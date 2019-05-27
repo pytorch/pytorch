@@ -45,38 +45,38 @@ void expectCallsDecrement(TensorTypeId type_id) {
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t i) {return i+1;}).dispatchKey(TensorType1()));
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t i) {return i+1;}));
   expectCallsIncrement(TensorType1());
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenOutOfLineKernel_whenRegistered_thenCanBeCalled) {
   auto my_kernel = [] (Tensor, int64_t i) {return i+1;};
-  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(my_kernel).dispatchKey(TensorType1()));
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType1(), my_kernel));
   expectCallsIncrement(TensorType1());
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
-      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t i) {return i+1;}).dispatchKey(TensorType1()))
-      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}).dispatchKey(TensorType2()))
-      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}).dispatchKey(TensorType1()))
-      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}).dispatchKey(TensorType2()));
+      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t i) {return i+1;}))
+      .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType2(), [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}))
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}))
+      .op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType2(), [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}));
   expectCallsIncrement(TensorType1());
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
-  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t i) {return i+1;}).dispatchKey(TensorType1()));
-  auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}).dispatchKey(TensorType2()));
-  auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}).dispatchKey(TensorType1()));
-  auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}).dispatchKey(TensorType2()));
+  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t i) {return i+1;}));
+  auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType2(), [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}));
+  auto registrar3 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}));
+  auto registrar4 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType2(), [] (Tensor, int64_t) -> int64_t {EXPECT_TRUE(false); return 0;}));
   expectCallsIncrement(TensorType1());
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
-    auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t i) {return i+1;}).dispatchKey(TensorType1()));
+    auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t i) {return i+1;}));
     {
-      auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t i) {return i-1;}).dispatchKey(TensorType2()));
+      auto registrar2 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorType2(), [] (Tensor, int64_t i) {return i-1;}));
 
       // assert that schema and cpu kernel are present
       expectCallsIncrement(TensorType1());
@@ -97,8 +97,7 @@ bool was_called = false;
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::no_return(Tensor dummy) -> ()",
     RegisterOperators::options()
-      .kernel([] (const Tensor&) -> void {was_called = true;})
-      .dispatchKey(TensorType1()));
+      .kernel(TensorType1(), [] (const Tensor&) -> void {was_called = true;}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_return", "");
   ASSERT_TRUE(op.has_value());
@@ -110,8 +109,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithoutOutput_whenRe
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithZeroOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::zero_outputs(Tensor dummy) -> ()",
-    RegisterOperators::options().kernel([] (const Tensor&) -> std::tuple<> {was_called = true; return {};})
-    .dispatchKey(TensorType1()));
+    RegisterOperators::options().kernel(TensorType1(), [] (const Tensor&) -> std::tuple<> {was_called = true; return {};}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::zero_outputs", "");
   ASSERT_TRUE(op.has_value());
@@ -124,8 +122,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithZeroOutputs_when
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_output(Tensor dummy, int a, int b) -> int",
-        RegisterOperators::options().kernel([] (Tensor, int64_t a, int64_t b) {return a+b;})
-        .dispatchKey(TensorType1()));
+        RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t a, int64_t b) {return a+b;}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::int_output", "");
   ASSERT_TRUE(op.has_value());
@@ -138,11 +135,9 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntOutput_whenRe
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::returning_tensor(Tensor input) -> Tensor",
-        RegisterOperators::options().kernel([] (const Tensor& a) {return a;})
-        .dispatchKey(TensorType1()))
+        RegisterOperators::options().kernel(TensorType1(), [] (const Tensor& a) {return a;}))
       .op("_test::returning_tensor(Tensor input) -> Tensor",
-        RegisterOperators::options().kernel([] (const Tensor& a) {return a;})
-        .dispatchKey(TensorType2()));
+        RegisterOperators::options().kernel(TensorType2(), [] (const Tensor& a) {return a;}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::returning_tensor", "");
   ASSERT_TRUE(op.has_value());
@@ -159,8 +154,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorOutput_whe
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]",
-        RegisterOperators::options().kernel([] (const Tensor& a, const Tensor& b, const Tensor& c) -> std::vector<Tensor> {return {a, b, c};})
-        .dispatchKey(TensorType1()));
+        RegisterOperators::options().kernel(TensorType1(), [] (const Tensor& a, const Tensor& b, const Tensor& c) -> std::vector<Tensor> {return {a, b, c};}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
   ASSERT_TRUE(op.has_value());
@@ -176,8 +170,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListOutput
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor dummy, int input1, int input2, int input3) -> int[]",
-        RegisterOperators::options().kernel([] (const Tensor&, int64_t a, int64_t b, int64_t c) -> std::vector<int64_t> {return {a,b,c};})
-        .dispatchKey(TensorType1()));
+        RegisterOperators::options().kernel(TensorType1(), [] (const Tensor&, int64_t a, int64_t b, int64_t c) -> std::vector<int64_t> {return {a,b,c};}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
   ASSERT_TRUE(op.has_value());
@@ -193,7 +186,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListOutput_wh
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
      .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))",
-       RegisterOperators::options().kernel([] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>> {
+       RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>> {
          DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
          dict.insert("first", dummyTensor(TensorType1()));
          dict.insert("second", dummyTensor(TensorType2()));
@@ -204,8 +197,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithMultipleOutputs_
            c10::optional<int64_t>(c10::in_place, 0),
            dict
          );
-       })
-       .dispatchKey(TensorType1()));
+       }));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::multiple_outputs", "");
   ASSERT_TRUE(op.has_value());
@@ -227,11 +219,9 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithMultipleOutputs_
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> Tensor",
-        RegisterOperators::options().kernel([] (const Tensor& a) {return a;})
-        .dispatchKey(TensorType1()))
+        RegisterOperators::options().kernel(TensorType1(), [] (const Tensor& a) {return a;}))
       .op("_test::tensor_input(Tensor input) -> Tensor",
-        RegisterOperators::options().kernel([] (const Tensor& a) {return a;})
-        .dispatchKey(TensorType2()));
+        RegisterOperators::options().kernel(TensorType2(), [] (const Tensor& a) {return a;}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
   ASSERT_TRUE(op.has_value());
@@ -248,11 +238,9 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByRef
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> Tensor",
-        RegisterOperators::options().kernel([] (Tensor a) {return a;})
-        .dispatchKey(TensorType1()))
+        RegisterOperators::options().kernel(TensorType1(), [] (Tensor a) {return a;}))
       .op("_test::tensor_input(Tensor input) -> Tensor",
-        RegisterOperators::options().kernel([] (Tensor a) {return a;})
-        .dispatchKey(TensorType2()));
+        RegisterOperators::options().kernel(TensorType2(), [] (Tensor a) {return a;}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
   ASSERT_TRUE(op.has_value());
@@ -271,11 +259,9 @@ Tensor captured_input;
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> ()",
-        RegisterOperators::options().kernel([] (const Tensor& a) -> void {captured_input = a;})
-        .dispatchKey(TensorType1()))
+        RegisterOperators::options().kernel(TensorType1(), [] (const Tensor& a) -> void {captured_input = a;}))
       .op("_test::tensor_input(Tensor input) -> ()",
-        RegisterOperators::options().kernel([] (const Tensor& a) -> void {captured_input = a;})
-        .dispatchKey(TensorType2()));
+        RegisterOperators::options().kernel(TensorType2(), [] (const Tensor& a) -> void {captured_input = a;}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
   ASSERT_TRUE(op.has_value());
@@ -292,11 +278,9 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByRef
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> ()",
-        RegisterOperators::options().kernel([] (Tensor a) -> void {captured_input = a;})
-        .dispatchKey(TensorType1()))
+        RegisterOperators::options().kernel(TensorType1(), [] (Tensor a) -> void {captured_input = a;}))
       .op("_test::tensor_input(Tensor input) -> ()",
-        RegisterOperators::options().kernel([] (Tensor a) -> void {captured_input = a;})
-        .dispatchKey(TensorType2()));
+        RegisterOperators::options().kernel(TensorType2(), [] (Tensor a) -> void {captured_input = a;}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
   ASSERT_TRUE(op.has_value());
@@ -315,8 +299,7 @@ int64_t captured_int_input = 0;
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> ()",
-        RegisterOperators::options().kernel([] (Tensor, int64_t a) -> void {captured_int_input = a;})
-        .dispatchKey(TensorType1()));
+        RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t a) -> void {captured_int_input = a;}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::int_input", "");
   ASSERT_TRUE(op.has_value());
@@ -330,8 +313,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntInput_without
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> int",
-        RegisterOperators::options().kernel([] (Tensor, int64_t a) {return a + 1;})
-        .dispatchKey(TensorType1()));
+        RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t a) {return a + 1;}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::int_input", "");
   ASSERT_TRUE(op.has_value());
@@ -346,8 +328,7 @@ int64_t captured_input_list_size = 0;
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> ()",
-        RegisterOperators::options().kernel([] (Tensor, const std::vector<int64_t>& a) {captured_input_list_size = a.size();})
-        .dispatchKey(TensorType1()));
+        RegisterOperators::options().kernel(TensorType1(), [] (Tensor, const std::vector<int64_t>& a) {captured_input_list_size = a.size();}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::int_list_input", "");
   ASSERT_TRUE(op.has_value());
@@ -361,8 +342,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListInput_wit
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> int",
-        RegisterOperators::options().kernel([] (Tensor, const std::vector<int64_t>& a) -> int64_t {return a.size();})
-        .dispatchKey(TensorType1()));
+        RegisterOperators::options().kernel(TensorType1(), [] (Tensor, const std::vector<int64_t>& a) -> int64_t {return a.size();}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::int_list_input", "");
   ASSERT_TRUE(op.has_value());
@@ -375,8 +355,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListInput_wit
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()",
-        RegisterOperators::options().kernel([] (const std::vector<Tensor>& a) -> void {captured_input_list_size = a.size();})
-        .dispatchKey(TensorType1()));
+        RegisterOperators::options().kernel(TensorType1(), [] (const std::vector<Tensor>& a) -> void {captured_input_list_size = a.size();}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
   ASSERT_TRUE(op.has_value());
@@ -390,8 +369,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListInput_
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int",
-         RegisterOperators::options().kernel([] (const std::vector<Tensor>& a) -> int64_t {return a.size();})
-         .dispatchKey(TensorType1()));
+         RegisterOperators::options().kernel(TensorType1(), [] (const std::vector<Tensor>& a) -> int64_t {return a.size();}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
   ASSERT_TRUE(op.has_value());
@@ -405,7 +383,7 @@ int captured_dict_size = 0;
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", RegisterOperators::options().kernel([] (DictPtr<string, Tensor> input1) {
+      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", RegisterOperators::options().catchAllKernel([] (DictPtr<string, Tensor> input1) {
         captured_dict_size = input1.size();
       }));
 
@@ -423,7 +401,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithDictInput_withou
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::dict_input(Dict(str, str) input) -> str", RegisterOperators::options().kernel([] (DictPtr<string, string> input1) {
+      .op("_test::dict_input(Dict(str, str) input) -> str", RegisterOperators::options().catchAllKernel([] (DictPtr<string, string> input1) {
         return input1.at("key2");
       }));
 
@@ -440,7 +418,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithDictInput_withOu
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-    .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", RegisterOperators::options().kernel([] (DictPtr<string, string> input) {
+    .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", RegisterOperators::options().catchAllKernel([] (DictPtr<string, string> input) {
       return input;
     }));
 
@@ -466,7 +444,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenFallbackKernelWithoutAnyAr
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   auto registrar = RegisterOperators()
-      .op("_test::no_tensor_args() -> ()", RegisterOperators::options().kernel([] () {called = true;}));
+      .op("_test::no_tensor_args() -> ()", RegisterOperators::options().catchAllKernel([] () {called = true;}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
   ASSERT_TRUE(op.has_value());
@@ -481,7 +459,7 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenFallbackKernelWithoutTenso
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   auto registrar = RegisterOperators()
-      .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().kernel([] (int64_t arg) {return arg + 1;}));
+      .op("_test::no_tensor_args(int arg) -> int", RegisterOperators::options().catchAllKernel([] (int64_t arg) {return arg + 1;}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
   ASSERT_TRUE(op.has_value());
@@ -498,13 +476,12 @@ c10::optional<std::string> called_arg4;
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> ()",
-    RegisterOperators::options().kernel([] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    RegisterOperators::options().kernel(TensorType1(), [] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
       called = true;
       called_arg2 = arg2;
       called_arg3 = arg3;
       called_arg4 = arg4;
-    })
-    .dispatchKey(TensorType1()));
+    }));
   auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
   ASSERT_TRUE(op.has_value());
 
@@ -533,14 +510,13 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_w
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> Tensor?",
-    RegisterOperators::options().kernel([] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    RegisterOperators::options().kernel(TensorType1(), [] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
       called = true;
       called_arg2 = arg2;
       called_arg3 = arg3;
       called_arg4 = arg4;
       return arg2;
-    })
-    .dispatchKey(TensorType1()));
+    }));
   auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
   ASSERT_TRUE(op.has_value());
 
@@ -571,10 +547,9 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_w
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> (Tensor?, int?, str?)",
-    RegisterOperators::options().kernel([] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    RegisterOperators::options().kernel(TensorType1(), [] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
       return std::make_tuple(arg2, arg3, arg4);
-    })
-    .dispatchKey(TensorType1()));
+    }));
   auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
   ASSERT_TRUE(op.has_value());
 
@@ -593,172 +568,173 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithOptionalInputs_w
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenInfersSchema) {
   auto registrar = RegisterOperators()
-      .op("_test::no_schema_specified", RegisterOperators::options().kernel([] (Tensor arg1, int64_t arg2, const std::vector<Tensor>& arg3) -> std::tuple<int64_t, Tensor> {return {};}));
+      .op("_test::no_schema_specified", RegisterOperators::options().catchAllKernel([] (Tensor arg1, int64_t arg2, const std::vector<Tensor>& arg3) -> std::tuple<int64_t, Tensor> {return {};}));
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_schema_specified", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::assertSchemasHaveSameSignature(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
+  c10::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
+  EXPECT_FALSE(differences.has_value());
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenMismatchedKernel_withDifferentNumArguments_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
-      .op("_test::mismatch(Tensor arg) -> int", RegisterOperators::options().kernel([] (Tensor) -> int64_t {return {};}).dispatchKey(TensorType1()));
+      .op("_test::mismatch(Tensor arg) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> int64_t {return {};}));
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg, Tensor arg2) -> int", RegisterOperators::options().kernel([] (Tensor) -> int64_t {return {};}).dispatchKey(TensorType1()));
-    }, "The number of arguments is different. Specified 2 but inferred 1"
+        .op("_test::mismatch(Tensor arg, Tensor arg2) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> int64_t {return {};}));
+    }, "The number of arguments is different. 2 vs 1"
   );
 
   // assert this does not fail because it matches
   RegisterOperators()
-      .op("_test::mismatch(Tensor arg, Tensor arg2) -> ()", RegisterOperators::options().kernel([] (Tensor, Tensor) -> void {}).dispatchKey(TensorType1()));
+      .op("_test::mismatch(Tensor arg, Tensor arg2) -> ()", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, Tensor) -> void {}));
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch() -> ()", RegisterOperators::options().kernel([] (Tensor, Tensor) -> void {}).dispatchKey(TensorType1()));
-    }, "The number of arguments is different. Specified 0 but inferred 2"
+        .op("_test::mismatch() -> ()", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, Tensor) -> void {}));
+    }, "The number of arguments is different. 0 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> ()", RegisterOperators::options().kernel([] (Tensor, Tensor) -> void {}).dispatchKey(TensorType1()));
-    }, "The number of arguments is different. Specified 1 but inferred 2"
+        .op("_test::mismatch(Tensor arg) -> ()", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, Tensor) -> void {}));
+    }, "The number of arguments is different. 1 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg, Tensor arg2, Tensor arg3) -> ()", RegisterOperators::options().kernel([] (Tensor, Tensor) -> void {}).dispatchKey(TensorType1()));
-    }, "The number of arguments is different. Specified 3 but inferred 2"
+        .op("_test::mismatch(Tensor arg, Tensor arg2, Tensor arg3) -> ()", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, Tensor) -> void {}));
+    }, "The number of arguments is different. 3 vs 2"
   );
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenMismatchedKernel_withDifferentArgumentType_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
-      .op("_test::mismatch(Tensor arg1, int arg2) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t) -> int64_t {return {};}).dispatchKey(TensorType1()));
+      .op("_test::mismatch(Tensor arg1, int arg2) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t) -> int64_t {return {};}));
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg1, float arg2) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t) -> int64_t {return {};}).dispatchKey(TensorType1()));
-    }, "Type mismatch in argument 2: specified float but inferred int"
+        .op("_test::mismatch(Tensor arg1, float arg2) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t) -> int64_t {return {};}));
+    }, "Type mismatch in argument 2: float vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(int arg1, int arg2) -> int", RegisterOperators::options().kernel([] (Tensor, int64_t) -> int64_t {return {};}).dispatchKey(TensorType1()));
-    }, "Type mismatch in argument 1: specified int but inferred Tensor"
+        .op("_test::mismatch(int arg1, int arg2) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor, int64_t) -> int64_t {return {};}));
+    }, "Type mismatch in argument 1: int vs Tensor"
   );
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenMismatchedKernel_withDifferentNumReturns_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
-      .op("_test::mismatch(Tensor arg) -> int", RegisterOperators::options().kernel([] (Tensor) -> int64_t {return {};}).dispatchKey(TensorType1()));
+      .op("_test::mismatch(Tensor arg) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> int64_t {return {};}));
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> ()", RegisterOperators::options().kernel([] (Tensor) -> int64_t {return {};}).dispatchKey(TensorType1()));
-    }, "The number of returns is different. Specified 0 but inferred 1"
+        .op("_test::mismatch(Tensor arg) -> ()", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> int64_t {return {};}));
+    }, "The number of returns is different. 0 vs 1"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> (int, int)", RegisterOperators::options().kernel([] (Tensor) -> int64_t {return {};}).dispatchKey(TensorType1()));
-    }, "The number of returns is different. Specified 2 but inferred 1"
+        .op("_test::mismatch(Tensor arg) -> (int, int)", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> int64_t {return {};}));
+    }, "The number of returns is different. 2 vs 1"
   );
 
   // assert this does not fail because it matches
   RegisterOperators()
-      .op("_test::mismatch(Tensor arg) -> ()", RegisterOperators::options().kernel([] (Tensor) -> void {}).dispatchKey(TensorType1()));
+      .op("_test::mismatch(Tensor arg) -> ()", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> void {}));
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> Tensor", RegisterOperators::options().kernel([] (Tensor) -> void {}).dispatchKey(TensorType1()));
-    }, "The number of returns is different. Specified 1 but inferred 0"
+        .op("_test::mismatch(Tensor arg) -> Tensor", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> void {}));
+    }, "The number of returns is different. 1 vs 0"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor)", RegisterOperators::options().kernel([] (Tensor) -> void {}).dispatchKey(TensorType1()));
-    }, "The number of returns is different. Specified 2 but inferred 0"
+        .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor)", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> void {}));
+    }, "The number of returns is different. 2 vs 0"
   );
 
   // assert this does not fail because it matches
   RegisterOperators()
-      .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor)", RegisterOperators::options().kernel([] (Tensor) -> std::tuple<Tensor, Tensor> {return {};}).dispatchKey(TensorType1()));
+      .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor)", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};}));
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> ()", RegisterOperators::options().kernel([] (Tensor) -> std::tuple<Tensor, Tensor> {return {};}).dispatchKey(TensorType1()));
-    }, "The number of returns is different. Specified 0 but inferred 2"
+        .op("_test::mismatch(Tensor arg) -> ()", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};}));
+    }, "The number of returns is different. 0 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> Tensor", RegisterOperators::options().kernel([] (Tensor) -> std::tuple<Tensor, Tensor> {return {};}).dispatchKey(TensorType1()));
-    }, "The number of returns is different. Specified 1 but inferred 2"
+        .op("_test::mismatch(Tensor arg) -> Tensor", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};}));
+    }, "The number of returns is different. 1 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor, Tensor)", RegisterOperators::options().kernel([] (Tensor) -> std::tuple<Tensor, Tensor> {return {};}).dispatchKey(TensorType1()));
-    }, "The number of returns is different. Specified 3 but inferred 2"
+        .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor, Tensor)", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};}));
+    }, "The number of returns is different. 3 vs 2"
   );
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenMismatchedKernel_withDifferentReturnTypes_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
-      .op("_test::mismatch(Tensor arg) -> int", RegisterOperators::options().kernel([] (Tensor) -> int64_t {return {};}).dispatchKey(TensorType1()));
+      .op("_test::mismatch(Tensor arg) -> int", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> int64_t {return {};}));
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> Tensor", RegisterOperators::options().kernel([] (Tensor) -> int64_t {return {};}).dispatchKey(TensorType1()));
-    }, "Type mismatch in return 1: specified Tensor but inferred int"
+        .op("_test::mismatch(Tensor arg) -> Tensor", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> int64_t {return {};}));
+    }, "Type mismatch in return 1: Tensor vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> float", RegisterOperators::options().kernel([] (Tensor) -> int64_t {return {};}).dispatchKey(TensorType1()));
-    }, "Type mismatch in return 1: specified float but inferred int"
+        .op("_test::mismatch(Tensor arg) -> float", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> int64_t {return {};}));
+    }, "Type mismatch in return 1: float vs int"
   );
 
   // assert this does not fail because it matches
   RegisterOperators()
-      .op("_test::mismatch(Tensor arg) -> Tensor", RegisterOperators::options().kernel([] (Tensor) -> Tensor {return {};}).dispatchKey(TensorType1()));
+      .op("_test::mismatch(Tensor arg) -> Tensor", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> Tensor {return {};}));
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> float", RegisterOperators::options().kernel([] (Tensor) -> Tensor {return {};}).dispatchKey(TensorType1()));
-    }, "Type mismatch in return 1: specified float but inferred Tensor"
+        .op("_test::mismatch(Tensor arg) -> float", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> Tensor {return {};}));
+    }, "Type mismatch in return 1: float vs Tensor"
   );
 
   // assert this does not fail because it matches
   RegisterOperators()
-      .op("_test::mismatch(Tensor arg) -> (Tensor, int)", RegisterOperators::options().kernel([] (Tensor) -> std::tuple<Tensor, int64_t> {return {};}).dispatchKey(TensorType1()));
+      .op("_test::mismatch(Tensor arg) -> (Tensor, int)", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};}));
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> (Tensor, float)", RegisterOperators::options().kernel([] (Tensor) -> std::tuple<Tensor, int64_t> {return {};}).dispatchKey(TensorType1()));
-    }, "Type mismatch in return 2: specified float but inferred int"
+        .op("_test::mismatch(Tensor arg) -> (Tensor, float)", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};}));
+    }, "Type mismatch in return 2: float vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .op("_test::mismatch(Tensor arg) -> (int, int)", RegisterOperators::options().kernel([] (Tensor) -> std::tuple<Tensor, int64_t> {return {};}).dispatchKey(TensorType1()));
-    }, "Type mismatch in return 1: specified int but inferred Tensor"
+        .op("_test::mismatch(Tensor arg) -> (int, int)", RegisterOperators::options().kernel(TensorType1(), [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};}));
+    }, "Type mismatch in return 1: int vs Tensor"
   );
 }
 

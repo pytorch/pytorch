@@ -93,8 +93,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_linear_prepack(Tensor W) -> Tensor W_prepack",
     c10::RegisterOperators::options()
-      .kernel<QFCPackWeightInt8>()
-      .dispatchKey(QuantizedCPUTensorId()));
+      .kernel<QFCPackWeightInt8>(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at

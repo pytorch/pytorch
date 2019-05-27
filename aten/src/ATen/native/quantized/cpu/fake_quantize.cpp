@@ -137,12 +137,10 @@ class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators()
 .op("quantized::fake_quantize_per_tensor_affine_forward(Tensor X, float scale, int zero_point, int num_bits = 8, int quant_delay = 0, int iter = 0) -> Tensor",
     c10::RegisterOperators::options()
-      .kernel<FakeQuantizePerTensorAffineOp_forward>()
-      .dispatchKey(CPUTensorId()))
+      .kernel<FakeQuantizePerTensorAffineOp_forward>(CPUTensorId()))
 .op("quantized::fake_quantize_per_tensor_affine_backward(Tensor X, Tensor dY, float scale, int zero_point, int num_bits=8, int quant_delay=0, int iter = 0) -> Tensor",
     c10::RegisterOperators::options()
-      .kernel<FakeQuantizePerTensorAffineOp_backward>()
-      .dispatchKey(CPUTensorId()));
+      .kernel<FakeQuantizePerTensorAffineOp_backward>(CPUTensorId()));
 
 }  // namespace
 }}  // namespace at::native
