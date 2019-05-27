@@ -636,11 +636,17 @@ class TestDataLoader(TestCase):
 
     def _test_sequential(self, loader):
         batch_size = loader.batch_size
-        for i, (sample, target) in enumerate(loader):
-            idx = i * batch_size
-            self.assertEqual(sample, self.data[idx:idx + batch_size])
-            self.assertEqual(target, self.labels[idx:idx + batch_size])
-        self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
+        if batch_size is None:
+            for idx, (sample, target) in enumerate(loader):
+                self.assertEqual(sample, self.data[idx])
+                self.assertEqual(target, self.labels[idx])
+            self.assertEqual(idx, len(self.dataset) - 1)
+        else:
+            for i, (sample, target) in enumerate(loader):
+                idx = i * batch_size
+                self.assertEqual(sample, self.data[idx:idx + batch_size])
+                self.assertEqual(target, self.labels[idx:idx + batch_size])
+            self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
 
     def _test_shuffle(self, loader):
         found_data = {i: 0 for i in range(self.data.size(0))}
@@ -673,9 +679,10 @@ class TestDataLoader(TestCase):
                 return
 
     def test_error_in_init(self):
-        loader = DataLoader(ErrorIterableDataset(), num_workers=2)
-        with self.assertRaisesRegex(RuntimeError, 'Error in __iter__'):
-            list(iter(loader))
+        for num_workers in [0, 2]:
+            loader = DataLoader(ErrorIterableDataset(), num_workers=num_workers)
+            with self.assertRaisesRegex(RuntimeError, 'Error in __iter__'):
+                list(iter(loader))
 
         loader = DataLoader(self.dataset, num_workers=2, worker_init_fn=error_worker_init_fn)
         with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
@@ -689,10 +696,11 @@ class TestDataLoader(TestCase):
 
             self.assertRaises(ValueError, fn)
 
-    def test_sequential(self):
-        self._test_sequential(DataLoader(self.dataset))
+    def test_sequential_nonbatch(self):
+        self._test_sequential(DataLoader(self.dataset, batch_size=None))
 
     def test_sequential_batch(self):
+        self._test_sequential(DataLoader(self.dataset))
         self._test_sequential(DataLoader(self.dataset, batch_size=2))
 
     def test_growing_dataset(self):
@@ -755,7 +763,7 @@ class TestDataLoader(TestCase):
                 p.terminate()
 
     def test_iterable_dataset(self):
-        # single process loading
+        # [non-batched] single process loading
         dataset = CountingIterableDataset(20)
         fetched = list(DataLoader(dataset))
         self.assertEqual(len(fetched), 20)
@@ -763,7 +771,7 @@ class TestDataLoader(TestCase):
             self.assertIsInstance(d, torch.Tensor)
             self.assertEqual(d, i)
 
-        # multiprocessing loading
+        # [non-batched] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
         expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
@@ -771,12 +779,83 @@ class TestDataLoader(TestCase):
         dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
         dataloader = DataLoader(dataset, num_workers=num_workers)
         dataloader_iter = iter(dataloader)
-        retrieved = sorted([d.item() for d in dataloader_iter])
+        fetched = sorted([d.item() for d in dataloader_iter])
 
-        for a, b in zip(retrieved, expected):
+        for a, b in zip(fetched, expected):
             self.assertEqual(a, b)
 
-        # test that workers exit gracefully
+        # [non-batched] test that workers exit gracefully
+        workers = dataloader_iter.workers
+        del dataloader_iter
+        try:
+            for w in workers:
+                w.join(JOIN_TIMEOUT)
+                self.assertFalse(w.is_alive())
+                self.assertEqual(w.exitcode, 0)
+        finally:
+            for w in workers:
+                w.terminate()
+
+        # [batched] single process loading
+        dataset = CountingIterableDataset(20)
+        fetched = list(DataLoader(dataset, batch_size=7))
+        self.assertEqual(len(fetched), 3)
+        self.assertEqual(fetched[0].tolist(), list(range(7)))
+        self.assertEqual(fetched[1].tolist(), list(range(7, 14)))
+        self.assertEqual(fetched[2].tolist(), list(range(14, 20)))
+
+        # [batched] multiprocessing loading
+        num_workers = 3
+        sizes_for_all_workers = [0, 4, 20]
+        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
+        dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
+        # worker 0 should return 0 batches
+        # worker 1 should return 1 batches
+        # worker 2 should return 3 batches
+        dataloader = DataLoader(dataset, num_workers=num_workers, batch_size=7)
+        dataloader_iter = iter(dataloader)
+        fetched = list(dataloader_iter)
+        self.assertEqual(len(fetched), 4)
+        fetched = set(tuple(t.tolist()) for t in fetched)
+        self.assertEqual(fetched, {tuple(range(4)), tuple(range(7)), tuple(range(7, 14)), tuple(range(14, 20))})
+
+        # [batched] test that workers exit gracefully
+        workers = dataloader_iter.workers
+        del dataloader_iter
+        try:
+            for w in workers:
+                w.join(JOIN_TIMEOUT)
+                self.assertFalse(w.is_alive())
+                self.assertEqual(w.exitcode, 0)
+        finally:
+            for w in workers:
+                w.terminate()
+
+        # [batched & drop_last] single process loading
+        dataset = CountingIterableDataset(20)
+        fetched = list(DataLoader(dataset, batch_size=7, drop_last=True))
+        self.assertEqual(len(fetched), 2)
+        self.assertEqual(fetched[0].tolist(), list(range(7)))
+        self.assertEqual(fetched[1].tolist(), list(range(7, 14)))
+
+        # [batched & drop_last] multiprocessing loading
+        num_workers = 3
+        sizes_for_all_workers = [0, 4, 20]
+        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
+        dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
+        # worker 0 should return 0 batches
+        # worker 1 should return 1 batches
+        # worker 2 should return 3 batches
+        dataloader = DataLoader(dataset, num_workers=num_workers, batch_size=7, drop_last=True)
+        dataloader_iter = iter(dataloader)
+        fetched = list(dataloader_iter)
+        self.assertEqual(len(fetched), 2)
+        fetched = set(tuple(t.tolist()) for t in fetched)
+        self.assertEqual(fetched, {tuple(range(7)), tuple(range(7, 14))})
+
+        # [batched & drop_last] test that workers exit gracefully
         workers = dataloader_iter.workers
         del dataloader_iter
         try:

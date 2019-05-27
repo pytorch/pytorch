@@ -23,7 +23,7 @@ Dataset Types
 Map-style datasets
 ^^^^^^^^^^^^^^^^^^
 
-A map-style dataset is one that implements the :meth:`__getitem__` and
+A map-style dataset is one that implements the :meth:`__getitem__` and (ideally)
 :meth:`__len__` protocols, and represents a map from (possibly non-integral)
 indices/keys to data samples. E.g., such a dataset, when called ``dataset[idx]``
 could read and the ``idx``-th image and its corresponding label from a folder

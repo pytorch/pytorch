@@ -104,8 +104,9 @@ r"""Dummy class used to signal the end of an IterableDataset"""
 IterableDatasetStopIteration = namedtuple('IterableDatasetStopIteration', ['worker_id'])
 
 
-def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
-                 collate_fn, seed, init_fn, worker_id, num_workers):
+def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
+                 is_batched, collate_fn, drop_last, seed, init_fn, worker_id,
+                 num_workers):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -127,7 +128,7 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
         _worker_info = WorkerInfo(id=worker_id, num_workers=num_workers,
                                   seed=seed, dataset=dataset)
 
-        from torch.utils.data import _DataLoaderStrategy
+        from torch.utils.data import _DatasetKind
 
         init_exception = None
 
@@ -135,9 +136,7 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
             if init_fn is not None:
                 init_fn(worker_id)
 
-            if mode == _DataLoaderStrategy.Iterable:
-                dataset_iter = iter(dataset)
-
+            fetcher = _DatasetKind.create_fetcher(dataset_kind, dataset, is_batched, collate_fn, drop_last)
         except Exception:
             init_exception = ExceptionWrapper(sys.exc_info())
 
@@ -172,33 +171,25 @@ def _worker_loop(mode, dataset, index_queue, data_queue, done_event, convert_fn,
                 # processing steps.
                 continue
             idx, index = r
-            try:
-                if init_exception is not None:
-                    data = init_exception
-                    init_exception = None
-                else:
-                    if mode == _DataLoaderStrategy.Iterable:
-                        try:
-                            data = convert_fn(next(dataset_iter))
-                        except StopIteration:
-                            data = IterableDatasetStopIteration(worker_id)
-                            # Set `iteration_end`
-                            #   (1) to save future `next(...)` calls, and
-                            #   (2) to avoid sending multiple `IterableDatasetStopIteration`s.
-                            iteration_end = True
-                    elif mode == _DataLoaderStrategy.Map:
-                        data = convert_fn(dataset[index])
-                    else:
-                        # mode == _DataLoaderStrategy.MapWithBatchedRead:
-                        data = collate_fn([dataset[i] for i in index])
-            except Exception:
-                # It is important that we don't store exc_info in a variable,
-                # see NOTE [ Python Traceback Reference Cycle Problem ]
-                data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
+            if init_exception is not None:
+                data = init_exception
+                init_exception = None
             else:
-                data_queue.put((idx, data))
-                del data  # save memory
-            del idx, index, r  # save memory
+                try:
+                    data = fetcher.fetch(index)
+                except Exception as e:
+                    if isinstance(e, StopIteration) and dataset_kind == _DatasetKind.Iterable:
+                        data = IterableDatasetStopIteration(worker_id)
+                        # Set `iteration_end`
+                        #   (1) to save future `next(...)` calls, and
+                        #   (2) to avoid sending multiple `IterableDatasetStopIteration`s.
+                        iteration_end = True
+                    else:
+                        # It is important that we don't store exc_info in a variable,
+                        # see NOTE [ Python Traceback Reference Cycle Problem ]
+                        data = ExceptionWrapper(sys.exc_info())
+            data_queue.put((idx, data))
+            del data, idx, index, r  # save memory
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
         pass
