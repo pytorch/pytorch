@@ -134,14 +134,6 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_max_pool2d_with_indices(Tensor self, IntArrayRef[2] kernel_size, IntArrayRef[2] stride={}, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1, bool ceil_mode=false)
-  cname: SpatialDilatedMaxPooling
-  default_init:
-    stride: kernel_size
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 - name: _thnn_max_pool3d_with_indices(Tensor self, IntArrayRef[3] kernel_size, IntArrayRef[3] stride={}, IntArrayRef[3] padding=0, IntArrayRef[3] dilation=1, bool ceil_mode=false)
   cname: VolumetricDilatedMaxPooling
   default_init:

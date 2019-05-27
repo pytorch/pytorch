@@ -98,6 +98,6 @@ FunctionSchema inferFunctionSchema(std::string name, std::string overload_name) 
   return detail::createFunctionSchemaFromTraits<guts::infer_function_traits_t<FuncType>>(std::move(name), std::move(overload_name));
 }
 
-CAFFE2_API void assertSchemasHaveSameSignature(const FunctionSchema& inferred, const FunctionSchema& specified);
+CAFFE2_API c10::optional<std::string> findSchemaDifferences(const FunctionSchema& inferred, const FunctionSchema& specified);
 
 }

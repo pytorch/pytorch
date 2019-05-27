@@ -401,19 +401,19 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 
 struct C10_EXPORT ivalue::GenericDict : c10::intrusive_ptr_target {
  private:
-  c10::impl::GenericDict elements_;
+  c10::impl::GenericDictPtr elements_;
 
  public:
-  GenericDict(c10::impl::GenericDict elements_)
+  GenericDict(c10::impl::GenericDictPtr elements_)
       : elements_(std::move(elements_)) {}
   static c10::intrusive_ptr<GenericDict> create(
-      c10::impl::GenericDict elements_) {
+      c10::impl::GenericDictPtr elements_) {
     return c10::make_intrusive<GenericDict>(std::move(elements_));
   }
-  const c10::impl::GenericDict& elements() const & {
+  const c10::impl::GenericDictPtr& elements() const & {
     return elements_;
   }
-  c10::impl::GenericDict& elements() & {
+  c10::impl::GenericDictPtr& elements() & {
     return elements_;
   }
 
@@ -570,7 +570,7 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
 : tag(Tag::GenericDict), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(c10::impl::GenericDict v)
+inline IValue::IValue(c10::impl::GenericDictPtr v)
 : IValue(ivalue::GenericDict::create(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
@@ -602,7 +602,7 @@ inline const std::vector<IValue>& IValue::toGenericListRef() const {
   return toGenericList()->elements();
 }
 
-inline const c10::impl::GenericDict& IValue::
+inline const c10::impl::GenericDictPtr& IValue::
     toGenericDictRef() const {
   return toGenericDict()->elements();
 }
