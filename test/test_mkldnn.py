@@ -232,6 +232,13 @@ class TestMkldnn(TestCase):
             x.clone(),
             x.to_mkldnn().clone().to_dense(),
         )
+        # test whether share same memory
+        y = x.to_mkldnn()
+        z = y.clone().add_(y)
+        self.assertNotEqual(
+            y.to_dense(),
+            z.to_dense(),
+        )
 
     def test_linear(self):
         in_features = torch.randint(3, 10, (1,)).item()
