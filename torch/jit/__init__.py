@@ -1733,10 +1733,16 @@ if _enabled:
 class _ConstModuleList(ScriptModule):
     def __init__(self, modules):
         super(_ConstModuleList, self).__init__()
-        for i, module in enumerate(modules):
-            if _is_weak_type(type(module)):
-                module = _make_strong(module)
-            self.add_module(str(i), module)
+        if isinstance(modules, OrderedDict):
+            for key, module in modules.items():
+                if _is_weak_type(type(module)):
+                    module = _make_strong(module)
+                self.add_module(key, module)
+        else:
+            for i, module in enumerate(modules):
+                if _is_weak_type(type(module)):
+                    module = _make_strong(module)
+                self.add_module(str(i), module)
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
@@ -1764,7 +1770,7 @@ class _ConstSequential(_ConstModuleList):
     __constants__ = ['mods']
 
     def __init__(self, mods):
-        super(_ConstSequential, self).__init__(mods._modules.values())
+        super(_ConstSequential, self).__init__(mods._modules)
 
         # we define the forward method via self.define rather than
         # making it a direct class member (with a @script) annotation

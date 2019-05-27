@@ -148,8 +148,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_conv2d",
-    c10::RegisterOperators::options().kernel<QConv2dInt8>().dispatchKey(
-        QuantizedCPUTensorId()));
+    c10::RegisterOperators::options().kernel<QConv2dInt8>(QuantizedCPUTensorId()));
 
 } // namespace
 } // namespace native

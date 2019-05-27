@@ -154,12 +154,10 @@ static auto registry =
   c10::RegisterOperators()
   .op("quantized::fake_quantize_per_tensor_affine_forward(Tensor X, float scale, int zero_point, int num_bits = 8, int quant_delay = 0, int iter = 0) -> Tensor",
       c10::RegisterOperators::options()
-      .kernel<FakeQuantizePerTensorAffineOp_forward>()
-      .dispatchKey(CUDATensorId()))
+      .kernel<FakeQuantizePerTensorAffineOp_forward>(CUDATensorId()))
   .op("quantized::fake_quantize_per_tensor_affine_backward(Tensor X, Tensor dY, float scale, int zero_point, int num_bits=8, int quant_delay=0, int iter = 0) -> Tensor",
       c10::RegisterOperators::options()
-      .kernel<FakeQuantizePerTensorAffineOp_backward>()
-      .dispatchKey(CUDATensorId()));
+      .kernel<FakeQuantizePerTensorAffineOp_backward>(CUDATensorId()));
 
 } // namespace
 }} // namespace at::native

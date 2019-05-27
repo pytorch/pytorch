@@ -329,7 +329,7 @@ class RNN(RNNBase):
           :math:`H_{out}=\text{hidden\_size}`
           Defaults to zero if not provided. where :math:`S=\text{num\_layers} * \text{num\_directions}`
           If the RNN is bidirectional, num_directions should be 2, else it should be 1.
-        - Output1: :math:`(L, N, H_{all})` where :math:`H_all=\text{num\_directions} * \text{hidden\_size}`
+        - Output1: :math:`(L, N, H_{all})` where :math:`H_{all}=\text{num\_directions} * \text{hidden\_size}`
         - Output2: :math:`(S, N, H_{out})` tensor containing the next hidden state
           for each element in the batch
 
@@ -635,7 +635,7 @@ class GRU(RNNBase):
           :math:`H_{out}=\text{hidden\_size}`
           Defaults to zero if not provided. where :math:`S=\text{num\_layers} * \text{num\_directions}`
           If the RNN is bidirectional, num_directions should be 2, else it should be 1.
-        - Output1: :math:`(L, N, H_{all})` where :math:`H_all=\text{num\_directions} * \text{hidden\_size}`
+        - Output1: :math:`(L, N, H_{all})` where :math:`H_{all}=\text{num\_directions} * \text{hidden\_size}`
         - Output2: :math:`(S, N, H_{out})` tensor containing the next hidden state
           for each element in the batch
 
