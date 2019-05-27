@@ -12468,6 +12468,110 @@ a")
 
         self.assertEqual(eager_out, script_out)
 
+    def test_torchscript_multi_head_attn(self):
+        @torch.jit.script
+        def jit_multihead_attn_forward(query,                   # type: Tensor
+                                       key,                     # type: Tensor
+                                       value,                   # type: Tensor
+                                       embed_dim_to_check,      # type: int
+                                       num_heads,               # type: int
+                                       in_proj_weight,          # type: Tensor
+                                       in_proj_bias,            # type: Tensor
+                                       bias_k,                  # type: Optional[Tensor]
+                                       bias_v,                  # type: Optional[Tensor]
+                                       add_zero_attn,           # type: bool
+                                       dropout,                 # type: float
+                                       out_proj_weight,         # type: Tensor
+                                       out_proj_bias,           # type: Tensor
+                                       training=True,           # type: bool
+                                       key_padding_mask=None,   # type: Optional[Tensor]
+                                       need_weights=True,       # type: bool
+                                       attn_mask=None           # type: Optional[Tensor]
+                                       ):
+            # type: (...) -> Tuple[Tensor, Optional[Tensor]]
+            return torch.nn.functional.multi_head_attention_forward(query, key, value,
+                                                                    embed_dim_to_check, num_heads,
+                                                                    in_proj_weight, in_proj_bias,
+                                                                    bias_k, bias_v,
+                                                                    add_zero_attn, dropout,
+                                                                    out_proj_weight, out_proj_bias,
+                                                                    training, key_padding_mask,
+                                                                    need_weights, attn_mask)
+
+        src_l = 3
+        bsz = 5
+        embed_size = 8
+        nhead = 2
+        multi_head_attn = torch.nn.MultiheadAttention(embed_size, nhead)
+        query = torch.rand((src_l, bsz, embed_size))
+        key = torch.rand((src_l, bsz, embed_size))
+        value = torch.rand((src_l, bsz, embed_size))
+
+        mask = (torch.triu(torch.ones(src_l, src_l)) == 1).transpose(0, 1)
+        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0)).double()
+
+        jit_out = jit_multihead_attn_forward(query, key, value,
+                                             embed_size, nhead,
+                                             multi_head_attn.in_proj_weight,
+                                             multi_head_attn.in_proj_bias,
+                                             multi_head_attn.bias_k, multi_head_attn.bias_v,
+                                             multi_head_attn.add_zero_attn, multi_head_attn.dropout,
+                                             multi_head_attn.out_proj.weight,
+                                             multi_head_attn.out_proj.bias, attn_mask=mask)[0]
+
+        py_out = torch.nn.functional.multi_head_attention_forward(query, key, value,
+                                                                  embed_size, nhead,
+                                                                  multi_head_attn.in_proj_weight,
+                                                                  multi_head_attn.in_proj_bias,
+                                                                  multi_head_attn.bias_k,
+                                                                  multi_head_attn.bias_v,
+                                                                  multi_head_attn.add_zero_attn,
+                                                                  multi_head_attn.dropout,
+                                                                  multi_head_attn.out_proj.weight,
+                                                                  multi_head_attn.out_proj.bias,
+                                                                  attn_mask=mask)[0]
+        # print("rel. error: ")
+        # print(jit_out / py_out - 1)
+        self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_scriptmodule_multi_head_attn_cuda(self):
+
+        class MyModule(torch.jit.ScriptModule):
+            def __init__(self, embed_dim, num_heads):
+                super(MyModule, self).__init__()
+                sample_q = torch.randn(3, 2, embed_dim)
+                sample_kv = torch.randn(3, 2, embed_dim)
+                attention = nn.MultiheadAttention(embed_dim, num_heads)
+                attention.eval()
+
+                self.mod = torch.jit.trace(attention,
+                                           (sample_q, sample_kv, sample_kv))
+
+            @torch.jit.script_method
+            def forward(self, q, k, v):
+                return self.mod(q, k, v)
+
+        embed_dim = 8
+        num_heads = 2
+        sl = 3
+        bs = 2
+        model = MyModule(embed_dim, num_heads).cuda()
+        q = torch.randn(sl, bs, embed_dim, device="cuda")
+        kv = torch.randn(sl, bs, embed_dim, device="cuda")
+
+        jit_out = model(q, kv, kv)[0]
+        py_out = torch.nn.functional.multi_head_attention_forward(q, kv, kv,
+                                                                  embed_dim, num_heads,
+                                                                  model.mod.in_proj_weight,
+                                                                  model.mod.in_proj_bias,
+                                                                  None, None, None, 0.0,
+                                                                  model.mod.out_proj.weight,
+                                                                  model.mod.out_proj.bias)[0]
+        # print(jit_out/py_out-1)
+        # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+        self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+
     def test_list_python_op(self):
         def python_list_op(lst):
             # type: (List[Tensor]) -> Tensor
