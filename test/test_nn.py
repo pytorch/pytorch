@@ -6368,6 +6368,13 @@ class TestNN(NNTestCase):
         self.assertAlmostEqual(module.running_mean, (running_mean1 + running_mean2) / 2)
         self.assertAlmostEqual(module.running_var, (running_var1 + running_var2) / 2)
 
+    def test_batchnorm_immutable_options(self):
+        bn = nn.BatchNorm1d(3)
+        with self.assertRaises(AttributeError):
+            bn.affine = False
+        with self.assertRaises(AttributeError):
+            bn.track_running_stats = False
+
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True)
         input2 = torch.randn(4, 4, requires_grad=True)
