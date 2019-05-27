@@ -42,8 +42,8 @@ def find_cuda_version(cuda_home):
             if os.path.exists(cuda_lib_path):
                 break
         # get a list of candidates for the version number
-        # which are files containing cudart
-        candidate_names = list(glob.glob(os.path.join(cuda_lib_path, '*cudart*')))
+        # which are files containing *cudart.so.9.2.88 or *cudart.9.2.88.dylib
+        candidate_names = list(glob.glob(os.path.join(cuda_lib_path, '*cudart*.[0-9]*.[0-9]*.[0-9]**')))
         candidate_names = [os.path.basename(c) for c in candidate_names]
         # if we didn't find any cudart, ask nvcc
         if len(candidate_names) == 0:
