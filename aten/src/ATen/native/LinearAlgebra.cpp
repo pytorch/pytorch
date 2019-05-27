@@ -599,6 +599,97 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
   return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
 }
 
+// Return a permutation with the given axes moved to the end.
+static Tensor move_to_end(const Tensor& self, IntArrayRef axes) {
+  const std::vector<int64_t> a = axes.vec();
+  std::vector<int64_t> perm;
+
+  for (int64_t i = 0; i < self.ndimension(); i++) {
+    auto it = std::find(a.begin(), a.end(), i);
+    if (it == a.end()) {
+       perm.push_back(i);
+    }
+  }
+  for (auto i : a) {
+    perm.push_back(i);
+  }
+
+  return self.permute(perm);
+}
+
+// Non-optimized batched svd implementation. This can be merged with at::svd
+// once at::svd has been ported to ATen.
+static std::tuple<Tensor, Tensor, Tensor>
+batch_svd(const Tensor& self, bool some, bool compute_uv)
+{
+  const int64_t ndim = self.ndimension();
+
+  TORCH_CHECK(
+      ndim >= 2,
+      "Expected a tensor with at least 2 dimensions, but got a ",
+      ndim,
+      " dimensions tensor instead.");
+
+  if (ndim == 2) {
+    return at::svd(self, some, compute_uv);
+  }
+
+  const int64_t n = self.size(-2);
+  const int64_t m = self.size(-1);
+  const int64_t k = std::min<int64_t>(n, m);
+  const int64_t nn = (some && compute_uv) ? k : n;
+  const int64_t mm = (some && compute_uv) ? k : m;
+  int64_t p = 1;
+
+  for (int64_t i = 0; i < ndim-2; i++) {
+    p *= self.size(i);
+  }
+
+  Tensor t = self.reshape({p, n, m}).contiguous();
+  Tensor u = at::zeros({p, n, nn}, self.options());
+  Tensor s = at::zeros({p, k}, self.options());
+  Tensor v = at::zeros({p, m, mm}, self.options());
+
+  for (int64_t i = 0; i < p; i++) {
+    auto tuple = at::svd(t[i], some, compute_uv);
+    s[i] = std::get<1>(tuple);
+    if (compute_uv) {
+      u[i] = std::get<0>(tuple);
+      v[i] = std::get<2>(tuple);
+    }
+  }
+
+  std::vector<int64_t> shape = self.sizes().slice(0, ndim-2).vec();
+  shape.push_back(n);
+  shape.push_back(nn);
+  u = u.reshape(shape);
+
+  shape = self.sizes().slice(0, ndim-2).vec();
+  shape.push_back(k);
+  s = s.reshape(shape);
+
+  shape = self.sizes().slice(0, ndim-2).vec();
+  shape.push_back(m);
+  shape.push_back(mm);
+  v = v.reshape(shape);
+
+  return std::tuple<Tensor, Tensor, Tensor>(u, s, v);
+}
+
+Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
+
+  Tensor p = move_to_end(self, dim);
+  return at::sum(std::get<1>(batch_svd(p, true, false)), -1, keepdim);
+}
+
+Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+  TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
+
+  Tensor p = move_to_end(self, dim);
+  return at::sum_out(result, std::get<1>(batch_svd(p, true, false)), -1, keepdim);
+}
+
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
   if (i == j)
     return matrices[i];

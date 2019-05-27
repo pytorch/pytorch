@@ -20,7 +20,7 @@ from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
-from itertools import product, combinations, combinations_with_replacement
+from itertools import product, combinations, combinations_with_replacement, permutations
 from functools import reduce
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
@@ -969,6 +969,73 @@ class _TestTorchMixin(object):
     @skipIfNoLapack
     def test_norm(self):
         self._test_norm(self, device='cpu')
+
+    def check_single_nuclear_norm(self, x, axes):
+        a = np.array(x, copy=False)
+        expected = np.linalg.norm(a, "nuc", axis=axes)
+
+        ans = torch.norm(x, "nuc", dim=axes)
+        self.assertTrue(ans.is_contiguous())
+        self.assertEqual(ans.shape, expected.shape)
+        self.assertTrue(np.allclose(ans, expected))
+
+        out = torch.zeros(expected.shape, dtype=x.dtype)
+        ans = torch.norm(x, "nuc", dim=axes, out=out)
+        self.assertIs(ans, out)
+        self.assertTrue(ans.is_contiguous())
+        self.assertEqual(ans.shape, expected.shape)
+        self.assertTrue(np.allclose(ans, expected))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_nuclear_norm_axes_small_brute_force(self):
+        for n in range(1, 5):
+            for m in range(1, 5):
+                for axes in permutations([0, 1], 2):
+                    # 2d, inner dimensions C
+                    x = torch.randn(n, m)
+                    self.check_single_nuclear_norm(x, axes)
+
+                    # 2d, inner dimensions Fortran
+                    x = torch.randn(m, n).transpose(-1, -2)
+                    self.check_single_nuclear_norm(x, axes)
+
+                    # 2d, inner dimensions non-contiguous
+                    x = torch.randn(n, 2 * m)[:, ::2]
+                    self.check_single_nuclear_norm(x, axes)
+
+                for o in range(1, 3):
+                    for axes in permutations([0, 1, 2], 2):
+                        # 3d, inner dimensions C
+                        x = torch.randn(o, n, m)
+                        self.check_single_nuclear_norm(x, axes)
+
+                        # 3d, inner dimensions Fortran
+                        y = torch.randn(o, n, m).transpose(-1, -2)
+                        self.check_single_nuclear_norm(x, axes)
+
+                        # 3d, inner dimensions non-contiguous
+                        x = torch.randn(o, n, 2 * m)[:, :, ::2]
+                        self.check_single_nuclear_norm(x, axes)
+
+                    for r in range(1, 3):
+                        for axes in permutations([0, 1, 2, 3], 2):
+                            # 4d, inner dimensions C
+                            x = torch.randn(r, o, n, m)
+                            self.check_single_nuclear_norm(x, axes)
+
+                            # 4d, inner dimensions Fortran
+                            x = torch.randn(r, o, n, m).transpose(-1, -2)
+                            self.check_single_nuclear_norm(x, axes)
+
+                            # 4d, inner dimensions non-contiguous
+                            x = torch.randn(r, o, n, 2 * m)[:, :, :, ::2]
+                            self.check_single_nuclear_norm(x, axes)
+
+    def test_nuclear_norm_exceptions(self):
+        for lst in [], [1], [1, 2]:
+            for axes in (), (0,), (0,1):
+                x = torch.tensor(lst, dtype=torch.double)
+                self.assertRaises(RuntimeError, torch.norm, x, "nuc", axes)
 
     @staticmethod
     def _test_dist(self, device):
