@@ -34,7 +34,7 @@ thread_local bool in_parallel_region_ = false;
 // thread number (task_id) set by parallel primitive
 thread_local size_t thread_num_ = 0;
 
-int _num_threads(int nthreads) {
+int _num_pool_threads(int nthreads) {
   if (nthreads == NOT_SET) {
     nthreads = TaskThreadPoolBase::defaultNumThreads();
   } else {
@@ -52,7 +52,7 @@ TaskThreadPoolBase& _get_intraop_pool() {
       ThreadPoolRegistry()->Create(
           "C10",
           /* device_id */ 0,
-          /* pool_size */ _num_threads(num_intraop_threads.exchange(CONSUMED)),
+          /* pool_size */ _num_pool_threads(num_intraop_threads.exchange(CONSUMED)),
           /* create_new */ true); // create a separate thread pool for intra-op
   return *pool;
 }
@@ -110,7 +110,6 @@ int get_thread_num() {
 
 bool in_parallel_region() {
   return in_parallel_region_ || (
-    // pool is already created or single thread case
     num_intraop_threads.load() == CONSUMED &&
     internal::_get_intraop_pool().inThreadPool()
   );
