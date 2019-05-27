@@ -5632,6 +5632,13 @@ a")
         inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+    def test_divmod(self):
+        def func(a, b):
+            #type: (int, int) -> (int, int)
+            return divmod(x, y)
+
+        self.checkScript(func, (1024, 10,))
+
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
             if is_float:

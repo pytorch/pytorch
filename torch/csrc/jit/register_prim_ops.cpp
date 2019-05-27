@@ -2182,7 +2182,21 @@ RegisterOperators reg2({
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
 
+
     // only used internally in range() translation
+
+    Operator(
+        "prim::divmod(int x, int y) -> (int, int)",
+        [](Stack& stack) {
+          int64_t a,b;
+          div_t divresult;
+          pop(stack, a, b);
+          divresult = div(a,b);
+          push(stack, divresult.quot);
+          push(stack, divresult.rem);
+          return 0;
+        }),
+
     Operator(
         "aten::__range_length(int lo, int hi, int step) -> int",
         [](Stack& stack) {
