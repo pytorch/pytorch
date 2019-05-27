@@ -173,7 +173,7 @@ class BatchSampler(Sampler):
             batch.append(idx)
             if len(batch) == self.batch_size:
                 yield batch
-                batch = []
+                batch.clear()
         if len(batch) > 0 and not self.drop_last:
             yield batch
 
