@@ -459,3 +459,94 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
     precision = tp / np.maximum(_MINIMUM_COUNT, tp + fp)
     recall = tp / np.maximum(_MINIMUM_COUNT, tp + fn)
     return np.stack((tp, fp, tn, fn, precision, recall))
+
+
+def _get_tensor_summary(name, display_name, description, tensor, content_type, json_config):
+    """Creates a tensor summary with summary metadata.
+
+    Args:
+      name: Uniquely identifiable name of the summary op. Could be replaced by
+        combination of name and type to make it unique even outside of this
+        summary.
+      display_name: Will be used as the display name in TensorBoard.
+        Defaults to `name`.
+      description: A longform readable description of the summary data. Markdown
+        is supported.
+      tensor: Tensor to display in summary.
+      content_type: Type of content inside the Tensor.
+      json_config: A string, JSON-serialized dictionary of ThreeJS classes
+        configuration.
+
+    Returns:
+      Tensor summary with metadata.
+    """
+    import torch
+    from tensorboard.plugins.mesh import metadata
+
+    tensor = torch.as_tensor(tensor)
+
+    tensor_metadata = metadata.create_summary_metadata(
+        name,
+        display_name,
+        content_type,
+        tensor.shape,
+        description,
+        json_config=json_config)
+
+    tensor = TensorProto(dtype='DT_FLOAT',
+                         float_val=tensor.reshape(-1).tolist(),
+                         tensor_shape=TensorShapeProto(dim=[
+                             TensorShapeProto.Dim(size=tensor.shape[0]),
+                             TensorShapeProto.Dim(size=tensor.shape[1]),
+                             TensorShapeProto.Dim(size=tensor.shape[2]),
+                         ]))
+
+    tensor_summary = Summary.Value(
+        tag=metadata.get_instance_name(name, content_type),
+        tensor=tensor,
+        metadata=tensor_metadata,
+    )
+
+    return tensor_summary
+
+
+# https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/mesh/summary.py
+def mesh(tag, vertices, colors, faces, config_dict, display_name=None, description=None):
+    """Outputs a merged `Summary` protocol buffer with a mesh/point cloud.
+
+      Args:
+        tag: A name for this summary operation.
+        vertices: Tensor of shape `[dim_1, ..., dim_n, 3]` representing the 3D
+          coordinates of vertices.
+        faces: Tensor of shape `[dim_1, ..., dim_n, 3]` containing indices of
+          vertices within each triangle.
+        colors: Tensor of shape `[dim_1, ..., dim_n, 3]` containing colors for each
+          vertex.
+        display_name: If set, will be used as the display name in TensorBoard.
+          Defaults to `name`.
+        description: A longform readable description of the summary data. Markdown
+          is supported.
+        config_dict: Dictionary with ThreeJS classes names and configuration.
+
+      Returns:
+        Merged summary for mesh/point cloud representation.
+      """
+    from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
+    from tensorboard.plugins.mesh.summary import _get_json_config
+
+    json_config = _get_json_config(config_dict)
+
+    summaries = []
+    tensors = [
+        (vertices, MeshPluginData.VERTEX),
+        (faces, MeshPluginData.FACE),
+        (colors, MeshPluginData.COLOR)
+    ]
+
+    for tensor, content_type in tensors:
+        if tensor is None:
+            continue
+        summaries.append(
+            _get_tensor_summary(tag, display_name, description, tensor, content_type, json_config))
+
+    return Summary(value=summaries)

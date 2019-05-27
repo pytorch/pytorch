@@ -85,6 +85,7 @@ torch/version.py
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml
 env
+.circleci/scripts/COMMIT_MSG
 
 # IPython notebook checkpoints
 .ipynb_checkpoints
