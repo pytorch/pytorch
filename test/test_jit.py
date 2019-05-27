@@ -1315,11 +1315,11 @@ graph(%x : Tensor,
         # is last node. Constant nodes correspond to params for the
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear") \
+                   .check_next("_dequantize_linear") \
                    .check("conv2d").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check("relu").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check_next("return").run(str(scriptM.graph))
 
     def test_insert_quantdequant_consecutive_qnodes_trace(self):
@@ -1346,11 +1346,11 @@ graph(%x : Tensor,
         # is last node. Constant nodes correspond to params for the
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear") \
+                   .check_next("_dequantize_linear") \
                    .check("_convolution").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check("relu").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check_next("return").run(str(scriptM.graph))
 
     def test_insert_quantdequant_single_qnode(self):
@@ -1381,9 +1381,9 @@ graph(%x : Tensor,
         # both conv and no quant-dequant after add. Constant nodes correspond
         # to params for the quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear") \
+                   .check_next("_dequantize_linear") \
                    .check("conv2d").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check_next("add").check_next("return").run(str(scriptM.graph))
 
     def test_insert_quantdequant_alternate_qnode(self):
@@ -1415,11 +1415,11 @@ graph(%x : Tensor,
         # conv, relu and add. Constant nodes correspond to params for the
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear").check("conv2d") \
+                   .check_next("_dequantize_linear").check("conv2d") \
                    .check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear").run(str(scriptM.graph))
+                   .check_next("_dequantize_linear").run(str(scriptM.graph))
         FileCheck().check("add").check("quantize_linear") \
-                   .check_next("int_repr").check("dequantize_linear") \
+                   .check_next("int_repr").check("_dequantize_linear") \
                    .run(str(scriptM.graph))
 
     def test_insert_quantdequant_for_weight(self):
@@ -1453,7 +1453,7 @@ graph(%x : Tensor,
 
         # We expect to see quant-dequant node before conv node for weight.
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear") \
+                   .check_next("_dequantize_linear") \
                    .check("conv2d").run(str(scriptModule.graph))
 
     def test_insert_quantdequant_for_bias(self):
@@ -1467,9 +1467,9 @@ graph(%x : Tensor,
 
             @torch.jit.script_method
             def forward(self, x):
-                x = x.quantize_linear(1.0, 0, torch.uint8)
+                x = x.quantize_linear(1.0, 0, torch.quint8)
                 x = x.int_repr()
-                x = x.dequantize_linear(1.0, 0, torch.uint8)
+                x = torch._dequantize_linear(x, 1.0, 0, torch.float)
                 x = self.conv1(x)
                 return x
 
@@ -1495,10 +1495,10 @@ graph(%x : Tensor,
         # We expect to see 3 pairs of quant-dequant nodes.
 
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("_dequantize_linear").check("quantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear").check("conv2d") \
+                   .check_next("_dequantize_linear").check("conv2d") \
                    .run(str(scriptModule.graph))
 
     def test_pattern_based_rewrite(self):
