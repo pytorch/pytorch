@@ -5,7 +5,7 @@ set -ex
 [ -n "$CLANG_VERSION" ]
 [ -n "$UBUNTU_VERSION" ]
 
-if [[ "$CLANG_VERSION" == "6.0" || "$CLANG_VERSION" == "7" ]]; then
+if [[ "$CLANG_VERSION" == "6.0" || "$CLANG_VERSION" == "7" || "$CLANG_VERSION" == "8" ]]; then
   apt-get update
   apt-get install -y --no-install-recommends software-properties-common wget
   wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -

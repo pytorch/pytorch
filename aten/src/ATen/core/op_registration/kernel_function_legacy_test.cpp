@@ -902,7 +902,8 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegiste
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_schema_specified", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::assertSchemasHaveSameSignature(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
+  c10::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
+  EXPECT_FALSE(differences.has_value());
 }
 
 template<class Return, class... Args> struct kernel_func final {
@@ -921,7 +922,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg, Tensor arg2) -> int", &kernel_func<int64_t, Tensor>::func);
-    }, "The number of arguments is different. Specified 2 but inferred 1"
+    }, "The number of arguments is different. 2 vs 1"
   );
 
   // assert this does not fail because it matches
@@ -932,19 +933,19 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch() -> ()", &kernel_func<void, Tensor, Tensor>::func);
-    }, "The number of arguments is different. Specified 0 but inferred 2"
+    }, "The number of arguments is different. 0 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> ()", &kernel_func<void, Tensor, Tensor>::func);
-    }, "The number of arguments is different. Specified 1 but inferred 2"
+    }, "The number of arguments is different. 1 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg, Tensor arg2, Tensor arg3) -> ()", &kernel_func<void, Tensor, Tensor>::func);
-    }, "The number of arguments is different. Specified 3 but inferred 2"
+    }, "The number of arguments is different. 3 vs 2"
   );
 }
 
@@ -957,13 +958,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg1, float arg2) -> int", &kernel_func<int64_t, Tensor, int64_t>::func);
-    }, "Type mismatch in argument 2: specified float but inferred int"
+    }, "Type mismatch in argument 2: float vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(int arg1, int arg2) -> int", &kernel_func<int64_t, Tensor, int64_t>::func);
-    }, "Type mismatch in argument 1: specified int but inferred Tensor"
+    }, "Type mismatch in argument 1: int vs Tensor"
   );
 }
 
@@ -976,13 +977,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> ()", &kernel_func<int64_t, Tensor>::func);
-    }, "The number of returns is different. Specified 0 but inferred 1"
+    }, "The number of returns is different. 0 vs 1"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> (int, int)", &kernel_func<int64_t, Tensor>::func);
-    }, "The number of returns is different. Specified 2 but inferred 1"
+    }, "The number of returns is different. 2 vs 1"
   );
 
   // assert this does not fail because it matches
@@ -993,13 +994,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> Tensor", &kernel_func<void, Tensor>::func);
-    }, "The number of returns is different. Specified 1 but inferred 0"
+    }, "The number of returns is different. 1 vs 0"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor)", &kernel_func<void, Tensor>::func);
-    }, "The number of returns is different. Specified 2 but inferred 0"
+    }, "The number of returns is different. 2 vs 0"
   );
 
   // assert this does not fail because it matches
@@ -1010,19 +1011,19 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> ()", &kernel_func<std::tuple<Tensor, Tensor>, Tensor>::func);
-    }, "The number of returns is different. Specified 0 but inferred 2"
+    }, "The number of returns is different. 0 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> Tensor", &kernel_func<std::tuple<Tensor, Tensor>, Tensor>::func);
-    }, "The number of returns is different. Specified 1 but inferred 2"
+    }, "The number of returns is different. 1 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor, Tensor)", &kernel_func<std::tuple<Tensor, Tensor>, Tensor>::func);
-    }, "The number of returns is different. Specified 3 but inferred 2"
+    }, "The number of returns is different. 3 vs 2"
   );
 }
 
@@ -1035,13 +1036,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> Tensor", &kernel_func<int64_t, Tensor>::func);
-    }, "Type mismatch in return 1: specified Tensor but inferred int"
+    }, "Type mismatch in return 1: Tensor vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> float", &kernel_func<int64_t, Tensor>::func);
-    }, "Type mismatch in return 1: specified float but inferred int"
+    }, "Type mismatch in return 1: float vs int"
   );
 
   // assert this does not fail because it matches
@@ -1052,7 +1053,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> float", &kernel_func<Tensor, Tensor>::func);
-    }, "Type mismatch in return 1: specified float but inferred Tensor"
+    }, "Type mismatch in return 1: float vs Tensor"
   );
 
   // assert this does not fail because it matches
@@ -1063,13 +1064,13 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenMismatchedKernel_w
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> (Tensor, float)", &kernel_func<std::tuple<Tensor, int64_t>, Tensor>::func);
-    }, "Type mismatch in return 2: specified float but inferred int"
+    }, "Type mismatch in return 2: float vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> (int, int)", &kernel_func<std::tuple<Tensor, int64_t>, Tensor>::func);
-    }, "Type mismatch in return 1: specified int but inferred Tensor"
+    }, "Type mismatch in return 1: int vs Tensor"
   );
 }
 
