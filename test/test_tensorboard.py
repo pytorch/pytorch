@@ -25,7 +25,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 TEST_CAFFE2 = True
 try:
     from caffe2.python import workspace
-except ImportError:
+except:
     TEST_CAFFE2 = False
 skipIfNoCaffe2 = unittest.skipIf(not TEST_CAFFE2, "no caffe2")
 
@@ -367,6 +367,12 @@ if TEST_TENSORBOARD:
         def test_histogram_doane(self):
             self.assertTrue(compare_proto(summary.histogram('dummy', np.random.rand(1024), bins='doane', max_bins=5), self))
 
+        def test_custom_scalars(self):
+            layout = {'Taiwan':{'twse':['Multiline',['twse/0050', 'twse/2330']]},
+             'USA':{ 'dow':['Margin',   ['dow/aaa', 'dow/bbb', 'dow/ccc']],
+                  'nasdaq':['Margin',   ['nasdaq/aaa', 'nasdaq/bbb', 'nasdaq/ccc']]}}
+            self.assertTrue(compare_proto(summary.custom_scalars(layout), self))
+            
     def remove_whitespace(string):
         return string.replace(' ', '').replace('\t', '').replace('\n', '')
 
