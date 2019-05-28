@@ -135,12 +135,12 @@ const MemoryLocations& Element::getMemoryLocations() const {
 // traversing in the direction `dir`.`fn` will be run on each element.
 void Element::bfs(BfsDirection dir, MemoryLocations& res) const {
   std::queue<unsigned> queue;
-  MemoryLocations seen;
+  std::unordered_set<int> seen;
   queue.push(Element::toIndex(this));
   while (!queue.empty()) {
     const auto el = queue.front();
     queue.pop();
-    seen.set(el);
+    seen.insert(el);
     auto decompEl = Element::toElement(el);
     if (decompEl->pointsTo.empty()) {
       res.set(el);
@@ -149,7 +149,7 @@ void Element::bfs(BfsDirection dir, MemoryLocations& res) const {
     switch (dir) {
       case BfsDirection::POINTS_TO: {
         for (auto ptr : decompEl->pointsTo) {
-          if (!seen.test(ptr)) {
+          if (!seen.count(ptr)) {
             queue.push(ptr);
           }
         }
@@ -157,7 +157,7 @@ void Element::bfs(BfsDirection dir, MemoryLocations& res) const {
 
       case BfsDirection::POINTED_FROM: {
         for (auto ptr : decompEl->pointedFrom) {
-          if (!seen.test(ptr)) {
+          if (!seen.count(ptr)) {
             queue.push(ptr);
           }
         }

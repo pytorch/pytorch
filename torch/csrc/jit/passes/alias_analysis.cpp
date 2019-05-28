@@ -159,14 +159,14 @@ void AliasDb::dump() const {
   std::cout << "\n===2. ALIAS DB===\n";
   for (const auto& ptrPair : elementMap_) {
     const auto element = ptrPair.second;
-    if (element->pointsTo.count() > 0) {
+    if (!element->pointsTo.empty()) {
       std::cout << getElementName(element) << " points to: ";
       for (const auto pointedTo : element->pointsTo) {
         std::cout << getElementName(Element::toElement(pointedTo)) << ", ";
       }
       std::cout << "\n";
     }
-    if (element->contained_elements.count() > 0) {
+    if (!element->contained_elements.empty()) {
       std::cout << getElementName(element) << " contains: ";
       for (const auto contained : element->contained_elements) {
         std::cout << getElementName(Element::toElement(contained)) << ", ";

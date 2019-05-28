@@ -10,7 +10,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 // Uses a compressed index representation for faster comparisons
-typedef llvm::SparseBitVector<128> MemoryLocations;
+typedef c10::SparseBitVector<128> MemoryLocations;
 namespace torch {
 namespace jit {
 

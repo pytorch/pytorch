@@ -19,7 +19,7 @@
  #include <list>
  #include "./llvmMathExtras.h"
 
- namespace llvm {
+ namespace c10 {
 
  /// SparseBitVector is an implementation of a bitvector that is sparse by only
  /// storing the elements that have non-zero bits set.  In order to make this
@@ -115,7 +115,7 @@
    size_type count() const {
      unsigned NumBits = 0;
      for (unsigned i = 0; i < BITWORDS_PER_ELEMENT; ++i)
-       NumBits += countPopulation(Bits[i]);
+       NumBits += llvm::countPopulation(Bits[i]);
      return NumBits;
    }
 
@@ -123,7 +123,7 @@
    int find_first() const {
      for (unsigned i = 0; i < BITWORDS_PER_ELEMENT; ++i)
        if (Bits[i] != 0)
-         return i * BITWORD_SIZE + countTrailingZeros(Bits[i]);
+         return i * BITWORD_SIZE + llvm::countTrailingZeros(Bits[i]);
       throw std::runtime_error("Illegal empty element");
    }
 
@@ -133,7 +133,7 @@
        unsigned Idx = BITWORDS_PER_ELEMENT - I - 1;
        if (Bits[Idx] != 0)
          return Idx * BITWORD_SIZE + BITWORD_SIZE -
-                 countLeadingZeros(Bits[Idx]);
+                 llvm::countLeadingZeros(Bits[Idx]);
      }
       throw std::runtime_error("Illegal empty element");
    }
