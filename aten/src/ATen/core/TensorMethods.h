@@ -804,9 +804,6 @@ inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point, ScalarTy
 inline Tensor Tensor::dequantize() const {
     return dispatch_type().dequantize(*this);
 }
-inline Tensor Tensor::dequantize_linear(double scale, int64_t zero_point, ScalarType dtype) const {
-    return dispatch_type().dequantize_linear(*this, scale, zero_point, dtype);
-}
 inline Scalar Tensor::q_scale() const {
     return dispatch_type().q_scale(*this);
 }
@@ -815,9 +812,6 @@ inline Scalar Tensor::q_zero_point() const {
 }
 inline Tensor Tensor::int_repr() const {
     return dispatch_type().int_repr(*this);
-}
-inline Tensor & Tensor::qtensor_set_storage_(Storage storage, int64_t storage_offset, IntArrayRef sizes, IntArrayRef strides) {
-    return dispatch_type().qtensor_set_storage_(*this, storage, storage_offset, sizes, strides);
 }
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     return dispatch_type().to(*this, options, non_blocking, copy);

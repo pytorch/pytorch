@@ -620,6 +620,15 @@ Tensor _sparse_mm(
   return at::_sparse_addmm(t, sparse, dense, 0, 1);
 }
 
+SparseTensor& _sparse_mm_out(
+  SparseTensor& result,
+  const SparseTensor& sparse,
+  const Tensor& dense
+) {
+  Tensor t = at::zeros({}, dense.options());
+  return at::addmm_out(result, t, sparse, dense, 0, 1);
+}
+
 // --------------------------------------------------------------------
 // hspmm(SparseTensor mat1, Tensor mat2)
 // --------------------------------------------------------------------

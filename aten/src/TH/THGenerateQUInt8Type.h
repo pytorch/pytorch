@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#error "You must define TH_GENERIC_FILE before including THGenerateQInt8Type.h"
+#error "You must define TH_GENERIC_FILE before including THGenerateQUInt8Type.h"
 #endif
 
 #define quantized_t c10::quint8

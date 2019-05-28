@@ -8,6 +8,8 @@
 #endif
 
 #include <TH/THGenerateQUInt8Type.h>
+#include <TH/THGenerateQInt8Type.h>
+#include <TH/THGenerateQInt32Type.h>
 
 #ifdef THQLocalGenerateManyTypes
 #undef THQLocalGenerateManyTypes

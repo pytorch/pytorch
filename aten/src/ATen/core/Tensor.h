@@ -583,11 +583,9 @@ class CAFFE2_API Tensor {
   Tensor to_mkldnn() const;
   Tensor quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const;
   Tensor dequantize() const;
-  Tensor dequantize_linear(double scale, int64_t zero_point, ScalarType dtype) const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;
   Tensor int_repr() const;
-  Tensor & qtensor_set_storage_(Storage storage, int64_t storage_offset, IntArrayRef sizes, IntArrayRef strides={});
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
