@@ -160,11 +160,20 @@
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: legacy::cpu::_th_addmv
+    CUDA: legacy::cuda::_th_addmv
 
 - func: addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: function, method
+  dispatch:
+    CPU: legacy::cpu::_th_addmv_
+    CUDA: legacy::cuda::_th_addmv_
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_addmv_out
+    CUDA: legacy::cuda::_th_addmv_out
 
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -621,6 +630,9 @@
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: legacy::cpu::_th_dot
+    CUDA: legacy::cuda::_th_dot
 
 - func: dot(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -878,8 +890,14 @@
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: legacy::cpu::_th_ger
+    CUDA: legacy::cuda::_th_ger
 
 - func: ger(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_ger_out
+    CUDA: legacy::cuda::_th_ger_out
 
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
 
@@ -1247,8 +1265,18 @@
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: legacy::cpu::_th_mm
+    CUDA: legacy::cuda::_th_mm
+    SparseCPU: _sparse_mm
+    SparseCUDA: _sparse_mm
 
 - func: mm(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_mm_out
+    CUDA: legacy::cuda::_th_mm_out
+    SparseCPU: _sparse_mm_out
+    SparseCUDA: _sparse_mm_out
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
 
@@ -1274,8 +1302,14 @@
 
 - func: mv(Tensor self, Tensor vec) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: legacy::cpu::_th_mv
+    CUDA: legacy::cuda::_th_mv
 
 - func: mv(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_mv_out
+    CUDA: legacy::cuda::_th_mv_out
 
 - func: mvlgamma(Tensor self, int p) -> Tensor
   variants: function, method
@@ -2117,8 +2151,8 @@
 - func: clone(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    CPU: clone
-    CUDA: clone
+    CPU: legacy::cpu::_th_clone
+    CUDA: legacy::cuda::_th_clone
     SparseCPU: clone_sparse
     SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
@@ -2126,31 +2160,31 @@
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   variants: function, method
   dispatch:
-    CPU: resize_as_
-    CUDA: resize_as_
+    CPU: legacy::cpu::_th_resize_as_
+    CUDA: legacy::cuda::_th_resize_as_
     SparseCPU: resize_as_sparse_
     SparseCUDA: resize_as_sparse_
 
 - func: pow(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: pow_out
-    CUDA: pow_out
+    CPU: legacy::cpu::_th_pow_out
+    CUDA: legacy::cuda::_th_pow_out
     SparseCPU: pow_out_sparse_scalar
     SparseCUDA: pow_out_sparse_scalar
 
 - func: pow(Tensor self, Scalar exponent) -> Tensor
   variants: function, method
   dispatch:
-    CPU: pow
-    CUDA: pow
+    CPU: legacy::cpu::_th_pow
+    CUDA: legacy::cuda::_th_pow
     SparseCPU: pow_sparse_scalar
     SparseCUDA: pow_sparse_scalar
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   variants: method, function
   dispatch:
-    CPU: zero_
-    CUDA: zero_
+    CPU: legacy::cpu::_th_zero_
+    CUDA: legacy::cuda::_th_zero_
     SparseCPU: zero_sparse_
     SparseCUDA: zero_sparse_
 
@@ -2668,36 +2702,60 @@
 - func: set_(Tensor(a!) self, Storage source) -> Tensor(a!)
   variants: method
   device_guard: False
+  dispatch:
+    CPU: legacy::cpu::_th_set_
+    CUDA: legacy::cuda::_th_set_
 
 - func: set_(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
   variants: method
   device_guard: False
+  dispatch:
+    CPU: legacy::cpu::_th_set_
+    CUDA: legacy::cuda::_th_set_
 
 - func: set_(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
   device_guard: False
+  dispatch:
+    CPU: legacy::cpu::_th_set_
+    CUDA: legacy::cuda::_th_set_
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_set_
+    CUDA: legacy::cuda::_th_set_
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
   device_guard: False
+  dispatch:
+    CPU: legacy::cpu::_th_is_set_to
+    CUDA: legacy::cuda::_th_is_set_to
 
 - func: masked_fill_(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: masked_fill__cpu
+    CUDA: masked_fill__cuda
 
 - func: masked_fill(Tensor self, Tensor mask, Scalar value) -> Tensor
   variants: function, method
 
 - func: masked_fill_(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: masked_fill__cpu
+    CUDA: masked_fill__cuda
 
 - func: masked_fill(Tensor self, Tensor mask, Tensor value) -> Tensor
   variants: function, method
 
 - func: masked_scatter_(Tensor(a!) self, Tensor mask, Tensor source) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: masked_scatter__cpu
+    CUDA: masked_scatter__cuda
 
 - func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
   variants: function, method
@@ -2706,150 +2764,273 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: view
-    CUDA: view
+    CPU: legacy::cpu::_th_view
+    CUDA: legacy::cuda::_th_view
     MkldnnCPU: mkldnn_view
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_put_
+    CUDA: legacy::cuda::_th_put_
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_index_add_
+    CUDA: legacy::cuda::_th_index_add_
 
 - func: index_add(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
   variants: function, method
 
 - func: index_fill_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_index_fill_
+    CUDA: legacy::cuda::_th_index_fill_
 
 - func: index_fill(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
 
 - func: index_fill_(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_index_fill_
+    CUDA: legacy::cuda::_th_index_fill_
 
 - func: index_fill(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
   variants: function, method
 
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_scatter_
+    CUDA: legacy::cuda::_th_scatter_
 
 - func: scatter(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
 - func: scatter_(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_scatter_
+    CUDA: legacy::cuda::_th_scatter_
 
 - func: scatter(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
 
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_scatter_add_
+    CUDA: legacy::cuda::_th_scatter_add_
 
 - func: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
 - func: lt_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_lt_
+    CUDA: legacy::cuda::_th_lt_
 
 - func: lt_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_lt_
+    CUDA: legacy::cuda::_th_lt_
 
 - func: gt_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_gt_
+    CUDA: legacy::cuda::_th_gt_
 
 - func: gt_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_gt_
+    CUDA: legacy::cuda::_th_gt_
 
 - func: le_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_le_
+    CUDA: legacy::cuda::_th_le_
 
 - func: le_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_le_
+    CUDA: legacy::cuda::_th_le_
 
 - func: ge_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_ge_
+    CUDA: legacy::cuda::_th_ge_
 
 - func: ge_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_ge_
+    CUDA: legacy::cuda::_th_ge_
 
 - func: eq_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_eq_
+    CUDA: legacy::cuda::_th_eq_
 
 - func: eq_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_eq_
+    CUDA: legacy::cuda::_th_eq_
 
 - func: ne_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_ne_
+    CUDA: legacy::cuda::_th_ne_
 
 - func: ne_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_ne_
+    CUDA: legacy::cuda::_th_ne_
 
 - func: __and__(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_and
+    CUDA: legacy::cuda::_th_and
 
 - func: __and__(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_and
+    CUDA: legacy::cuda::_th_and
 
 - func: __iand__(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_iand_
+    CUDA: legacy::cuda::_th_iand_
 
 - func: __iand__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_iand_
+    CUDA: legacy::cuda::_th_iand_
 
 - func: __or__(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_or
+    CUDA: legacy::cuda::_th_or
 
 - func: __or__(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_or
+    CUDA: legacy::cuda::_th_or
 
 - func: __ior__(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_ior_
+    CUDA: legacy::cuda::_th_ior_
 
 - func: __ior__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_ior_
+    CUDA: legacy::cuda::_th_ior_
 
 - func: __xor__(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_xor
+    CUDA: legacy::cuda::_th_xor
 
 - func: __xor__(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_xor
+    CUDA: legacy::cuda::_th_xor
 
 - func: __ixor__(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_ixor_
+    CUDA: legacy::cuda::_th_ixor_
 
 - func: __ixor__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_ixor_
+    CUDA: legacy::cuda::_th_ixor_
 
 - func: __lshift__(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_lshift
+    CUDA: legacy::cuda::_th_lshift
 
 - func: __lshift__(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_lshift
+    CUDA: legacy::cuda::_th_lshift
 
 - func: __ilshift__(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_ilshift_
+    CUDA: legacy::cuda::_th_ilshift_
 
 - func: __ilshift__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_ilshift_
+    CUDA: legacy::cuda::_th_ilshift_
 
 - func: __rshift__(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_rshift
+    CUDA: legacy::cuda::_th_rshift
 
 - func: __rshift__(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_rshift
+    CUDA: legacy::cuda::_th_rshift
 
 - func: __irshift__(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_irshift_
+    CUDA: legacy::cuda::_th_irshift_
 
 - func: __irshift__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_ilshift_
+    CUDA: legacy::cuda::_th_ilshift_
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_lgamma_
+    CUDA: legacy::cuda::_th_lgamma_
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_atan2_
+    CUDA: legacy::cuda::_th_atan2_
 
 - func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
   variants: method
@@ -2865,21 +3046,39 @@
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_digamma_
+    CUDA: legacy::cuda::_th_digamma_
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_polygamma_
+    CUDA: legacy::cuda::_th_polygamma_
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_erfinv_
+    CUDA: legacy::cuda::_th_erfinv_
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_renorm_
+    CUDA: legacy::cuda::_th_renorm_
 
 - func: pow_(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_pow_
+    CUDA: legacy::cuda::_th_pow_
 
 - func: pow_(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_pow_
+    CUDA: legacy::cuda::_th_pow_
 
 - func: lerp_(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   variants: method
@@ -2895,84 +3094,129 @@
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_sign_
+    CUDA: legacy::cuda::_th_sign_
 
 - func: fmod_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_fmod_
+    CUDA: legacy::cuda::_th_fmod_
 
 - func: fmod_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_fmod_
+    CUDA: legacy::cuda::_th_fmod_
 
 - func: remainder_(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_remainder_
+    CUDA: legacy::cuda::_th_remainder_
 
 - func: remainder_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_remainder_
+    CUDA: legacy::cuda::_th_remainder_
 
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_addbmm_
+    CUDA: legacy::cuda::_th_addbmm_
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_addbmm_out
+    CUDA: legacy::cuda::_th_addbmm_out
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_addbmm
+    CUDA: legacy::cuda::_th_addbmm
 
 - func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_addcmul_
+    CUDA: legacy::cuda::_th_addcmul_
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_addcdiv_
+    CUDA: legacy::cuda::_th_addcdiv_
 
 - func: random_(Tensor(a!) self, int from, int to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
-    CPU: clamped_random_cpu_
+    CPU: legacy::cpu::_th_random_
     CUDA: clamped_random_cuda_
 
 - func: random_(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
-    CPU: capped_random_cpu_
+    CPU: legacy::cpu::_th_random_
     CUDA: capped_random_cuda_
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
   variants: method
-  cpu_bool: True
-  cuda_bool: True
   dispatch:
-    CPU: random_cpu_
+    CPU: legacy::cpu::_th_random_
     CUDA: random_cuda_
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: uniform_cpu_
+    CPU: legacy::cpu::_th_uniform_
     CUDA: uniform_cuda_
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_normal_
+    CUDA: legacy::cuda::_th_normal_
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_cauchy_
+    CUDA: legacy::cuda::_th_cauchy_
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_log_normal_
+    CUDA: legacy::cuda::_th_log_normal_
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_exponential_
+    CUDA: legacy::cuda::_th_exponential_
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_geometric_
+    CUDA: legacy::cuda::_th_geometric_
 
 # wrappers for TH functions
 
 - func: diag(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_diag_out
+    CUDA: legacy::cuda::_th_diag_out
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_diag
+    CUDA: legacy::cuda::_th_diag
 
 - func: cross(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -3007,108 +3251,231 @@
 
 - func: trace(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_trace
+    CUDA: legacy::cuda::_th_trace
 
 - func: ne(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_ne_out
+    CUDA: legacy::cuda::_th_ne_out
 
 - func: ne(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_ne
+    CUDA: legacy::cuda::_th_ne
 
 - func: ne(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_ne_out
+    CUDA: legacy::cuda::_th_ne_out
 
 - func: ne(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_ne
+    CUDA: legacy::cuda::_th_ne
 
 - func: eq(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_eq_out
+    CUDA: legacy::cuda::_th_eq_out
 
 - func: eq(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_eq
+    CUDA: legacy::cuda::_th_eq
 
 - func: eq(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_eq_out
+    CUDA: legacy::cuda::_th_eq_out
 
 - func: eq(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_eq
+    CUDA: legacy::cuda::_th_eq
 
 - func: ge(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_ge_out
+    CUDA: legacy::cuda::_th_ge_out
 
 - func: ge(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_ge
+    CUDA: legacy::cuda::_th_ge
 
 - func: ge(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_ge_out
+    CUDA: legacy::cuda::_th_ge_out
 
 - func: ge(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_ge
+    CUDA: legacy::cuda::_th_ge
 
 - func: le(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_le_out
+    CUDA: legacy::cuda::_th_le_out
 
 - func: le(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_le
+    CUDA: legacy::cuda::_th_le
 
 - func: le(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_le_out
+    CUDA: legacy::cuda::_th_le_out
 
 - func: le(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_le
+    CUDA: legacy::cuda::_th_le
 
 - func: gt(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_gt_out
+    CUDA: legacy::cuda::_th_gt_out
 
 - func: gt(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_gt
+    CUDA: legacy::cuda::_th_gt
 
 - func: gt(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_gt_out
+    CUDA: legacy::cuda::_th_gt_out
 
 - func: gt(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_gt
+    CUDA: legacy::cuda::_th_gt
 
 - func: lt(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_lt_out
+    CUDA: legacy::cuda::_th_lt_out
 
 - func: lt(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_lt
+    CUDA: legacy::cuda::_th_lt
 
 - func: lt(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_lt_out
+    CUDA: legacy::cuda::_th_lt_out
 
 - func: lt(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_lt
+    CUDA: legacy::cuda::_th_lt
 
 - func: take(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_take_out
+    CUDA: legacy::cuda::_th_take_out
 
 - func: take(Tensor self, Tensor index) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_take
+    CUDA: legacy::cuda::_th_take
 
 - func: index_select(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_index_select_out
+    CUDA: legacy::cuda::_th_index_select_out
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_index_select
+    CUDA: legacy::cuda::_th_index_select
 
 - func: masked_select(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_masked_select_out
+    CUDA: legacy::cuda::_th_masked_select_out
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: masked_select_cpu
+    CUDA: masked_select_cuda
 
 - func: nonzero(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_nonzero_out
+    CUDA: legacy::cuda::_th_nonzero_out
 
 - func: nonzero(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_nonzero
+    CUDA: legacy::cuda::_th_nonzero
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: gather_out_cpu
+    CUDA: gather_out_cuda
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: gather_cpu
+    CUDA: gather_cuda
 
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_addcmul_out
+    CUDA: legacy::cuda::_th_addcmul_out
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_addcmul
+    CUDA: legacy::cuda::_th_addcmul
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_addcdiv_out
+    CUDA: legacy::cuda::_th_addcdiv_out
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_addcdiv
+    CUDA: legacy::cuda::_th_addcdiv
 
 - func: gels(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
+  dispatch:
+    CPU: legacy::cpu::_th_gels_out
+    CUDA: legacy::cuda::_th_gels_out
 
 - func: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_gels
+    CUDA: legacy::cuda::_th_gels
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
 
@@ -3122,19 +3489,37 @@
     CUDA: _triangular_solve_helper_cuda
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  dispatch:
+    CPU: legacy::cpu::_th_symeig_out
+    CUDA: legacy::cuda::_th_symeig_out
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_symeig
+    CUDA: legacy::cuda::_th_symeig
 
 - func: eig(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
+  dispatch:
+    CPU: legacy::cpu::_th_eig_out
+    CUDA: legacy::cuda::_th_eig_out
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_eig
+    CUDA: legacy::cuda::_th_eig
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
+  dispatch:
+    CPU: legacy::cpu::_th_svd_out
+    CUDA: legacy::cuda::_th_svd_out
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_svd
+    CUDA: legacy::cuda::_th_svd
 
 - func: cholesky(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -3170,34 +3555,64 @@
     CUDA: _solve_helper_cuda
 
 - func: cholesky_inverse(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_potri_out
+    CUDA: legacy::cuda::_th_potri_out
 
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_potri
+    CUDA: legacy::cuda::_th_potri
 
 - func: pstrf(Tensor self, bool upper=True, Scalar tol=-1, *, Tensor(a!) u, Tensor(b!) pivot) -> (Tensor(a!) u, Tensor(b!) pivot)
+  dispatch:
+    CPU: legacy::cpu::_th_pstrf_out
 
 - func: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_pstrf
 
 - func: qr(Tensor self, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
+  dispatch:
+    CPU: legacy::cpu::_th_qr_out
+    CUDA: legacy::cuda::_th_qr_out
 
 - func: qr(Tensor self) -> (Tensor Q, Tensor R)
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_qr
+    CUDA: legacy::cuda::_th_qr
 
 - func: geqrf(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
+  dispatch:
+    CPU: legacy::cpu::_th_geqrf_out
+    CUDA: legacy::cuda::_th_geqrf_out
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_geqrf
+    CUDA: legacy::cuda::_th_geqrf
 
 - func: orgqr(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_orgqr_out
 
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_orgqr
 
 - func: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_ormqr_out
 
 - func: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_ormqr
 
 - func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor, Tensor, Tensor)
   variants: function
@@ -3206,48 +3621,99 @@
     CUDA: _lu_with_info_cuda
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_btrisolve_out
+    CUDA: legacy::cuda::_th_btrisolve_out
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_btrisolve
+    CUDA: legacy::cuda::_th_btrisolve
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_multinomial_out
+    CUDA: legacy::cuda::_th_multinomial_out
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_multinomial
+    CUDA: legacy::cuda::_th_multinomial
 
 - func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
   variants: function
+  dispatch:
+    CPU: legacy::cpu::_th_multinomial_alias_setup
+    CUDA: legacy::cuda::_th_multinomial_alias_setup
 
 - func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor
   variants: function
+  dispatch:
+    CPU: legacy::cpu::_th_multinomial_alias_draw
+    CUDA: legacy::cuda::_th_multinomial_alias_draw
 
 - func: lgamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_lgamma_out
+    CUDA: legacy::cuda::_th_lgamma_out
 
 - func: lgamma(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_lgamma
+    CUDA: legacy::cuda::_th_lgamma
 
 - func: digamma(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_digamma_out
+    CUDA: legacy::cuda::_th_digamma_out
 
 - func: digamma(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_digamma
+    CUDA: legacy::cuda::_th_digamma
 
 - func: polygamma(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_polygamma_out
+    CUDA: legacy::cuda::_th_polygamma_out
 
 - func: polygamma(int n, Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_polygamma
+    CUDA: legacy::cuda::_th_polygamma
 
 - func: erfinv(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_erfinv_out
+    CUDA: legacy::cuda::_th_erfinv_out
 
 - func: erfinv(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_erfinv
+    CUDA: legacy::cuda::_th_erfinv
 
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_dist
+    CUDA: legacy::cuda::_th_dist
 
 - func: atan2(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_atan2_out
+    CUDA: legacy::cuda::_th_atan2_out
 
 - func: atan2(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_atan2
+    CUDA: legacy::cuda::_th_atan2
 
 - func: lerp(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3273,55 +3739,103 @@
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: _histc_out_cpu
+    CPU: legacy::cpu::_th_histc_out
     CUDA: _histc_out_cuda
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   variants: method, function
   dispatch:
-    CPU: _histc_cpu
+    CPU: legacy::cpu::_th_histc
     CUDA: _histc_cuda
 
 - func: sign(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_sign_out
+    CUDA: legacy::cuda::_th_sign_out
 
 - func: sign(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_sign
+    CUDA: legacy::cuda::_th_sign
 
 - func: fmod(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_fmod_out
+    CUDA: legacy::cuda::_th_fmod_out
 
 - func: fmod(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_fmod
+    CUDA: legacy::cuda::_th_fmod
 
 - func: fmod(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_fmod_out
+    CUDA: legacy::cuda::_th_fmod_out
 
 - func: fmod(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_fmod
+    CUDA: legacy::cuda::_th_fmod
 
 - func: remainder(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_remainder_out
+    CUDA: legacy::cuda::_th_remainder_out
 
 - func: remainder(Tensor self, Scalar other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_remainder
+    CUDA: legacy::cuda::_th_remainder
 
 - func: remainder(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_remainder_out
+    CUDA: legacy::cuda::_th_remainder_out
 
 - func: remainder(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_remainder
+    CUDA: legacy::cuda::_th_remainder
 
 - func: min(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_min_out
+    CUDA: legacy::cuda::_th_min_out
 
 - func: min(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_min
+    CUDA: legacy::cuda::_th_min
 
 - func: min(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_min
+    CUDA: legacy::cuda::_th_min
 
 - func: max(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_max_out
+    CUDA: legacy::cuda::_th_max_out
 
 - func: max(Tensor self, Tensor other) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_max
+    CUDA: legacy::cuda::_th_max
 
 - func: max(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_max
+    CUDA: legacy::cuda::_th_max
 
 - func: median(Tensor self) -> Tensor
   variants: method, function
@@ -3330,17 +3844,29 @@
     CUDA: median_cuda
 
 - func: sort(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+  dispatch:
+    CPU: legacy::cpu::_th_sort_out
+    CUDA: legacy::cuda::_th_sort_out
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_sort
+    CUDA: legacy::cuda::_th_sort
 
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
   variants: method, function
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) ->(Tensor(a!) values, Tensor(b!) indices)
+  dispatch:
+    CPU: legacy::cpu::_th_topk_out
+    CUDA: legacy::cuda::_th_topk_out
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_topk
+    CUDA: legacy::cuda::_th_topk
 
 - func: all(Tensor self) -> Tensor
   variants: method, function
@@ -3349,93 +3875,295 @@
   variants: method, function
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_renorm_out
+    CUDA: legacy::cuda::_th_renorm_out
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_renorm
+    CUDA: legacy::cuda::_th_renorm
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_unfold
+    CUDA: legacy::cuda::_th_unfold
 
 - func: equal(Tensor self, Tensor other) -> bool
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_equal
+    CUDA: legacy::cuda::_th_equal
 
 - func: pow(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_pow_out
+    CUDA: legacy::cuda::_th_pow_out
 
 - func: pow(Tensor self, Tensor exponent) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_pow
+    CUDA: legacy::cuda::_th_pow
 
 - func: pow(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_pow_out
+    CUDA: legacy::cuda::_th_pow_out
 
 - func: pow(Scalar self, Tensor exponent) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_pow
+    CUDA: legacy::cuda::_th_pow
 
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_normal_out
+    CUDA: legacy::cuda::_th_normal_out
 
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_normal
+    CUDA: legacy::cuda::_th_normal
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_normal_out
+    CUDA: legacy::cuda::_th_normal_out
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_normal
+    CUDA: legacy::cuda::_th_normal
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_normal_out
+    CUDA: legacy::cuda::_th_normal_out
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_normal
+    CUDA: legacy::cuda::_th_normal
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_alias
+    CUDA: legacy::cuda::_th_alias
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_dirichlet_grad_out
 
 - func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_dirichlet_grad
+
+- func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_addr
+    CUDA: legacy::cuda::_th_addr
+
+- func: _addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_addr_
+    CUDA: legacy::cuda::_th_addr_
+
+- func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_addr_out
+    CUDA: legacy::cuda::_th_addr_out
+
+- func: _index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_index_copy_
+    CUDA: legacy::cuda::_th_index_copy_
+
+- func: _cumsum(Tensor self, int dim) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_cumsum
+    CUDA: legacy::cuda::_th_cumsum
+
+- func: _cumsum(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_cumsum_out
+    CUDA: legacy::cuda::_th_cumsum_out
+
+- func: _cumprod(Tensor self, int dim) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_cumprod
+    CUDA: legacy::cuda::_th_cumprod
+
+- func: _cumprod(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_cumprod_out
+    CUDA: legacy::cuda::_th_cumprod_out
+
+- func: _var(Tensor self, bool unbiased=True) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_var
+    CUDA: legacy::cuda::_th_var
+
+- func: _std(Tensor self, bool unbiased=True) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_std
+    CUDA: legacy::cuda::_th_std
+
+- func: _addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_addmm_out
+    CUDA: legacy::cuda::_th_addmm_out
+
+- func: _addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_addmm
+    CUDA: legacy::cuda::_th_addmm
+
+- func: _addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_addmm_
+    CUDA: legacy::cuda::_th_addmm_
+
+- func: _cat(Tensor[] tensors, int dim=0) -> Tensor
+  dispatch:
+    CPU: legacy::cpu::_th_cat
+    CUDA: legacy::cuda::_th_cat
+
+- func: _cat(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_cat_out
+    CUDA: legacy::cuda::_th_cat_out
+
+- func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
+  dispatch:
+    CPU: legacy::cpu::_th_mode
+    CUDA: legacy::cuda::_th_mode
+
+- func: _mode(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+  dispatch:
+    CPU: legacy::cpu::_th_mode_out
+    CUDA: legacy::cuda::_th_mode_out
+
+- func: _max(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
+  dispatch:
+    CPU: legacy::cpu::_th_max
+    CUDA: legacy::cuda::_th_max
+
+- func: _max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_indices) -> (Tensor(a!), Tensor(b!))
+  dispatch:
+    CPU: legacy::cpu::_th_max_out
+    CUDA: legacy::cuda::_th_max_out
+
+- func: _min(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
+  dispatch:
+    CPU: legacy::cpu::_th_min
+    CUDA: legacy::cuda::_th_min
+
+- func: _min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!), Tensor(b!))
+  dispatch:
+    CPU: legacy::cpu::_th_min_out
+    CUDA: legacy::cuda::_th_min_out
 
 ## NN wrappers
 
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_binary_cross_entropy_forward_out
+    CUDA: legacy::cuda::_thnn_binary_cross_entropy_forward_out
 
 - func: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_binary_cross_entropy_forward
+    CUDA: legacy::cuda::_thnn_binary_cross_entropy_forward
 
-- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_binary_cross_entropy_backward_out
+    CUDA: legacy::cuda::_thnn_binary_cross_entropy_backward_out
 
-- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int reduction) -> Tensor
+- func: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_binary_cross_entropy_backward
+    CUDA: legacy::cuda::_thnn_binary_cross_entropy_backward
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_mse_loss_forward_out
+    CUDA: legacy::cuda::_thnn_mse_loss_forward_out
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_mse_loss_forward
+    CUDA: legacy::cuda::_thnn_mse_loss_forward
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_mse_loss_backward_out
+    CUDA: legacy::cuda::_thnn_mse_loss_backward_out
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_mse_loss_backward
+    CUDA: legacy::cuda::_thnn_mse_loss_backward
 
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_l1_loss_forward_out
+    CUDA: legacy::cuda::_thnn_l1_loss_forward_out
 
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_l1_loss_forward
+    CUDA: legacy::cuda::_thnn_l1_loss_forward
 
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_l1_loss_backward_out
+    CUDA: legacy::cuda::_thnn_l1_loss_backward_out
 
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_l1_loss_backward
+    CUDA: legacy::cuda::_thnn_l1_loss_backward
 
 - func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_multi_margin_loss_forward_out
+    CUDA: legacy::cuda::_thnn_multi_margin_loss_forward_out
 
 - func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_multi_margin_loss_forward
+    CUDA: legacy::cuda::_thnn_multi_margin_loss_forward
 
-- func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_multi_margin_loss_backward_out
+    CUDA: legacy::cuda::_thnn_multi_margin_loss_backward_out
 
-- func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, int reduction) -> Tensor
+- func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_multi_margin_loss_backward
+    CUDA: legacy::cuda::_thnn_multi_margin_loss_backward
 
 - func: multilabel_margin_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -3445,15 +4173,27 @@
 
 - func: multilabel_margin_loss_forward(Tensor self, Tensor target, int reduction, *, Tensor(a!) output, Tensor(b!) is_target) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_multilabel_margin_loss_forward_out
+    CUDA: legacy::cuda::_thnn_multilabel_margin_loss_forward_out
 
 - func: multilabel_margin_loss_forward(Tensor self, Tensor target, int reduction) -> (Tensor output, Tensor is_target)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_multilabel_margin_loss_forward
+    CUDA: legacy::cuda::_thnn_multilabel_margin_loss_forward
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_multilabel_margin_loss_backward_out
+    CUDA: legacy::cuda::_thnn_multilabel_margin_loss_backward_out
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_multilabel_margin_loss_backward
+    CUDA: legacy::cuda::_thnn_multilabel_margin_loss_backward
 
 - func: nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -3463,15 +4203,27 @@
 
 - func: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, *, Tensor(a!) output, Tensor(b!) total_weight) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_nll_loss_forward_out
+    CUDA: legacy::cuda::_thnn_nll_loss_forward_out
 
 - func: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_nll_loss_forward
+    CUDA: legacy::cuda::_thnn_nll_loss_forward
 
 - func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_nll_loss_backward_out
+    CUDA: legacy::cuda::_thnn_nll_loss_backward_out
 
 - func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_nll_loss_backward
+    CUDA: legacy::cuda::_thnn_nll_loss_backward
 
 - func: nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -3481,96 +4233,189 @@
 
 - func: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, *, Tensor(a!) output, Tensor(b!) total_weight) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_nll_loss2d_forward_out
+    CUDA: legacy::cuda::_thnn_nll_loss2d_forward_out
 
 - func: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_nll_loss2d_forward
+    CUDA: legacy::cuda::_thnn_nll_loss2d_forward
 
 - func: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_nll_loss2d_backward_out
+    CUDA: legacy::cuda::_thnn_nll_loss2d_backward_out
 
 - func: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_nll_loss2d_backward
+    CUDA: legacy::cuda::_thnn_nll_loss2d_backward
 
 - func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_smooth_l1_loss_forward_out
+    CUDA: legacy::cuda::_thnn_smooth_l1_loss_forward_out
 
 - func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_smooth_l1_loss_forward
+    CUDA: legacy::cuda::_thnn_smooth_l1_loss_forward
 
 - func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_smooth_l1_loss_backward_out
+    CUDA: legacy::cuda::_thnn_smooth_l1_loss_backward_out
 
 - func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_smooth_l1_loss_backward
+    CUDA: legacy::cuda::_thnn_smooth_l1_loss_backward
 
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_soft_margin_loss_forward_out
+    CUDA: legacy::cuda::_thnn_soft_margin_loss_forward_out
 
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_soft_margin_loss_forward
+    CUDA: legacy::cuda::_thnn_soft_margin_loss_forward
 
 - func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_soft_margin_loss_backward_out
+    CUDA: legacy::cuda::_thnn_soft_margin_loss_backward_out
 
 - func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_soft_margin_loss_backward
+    CUDA: legacy::cuda::_thnn_soft_margin_loss_backward
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_elu_forward_out
+    CUDA: legacy::cuda::_thnn_elu_forward_out
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_elu_forward
+    CUDA: legacy::cuda::_thnn_elu_forward
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_elu_backward_out
+    CUDA: legacy::cuda::_thnn_elu_backward_out
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_elu_backward
+    CUDA: legacy::cuda::_thnn_elu_backward
 
 - func: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_elu_forward_
+    CUDA: legacy::cuda::_thnn_elu_forward_
 
 - func: glu(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_glu_forward_out
+    CUDA: legacy::cuda::_thnn_glu_forward_out
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_glu_forward
+    CUDA: legacy::cuda::_thnn_glu_forward
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_glu_backward_out
+    CUDA: legacy::cuda::_thnn_glu_backward_out
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_glu_backward
+    CUDA: legacy::cuda::_thnn_glu_backward
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_hardtanh_forward_out
+    CUDA: legacy::cuda::_thnn_hardtanh_forward_out
 
 - func: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_hardtanh_forward
+    CUDA: legacy::cuda::_thnn_hardtanh_forward
 
 - func: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_hardtanh_backward_out
+    CUDA: legacy::cuda::_thnn_hardtanh_backward_out
 
 - func: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_hardtanh_backward
+    CUDA: legacy::cuda::_thnn_hardtanh_backward
 
 - func: hardtanh_(Tensor(a!) self, Scalar min_val=-1, Scalar max_val=1) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_hardtanh_forward_
+    CUDA: legacy::cuda::_thnn_hardtanh_forward_
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_leaky_relu_forward_out
+    CUDA: legacy::cuda::_thnn_leaky_relu_forward_out
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_leaky_relu_forward
+    CUDA: legacy::cuda::_thnn_leaky_relu_forward
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_leaky_relu_backward_out
+    CUDA: legacy::cuda::_thnn_leaky_relu_backward_out
 
 - func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_leaky_relu_backward
+    CUDA: legacy::cuda::_thnn_leaky_relu_backward
 
 - func: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_leaky_relu_forward_
+    CUDA: legacy::cuda::_thnn_leaky_relu_forward_
 
 - func: log_sigmoid(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -3580,54 +4425,105 @@
 
 - func: log_sigmoid_forward(Tensor self, *, Tensor(a!) output, Tensor(b!) buffer) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_log_sigmoid_forward_out
+    CUDA: legacy::cuda::_thnn_log_sigmoid_forward_out
 
 - func: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_log_sigmoid_forward
+    CUDA: legacy::cuda::_thnn_log_sigmoid_forward
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_log_sigmoid_backward_out
+    CUDA: legacy::cuda::_thnn_log_sigmoid_backward_out
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_log_sigmoid_backward
+    CUDA: legacy::cuda::_thnn_log_sigmoid_backward
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_rrelu_with_noise_forward_out
+    CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_out
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_rrelu_with_noise_forward
+    CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_rrelu_with_noise_backward_out
+    CUDA: legacy::cuda::_thnn_rrelu_with_noise_backward_out
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_rrelu_with_noise_backward
+    CUDA: legacy::cuda::_thnn_rrelu_with_noise_backward
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_rrelu_with_noise_forward_
+    CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_softplus_forward_out
+    CUDA: legacy::cuda::_thnn_softplus_forward_out
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_softplus_forward
+    CUDA: legacy::cuda::_thnn_softplus_forward
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_softplus_backward_out
+    CUDA: legacy::cuda::_thnn_softplus_backward_out
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_softplus_backward
+    CUDA: legacy::cuda::_thnn_softplus_backward
 
 - func: softshrink(Tensor self, Scalar lambd=0.5, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_softshrink_forward_out
+    CUDA: legacy::cuda::_thnn_softshrink_forward_out
 
 - func: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_softshrink_forward
+    CUDA: legacy::cuda::_thnn_softshrink_forward
 
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_softshrink_backward_out
+    CUDA: legacy::cuda::_thnn_softshrink_backward_out
 
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_softshrink_backward
+    CUDA: legacy::cuda::_thnn_softshrink_backward
 
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -3734,34 +4630,52 @@
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: avg_pool2d_out
-    CUDA: avg_pool2d_out
+    CPU: legacy::cpu::_thnn_avg_pool2d_forward_out
+    CUDA: legacy::cuda::_thnn_avg_pool2d_forward_out
     MkldnnCPU: mkldnn_avg_pool2d_out
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   python_module: nn
   dispatch:
-    CPU: avg_pool2d
-    CUDA: avg_pool2d
+    CPU: legacy::cpu::_thnn_avg_pool2d_forward
+    CUDA: legacy::cuda::_thnn_avg_pool2d_forward
     MkldnnCPU: mkldnn_avg_pool2d
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_avg_pool2d_backward_out
+    CUDA: legacy::cuda::_thnn_avg_pool2d_backward_out
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_avg_pool2d_backward
+    CUDA: legacy::cuda::_thnn_avg_pool2d_backward
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_avg_pool3d_forward_out
+    CUDA: legacy::cuda::_thnn_avg_pool3d_forward_out
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_avg_pool3d_forward
+    CUDA: legacy::cuda::_thnn_avg_pool3d_forward
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_avg_pool3d_backward_out
+    CUDA: legacy::cuda::_thnn_avg_pool3d_backward_out
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_avg_pool3d_backward
+    CUDA: legacy::cuda::_thnn_avg_pool3d_backward
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
@@ -3844,40 +4758,76 @@
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_pool3d_with_indices_forward_out
+    CUDA: legacy::cuda::_thnn_max_pool3d_with_indices_forward_out
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_pool3d_with_indices_forward
+    CUDA: legacy::cuda::_thnn_max_pool3d_with_indices_forward
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_pool3d_with_indices_backward_out
+    CUDA: legacy::cuda::_thnn_max_pool3d_with_indices_backward_out
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_pool3d_with_indices_backward
+    CUDA: legacy::cuda::_thnn_max_pool3d_with_indices_backward
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_unpool2d_forward_out
+    CUDA: legacy::cuda::_thnn_max_unpool2d_forward_out
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_unpool2d_forward
+    CUDA: legacy::cuda::_thnn_max_unpool2d_forward
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_unpool2d_backward_out
+    CUDA: legacy::cuda::_thnn_max_unpool2d_backward_out
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_unpool2d_backward
+    CUDA: legacy::cuda::_thnn_max_unpool2d_backward
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_unpool3d_forward_out
+    CUDA: legacy::cuda::_thnn_max_unpool3d_forward_out
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_unpool3d_forward
+    CUDA: legacy::cuda::_thnn_max_unpool3d_forward
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_unpool3d_backward_out
+    CUDA: legacy::cuda::_thnn_max_unpool3d_backward_out
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_max_unpool3d_backward
+    CUDA: legacy::cuda::_thnn_max_unpool3d_backward
 
 - func: reflection_pad1d(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4169,15 +5119,27 @@
 
 - func: sigmoid_backward(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_sigmoid_backward_out
+    CUDA: legacy::cuda::_thnn_sigmoid_backward_out
 
 - func: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_sigmoid_backward
+    CUDA: legacy::cuda::_thnn_sigmoid_backward
 
 - func: tanh_backward(Tensor grad_output, Tensor output, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_tanh_backward_out
+    CUDA: legacy::cuda::_thnn_tanh_backward_out
 
 - func: tanh_backward(Tensor grad_output, Tensor output) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_tanh_backward
+    CUDA: legacy::cuda::_thnn_tanh_backward
 
 - func: thnn_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4187,15 +5149,27 @@
 
 - func: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_transpose2d_forward_out
+    CUDA: legacy::cuda::_thnn_conv_transpose2d_forward_out
 
 - func: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation) -> (Tensor output, Tensor columns, Tensor ones)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_transpose2d_forward
+    CUDA: legacy::cuda::_thnn_conv_transpose2d_forward
 
 - func: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_transpose2d_backward_out
+    CUDA: legacy::cuda::_thnn_conv_transpose2d_backward_out
 
 - func: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_transpose2d_backward
+    CUDA: legacy::cuda::_thnn_conv_transpose2d_backward
 
 - func: thnn_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4205,15 +5179,27 @@
 
 - func: thnn_conv_transpose3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_transpose3d_forward_out
+    CUDA: legacy::cuda::_thnn_conv_transpose3d_forward_out
 
 - func: thnn_conv_transpose3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation) -> (Tensor output, Tensor finput, Tensor fgrad_input)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_transpose3d_forward
+    CUDA: legacy::cuda::_thnn_conv_transpose3d_forward
 
 - func: thnn_conv_transpose3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_transpose3d_backward_out
+    CUDA: legacy::cuda::_thnn_conv_transpose3d_backward_out
 
 - func: thnn_conv_transpose3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_transpose3d_backward
+    CUDA: legacy::cuda::_thnn_conv_transpose3d_backward
 
 - func: thnn_conv2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4223,15 +5209,27 @@
 
 - func: thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv2d_forward_out
+    CUDA: legacy::cuda::_thnn_conv2d_forward_out
 
 - func: thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv2d_forward
+    CUDA: legacy::cuda::_thnn_conv2d_forward
 
 - func: thnn_conv2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv2d_backward_out
+    CUDA: legacy::cuda::_thnn_conv2d_backward_out
 
 - func: thnn_conv2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv2d_backward
+    CUDA: legacy::cuda::_thnn_conv2d_backward
 
 - func: thnn_conv_depthwise2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4241,15 +5239,23 @@
 
 - func: thnn_conv_depthwise2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CUDA: legacy::cuda::_thnn_conv_depthwise2d_forward_out
 
 - func: thnn_conv_depthwise2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> Tensor
   python_module: nn
+  dispatch:
+    CUDA: legacy::cuda::_thnn_conv_depthwise2d_forward
 
 - func: thnn_conv_depthwise2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight) -> (Tensor(a!), Tensor(b!))
   python_module: nn
+  dispatch:
+    CUDA: legacy::cuda::_thnn_conv_depthwise2d_backward_out
 
 - func: thnn_conv_depthwise2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool[2] output_mask) -> (Tensor grad_input, Tensor grad_weight)
   python_module: nn
+  dispatch:
+    CUDA: legacy::cuda::_thnn_conv_depthwise2d_backward
 
 - func: thnn_conv3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4259,15 +5265,23 @@
 
 - func: thnn_conv3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv3d_forward_out
 
 - func: thnn_conv3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv3d_forward
 
 - func: thnn_conv3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv3d_backward_out
 
 - func: thnn_conv3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv3d_backward
 
 - func: thnn_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4277,15 +5291,27 @@
 
 - func: thnn_conv_dilated2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_dilated2d_forward_out
+    CUDA: legacy::cuda::_thnn_conv_dilated2d_forward_out
 
 - func: thnn_conv_dilated2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> (Tensor output, Tensor columns, Tensor ones)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_dilated2d_forward
+    CUDA: legacy::cuda::_thnn_conv_dilated2d_forward
 
 - func: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_dilated2d_backward_out
+    CUDA: legacy::cuda::_thnn_conv_dilated2d_backward_out
 
 - func: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_dilated2d_backward
+    CUDA: legacy::cuda::_thnn_conv_dilated2d_backward
 
 - func: thnn_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -4295,24 +5321,48 @@
 
 - func: thnn_conv_dilated3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_dilated3d_forward_out
+    CUDA: legacy::cuda::_thnn_conv_dilated3d_forward_out
 
 - func: thnn_conv_dilated3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] dilation) -> (Tensor output, Tensor columns, Tensor ones)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_dilated3d_forward
+    CUDA: legacy::cuda::_thnn_conv_dilated3d_forward
 
 - func: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_dilated3d_backward_out
+    CUDA: legacy::cuda::_thnn_conv_dilated3d_backward_out
 
 - func: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_conv_dilated3d_backward
+    CUDA: legacy::cuda::_thnn_conv_dilated3d_backward
 
 - func: thnn_col2im(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_col2im_forward
+    CUDA: legacy::cuda::_thnn_col2im_forward
 
 - func: thnn_col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_col2im_backward
+    CUDA: legacy::cuda::_thnn_col2im_backward
 
 - func: thnn_im2col(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_im2col_forward
+    CUDA: legacy::cuda::_thnn_im2col_forward
 
 - func: thnn_im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
+  dispatch:
+    CPU: legacy::cpu::_thnn_im2col_backward
+    CUDA: legacy::cuda::_thnn_im2col_backward
