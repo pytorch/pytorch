@@ -21,6 +21,8 @@ namespace internal {
       tbb::task_scheduler_init::deferred);
 
   std::atomic<int> num_intraop_threads{-1};
+
+  static thread_local tbb::task_group tg_;
 }
 
 //TODO: use OMP and MKL env. vars as default values
@@ -68,6 +70,10 @@ int get_thread_num() {
 
 bool in_parallel_region() {
   return tbb::this_task_arena::current_thread_index() != -1;
+}
+
+void intraop_launch(std::function<void()> func) {
+  tg_.run(func);
 }
 
 } // namespace at

@@ -102,7 +102,10 @@ CAFFE2_API void set_num_interop_threads(int);
 CAFFE2_API int get_num_interop_threads();
 
 // Launches inter-op parallel task
-CAFFE2_API void launch(const std::function<void()>& func);
+CAFFE2_API void launch(std::function<void()> func);
+
+// Launches intra-op parallel task
+CAFFE2_API void intraop_launch(std::function<void()> func);
 
 } // namespace at
 
