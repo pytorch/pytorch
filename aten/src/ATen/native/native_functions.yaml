@@ -3423,9 +3423,15 @@
     CUDA: masked_select_cuda
 
 - func: nonzero(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: legacy::cpu::_th_nonzero_out
+    CUDA: legacy::cuda::_th_nonzero_out
 
 - func: nonzero(Tensor self) -> Tensor
   variants: method, function
+  dispatch:
+    CPU: legacy::cpu::_th_nonzero
+    CUDA: legacy::cuda::_th_nonzero
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
