@@ -66,7 +66,7 @@ int get_num_interop_threads() {
   }
 }
 
-void launch(const std::function<void()>& func) {
+void launch(std::function<void()> func) {
   get_pool().run(func);
 }
 
