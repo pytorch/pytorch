@@ -5,31 +5,13 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
+#include <THNN/generic/pooling_shape.h>
 
 #include <algorithm>
 #include <vector>
 
 namespace at { namespace native {
 namespace {
-
-/* Creates the output shape using the input parameters for the axis.
-
-Args:
-  input_size, kernel_size, padding, stride: Appropriate parameter
-  ceil_mode: use ceiling instead of floor while computing the output shape.
-*/
-inline int64_t pooling_output_shape(int64_t input_size, int64_t kernel_size,
-                                    int64_t padding, int64_t stride,
-                                    int64_t dilation, bool ceil_mode) {
-  int64_t output_size
-    = (input_size + 2 * padding - dilation * (kernel_size - 1) - 1
-    + (ceil_mode ? stride - 1 : 0)) / stride + 1;
-
-  if (padding && ((output_size - 1) * stride >= input_size + padding)) {
-    --output_size;
-  }
-  return output_size;
-}
 
 /* Computes the spatial 2D max pooling with dilation.
 
@@ -77,10 +59,8 @@ void spatial_dilated_max_pooling(const T* iData,
               }
             }
           }
-          // set output
-          *o_p = T(max_val);
-          // store for backprop.
-          *ind_p = max_index;
+          *o_p = T(max_val);  // Output.
+          *ind_p = max_index;  // Max index for backprop.
         }
       }
     }
