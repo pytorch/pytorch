@@ -559,6 +559,9 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def(
       "_jit_recursive_script",
+      []() { return getRecursiveScriptMode(); });
+  m.def(
+      "_jit_recursive_script",
       [](bool recurse) { getRecursiveScriptMode() = recurse; });
   m.def(
       "_jit_script_compile",

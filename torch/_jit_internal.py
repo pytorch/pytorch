@@ -26,7 +26,7 @@ boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 
 # Python Op functions that should be ignored by the compiler. These will be replaced
 # with an operator that always throws an error
-ignored_fns = weakref.WeakSet()  # noqa: T484
+ignored_fns = weakref.WeakKeyDictionary()  # noqa: T484
 
 COMPILATION_PENDING = object()
 COMPILED = object()
@@ -159,10 +159,88 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     }
     return fn
 
+def get_class_attribute_dict(fn, frames_up=2):
+    """
+    Get the frame for class attribute definitions (the top level frame
+    containing methods and class variables defined outside methods)
+    """
+    # default to 2 frames up:
+    #   0 - get_class_attribute_dict
+    #   1 - some decorator
+    #   2 - the class definition
+    frame = inspect.currentframe()
+    i = 0
+    while i < frames_up:
+        frame = frame.f_back
+        i += 1
 
-def ignore(fn):
-    ignored_fns.add(fn)
+    # The locals of the class definition frame contain any class attributes
+    # (such as __constants__)
+    return frame.f_locals
+
+def export(fn):
+    """
+    This decorator indicates that a method is used as an entry point into a
+    ScriptModule. `forward` implicitly is used as an entry point, so it does
+    not need this decorator.
+
+    Methods are added to a ScriptModule as they are called in Python. If a
+    method is never called, it will not be included in the ScriptModule when
+    saving. This decorator explicitly marks that a method should be included
+    even if it is not called from Python.
+    """
+    class_dict = get_class_attribute_dict(fn, frames_up=2)
+    if '__torchscript_export__' not in class_dict:
+        class_dict['__torchscript_export__'] = set()
+    class_dict['__torchscript_export__'].add(fn.__name__)
     return fn
+
+
+def ignore(drop_on_export=False):
+    """
+    This decorator indicates to the compiler that a function or method should
+    be ignored and left as a Python function.
+
+    With `drop_on_export=False` (the default), calls to this function will
+    prevent saving a TorchScript model.
+
+    With `drop_on_export=True`, any calls to this function from other
+    TorchScript code will be replaced with a `raise`. This allows you to leave
+    code in your TorchScript model that is only ever run when the Python
+    interpreter is present.
+    """
+    if callable(drop_on_export):
+        # used without any args, so drop_on_export is actually a function
+        #   @torch.jit.ignore
+        #   def fn(...):
+        fn = drop_on_export
+        fn._torchscript_ignore = {"drop_on_export": False}
+        return fn
+    elif isinstance(drop_on_export, bool):
+        # used with an arg
+        #   @torch.jit.ignore(drop_on_export=True)
+        def decorator(fn):
+            fn._torchscript_ignore = {"drop_on_export": drop_on_export}
+            return fn
+        return decorator
+    else:
+        raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
+                           "a function but got {}".format(drop_on_export))
+
+
+def should_drop_on_export(fn):
+    attr = get_ignore_attribute(fn)
+    if not attr:
+        return False
+    return attr["drop_on_export"]
+
+
+def get_ignore_attribute(fn):
+    if not callable(fn):
+        return False
+    if hasattr(fn, '__func__'):
+        fn = fn.__func__
+    return getattr(fn, '_torchscript_ignore', False)
 
 
 def _parameter_list(parameter_names_fn):
