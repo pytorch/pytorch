@@ -53,7 +53,7 @@ void spatial_dilated_max_pooling(const T* iData,
             for (x = w_start; x < w_end; x += dW) {
               tcntr = y * iW + x;
               auto val = (i_p + tcntr)->val_;
-              if ((val > max_val) || std::isnan(val)) {
+              if (val > max_val) {
                 max_val = val;
                 max_index = tcntr;
               }
@@ -127,7 +127,7 @@ Tensor q_maxpool_2d(Tensor qx,                  // Input Tensor (Quantized)
   std::vector<int64_t> index;
   index.resize(qy.numel());
 
-  if (ndim == 3) {
+  if (ndim == 3 || nbatch == 1) {
     auto* iData = qxd;
     auto* oData = qyd;
     int64_t* indData = index.data();
