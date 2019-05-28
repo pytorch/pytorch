@@ -61,7 +61,7 @@ class TestDocCoverage(unittest.TestCase):
             textwrap.dedent('''
             The whitelist in test_docs_coverage.py contains something
             that doesn't have a docstring or isn't in torch.*. If you just
-            removed something from torch.*, please remove it from whitelist
+            removed something from torch.*, please remove it from the whitelist
             in test_docs_coverage.py'''))
         has_docstring -= whitelist
         # assert they are equal
