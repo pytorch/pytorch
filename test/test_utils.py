@@ -198,7 +198,7 @@ class TestCheckpoint(TestCase):
             torch.randn(1, 60, requires_grad=True)
         )
 
-    def test_checkpoint_sequential_deprecated_args(self):
+    def test_checkpoint_sequential_deprecated_multiple_args(self):
         class Two(nn.Module):
             def forward(self, a, b):
                 return a, b
@@ -210,6 +210,18 @@ class TestCheckpoint(TestCase):
         self.assertWarns(
             lambda: checkpoint_sequential(model, 1, a, b),
             'checkpoint_sequential with multiple args should be deprecated',
+        )
+
+    def test_checkpoint_sequential_deprecated_no_args(self):
+        class Noop(nn.Module):
+            def forward(self):
+                pass
+
+        model = nn.Sequential(Noop())
+
+        self.assertWarns(
+            lambda: checkpoint_sequential(model, 1),
+            'checkpoint_sequential with no args should be deprecated',
         )
 
     def test_checkpoint_rng_cpu(self):
