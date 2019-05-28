@@ -5489,7 +5489,7 @@ a")
             if x > 2:
                 raise RuntimeError("bad input, {} is too high".format(x))
             return x + 3
-        with self.assertRaisesRegex(torch._C.JITException, "RuntimeError: bad input, 5 is too high"):
+        with self.assertRaisesRegex(torch.jit.Error, "RuntimeError: bad input, 5 is too high"):
             fn(5)
 
     def test_python_raise_not_function(self):
@@ -5497,7 +5497,7 @@ a")
         def fn(x):
             # type: (int) -> int
             if x > 2:
-                raise 5*3
+                raise 5 * 3
             return x + 3
         with self.assertRaisesRegex(torch._C.JITException, ""):  # For backwards compatibility
             fn(5)

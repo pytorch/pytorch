@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -6,7 +7,6 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -1600,6 +1600,8 @@ struct to_ir {
   void emitRaise(const Raise& stmt) {
     if (stmt.expr().present()) {
       auto exceptionNode = stmt.expr().get().tree();
+      // Verifies that the expression is of the form `raise f(expr, ...)`, and
+      // outputs "<f>: <expr>"
       if (exceptionNode->kind() == TK_APPLY &&
           !Apply(exceptionNode).inputs().empty()) {
         auto apply = Apply(exceptionNode);
