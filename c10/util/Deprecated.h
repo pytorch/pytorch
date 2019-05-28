@@ -19,7 +19,8 @@
 // because we are C++11.  However, aspirationally, we would like
 // to use this version, because as of C++14 it is the correct and
 // portable way to declare something deprecated.
-#if defined(__cplusplus) && __cplusplus >= 201402L
+#if (defined(__cplusplus) && __cplusplus >= 201402L) || \
+    (defined(_MSVC_LANG) && _MSVC_LANG >= 201402L)
 # define C10_DEPRECATED [[deprecated]]
 # define C10_DEPRECATED_MESSAGE(message) [[deprecated(message)]]
 #elif defined(__GNUC__)
@@ -28,8 +29,7 @@
 # define C10_DEPRECATED_MESSAGE(message) __attribute__((deprecated))
 #elif defined(_MSC_VER)
 # define C10_DEPRECATED __declspec(deprecated)
-// TODO: is there some way to implement this?
-# define C10_DEPRECATED_MESSAGE(message) __declspec(deprecated)
+# define C10_DEPRECATED_MESSAGE(message) __declspec(deprecated(message))
 #else
 # warning "You need to implement C10_DEPRECATED for this compiler"
 # define C10_DEPRECATED
