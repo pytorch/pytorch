@@ -1174,6 +1174,10 @@ class _TestTorchMixin(object):
         for device in devices:
             x = torch.randn(shape, device=device)
 
+            for fn in [torch.max, torch.min]:
+                ident_err = 'tensor must have one dimension'
+                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x))
+
             for item in fns_to_test:
                 name, fn, identity = item
                 if identity is None:

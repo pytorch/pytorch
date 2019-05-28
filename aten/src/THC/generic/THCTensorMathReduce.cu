@@ -302,6 +302,7 @@ accreal THCTensor_(meanall)(THCState *state, THCTensor *self)
 
 scalar_t THCTensor_(minall)(THCState *state, THCTensor *self) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
+  THArgCheck(THTensor_nDimensionLegacyAll(self) > 0, 1, "tensor must have one dimension");
   accreal val;
   if (!THC_reduceAll<scalar_t>(state, self,
                            thrust::identity<accreal>{},
@@ -316,6 +317,7 @@ scalar_t THCTensor_(minall)(THCState *state, THCTensor *self) {
 
 scalar_t THCTensor_(maxall)(THCState *state, THCTensor *self) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
+  THArgCheck(THTensor_nDimensionLegacyAll(self) > 0, 1, "tensor must have one dimension");
   accreal val;
   if (!THC_reduceAll<scalar_t>(state, self,
                            thrust::identity<accreal>{},
