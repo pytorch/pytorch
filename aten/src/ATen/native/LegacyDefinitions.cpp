@@ -83,9 +83,6 @@ Tensor & masked_scatter_(Tensor& self, const Tensor & mask, const Tensor & sourc
 }
 
 Tensor view(const Tensor& self, IntArrayRef size) {
-  if (self.is_mkldnn()) {
-    return mkldnn_view(self, size);
-  }
   return at::legacy::th::_th_view(self, size);
 }
 
