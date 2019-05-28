@@ -666,6 +666,10 @@ void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scal
 
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 {
+  if ( (THTensor_nDimension(tensor) != 1) || (THTensor_nDimension(src) != 1) ) {
+    THError("1D tensors expected, got %dD, %dD tensors",
+       THTensor_nDimension(tensor), THTensor_nDimension(src));
+  }
   accreal sum = 0;
   /* we use a trick here. careful with that. */
   TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
