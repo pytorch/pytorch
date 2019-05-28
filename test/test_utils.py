@@ -207,8 +207,9 @@ class TestCheckpoint(TestCase):
         a = torch.randn(1, 100, requires_grad=True)
         b = torch.randn(1, 100, requires_grad=True)
 
-        self.assertWarns(
+        self.assertWarnsRegex(
             lambda: checkpoint_sequential(model, 1, a, b),
+            'deprecated',
             'checkpoint_sequential with multiple args should be deprecated',
         )
 
@@ -219,8 +220,9 @@ class TestCheckpoint(TestCase):
 
         model = nn.Sequential(Noop())
 
-        self.assertWarns(
+        self.assertWarnsRegex(
             lambda: checkpoint_sequential(model, 1),
+            'deprecated',
             'checkpoint_sequential with no args should be deprecated',
         )
 
