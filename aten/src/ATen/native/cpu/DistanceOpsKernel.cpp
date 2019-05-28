@@ -214,6 +214,8 @@ struct Dist {
       int64_t k = start % combs;
       int64_t i = k / r2;
       int64_t j = k % r2;
+      i = i * m;
+      j = j * m;
 
       while (res != res_end) {
         const scalar_t * self_i = t1_start + size1 * l + i;

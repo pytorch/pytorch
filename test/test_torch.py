@@ -1284,19 +1284,13 @@ class _TestTorchMixin(object):
                             expected = brute_cdist(x, y, p=p)
                             self.assertTrue(torch.allclose(expected, actual))
 
-    def test_cdist_large_cuda(self):
-        x = torch.randn(1000, 10, device="cuda")
-        y = torch.randn(1000, 10, device="cuda")
-        actual = torch.cdist(x, y, p=2)
-        expected = brute_cdist(x, y, p=2)
-        self.assertTrue(torch.allclose(expected, actual))
-
-    def test_cdist_large_cpu(self):
-        x = torch.randn(1000, 10, device="cpu")
-        y = torch.randn(1000, 10, device="cpu")
-        actual = torch.cdist(x, y, p=2)
-        expected = brute_cdist(x, y, p=2)
-        self.assertTrue(torch.allclose(expected, actual))
+    def test_cdist_large(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.randn(1000, 10, device=device)
+            y = torch.randn(1000, 10, device=device)
+            actual = torch.cdist(x, y, p=2)
+            expected = brute_cdist(x, y, p=2)
+            self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_large_batch(self):
         for device in torch.testing.get_all_device_types():
