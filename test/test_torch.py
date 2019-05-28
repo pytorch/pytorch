@@ -1033,7 +1033,7 @@ class _TestTorchMixin(object):
 
     def test_nuclear_norm_exceptions(self):
         for lst in [], [1], [1, 2]:
-            for axes in (), (0,), (0,1):
+            for axes in (), (0,), (0, 1):
                 x = torch.tensor(lst, dtype=torch.double)
                 self.assertRaises(RuntimeError, torch.norm, x, "nuc", axes)
 
