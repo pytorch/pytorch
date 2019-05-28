@@ -92,12 +92,19 @@ static void reciprocal_kernel(TensorIterator& iter) {
 }
 
 static void neg_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "neg_cpu", [&]() {
+  if (iter.dtype() == ScalarType::Bool) {
     unary_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return -a; },
-        [=](Vec256<scalar_t> a) { return a.neg(); });
-  });
+        [=](bool a) -> bool { return !a; },
+        [=](Vec256<bool> a) { return a.neg(); });
+  } else {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "neg_cpu", [&]() {
+      unary_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return -a; },
+          [=](Vec256<scalar_t> a) { return a.neg(); });
+    });
+  }
 }
 
 #if !AT_MKL_ENABLED()
