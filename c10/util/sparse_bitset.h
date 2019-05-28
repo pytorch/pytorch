@@ -1,9 +1,23 @@
+//===- llvm/ADT/SparseBitVector.h - Efficient Sparse BitVector --*- C++ -*-===//
+ //
+ // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+ // See https://llvm.org/LICENSE.txt for license information.
+ // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+ //
+ //===----------------------------------------------------------------------===//
+ //
+ // This file defines the SparseBitVector class.  See the doxygen comment for
+ // SparseBitVector for more details on the algorithm used.
+ //
+ //===----------------------------------------------------------------------===//
+
 #pragma once
  #include <cassert>
  #include <climits>
  #include <cstring>
  #include <iterator>
  #include <list>
+ #include "./llvmMathExtras.h"
 
  namespace llvm {
 
@@ -101,7 +115,7 @@
    size_type count() const {
      unsigned NumBits = 0;
      for (unsigned i = 0; i < BITWORDS_PER_ELEMENT; ++i)
-       NumBits += __builtin_popcountl(Bits[i]);
+       NumBits += countPopulation(Bits[i]);
      return NumBits;
    }
 
@@ -109,7 +123,7 @@
    int find_first() const {
      for (unsigned i = 0; i < BITWORDS_PER_ELEMENT; ++i)
        if (Bits[i] != 0)
-         return i * BITWORD_SIZE + __builtin_ctzl(Bits[i]);
+         return i * BITWORD_SIZE + countTrailingZeros(Bits[i]);
       throw std::runtime_error("Illegal empty element");
    }
 
@@ -119,7 +133,7 @@
        unsigned Idx = BITWORDS_PER_ELEMENT - I - 1;
        if (Bits[Idx] != 0)
          return Idx * BITWORD_SIZE + BITWORD_SIZE -
-                __builtin_clzl(Bits[Idx]) - 1;
+                 countLeadingZeros(Bits[Idx]);
      }
       throw std::runtime_error("Illegal empty element");
    }
