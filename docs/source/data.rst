@@ -4,45 +4,61 @@ torch.utils.data
 .. automodule:: torch.utils.data
 
 At the heart of PyTorch data loading utility is the :class:`torch.utils.data.DataLoader`
-class.  It represents an Python Iterable over a dataset, with
-`the iterating strategy <Data Loading Strategies_>`_ specified by
-`the type of the given dataset <Dataset Types_>`_  and the constructor arguments.
-Moreover, it supports
-`both single- and multi-process data loading <Single- and Multi-process Data Loading_>`_,
-as well as automatic `memory pinning <Memory Pinning_>`_.
+class.  It represents a Python iterable over a dataset, with support for
+
+* `map-style and iterable-style datasets <Dataset Types_>`_,
+
+* `customizing data loading order <Data Loading Order and Sampler_>`_,
+
+* `automatic batching <Loading Batched and Non-Batched Data_>`_,
+
+* `single- and multi-process data loading <Single- and Multi-process Data Loading_>`_,
+
+* `automatic memory pinning <Memory Pinning_>`_.
+
+These options are configured by the constructor arguments of a
+:class:`~torch.utils.data.DataLoader`, which has signature::
+
+    DataLoader(dataset, batch_size=1, shuffle=False, sampler=None,
+               batch_sampler=None, num_workers=0, collate_fn=None,
+               pin_memory=False, drop_last=False, timeout=0,
+               worker_init_fn=None)
+
+The sections below describe in details the effects and usages of these options.
 
 Dataset Types
 -------------
 
-:class:`~torch.utils.data.DataLoader` supports two different types of datasets:
+The most important argument of :class:`~torch.utils.data.DataLoader`
+constructor is :attr:`dataset`, which indicates a dataset object to load data
+from. PyTorch supports two different types of datasets:
 
-* `map-style datasets <Map-style datasets_>`_
+* `map-style datasets <Map-style datasets_>`_,
 
-* `iterable-style datasets <Iterable-style datasets_>`_
+* `iterable-style datasets <Iterable-style datasets_>`_.
 
 Map-style datasets
 ^^^^^^^^^^^^^^^^^^
 
-A map-style dataset is one that implements the :meth:`__getitem__` and (ideally)
+A map-style dataset is one that implements the :meth:`__getitem__` and
 :meth:`__len__` protocols, and represents a map from (possibly non-integral)
-indices/keys to data samples. E.g., such a dataset, when called ``dataset[idx]``
-could read and the ``idx``-th image and its corresponding label from a folder
-on the disk.
+indices/keys to data samples.
 
-.. note::
-  :class:`~torch.utils.data.DataLoader` by default constructs a index sampler
-  that yields integral indices.  To make it work with a map-style dataset with
-  non-integral indices/keys, a custom sampler must be provided.
+For example, such a dataset, when accessed with ``dataset[idx]``, could read
+the ``idx``-th image and its corresponding label from a folder on the disk.
 
 See :class:`~torch.utils.data.Dataset` for more details.
 
 Iterable-style datasets
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-An iterable-style dataset is one that implements the :meth:`__iter__` protocol,
-and represents an iterable over data samples. This type of datasets is
-particularly suitable for cases where random reads are expensive or even
-improbable. E.g., such a dataset, when called ``iter(dataset)``, could return a
+An iterable-style dataset is an instance of a subclass of :class:`~torch.utils.data.IterableDataset`
+that implements the :meth:`__iter__` protocol, and represents an iterable over
+data samples. This type of datasets is particularly suitable for cases where
+random reads are expensive or even improbable, and where the batch size depends
+on the fetched data.
+
+For example, such a dataset, when called ``iter(dataset)``, could return a
 stream of data reading from a database, a remote server, or even logs generated
 in real time.
 
@@ -51,75 +67,151 @@ See :class:`~torch.utils.data.IterableDataset` for more details.
 .. note:: When using an :class:`~torch.utils.data.IterableDataset` with
           `multi-process data loading <Multi-process data loading_>`_. The same
           dataset object is replicated on each worker process, and thus the
-          replicas must be configured differently to avoid duplicate data. See
+          replicas must be configured differently to avoid duplicated data. See
           :class:`~torch.utils.data.IterableDataset` documentations for how to
           achieve this.
 
-Samplers
---------
+Data Loading Order and :class:`~torch.utils.data.Sampler`
+---------------------------------------------------------
 
-For `map-style datasets <Map-style datasets_>`_, we need a way to specify the
-sequence of indices/keys used in data loading.  The :class:`torch.utils.data.Sampler`
-classes are created for this purpose. They represent iterable objects over the
-indices to map-style datasets.  E.g., in the common case with stochastic
-gradient decent (SGD), a :class:`~torch.utils.data.Sampler` could randomly
-permute a list of indices and yield each one at a time, or yield a small number
-of them for mini-batch SGD.
+For `iterable-style datasets <Iterable-style datasets_>`_, data loading order
+is entirely controlled by the user-defined iterable. This allows easier
+implementations of chunk-reading and dynamic batch size (e.g., by yielding a
+batched sample at each time).
 
-`Data Loading Strategies`_ section talks about how to use a :class:`~torch.utils.data.Sampler`
-with a :class:`~torch.utils.data.DataLoader`.
+The rest of this section concerns the case with
+`map-style datasets <Map-style datasets_>`_. :class:`torch.utils.data.Sampler`
+classes are used to specify the sequence of indices/keys used in data loading.
+They represent iterable objects over the indices to datasets.  E.g., in the
+common case with stochastic gradient decent (SGD), a
+:class:`~torch.utils.data.Sampler` could randomly permute a list of indices
+and yield each one at a time, or yield a small number of them for mini-batch
+SGD.
 
-Data Loading Strategies
------------------------
+A sequential or shuffled sampler will be automatically constructed based on the :attr:`shuffle` argument to a :class:`~torch.utils.data.DataLoader`.
+Alternatively, users may use the :attr:`sampler` argument to specify a
+custom :class:`~torch.utils.data.Sampler` object that at each time yields
+the next index/key to fetch.
 
-:class:`~torch.utils.data.DataLoader` constructor receives a
-:attr:`dataset` object as its first argument. Based on the other provided
-arguments, a :class:`~torch.utils.data.DataLoader` operates in one of three
-following strategies:
+A custom :class:`~torch.utils.data.Sampler` that yields a list of batch
+indices at a time can be passed as the :attr:`batch_sampler` argument.
+Automatic batching can also be enabled via :attr:`batch_size` and
+:attr:`drop_last` arguments. See
+`the next section <Loading Batched and Non-Batched Data_>`_ for more details
+on this.
 
-* `Batched loading from a map-style dataset`_
+.. note::
+  Neither :attr:`sampler` nor :attr:`batch_sampler` is compatible with
+  iterable-style datasets, since such datasets have no notion of a key or an
+  index.
 
-* `Loading individual members of a map-style dataset`_
+Loading Batched and Non-Batched Data
+------------------------------------
 
-* `Loading from an iterable-style dataset`_
+:class:`~torch.utils.data.DataLoader` supports automatically collating
+individual fetched data samples into batches via arguments
+:attr:`batch_size`, :attr:`drop_last`, and :attr:`batch_sampler`.
 
-Batched loading from a map-style dataset
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Automatic batching (default)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This is the most common case, and corresponds to fetching a minibatch of
-data and collating them into batched Tensors, i.e., Tensors with one dimension
-being the batch dimension (usually the first). Two combinations of arguments
-that starts this mode are:
+data and collating them into batched samples, i.e., containing Tensors with
+one dimension being the batch dimension (usually the first).
 
-* (default) Using arguments :attr:`batch_size`, :attr:`shuffle`,
-  :attr:`sampler`, and :attr:`drop_last` to specify the batch indices sampling
-  behavior.
+When :attr:`batch_size` (default ``1``) is not ``None``, the data loader yields
+batched samples instead of individual samples. :attr:`batch_size` and
+:attr:`drop_last` arguments are used to specify how the data loader obtains
+batches of dataset keys. For map-style datasets, users can alternatively
+specify :attr:`batch_sampler`, which yields a list of keys at a time.
 
-  With the default arguments :attr:`batch_size=1`, :attr:`shuffle=False`,
-  :attr:`sampler=None` and :attr:`drop_last=False`, :class:`~torch.utils.data.DataLoader`
-  loads data as batches of size ``1`` sequentially.
+.. note::
+  The :attr:`batch_size` and :attr:`drop_last` arguments essentially are used
+  to construct a :attr:`batch_sampler` from :attr:`sampler`. For map-style
+  datasets, the :attr:`sampler` is either provided by user or constructed
+  based on the :attr:`shuffle` argument. For iterable-style datasets, the
+  :attr:`sampler` is a dummy infinite one. See
+  `this section <Data Loading Order and Sampler_>`_ on more details on
+  samplers.
 
-* Setting argument :attr:`batch_sampler` to a custom sampler returning a list
-  of indices at each time, representing the indices for a batch.
+.. note::
+  When fetching from
+  `iterable-style datasets <Iterable-style datasets_>`_ with
+  `multi-processing <Multi-process data loading_>`_, the :attr:`drop_last`
+  argument drops the last non-full batch of each worker's dataset replica.
 
 After fetching a list of samples using the indices from sampler, the function
-passed as the :attr:`collate_fn` argument is used to collate the list of samples
-into batched Tensors.
+passed as the :attr:`collate_fn` argument is used to collate lists of samples
+into batches.
 
-The behavior of this mode is roughly equivalent with::
+In this case, loading from a map-style dataset is roughly equivalent with::
 
     for indices in batch_sampler:
         yield collate_fn([dataset[i] for i in indices])
 
+and loading from an iterable-style dataset is roughly equivalent with::
+
+    dataset_iter = iter(dataset)
+    for indices in batch_sampler:
+        yield collate_fn([next(dataset_iter) for _ in indices])
+
+See `this section <dataloader-collate_fn_>`_ on more about :attr:`collate_fn`.
+
+Disable automatic batching
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In certain cases, users may want to handle batching manually in dataset code,
+or simply load individual samples. For example, it could cheaper to directly
+load batched data (e.g., bulk reads from a database or reading continuous
+chunks of memory), or the batch size is data dependent, or the program is
+designed to work on individual samples.  Under these scenarios, it's likely
+better to not use automatic batching (where :attr:`collate_fn` is used to
+collate the samples), but let the data loader directly return each member of
+the :attr:`dataset` object.
+
+When both :attr:`batch_size` and :attr:`batch_sampler` are ``None``, automatic
+batching is disabled. Each sample obtained from the :attr:`dataset` is
+processed with the function passed as the :attr:`collate_fn` argument.
+
+**When automatic batching is disabled**, the default :attr:`collate_fn` simply
+converts NumPy arrays into PyTorch Tensors, and keeps everything else untouched.
+
+In this case, loading from a map-style dataset is roughly equivalent with::
+
+    for index in sampler:
+        yield collate_fn(dataset[index])
+
+and loading from an iterable-style dataset is roughly equivalent with::
+
+    for data in iter(dataset):
+        yield collate_fn(data)
+
+See `this section <dataloader-collate_fn_>`_ on more about :attr:`collate_fn`.
+
+.. _dataloader-collate_fn:
 
 Working with :attr:`collate_fn`
-"""""""""""""""""""""""""""""""
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The use of :attr:`collate_fn` is slightly different when automatic batching is
+enabled or disabled.
+
+**When automatic batching is disabled**, :attr:`collate_fn` is called with
+each individual data sample, and the output is yielded from the data loader
+iterator. In this case, the default :attr:`collate_fn` simply converts NumPy
+arrays in PyTorch tensors.
+
+**When automatic batching is enabled**, :attr:`collate_fn` is called with a list
+of data samples at each time. It is expected to collate the input samples into
+a batch for yielding from the data loader iterator. The rest of this section
+describes behavior of the default :attr:`collate_fn` in this case.
 
 For instance, if each data sample consists of a 3-channel image and an integral
 class label, i.e., each element of the dataset returns a tuple
-``(image, class_index)``, the default :attr:`collate_fn` collates a list of such
-tuples into a single tuple of a batched image tensor and a batched class label
-Tensor. In particular, the default :attr:`collate_fn` has the following
+``(image, class_index)``, the default :attr:`collate_fn` collates a list of
+such tuples into a single tuple of a batched image tensor and a batched class
+label Tensor. In particular, the default :attr:`collate_fn` has the following
 properties:
 
 * It always prepends a new dimension as the batch dimension.
@@ -135,62 +227,14 @@ properties:
 Users may use customized :attr:`collate_fn` to achieve custom batching, e.g.,
 along a dimension other than the first, or to add support for custom data types.
 
-Loading individual members of a map-style dataset
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Sometimes it is cheaper to directly load batched data (e.g., bulk reads from a
-database or a remote server), or your program is designed for working on
-individual samples.  In such cases, it's probably better to not use the above
-loading strategy (where :attr:`collate_fn` is used to collate the samples), but
-let the data loader directly return each member of the :attr:`dataset` object.
-
-To start this mode, simply set ``batch_size=None``.  If :attr:`sampler` is set,
-it will be used to sample the indices/keys to :attr:`dataset`. Otherwise, a
-sampler will be constructed according to :attr:`shuffle` argument.
-
-Each sample is processed with the function passed as the :attr:`convert_fn`
-argument. The default :attr:`convert_fn` simply converts NumPy arrays and
-Python numerical values into PyTorch Tensors.
-
-The behavior of this mode is roughly equivalent with::
-
-    for index in sampler:
-        yield convert_fn(dataset[index])
-
-
-Loading from an iterable-style dataset
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-When loading from an iterable-style dataset (i.e., a :class:`~torch.utils.data.IterableDataset`),
-there is no  notion of a :attr:`sampler`. The data samples are read from the
-iterable generated by the :class:`~torch.utils.data.IterableDataset`.
-
-To start this mode, simply passing an :class:`~torch.utils.data.IterableDataset`
-instance as the :attr:`dataset` argument.
-
-Each sample is processed with the function passed as the :attr:`convert_fn`
-argument. The default :attr:`convert_fn` simply converts NumPy arrays and
-Python numerical values into PyTorch Tensors.
-
-For single-process loading, the behavior of this mode is roughly equivalent
-with::
-
-    for data in iter(dataset):
-        yield convert_fn(data)
-
-
-For multi-process loading, each worker process gets a different copy of
-:attr:`dataset`, so it is often desired to configure each copy independently to
-avoid having duplicate data returned from the workers. See the documentation of
-:class:`~torch.utils.data.IterableDataset` for details on this.
-
 Single- and Multi-process Data Loading
 --------------------------------------
 
 A :class:`~torch.utils.data.DataLoader` uses single-process data loading by
 default.
 
-Within a Python process, the `global interpreter lock <https://wiki.python.org/moin/GlobalInterpreterLock>`_
+Within a Python process, the
+`Global Interpreter Lock (GIL) <https://wiki.python.org/moin/GlobalInterpreterLock>`_
 prevents true fully parallelizing Python code across threads. To avoid blocking
 computation code with data loading, PyTorch provides an easy switch to perform
 multi-process data loading by simply setting the argument :attr:`num_workers`
@@ -203,7 +247,8 @@ In this mode, data fetching is done in the same process a
 :class:`~torch.utils.data.DataLoader` is initialized.  Therefore, data loading
 may block computing.  However, this mode may be preferred when resource(s) used
 for sharing data among processes (e.g., shared memory, file descriptors) is
-limited.  Additionally, single-process loading often shows more readable error
+limited, or when the entire dataset is small and can be loaded entirely in
+memory.  Additionally, single-process loading often shows more readable error
 traces and thus is useful for debugging.
 
 
@@ -215,16 +260,32 @@ turn on multi-process data loading with the specified number of loader worker
 processes.
 
 In this mode, each time an iterator of a :class:`~torch.utils.data.DataLoader`
-is created (e.g., when you call ``enumerate(dataloader, 0)``), :attr:`num_workers`
-worker processes are created. At this point, the :attr:`dataset`, :attr:`collate_fn`,
-:attr:`convert_fn` and :attr:`worker_init_fn` are passed to each
+is created (e.g., when you call ``enumerate(dataloader)``), :attr:`num_workers`
+worker processes are created. At this point, the :attr:`dataset`,
+:attr:`collate_fn`, and :attr:`worker_init_fn` are passed to each
 worker, where they are used to initialize, and fetch data. This means that
 dataset access together with its  internal IO, transforms
-(including :attr:`collate_fn` and :attr:`convert_fn`) runs in the worker process.
+(including :attr:`collate_fn`) runs in the worker process.
 
-For map-style datasets, the main process generates the indices using :attr:`sampler`
-and sends them to the workers. So any shuffle randomization is done in the main
-process which guides loading by assigning indices to load.
+:func:`torch.utils.data.get_worker_info()` returns various useful information
+in a worker process (including the worker id, dataset replica, initial seed,
+etc.), and returns ``None`` in main process. Users may use this function in
+dataset code and/or :attr:`worker_init_fn` to individually configure each
+dataset replica, and to determine whether the code is running in a worker
+process. For example, this can be particularly helpful in sharding the dataset.
+
+For map-style datasets, the main process generates the indices using
+:attr:`sampler` and sends them to the workers. So any shuffle randomization is
+done in the main process which guides loading by assigning indices to load.
+
+For iterable-style datasets, since each worker process gets a replica of the
+:attr:`dataset` object, naive multi-process loading will often result in
+duplicated data. Using :func:`torch.utils.data.get_worker_info()` and/or
+:attr:`worker_init_fn`, users may configure each replica independently. (See
+:class:`~torch.utils.data.IterableDataset` documentations for how to achieve
+this. ) For similar reasons, in multi-process loading, the :attr:`drop_last`
+argument drops the last non-full batch of each worker's iterable-style dataset
+replica.
 
 Workers are shut down once the end of the iteration is reached, or when the
 iterator becomes garbage collected.
@@ -234,24 +295,23 @@ iterator becomes garbage collected.
   loading because of many subtleties in using CUDA and sharing CUDA tensors in
   multiprocessing (see :ref:`multiprocessing-cuda-note`). Instead, we recommend
   using `automatic memory pinning <Memory Pinning_>`_ (i.e., setting
-  :attr:``pin_memory=True``), which enables fast data transfer to CUDA-enabled
+  :attr:`pin_memory=True`), which enables fast data transfer to CUDA-enabled
   GPUs.
 
 Platform-specific behaviors
 """""""""""""""""""""""""""
 
-Since workers rely on Python ``multiprocessing``, worker launch behavior is
+Since workers rely on Python :py:mod:`multiprocessing`, worker launch behavior is
 different on Windows compared to Unix.
 
-* On Unix, ``fork`` is the default ``multiprocessing`` start method. Using ``fork``,
-  child workers typically can access the :attr:`dataset` and Python argument
-  functions directly through the cloned address space.
+* On Unix, :func:`fork()` is the default :py:mod:`multiprocessing` start method.
+  Using :func:`fork`, child workers typically can access the :attr:`dataset` and
+  Python argument functions directly through the cloned address space.
 
-* On Windows, ``spawn`` is the default ``multiprocessing`` start method. Using
-  ``spawn``, another interpreter is launched which runs your main script,
+* On Windows, :func:`spawn()` is the default :py:mod:`multiprocessing` start method.
+  Using :func:`spawn()`, another interpreter is launched which runs your main script,
   followed by the internal worker function that receives the :attr:`dataset`,
-  :attr:`collate_fn` and other arguments through `Pickle <https://docs.python.org/3/library/pickle.html>`_
-  serialization.
+  :attr:`collate_fn` and other arguments through :py:mod:`pickle` serialization.
 
 This separate serialization means that you should take two steps to ensure you
 are compatible with Windows while using multi-process data loading:
@@ -261,9 +321,9 @@ are compatible with Windows while using multi-process data loading:
   process is launched. You can place your dataset and :class:`~torch.utils.data.DataLoader`
   instance creation logic here, as it doesn't need to be re-executed in workers.
 
-- Make sure that any custom :attr:`collate_fn`, :attr:`convert_fn`, :attr:`worker_init_fn`
-  or dataset code is declared as top level definitions, outside of the ``__main__``
-  check. This ensures that they are available in workers.
+- Make sure that any custom :attr:`collate_fn`, :attr:`worker_init_fn`
+  or :attr:`dataset` code is declared as top level definitions, outside of the
+  ``__main__`` check. This ensures that they are available in worker processes.
   (this is needed since functions are pickled as references only, not ``bytecode``.)
 
 Randomness in multi-process data loading
@@ -271,7 +331,7 @@ Randomness in multi-process data loading
 
 By default, each worker will have its PyTorch seed set to
 ``base_seed + worker_id``, where ``base_seed`` is a long generated
-by main process using its RNG. However, seeds for other libraies
+by main process using its RNG. However, seeds for other libraries
 may be duplicated upon initializing workers (w.g., NumPy), causing
 each worker to return identical random numbers. (See
 :ref:`this section <dataloader-workers-random-seed>` in FAQ.)
@@ -288,7 +348,7 @@ Host to GPU copies are much faster when they originate from pinned (page-locked)
 memory. See :ref:`cuda-memory-pinning` for more details on when and how to use
 pinned memory generally.
 
-For data loading, passing :attr:``pin_memory=True`` to a
+For data loading, passing :attr:`pin_memory=True` to a
 :class:`~torch.utils.data.DataLoader` will automatically put the fetched data
 Tensors in pinned memory, and thus enables faster data transfer to CUDA-enabled
 GPUs.
@@ -298,8 +358,9 @@ containing Tensors.  By default, if the pinning logic sees a batch that is a
 custom type (which will occur if you have a :attr:`collate_fn` that returns a
 custom batch type), or if each element of your batch is a custom type, the
 pinning logic will not recognize them, and it will return that batch (or those
-elements) without pinning the memory.  To enable memory pinning for custom batch
-or data types, define a :meth:`pin_memory` method on your custom type(s).
+elements) without pinning the memory.  To enable memory pinning for custom
+batch or data type(s), define a :meth:`pin_memory` method on your custom
+type(s).
 
 See the example below.
 

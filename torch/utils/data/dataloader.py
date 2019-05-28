@@ -36,8 +36,8 @@ class _DatasetKind(object):
 
 
 class _InfiniteConstantSampler(Sampler):
-    r"""Analogous to itertools.repeat(None, None).
-    Used as sampler for IterableDataset.
+    r"""Analogous to ``itertools.repeat(None, None)``.
+    Used as sampler for :class:`~torch.utils.data.IterableDataset`.
     """
     def __init__(self):
         super(_InfiniteConstantSampler, self).__init__(None)
@@ -53,10 +53,10 @@ class DataLoader(object):
     the given dataset.
 
     The :class:`~torch.utils.data.DataLoader` supports both map-style and
-    iterable-style datasets with single- or multi-process loading strategies,
-    and optional automatic batching (collation).
+    iterable-style datasets with single- or multi-process loading, customizing
+    loading order and optional automatic batching (collation) and memory pinning.
 
-    See `Dataset Types`_ and `Data Loading Strategies`_ for more details.
+    See :py:mod:`torch.utils.data` documentation page for more details.
 
     Arguments:
         dataset (Dataset): dataset from which to load the data.
@@ -92,20 +92,20 @@ class DataLoader(object):
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
                  cannot be an unpicklable object, e.g., a lambda function. See
-                 :ref:`_multiprocessing-best-practices` on more details related
+                 :ref:`multiprocessing-best-practices` on more details related
                  to multiprocessing in PyTorch.
 
     .. note:: ``len(dataloader)`` is determined by length of the sampler used.
               When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
-              an infinite sampler is used, whose ``__len__`` is not implemented.
-              With :class:`~torch.utils.data.IterableDataset` the actual
-              iterator size depends on :attr:`num_workers`.
-              If ``num_workers > 0`` (i.e., multi-process loading), each worker
-              gets a copy of the same iterable dataset object and can return
-              duplicate data, unless the dataset copies and/or the workers are
-              configured differently (e.g., in ``__iter__``). See
-              :class:`~torch.utils.data.IterableDataset` for more details and
-              examples.
+              an infinite sampler is used, whose :meth:`__len__` is not
+              implemented. With :class:`~torch.utils.data.IterableDataset` the
+              actual iterator size depends on :attr:`num_workers`.
+              If :attr:`num_workers > 0` (i.e., multi-process loading), each
+              worker gets a copy of the same iterable dataset object and can
+              return duplicate data, unless the dataset copies and/or the
+              workers are configured differently (e.g., in :meth:`__iter__`).
+              See :class:`~torch.utils.data.IterableDataset` for more details
+              and examples.
     """
 
     __initialized = False

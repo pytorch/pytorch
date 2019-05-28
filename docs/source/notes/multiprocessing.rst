@@ -22,6 +22,8 @@ memory and will only send a handle to another process.
 This allows to implement various training methods, like Hogwild, A3C, or any
 others that require asynchronous operation.
 
+.. _multiprocessing-cuda-note:
+
 CUDA in multiprocessing
 -----------------------
 

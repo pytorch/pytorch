@@ -42,7 +42,7 @@ class IterableDataset(Dataset):
 
     When a subclass is used with :class:`~torch.utils.data.DataLoader`, each
     item in the dataset will be yielded from the :class:`~torch.utils.data.DataLoader`
-    iterator. When ``num_workers > 0``, each worker process will have a
+    iterator. When :attr:`num_workers > 0`, each worker process will have a
     different copy of the dataset object, so it is often desired to configure
     each copy independently to avoid having duplicate data returned from the
     workers. :func:`~torch.utils.data.get_worker_info`, when called in a worker
