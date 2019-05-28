@@ -15,6 +15,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <c10/core/TensorOptions.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 #include <vector>
 #include <tuple>
@@ -110,15 +111,15 @@ static Variable sequenceToVariable(const at::Type& type, PyObject* seq) {
   return torch::utils::indexing_tensor_from_data(idx_type, kLong, c10::nullopt, seq);
 }
 
-static Variable valueToTensor(const at::Type & type, PyObject* value) {
+static Variable valueToTensor(const at::Type & type, const ScalarType scalar_type, PyObject* value) {
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
-  if (THPUtils_checkLong(value)) {
-    return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), type.options());
+  if (THPUtils_checkLong(value) || PyBool_Check(value)) {
+    return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), type.options(scalar_type));
   }
   if (PyFloat_Check(value)) {
-    return at::scalar_tensor(Scalar(THPUtils_unpackDouble(value)), type.options());
+    return at::scalar_tensor(Scalar(THPUtils_unpackDouble(value)), type.options(scalar_type));
   }
   throw TypeError("can't assign a %s to a %s", Py_TYPE(value)->tp_name, type.toString());
 }
@@ -334,7 +335,12 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
 
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  auto value = valueToTensor(self_.dispatch_type(), py_value);
+  Variable value;
+  if (isQIntType(self_.scalar_type())) {
+    value = valueToTensor(at::globalContext().getVariableType(at::Backend::CPU, at::kFloat), at::kFloat, py_value);
+  } else {
+    value = valueToTensor(self_.dispatch_type(), self_.scalar_type(), py_value);
+  }
 
   // handle simple types: integers, slices, ellipsis, bool
   if (index == Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)

@@ -93,8 +93,8 @@ TEST(TorchScriptTest, TestDictArgMatching) {
       def dict_op(a: Dict[str, Tensor], b: str):
         return a[b]
     )JIT");
-  c10::ivalue::UnorderedMap dict;
-  dict[std::string("hello")] = torch::ones({2});
+  c10::impl::GenericDictPtr dict = c10::impl::make_generic_dict();
+  dict.insert("hello", torch::ones({2}));
   auto output = module->run_method("dict_op", dict, std::string("hello"));
   ASSERT_EQ(1, output.toTensor()[0].item<int64_t>());
 }
@@ -110,5 +110,22 @@ TEST(TorchScriptTest, TestTupleArgMatching) {
 
   // doesn't fail on arg matching
   module->run_method("tuple_op", tuple_generic_list);
+
+}
+
+TEST(TorchScriptTest, TestOptionalArgMatching) {
+  auto module = torch::jit::compile(R"JIT(
+      def optional_tuple_op(a: Optional[Tuple[int, str]]):
+        if a is None:
+          return 0
+        else:
+          return a[0]
+    )JIT");
+
+  auto optional_tuple = torch::jit::Tuple::create({2, std::string("hi")});
+
+  ASSERT_EQ(2, module->run_method("optional_tuple_op", optional_tuple).toInt());
+  ASSERT_EQ(
+      0, module->run_method("optional_tuple_op", torch::jit::IValue()).toInt());
 
 }

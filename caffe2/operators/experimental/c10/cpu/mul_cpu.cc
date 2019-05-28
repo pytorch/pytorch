@@ -17,9 +17,9 @@ void mul_op_cpu_impl(
     const at::Tensor& C_,
     bool legacy_broadcast,
     int64_t axis) {
-  Tensor A{C10Tensor(A_)};
-  Tensor B{C10Tensor(B_)};
-  Tensor C{C10Tensor(C_)};
+  Tensor A(A_);
+  Tensor B(B_);
+  Tensor C(C_);
   CPUContext context;
   const DataType* A_data = A.template data<DataType>();
   const DataType* B_data = B.template data<DataType>();
@@ -72,18 +72,9 @@ void mul_op_cpu_impl(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::Mul",
-        "",
-        (std::vector<c10::Argument>{
-            c10::Argument("input1"),
-            c10::Argument("input2"),
-            c10::Argument("output"),
-            c10::Argument("legacy_broadcast", BoolType::get()),
-            c10::Argument("axis", IntType::get())}),
-        (std::vector<c10::Argument>{})),
-    c10::kernel<decltype(mul_op_cpu_impl<float>), &mul_op_cpu_impl<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+    "_c10_experimental::Mul",
+    c10::RegisterOperators::options()
+      .kernel<decltype(mul_op_cpu_impl<float>), &mul_op_cpu_impl<float>>(CPUTensorId()));
 
 } // namespace
 

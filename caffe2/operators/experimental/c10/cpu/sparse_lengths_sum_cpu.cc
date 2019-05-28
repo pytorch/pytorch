@@ -15,10 +15,10 @@ void sparse_lengths_sum_op_cpu_impl_(
     const at::Tensor& indicesInput_,
     const at::Tensor& lengthsInput_,
     const at::Tensor& output_) {
-  Tensor dataInput{C10Tensor(dataInput_)};
-  Tensor indicesInput{C10Tensor(indicesInput_)};
-  Tensor lengthsInput{C10Tensor(lengthsInput_)};
-  Tensor output{C10Tensor(output_)};
+  Tensor dataInput(dataInput_);
+  Tensor indicesInput(indicesInput_);
+  Tensor lengthsInput(lengthsInput_);
+  Tensor output(output_);
 
   using T = float;
   constexpr bool USE_MEAN = false;
@@ -82,18 +82,11 @@ void sparse_lengths_sum_op_cpu(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::SparseLengthsSum",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("data"),
-                                    c10::Argument("indices"),
-                                    c10::Argument("lengths"),
-                                    c10::Argument("output")}),
-        (std::vector<c10::Argument>{})),
-    c10::kernel<
+    "_c10_experimental::SparseLengthsSum",
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(sparse_lengths_sum_op_cpu),
-        &sparse_lengths_sum_op_cpu>(),
-    c10::dispatchKey(CPUTensorId()));
+        &sparse_lengths_sum_op_cpu>(CPUTensorId()));
 
 } // namespace
 

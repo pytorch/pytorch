@@ -274,7 +274,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
     const int64_t k_ = 1;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-	if (bias) {
+        if (bias) {
       THBlas_(gemm)(
         't', 'n',
         n_, m_, k_,

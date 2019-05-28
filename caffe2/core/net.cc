@@ -37,6 +37,7 @@ NetBase::NetBase(
       name_(def->name()),
       net_def_(def) {
   static GlobalInitIsCalledGuard guard;
+  C10_LOG_API_USAGE_ONCE("caffe2.net.create");
   // Check that node_name is empty for all ops
   for (const OperatorDef& op : def->op()) {
     if (op.has_device_option()) {
@@ -157,7 +158,7 @@ unique_ptr<NetBase> CreateNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws) {
   std::string net_type;
-  if (net_def->has_type()) {
+  if (net_def->has_type() && !net_def->type().empty()) {
     net_type = net_def->type();
   } else {
     // By default, we will return a simple network that just runs all operators
@@ -188,6 +189,15 @@ std::vector<OperatorBase*> ExecutorHelper::GetOperators() const {
 
 int ExecutorHelper::GetNumWorkers() const {
   CAFFE_THROW("Not implemented");
+}
+
+// benchmark an individual run so that we can FeedBlobs with new inputs
+// no warmup
+// return time taken in microseconds
+float NetBase::TEST_Benchmark_One_Run() {
+  Timer timer;
+  CAFFE_ENFORCE(Run(), "Run has failed.");
+  return timer.MicroSeconds();
 }
 
 std::vector<float> NetBase::TEST_Benchmark(

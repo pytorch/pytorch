@@ -31,9 +31,9 @@ void sigmoid_cross_entropy_with_logits_op_cpu_impl(
     const at::Tensor& out_,
     bool log_D_trick,
     bool unjoined_lr_loss) {
-  Tensor logits{C10Tensor(logits_)};
-  Tensor targets{C10Tensor(targets_)};
-  Tensor out{C10Tensor(out_)};
+  Tensor logits(logits_);
+  Tensor targets(targets_);
+  Tensor out(out_);
 
   CAFFE_ENFORCE_EQ(logits.sizes(), targets.sizes());
   const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
@@ -71,20 +71,11 @@ void sigmoid_cross_entropy_with_logits_op_cpu_impl(
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::SigmoidCrossEntropyWithLogits",
-        "",
-        (std::vector<c10::Argument>{
-            c10::Argument("input1"),
-            c10::Argument("input2"),
-            c10::Argument("output"),
-            c10::Argument("log_D_trick", BoolType::get()),
-            c10::Argument("unjoined_lr_loss", BoolType::get())}),
-        (std::vector<c10::Argument>{})),
-    c10::kernel<
+    "_c10_experimental::SigmoidCrossEntropyWithLogits",
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(sigmoid_cross_entropy_with_logits_op_cpu_impl),
-        &sigmoid_cross_entropy_with_logits_op_cpu_impl>(),
-    c10::dispatchKey(CPUTensorId()));
+        &sigmoid_cross_entropy_with_logits_op_cpu_impl>(CPUTensorId()));
 
 } // namespace
 

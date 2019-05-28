@@ -42,6 +42,9 @@
 #   USE_MKLDNN=0
 #     disables use of MKLDNN
 #
+#   MKLDNN_THREADING
+#     MKL-DNN threading mode (https://github.com/intel/mkl-dnn/)
+#
 #   USE_NNPACK=0
 #     disables NNPACK build
 #
@@ -63,6 +66,9 @@
 #
 #   USE_OPENCV
 #     enables use of OpenCV for additional operators
+#
+#   USE_OPENMP=0
+#     disables use of OpenMP for parallelization
 #
 #   USE_FFMPEG
 #     enables use of ffmpeg for additional operators
@@ -95,6 +101,9 @@
 #     BLAS to be used by Caffe2. Can be MKL, Eigen, ATLAS, or OpenBLAS. If set
 #     then the build will fail if the requested BLAS is not found, otherwise
 #     the BLAS will be chosen based on what is found on your system.
+#
+#   MKL_SEQ=1
+#     chooses a sequential version of MKL library (in case of BLAS=MKL)
 #
 #   USE_FBGEMM
 #     Enables use of FBGEMM
@@ -140,6 +149,16 @@
 #   LIBRARY_PATH
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
+#
+#   PARALLEL_BACKEND
+#     parallel backend to use for intra- and inter-op parallelism
+#     possible values:
+#       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
+#       NATIVE - use native thread pool for both intra- and inter-op tasks
+#
+#   USE_TBB
+#      use TBB for parallelization
+#
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, find_packages
@@ -229,7 +248,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.1.0a0'
+version = '1.2.0a0'
 sha = 'Unknown'
 
 try:
@@ -270,10 +289,15 @@ def build_deps():
     check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
     check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
     check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
     check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'foxi', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'fbgemm', 'third_party',
+                            'asmjit', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'onnx', 'third_party',
+                            'benchmark', 'CMakeLists.txt'))
 
     check_pydep('yaml', 'pyyaml')
     check_pydep('typing', 'typing')
@@ -585,10 +609,11 @@ main_link_args.extend(CAFFE2_LIBS)
 
 try:
     import numpy as np
-    NUMPY_INCLUDE_DIR = np.get_include()
-    USE_NUMPY = True
 except ImportError:
     USE_NUMPY = False
+else:
+    NUMPY_INCLUDE_DIR = np.get_include()
+    USE_NUMPY = True
 
 if USE_CUDA:
     if IS_WINDOWS:
@@ -735,6 +760,7 @@ if __name__ == '__main__':
                 'cuda/*.pyi',
                 'optim/*.pyi',
                 'autograd/*.pyi',
+                'utils/data/*.pyi',
                 'lib/*.so*',
                 'lib/*.dylib*',
                 'lib/*.dll',
@@ -789,6 +815,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/generated/*.h',
                 'include/torch/csrc/jit/passes/*.h',
+                'include/torch/csrc/jit/passes/utils/*.h',
                 'include/torch/csrc/jit/script/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/onnx/*.h',

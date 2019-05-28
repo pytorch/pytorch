@@ -136,7 +136,7 @@ PyObject * THCPModule_getRNGState(PyObject *_unused)
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
   Variable var = torch::empty(0, at::device(at::kCPU).dtype(at::kByte));
-  THCRandom_getRNGState(state, (THByteTensor*)(var.data().unsafeGetTensorImpl()));
+  THCRandom_getRNGState(state, (THByteTensor*)(var.unsafeGetTensorImpl()));
   return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
@@ -145,11 +145,12 @@ PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *obj)
 {
   HANDLE_TH_ERRORS
   if (!THPVariable_Check(obj) ||
-      at::globalContext().getNonVariableType(THPVariable_Unpack(obj).type().backend(), THPVariable_Unpack(obj).scalar_type()).ID() != at::TypeID::CPUByte) {
+      THPVariable_Unpack(obj).type_id() != at::CPUTensorId() ||
+      THPVariable_Unpack(obj).scalar_type() != at::kByte) {
     throw TypeError("set_rng_state expects a torch.ByteTensor, but got %s",
         Py_TYPE(obj)->tp_name);
   }
-  auto& tensor = THPVariable_UnpackData(obj);
+  auto& tensor = THPVariable_Unpack(obj);
   THCRandom_setRNGState(state, (THByteTensor*)tensor.unsafeGetTensorImpl());
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

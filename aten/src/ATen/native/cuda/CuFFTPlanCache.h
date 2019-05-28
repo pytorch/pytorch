@@ -109,13 +109,13 @@ public:
     if (input.scalar_type() == ScalarType::Half) {
       // cuFFT on half requires compute capability of at least SM_53
       auto dev_prop = at::cuda::getCurrentDeviceProperties();
-      AT_CHECK(dev_prop->major >= 5 && !(dev_prop->major == 5 && dev_prop->minor < 3),
+      TORCH_CHECK(dev_prop->major >= 5 && !(dev_prop->major == 5 && dev_prop->minor < 3),
                "cuFFT doesn't support signals of half type with compute "
                "capability less than SM_53, but the device containing input half "
                "tensor only has SM_", dev_prop->major, dev_prop->minor);
       for (int64_t i = 0; i < signal_ndim; i++) {
         auto signal_size = checked_signal_sizes[i];
-        AT_CHECK(is_pow_of_two(signal_size),
+        TORCH_CHECK(is_pow_of_two(signal_size),
                  "cuFFT doesn't support signals of half type with size at any ",
                  "dimension that is not a power of two, but got a signal size of ",
                  checked_signal_sizes);
@@ -266,7 +266,7 @@ public:
       CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
         /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1,
         /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1,
-	exec_type, batch, &ws_size_t));
+        exec_type, batch, &ws_size_t));
 #else
       CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
         /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1, itype,
@@ -373,6 +373,18 @@ public:
     _set_max_size(max_size);
   }
 
+  CuFFTParamsLRUCache(CuFFTParamsLRUCache&& other) noexcept :
+    _usage_list(std::move(other._usage_list)),
+    _cache_map(std::move(other._cache_map)),
+    _max_size(other._max_size) {}
+
+  CuFFTParamsLRUCache& operator=(CuFFTParamsLRUCache&& other) noexcept {
+    _usage_list = std::move(other._usage_list);
+    _cache_map = std::move(other._cache_map);
+    _max_size = other._max_size;
+    return *this;
+  }
+
   // If key is in this cache, return the cached config. Otherwise, emplace the
   // config in this cache using value_args and return it.
   // Return const reference because CuFFTConfig shouldn't be tampered with once
@@ -431,15 +443,17 @@ public:
 
   size_t max_size() const noexcept { return _max_size; }
 
+  std::mutex mutex;
+
 private:
   // Only sets size and does value check. Does not resize the data structures.
   void _set_max_size(int64_t new_size) {
     // We check that 0 <= new_size <= CUFFT_MAX_PLAN_NUM here. Since
     // CUFFT_MAX_PLAN_NUM is of type size_t, we need to do non-negativity check
     // first.
-    AT_CHECK(new_size >= 0,
+    TORCH_CHECK(new_size >= 0,
              "cuFFT plan cache size must be non-negative, but got ", new_size);
-    AT_CHECK(new_size <= CUFFT_MAX_PLAN_NUM,
+    TORCH_CHECK(new_size <= CUFFT_MAX_PLAN_NUM,
              "cuFFT plan cache size can not be larger than ", CUFFT_MAX_PLAN_NUM, ", but got ", new_size);
     _max_size = static_cast<size_t>(new_size);
   }
@@ -455,9 +469,9 @@ private:
 // native function counterparts (at native/SpectralOps.cpp), i.e.,
 // _cufft_get_plan_cache_max_size, _cufft_set_plan_cache_max_size
 // _cufft_get_plan_cache_size, and _cufft_clear_plan_cache.
-int64_t cufft_get_plan_cache_max_size_impl();
-void cufft_set_plan_cache_max_size_impl(int64_t max_size);
-int64_t cufft_get_plan_cache_size_impl();
-void cufft_clear_plan_cache_impl();
+int64_t cufft_get_plan_cache_max_size_impl(int64_t device_index);
+void cufft_set_plan_cache_max_size_impl(int64_t device_index, int64_t max_size);
+int64_t cufft_get_plan_cache_size_impl(int64_t device_index);
+void cufft_clear_plan_cache_impl(int64_t device_index);
 
 }}} // namespace at::native::detail

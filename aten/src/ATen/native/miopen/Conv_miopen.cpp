@@ -211,10 +211,10 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
 // Used on pad, stride and dilation
 static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, const char* arg_name)
 {
-  AT_CHECK(args.size() <= expected_size,
+  TORCH_CHECK(args.size() <= expected_size,
            "Too many ", arg_name, " values (", args.size(), ") supplied, expecting ",
            expected_size, " (while checking arguments for ", c, ")");
-  AT_CHECK(args.size() >= expected_size,
+  TORCH_CHECK(args.size() >= expected_size,
            "Not enough ", arg_name, " values (", args.size(), ") supplied, expecting ",
            expected_size, " (while checking arguments for ", c, ")");
 
@@ -456,7 +456,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
         args.wdesc.desc(), args.weight.data_ptr(),
         args.cdesc.desc(),
         args.odesc.desc(), args.output.data_ptr(),
-        1,	// just return the fastest
+        1,        // just return the fastest
         &perf_count,
         &perf_results,
         ws.data,

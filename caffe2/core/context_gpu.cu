@@ -201,6 +201,7 @@ static void Caffe2InitializeCuda() {
     VLOG(1) << "No cuda gpu present. Skipping.";
     return;
   }
+  C10_LOG_API_USAGE_ONCE("caffe2.init.cuda");
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
   CAFFE_ENFORCE_LE(
@@ -231,7 +232,13 @@ static void Caffe2InitializeCuda() {
         // Note: just for future reference, the 0 here is not a gpu id, it is
         // a reserved flag for cudaDeviceEnablePeerAccess that should always be
         // zero currently.
-        CUDA_ENFORCE(cudaDeviceEnablePeerAccess(j, 0));
+        // It is ok if peer access is already enabled...
+        cudaError_t err = cudaDeviceEnablePeerAccess(j, 0);
+        if ((err != cudaErrorPeerAccessAlreadyEnabled) &&
+            (err != cudaSuccess)) {
+          CAFFE_THROW(cudaGetErrorString(err));
+        }
+        cudaGetLastError(); // reset cuda error code
       }
     }
   }
@@ -485,14 +492,18 @@ struct DefaultCUDAAllocator final : public at::Allocator {
     }
     switch (g_cuda_memory_pool_type) {
       case CudaMemoryPoolType::NONE:
-        CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
+        if (nbytes != 0) {
+          CUDA_ENFORCE(cudaMalloc(&ptr, nbytes));
+        }
         if (FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
         return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::CUB:
-        CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
+        if (nbytes != 0) {
+          CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
+        }
         g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         VLOG(2) << "CUB allocating pointer " << ptr << " on device "
                 << CaffeCudaGetDevice();

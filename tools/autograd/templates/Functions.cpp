@@ -676,6 +676,46 @@ Tensor var_backward(Tensor grad, const Tensor & self, IntArrayRef dim, bool unbi
   return (2.0 / (_safe_size(self.sizes(), dim) - unbiased)) * grad * (self - self.mean(dim, true));
 }
 
+Tensor std_backward(const Tensor & result, const Tensor & grad, const Tensor & self, bool unbiased) {
+  return var_backward(grad / (result * 2), self, unbiased);
+}
+
+Tensor std_backward(const Tensor & result, Tensor grad, const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  return var_backward(grad / (result * 2), self, dim, unbiased, keepdim);
+}
+
+Tensor mean_backward(Tensor grad, const IntArrayRef sizes, IntArrayRef dim, bool keepdim) {
+  return sum_backward(grad, sizes, dim, keepdim) / _safe_size(sizes, dim);
+}
+
+Tensor mean_backward(Tensor grad, const IntArrayRef sizes, int numel) {
+  return grad.expand(sizes) / numel;
+}
+
+Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, IntArrayRef dim, bool unbiased, bool keepdim, bool is_std) {
+  Tensor grad;
+  if (grads[0].defined()) {
+    grad = is_std ? std_backward(r1, grads[0], self, dim, unbiased, keepdim) : var_backward(grads[0], self, dim, unbiased, keepdim);
+  }
+  if (grads[1].defined()) {
+    Tensor mean_grad = mean_backward(grads[1], self.sizes(), dim, keepdim);
+    grad = grads[0].defined() ? grad + mean_grad : mean_grad;
+  }
+  return grad;
+}
+
+Tensor var_std_mean_backward(const variable_list& grads, const Tensor & self, const Tensor & r1, const Tensor & r2, bool unbiased, bool is_std) {
+  Tensor grad;
+  if (grads[0].defined()) {
+    grad = is_std ? std_backward(r1, grads[0], self, unbiased) : var_backward(grads[0], self, unbiased);
+  }
+  if (grads[1].defined()) {
+    Tensor mean_grad = mean_backward(grads[1], self.sizes(), self.numel());
+    grad = grads[0].defined() ? grad + mean_grad : mean_grad;
+  }
+  return grad;
+}
+
 Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArrayRef sizes) {
   int64_t numel = 1;
   for (auto size : sizes) {
@@ -694,31 +734,25 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
 
 Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   // cf. Iain Murray (2016); arXiv 1602.07527
+  // This gradient is symmetric, and not triangular.
+  // Cholesky additionally assumes that the input is symmetric, which is a subspace of
+  // R^{n x n}, and hence the derivative is not well-defined for off-diagonal
+  // elements. We resolve this by taking the gradient of the functionally independent
+  // elements of the matrix (i.e., the lower triangular portion of the input) and then
+  // reflect it on the upper triangular portion, thereby symmetrizing the gradient of
+  // the cholesky operation. The motivation behind this choice is that symmetric gradient
+  // leads to stable gradient updates, and retains symmetry of the updated matrix if it
+  // were updated by a gradient based algorithm.
   if (upper) {
-    grad = grad.transpose(-1, -2);
-  } else {
     L = L.transpose(-1, -2);
+    grad = grad.transpose(-1, -2);
   }
+  auto L_inverse = std::get<0>(at::triangular_solve(at::eye(L.size(-1), L.options()), L, /*upper=*/false));
+  auto phi = at::matmul(L.transpose(-1, -2), grad);
+  phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
 
-  auto phi = [](const Tensor & A) -> Tensor {
-    auto B = A.tril();
-    B = B - 0.5 * at::diag_embed(B.diagonal(0, -1, -2), 0, -2, -1);
-    return B;
-  };
-
-  // make sure not to double-count variation, since
-  // only half of output matrix is unique
-  auto Lbar = grad.tril();
-
-  auto P = phi(at::matmul(L, Lbar));
-  Tensor S;
-  std::tie(S, std::ignore) = at::solve(P + P.transpose(-1, -2), L);
-  std::tie(S, std::ignore) = at::solve(S.transpose(-1, -2), L);
-  S = phi(S);
-  if (upper) {
-    S = S.transpose(-1, -2);
-  }
-  return S;
+  auto grad_input = at::matmul(at::matmul(L_inverse.transpose(-1, -2), phi), L_inverse);
+  return grad_input.add(grad_input.transpose(-1, -2)).mul_(0.5);  // Symmetrizing the gradient
 }
 
 Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
@@ -1587,7 +1621,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 // This makes no assumption on the signs of sigma.
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
-  AT_CHECK(compute_uv,
+  TORCH_CHECK(compute_uv,
            "svd_backward: Setting compute_uv to false in torch.svd doesn't compute singular matrices, ",
            "and hence we cannot compute backward. Please use torch.svd(compute_uv=True)");
 
@@ -1670,7 +1704,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
-    AT_CHECK(eigenvectors,
+    TORCH_CHECK(eigenvectors,
              "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
              "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
 
@@ -2079,13 +2113,6 @@ Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const T
   auto flattened_indices = at::sparse::flatten_indices(indices, full_size);
   return flattened_dense_grad.index_select(0, flattened_indices);
 }
-
-Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
-  AT_ASSERT(input_.is_sparse());
-  auto input = input_.coalesce();
-  return grad.sparse_mask(at::SparseTensorRef(input));
-}
-
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
 Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {

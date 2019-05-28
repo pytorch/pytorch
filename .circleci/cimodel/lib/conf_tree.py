@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 
 
+def X(val):
+    """
+    Compact way to write a leaf node
+    """
+    return val, []
+
+
 class Ver(object):
     """
     Represents a product with a version number

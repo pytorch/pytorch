@@ -1,6 +1,8 @@
 #!/bin/bash
 
+# shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
+
 export PATH="/usr/local/bin:$PATH"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 

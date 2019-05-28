@@ -54,8 +54,16 @@ QTensorProto BackendTransformerBase::wrapShapeInfoIntoQTensorProto(
       "Only quantized shapeinfo can be extracted into QTensor!");
   t.set_name(name);
   t.set_data_type(shape_info.shape.data_type());
-  t.set_scale(shape_info.q_info.scale);
-  t.set_bias(shape_info.q_info.offset);
+  t.set_axis(shape_info.q_info.axis);
+  t.set_is_multiparam(true);
+  for (const auto i : shape_info.q_info.scale) {
+    t.add_scales(i);
+  }
+  t.set_scale(1.0);
+  for (const auto i : shape_info.q_info.offset) {
+    t.add_biases(i);
+  }
+  t.set_bias(0.0);
   // precision and is_signed is not used in onnxifi workflow, but it is required
   // field
   t.set_precision(0);
@@ -101,14 +109,6 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
     const std::unordered_map<std::string, TensorShape>& shape_hints_mapped,
     const BoundShapeSpec& spec) {
   ShapeInfoMap shape_map;
-  // Populate shapes from workplace
-  const std::vector<std::string> ws_blobs = ws->Blobs();
-  for (const auto& s : ws_blobs) {
-    auto shape_info = getShapeInfoFromBlob(ws->GetBlob(s));
-    if (shape_info.dim_type != ShapeInfo::DimType::UNKNOWN) {
-      shape_map[s] = shape_info;
-    }
-  }
   // We treat hinted shapes as BATCH. If there are shape hints on blobs in the
   // workspace, since they are already inserted as CONSTANT, it will take effect
   // here. For SEQ typed tensors, there are only a few of them and they will be
@@ -119,9 +119,17 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
         std::forward_as_tuple(kv.first),
         std::forward_as_tuple(ShapeInfo::DimType::BATCH, kv.second));
   }
-  BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(*pred_net, shape_map);
-  const auto& out_map = eng.shape_info();
+  // Populate shapes from workplace
+  const std::vector<std::string> ws_blobs = ws->Blobs();
+  for (const auto& s : ws_blobs) {
+    auto shape_info = getShapeInfoFromBlob(ws->GetBlob(s));
+    if (shape_info.dim_type != ShapeInfo::DimType::UNKNOWN) {
+      shape_map.emplace(s, shape_info);
+    }
+  }
+  auto eng = BoundShapeInferencerRegistry()->Create("C10", spec);
+  eng->InferBoundShapeAndType(*pred_net, shape_map, ws);
+  const auto& out_map = eng->shape_info();
   shape_map.clear();
   for (const auto& kv : out_map) {
     shape_map.emplace(
@@ -134,5 +142,28 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
             kv.second.q_info));
   }
   return shape_map;
+}
+
+void BackendTransformerBase::dumpNet(
+    const NetDef& pred_net,
+    const ShapeInfoMap& shape_hints,
+    const std::string& fname) const {
+  NetDef shape_net(pred_net);
+  auto* shape_arg = shape_net.add_arg();
+  auto* qshape_arg = shape_net.add_arg();
+  shape_arg->set_name("shape_info");
+  qshape_arg->set_name("qshape_info");
+  for (const auto& kv : shape_hints) {
+    if (!kv.second.is_quantized) {
+      auto t = wrapShapeInfoIntoTensorProto(kv.first, kv.second);
+      t.add_int32_data(static_cast<int32_t>(kv.second.dim_type));
+      shape_arg->mutable_tensors()->Add()->CopyFrom(t);
+    } else {
+      auto t = wrapShapeInfoIntoQTensorProto(kv.first, kv.second);
+      t.add_data(static_cast<int32_t>(kv.second.dim_type));
+      qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
+    }
+  }
+  WriteProtoToTextFile(shape_net, fname);
 }
 } // namespace caffe2

@@ -76,6 +76,8 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Inv, vsInv)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Inv, vdInv)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Erf, vsErf)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Erf, vdErf)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, CdfNorm, vsCdfNorm)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, CdfNorm, vdCdfNorm)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS(T, MKLFunc)                                     \
@@ -239,6 +241,19 @@ CAFFE2_SPECIALIZED_CBRT(double)
 CAFFE2_SPECIALIZED_ERF(float)
 CAFFE2_SPECIALIZED_ERF(double)
 #undef CAFFE2_SPECIALIZED_ERF
+
+#define CAFFE2_SPECIALIZED_CDF_NORM(T)                            \
+  template <>                                                     \
+  C10_EXPORT void CdfNorm<T, CPUContext>(                         \
+      const int N, const T* X, T* Y, CPUContext* /* context */) { \
+    std::transform(X, X + N, Y, [](const T x) {                   \
+      constexpr T kRsqrt2 = 0.7071067811865475;                   \
+      return (T(1) + erf(x * kRsqrt2)) * static_cast<T>(0.5);     \
+    });                                                           \
+  }
+CAFFE2_SPECIALIZED_CDF_NORM(float)
+CAFFE2_SPECIALIZED_CDF_NORM(double)
+#undef CAFFE2_SPECIALIZED_CDF_NORM
 
 #define DELEGATE_SIMPLE_BINARY_FUNCTION_BY_EIGEN_OPERATOR(T, Func, EigenOp)   \
   template <>                                                                 \

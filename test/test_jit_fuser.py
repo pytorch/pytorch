@@ -5,13 +5,17 @@ from __future__ import unicode_literals
 
 import unittest
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch import Tensor
+from torch.testing import FileCheck
 
-from common_utils import IS_WINDOWS, \
-    skipIfRocm, IS_SANDCASTLE
+from common_utils import run_tests, IS_WINDOWS, skipIfRocm, IS_SANDCASTLE
+from textwrap import dedent
+from itertools import product, permutations
 
 from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
-    backward_graph
+    backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
 
 class TestFuser(JitTestCase):
@@ -265,18 +269,33 @@ class TestFuser(JitTestCase):
 
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
         b = torch.randn(4, 4, dtype=torch.float, device='cuda')
-        nan = torch.tensor(float('nan'))
+        nan = torch.tensor(float('nan'), dtype=torch.float, device='cuda')
 
         funcs = (func2, funcInf, funcOptMin, funcOptMax)
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
             inp1, inp2 = inputs
             s = self.checkScript(f, (inp1, inp2))
-            self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size'})
+            self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
 
             c = s(inp1, inp2)
             c.sum().backward()
             graph = backward_graph(s)
             self.assertAllFused(graph)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_dropout(self):
+        def func(x):
+            x = torch.nn.functional.dropout(x)
+            return torch.nn.functional.relu(x)
+
+        a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
+        s = torch.jit.script(func, (a,))
+        c = s(a)
+        c.sum().backward()
+        graph = backward_graph(s)
+        self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -331,7 +350,8 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x, y))
         x.requires_grad_(True)
         y.requires_grad_(True)
-        self.assertAllFused(ge.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes"))
+        self.assertAllFused(ge.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes",
+                                                            "aten::_size_if_not_equal"))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -424,43 +444,56 @@ class TestFuser(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_fuse_batch_norm(self):
-
+    def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):
-            def __init__(self, optimize=True):
+            def __init__(self, norm_module, optimize=True):
                 super(ResLike, self).__init__(optimize)
-                self.bn = nn.BatchNorm2d(16)
+                self.nm = norm_module
 
             @torch.jit.script_method
             def forward(self, x, y):
-                return y + torch.relu(self.bn(x))
+                return y + torch.relu(self.nm(x))
 
-        model = ResLike().cuda()
-        model_noopt = ResLike(optimize=False).cuda()
-        model_noopt.load_state_dict(model.state_dict())
-        x = torch.randn(2, 16, 8, 8, device='cuda')
-        y = torch.randn(2, 16, 8, 8, device='cuda')
-        # FIXME: We need differentiation for CNNs for this optimization to trigger
-        with torch.no_grad():
-            out = model(x, y)
-            graph = model.graph_for(x, y)
-            rep = str(graph)
+        def test_norm_decompose(nm, in_opt_graph, not_in_opt_graph, in_fusegraph):
+            model = ResLike(nm).cuda()
+            model_noopt = ResLike(nm, optimize=False).cuda()
+            model_noopt.load_state_dict(model.state_dict())
+            x = torch.randn(2, 16, 8, 8, device='cuda')
+            y = torch.randn(2, 16, 8, 8, device='cuda')
 
-            out_noopt = model_noopt(x, y)
-            rep_noopt = str(model_noopt.graph_for(x, y))
-            self.assertEqual(out, out_noopt, prec=3e-5)
+            # FIXME: We need differentiation for CNNs for this optimization to trigger
+            with torch.no_grad():
+                out = model(x, y)
+                graph = model.graph_for(x, y)
+                rep = str(graph)
 
-        # Check that batch_norm has really been decomposed
-        self.assertIn('aten::batch_norm_update_stats', rep)
-        self.assertNotIn('aten::batch_norm(', rep)
-        self.assertIn('aten::batch_norm(', rep_noopt)
+                out_noopt = model_noopt(x, y)
+                rep_noopt = str(model_noopt.graph_for(x, y))
+                self.assertEqual(out, out_noopt, prec=3e-5)
 
-        # Make sure the fusion group is big, and contains aten::sqrt, which could
-        # originate only from decomposing batch_norm in this case
-        fusion_groups = [node for node in graph.nodes() if node.kind() == 'prim::FusionGroup']
-        self.assertEqual(len(fusion_groups), 1)
-        fused_graph = fusion_groups[0].g('Subgraph')
-        self.assertTrue(any(node.kind() == 'aten::sqrt' for node in fused_graph.nodes()))
+            # Check that normalization op has really been decomposed
+            for node_in_graph in in_opt_graph:
+                self.assertIn(node_in_graph, rep)
+
+            for node_not_in_graph in not_in_opt_graph:
+                self.assertNotIn(node_not_in_graph, rep)
+                self.assertIn(node_not_in_graph, rep_noopt)
+
+            fusion_groups = [node for node in graph.nodes() if node.kind() == 'prim::FusionGroup']
+            self.assertEqual(len(fusion_groups), 1)
+            fused_graph = str(fusion_groups[0].g('Subgraph'))
+            for node_in_fusegraph in in_fusegraph:
+                self.assertIn(node_in_fusegraph, fused_graph)
+
+        # test for batchnorm decompose
+        bm = nn.BatchNorm2d(16)
+        test_norm_decompose(bm, ['aten::batch_norm_update_stats'],
+                            ['aten::batch_norm('], ['aten::sqrt'])
+
+        # test for layernorm decompose
+        lm = nn.LayerNorm(8)
+        test_norm_decompose(lm, ['aten::batch_norm_stats'],
+                            ['aten::layer_norm('], ['aten::sub', 'aten::mul', 'aten::add'])
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -490,7 +523,8 @@ class TestFuser(JitTestCase):
         self.assertAllFused(scripted.graph_for(x, p))
         x.requires_grad_(True)
         out = scripted(x, p)
-        self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes"))
+        self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
+                                                                  "aten::_size_if_not_equal"))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
@@ -503,7 +537,7 @@ class TestFuser(JitTestCase):
         b = torch.randn(5, 5, requires_grad=True)
         a = torch.randn(5, 5, requires_grad=True)
         s = self.checkScript(f, (a, b))
-        self.assertAllFused(s.graph_for(a, b), except_for={'aten::size'})
+        self.assertAllFused(s.graph_for(a, b), except_for={'aten::size', 'aten::_size_if_not_equal', 'prim::BroadcastSizes'})
 
         c = s(a, b)
         ga, gb = torch.autograd.grad(c.sum(), [a, b])
@@ -546,12 +580,12 @@ class TestFuser(JitTestCase):
 
         s = self.checkScript(iou, (b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2))
         self.assertAllFused(s.graph_for(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2),
-                            except_for={'aten::size', 'prim::BroadcastSizes'})
+                            except_for={'aten::size', 'prim::BroadcastSizes', 'aten::_size_if_not_equal'})
 
         c = s(b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2)
         torch.autograd.grad(c.sum(), [b1x1, b1y1, b1x2, b1y2, b2x1, b2y1, b2x2, b2y2])
         graph = backward_graph(s)
-        self.assertAllFused(graph, except_for={'aten::size', 'prim::BroadcastSizes'})
+        self.assertAllFused(graph, except_for={'aten::size', 'prim::BroadcastSizes', 'aten::_size_if_not_equal'})
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -638,8 +672,8 @@ class TestFuser(JitTestCase):
         hy, cy = module(*inputs)
         (hy + cy).sum().backward()
         backward = backward_graph(module)
-        FileCheck().check("FusionGroup_0").check_next("FusionGroup_1") \
-            .check_not("FusionGroup_2").run(str(backward))
+        self.assertAllFused(backward, except_for=("aten::t", "aten::mm",
+                                                  "aten::_grad_sum_to_size"))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -663,7 +697,7 @@ class TestFuser(JitTestCase):
             ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
             return ingate * forgetgate * cellgate * outgate
         ''')
-        for permutation in itertools.permutations(choices, len(choices)):
+        for permutation in permutations(choices, len(choices)):
             code = template.format(*permutation)
             scope = {}
             exec(code, globals(), scope)
@@ -726,6 +760,7 @@ class TestFuser(JitTestCase):
             __constants__ = ['d']
 
             def __init__(self):
+                super(M, self).__init__()
                 self.d = torch.device('cuda')
 
             @torch.jit.script_method
@@ -768,7 +803,8 @@ class TestFuser(JitTestCase):
         ge = self.checkTrace(fn_test_erf, (x,))
         self.assertAllFused(ge.graph_for(x))
         x.requires_grad_(True)
-        self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes"))
+        self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes",
+                                                         "aten::_size_if_not_equal"))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -785,7 +821,8 @@ class TestFuser(JitTestCase):
         self.assertAllFused(script_f.graph_for(x, y))
         x.requires_grad_(True)
         out = script_f(x, y)
-        self.assertAllFused(script_f.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes"))
+        self.assertAllFused(script_f.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes",
+                                                                  "aten::_size_if_not_equal"))
         # test that broadcasting random produces correct results
         x = torch.ones(4, 4, dtype=torch.float, device='cuda')
         y = torch.ones(4, dtype=torch.float, device='cuda')
@@ -861,6 +898,44 @@ class TestFuser(JitTestCase):
         self.assertEqual(result2, expected2)
         self.assertAllFused(script_f.graph_for(x, y), except_for={'prim::TupleConstruct'})
 
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_grad_sum_to_size_elimination(self):
+
+        def my_broadcasted_cell(a, b, c):
+            return (a + b) + c
+
+        s1 = torch.randn(5, 1, requires_grad=True, device='cuda')
+        s2 = torch.randn(5, 5, requires_grad=True, device='cuda')
+
+        module = self.checkScript(my_broadcasted_cell, (s1, s1, s1))
+        forward_graph = module.graph_for(s1, s1, s1)
+        self.assertAllFused(forward_graph, except_for=("aten::size", "prim::BroadcastSizes",
+                                                       "aten::_size_if_not_equal"))
+
+        old_plans = set()
+        for i in range(3):
+            # if we have s2, then the s1 are _grad_sum_to_size'd
+            args = s2 if i < 1 else s1, s2 if i < 2 else s1, s2
+            args = [a.detach_().requires_grad_() for a in args]
+            res = module(s2 if i < 1 else s1, s2 if i < 2 else s1, s2)
+            grads = torch.autograd.grad(res.sum(), args)
+            for inp, gr in zip(args, grads):
+                self.assertEqual(inp.shape, gr.shape)
+            backward = None
+            # this is a workaround for the backward graphs not being
+            # in order for Python 2
+            for g in all_backward_graphs(module):
+                if str(g) not in old_plans:
+                    assert backward is None
+                    backward = g
+                    old_plans.add(str(backward))
+            self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "aten::_grad_sum_to_size"]), i)
+            self.assertEqual(len([1 for o in backward.outputs() if o.node().kind() == "prim::Param"]), 3 - i)
+
+
     @unittest.skipIf(not IS_WINDOWS, "Test that the fuser is disabled on Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_windows_cuda(self):
@@ -876,3 +951,6 @@ class TestFuser(JitTestCase):
         ge = self.checkScript(scaleshift, inputs)
         self.assertGraphContainsExactly(
             ge.graph_for(*inputs), 'prim::FusionGroup', 0, consider_subgraphs=True)
+
+if __name__ == '__main__':
+    run_tests()

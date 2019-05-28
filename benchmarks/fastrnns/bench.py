@@ -195,7 +195,7 @@ if __name__ == '__main__':
     parser.add_argument('--group', nargs='*', default=default_groups, help='Which group to run. cnns, rnns, etc.')
 
     args = parser.parse_args()
-    rnns = args.rnns or ['cudnn', 'aten', 'jit', 'jit_premul', 'jit_simple',
+    rnns = args.rnns or ['cudnn', 'aten', 'jit', 'jit_premul', 'jit_premul_bias', 'jit_simple',
                          'jit_multilayer', 'py']
     cnns = args.cnns or ['resnet18', 'resnet18_jit', 'resnet50', 'resnet50_jit']
     # TODO: Maybe add a separate section for the layernorm/dropout lstms

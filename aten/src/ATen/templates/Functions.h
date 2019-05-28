@@ -28,11 +28,18 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
+  auto device = getType(options).getDeviceFromPtr(data);
+  if (options.device().has_index()) {
+    TORCH_CHECK(
+        options.device() == device,
+        "Specified device ", options.device(),
+        " does not match device of data ", device);
+  }
   auto storage = Storage(
       options.dtype(),
       detail::computeStorageSize(sizes, strides),
       InefficientStdFunctionContext::makeDataPtr(
-          data, deleter, options.device()),
+          data, deleter, device),
       /*allocator=*/nullptr,
       /*resizable=*/false);
   return empty({0}, options).set_(storage, 0, sizes, strides);
@@ -64,11 +71,11 @@ inline Tensor from_blob(
 namespace detail {
 
 static inline TypeExtendedInterface & infer_type(const Tensor & t) {
-  AT_CHECK(t.defined(), "undefined Tensor");
+  TORCH_CHECK(t.defined(), "undefined Tensor");
   return getType(t);
 }
 static inline TypeExtendedInterface & infer_type(const TensorList & tl) {
-  AT_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
   return getType(tl[0]);
 }
 

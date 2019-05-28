@@ -9,11 +9,13 @@ if [ ! -f setup.py ]; then
   exit 1
 fi
 
+# shellcheck disable=SC2034
 COMPACT_JOB_NAME=pytorch-win-ws2016-cuda9-cudnn7-py3-build
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source "$SCRIPT_PARENT_DIR/common.sh"
 
+export IMAGE_COMMIT_ID=`git rev-parse HEAD`
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 if [[ ${JOB_NAME} == *"develop"* ]]; then
   export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}

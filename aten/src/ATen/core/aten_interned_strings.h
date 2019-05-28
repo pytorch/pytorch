@@ -8,7 +8,6 @@
 // To explicitly use interned strings as symbols in your code, you must add
 // them to this list.
 
-#ifndef C10_MOBILE
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
 _(aten, __and__) \
 _(aten, __iand__) \
@@ -225,7 +224,6 @@ _(aten, bincount) \
 _(aten, blackman_window) \
 _(aten, bmm) \
 _(aten, broadcast_tensors) \
-_(aten, btrisolve) \
 _(aten, cartesian_prod) \
 _(aten, cat) \
 _(aten, cauchy) \
@@ -233,6 +231,7 @@ _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
 _(aten, cholesky) \
+_(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
 _(aten, chunk) \
 _(aten, clamp) \
@@ -258,6 +257,8 @@ _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
 _(aten, cross) \
+_(aten, std_mean) \
+_(aten, var_mean) \
 _(aten, ctc_loss) \
 _(aten, cudnn_affine_grid_generator) \
 _(aten, cudnn_affine_grid_generator_backward) \
@@ -416,6 +417,7 @@ _(aten, logsumexp) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lt) \
+_(aten, lu_solve) \
 _(aten, margin_ranking_loss) \
 _(aten, masked_fill) \
 _(aten, masked_scatter) \
@@ -519,7 +521,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
-_(aten, potri) \
 _(aten, pow) \
 _(aten, prelu) \
 _(aten, prelu_backward) \
@@ -906,6 +907,8 @@ _(attr, padding_value) \
 _(attr, params) \
 _(attr, pdist) \
 _(attr, cdist) \
+_(attr, std_mean) \
+_(attr, var_mean) \
 _(attr, periodic) \
 _(attr, pivot) \
 _(attr, pivots) \
@@ -1013,4 +1016,3 @@ _(attr, workspace) \
 _(attr, x) \
 _(attr, x1) \
 _(attr, x2)
-#endif

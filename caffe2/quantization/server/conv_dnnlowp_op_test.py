@@ -10,6 +10,7 @@ from dnnlowp_test_utils import (
     check_quantized_results_close,
     generate_conv_inputs,
     generate_convnd_inputs,
+    run_conv_or_fc,
 )
 from hypothesis import assume, given
 
@@ -112,7 +113,9 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([quantize])
 
-            x_q_param = dnnlowp_utils.choose_quantization_params(X.min(), X.max(), preserve_activation_sparsity)  # noqa
+            x_q_param = dnnlowp_utils.choose_quantization_params(
+                X.min(), X.max(), preserve_activation_sparsity
+            )
             if do_quantize_weight:
                 int8_given_tensor_fill, w_q_param = dnnlowp_utils.create_int8_given_tensor_fill(
                     W, "W_q", preserve_weight_sparsity
@@ -178,13 +181,9 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(init_net)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)
 
@@ -295,12 +294,9 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([relu])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, None, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs)
 
@@ -345,12 +341,6 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
         for op_type, engine in op_engine_list:
             init_net = core.Net("test_init_net")
             net = core.Net("test_net")
-
-            fall_back_to_NCHW = "DNNLOWP" not in engine and order == "NHWC"
-
-            if fall_back_to_NCHW:
-                X_nchw = utils.NHWC2NCHW(X)
-                W_nchw = utils.NHWC2NCHW(W)
 
             do_quantize = "DNNLOWP" in engine
             do_dequantize = "DNNLOWP" in engine
@@ -408,7 +398,7 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                 kernels=kernels,
                 dilations=[dilation] * ndim,
                 pads=[pad] * (ndim * 2),
-                order="NCHW" if fall_back_to_NCHW else order,
+                order=order,
                 dequantize_output=not do_dequantize,
                 engine=engine,
                 group=group,
@@ -428,19 +418,9 @@ class DNNLowPOpConvTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(
-                X_nchw if fall_back_to_NCHW else X, device_option=gc
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, order, gc, outputs
             )
-            self.ws.create_blob("W").feed(
-                W_nchw if fall_back_to_NCHW else W, device_option=gc
-            )
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(init_net)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            if fall_back_to_NCHW:
-                Y = utils.NCHW2NHWC(Y)
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
 
         check_quantized_results_close(outputs)
 

@@ -394,7 +394,9 @@ bool SoftmaxWithLossOp<float, CUDAContext>::RunOnDevice() {
     math::Scale<float, float, CUDAContext>(
         1, scale_ / total_weight, avg_loss_data, avg_loss_data, &context_);
   }
-
+  if (OutputSize() > 2) {
+    OutputTensorAlias(2, losses_);
+  }
   return true;
 }
 

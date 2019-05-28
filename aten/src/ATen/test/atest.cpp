@@ -96,5 +96,13 @@ TEST(atest, atest) {
       auto f2 = from_blob(base.data_ptr(), {1, 2, 3}, [&](void*) { isgone++; });
     }
     ASSERT_EQ(isgone, 1);
+
+    // Attempt to specify the wrong device in from_blob
+    auto t = at::empty({1,2,3}, TensorOptions(kCUDA, 0));
+    EXPECT_ANY_THROW(from_blob(t.data_ptr(), {1,2,3}, at::Device(kCUDA, 1)));
+
+    // Infers the correct device
+    auto t_ = from_blob(t.data_ptr(), {1,2,3}, kCUDA);
+    ASSERT_EQ(t_.device(), at::Device(kCUDA, 0));
   }
 }

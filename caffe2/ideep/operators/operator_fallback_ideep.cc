@@ -28,7 +28,6 @@
 #include <caffe2/operators/load_save_op.h>
 #include <caffe2/operators/loss_op.h>
 #include <caffe2/operators/normalize_op.h>
-#include <caffe2/operators/order_switch_ops.h>
 #include <caffe2/operators/pad_op.h>
 #include <caffe2/operators/prelu_op.h>
 #include <caffe2/operators/reduce_ops.h>
@@ -252,12 +251,6 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(
     SoftmaxWithLossGradient,
     IDEEPFallbackOp<SoftmaxWithLossGradientOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    NHWC2NCHW,
-    IDEEPFallbackOp<NHWC2NCHWOp<float, CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    NCHW2NHWC,
-    IDEEPFallbackOp<NCHW2NHWCOp<float, CPUContext>>);
 
 REGISTER_IDEEP_OPERATOR(
     Expand,

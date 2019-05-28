@@ -8,7 +8,6 @@ import torch.nn as nn
 
 import itertools
 import io
-import unittest
 import inspect
 import glob
 import os
@@ -258,6 +257,10 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2), x)
 
+    def test_maxpool_dilations(self):
+        x = torch.randn(20, 16, 50)
+        self.assertONNX(nn.MaxPool1d(2, stride=1, dilation=2), x, opset_version=10)
+
     def test_avg_pool2d(self):
         x = torch.randn(20, 16, 50, 32)
         self.assertONNX(nn.AvgPool2d(3, stride=2), x)
@@ -412,6 +415,10 @@ class TestOperators(TestCase):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x[:, 1:2], x)
 
+    def test_sign(self):
+        x = torch.rand(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.sign(), x)
+
     def test_narrow(self):
         x = torch.randn(3, 3, requires_grad=True)
         self.assertONNX(lambda x: torch.narrow(x, 0, 0, 2), x)
@@ -469,8 +476,11 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
-    def test_upsample(self):
+    def test_upsample_nearest(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
+
+    def test_upsample_bilinear(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
 
@@ -480,7 +490,7 @@ class TestOperators(TestCase):
 
     def test_batchnorm_noaffine(self):
         x = torch.randn(128, 128, 1, 1, requires_grad=True)
-        self.assertONNX(nn.BatchNorm2d(128, affine=False), x)
+        self.assertONNX(nn.BatchNorm2d(128, affine=False, momentum=0.3), x)
 
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
@@ -568,6 +578,32 @@ class TestOperators(TestCase):
 
         x = torch.randn(3, 4).float()
         self.assertONNX(MyModule(), (x,), _retain_param_name=False)
+
+    def test_c2_op(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, scores, bbox_deltas, im_info, anchors):
+                a, b = torch.ops._caffe2.GenerateProposals(
+                    (scores), (bbox_deltas), (im_info), (anchors),
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
+                )
+                return a, b
+
+        model = MyModel()
+        A = 4
+        H = 10
+        W = 8
+        img_count = 3
+        scores = torch.ones(img_count, A, H, W, dtype=torch.float32)
+        bbox_deltas = torch.linspace(0, 10, steps=img_count * 4 * A * H * W,
+                                     dtype=torch.float32)
+        bbox_deltas = bbox_deltas.view(img_count, 4 * A, H, W)
+        im_info = torch.ones(img_count, 3, dtype=torch.float32)
+        anchors = torch.ones(A, 4, dtype=torch.float32)
+        inputs = (scores, bbox_deltas, im_info, anchors)
+        self.assertONNX(model, inputs)
 
 
 if __name__ == '__main__':

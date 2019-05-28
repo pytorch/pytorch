@@ -11,6 +11,8 @@ namespace at { namespace native {
 
 using unary_fn = void(*)(TensorIterator&);
 
+DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar), fill_stub);
+
 DECLARE_DISPATCH(unary_fn, abs_stub);
 DECLARE_DISPATCH(unary_fn, acos_stub);
 DECLARE_DISPATCH(unary_fn, asin_stub);
@@ -23,10 +25,13 @@ DECLARE_DISPATCH(unary_fn, erfc_stub);
 DECLARE_DISPATCH(unary_fn, exp_stub);
 DECLARE_DISPATCH(unary_fn, expm1_stub);
 DECLARE_DISPATCH(unary_fn, floor_stub);
+DECLARE_DISPATCH(unary_fn, frac_stub);
 DECLARE_DISPATCH(unary_fn, log_stub);
 DECLARE_DISPATCH(unary_fn, log10_stub);
 DECLARE_DISPATCH(unary_fn, log1p_stub);
 DECLARE_DISPATCH(unary_fn, log2_stub);
+DECLARE_DISPATCH(unary_fn, neg_stub);
+DECLARE_DISPATCH(unary_fn, reciprocal_stub);
 DECLARE_DISPATCH(unary_fn, round_stub);
 DECLARE_DISPATCH(unary_fn, rsqrt_stub);
 DECLARE_DISPATCH(unary_fn, sigmoid_stub);
@@ -43,13 +48,9 @@ DECLARE_DISPATCH(void(*)(Tensor&, const double, Generator *), bernoulli_mkl_stub
 // digamma
 // lgamma
 // erfinv
-// fill
-// frac
 // clone
 // contiguous
 // clamp/_min/_max
-// neg
-// reciprocal
 // sign
 // zero
 }} // namespace at::native

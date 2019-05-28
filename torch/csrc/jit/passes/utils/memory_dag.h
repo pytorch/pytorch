@@ -1,8 +1,12 @@
 #pragma once
 
-#include <unordered_set>
-#include <unordered_map>
+#include <c10/util/ArrayRef.h>
 #include <memory>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 namespace jit {
@@ -25,10 +29,19 @@ struct Value;
 //
 // So, by traversing the "points-to" graph to the leaves, you can determine
 // which memory locations an element may point to.
-class MemoryDAG {
+class TORCH_API MemoryDAG {
  public:
+
+  // explicitly delete copy constructor because otherwise windows build is confused for an exported class
+  // see https://stackoverflow.com/a/51033485/105137
+  MemoryDAG() {}
+  MemoryDAG(const MemoryDAG&)=delete;
+  MemoryDAG& operator=(const MemoryDAG&)=delete;
+
   // Make `from` point at `to`.
   void makePointerTo(Element* from, Element* to);
+
+  void addToContainedElements(Element* contained, Element* container);
 
   // Make a fresh element (i.e. an element that doesn't point to anything) and
   // return it.
@@ -37,6 +50,14 @@ class MemoryDAG {
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Element* a, const Element* b) const;
   bool mayAlias(Element* a, Element* b) const;
+
+  // Does a hold reference to any memory that is stored in elem, or vice versa?
+  bool mayContainAlias(const Element* a, const Element* b) const;
+  bool mayContainAlias(Element* a, Element* b) const;
+
+  bool mayContainAlias(
+      const at::ArrayRef<Element*>& a,
+      const at::ArrayRef<Element*>& b) const;
 
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`?
@@ -79,7 +100,12 @@ class MemoryDAG {
   }
 
  private:
-   bool mayAliasImpl(const Element* a, const Element* b) const;
+  bool memoryLocationOverlap(
+      const std::unordered_set<const Element*>& a,
+      const std::unordered_set<const Element*>& b) const;
+  bool mayAliasImpl(const Element* a, const Element* b) const;
+  bool mayContainAliasImpl(const Element* contained, const Element* container)
+      const;
   // Structure that owns all the element pointers. It's a map of
   //  raw pointer -> unique_ptr to facilitate easy queries
   std::unordered_map<Element*, std::unique_ptr<Element>> elements_;
@@ -104,8 +130,10 @@ struct Element {
   // Backreference for points-to.
   std::unordered_set<Element*> pointedFrom;
 
+  std::unordered_set<Element*> contained_elements;
+
   // Return the unique memory locations that `Element` might represent.
-  std::unordered_set<const Element*> getMemoryLocations() const;
+  TORCH_API std::unordered_set<const Element*> getMemoryLocations() const;
   // We do path compression to make repeated memory location queries faster.
   // An empty cache means it is invalidated (it can never be empty otherwise,
   // since every element must point to at least one memory location).
@@ -116,6 +144,5 @@ struct Element {
   template <typename Fn>
   bool bfs(Fn fn, BfsDirection dir) const;
 };
-
 } // namespace jit
 } // namespace torch

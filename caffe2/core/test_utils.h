@@ -5,6 +5,8 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/utils/proto_utils.h"
 
+#include <c10/macros/Macros.h>
+
 #include <cmath>
 #include <string>
 #include <vector>
@@ -16,10 +18,10 @@ namespace caffe2 {
 namespace testing {
 
 // Asserts that the values of two tensors are the same.
-void assertTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2);
+CAFFE2_API void assertTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2);
 
 // Asserts that two float values are close within epsilon.
-void assertNear(float value1, float value2, float epsilon);
+CAFFE2_API void assertNear(float value1, float value2, float epsilon);
 
 // Asserts that the numeric values of a tensor is equal to a data vector.
 template <typename T>
@@ -50,23 +52,23 @@ void assertTensor(
 }
 
 // Asserts a list of tensors presented in two workspaces are equal.
-void assertTensorListEquals(
+CAFFE2_API void assertTensorListEquals(
     const std::vector<std::string>& tensorNames,
     const Workspace& workspace1,
     const Workspace& workspace2);
 
 // Read a tensor from the workspace.
-const caffe2::Tensor& getTensor(
+CAFFE2_API const caffe2::Tensor& getTensor(
     const caffe2::Workspace& workspace,
     const std::string& name);
 
 // Create a new tensor in the workspace.
-caffe2::Tensor* createTensor(
+CAFFE2_API caffe2::Tensor* createTensor(
     const std::string& name,
     caffe2::Workspace* workspace);
 
 // Create a new operator in the net.
-caffe2::OperatorDef* createOperator(
+CAFFE2_API caffe2::OperatorDef* createOperator(
     const std::string& type,
     const std::vector<std::string>& inputs,
     const std::vector<std::string>& outputs,
@@ -95,6 +97,15 @@ caffe2::Tensor* createTensorAndFill(
     Workspace* workspace) {
   auto* tensor = createTensor(name, workspace);
   fillTensor<T>(shape, data, tensor);
+  return tensor;
+}
+
+template <typename T>
+caffe2::Tensor createTensorAndFill(
+    const std::vector<int64_t>& shape,
+    const std::vector<T>& data) {
+  Tensor tensor(caffe2::CPU);
+  fillTensor<T>(shape, data, &tensor);
   return tensor;
 }
 
@@ -154,7 +165,7 @@ class CAFFE2_API NetMutator {
 };
 
 // Concise util class to mutate a workspace in a chaining fashion.
-class WorkspaceMutator {
+class CAFFE2_API WorkspaceMutator {
  public:
   explicit WorkspaceMutator(caffe2::Workspace* workspace)
       : workspace_(workspace) {}

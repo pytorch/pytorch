@@ -7,7 +7,11 @@ import hypothesis.strategies as st
 from caffe2.python import core, dyndep, workspace
 from caffe2.python.fb import hardcode_scale_zp
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import check_quantized_results_close, generate_conv_inputs
+from dnnlowp_test_utils import (
+    check_quantized_results_close,
+    generate_conv_inputs,
+    run_conv_or_fc,
+)
 from hypothesis import assume, given
 
 
@@ -157,13 +161,9 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(init_net)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)
 
@@ -275,11 +275,8 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([relu])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(net)
-            Y = self.ws.blobs["Y"].fetch()
-            outputs.append(Output(Y=Y, op_type=op_type, engine=engine, order=order))
+            run_conv_or_fc(
+                self, None, net, X, W, b, op_type, engine, order, gc, outputs
+            )
 
         check_quantized_results_close(outputs)

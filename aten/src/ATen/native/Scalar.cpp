@@ -6,11 +6,13 @@ namespace native {
 
 Scalar item(const Tensor& self) {
   int64_t numel = self.numel();
-  AT_CHECK(numel == 1, "a Tensor with ", numel, " elements cannot be converted to Scalar");
+  TORCH_CHECK(numel == 1, "a Tensor with ", numel, " elements cannot be converted to Scalar");
   if (self.is_sparse()) {
     if (self._nnz() == 0) return Scalar(0);
     if (self.is_coalesced()) return at::_local_scalar_dense(self._values());
     return at::_local_scalar_dense(self._values().sum());
+  } else if (self.is_quantized()) {
+    return self.dequantize().item();
   } else {
     return _local_scalar_dense(self);
   }

@@ -6,6 +6,7 @@ import shutil
 import random
 import tempfile
 import unittest
+import contextlib
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -492,11 +493,26 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
+# Errors will still be raised and reported
+@contextlib.contextmanager
+def suppress_stderr():
+    original = sys.stderr
+    sys.stderr = open(os.devnull, 'w')
+    yield
+    sys.stderr = original
+
+
 class TestHub(TestCase):
     @classmethod
     @skipIfNoTorchVision
     def setUpClass(cls):
-        cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
+        # The current torchvision code does not provide a way to disable tqdm
+        # progress bar, leading this download printing a huge number of lines
+        # in CI.
+        # TODO: remove this context manager when torchvision provides a way.
+        #       See pytorch/torchvision#862
+        with suppress_stderr():
+            cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
 
     @skipIfNoTorchVision
     def test_load_from_github(self):
@@ -515,9 +531,12 @@ class TestHub(TestCase):
             'resnet18',
             pretrained=True)
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
-        assert os.path.exists(temp_dir + '/vision_master')
-        shutil.rmtree(temp_dir + '/vision_master')
+        assert os.path.exists(temp_dir + '/pytorch_vision_master')
+        shutil.rmtree(temp_dir + '/pytorch_vision_master')
 
+    def test_list_entrypoints(self):
+        entry_lists = hub.list('pytorch/vision', force_reload=True)
+        self.assertObjectIn('resnet18', entry_lists)
 
 if __name__ == '__main__':
     run_tests()

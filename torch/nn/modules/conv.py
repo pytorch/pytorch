@@ -45,7 +45,6 @@ class _ConvNd(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        n = self.in_channels
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)

@@ -28,6 +28,9 @@ endif()
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
+if(CUDA_VERSION VERSION_LESS 9.0)
+  message(FATAL_ERROR "PyTorch requires CUDA 9.0 and above.")
+endif()
 
 if(CUDA_FOUND)
   # Sometimes, we may mismatch nvcc with the CUDA headers we are
@@ -299,17 +302,6 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
   endif()
 endif()
 
-if (${CUDA_VERSION} LESS 8.0) # CUDA 7.x
-  list(APPEND CUDA_NVCC_FLAGS "-D_MWAITXINTRIN_H_INCLUDED")
-  list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")
-elseif (${CUDA_VERSION} LESS 9.0) # CUDA 8.x
-  list(APPEND CUDA_NVCC_FLAGS "-D_MWAITXINTRIN_H_INCLUDED")
-  list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")
-  # CUDA 8 may complain that sm_20 is no longer supported. Suppress the
-  # warning for now.
-  list(APPEND CUDA_NVCC_FLAGS "-Wno-deprecated-gpu-targets")
-endif()
-
 # Add onnx namepsace definition to nvcc
 if (ONNX_NAMESPACE)
   list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=${ONNX_NAMESPACE}")
@@ -329,19 +321,51 @@ if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
       CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
     message(FATAL_ERROR
       "CUDA ${CUDA_VERSION} is not compatible with std::tuple from GCC version "
-      ">= 6. Please upgrade to CUDA 9.2 or use the following option to use "
-      "another version (for example): \n"
-      "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-5\n")
+      ">= 6. Please upgrade to CUDA 9.2 or set the following environment "
+      "variable to use another version (for example): \n"
+      "  export CUDAHOSTCXX='/usr/bin/gcc-5'\n")
   endif()
-elseif (CUDA_VERSION VERSION_EQUAL 8.0)
-  # CUDA 8.0 requires GCC version <= 5
-  if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
-      NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 6.0 AND
-      CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
+endif()
+
+# CUDA 9.0 / 9.1 require MSVC version < 19.12
+# CUDA 9.2 require MSVC version < 19.13
+# CUDA 10.0 require MSVC version < 19.20
+if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
+    (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 9.2))
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
+      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.12 AND
+      NOT ENV{CUDAHOSTCXX})
+        message(FATAL_ERROR
+          "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
+          ">= 19.12. (a.k.a Visual Studio 2017 Update 5, VS 15.5) "
+          "Please upgrade to CUDA >= 9.2 or set the following environment "
+          "variable to use another version (for example): \n"
+          "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
+          "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.11.25503\\bin\\HostX64\\x64\\cl.exe\"\n")
+  endif()
+elseif(CUDA_VERSION VERSION_EQUAL   9.2)
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
+      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.13 AND
+      NOT ENV{CUDAHOSTCXX})
     message(FATAL_ERROR
-      "CUDA 8.0 is not compatible with GCC version >= 6. "
-      "Use the following option to use another version (for example): \n"
-      "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-5\n")
+      "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
+      ">= 19.13. (a.k.a Visual Studio 2017 Update 7, VS 15.7) "
+      "Please upgrade to CUDA >= 10.0 or set the following environment "
+      "variable to use another version (for example): \n"
+      "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
+      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.12.25827\\bin\\HostX64\\x64\\cl.exe\"\n")
+  endif()
+elseif(CUDA_VERSION VERSION_EQUAL   10.0)
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
+      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.20 AND
+      NOT ENV{CUDAHOSTCXX})
+    message(FATAL_ERROR
+      "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
+      ">= 19.20. (a.k.a Visual Studio 2019, VS 16.0) "
+      "Please upgrade to CUDA >= 10.1 or set the following environment "
+      "variable to use another version (for example): \n"
+      "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
+      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.16.27023\\bin\\HostX64\\x64\\cl.exe\"\n")
   endif()
 endif()
 

@@ -2,7 +2,9 @@
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/operators/concat_split_op.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPConcatOp final : public IDEEPOperator {
  public:
@@ -168,4 +170,4 @@ class IDEEPSplitOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(Concat, IDEEPConcatOp);
 REGISTER_IDEEP_OPERATOR(Split, IDEEPSplitOp);
 
-} // namespace caffe2
+} // namespace

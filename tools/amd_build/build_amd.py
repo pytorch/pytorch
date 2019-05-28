@@ -26,7 +26,15 @@ parser.add_argument(
     '--output-directory',
     type=str,
     default='',
-    help="The Directory to Store the Hipified Project",
+    help="The directory to store the hipified project",
+    required=False)
+
+parser.add_argument(
+    '--extra-include-dir',
+    type=str,
+    default=[],
+    nargs='+',
+    help="The list of extra directories in caffe2 to hipify",
     required=False)
 
 # Hipify using HIP-Clang launch.
@@ -61,6 +69,7 @@ includes = [
     "caffe2/core/*",
     "caffe2/db/*",
     "caffe2/utils/*",
+    "caffe2/contrib/gloo/*",
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
     "modules/*",
@@ -80,6 +89,12 @@ includes = [
     "torch/*",
     "tools/autograd/templates/python_variable_methods.cpp",
 ]
+
+for new_dir in args.extra_include_dir:
+    abs_new_dir = os.path.join(proj_dir, new_dir)
+    if os.path.exists(abs_new_dir):
+        new_dir = os.path.join(new_dir, '**/*')
+        includes.append(new_dir)
 
 ignores = [
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
@@ -112,7 +127,7 @@ if not args.out_of_place_only:
     paths = ("torch", "tools")
     for root, _directories, files in chain.from_iterable(os.walk(path) for path in paths):
         for filename in files:
-            if filename.endswith(".cpp") or filename.endswith(".h"):
+            if filename.endswith(".cpp") or filename.endswith(".h") or filename.endswith(".hpp"):
                 source = os.path.join(root, filename)
                 # Disabled files
                 if reduce(lambda result, exclude: source.endswith(exclude) or result, ignore_files, False):

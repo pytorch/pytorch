@@ -33,6 +33,7 @@ private:
   c10::intrusive_ptr<c10::ivalue::Object> container_;
   size_t offset_;
   friend struct std::hash<Slot>;
+  friend struct Module;
 };
 
 }}}

@@ -48,7 +48,7 @@ inline bool getCatGrid(THCState* state, ptrdiff_t nTensors, dim3& grid) {
   //X dim of grid for cat array cooperates on a single tensor in the cat.
   //Given half of the GPU, full utilization will always occur.
   grid = dim3( 2LL * numSM, (long long) nTensors );
-	     
+             
   return true;
 }
 
@@ -131,7 +131,7 @@ __global__ void CatArrayBatchedCopy(
 
     while( tid < nElements){
     IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(
-    	      os.outputSize, os.outputStride, dimSize, concatDim, tid);
+                  os.outputSize, os.outputStride, dimSize, concatDim, tid);
     output[dataOffset + elementOffset] = data[tid];
 
     tid += stride;

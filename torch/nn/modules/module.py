@@ -63,6 +63,7 @@ class Module(object):
     _version = 1
 
     def __init__(self):
+        torch._C._log_api_usage_once("python.nn_module")
         self._backend = thnn_backend
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
@@ -220,11 +221,10 @@ class Module(object):
         Example::
 
             >>> def init_weights(m):
-                    print(m)
-                    if type(m) == nn.Linear:
-                        m.weight.data.fill_(1.0)
-                        print(m.weight)
-
+            >>>     print(m)
+            >>>     if type(m) == nn.Linear:
+            >>>         m.weight.data.fill_(1.0)
+            >>>         print(m.weight)
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
             >>> net.apply(init_weights)
             Linear(in_features=2, out_features=2, bias=True)
@@ -762,6 +762,7 @@ class Module(object):
                     load(child, prefix + name + '.')
 
         load(self)
+        load = None  # break load->load reference cycle
 
         if strict:
             if len(unexpected_keys) > 0:

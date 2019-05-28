@@ -5,12 +5,6 @@ namespace at {
 
 UndefinedType::UndefinedType()
     : TypeDefault(UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
-ScalarType UndefinedType::scalarType() const {
-  return ScalarType::Undefined;
-}
-caffe2::TypeMeta UndefinedType::typeMeta() const {
-  return scalarTypeToTypeMeta(scalarType());
-}
 Backend UndefinedType::backend() const {
   return Backend::Undefined;
 }
@@ -25,9 +19,6 @@ Device UndefinedType::getDeviceFromPtr(void*) const {
 
 Storage UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeStorageFromTH not defined for UndefinedType");
-}
-Storage UndefinedType::storageWithAllocator(int64_t size, Allocator* allocator) const {
-  AT_ERROR("storageWithAllocator not defined for UndefinedType");
 }
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeTensorFromTH not defined for UndefinedType");

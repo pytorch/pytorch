@@ -194,6 +194,9 @@ public:
   Vec256<T> expm1() const {
     return map(std::expm1);
   }
+  Vec256<T> frac() const {
+    return *this - this->trunc();
+  }
   Vec256<T> log() const {
     return map(std::log);
   }
@@ -219,7 +222,10 @@ public:
     return map(std::floor);
   }
   Vec256<T> neg() const {
-    return map([](T x) { return -x; });
+    // NB: the trailing return type is needed because we need to coerce the
+    // return value back to T in the case of unary operator- incuring a
+    // promotion
+    return map([](T x) -> T { return -x; });
   }
   Vec256<T> round() const {
     return map(std::nearbyint);
