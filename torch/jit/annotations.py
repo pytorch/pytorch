@@ -127,7 +127,7 @@ def get_type_line(source):
         if len(wrong_type_lines) > 0:
             raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
                                + " is probably invalid.\nIt must be '# type:'"
-                               + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)"
+                               + "\nSee PEP 484 (https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)" # noqa
                                + "\nfor examples")
         return None
     elif len(type_lines) == 1:
