@@ -12475,7 +12475,9 @@ a")
                                        value,                   # type: Tensor
                                        embed_dim_to_check,      # type: int
                                        num_heads,               # type: int
-                                       in_proj_weight,          # type: Tensor
+                                       q_proj_weight,           # type: Tensor
+                                       k_proj_weight,           # type: Tensor
+                                       v_proj_weight,           # type: Tensor
                                        in_proj_bias,            # type: Tensor
                                        bias_k,                  # type: Optional[Tensor]
                                        bias_v,                  # type: Optional[Tensor]
@@ -12491,7 +12493,8 @@ a")
             # type: (...) -> Tuple[Tensor, Optional[Tensor]]
             return torch.nn.functional.multi_head_attention_forward(query, key, value,
                                                                     embed_dim_to_check, num_heads,
-                                                                    in_proj_weight, in_proj_bias,
+                                                                    q_proj_weight, k_proj_weight,
+                                                                    v_proj_weight, in_proj_bias,
                                                                     bias_k, bias_v,
                                                                     add_zero_attn, dropout,
                                                                     out_proj_weight, out_proj_bias,
@@ -12512,7 +12515,9 @@ a")
 
         jit_out = jit_multihead_attn_forward(query, key, value,
                                              embed_size, nhead,
-                                             multi_head_attn.in_proj_weight,
+                                             multi_head_attn.q_proj_weight,
+                                             multi_head_attn.k_proj_weight,
+                                             multi_head_attn.v_proj_weight,
                                              multi_head_attn.in_proj_bias,
                                              multi_head_attn.bias_k, multi_head_attn.bias_v,
                                              multi_head_attn.add_zero_attn, multi_head_attn.dropout,
@@ -12521,7 +12526,9 @@ a")
 
         py_out = torch.nn.functional.multi_head_attention_forward(query, key, value,
                                                                   embed_size, nhead,
-                                                                  multi_head_attn.in_proj_weight,
+                                                                  multi_head_attn.q_proj_weight,
+                                                                  multi_head_attn.k_proj_weight,
+                                                                  multi_head_attn.v_proj_weight,
                                                                   multi_head_attn.in_proj_bias,
                                                                   multi_head_attn.bias_k,
                                                                   multi_head_attn.bias_v,
@@ -12563,13 +12570,13 @@ a")
         jit_out = model(q, kv, kv)[0]
         py_out = torch.nn.functional.multi_head_attention_forward(q, kv, kv,
                                                                   embed_dim, num_heads,
-                                                                  model.mod.in_proj_weight,
+                                                                  model.mod.q_proj_weight,
+                                                                  model.mod.k_proj_weight,
+                                                                  model.mod.v_proj_weight,
                                                                   model.mod.in_proj_bias,
                                                                   None, None, None, 0.0,
                                                                   model.mod.out_proj.weight,
                                                                   model.mod.out_proj.bias)[0]
-        # print(jit_out/py_out-1)
-        # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
         self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
 
     def test_list_python_op(self):
