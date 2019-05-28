@@ -4,6 +4,9 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
+
 namespace {
 template <typename scalar_t>
 void lerp_cpu(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, const at::Tensor& weight) {
@@ -19,17 +22,22 @@ void lerp_cpu(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, co
 }
 
 template <typename scalar_t>
-void lerp_cpu(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, scalar_t weight_val) {
-  at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
-      ret, self, end,
-      [=](scalar_t& ret_val,
-         const scalar_t& self_val,
-         const scalar_t& end_val) {
-        ret_val = (weight_val < 0.5) ?
-            self_val + weight_val * (end_val - self_val) : end_val - (end_val - self_val) * (1 - weight_val);
-      });
+void lerp_cpu(
+    at::Tensor& ret,
+    const at::Tensor& self,
+    const at::Tensor& end,
+    scalar_t weight_val) {
+  auto builder = at::TensorIterator::Builder();
+  builder.add_output(ret);
+  builder.add_input(self);
+  builder.add_input(end);
+  auto iter = builder.build();
+  at::native::binary_kernel(*iter, [=](scalar_t self_val, scalar_t end_val) {
+    return (weight_val < 0.5)
+        ? self_val + weight_val * (end_val - self_val)
+        : end_val - (end_val - self_val) * (1 - weight_val);
+  });
 }
-
 } // namespace
 
 namespace at {
