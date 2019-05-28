@@ -83,7 +83,7 @@ class ScriptModuleOp final : public Operator<Context> {
   }
 
   static caffe2::Tensor castIValueToTensor(const IValue& v) {
-    return caffe2::Tensor(torch::autograd::Variable(v.toTensor()).data());
+    return caffe2::Tensor(torch::autograd::Variable(v.toTensor()).tensor_data());
   }
 
   bool RunOnDevice() override {

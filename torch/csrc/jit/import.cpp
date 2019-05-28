@@ -95,6 +95,7 @@ void ScriptModuleDeserializer::deserialize(
     script::ModuleLookup module_lookup,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
+  C10_LOG_API_USAGE_ONCE("torch.script.load");
   torch::ModelDef model_def;
   at::DataPtr data_ptr;
   size_t data_size;

@@ -136,7 +136,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 # The following list contains functions that we don't enforce the invariant on.
 DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
-    '_th_set_', '_cudnn_rnn_flatten_weight',
+    'set_', '_cudnn_rnn_flatten_weight',
 }
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
@@ -484,12 +484,6 @@ def emit_body(declaration):
         if 'TensorOptions' in arg['type']:
             return False
         if 'Tensor' not in arg['type']:
-            return False
-        if arg['dynamic_type'] in {'IndexTensor', 'ByteTensor', 'BoolTensor'}:
-            # These are necessary for legacy code and should be
-            # used by legacy code only!
-            assert declaration['mode'] == 'TH' or declaration['mode'] == 'NN', \
-                "IndexTensor and BoolTensor are restricted to legacy TH/THNN functions only."
             return False
         if arg['name'] in declaration.get('non_differentiable_arg_names', []):
             return False

@@ -2828,7 +2828,7 @@ class _TestTorchMixin(object):
         t = torch.arange(-10, 10, dtype=torch.int8)
         scale = 3
         zero_point = 2
-        qt = torch.dequantize_linear(t, scale, zero_point, torch.float)
+        qt = torch._dequantize_linear(t, scale, zero_point, torch.float)
 
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
@@ -7329,6 +7329,14 @@ class _TestTorchMixin(object):
         self._test_advancedindex_big(self, lambda x: x)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_empty_storage_view(self):
+        # we should be able to "modify" slices of a 0-element
+        # array without an error being raised due to
+        # trying to resize its storage
+        t = torch.from_numpy(np.empty((0, 4)))
+        t[:, 1::2] *= 1
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):
             npt = tensor.numpy()
@@ -11484,16 +11492,21 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(2 / torch.tensor(3), 2 / torch.tensor(3).to("cuda:1"))    # __rtruediv__
         self.assertEqual(2 // torch.tensor(3), 2 // torch.tensor(3).to("cuda:1"))  # __rfloordiv__
 
-        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
-            torch.tensor(2).to("cuda:1") + torch.tensor(3).to("cuda:0")
-        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
-            torch.tensor(2).to("cuda:1") - torch.tensor(3).to("cuda:0")
-        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
-            torch.tensor(2).to("cuda:1") * torch.tensor(3).to("cuda:0")
-        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
-            torch.tensor(2).to("cuda:1") / torch.tensor(3).to("cuda:0")
-        with self.assertRaisesRegex(RuntimeError, "expected both inputs to be on same device"):
-            torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0")
+        self.assertEqual(
+            torch.tensor(2).to("cuda:1") + torch.tensor(3).to("cuda:0"),
+            torch.tensor(2) + torch.tensor(3))
+        self.assertEqual(
+            torch.tensor(2).to("cuda:1") - torch.tensor(3).to("cuda:0"),
+            torch.tensor(2) - torch.tensor(3))
+        self.assertEqual(
+            torch.tensor(2).to("cuda:1") * torch.tensor(3).to("cuda:0"),
+            torch.tensor(2) * torch.tensor(3))
+        self.assertEqual(
+            torch.tensor(2).to("cuda:1") / torch.tensor(3).to("cuda:0"),
+            torch.tensor(2) / torch.tensor(3))
+        self.assertEqual(
+            torch.tensor(2).to("cuda:1") // torch.tensor(3).to("cuda:0"),
+            torch.tensor(2) // torch.tensor(3))
 
     def test_allow_tensor_metadata_change(self):
         def do_test(t):
