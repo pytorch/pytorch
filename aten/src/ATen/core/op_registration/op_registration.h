@@ -5,6 +5,7 @@
  * functionality needed to do so for you.
  */
 
+#include <torch/csrc/jit/script/compilation_unit.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/kernel_functor.h>
 #include <ATen/core/op_registration/kernel_function.h>
@@ -309,12 +310,15 @@ public:
    * Call this to register an operator. See class doc comment for examples.
    */
   RegisterOperators&& op(const std::string& schemaOrName, Options&& options = RegisterOperators::options()) && {
-    checkSchemaAndRegisterOp_(schemaOrName, std::move(options));
+    std::cout<<"operator 313: " <<&torch::jit::script::CompilationUnit::_get_python_cu()<<" "<<schemaOrName<<std::endl;
+    this->checkSchemaAndRegisterOp_(schemaOrName, std::move(options));
+    std::cout<<"operator 315: " <<&torch::jit::script::CompilationUnit::_get_python_cu()<<" "<<schemaOrName<<std::endl;
     return std::move(*this);
   }
 
   // internal only for registering caffe2 ops
   RegisterOperators&& op(FunctionSchema schema, Options&& options) && {
+    std::cout<<"operator 320: " <<&torch::jit::script::CompilationUnit::_get_python_cu()<<" "<<schema.name()<<std::endl;
     checkSchemaAndRegisterOp_(std::move(schema), std::move(options));
     return std::move(*this);
   }
@@ -322,6 +326,7 @@ public:
   template<class FuncType>
   explicit RegisterOperators(const std::string& schemaOrName, FuncType&& func, Options&& options = RegisterOperators::options())
   : RegisterOperators() {
+    std::cout<<"operator 325: " <<&torch::jit::script::CompilationUnit::_get_python_cu()<<" "<<schemaOrName<<std::endl;
     std::move(*this).op(schemaOrName, std::forward<FuncType>(func), std::move(options));
   }
 

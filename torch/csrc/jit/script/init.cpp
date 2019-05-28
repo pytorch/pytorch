@@ -91,22 +91,27 @@ struct PythonResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name) const override {
+    std::cout << "resolving 94: " << name << std::endl;
     if (classType_ && name == classname_) {
       return classType_;
     }
     AutoGIL ag;
     py::object obj = rcb_(name);
+    std::cout << "part 1" << std::endl;
     if (obj.is(py::none())) {
       return nullptr;
     }
     py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
+    std::cout << "part 2" << std::endl;
     if (!py::cast<bool>(isClass)) {
       return nullptr;
     }
 
+    std::cout << "part 3" << std::endl;
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
 
+    std::cout << "qualifiedName 114: " << qualifiedName << std::endl;
     return CompilationUnit::_get_python_cu().get_class(
         c10::QualifiedName(qualifiedName));
   }
@@ -557,9 +562,9 @@ void initJitScriptBindings(PyObject* module) {
         PythonPrint(ss, self.function(), true, tensors, classes, false);
         return ss.str();
       });
-  m.def(
-      "_jit_recursive_script",
-      [](bool recurse) { getRecursiveScriptMode() = recurse; });
+  m.def("_jit_recursive_script", [](bool recurse) {
+    getRecursiveScriptMode() = recurse;
+  });
   m.def(
       "_jit_script_compile",
       [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {

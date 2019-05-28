@@ -13,6 +13,7 @@
 #include <c10/util/Optional.h>
 
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <ostream>
@@ -184,7 +185,8 @@ struct TORCH_API Function {
 // are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
-  // constructor that takes a set of functions to compile using the native resolver
+  // constructor that takes a set of functions to compile using the native
+  // resolver
   explicit CompilationUnit(const std::string& source);
   CompilationUnit() = default;
 
@@ -268,6 +270,10 @@ struct TORCH_API CompilationUnit {
   };
 
   ClassTypePtr get_class(const c10::QualifiedName& name) const {
+    std::cout << "Getting class: " << name.name() << std::endl;
+    for (const auto& i : classes_) {
+      std::cout << i->str() << std::endl;
+    }
     for (const auto& cls : classes_) {
       if (cls->qualname() == name.qualifiedName()) {
         return cls;
@@ -285,10 +291,7 @@ struct TORCH_API CompilationUnit {
   static const CompilationUnit& _get_python_cu_const() {
     return _get_python_cu();
   }
-  static CompilationUnit& _get_python_cu() {
-    static CompilationUnit pyCu;
-    return pyCu;
-  }
+  static CompilationUnit& _get_python_cu();
   // For testing: clear all Python-defined classes to ensure that unit tests
   // have isolation.
   static void _clear_python_cu() {
