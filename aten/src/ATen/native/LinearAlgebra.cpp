@@ -144,14 +144,10 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
 }
 
 Tensor ger(const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
   return at::legacy::th::_th_ger(self, vec2);
 }
 
 Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
   return at::legacy::th::_th_ger_out(result, self, vec2);
 }
 
@@ -170,27 +166,22 @@ Tensor& mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
 }
 
 Tensor mv(const Tensor& self, const Tensor& vec) {
-  check_1d(vec, "vec", "mv");
   return at::legacy::th::_th_mv(self, vec);
 }
 
 Tensor& mv_out(Tensor& result, const Tensor& self, const Tensor& vec) {
-  check_1d(vec, "vec", "mv");
   return at::legacy::th::_th_mv_out(result, self, vec);
 }
 
 Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
   return at::legacy::th::_th_addmv(self, mat, vec, beta, alpha);
 }
 
 Tensor& addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
   return at::legacy::th::_th_addmv_(self, mat, vec, beta, alpha);
 }
 
 Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
   return at::legacy::th::_th_addmv_out(result, self, mat, vec, beta, alpha);
 }
 
@@ -361,8 +352,6 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
 }
 
 Tensor dot(const Tensor& self, const Tensor& tensor) {
-  check_1d(self, "self", "dot");
-  check_1d(tensor, "tensor", "dot");
   return at::legacy::th::_th_dot(self, tensor);
 }
 
