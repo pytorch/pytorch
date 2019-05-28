@@ -7604,6 +7604,33 @@ a")
         with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
             M()
 
+    def test_script_module_fail_exist(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.whatisgoingon
+        with self.assertRaisesRegex(RuntimeError, "module has no attribute"):
+            M()
+
+    def test_script_module_none_exist_fail(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, my_optional):
+                super(M, self).__init__()
+                self.my_optional = my_optional
+
+            @torch.jit.script_method
+            def forward(self, x):
+                if self.my_optional is not None:
+                    return torch.neg(x) + self.my_optional
+                return torch.neg(x)
+        with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
+            x = torch.rand(3, 4)
+            fb = M(None)
+            fb(x)
+
     def test_script_module_valid_consts(self):
         tester = self
 
@@ -8637,7 +8664,7 @@ a")
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"expected a value of type Tensor for argument"
+            with self.assertRaisesRegex(RuntimeError, r"Expected a value of type Tensor for argument"
                                                       r" '0' but found Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
@@ -10842,7 +10869,7 @@ a")
         def test_test():
             return torch.jit._unwrap_optional(1)
 
-        with self.assertRaisesRegex(RuntimeError, "cannot match an Optional\\[T\\] to None"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot match an Optional\\[T\\] to None"):
             @torch.jit.script
             def test_no_type():
                 # type: () -> int
@@ -15458,7 +15485,7 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_type_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
+        with self.assertRaisesRegex(RuntimeError, "Expected a value of type bool"):
             @torch.jit.script  # noqa: B903
             class FooTest(object):
                 def __init__(self, x):
