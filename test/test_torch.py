@@ -1413,6 +1413,14 @@ class _TestTorchMixin(object):
             self.assertTrue(x.all())
             self.assertTrue(x.any())
 
+            x = torch.ones(*size).bool()
+            self.assertTrue(x.all())
+            self.assertTrue(x.any())
+
+            x[3] = False
+            self.assertFalse(x.all())
+            self.assertTrue(x.any())
+
         test((10,))
         test((5, 5))
 
@@ -1591,9 +1599,6 @@ class _TestTorchMixin(object):
             # test via __neg__ operator
             res_neg_op = -a.clone()
             self.assertEqual(res_neg_op, res_add)
-
-        self.assertEqual(torch.tensor(False, dtype=torch.bool).neg(), torch.tensor(True, dtype=torch.bool));
-        self.assertEqual(torch.tensor(True, dtype=torch.bool).neg(), torch.tensor(False, dtype=torch.bool));
 
     def test_neg(self):
         self._test_neg(self, lambda t: t)
