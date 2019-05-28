@@ -8,8 +8,8 @@
 namespace torch {
 namespace jit {
 namespace {
-std::unordered_set<const Element*, unsigned> comprMap;
-std::unordered_set<unsigned, const Element*> decomprMap;
+std::unordered_map<const Element*, unsigned> comprMap;
+std::unordered_map<unsigned, const Element*> decomprMap;
 } // namespace
 
 unsigned Element::toIndex(const Element* x) {
