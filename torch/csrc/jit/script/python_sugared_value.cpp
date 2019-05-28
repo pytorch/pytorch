@@ -259,7 +259,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       v = module_->find_buffer(field);
     }
     Value* the_tensor = m.graph()->insertGetAttr(self_, "training");
-    Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
+    Value* the_bool = m.graph()->insert(aten::Bool, {the_tensor});
     return std::make_shared<SimpleValue>(the_bool);
   }
 
