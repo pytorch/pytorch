@@ -11,7 +11,10 @@ from .normalization import LayerNorm
 
 class Transformer(Module):
     r"""A transformer model. User is able to modified the attributes as needed. The architechture
-        is based on the paper "Attention Is All You Need".
+        is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
+        Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
+        Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
+        Processing Systems, pages 6000–6010.
 
     Args:
         d_model: the number of expected features in the encoder/decoder inputs (default=512).
@@ -37,14 +40,14 @@ class Transformer(Module):
             self.encoder = custom_encoder
         else:
             encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout)
-            encoder_norm = LayerNorm(d_model) 
+            encoder_norm = LayerNorm(d_model)
             self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         if custom_decoder is not None:
             self.decoder = custom_decoder
         else:
-            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout)    
-            decoder_norm = LayerNorm(d_model) 
+            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout)
+            decoder_norm = LayerNorm(d_model)
             self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
         self._reset_parameters()
@@ -68,14 +71,14 @@ class Transformer(Module):
             src_mask: math:`(S, S)`
             tgt_mask: :math:`(T, T)`
             memory_mask: :math:`(T, S)`
-            Note: The maksed positions are filled with float('-inf'). 
+            Note: The maksed positions are filled with float('-inf').
                   Unmasked positions are filled with float(0.0). Masks ensure that the predictions 
                   for position i depend only on the information before position i.
 
-            output: :math:`(T, N, E)` 
-            Note: Due to the multi-head attention architecture in the transformer model, 
+            output: :math:`(T, N, E)`
+            Note: Due to the multi-head attention architecture in the transformer model,
                   the output sequence length of a transformer is same as the input sequence
-                  (i.e. target) length of the decode. 
+                  (i.e. target) length of the decode.
 
             where S is the source sequence length, T is the target sequence length,
             N is the batch size, E is the feature number
@@ -100,7 +103,7 @@ class Transformer(Module):
         """
         mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-        return mask    
+        return mask
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
@@ -114,7 +117,7 @@ class TransformerEncoder(Module):
     r"""TransformerEncoder is a stack of N encoder layers
 
     Args:
-        encoder_layer: an instance of the TransformerEncoderLayer() class (required). 
+        encoder_layer: an instance of the TransformerEncoderLayer() class (required).
         num_layers: the number of sub-encoder-layers in the encoder (required).
         norm: the layer normalization component (optional).
 
@@ -153,7 +156,7 @@ class TransformerDecoder(Module):
     r"""TransformerDecoder is a stack of N decoder layers
 
     Args:
-        decoder_layer: an instance of the TransformerDecoderLayer() class (required). 
+        decoder_layer: an instance of the TransformerDecoderLayer() class (required).
         num_layers: the number of sub-decoder-layers in the decoder (required).
         norm: the layer normalization component (optional).
 
@@ -191,6 +194,8 @@ class TransformerDecoder(Module):
 
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
+        This standard encoder layer is based on the paper "Attention Is All You Need".
+        Users may modify or implement in a different way during application.
 
     Args:
         d_model: the number of expected features in the input (required).
@@ -235,7 +240,9 @@ class TransformerEncoderLayer(Module):
 
 class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
-
+        This standard decoder layer is based on the paper "Attention Is All You Need".
+        Users may modify or implement in a different way during application.
+        
     Args:
         d_model: the number of expected features in the input (required).
         nhead: the number of heads in the multiheadattention models (required).
@@ -280,7 +287,7 @@ class TransformerDecoderLayer(Module):
         tgt = tgt + self.dropout2(self.multihead_attn(tgt2, memory, memory, attn_mask=memory_mask)[0])
         tgt2 = self.norm3(tgt)
         tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt2))))
-        tgt = tgt + self.dropout3(tgt2)        
+        tgt = tgt + self.dropout3(tgt2)
         return tgt
 
 
