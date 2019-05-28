@@ -221,8 +221,12 @@ include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
-set(TORCH_DEFAULT_VERSION "1.0.0")
+set(TORCH_DEFAULT_VERSION "1.1.0")
 set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}" CACHE STRING "Torch build version")
+if (DEFINED ENV{PYTORCH_BUILD_VERSION})
+  set(TORCH_BUILD_VERSION "$ENV{PYTORCH_BUILD_VERSION}"
+    CACHE STRING "Torch build version" FORCE)
+endif()
 if (NOT TORCH_BUILD_VERSION)
   # An empty string was specified so force version to the default
   set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}"

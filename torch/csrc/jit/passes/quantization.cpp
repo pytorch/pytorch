@@ -31,7 +31,7 @@ int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
 }
 
 Value* getScaleValue(Node* n) {
-  if (n->kind().toQualString() != std::string("aten::dequantize_linear")) {
+  if (n->kind().toQualString() != std::string("aten::_dequantize_linear")) {
     return nullptr;
   }
   TORCH_CHECK(n->inputs().size() == 4);
@@ -142,7 +142,7 @@ Node* createQuantNode(Value* v, Graph* g) {
 // Create Dequant node
 Node* createDeQuantNode(Value* v, Graph* g) {
   Node* dequant =
-      g->create(at::Symbol::fromQualString("aten::dequantize_linear"));
+      g->create(at::Symbol::fromQualString("aten::_dequantize_linear"));
   TORCH_INTERNAL_ASSERT(dequant != nullptr, "Failed to create dequant node");
   dequant->output()->setUniqueName(v->uniqueName() + ".dequant");
   return dequant;

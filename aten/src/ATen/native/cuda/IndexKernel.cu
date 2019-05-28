@@ -28,13 +28,6 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     return;
   }
 
-  if (!iter.can_use_32bit_indexing()) {
-    for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_index_kernel(sub_iter, index_size, index_stride, f);
-    }
-    return;
-  }
-
   auto sizes = cuda::Array<int64_t, 25>(0);
   auto strides = cuda::Array<int64_t, 25>(0);
   auto index_ptrs = cuda::Array<char*, 25>(nullptr);
