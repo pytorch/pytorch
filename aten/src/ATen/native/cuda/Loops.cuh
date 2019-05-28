@@ -62,7 +62,6 @@ static OffsetCalculator<N> make_offset_calculator(const TensorIterator& iter) {
 
 template<int nt, int vt, typename func_t>
 static void launch_kernel(int64_t N, const func_t& f) {
-  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }
