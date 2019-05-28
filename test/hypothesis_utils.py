@@ -84,8 +84,8 @@ Example:
     @given(Q = qtensor(shapes=array_shapes(min_dims=3, max_dims=4))
     some_test(self, Q):...
 """
-@st.defines_strategy
-def array_shapes(min_dims=1, max_dims=None, min_side=1, max_side=None):
+@st.composite
+def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None):
     """Return a strategy for array shapes (tuples of int >= 1)."""
     assert(min_dims < 32)
     if max_dims is None:
@@ -93,6 +93,6 @@ def array_shapes(min_dims=1, max_dims=None, min_side=1, max_side=None):
     assert(max_dims < 32)
     if max_side is None:
         max_side = min_side + 5
-    return st.lists(
+    return draw(st.lists(
         st.integers(min_side, max_side), min_size=min_dims, max_size=max_dims
-    ).map(tuple)
+    ).map(tuple))
