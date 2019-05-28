@@ -3568,6 +3568,7 @@ among all drawn elements. The resulting tensor has size given by :attr:`size`.
 Args:
     mean (float): the mean for all distributions
     std (float): the standard deviation for all distributions
+    size (int...): a sequence of integers defining the shape of the output tensor.
     out (Tensor, optional): the output tensor
 
 Example::
