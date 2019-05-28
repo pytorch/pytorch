@@ -372,7 +372,7 @@ class JitTestCase(TestCase):
                     main_module_code += line.decode()
             except RuntimeError as e:
                 se = str(e)
-                if "could not export python function" not in se and \
+                if "Could not export Python function" not in se and \
                    "closures are not exportable" not in se:
                     raise
                 else:
