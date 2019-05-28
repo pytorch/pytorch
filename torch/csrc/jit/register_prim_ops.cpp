@@ -1083,6 +1083,20 @@ RegisterOperators logging_operators(
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
       DEFINE_INT_FLOAT_OP(aten_op, op, bool), DEFINE_STR_CMP_OP(aten_op, op)
 
+#define DEFINE_UNARY_OP(aten_op, op, int_result, float_result)            \
+  Operator(#aten_op "(int a) -> " #int_result, [](Stack& stack) {         \
+    int64_t a;                                                            \
+    pop(stack, a);                                                        \
+    push(stack, op);                                                      \
+    return 0;                                                             \
+  }),                                                                     \
+  Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) {     \
+    double a;                                                             \
+    pop(stack, a);                                                        \
+    push(stack, op);                                                      \
+    return 0;                                                             \
+  })
+
 #define DEFINE_BOOL_OP(aten_op, op)                                \
   Operator(#aten_op "(bool a, bool b) -> bool", [](Stack& stack) { \
     bool a, b;                                                     \
@@ -2070,6 +2084,14 @@ RegisterOperators reg2({
         float),
     DEFINE_INT_FLOAT_OP(aten::floordiv, std::floor(a / b), float),
 
+    // NB: This is the python truediv operation
+    DEFINE_GENERIC_OP(
+        aten::div,
+        static_cast<double>(a) / static_cast<double>(b),
+        a / b,
+        float,
+        float),
+
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
 
@@ -2077,149 +2099,22 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
 
-    Operator(
-        "prim::abs(int x) -> int",
-        [](Stack& stack) {
-          int64_t x;
-          pop(stack, x);
-          push(stack, std::abs(x));
-          return 0;
-        }),
-    Operator(
-        "prim::abs(float x) -> float",
-        [](Stack& stack) {
-          float x;
-          pop(stack, x);
-          push(stack, std::abs(x));
-          return 0;
-        }),
+    DEFINE_UNARY_OP(aten::floor, std::floor(a), float, float),
+    DEFINE_UNARY_OP(aten::ceil, std::ceil(a), float, float),
+    DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
+    DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
+    DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
+    DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
+    DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
+
+    // TODO: move abs to aten namespace because it's schematized!
+    DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),
     Operator(
         "prim::abs(Tensor x) -> Tensor",
         [](Stack& stack) {
           at::Tensor x;
           pop(stack, x);
           push(stack, x.abs());
-          return 0;
-        }),
-
-    // NB: This is the python truediv operation
-    Operator(
-        "aten::div(int a, int b) -> float",
-        [](Stack& stack) {
-          int64_t a, b;
-          pop(stack, a, b);
-          push(stack, static_cast<double>(a) / static_cast<double>(b));
-          return 0;
-        }),
-    Operator(
-        "aten::div(float a, float b) -> float",
-        [](Stack& stack) {
-          double a, b;
-          pop(stack, a, b);
-          push(stack, a / b);
-          return 0;
-        }),
-
-    Operator(
-        "aten::floor(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::floor(a));
-          return 0;
-        }),
-
-    Operator(
-        "aten::ceil(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::ceil(a));
-          return 0;
-        }),
-
-    Operator(
-        "aten::log(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::log(a));
-          return 0;
-        }),
-    Operator(
-        "aten::log(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::log(a));
-          return 0;
-        }),
-
-    Operator(
-        "aten::log1p(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::log1p(a));
-          return 0;
-        }),
-    Operator(
-        "aten::log1p(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::log1p(a));
-          return 0;
-        }),
-
-    Operator(
-        "aten::log10(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::log10(a));
-          return 0;
-        }),
-    Operator(
-        "aten::log10(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::log10(a));
-          return 0;
-        }),
-
-    Operator(
-        "aten::exp(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::exp(a));
-          return 0;
-        }),
-    Operator(
-        "aten::exp(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::exp(a));
-          return 0;
-        }),
-
-    Operator(
-        "aten::sqrt(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::sqrt(a));
-          return 0;
-        }),
-    Operator(
-        "aten::sqrt(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::sqrt(a));
           return 0;
         }),
 
@@ -2233,28 +2128,12 @@ RegisterOperators reg2({
         float),
     DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a, b), float),
 
-#define DEFINE_MATH_OP(aten_op, op, int_result, float_result)             \
-  Operator(                                                               \
-      #aten_op "(int a) -> " #int_result,                                 \
-      [](Stack& stack) {                                                  \
-        int64_t a;                                                        \
-        pop(stack, a);                                                    \
-        push(stack, op);                                                  \
-        return 0;                                                         \
-      }),                                                                 \
-      Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) { \
-        double a;                                                         \
-        pop(stack, a);                                                    \
-        push(stack, op);                                                  \
-        return 0;                                                         \
-      })
-
-    DEFINE_MATH_OP(aten::gamma, std::tgamma(a), float, float),
-    DEFINE_MATH_OP(aten::erf, std::erf(a), float, float),
-    DEFINE_MATH_OP(aten::erfc, std::erfc(a), float, float),
-    DEFINE_MATH_OP(aten::expm1, std::expm1(a), float, float),
-    DEFINE_MATH_OP(aten::fabs, std::fabs(a), float, float),
-    DEFINE_MATH_OP(aten::lgamma, std::lgamma(a), float, float),
+    DEFINE_UNARY_OP(aten::gamma, std::tgamma(a), float, float),
+    DEFINE_UNARY_OP(aten::erf, std::erf(a), float, float),
+    DEFINE_UNARY_OP(aten::erfc, std::erfc(a), float, float),
+    DEFINE_UNARY_OP(aten::expm1, std::expm1(a), float, float),
+    DEFINE_UNARY_OP(aten::fabs, std::fabs(a), float, float),
+    DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
@@ -2266,18 +2145,7 @@ RegisterOperators reg2({
     DEFINE_BOOL_OP(aten::__or__, a || b),
     DEFINE_BOOL_OP(aten::__xor__, a != b),
 
-    Operator(
-        "aten::neg(int self) -> int",
-        [](Stack& stack) {
-          push(stack, -pop(stack).toInt());
-          return 0;
-        }),
-    Operator(
-        "aten::neg(float self) -> float",
-        [](Stack& stack) {
-          push(stack, -pop(stack).toDouble());
-          return 0;
-        }),
+    DEFINE_UNARY_OP(aten::neg, -a, int, float),
     Operator(
         "aten::__not__(bool self) -> bool",
         [](Stack& stack) {
