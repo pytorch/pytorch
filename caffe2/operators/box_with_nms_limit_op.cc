@@ -131,7 +131,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     // Limit to max_per_image detections *over all classes*
     if (detections_per_im_ > 0 && total_keep_count > detections_per_im_) {
       // merge all scores (represented by indices) together and sort
-      auto get_all_scores_sorted = [&scores, &keeps, total_keep_count]() {
+      auto get_all_scores_sorted = [&]() {
         // flatten keeps[i][j] to [pair(i, keeps[i][j]), ...]
         // first: class index (1 ~ keeps.size() - 1),
         // second: values in keeps[first]
@@ -139,19 +139,19 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
         vector<KeepIndex> ret(total_keep_count);
 
         int ret_idx = 0;
-        for (int i = 1; i < keeps.size(); i++) {
-          auto& cur_keep = keeps[i];
+        for (int j = 1; j < num_classes; j++) {
+          auto& cur_keep = keeps[j];
           for (auto& ckv : cur_keep) {
-            ret[ret_idx++] = {i, ckv};
+            ret[ret_idx++] = {j, ckv};
           }
         }
 
         std::sort(
             ret.data(),
             ret.data() + ret.size(),
-            [&scores](const KeepIndex& lhs, const KeepIndex& rhs) {
-              return scores(lhs.second, lhs.first) >
-                  scores(rhs.second, rhs.first);
+            [this, &scores](const KeepIndex& lhs, const KeepIndex& rhs) {
+              return scores(lhs.second, this->get_score_cls_index(lhs.first)) >
+                  scores(rhs.second, this->get_score_cls_index(rhs.first));
             });
 
         return ret;

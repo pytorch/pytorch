@@ -665,29 +665,6 @@ THC_API void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
                   int adjW, int adjH,
                   accreal scale);
 
-THC_API void THNN_(SpatialDilatedMaxPooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCIndexTensor *indices,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  int dilationW, int dilationH,
-                  bool ceil_mode);
-
-THC_API void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCIndexTensor *indices,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  int dilationW, int dilationH,
-                  bool ceil_mode);
-
 THC_API void THNN_(SpatialFullConvolution_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -727,26 +704,20 @@ THC_API void THNN_(SpatialFullConvolution_accGradParameters)(
                   int adjW, int adjH,
                   accreal scale);
 
-THC_API void THNN_(SpatialMaxPooling_updateOutput)(
+THC_API void THNN_(SpatialMaxUnpooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
                   THCIndexTensor *indices,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  bool ceil_mode);
+                  int owidth, int oheight);
 
-THC_API void THNN_(SpatialMaxPooling_updateGradInput)(
+THC_API void THNN_(SpatialMaxUnpooling_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCIndexTensor *indices,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  bool ceil_mode);
+                  int owidth, int oheight);
 
 THC_API void THNN_(SpatialSubSampling_updateOutput)(
                   THCState *state,
