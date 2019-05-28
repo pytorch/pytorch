@@ -1577,6 +1577,44 @@ struct to_ir {
     emitLoopCommon(range, body, assigner, {}, count);
   }
 
+  void emitEnumerateForLoop(
+      const For& stmt,
+      const std::shared_ptr<torch::jit::script::SimpleValue>& siv1,
+      const Expr& var1,
+      const Expr& var2) {
+    auto body = stmt.body();
+    auto& range = stmt.range();
+
+    auto listArg1 = siv1->asValue(range, method);
+
+    auto count = emitBuiltinCall(
+        range,
+        *graph,
+        aten::len,
+        c10::nullopt,
+        {listArg1},
+        {},
+        /*required=*/true);
+
+    const auto& var1_name = Var(var1).name().name();
+    const auto& var2_name = Var(var2).name().name();
+    auto assigner = [var1_name, var2_name, range, listArg1, this](
+                        Value* index, std::shared_ptr<Environment> env) {
+      env->setVar(range, var1_name, index);
+      auto list1_elem = emitBuiltinCall(
+          range,
+          *this->graph,
+          aten::select,
+          c10::nullopt,
+          {listArg1, index},
+          {},
+          /*required=*/true);
+      env->setVar(range, var2_name, list1_elem);
+    };
+
+    emitLoopCommon(range, body, assigner, {}, count);
+  }
+
   bool isMethod(const Expr& expr, const std::string& name) {
     if (expr.kind() == TK_APPLY) {
       Apply range_iterator = Apply(expr);
@@ -1622,6 +1660,20 @@ struct to_ir {
           if (siv1 && siv1->getValue()->type()->kind() == TypeKind::ListType &&
               siv2 && siv2->getValue()->type()->kind() == TypeKind::ListType) {
             emitForZipLoop(stmt, siv1, siv2, tl.inputs()[0], tl.inputs()[1]);
+            return;
+          }
+        }
+
+        if (isMethod(itrs[0], "enumerate")) {
+          auto range_iterator = Apply(itrs[0]);
+          TORCH_INTERNAL_ASSERT(
+              range_iterator.inputs().size() == 1,
+              "enumerate takes only one argument");
+
+          auto sv1 = emitSugaredExpr(range_iterator.inputs()[0], 1);
+          auto siv1 = std::dynamic_pointer_cast<SimpleValue>(sv1);
+          if (siv1 && siv1->getValue()->type()->kind() == TypeKind::ListType) {
+            emitEnumerateForLoop(stmt, siv1, tl.inputs()[0], tl.inputs()[1]);
             return;
           }
         }
