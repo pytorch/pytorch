@@ -1,11 +1,10 @@
+#include <ATen/native/Lerp.h>
+
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 
 namespace {
 template <typename scalar_t>
@@ -19,24 +18,6 @@ void lerp_cpu(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, co
         ret_val = (weight_val < 0.5) ?
             self_val + weight_val * (end_val - self_val) : end_val - (end_val - self_val) * (1 - weight_val);
       });
-}
-
-template <typename scalar_t>
-void lerp_cpu(
-    at::Tensor& ret,
-    const at::Tensor& self,
-    const at::Tensor& end,
-    scalar_t weight_val) {
-  auto builder = at::TensorIterator::Builder();
-  builder.add_output(ret);
-  builder.add_input(self);
-  builder.add_input(end);
-  auto iter = builder.build();
-  at::native::binary_kernel(*iter, [=](scalar_t self_val, scalar_t end_val) {
-    return (weight_val < 0.5)
-        ? self_val + weight_val * (end_val - self_val)
-        : end_val - (end_val - self_val) * (1 - weight_val);
-  });
 }
 } // namespace
 
@@ -61,9 +42,7 @@ Tensor& lerp_cpu_scalar_out(Tensor& result, const Tensor& self,
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_out_cpu");
   result.resize_as_(b_self);
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp_out_cpu", [&]{
-    lerp_cpu<scalar_t>(result, b_self, b_end, weight.to<scalar_t>());
-  });
+  lerp_stub(kCPU, result, b_self, b_end, weight);
   return result;
 }
 
@@ -87,9 +66,7 @@ Tensor& lerp_cpu_scalar_(Tensor& self, const Tensor& end, Scalar weight) {
   TORCH_CHECK(b_self.sizes() == self.sizes(),
            "output with shape ", self.sizes(),
            " doesn't match the broadcast shape ", b_self.sizes());
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp__cpu", [&]{
-    lerp_cpu<scalar_t>(self, b_self, b_end, weight.to<scalar_t>());
-  });
+  lerp_stub(kCPU, self, b_self, b_end, weight);
   return self;
 }
 
@@ -109,11 +86,11 @@ Tensor lerp_cpu_scalar(const Tensor& self, const Tensor& end, Scalar weight) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_cpu");
   Tensor result = at::empty_like(b_self);
-  AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "lerp_cpu", [&]{
-    lerp_cpu<scalar_t>(result, b_self, b_end, weight.to<scalar_t>());
-  });
+  lerp_stub(kCPU, result, b_self, b_end, weight);
   return result;
 }
+
+DEFINE_DISPATCH(lerp_stub);
 
 } // namespace native
 } // namespace at
