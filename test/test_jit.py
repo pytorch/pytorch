@@ -6009,7 +6009,11 @@ a")
             # type: (int, int) -> int
             return math.gcd(x, y)
 
-        for inputs in [(2, 4), (-5, -15), (-5, 15), (10, 0), (0, 10), (-5, 0), (0, -5), (0, 0), (0, -0)]:
+        max_int = 2147483647
+        min_int = -2147483647 - 1
+        int_vals = list(range(-5, 5, 1)) + [max_int + 5, max_int * 2, min_int - 5, min_int * 2]
+        vals = [(i, j) for i in int_vals for j in int_vals]
+        for inputs in vals:
             self.checkScript(test_gcd, inputs)
 
     def test_math_ops1(self):
