@@ -87,6 +87,18 @@ static inline bool is_reduction(char** data, const int64_t* strides) {
   const char* in2_ptr = data[2]; \
   int64_t s0 = strides[0], s1 = strides[1], s2 = strides[2];
 
+#define TERNARY_LOOP_HEADER(func_t, data, strides) \
+  using traits = ternary_function_traits<func_t>; \
+  using arg0_t = typename traits::result_type; \
+  using arg1_t = typename traits::arg1_t; \
+  using arg2_t = typename traits::arg2_t; \
+  using arg3_t = typename traits::arg3_t; \
+  char* out_ptr = data[0]; \
+  const char* in1_ptr = data[1]; \
+  const char* in2_ptr = data[2]; \
+  const char* in3_ptr = data[3]; \
+  int64_t s0 = strides[0], s1 = strides[1], s2 = strides[2], s3 = strides[3];
+
 #define VEC_HEADER(func_t) \
   using traits = binary_function_traits<func_t>; \
   using scalar_t = typename traits::result_type; \
@@ -210,6 +222,21 @@ static inline void binary_loop(char** data, const int64_t* strides, int64_t i, i
     *(arg0_t*)(out_ptr + i * s0) = out;
   }
 }
+
+// Basic loop ternary operation (three inputs, one output). May be auto-vectorized
+// by the compiler.
+template <typename func_t>
+static inline void ternary_loop(char** data, const int64_t* strides, int64_t i, int64_t n, func_t op) {
+  TERNARY_LOOP_HEADER(func_t, data, strides)
+  for (; i < n; i++) {
+    arg1_t in1 = *(arg1_t*)(in1_ptr + i * s1);
+    arg2_t in2 = *(arg2_t*)(in2_ptr + i * s2);
+    arg3_t in3 = *(arg3_t*)(in3_ptr + i * s3);
+    arg0_t out = op(in1, in2, in3);
+    *(arg0_t*)(out_ptr + i * s0) = out;
+  }
+}
+
 
 // computes out = op(in1, in2)
 template <typename func_t, typename vec_func_t>
@@ -416,6 +443,24 @@ void binary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
       vectorized_binary_loop_s2(data, n, op, vop);
     } else {
       binary_loop(data, strides, 0, n, op);
+    }
+  });
+}
+
+template <typename func_t>
+void ternary_kernel(TensorIterator& iter, func_t op) {
+  using traits = ternary_function_traits<func_t>;
+
+  iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
+    // Specializations to encourage auto-vectorization (trick from Numpy's loops.c.src)
+    if (is_binary_contiguous<traits>(strides)) {
+      ternary_loop(data, strides, 0, n, op);
+    } else if (is_binary_contiguous_s1<traits>(strides)) {
+      ternary_loop(data, strides, 0, n, op);
+    } else if (is_binary_contiguous_s2<traits>(strides)) {
+      ternary_loop(data, strides, 0, n, op);
+    } else {
+      ternary_loop(data, strides, 0, n, op);
     }
   });
 }
