@@ -187,15 +187,14 @@ class QMaxPool2D_arr_args final : public c10::OperatorKernel {
   }
 };
 
-static auto registry = c10::RegisterOperators()
-.op("quantized::max_pool2d(Tensor qx, "
-                          "int[] kernel_size, "
-                          "int[] stride, "
-                          "int[] dilation, "
-                          "int[] padding) -> Tensor",
-    c10::RegisterOperators::options()
-      .kernel<QMaxPool2D_arr_args>()
-      .dispatchKey(QuantizedCPUTensorId()));
+static auto registry = c10::RegisterOperators().op(
+  "quantized::max_pool2d(Tensor qx, "
+                        "int[] kernel_size, "
+                        "int[] stride, "
+                        "int[] dilation, "
+                        "int[] padding) -> Tensor",
+  c10::RegisterOperators::options()
+    .kernel<QMaxPool2D_arr_args>(QuantizedCPUTensorId()));
 
 }  // namespace
 }}  // namespace at::native

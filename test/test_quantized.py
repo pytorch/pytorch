@@ -9,8 +9,8 @@ import torch.nn.functional as F
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
+from hypothesis_utils import qtensor, array_shapes
 
-from common_utils import qtensor, array_shapes
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests
 from common_utils import skipIfNotRegistered
 

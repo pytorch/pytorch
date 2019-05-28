@@ -9,8 +9,11 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
   - attach_workspace:
       at: ~/workspace
+  - run:
+      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
   - checkout
@@ -57,11 +60,13 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
   - attach_workspace:
       at: ~/workspace
   - run:
+      <<: *should_run_job
+  - run:
       <<: *setup_linux_system_environment
-  - checkout
   - run:
       <<: *setup_ci_environment
   - run:
@@ -95,8 +100,11 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
   - attach_workspace:
       at: ~/workspace
+  - run:
+      <<: *should_run_job
   - run:
       <<: *setup_linux_system_environment
   - checkout
@@ -156,10 +164,13 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   machine:
     image: ubuntu-1604:201903-01
   steps:
+  # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
   - attach_workspace:
       at: ~/workspace
   - run:
       <<: *setup_linux_system_environment
+  - run:
+      <<: *should_run_job
   - run:
       <<: *setup_ci_environment
   - run:

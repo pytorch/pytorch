@@ -49,6 +49,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       input_size_(operator_def.input_size()),
       event_(caffe2::make_unique<Event>(device_option_)) {
   static GlobalInitIsCalledGuard guard;
+  inputs_.reserve(operator_def.input_size());
   for (const string& input_str : operator_def.input()) {
     auto* blob = ws->GetBlob(input_str);
     CAFFE_ENFORCE(
@@ -62,6 +63,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 
   GetOperatorLogger()(operator_def);
 
+  outputs_.reserve(operator_def.output_size());
   for (const string& output_str : operator_def.output()) {
     outputs_.push_back(CHECK_NOTNULL(ws->CreateBlob(output_str)));
   }
@@ -115,6 +117,9 @@ OperatorBase::OperatorBase(
 #endif
 
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
+  CAFFE_ENFORCE(
+      isLegacyOperator(),
+      "InputTensorShapes() not supported for operators exported to c10.");
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
     tps.push_back(GetTensorShapeOfBlob(blob));
