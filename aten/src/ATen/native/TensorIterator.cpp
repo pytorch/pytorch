@@ -66,22 +66,46 @@ void TensorIterator::reorder_dimensions() {
 }
 
 template <typename F>
-static std::tuple<ScalarType, Backend>
+static std::tuple<Device, ScalarType>
 compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
-  auto result_type = ScalarType::Undefined;
-  auto backend = Backend::Undefined;
+  Device device = kCPU;
+  ScalarType dtype = ScalarType::Undefined;
   for (auto& op : operands) {
     if (!op.tensor.defined()) continue;
     if (!predicate(op.tensor)) continue;
-    auto dtype = op.tensor.scalar_type();;
-    result_type = (result_type == ScalarType::Undefined
-        ? dtype
-        : promoteTypes(result_type, dtype));
-    backend = (backend == Backend::Undefined
-        ? op.tensor.type().backend()
-        : backend);
+    auto tensor_dtype = op.tensor.scalar_type();
+    if (dtype == ScalarType::Undefined) {
+      dtype = tensor_dtype;
+      device = op.tensor.device();
+    } else {
+      dtype = promoteTypes(dtype, tensor_dtype);
+    }
   }
-  return std::make_tuple(result_type, backend);
+  return std::make_tuple(device, dtype);
+}
+
+template <typename F, typename... Preds>
+static std::tuple<Device, ScalarType>
+compute_result_type(at::ArrayRef<OperandInfo> operands,
+                    const F& first_predicate,
+                    Preds... predicates) {
+  auto result_type = compute_result_type(operands, first_predicate);
+  if (std::get<1>(result_type) != ScalarType::Undefined) {
+    return result_type;
+  }
+  return compute_result_type(operands, predicates...);
+}
+
+std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
+  // See [Result type computation] in TensorIterator.h
+  auto result_type =
+      compute_result_type(operands_,
+        [](const Tensor& t) { return t.dim() > 0; },
+        [](const Tensor& t) { return !t.unsafeGetTensorImpl()->is_wrapped_number(); },
+        [](const Tensor& t) { return true; });
+
+  TORCH_INTERNAL_ASSERT(std::get<1>(result_type) != ScalarType::Undefined);
+  return result_type;
 }
 
 void TensorIterator::compute_types() {
@@ -93,68 +117,53 @@ void TensorIterator::compute_types() {
   }
 
   if (missing_dtypes || compute_common_dtype_) {
-    ScalarType common_dtype;
-    Backend common_backend;
-    std::tie(common_backend, common_dtype) = compute_common_type();
+    auto common_type = compute_common_type();
+    auto common_device = std::get<0>(common_type);
+    auto common_dtype = std::get<1>(common_type);
     for (auto& op : operands_) {
       if (!op.is_type_defined()) {
-        op.set_type(common_backend, common_dtype);
-      } else if (compute_common_dtype_ && !op.is_type_equal(common_backend, common_dtype)) {
+        op.device = common_device;
+        op.dtype = common_dtype;
+      } else if (compute_common_dtype_ &&
+                 (op.device != common_device || op.dtype != common_dtype)) {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
-            common_backend == Backend::CUDA && op.tensor.type().backend() == Backend::CPU) {
+            op.device.is_cuda() && op.tensor.device().is_cpu()) {
           // don't cast CPU scalars in CUDA ops that directly support them
-          op.set_type(op.tensor.type().backend(), op.tensor.scalar_type());
+          op.device = op.tensor.device();
+          op.dtype = op.tensor.scalar_type();
         } else if (promote_gpu_output_dtypes_ && op.tensor.defined() &&
-            !op.is_output && op.tensor.scalar_type() == kHalf &&
-            common_dtype == kFloat && common_backend == Backend::CUDA &&
-            op.tensor.type().backend() == Backend::CUDA) {
+            !op.is_output &&
+            op.tensor.scalar_type() == kHalf && common_dtype == kFloat &&
+            op.tensor.device().is_cuda() && common_device.is_cuda()) {
           // allow input tensor type upcasting for fp16 to fp32 in fused kernel
           // on GPU
-          op.set_type(op.tensor.type().backend(), op.tensor.scalar_type());
+          op.device = op.tensor.device();
+          op.dtype = op.tensor.scalar_type();
         } else {
-          op.set_type(common_backend, common_dtype);
+          op.device = common_device;
+          op.dtype = common_dtype;
         }
       }
     }
   }
 
   for (auto& op : operands_) {
-    if (op.tensor.defined() && !op.is_type_equal(op.tensor.type().backend(), op.tensor.scalar_type())) {
+    auto& tensor = op.tensor;
+    if (!tensor.defined()) {
+      continue;
+    }
+    if (op.device != tensor.device() || op.dtype != tensor.scalar_type()) {
       if (op.is_output) {
-        AT_ERROR("output with backend ", toString(op.tensor.type().backend()), " and dtype ", toString(op.tensor.scalar_type()),
-                 " doesn't match the desired backend ", toString(op.backend), " and dtype ", toString(op.dtype));
-      } else if (op.tensor.dim() == 0) {
-        op.tensor = op.tensor.to(op.options());
+        AT_ERROR("output with device ", tensor.device(), " and dtype ", tensor.scalar_type(),
+                 " doesn't match the desired device ", op.device, " and dtype ", op.dtype);
+      } else if (tensor.dim() == 0) {
+        tensor = tensor.to(op.options());
       } else {
-        AT_ERROR("expected backend ", toString(op.backend), " and dtype ", toString(op.dtype),
-                 " but got backend ", toString(op.tensor.type().backend()), " and dtype ", toString(op.tensor.scalar_type()));
+        AT_ERROR("expected device ", op.device, " and dtype ", op.dtype,
+                 " but got device ", tensor.device(), " and dtype ", tensor.scalar_type());
       }
     }
   }
-}
-
-std::pair<Backend, ScalarType> TensorIterator::compute_common_type() {
-  // See [Result type computation] in TensorIterator.h
-  auto result_type = ScalarType::Undefined;
-  auto backend = Backend::Undefined;
-  std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
-    return t.dim() > 0;
-  });
-  if (result_type == ScalarType::Undefined) {
-    std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
-      return !t.unsafeGetTensorImpl()->is_wrapped_number();
-    });
-  }
-  if (result_type == ScalarType::Undefined) {
-    std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
-      return true;
-    });
-  }
-
-  AT_ASSERT(result_type != ScalarType::Undefined);
-  AT_ASSERT(backend != Backend::Undefined);
-
-  return std::make_pair(backend, result_type);
 }
 
 DimVector TensorIterator::compatible_stride(int element_size) const {
@@ -170,7 +179,7 @@ DimVector TensorIterator::compatible_stride(int element_size) const {
 DimVector TensorIterator::invert_perm(IntArrayRef input) const {
   // Invert the permutation caused by reorder_dimensions. This is not valid
   // after coalesce_dimensions is called.
-  AT_ASSERT(!has_coalesced_dimensions_);
+  TORCH_INTERNAL_ASSERT(!has_coalesced_dimensions_);
   auto res = DimVector(input.size(), 0);
   for (int dim = 0; dim < ndim(); dim++) {
     res[perm_[dim]] = input[dim];
@@ -182,7 +191,7 @@ void TensorIterator::allocate_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     auto& op = operands_[i];
     if (!op.tensor.defined()) {
-      AT_ASSERTM(op.is_type_defined(), "no type for operand", i);
+      TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
       int element_size = elementSize(op.dtype);
       op.stride_bytes = compatible_stride(element_size);
 
@@ -437,7 +446,7 @@ bool TensorIterator::is_scalar(int arg) const {
 }
 
 bool TensorIterator::is_cpu_scalar(int arg) const {
-  return is_scalar(arg) && device_type(arg) == kCPU;
+  return is_scalar(arg) && device(arg).is_cpu();
 }
 
 void* TensorIterator::data_ptr(int arg) const {
@@ -484,11 +493,6 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 
 std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   auto builder = TensorIterator::Builder();
-  if (a.device().is_cuda() && b.device().is_cuda()) {
-    TORCH_CHECK(a.device() == b.device(),
-      "binary_op(): expected both inputs to be on same device, but input a "
-      "is on ", a.device(), " and input b is on ", b.device());
-  }
   builder.add_output(out);
   builder.add_input(a);
   builder.add_input(b);
@@ -687,7 +691,7 @@ std::unique_ptr<TensorIterator> TensorIterator::Builder::build() {
   iter_->compute_strides();
   // re-order dimensions to improve coalescing
   iter_->reorder_dimensions();
-  // compute the result dtype and backend
+  // compute the result dtype and device
   iter_->compute_types();
   // allocate the output tensor if it's not provided
   iter_->allocate_outputs();

@@ -94,6 +94,11 @@ inline TypedIValue toTypedIValue(py::handle input) {
     if (ten.is_sparse()) {
       AT_ERROR("sparse tensors not supported");
     }
+    if (ten.is_mkldnn()) {
+      // mkldnn tensor as opaque tensor doesn't have strides, so we can
+      // not create a CompleteTensorType
+      return TypedIValue(ten, DimensionedTensorType::create(ten));
+    }
     return TypedIValue(ten, CompleteTensorType::create(ten));
   } else if (six::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
@@ -110,7 +115,7 @@ inline TypedIValue toTypedIValue(py::handle input) {
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
-    c10::impl::GenericDict elems;
+    c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
 
     size_t len = py::len(dict);
     if (!len) {
@@ -200,7 +205,7 @@ inline IValue createGenericDict(
     py::handle obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
-  c10::impl::GenericDict elems;
+  c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
   elems.reserve(py::len(obj));
   for (auto key : obj) {
     elems.insert(

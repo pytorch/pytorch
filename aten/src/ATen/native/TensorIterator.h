@@ -67,12 +67,16 @@ struct DimCounter {
 
 struct CAFFE2_API OperandInfo {
   OperandInfo() {}
-  explicit OperandInfo(const Tensor& t, const Backend backend=Backend::Undefined, const ScalarType dtype=ScalarType::Undefined)
-    : tensor(t), backend(backend), dtype(dtype) {
-      if (t.defined() && (backend == Backend::Undefined || dtype == ScalarType::Undefined)) {
-        this->backend = t.type().backend();
-        this->dtype = t.scalar_type();
-      }
+  explicit OperandInfo(const Tensor& t) : tensor(t) {
+    if (t.defined()) {
+      device = t.device();
+      dtype = t.scalar_type();
+    }
+    validate();
+  }
+  OperandInfo(const Tensor& t, Device device, ScalarType dtype)
+    : tensor(t), device(device), dtype(dtype) {
+    validate();
   }
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
@@ -83,28 +87,16 @@ struct CAFFE2_API OperandInfo {
   /// coalescing.
   Tensor tensor;
 
-  /// The desired type for the operand. For inputs, this specifies that the
-  /// input should be converted to this type if necessary. For outputs, this
+  /// The desired device and type for the operand. For inputs, this specifies that
+  /// the input should be converted to this type if necessary. For outputs, this
   /// specifies which type to allocate. Note that there is very limited support
   /// for type conversions currently: they are only allowed for zero-dim tensors.
-  Backend backend = Backend::Undefined;
+  Device device = kCPU;
   ScalarType dtype = ScalarType::Undefined;
 
-  bool is_type_defined() {
-    return dtype != ScalarType::Undefined && backend != Backend::Undefined;
-  }
-
-  bool is_type_equal(Backend b, ScalarType s) {
-    return dtype == s && backend == b;
-  }
-
-  void set_type(Backend b, ScalarType s) {
-    dtype = s;
-    backend = b;
-  }
-
-  TensorOptions options() {
-    return TensorOptions(backendToDeviceType(backend)).dtype(dtype);
+  bool is_type_defined() const { return dtype != ScalarType::Undefined; }
+  TensorOptions options() const {
+    return TensorOptions(dtype).device(device);
   }
 
   /// The data pointer. This may be different from tensor.data_ptr() if the
@@ -114,6 +106,12 @@ struct CAFFE2_API OperandInfo {
   bool is_output = false;
 
   bool is_read_write = false;
+
+  void validate() {
+    TORCH_CHECK(
+        !tensor.defined() || tensor.layout() == kStrided,
+        "unsupported tensor layout: ", tensor.layout());
+  }
 };
 
 struct SplitUntil32Bit;
@@ -175,8 +173,8 @@ struct CAFFE2_API TensorIterator {
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
   ScalarType dtype(int arg=0) const { return operands_[arg].dtype; }
-  DeviceType device_type(int arg=0) const { return backendToDeviceType(operands_[arg].backend); }
-  Device device(int arg=0) const { return operands_[arg].tensor.device(); }
+  Device device(int arg=0) const { return operands_[arg].device; }
+  DeviceType device_type(int arg=0) const { return device(arg).type(); }
   int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
@@ -265,7 +263,7 @@ protected:
   void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);
   void compute_types();
-  std::pair<Backend, ScalarType> compute_common_type();
+  std::tuple<Device, ScalarType> compute_common_type();
   void allocate_outputs();
   void coalesce_dimensions();
 
@@ -289,13 +287,22 @@ struct TensorIterator::Builder {
 
   Builder() : iter_(new TensorIterator()) {};
 
-  void add_output(const Tensor& output, const Backend backend=Backend::Undefined, const ScalarType dtype=ScalarType::Undefined) {
-    iter_->operands_.emplace_back(output, backend, dtype);
+  void add_output(const Tensor& output) {
+    iter_->operands_.emplace_back(output);
     iter_->num_outputs_++;
   }
 
-  void add_input(const Tensor& input, const Backend backend=Backend::Undefined, const ScalarType dtype=ScalarType::Undefined) {
-    iter_->operands_.emplace_back(input, backend, dtype);
+  void add_output(const Tensor& input, Device device, ScalarType dtype) {
+    iter_->operands_.emplace_back(input, device, dtype);
+    iter_->num_outputs_++;
+  }
+
+  void add_input(const Tensor& input) {
+    iter_->operands_.emplace_back(input);
+  }
+
+  void add_input(const Tensor& input, Device device, ScalarType dtype) {
+    iter_->operands_.emplace_back(input, device, dtype);
   }
 
   void dont_compute_common_dtype() {
