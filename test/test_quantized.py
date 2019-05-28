@@ -1,21 +1,30 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import torch
-import torch.jit
 import numpy as np
 import unittest
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, skipIfNotRegistered
+
+import torch
+import torch.jit
 import torch.nn.functional as F
 
+from hypothesis import given
+from hypothesis_utils import qtensor
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests
+from common_utils import skipIfNotRegistered
 
 def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
 
 
-def _quantize(x, scale, zero_point, qmin=0, qmax=255, qtype=np.uint8):
+def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
     """Quantizes a numpy array."""
-    qx = np.round(x / scale + zero_point)
-    qx = np.clip(qx, qmin, qmax).astype(qtype)
+    if qmin is None:
+        qmin = np.iinfo(dtype).min
+    if qmax is None:
+        qmax = np.iinfo(dtype).max
+    qx = np.round(x / scale + zero_point).astype(np.int64)
+    qx = np.clip(qx, qmin, qmax)
+    qx = qx.astype(dtype)
     return qx
 
 
@@ -129,21 +138,22 @@ graph(%x : (Tensor, float, int)):
             x.data = x_q
 
 
-class TestQuantizedOps(unittest.TestCase):
+class TestQuantizedOps(TestCase):
     """Tests the correctness of the quantized::relu op."""
-
-    def test_qrelu(self):
+    @given(Q=qtensor(shapes=(1, 2, (3, 4), (3, 2, 1, 2, 3))))
+    def test_qrelu(self, Q):
+        X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
         relu = torch.ops.quantized.relu
 
-        X = torch.arange(-5, 5, dtype=torch.float)
-        scale = 2.0
-        zero_point = 1
-        qX = X.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        Y = X.copy()
+        X = torch.from_numpy(X)
 
-        Y = X.numpy().copy()
-        Y[Y < 0] = 0
-        qY = _quantize(Y, scale, zero_point)
+        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
         qY_hat = relu(qX)
+
+        Y[Y < 0] = 0
+        qY = _quantize(Y, scale, zero_point, dtype=np_type)
         np.testing.assert_equal(qY, qY_hat.int_repr())
 
     """Tests the correctness of the add and add_relu op."""
