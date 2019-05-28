@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/jit/script/error_report.h>
@@ -26,6 +27,8 @@ static inline bool isIntOrFloatUsedAsList(
   return list_type && list_type->getElementType() == v_type && arg.N();
 }
 
+/// Returns true if `type` is a Tuple in which all the elements have the
+/// same type or if it's a subtype of `list_type_`.
 inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   auto list_type = list_type_->cast<ListType>();
   if (!list_type) {
@@ -39,14 +42,15 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
         tuple->elements().begin(),
         tuple->elements().end(),
         [&](const TypePtr& t) {
+          // TODO: resolve VarType if necessary
           return t->isSubtypeOf(list_type->getElementType());
         });
   }
   return false;
 }
 
-// applies implict conversion from value trying to turn it into type
-// concrete_type it succeeds if the return_value->isSubclassOf(concrete_type)
+// Applies implict conversion from value trying to turn it into type
+// concrete_type. It succeeds if `return_value->isSubclassOf(concrete_type)`
 Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,
@@ -62,6 +66,7 @@ Value* tryConvertToType(
           unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
       value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
     }
+
     // inductively apply implicit conversions to tuples
     if (auto concrete_tuple = concrete_type->cast<TupleType>()) {
       if (!value_tuple->isSubtypeOf(concrete_tuple) &&
@@ -96,11 +101,14 @@ Value* tryConvertToType(
 
   // implicit conversions
   if (allow_conversions) {
+    // Convert tensor to number
     if (concrete_type->isSubtypeOf(NumberType::get()) &&
         value->type()->isSubtypeOf(TensorType::get())) {
       auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)->setSourceRange(loc)->output();
     }
+
+    // Convert strings to device
     if (value->type()->isSubtypeOf(StringType::get()) &&
         DeviceObjType::get()->isSubtypeOf(concrete_type)) {
       return graph.insert(aten::device, {value}, {}, loc);
@@ -110,6 +118,10 @@ Value* tryConvertToType(
   return value;
 }
 
+// Checks if `named_value` can be used as a value for `arg`. If `arg` is a
+// VarType, it will be added to the type_env through `matchTypeVariables` as
+// the corresponding actual type. If `allow_conversions` is true, implicit
+// conversions to the `arg` type may be performed through `tryConvertToType`.
 Value* tryMatchArgument(
     const Argument& arg,
     Graph& graph,
@@ -120,19 +132,20 @@ Value* tryMatchArgument(
     TypeEnv& type_env) {
   Value* value = named_value.value(graph);
 
-  // some functions that take lists of integers or floats for fixed size arrays
-  // also allow single ints/floats to be passed in their place.
-  // the single int/float is then repeated to the length of the list
+  // Some functions that take lists of integers or floats for fixed size arrays
+  // also allow single ints/floats to be passed in their place. The single
+  // int/float is then repeated to the length of the list
   if (isIntOrFloatUsedAsList(value, arg)) {
     std::vector<Value*> repeated(*arg.N(), value);
     value =
         graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
+  // Resolve VarType variables
   const MatchTypeReturn matched_type =
       matchTypeVariables(arg.type(), value->type(), type_env);
   if (!matched_type.type) {
-    err() << "could not match type " << value->type()->python_str() << " to "
+    err() << "Could not match type " << value->type()->python_str() << " to "
           << arg.type()->python_str() << " in argument '" << arg.name()
           << "': " << matched_type.errMsg << "\n"
           << named_value.locOr(loc);
@@ -140,10 +153,12 @@ Value* tryMatchArgument(
   }
   const auto concrete_type = *matched_type.type;
 
+  // Check if the value can be matched to the arg through any implicit
+  // conversions
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
-    auto& ostream = err() << "expected a value of type "
+    auto& ostream = err() << "Expected a value of type "
                           << concrete_type->python_str() << " for argument '"
                           << arg.name() << "' but found "
                           << value->type()->python_str() << "\n";
@@ -158,8 +173,8 @@ Value* tryMatchArgument(
 
     if (value->type() == NumberType::get() &&
         value->node()->kind() == aten::item) {
-      ostream
-          << "Use int(tensor) or float(tensor) to retrieve item() from a tensor with the appropriate type\n";
+      ostream << "Use int(tensor) or float(tensor) to retrieve item() from a "
+                 "tensor with the appropriate type\n";
     }
     ostream << named_value.locOr(loc);
     return nullptr;
@@ -177,6 +192,11 @@ c10::optional<size_t> findInputWithName(
   return c10::nullopt;
 }
 
+/// Creates a list with the provided values if each value's type can be matched
+/// to an argument with type `elem_type`. If a type in `varargs` does not match
+/// `elem_type`, nullptr is returned. This is used for creating lists from
+/// varargs so that calls like torch.zeros(1, 2, 3) will be matched to
+/// aten::zeros(int[]).
 Value* tryCreateList(
     const TypePtr& elem_type,
     Graph& graph,
@@ -186,15 +206,45 @@ Value* tryCreateList(
     bool convert_tensor_to_num,
     TypeEnv& type_env) {
   Argument elem_arg("<varargs>", elem_type);
-  std::vector<Value*> list_ctor;
-  for (const auto& a : varargs) {
-    Value* av = tryMatchArgument(
-        elem_arg, graph, loc, a, err, convert_tensor_to_num, type_env);
-    if (!av)
+  std::vector<Value*> list_elements;
+  for (const auto& named_value : varargs) {
+    // Try to convert named_value to elem_type
+    Value* matched_value = tryMatchArgument(
+        /*arg=*/elem_arg,
+        graph,
+        loc,
+        named_value,
+        err,
+        /*allow_conversions=*/convert_tensor_to_num,
+        type_env);
+    if (!matched_value) {
       return nullptr;
-    list_ctor.push_back(av);
+    }
+    list_elements.push_back(matched_value);
   }
-  return graph.insertNode(graph.createList(elem_type, list_ctor))->output();
+
+  return graph.insertNode(graph.createList(elem_type, list_elements))->output();
+}
+
+// Check if it is possible to convert all the remaining non-kwarg arguments
+// to a list. This allows zeros(IntArrayRef sizes) to work with zeros(1, 2) or
+// zeros(1)
+bool varargsCanBeUsedAsList(
+    const FunctionSchema& schema,
+    size_t arg_index,
+    const Argument& arg) {
+  // The arg must be the last one in the arg list that is not a kwarg
+  bool is_last_argument = arg_index + 1 == schema.arguments().size() ||
+      schema.arguments()[arg_index + 1].kwarg_only();
+
+  // The formal must be a list
+  bool argument_is_list = arg.type()->kind() == TypeKind::ListType;
+
+  // it must not be a broadcasting list like int[3],
+  // otherwise a single int is a valid input
+  bool arg_is_broadcasting_list = bool(arg.N());
+
+  return is_last_argument && argument_is_list & !arg_is_broadcasting_list;
 }
 
 c10::optional<MatchedSchema> tryMatchSchema(
@@ -211,6 +261,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
     return failure_messages;
   };
 
+  // For VarTypes, maps VarType name to actual type as it's used with these
+  // args
   TypeEnv type_env;
   std::vector<Value*> positional_inputs;
   std::vector<bool> used_kwarg(kwargs.size(), false);
@@ -219,68 +271,71 @@ c10::optional<MatchedSchema> tryMatchSchema(
   size_t used_args = 0;
   for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
     const auto& arg = schema.arguments()[schema_i];
-    c10::optional<NamedValue> v;
+    c10::optional<NamedValue> actual_named_value;
     if (arg.name() == "self" && self) {
-      v = self;
+      actual_named_value = self;
       self = c10::nullopt;
     } else if (!arg.kwarg_only() && used_args < args.size()) {
-      // allow zeros(IntArrayRef sizes) to work with zeros(1, 2) or zeros(1)
-      if (allow_conversions &&
-          arg.type()->kind() ==
-              TypeKind::ListType && // the formal must be a list
-          !arg.N() && // it must not be a broadcasting list like int[3],
-                      // otherwise a single int is a valid input
-          (schema_i + 1 == schema.arguments().size() ||
-           schema.arguments()[schema_i + 1]
-               .kwarg_only())) { // must be the last position argument
-        auto actual_type = args[used_args].value(graph)->type();
+      // Try to convert all the remaining non-kwarg arguments (used_args) to a
+      // list. Allow zeros(IntArrayRef sizes) to work with zeros(1, 2) or
+      // zeros(1)
+      if (allow_conversions && varargsCanBeUsedAsList(schema, schema_i, arg)) {
+        auto value = args[used_args].value(graph);
+        const auto& actual_type = value->type();
+        // The actual cannot already be a list
         if (actual_type->kind() != TypeKind::ListType &&
-            !convertibleToList(
-                actual_type,
-                unwrapOptional(arg.type()))) { // and the actual should not be a
-                                               // list already
-          auto elem_type =
+            !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
+          auto formal_type =
               unwrapOptional(arg.type())->expect<ListType>()->getElementType();
+
           Value* list = tryCreateList(
-              elem_type,
+              formal_type,
               graph,
               loc,
               at::ArrayRef<NamedValue>(args).slice(used_args),
               err,
               allow_conversions,
               type_env);
-          if (!list)
+          if (!list) {
             return c10::nullopt;
+          }
           used_args = args.size();
           positional_inputs.push_back(list);
           continue;
         }
       }
 
-      v = args[used_args];
+      // Set actual_named_value to the argument and mark the arg position as
+      // used
+      actual_named_value = args[used_args];
       used_args++;
-    } else if (auto idx = findInputWithName(arg.name(), kwargs)) {
-      const NamedValue& nv = kwargs[*idx];
-      if (used_kwarg[*idx]) {
+    } else if (auto kwarg_idx = findInputWithName(arg.name(), kwargs)) {
+      const NamedValue& nv = kwargs[*kwarg_idx];
+      if (used_kwarg[*kwarg_idx]) {
         err() << "argument " << nv.name()
               << " specified twice in schema, submit a bug report!\n"
               << nv.locOr(loc);
         return c10::nullopt;
       }
-      used_kwarg[*idx] = true;
-      v = nv;
+      used_kwarg[*kwarg_idx] = true;
+      actual_named_value = nv;
     } else if (arg.default_value()) {
-      v = NamedValue(*arg.default_value());
+      // Argument has a default value and no value was provided, so use the
+      // default
+      actual_named_value = NamedValue(*arg.default_value());
     } else {
       err() << "argument " << schema.arguments()[schema_i].name()
             << " not provided.\n"
             << loc;
       return c10::nullopt;
     }
-    Value* positional =
-        tryMatchArgument(arg, graph, loc, *v, err, allow_conversions, type_env);
-    if (!positional)
+
+    // Make sure the actual_named_value found matches the type of arg
+    Value* positional = tryMatchArgument(
+        arg, graph, loc, *actual_named_value, err, allow_conversions, type_env);
+    if (!positional) {
       return c10::nullopt;
+    }
     positional_inputs.push_back(positional);
   }
   // check for unused self argument
