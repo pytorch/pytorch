@@ -1842,7 +1842,7 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
-    
+
     Operator(
         "prim::abs(int x) -> int",
         [](Stack& stack) {

@@ -6288,9 +6288,9 @@ a")
         m = M()
         self.assertEqual(m(), 10)
 
-    def test_script_module_for2(self):  
+    def test_script_module_for2(self):
         class Sub(torch.jit.ScriptModule):
-            def __init__(self):            
+            def __init__(self):
                 super(Sub, self).__init__(False)
                 self.weight = nn.Parameter(torch.randn(2))
 
