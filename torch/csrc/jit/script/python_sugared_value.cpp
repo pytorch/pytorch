@@ -282,39 +282,38 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return std::make_shared<OverloadedMethodValue>(
         self_, py::cast<std::vector<std::string>>(overloads));
   }
-
-  if (py::object attr = py::getattr(py_module_, field.c_str(), py::none())) {
-    if (py::isinstance<py::function>(attr) &&
-        py::hasattr(attr, "_parameter_names_fn")) {
-      // Fetch the names of the parameters in the list so they're in the
-      // right order
-      auto fn_self = py::getattr(attr, "__self__");
-      auto param_names = py::getattr(attr, "_parameter_names_fn")(fn_self);
-
-      Graph& g = *m.graph();
-      // Add all module parameters as inputs to the graph
-      std::vector<Value*> params;
-      for (auto name : param_names) {
-        params.emplace_back(g.insertGetAttr(self_, py::str(name)));
-      }
-      auto list = g.insertNode(g.createTuple(params))->output();
-      return std::make_shared<ConstantParameterList>(list);
-    }
-    if (py::isinstance<py::function>(attr) ||
-        py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
-        py_module_.attr("_constants_set").contains(field.c_str())) {
-      return toSugaredValue(attr, m, loc, true);
-    } else {
-      std::string hint = "did you forget to add it __constants__?";
-      if (py::isinstance(attr, py::module::import("torch").attr("Tensor"))) {
-        hint = "Tensors must be added to a module as a buffer or parameter";
-      }
-      throw ErrorReport(loc)
-          << "attribute '" << field << "' of type '" << typeString(attr)
-          << "' is not usable in a script method (" << hint << ")";
-    }
+  if (!py::hasattr(py_module_, field.c_str())) {
+    throw ErrorReport(loc) << "module has no attribute '" << field;
   }
-  throw ErrorReport(loc) << "module has no attribute '" << field << "'";
+  py::object attr = py::getattr(py_module_, field.c_str());
+  if (py::isinstance<py::function>(attr) &&
+      py::hasattr(attr, "_parameter_names_fn")) {
+    // Fetch the names of the parameters in the list so they're in the
+    // right order
+    auto fn_self = py::getattr(attr, "__self__");
+    auto param_names = py::getattr(attr, "_parameter_names_fn")(fn_self);
+
+    Graph& g = *m.graph();
+    // Add all module parameters as inputs to the graph
+    std::vector<Value*> params;
+    for (auto name : param_names) {
+      params.emplace_back(g.insertGetAttr(self_, py::str(name)));
+    }
+    auto list = g.insertNode(g.createTuple(params))->output();
+    return std::make_shared<ConstantParameterList>(list);
+  }
+  if (py::isinstance<py::function>(attr) ||
+      py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
+      py_module_.attr("_constants_set").contains(field.c_str())) {
+    return toSugaredValue(attr, m, loc, true);
+  }
+  std::string hint = "did you forget to add it __constants__?";
+  if (py::isinstance(attr, py::module::import("torch").attr("Tensor"))) {
+    hint = "Tensors must be added to a module as a buffer or parameter";
+  }
+  throw ErrorReport(loc)
+      << "attribute '" << field << "' of type '" << typeString(attr)
+      << "' is not usable in a script method (" << hint << ")";
 }
 
 std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
