@@ -155,6 +155,9 @@ def checkpoint(function, *args, **kwargs):
     return CheckpointFunction.apply(function, preserve, *args)
 
 
+# TODO(sublee): When releasing PyTorch 1.2.0,
+# fix the function signature to not accept variadic arguments.
+# See also: https://github.com/pytorch/pytorch/issues/19260
 def checkpoint_sequential(functions, segments, *inputs, **kwargs):
     r"""A helper function for checkpointing sequential models.
 
