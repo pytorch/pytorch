@@ -8,7 +8,6 @@ import torch
 from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
 from .modules import utils
-from ._functions import vision
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from . import _VF
@@ -2731,7 +2730,18 @@ def affine_grid(theta, size):
     Returns:
         output (Tensor): output Tensor of size (:math:`N \times H \times W \times 2`)
     """
-    return vision.affine_grid_generator(theta, size)
+    if (
+        theta.is_cuda
+        and torch.backends.cudnn.enabled
+        and torch.backends.cudnn.is_acceptable(theta)
+        and len(size) == 4
+        and size[0] < 65536
+    ):
+        N, C, H, W = size
+        ret = torch.cudnn_affine_grid_generator(theta, N, C, H, W)
+    else:
+        ret = torch.affine_grid_generator(theta, size)
+    return ret
 
 
 @weak_script
