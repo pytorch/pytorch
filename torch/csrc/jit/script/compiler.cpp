@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -7,6 +6,7 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -1406,6 +1406,8 @@ struct to_ir {
       end_val = argVals[0];
       start_val = end_val->owningGraph()->insertConstant(0);
       step_val = end_val->owningGraph()->insertConstant(1);
+      start_val->node()->setSourceRange(range);
+      end_val->node()->setSourceRange(range);
     } else if (args.size() == 2 || args.size() == 3) {
       start_val = argVals[0];
       end_val = argVals[1];
@@ -1413,6 +1415,7 @@ struct to_ir {
         step_val = argVals[2];
       } else {
         step_val = end_val->owningGraph()->insertConstant(1);
+        step_val->node()->setSourceRange(range);
       }
     } else if (args.size() == 0) {
       throw ErrorReport(range) << "range expected 1 arguments, got 0";
@@ -1424,9 +1427,10 @@ struct to_ir {
     AT_CHECK(
         end_val != nullptr && start_val != nullptr && step_val != nullptr,
         "Expected non-null pointers for range() arguments");
-    auto addOp = [end_val](Graph* g, NodeKind kind, ArrayRef<Value*> inputs) {
+    auto addOp = [end_val, range](
+                     Graph* g, NodeKind kind, ArrayRef<Value*> inputs) {
       return g->insertNode(g->create(kind, inputs, 1))
-          ->setSourceRange(end_val->node()->sourceRange())
+          ->setSourceRange(range)
           ->output()
           ->setType(IntType::get());
     };
