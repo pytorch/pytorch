@@ -196,6 +196,18 @@ def checkpoint_sequential(functions, segments, *inputs, **kwargs):
     if kwargs:
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
+    # To accept variadic arguments is not consistent with nn.Sequential.
+    # This interface will be changed at PyTorch 1.2.0.
+    # See also: https://github.com/pytorch/pytorch/issues/19260
+    if not inputs:
+        warnings.warn('no input to checkpoint_sequential has been deprecated, '
+                      'TypeError will be raised since PyTorch 1.2.0',
+                      DeprecationWarning)
+    elif len(inputs) > 1:
+        warnings.warn('multiple inputs to checkpoint_sequential has been deprecated, '
+                      'TypeError will be raised since PyTorch 1.2.0',
+                      DeprecationWarning)
+
     def run_function(start, end, functions):
         def forward(*inputs):
             for j in range(start, end + 1):
