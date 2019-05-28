@@ -5633,11 +5633,16 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_divmod(self):
-        def func(a, b):
+        def func_int(a, b):
             # type: (int, int) -> Tuple[int, int]
             return divmod(a, b)
 
-        self.checkScript(func, (1024, 10,))
+        def func_float(a, b):
+            # type: (float, float) -> Tuple[float, float]
+            return divmod(a, b)
+
+        self.checkScript(func_int, (1024, 10,))
+        self.checkScript(func_float, (5.3, 2))
 
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):

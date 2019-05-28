@@ -2186,14 +2186,23 @@ RegisterOperators reg2({
     // only used internally in range() translation
 
     Operator(
-        "prim::divmod(int x, int y) -> (int, int)",
+        "aten::divmod(int x, int y) -> (int, int)",
         [](Stack& stack) {
-          int64_t a,b;
+          int64_t a, b;
           lldiv_t divresult = {};
           pop(stack, a, b);
-          divresult = lldiv(a,b);
+          divresult = lldiv(a, b);
           push(stack, static_cast<int64_t>(divresult.quot), \
             static_cast<int64_t>(divresult.rem));
+          return 0;
+        }),
+      Operator(
+        "aten::divmod(float x, float y) -> (float, float)",
+        [](Stack& stack) {
+          double a, b;
+          pop(stack, a, b);
+          double rem = fmod(a, b);
+          push(stack, (a - rem)/b, rem);
           return 0;
         }),
 
