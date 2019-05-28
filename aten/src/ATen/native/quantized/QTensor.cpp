@@ -17,10 +17,11 @@ Tensor dequantize_quant(const Tensor& self) {
 }
 
 Tensor dequantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point, ScalarType dtype) {
-  AT_CHECK(isQIntType(toQIntType(self.scalar_type())),
+  TORCH_CHECK(isQIntType(toQIntType(self.scalar_type())),
            "Scalar type for quantized Tensor must have same underlying type as input.");
-  AT_CHECK(dtype == ScalarType::Float, "ScalarType for target Tensor must be float.");
-  Tensor f = at::empty(self.sizes(), self.options().dtype(dtype));
+  TORCH_CHECK(dtype == toQIntType(self.scalar_type()), "ScalarType argument must match the corresponding quantized scalar type of input integer Tensor");
+  // scalar type of output Tensor is hard-coded as float
+  Tensor f = at::empty(self.sizes(), self.options().dtype(at::kFloat));
   AT_DISPATCH_QINT_TYPES(
       toQIntType(self.scalar_type()), "dequantize_linear_cpu", [&]() {
         underlying_t* qdata = self.data<underlying_t>();
@@ -33,13 +34,13 @@ Tensor dequantize_linear_cpu(const Tensor& self, double scale, int64_t zero_poin
 
 Scalar q_scale_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
+  TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
   return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale());
 }
 
 Scalar q_zero_point_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  AT_ASSERT(quantizer->qscheme() == kPerTensorAffine);
+  TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
   return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point());
 }
 
