@@ -117,8 +117,8 @@ std::shared_ptr<SugaredValue> PythonValue::call(
       m.graph()->createPythonOp(THPObjectPtr(func.release().ptr()), cconv, {}));
 
   // Mark if function is ignored on export
-  if (py::cast<bool>(
-          py::module::import("torch.jit").attr("_is_ignored_function")(self))) {
+  if (py::cast<bool>(py::module::import("torch._jit_internal")
+                         .attr("should_drop_on_export")(self))) {
     auto python_op = static_cast<PythonOp*>(new_node);
     python_op->ignore_on_export = true;
   }
@@ -514,7 +514,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  if (recurse_on_python_ops && py::isinstance<py::function>(obj)) {
+  if (getRecursiveScriptMode() && py::isinstance<py::function>(obj)) {
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_fn")(obj);
     if (auto callee = as_function(compiled_fn)) {

@@ -1031,9 +1031,12 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         return obj
     if _rcb is None:
         _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-    if isinstance(obj, torch.nn.Module):
-        return _convert_to_script_module(obj)
-    elif inspect.isclass(obj):
+
+    if torch._C._jit_recursive_script():
+        if isinstance(obj, torch.nn.Module):
+            return _convert_to_script_module(obj)
+
+    if inspect.isclass(obj):
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
         qualified_name = _qualified_name(obj)

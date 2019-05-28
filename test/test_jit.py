@@ -12622,7 +12622,7 @@ a")
                 self.ignored_code(x)
                 return x
 
-            @torch.jit.ignore
+            @torch.jit.ignore(drop_on_export=True)
             def ignored_code(self, x):
                 self.some_state = torch.tensor((100,))
 
@@ -12965,9 +12965,6 @@ a")
 
         with torch.jit._enable_recursive_script():
             sm = torch.jit.script(M())
-            breakpoint()
-            print(sm.other.graph)
-            print(sm.other.some_entry_point.graph)
 
         self.assertExportImportModule(sm, (torch.ones(2, 2),))
 
