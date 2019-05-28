@@ -67,7 +67,7 @@ class DataLoader(object):
 
               Since workers rely on Python multiprocessing, worker launch behavior is different
               on Windows compared to Unix. On Unix fork() is used as the default
-              muliprocessing start method, so child workers typically can access the dataset and
+              multiprocessing start method, so child workers typically can access the dataset and
               Python argument functions directly through the cloned address space. On Windows, another
               interpreter is launched which runs your main script, followed by the internal
               worker function that receives the dataset, collate_fn and other arguments
