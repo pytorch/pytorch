@@ -52,7 +52,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/TensorIterator.h>
 
@@ -500,7 +499,7 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
           "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
   }
 
-  return at::legacy::th::_th_index_copy_(self, dim, index, source);
+  return at::_index_copy_(self, dim, index, source);
 }
 
 Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
