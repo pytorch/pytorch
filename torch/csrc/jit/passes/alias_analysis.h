@@ -1,9 +1,9 @@
 #pragma once
 
+#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
-#include <c10/util/flat_hash_map.h>
 
 namespace torch {
 namespace jit {
@@ -201,7 +201,7 @@ class AliasDb {
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAG> memoryDAG_;
   // Mapping of values to MemoryDAG elements
-  ska::flat_hash_map<const Value*, Element*> elementMap_;
+  std::unordered_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
   std::map<TypeKind, Element*> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;

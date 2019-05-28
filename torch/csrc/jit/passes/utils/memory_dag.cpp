@@ -8,8 +8,8 @@
 namespace torch {
 namespace jit {
 namespace {
-ska::flat_hash_map<const Element*, unsigned> comprMap;
-ska::flat_hash_map<unsigned, const Element*> decomprMap;
+std::unordered_set<const Element*, unsigned> comprMap;
+std::unordered_set<unsigned, const Element*> decomprMap;
 } // namespace
 
 unsigned Element::toIndex(const Element* x) {
