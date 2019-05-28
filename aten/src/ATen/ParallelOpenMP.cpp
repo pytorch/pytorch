@@ -76,5 +76,10 @@ bool in_parallel_region() {
 #endif
 }
 
+void intraop_launch(std::function<void()> func) {
+  // execute inline in openmp case
+  func();
+}
+
 } // namespace at
 #endif
