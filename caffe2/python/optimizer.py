@@ -60,6 +60,11 @@ class Optimizer(object):
 
         self._run(net, param_init_net, param)
 
+    def __str__(self):
+        return "Optimizer: \n{}".format(
+            "\n".join(["{}: {}".format(k, v) for k, v in self.attributes.items()])
+        )
+
     def _run(self, net, param_init_net, param_info):
         raise Exception("Not Implemented")
 
