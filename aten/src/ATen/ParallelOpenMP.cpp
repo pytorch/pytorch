@@ -31,7 +31,7 @@ void init_num_threads() {
 }
 
 void set_num_threads(int nthreads) {
-  AT_CHECK(nthreads > 0, "Expected positive number of threads");
+  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
   num_threads.store(nthreads);
 #ifdef _OPENMP
   omp_set_num_threads(nthreads);
@@ -74,6 +74,11 @@ bool in_parallel_region() {
 #else
   return false;
 #endif
+}
+
+void intraop_launch(std::function<void()> func) {
+  // execute inline in openmp case
+  func();
 }
 
 } // namespace at
