@@ -1399,7 +1399,7 @@ struct to_ir {
     Value *end_val = nullptr, *start_val = nullptr, *step_val = nullptr;
     bool isSimpleRange = (args.size() == 1);
     std::vector<Value*> argVals;
-    for (auto i: args) {
+    for (auto i : args) {
       argVals.push_back(ensureInt(range, emitExpr(i)));
     }
     if (isSimpleRange) {
@@ -1415,43 +1415,46 @@ struct to_ir {
         step_val = end_val->owningGraph()->insertConstant(1);
       }
     } else if (args.size() == 0) {
-      throw ErrorReport(range)
-          << "range expected 1 arguments, got 0";
+      throw ErrorReport(range) << "range expected 1 arguments, got 0";
     } else {
       throw ErrorReport(range)
           << "range expected at most 3 arguments, got " << args.size();
     }
     const auto& ident_name = target.name();
-    AT_CHECK(end_val != nullptr && start_val != nullptr && step_val != nullptr, "Expected non-null pointers for range() arguments");
-    auto addOp = [end_val](Graph *g, NodeKind x, ArrayRef<Value*> inputs) {
-      return g->insertNode(g->create(x, inputs, 1))
+    AT_CHECK(
+        end_val != nullptr && start_val != nullptr && step_val != nullptr,
+        "Expected non-null pointers for range() arguments");
+    auto addOp = [end_val](Graph* g, NodeKind kind, ArrayRef<Value*> inputs) {
+      return g->insertNode(g->create(kind, inputs, 1))
           ->setSourceRange(end_val->node()->sourceRange())
           ->output()
           ->setType(IntType::get());
     };
-    auto assigner = [addOp, ident_name, range, start_val, step_val, isSimpleRange](
-                        Value* index, std::shared_ptr<Environment> env) {
-      Value* derived_index;
-      if (isSimpleRange) {
-        derived_index = index;
-      } else {
-        auto g = index->owningGraph();
-        derived_index = addOp(g, aten::__derive_index, {index, start_val, step_val});
-      }
-      env->setVar(range, ident_name, derived_index);
-    };
+    auto assigner =
+        [addOp, ident_name, range, start_val, step_val, isSimpleRange](
+            Value* index, std::shared_ptr<Environment> env) {
+          Value* derived_index;
+          if (isSimpleRange) {
+            derived_index = index;
+          } else {
+            auto g = index->owningGraph();
+            derived_index =
+                addOp(g, aten::__derive_index, {index, start_val, step_val});
+          }
+          env->setVar(range, ident_name, derived_index);
+        };
     Value* max_trip_count_val;
     if (isSimpleRange) {
       max_trip_count_val = end_val;
     } else {
       auto g = start_val->owningGraph();
       Value* cond_value = emitBuiltinCall(
-            range,
-            *g,
-            aten::eq,
-            c10::nullopt,
-            {step_val, g->insertConstant(0)},
-            {},
+          range,
+          *g,
+          aten::eq,
+          c10::nullopt,
+          {step_val, g->insertConstant(0)},
+          {},
           /*required=*/true);
       Node* n = g->insertNode(create(prim::If, range, 0));
       n->addInput(cond_value);
@@ -1465,7 +1468,8 @@ struct to_ir {
             {},
             range);
       }
-      max_trip_count_val = addOp(g, aten::__range_length, {start_val, end_val, step_val});
+      max_trip_count_val =
+          addOp(g, aten::__range_length, {start_val, end_val, step_val});
     }
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
