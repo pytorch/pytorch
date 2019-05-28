@@ -208,6 +208,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
+   .. automethod:: dequantize
    .. automethod:: det
    .. automethod:: dense_dim
    .. automethod:: detach

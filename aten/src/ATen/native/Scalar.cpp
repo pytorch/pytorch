@@ -12,7 +12,7 @@ Scalar item(const Tensor& self) {
     if (self.is_coalesced()) return at::_local_scalar_dense(self._values());
     return at::_local_scalar_dense(self._values().sum());
   } else if (self.is_quantized()) {
-    return at::dequantize(self).item();
+    return self.dequantize().item();
   } else {
     return _local_scalar_dense(self);
   }

@@ -40,7 +40,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
   }
 
   // Check for correct dequantization
-  Tensor rqr = at::dequantize(qr);
+  Tensor rqr = qr.dequantize();
   auto rqr_data = rqr.data<float>();
   for (auto i = 0; i < num_elements; ++i) {
     ASSERT_EQ(r_data[i], rqr_data[i]);
@@ -90,7 +90,7 @@ TEST(TestQTensor, EmptyQuantized) {
   }
 
   // dequantize
-  auto r = at::dequantize(q);
+  auto r = q.dequantize();
   auto* r_data = r.data<float>();
   for (int i = 0; i < numel; ++i) {
     ASSERT_EQ(r_data[i], (val - zero_point) * scale);

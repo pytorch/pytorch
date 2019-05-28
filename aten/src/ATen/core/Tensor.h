@@ -581,6 +581,7 @@ class CAFFE2_API Tensor {
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
+  Tensor dequantize() const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;
   Tensor int_repr() const;

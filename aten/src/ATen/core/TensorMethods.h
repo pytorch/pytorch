@@ -798,6 +798,9 @@ inline Tensor Tensor::to_sparse() const {
 inline Tensor Tensor::to_mkldnn() const {
     return dispatch_type().to_mkldnn(*this);
 }
+inline Tensor Tensor::dequantize() const {
+    return dispatch_type().dequantize(*this);
+}
 inline Scalar Tensor::q_scale() const {
     return dispatch_type().q_scale(*this);
 }

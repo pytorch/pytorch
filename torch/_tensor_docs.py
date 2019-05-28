@@ -671,6 +671,13 @@ data_ptr() -> int
 Returns the address of the first element of :attr:`self` tensor.
 """)
 
+add_docstr_all('dequantize',
+               r"""
+dequantize() -> Tensor
+
+Given a quantized Tensor, dequantize it and return the dequantized float Tensor.
+""")
+
 add_docstr_all('dense_dim',
                r"""
 dense_dim() -> int

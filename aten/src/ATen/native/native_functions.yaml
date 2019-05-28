@@ -2547,7 +2547,7 @@
     CPU: quantize_linear_cpu
 
 - func: dequantize(Tensor self) -> Tensor
-  variants: function
+  variants: function, method
   dispatch:
     QuantizedCPU: dequantize_quant
 
