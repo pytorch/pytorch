@@ -8,7 +8,7 @@ import torch.jit
 import torch.nn.functional as F
 
 from hypothesis import given
-from common_utils import qtensor
+from hypothesis_utils import qtensor
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests
 from common_utils import skipIfNotRegistered
 
