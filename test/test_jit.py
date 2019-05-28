@@ -7604,6 +7604,33 @@ a")
         with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
             M()
 
+    def test_script_module_fail_exist(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.whatisgoingon
+        with self.assertRaisesRegex(RuntimeError, "module has no attribute"):
+            M()
+
+    def test_script_module_none_exist_fail(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, my_optional):
+                super(M, self).__init__()
+                self.my_optional = my_optional
+
+            @torch.jit.script_method
+            def forward(self, x):
+                if self.my_optional is not None:
+                    return torch.neg(x) + self.my_optional
+                return torch.neg(x)
+        with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
+            x = torch.rand(3, 4)
+            fb = M(None)
+            fb(x)
+
     def test_script_module_valid_consts(self):
         tester = self
 
