@@ -509,7 +509,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
       using accscalar_t = acc_type<scalar_t, true>;
       if (!half_to_float) {
         if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-          dispatch_softmax<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
+          dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
               output.data<scalar_t>(), input.data<scalar_t>(), dim_size, dim_size, outer_size);
         } else {
           cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
@@ -519,7 +519,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
         }
       } else {
         if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-          dispatch_softmax<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
+          dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
               output.data<accscalar_t>(), input.data<scalar_t>(), dim_size, dim_size, outer_size);
         } else {
           cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
