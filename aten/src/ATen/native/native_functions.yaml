@@ -2570,8 +2570,8 @@
   dispatch:
     QuantizedCPU: dequantize_quant
 
-- func: _dequantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
-  variants: function
+- func: dequantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+  variants: function, method
   dispatch:
     CPU: dequantize_linear_cpu
 
@@ -3017,8 +3017,8 @@
 - func: __irshift__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_ilshift_
-    CUDA: legacy::cuda::_th_ilshift_
+    CPU: legacy::cpu::_th_irshift_
+    CUDA: legacy::cuda::_th_irshift_
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
   variants: method
