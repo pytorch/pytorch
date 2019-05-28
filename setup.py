@@ -154,6 +154,7 @@
 #     parallel backend to use for intra- and inter-op parallelism
 #     possible values:
 #       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
+#       NATIVE - use native thread pool for both intra- and inter-op tasks
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, find_packages
