@@ -2,7 +2,6 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/Parallel.h>
