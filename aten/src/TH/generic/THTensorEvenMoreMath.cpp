@@ -569,10 +569,7 @@ scalar_t THTensor_(minall)(THTensor *tensor)
   scalar_t theMin;
   scalar_t value;
 
-  if (THTensor_nDimensionLegacyAll(tensor) == 0){
-    return std::numeric_limits<scalar_t>::max();
-  }
-
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
   theMin = tensor->data<scalar_t>()[0];
   TH_TENSOR_APPLY(scalar_t, tensor,
                   value = *tensor_data;
@@ -590,10 +587,7 @@ scalar_t THTensor_(maxall)(THTensor *tensor)
   scalar_t theMax;
   scalar_t value;
 
-  if (THTensor_nDimensionLegacyAll(tensor) == 0){
-    return std::numeric_limits<scalar_t>::lowest();
-  }
-
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
   theMax = tensor->data<scalar_t>()[0];
   TH_TENSOR_APPLY(scalar_t, tensor,
                   value = *tensor_data;
