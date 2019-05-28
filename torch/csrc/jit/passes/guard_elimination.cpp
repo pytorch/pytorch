@@ -64,10 +64,10 @@ struct GuardElimination {
         } else {
           inputs_to_guards.insert({n->input(), n});
         }
-      } else {
+      } else if (n->kind() != prim::Constant) {
         inputs_to_guards.clear();
         for (Block* ib : n->blocks()) {
-          moveGuardsToDefs(ib);
+          coalesceGuards(ib);
         }
       }
     }
@@ -89,7 +89,7 @@ struct GuardElimination {
       } else {
         it++;
         for (Block* ib : n->blocks()) {
-          moveGuardsToDefs(ib);
+          eliminateGuards(ib);
         }
       }
     }
