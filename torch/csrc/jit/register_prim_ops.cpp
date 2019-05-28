@@ -24,8 +24,8 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
-#include <cctype>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <exception>
 #include <fstream>
@@ -63,8 +63,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
     throw std::runtime_error(
         "Cannot input a tensor of dimension other than 0 as a scalar argument");
   }
-  if (toInt &&
-      !isIntegralType(t.scalar_type())) {
+  if (toInt && !isIntegralType(t.scalar_type())) {
     std::stringstream ss;
     ss << "Cannot input a tensor of type " << t.scalar_type()
        << " as an integral argument";
@@ -98,9 +97,9 @@ static int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 
-static int gcd(int a, int b) {
+static int64_t gcd(int64_t a, int64_t b) {
   while (b != 0) {
-    int r = a % b;
+    int64_t r = a % b;
     a = b;
     b = r;
   }
