@@ -348,14 +348,14 @@ void Module::clone_method(const Module& orig, const std::string& name) {
 }
 
 void Module::train(bool on) {
- for (auto& submod : get_modules()) {
-   submod->train(on);
- }
- if (auto slot = find_attribute("training")) {
-   slot->setValue(on);
- } else{
-   register_attribute("training", BoolType::get(), on);
- }
+  for (auto& submod : get_modules()) {
+    submod->train(on);
+  }
+  if (auto slot = find_attribute("training")) {
+    slot->setValue(on);
+  } else {
+    register_attribute("training", BoolType::get(), on);
+  }
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
