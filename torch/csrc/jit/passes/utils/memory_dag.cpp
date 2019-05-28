@@ -8,22 +8,22 @@
 namespace torch {
 namespace jit {
 namespace {
-std::unordered_map<const Element*, unsigned> comprMap;
-std::unordered_map<unsigned, const Element*> decomprMap;
+ska::flat_hash_map<const Element*, unsigned> comprMap;
+std::vector<const Element*> decomprMap;
 } // namespace
 
 unsigned Element::toIndex(const Element* x) {
   if (comprMap.count(x)) {
     return comprMap[x];
   }
-  comprMap[x] = comprMap.size() + 1;
-  decomprMap[comprMap.size()] = x;
+  comprMap[x] = comprMap.size();
+  decomprMap.push_back(x);
   return comprMap[x];
 }
 
 const Element* Element::toElement(unsigned x) {
+  TORCH_INTERNAL_ASSERT(x < decomprMap.size());
   auto res = decomprMap[x];
-  TORCH_INTERNAL_ASSERT(res);
   return res;
 }
 

@@ -201,7 +201,7 @@ class AliasDb {
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAG> memoryDAG_;
   // Mapping of values to MemoryDAG elements
-  std::unordered_map<const Value*, Element*> elementMap_;
+  ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
   std::map<TypeKind, Element*> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
@@ -212,7 +212,7 @@ class AliasDb {
    * State for tracking write info.
    */
   // Map of nodes to the values that they write to
-  std::unordered_map<Node*, ValueSet> writeIndex_;
+  ska::flat_hash_map<Node*, ValueSet> writeIndex_;
   // Set of all memory locations that may have been written to.
   mutable MemoryLocations writeCache_;
   mutable bool isWriteCacheStale_ = true;
