@@ -3555,6 +3555,18 @@ def foo(x):
         self.checkScript(test_sizes, (torch.rand(777),))
         self.checkScript(test_sizes, (torch.rand(0),))
 
+    def test_for_zip_lists(self):
+        def test_sizes(x, y):
+
+            # type: (List[int], List[int]) -> int
+            sum = 0
+            for (e1, e2) in zip(x, y):
+                sum += e1 + e2
+
+            return sum
+
+            self.checkScript(test_for_zip_lists, ([1, 1, 1], [3, 3, 3],))
+
     def test_for_in_tensors_rank0(self):
         with self.assertRaisesRegex(Exception, "iteration over a 0-d tensor"):
             @torch.jit.script

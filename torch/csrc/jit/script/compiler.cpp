@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -7,6 +6,7 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -1510,6 +1510,84 @@ struct to_ir {
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
+  void emitForZipLoop(
+      const For& stmt,
+      const std::shared_ptr<torch::jit::script::SimpleValue>& siv1,
+      const std::shared_ptr<torch::jit::script::SimpleValue>& siv2,
+      const Expr& var1,
+      const Expr& var2) {
+    auto body = stmt.body();
+    auto& range = stmt.range();
+
+    auto listArg1 = siv1->asValue(range, method);
+    auto listArg2 = siv2->asValue(range, method);
+
+    auto list1_len = emitBuiltinCall(
+        range,
+        *graph,
+        aten::len,
+        c10::nullopt,
+        {listArg1},
+        {},
+        /*required=*/true);
+
+    auto list2_len = emitBuiltinCall(
+        range,
+        *graph,
+        aten::len,
+        c10::nullopt,
+        {listArg1},
+        {},
+        /*required=*/true);
+
+    auto count = emitBuiltinCall(
+        range,
+        *graph,
+        prim::min,
+        c10::nullopt,
+        {list1_len, list2_len},
+        {},
+        /*required=*/true);
+
+    const auto& var1_name = Var(var1).name().name();
+    const auto& var2_name = Var(var2).name().name();
+    auto assigner = [var1_name, var2_name, range, listArg1, listArg2, this](
+                        Value* index, std::shared_ptr<Environment> env) {
+      auto list1_elem = emitBuiltinCall(
+          range,
+          *this->graph,
+          aten::select,
+          c10::nullopt,
+          {listArg1, index},
+          {},
+          /*required=*/true);
+      env->setVar(range, var1_name, list1_elem);
+
+      auto list2_elem = emitBuiltinCall(
+          range,
+          *this->graph,
+          aten::select,
+          c10::nullopt,
+          {listArg2, index},
+          {},
+          /*required=*/true);
+      env->setVar(range, var2_name, list2_elem);
+    };
+
+    emitLoopCommon(range, body, assigner, {}, count);
+  }
+
+  bool isMethod(const Expr& expr, const std::string& name) {
+    if (expr.kind() == TK_APPLY) {
+      Apply range_iterator = Apply(expr);
+      if (range_iterator.callee().kind() == TK_VAR) {
+        Var var = Var(range_iterator.callee());
+        return var.name().name() == name;
+      }
+    }
+    return false;
+  }
+
   void emitFor(const For& stmt) {
     // For now, we only support range loops. e.g. for i in range(3): ...
 
@@ -1525,7 +1603,36 @@ struct to_ir {
           << "Iteration variable unpacking is not supported";
     }
 
+    if (targets[0].kind() == TK_TUPLE_LITERAL) {
+      TupleLiteral tl(targets[0]);
+      if (tl.inputs().size() == 2 && tl.inputs()[0].kind() == TK_VAR &&
+          tl.inputs()[1].kind() == TK_VAR) {
+        if (isMethod(itrs[0], "zip")) {
+          auto range_iterator = Apply(itrs[0]);
+          TORCH_INTERNAL_ASSERT(
+              range_iterator.inputs().size() == 2,
+              "zip must have two arguments");
+
+          auto sv1 = emitSugaredExpr(range_iterator.inputs()[0], 1);
+          auto siv1 = std::dynamic_pointer_cast<SimpleValue>(sv1);
+
+          auto sv2 = emitSugaredExpr(range_iterator.inputs()[1], 1);
+          auto siv2 = std::dynamic_pointer_cast<SimpleValue>(sv2);
+
+          if (siv1 && siv1->getValue()->type()->kind() == TypeKind::ListType &&
+              siv2 && siv2->getValue()->type()->kind() == TypeKind::ListType) {
+            emitForZipLoop(stmt, siv1, siv2, tl.inputs()[0], tl.inputs()[1]);
+            return;
+          }
+        }
+      }
+      throw ErrorReport(targets[0])
+          << "unexpected expression in variable initialization of for loop";
+    }
+
     if (targets[0].kind() != TK_VAR) {
+      std::cout << targets[0];
+
       throw ErrorReport(targets[0])
           << "unexpected expression in variable initialization of for loop";
     }
@@ -1533,15 +1640,8 @@ struct to_ir {
 
     // match range(<expr>) style loops
     // itrs must consist of a single Apply node
-    if (itrs[0].kind() == TK_APPLY) {
-      Apply range_iterator = Apply(itrs[0]);
-      if (range_iterator.callee().kind() == TK_VAR) {
-        Var var = Var(range_iterator.callee());
-        if (var.name().name() == "range") {
-          return emitForRange(
-              stmt.range(), target, range_iterator.inputs(), body);
-        }
-      }
+    if (isMethod(itrs[0], "range")) {
+      return emitForRange(stmt.range(), target, Apply(itrs[0]).inputs(), body);
     }
 
     // it isn't a range(<expr>) loop, treat it as a sugared value that maybe can
