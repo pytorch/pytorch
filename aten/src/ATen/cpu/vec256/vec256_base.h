@@ -307,6 +307,14 @@ template <class T> Vec256<T> inline operator*(const Vec256<T> &a, const Vec256<T
   return c;
 }
 
+template <> Vec256<bool> inline operator*(const Vec256<bool> &a, const Vec256<bool> &b) {
+  Vec256<bool> c = Vec256<bool>();
+  for (int i = 0; i != Vec256<bool>::size(); i++) {
+    c[i] = a[i] && b[i];
+  }
+  return c;
+}
+
 template <class T> Vec256<T> inline operator/(const Vec256<T> &a, const Vec256<T> &b) __ubsan_ignore_float_divide_by_zero__ {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
