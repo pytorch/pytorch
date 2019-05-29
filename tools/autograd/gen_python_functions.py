@@ -21,7 +21,7 @@ SKIP_PYTHON_BINDINGS = [
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
-    '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
+    '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*', '_sparse_dense_add_out',
     'index', 'unique_dim_consecutive',
     '_indexCopy_', 'max_values', 'min_values',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
@@ -174,15 +174,6 @@ def should_generate_python_binding(declaration):
         if pattern == signature:
             return False
 
-    # TODO: fix handling of SparseTensor. We don't want to generate Python
-    # bindings to SparseTensor overloads, such as add(Tensor, SparseTensorRef),
-    # since the Tensor-based signature already dynamically dispatches correctly.
-    # However, sparse_mask only has a SparseTensor signature so we need to bind
-    # that function.
-    for arg in declaration['arguments']:
-        if arg['type'] == 'SparseTensorRef' and declaration['name'] != 'sparse_mask':
-            return False
-
     return True
 
 
@@ -291,7 +282,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
     unpack_methods = {
         'const Tensor &': 'tensor',
-        'SparseTensorRef': 'tensor',
         'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
@@ -375,9 +365,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if unpack_args:
                 body.append('auto {} = {};'.format(name, expr))
                 expr = name
-
-            if typename == 'SparseTensorRef':
-                expr = 'SparseTensorRef({})'.format(expr)
 
             dispatch_type = typename
             if dispatch_type == 'Tensor':
@@ -706,7 +693,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if not has_self:
                 # Use 'input' instead of 'self' for NN functions
                 signature = signature.replace('Tensor self', 'Tensor input')
-            signature = signature.replace('SparseTensorRef', 'Tensor')
             if dictionary['base'].get('deprecated', False):
                 signature += '|deprecated'
             env['signatures'].append('"{}",'.format(signature))
