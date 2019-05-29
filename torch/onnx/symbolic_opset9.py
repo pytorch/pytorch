@@ -297,7 +297,7 @@ def transpose(g, self, dim0, dim1):
     else:
         # if we don't have dim information we cannot
         # output a permute so use ATen instead
-        return g.op("ATen", operator_s="transpose", dim0_i=dim0, dim1_i=dim1)
+        return g.op("ATen", self, operator_s="transpose", dim0_i=dim0, dim1_i=dim1)
 
 
 @parse_args('v', 'is')
