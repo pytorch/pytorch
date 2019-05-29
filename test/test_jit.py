@@ -1224,7 +1224,7 @@ graph(%x : Tensor,
   %2 : int = prim::Constant[value=1]()
   %3 : Tensor = aten::add(%x, %y, %2)
   %4 : int = aten::add(%2, %20)
-  %5 : bool = aten::Bool(%4)
+  %5 : bool = prim::Bool(%4)
   %z : int = prim::If(%5)
     # CHECK: block
     block0():
