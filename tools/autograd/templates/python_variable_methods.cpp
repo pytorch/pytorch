@@ -73,6 +73,7 @@ static PyObject * THPVariable__set_data_change_impl(PyObject* self, PyObject* ar
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   auto& tensor = reinterpret_cast<THPVariable*>(arg)->cdata;
   self_._set_data_change_impl(tensor);
+  Py_INCREF(self);
   return self;
   END_HANDLE_TH_ERRORS
 }
