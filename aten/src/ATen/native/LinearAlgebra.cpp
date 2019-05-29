@@ -2,10 +2,10 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/LegacyTHFunctionsCPU.h>
 #include <functional>
 #include <numeric>
 #include <vector>
@@ -143,73 +143,22 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
  TORCH_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
 }
 
-Tensor ger(const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
-  return at::legacy::th::_th_ger(self, vec2);
-}
-
-Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
-  return at::legacy::th::_th_ger_out(result, self, vec2);
-}
-
-Tensor mm(const Tensor& self, const Tensor& mat2) {
-  if (self.is_sparse()) {
-    return at::zeros({}, mat2.options()).addmm(self, mat2, 0, 1);
-  }
-  return at::legacy::th::_th_mm(self, mat2);
-}
-
-Tensor& mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
-  if (self.is_sparse()) {
-    return at::addmm_out(result, at::zeros({}, mat2.options()), self, mat2, 0, 1);
-  }
-  return at::legacy::th::_th_mm_out(result, self, mat2);
-}
-
-Tensor mv(const Tensor& self, const Tensor& vec) {
-  check_1d(vec, "vec", "mv");
-  return at::legacy::th::_th_mv(self, vec);
-}
-
-Tensor& mv_out(Tensor& result, const Tensor& self, const Tensor& vec) {
-  check_1d(vec, "vec", "mv");
-  return at::legacy::th::_th_mv_out(result, self, vec);
-}
-
-Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
-  return at::legacy::th::_th_addmv(self, mat, vec, beta, alpha);
-}
-
-Tensor& addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
-  return at::legacy::th::_th_addmv_(self, mat, vec, beta, alpha);
-}
-
-Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
-  return at::legacy::th::_th_addmv_out(result, self, mat, vec, beta, alpha);
-}
-
 Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::legacy::th::_th_addr(self, vec1, vec2, beta, alpha);
+  return at::_addr(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::legacy::th::_th_addr_(self, vec1, vec2, beta, alpha);
+  return at::_addr_(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::legacy::th::_th_addr_out(result, self, vec1, vec2, beta, alpha);
+  return at::_addr_out(result, self, vec1, vec2, beta, alpha);
 }
 
 template <typename scalar_t, bool is_bmm>
@@ -320,7 +269,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     if (is_bmm_out) {
       for (int64_t b = 0; b < bs; b++) {
         auto r = self_or_result.select(0, b);
-        at::native::mm_out(r, batch1.select(0, b), batch2.select(0, b));
+        legacy::cpu::_th_mm_out(r, batch1.select(0, b), batch2.select(0, b));
       }
     } else {
       for (int64_t b = 0; b < bs; b++) {
@@ -358,12 +307,6 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
   Scalar beta(0.0);
   Scalar alpha(1.0);
   return bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
-}
-
-Tensor dot(const Tensor& self, const Tensor& tensor) {
-  check_1d(self, "self", "dot");
-  check_1d(tensor, "tensor", "dot");
-  return at::legacy::th::_th_dot(self, tensor);
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
@@ -404,12 +347,12 @@ Tensor matmul(
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::native::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-    return has_out ? at::native::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
+    return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return has_out ? at::native::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
+    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
-    return has_out ? at::native::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
+    return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension.
@@ -428,6 +371,29 @@ Tensor matmul(
     Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
                             : at::_unsafe_view(t1.mm(t2), output_size);
     return has_out ? out.set_(output) : output;
+  } else if ((dim_tensor1 == 1 || dim_tensor1 == 2) && dim_tensor2 >= 3) {
+    // optimization: transpose the inner dimensions of the arguments, call
+    // matmul on the swapped arguments, then transpose the inner dimensions
+    // of the result.
+    const int64_t n = dim_tensor1 == 2 ? tensor1.size(-2) : 1;
+    const int64_t m = tensor1.size(-1);
+    const int64_t p = tensor2.size(-1);
+
+    const Tensor t2_T = tensor2.transpose(-1, -2);
+    const Tensor t1_T = dim_tensor1 == 2 ? tensor1.t() : tensor1.reshape({n, m}).t();
+    const Tensor res_T = matmul(out_opt, t2_T, t1_T);
+
+    if (dim_tensor1 == 2) {
+      Tensor res = res_T.transpose(-1, -2).contiguous();
+      return has_out ? out.set_(res) : res;
+    }
+    else {
+      std::vector<int64_t> shape = tensor2.sizes().slice(0, dim_tensor2 - 2).vec();
+      shape.push_back(p);
+
+      Tensor res = res_T.reshape(shape).contiguous();
+      return has_out ? out.set_(res) : res;
+    }
   } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
     // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
     // we track m1 vs m2 separately even though they must match for nicer error messages

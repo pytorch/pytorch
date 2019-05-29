@@ -14,12 +14,12 @@ class expand_dims_cpu final : public c10::OperatorKernel {
   void operator()(
       const at::Tensor& input_,
       const at::Tensor& output_,
-      ArrayRef<int64_t> dims) {
+      std::vector<int64_t> dims) {
     Tensor input(input_);
     Tensor output(output_);
 
     if (!initialized_) {
-      dims_ = dims.vec();
+      dims_ = std::move(dims);
       auto originalSize = dims_.size();
       CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
       std::sort(dims_.begin(), dims_.end());
@@ -56,8 +56,8 @@ class expand_dims_cpu final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::ExpandDims",
-    c10::kernel<expand_dims_cpu<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+    c10::RegisterOperators::options()
+      .kernel<expand_dims_cpu<float>>(CPUTensorId()));
 
 } // namespace
 

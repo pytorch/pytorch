@@ -63,6 +63,26 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
   return equal;
 }
 
+void THTensor_(sign)(THTensor *r_, THTensor *t)
+{
+  THTensor_(resizeAs)(r_, t);
+
+#if defined (TH_REAL_IS_BYTE)
+  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
+    if (*t_data > 0) *r__data = 1;
+    else *r__data = 0;);
+#elif defined (TH_REAL_IS_BOOL)
+TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
+  if (*t_data == true) *r__data = false;
+  else *r__data = true;);
+#else
+  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
+    if (*t_data > 0) *r__data = 1;
+    else if (*t_data < 0) *r__data = -1;
+    else *r__data = 0;);
+#endif
+}
+
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
@@ -91,7 +111,7 @@ void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t a
     if (beta != 0.0) {
       at::Tensor result_wrap = THTensor_wrap(result);
       at::Tensor t_wrap = THTensor_wrap(t);
-      at::_copy_same_type_(result_wrap, t_wrap);
+      at::native::copy_(result_wrap, t_wrap);
     }
   }
 
@@ -177,7 +197,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       at::Tensor values__wrap = THTensor_wrap(values_);
       at::Tensor t0_wrap = THTensor_wrap(t0);
       auto right_shape = t0_wrap.reshape(values__wrap.sizes());
-      at::_copy_same_type_(values__wrap, right_shape);
+      at::native::copy_(values__wrap, right_shape);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
@@ -261,7 +281,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       at::Tensor values__wrap = THTensor_wrap(values_);
       at::Tensor t0_wrap = THTensor_wrap(t0);
       auto right_shape = t0_wrap.reshape(values__wrap.sizes());
-      at::_copy_same_type_(values__wrap, right_shape);
+      at::native::copy_(values__wrap, right_shape);
       c10::raw::intrusive_ptr::decref(t0);
     } else {
       THTensor_(fill)(values_, THTensor_(get1d)(t, 0));
@@ -399,24 +419,6 @@ void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
                          r__data[i*r__stride] = (scalar_t)cumprod;
                        });
 }
-
-
-void THTensor_(sign)(THTensor *r_, THTensor *t)
-{
-  THTensor_(resizeAs)(r_, t);
-
-#if defined (TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else *r__data = 0;);
-#else
-  TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
-    if (*t_data > 0) *r__data = 1;
-    else if (*t_data < 0) *r__data = -1;
-    else *r__data = 0;);
-#endif
-}
-
 
 accreal THTensor_(trace)(THTensor *t)
 {
@@ -737,7 +739,7 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
   THTensor_(resizeAs)(rt_, t);
   at::Tensor rt__wrap = THTensor_wrap(rt_);
   at::Tensor t_wrap = THTensor_wrap(t);
-  at::_copy_same_type_(rt__wrap, t_wrap);
+  at::native::copy_(rt__wrap, t_wrap);
   THLongTensor_resize(ri_, t->sizes(), {});
 
   if(descendingOrder)
@@ -1341,7 +1343,7 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
     {
       at::Tensor rowR_wrap = THTensor_wrap(rowR);
       at::Tensor rowS_wrap = THTensor_wrap(rowS);
-      at::_copy_same_type_(rowR_wrap, rowS_wrap);
+      at::native::copy_(rowR_wrap, rowS_wrap);
     }
   }
 
