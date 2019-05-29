@@ -1717,7 +1717,7 @@
     SparseCPU: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
 
-- func: _sparse_dense_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+- func: _sparse_dense_add(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: add_out_dense_sparse_cpu
     CUDA: add_out_dense_sparse_cuda
@@ -2392,7 +2392,7 @@
   requires_tensor: True
 
 
-- func: sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
+- func: sparse_mask(Tensor self, Tensor mask) -> Tensor
   variants: method
   dispatch:
     CPU: sparse_mask_cpu
