@@ -207,7 +207,8 @@ class Module(object):
                     if param._grad._is_same_impl_type(grad_applied):
                         param._grad.data = grad_applied
                     else:
-                        param._grad._set_data_change_impl(grad_applied)
+                        # yf225 TODO: comment why we don't use _set_data_change_impl here
+                        param._grad = grad_applied
 
         for key, buf in self._buffers.items():
             if buf is not None:

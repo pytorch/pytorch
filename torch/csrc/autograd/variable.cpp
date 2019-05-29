@@ -128,13 +128,12 @@ void Variable::_set_data_change_impl(const at::Tensor &new_data) {
   reset_grad_accumulator(new_data.device(), new_data.type());
 
   // yf225 TODO: explain what's going on here!
-  PyObject* pyobj_saved = get()->pyobj();
-  std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_detached = get()->detach_autograd_meta();
-  impl_ = new_data.unsafeGetTensorImpl()->shallow_copy_and_detach(
+  auto new_impl = new_data.unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/get()->version_counter(),
     /*allow_tensor_metadata_change=*/get()->allow_tensor_metadata_change());
-  impl_->set_autograd_meta(std::move(autograd_meta_detached));
-  impl_->set_pyobj(pyobj_saved);
+  new_impl->set_autograd_meta(std::move(get()->detach_autograd_meta()));
+  new_impl->set_pyobj(get()->pyobj());
+  impl_ = std::move(new_impl);
 }
 
 Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
