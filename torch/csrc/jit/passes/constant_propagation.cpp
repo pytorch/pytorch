@@ -40,7 +40,7 @@ std::vector<IValue> runNode(Node* n) {
           // error gets caught within propagateNode()
           throw c10::Error("Can't insert requires grad as constant", "");
         }
-        return IValue(autograd::as_variable_ref(t).data());
+        return IValue(t);
       } else {
         return t;
       }
@@ -132,7 +132,7 @@ void replaceAndRemoveIfOutput(Node* n, size_t i, Value* replacement) {
 
 // remove extra outputs from the node
 bool removeExtraIfOutputs(Node* n) {
-  AT_CHECK(n->kind() == prim::If, "Only supported for If nodes");
+  TORCH_CHECK(n->kind() == prim::If, "Only supported for If nodes");
   auto true_block = n->blocks()[0];
   auto false_block = n->blocks()[1];
   auto graph = n->owningGraph();

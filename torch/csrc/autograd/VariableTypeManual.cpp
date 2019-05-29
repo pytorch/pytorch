@@ -176,15 +176,11 @@ Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, in
 }
 
 const Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
+  return checked_cast_variable(t, name, pos);
 }
 
 Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
-}
-
-SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
-  return SparseTensorRef(checked_cast_variable(t.tref, name, pos).data());
+  return checked_cast_variable(t, name, pos);
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
@@ -205,7 +201,7 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
       AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " at position #", i, " "
                     "for iterable argument #", pos, " '", name, "'");
     }
-    ret[i] = static_cast<const Variable&>(t).data();
+    ret[i] = static_cast<const Variable&>(t);
   }
   return ret;
 }
@@ -269,7 +265,7 @@ Tensor & VariableType::copy__127(Tensor & (*_op)(Tensor &, const Tensor &, bool)
   return self;
 }
 
-Tensor & VariableType::resize__191(Tensor & (*_op)(Tensor &, IntArrayRef), Tensor & self, IntArrayRef size) {
+Tensor & VariableType::resize__189(Tensor & (*_op)(Tensor &, IntArrayRef), Tensor & self, IntArrayRef size) {
   auto& self_ = unpack(self, "self", 0);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
@@ -286,7 +282,7 @@ Tensor & VariableType::resize__191(Tensor & (*_op)(Tensor &, IntArrayRef), Tenso
   return self;
 }
 
-Tensor & VariableType::resize_as__589(Tensor & (*_op)(Tensor &, const Tensor &), Tensor & self, const Tensor & the_template) {
+Tensor & VariableType::resize_as__591(Tensor & (*_op)(Tensor &, const Tensor &), Tensor & self, const Tensor & the_template) {
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (as_variable_ref(self).requires_grad()) {
@@ -303,7 +299,7 @@ Tensor & VariableType::resize_as__589(Tensor & (*_op)(Tensor &, const Tensor &),
   return self;
 }
 
-Tensor VariableType::detach_467(Tensor (*_op)(const Tensor &), const Tensor & self) {
+Tensor VariableType::detach_465(Tensor (*_op)(const Tensor &), const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
 
   torch::jit::Node* node = nullptr;
@@ -324,7 +320,7 @@ Tensor VariableType::detach_467(Tensor (*_op)(const Tensor &), const Tensor & se
   return std::move(result);
 }
 
-Tensor & VariableType::detach__468(Tensor & (*_op)(Tensor &), Tensor & self) {
+Tensor & VariableType::detach__466(Tensor & (*_op)(Tensor &), Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
 
   torch::jit::Node* node = nullptr;

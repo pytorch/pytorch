@@ -551,7 +551,6 @@ Block::Block(Graph* graph_, Node* node_)
       output_(graph_->create(prim::Return, 0)),
       input_(graph_->create(prim::Param, 0)),
       owning_node_(node_) {
-
   input_->next() = output_;
   input_->prev() = output_;
   output_->next() = input_;
@@ -652,6 +651,16 @@ void Block::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
 
 void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
   block()->remapTypes(type_map);
+}
+
+void Value::inferTypeFrom(const at::Tensor& output) {
+  if (output.is_mkldnn()) {
+    // mkldnn tensor as opaque tensor doesn't have strides, so we can
+    // not create a CompleteTensorType
+    setType(DimensionedTensorType::create(output));
+    return;
+  }
+  setType(CompleteTensorType::create(output));
 }
 
 bool Value::mustBeNone() const {
@@ -1119,7 +1128,9 @@ Node* Node::insertBefore(Node* n) {
 Node* Node::insertAfter(Node* n) {
   AT_ASSERT(!inBlockList() && n->inBlockList());
   AT_ASSERT(n->owningBlock());
-  AT_ASSERTM(n->kind() != prim::Return, "Attempting to insert a Node after the Return node or before the Param node");
+  AT_ASSERTM(
+      n->kind() != prim::Return,
+      "Attempting to insert a Node after the Return node or before the Param node");
   this->owning_block_ = n->owningBlock();
   Node* next = n->next();
   n->next() = this;

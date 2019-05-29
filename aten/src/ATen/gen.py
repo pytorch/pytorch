@@ -192,7 +192,9 @@ extension_backends = ['MSNPU', 'XLA']
 
 # scalar_name, c_type, accreal, is_floating_type
 quantized_scalar_types = [
-    ('QInt8', 'qint8', 'QInt8AccrealNotDefined', 'Qint8IsFloatingTypeNotDefined'),
+    ('QInt8', 'qint8', 'QInt8AccrealNotDefined', 'QInt8IsFloatingTypeNotDefined'),
+    ('QUInt8', 'quint8', 'QUInt8AccrealNotDefined', 'QUInt8IsFloatingTypeNotDefined'),
+    ('QInt32', 'qint32', 'QInt32AccrealNotDefined', 'Qint32IsFloatingTypeNotDefined'),
 ]
 
 
@@ -275,6 +277,7 @@ def generate_storage_type_and_tensor(backend, density, declarations):
     env['TypeID'] = 'TypeID::' + tag
     top_env['type_ids'].append(tag + ',')
 
+    env['legacy_th_headers'] = []
     if backend == 'CUDA':
         env['extra_cuda_headers'] = []
         env['extra_cuda_headers'].append('#include <ATen/DeviceGuard.h>')
@@ -290,7 +293,6 @@ def generate_storage_type_and_tensor(backend, density, declarations):
             env['extra_cuda_headers'].append('#include <ATen/hip/HIPDevice.h>')
             env['extra_cuda_headers'].append('#include <ATen/hip/HIPTypeDefault.h>')
             env['extra_cuda_headers'].append('#include <ATen/hip/HIPContext.h>')
-            env['allocator'] = 'at::hip::getCUDADeviceAllocator()'
         else:
             env['th_headers'] = [
                 '#include <THC/THC.h>',
@@ -303,11 +305,11 @@ def generate_storage_type_and_tensor(backend, density, declarations):
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDADevice.h>')
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDATypeDefault.h>')
             env['extra_cuda_headers'].append('#include <ATen/cuda/CUDAContext.h>')
-            env['allocator'] = 'at::cuda::getCUDADeviceAllocator()'
         env['state'] = ['globalContext().getTHCState()']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
         env['Generator'] = 'CUDAGenerator'
+        env['allocator'] = 'at::cuda::getCUDADeviceAllocator()'
     else:
         env['th_headers'] = [
             '#include <TH/TH.h>',
@@ -334,16 +336,17 @@ def generate_storage_type_and_tensor(backend, density, declarations):
     if env['DeviceType'] == 'CUDA':
         fm = cuda_file_manager
 
+    if env['Backend'] == 'CPU' or env['Backend'] == 'CUDA':
+        env['namespace'] = env['Backend'].lower()
+        env['legacy_th_headers'].append('#include <ATen/LegacyTHFunctions' + env['Backend'] + ".h>")
+        fm.write('LegacyTHFunctions' + env['Backend'] + ".h", LEGACY_TH_FUNCTIONS_H, env)
+        fm.write('LegacyTHFunctions' + env['Backend'] + ".cpp", LEGACY_TH_FUNCTIONS_CPP, env)
+
     if density != 'Sparse':
         fm.write(env['Type'] + ".cpp", TYPE_DERIVED_CPP, env)
     else:
         fm.write(env['Type'] + ".cpp", SPARSE_TYPE_DERIVED_CPP, env)
     fm.write(env['Type'] + ".h", TYPE_DERIVED_H, env)
-
-    if env['Backend'] == 'CPU' or env['Backend'] == 'CUDA':
-        env['namespace'] = env['Backend'].lower()
-        fm.write('LegacyTHFunctions' + env['Backend'] + ".h", LEGACY_TH_FUNCTIONS_H, env)
-        fm.write('LegacyTHFunctions' + env['Backend'] + ".cpp", LEGACY_TH_FUNCTIONS_CPP, env)
 
     type_register = TYPE_REGISTER.substitute(backend=env['Backend'], type_name=env['Type'])
     if env['DeviceType'] == 'CPU':

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/macros/Macros.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
@@ -132,7 +132,7 @@ inline bool is_quantized(Tensor self) {
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \
-    AT_CHECK(                                    \
+    TORCH_CHECK(                                    \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/macros/Macros.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
@@ -177,446 +177,446 @@ inline Tensor Tensor::clamp_min(Scalar min) const {
 inline Tensor & Tensor::clamp_min_(Scalar min) {
     return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 110)(*this, min);
 }
-inline Tensor Tensor::contiguous() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 114)(*this);
+inline Tensor Tensor::contiguous(MemoryFormat memory_format) const {
+    return find_op<Tensor, const Tensor &, MemoryFormat>(tensorTypeIdToBackend(type_id()), is_variable(), 114)(*this, memory_format);
 }
 inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
     return find_op<Tensor &, Tensor &, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 127)(*this, src, non_blocking);
 }
 inline Tensor Tensor::cos() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 131)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 129)(*this);
 }
 inline Tensor & Tensor::cos_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 132)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 130)(*this);
 }
 inline Tensor Tensor::cosh() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 134)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 132)(*this);
 }
 inline Tensor & Tensor::cosh_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 135)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 133)(*this);
 }
 inline Tensor Tensor::cumsum(int64_t dim, ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, int64_t, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 154)(*this, dim, dtype);
+    return find_op<Tensor, const Tensor &, int64_t, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 152)(*this, dim, dtype);
 }
 inline Tensor Tensor::cumsum(int64_t dim) const {
-    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 155)(*this, dim);
+    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 153)(*this, dim);
 }
 inline Tensor Tensor::cumprod(int64_t dim, ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, int64_t, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 158)(*this, dim, dtype);
+    return find_op<Tensor, const Tensor &, int64_t, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 156)(*this, dim, dtype);
 }
 inline Tensor Tensor::cumprod(int64_t dim) const {
-    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 159)(*this, dim);
+    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 157)(*this, dim);
 }
 inline Tensor Tensor::det() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 166)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 164)(*this);
 }
 inline Tensor Tensor::diag_embed(int64_t offset, int64_t dim1, int64_t dim2) const {
-    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 167)(*this, offset, dim1, dim2);
+    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 165)(*this, offset, dim1, dim2);
 }
 inline Tensor Tensor::diagflat(int64_t offset) const {
-    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 168)(*this, offset);
+    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 166)(*this, offset);
 }
 inline Tensor Tensor::diagonal(int64_t offset, int64_t dim1, int64_t dim2) const {
-    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 169)(*this, offset, dim1, dim2);
+    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 167)(*this, offset, dim1, dim2);
 }
 inline Tensor Tensor::div(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 170)(*this, other);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 168)(*this, other);
 }
 inline Tensor & Tensor::div_(const Tensor & other) {
-    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 171)(*this, other);
+    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 169)(*this, other);
 }
 inline Tensor Tensor::div(Scalar other) const {
-    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 173)(*this, other);
+    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 171)(*this, other);
 }
 inline Tensor & Tensor::div_(Scalar other) {
-    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 174)(*this, other);
+    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 172)(*this, other);
 }
 inline Tensor Tensor::dot(const Tensor & tensor) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 175)(*this, tensor);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 173)(*this, tensor);
 }
 inline Tensor & Tensor::resize_(IntArrayRef size) {
-    return find_op<Tensor &, Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 191)(*this, size);
+    return find_op<Tensor &, Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 189)(*this, size);
 }
 inline Tensor Tensor::erf() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 196)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 194)(*this);
 }
 inline Tensor & Tensor::erf_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 197)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 195)(*this);
 }
 inline Tensor Tensor::erfc() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 199)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 197)(*this);
 }
 inline Tensor & Tensor::erfc_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 200)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 198)(*this);
 }
 inline Tensor Tensor::exp() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 202)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 200)(*this);
 }
 inline Tensor & Tensor::exp_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 203)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 201)(*this);
 }
 inline Tensor Tensor::expm1() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 205)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 203)(*this);
 }
 inline Tensor & Tensor::expm1_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 206)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 204)(*this);
 }
 inline Tensor Tensor::expand(IntArrayRef size, bool implicit) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 208)(*this, size, implicit);
+    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 206)(*this, size, implicit);
 }
 inline Tensor Tensor::expand_as(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 209)(*this, other);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 207)(*this, other);
 }
 inline Tensor Tensor::flatten(int64_t start_dim, int64_t end_dim) const {
-    return find_op<Tensor, const Tensor &, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 214)(*this, start_dim, end_dim);
+    return find_op<Tensor, const Tensor &, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 212)(*this, start_dim, end_dim);
 }
 inline Tensor & Tensor::fill_(Scalar value) {
-    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 215)(*this, value);
+    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 213)(*this, value);
 }
 inline Tensor & Tensor::fill_(const Tensor & value) {
-    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 216)(*this, value);
+    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 214)(*this, value);
 }
 inline Tensor Tensor::floor() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 217)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 215)(*this);
 }
 inline Tensor & Tensor::floor_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 218)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 216)(*this);
 }
 inline Tensor Tensor::frac() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 220)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 218)(*this);
 }
 inline Tensor & Tensor::frac_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 221)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 219)(*this);
 }
 inline Tensor Tensor::ger(const Tensor & vec2) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 240)(*this, vec2);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 238)(*this, vec2);
 }
 inline Tensor Tensor::fft(int64_t signal_ndim, bool normalized) const {
-    return find_op<Tensor, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 243)(*this, signal_ndim, normalized);
+    return find_op<Tensor, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 241)(*this, signal_ndim, normalized);
 }
 inline Tensor Tensor::ifft(int64_t signal_ndim, bool normalized) const {
-    return find_op<Tensor, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 244)(*this, signal_ndim, normalized);
+    return find_op<Tensor, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 242)(*this, signal_ndim, normalized);
 }
 inline Tensor Tensor::rfft(int64_t signal_ndim, bool normalized, bool onesided) const {
-    return find_op<Tensor, const Tensor &, int64_t, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 245)(*this, signal_ndim, normalized, onesided);
+    return find_op<Tensor, const Tensor &, int64_t, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 243)(*this, signal_ndim, normalized, onesided);
 }
 inline Tensor Tensor::irfft(int64_t signal_ndim, bool normalized, bool onesided, IntArrayRef signal_sizes) const {
-    return find_op<Tensor, const Tensor &, int64_t, bool, bool, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 246)(*this, signal_ndim, normalized, onesided, signal_sizes);
+    return find_op<Tensor, const Tensor &, int64_t, bool, bool, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 244)(*this, signal_ndim, normalized, onesided, signal_sizes);
 }
 inline Tensor Tensor::index(TensorList indices) const {
-    return find_op<Tensor, const Tensor &, TensorList>(tensorTypeIdToBackend(type_id()), is_variable(), 252)(*this, indices);
+    return find_op<Tensor, const Tensor &, TensorList>(tensorTypeIdToBackend(type_id()), is_variable(), 250)(*this, indices);
 }
 inline Tensor & Tensor::index_copy_(int64_t dim, const Tensor & index, const Tensor & source) {
-    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 253)(*this, dim, index, source);
+    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 251)(*this, dim, index, source);
 }
 inline Tensor Tensor::index_copy(int64_t dim, const Tensor & index, const Tensor & source) const {
-    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 254)(*this, dim, index, source);
+    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 252)(*this, dim, index, source);
 }
 inline Tensor & Tensor::index_put_(TensorList indices, const Tensor & values, bool accumulate) {
-    return find_op<Tensor &, Tensor &, TensorList, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 255)(*this, indices, values, accumulate);
+    return find_op<Tensor &, Tensor &, TensorList, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 253)(*this, indices, values, accumulate);
 }
 inline Tensor Tensor::index_put(TensorList indices, const Tensor & values, bool accumulate) const {
-    return find_op<Tensor, const Tensor &, TensorList, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 256)(*this, indices, values, accumulate);
+    return find_op<Tensor, const Tensor &, TensorList, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 254)(*this, indices, values, accumulate);
 }
 inline Tensor Tensor::inverse() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 258)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 256)(*this);
 }
 inline Tensor Tensor::isclose(const Tensor & other, double rtol, double atol, bool equal_nan) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, double, double, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 261)(*this, other, rtol, atol, equal_nan);
+    return find_op<Tensor, const Tensor &, const Tensor &, double, double, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 259)(*this, other, rtol, atol, equal_nan);
 }
 inline bool Tensor::is_distributed() const {
-    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 263)(*this);
+    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 261)(*this);
 }
 inline bool Tensor::is_floating_point() const {
-    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 264)(*this);
+    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 262)(*this);
 }
 inline bool Tensor::is_complex() const {
-    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 265)(*this);
+    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 263)(*this);
 }
 inline bool Tensor::is_nonzero() const {
-    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 266)(*this);
+    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 264)(*this);
 }
 inline bool Tensor::is_same_size(const Tensor & other) const {
-    return find_op<bool, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 267)(*this, other);
+    return find_op<bool, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 265)(*this, other);
 }
 inline bool Tensor::is_signed() const {
-    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 268)(*this);
+    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 266)(*this);
 }
 inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, int64_t dim, bool keepdim) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 271)(*this, k, dim, keepdim);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 269)(*this, k, dim, keepdim);
 }
 inline Tensor Tensor::log() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 282)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 280)(*this);
 }
 inline Tensor & Tensor::log_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 283)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 281)(*this);
 }
 inline Tensor Tensor::log10() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 285)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 283)(*this);
 }
 inline Tensor & Tensor::log10_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 286)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 284)(*this);
 }
 inline Tensor Tensor::log1p() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 288)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 286)(*this);
 }
 inline Tensor & Tensor::log1p_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 289)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 287)(*this);
 }
 inline Tensor Tensor::log2() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 291)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 289)(*this);
 }
 inline Tensor & Tensor::log2_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 292)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 290)(*this);
 }
 inline Tensor Tensor::logdet() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 294)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 292)(*this);
 }
 inline Tensor Tensor::log_softmax(int64_t dim, ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, int64_t, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 297)(*this, dim, dtype);
+    return find_op<Tensor, const Tensor &, int64_t, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 295)(*this, dim, dtype);
 }
 inline Tensor Tensor::log_softmax(int64_t dim) const {
-    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 298)(*this, dim);
+    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 296)(*this, dim);
 }
 inline Tensor Tensor::logsumexp(IntArrayRef dim, bool keepdim) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 301)(*this, dim, keepdim);
+    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 299)(*this, dim, keepdim);
 }
 inline Tensor Tensor::matmul(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 304)(*this, other);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 302)(*this, other);
 }
 inline Tensor Tensor::matrix_power(int64_t n) const {
-    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 308)(*this, n);
+    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 306)(*this, n);
 }
 inline std::tuple<Tensor,Tensor> Tensor::max(int64_t dim, bool keepdim) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 309)(*this, dim, keepdim);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 307)(*this, dim, keepdim);
 }
 inline Tensor Tensor::max_values(IntArrayRef dim, bool keepdim) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 311)(*this, dim, keepdim);
+    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 309)(*this, dim, keepdim);
 }
 inline Tensor Tensor::mean(ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 317)(*this, dtype);
+    return find_op<Tensor, const Tensor &, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 315)(*this, dtype);
 }
 inline Tensor Tensor::mean() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 318)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 316)(*this);
 }
 inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef, bool, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 319)(*this, dim, keepdim, dtype);
+    return find_op<Tensor, const Tensor &, IntArrayRef, bool, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 317)(*this, dim, keepdim, dtype);
 }
 inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 320)(*this, dim, keepdim);
+    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 318)(*this, dim, keepdim);
 }
 inline Tensor Tensor::mean(IntArrayRef dim, ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 321)(*this, dim, dtype);
+    return find_op<Tensor, const Tensor &, IntArrayRef, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 319)(*this, dim, dtype);
 }
 inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 325)(*this, dim, keepdim);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 323)(*this, dim, keepdim);
 }
 inline std::tuple<Tensor,Tensor> Tensor::min(int64_t dim, bool keepdim) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 327)(*this, dim, keepdim);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 325)(*this, dim, keepdim);
 }
 inline Tensor Tensor::min_values(IntArrayRef dim, bool keepdim) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 329)(*this, dim, keepdim);
+    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 327)(*this, dim, keepdim);
 }
 inline Tensor Tensor::mm(const Tensor & mat2) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 349)(*this, mat2);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 347)(*this, mat2);
 }
 inline std::tuple<Tensor,Tensor> Tensor::mode(int64_t dim, bool keepdim) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 352)(*this, dim, keepdim);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 350)(*this, dim, keepdim);
 }
 inline Tensor Tensor::mul(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 354)(*this, other);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 352)(*this, other);
 }
 inline Tensor & Tensor::mul_(const Tensor & other) {
-    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 355)(*this, other);
+    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 353)(*this, other);
 }
 inline Tensor Tensor::mul(Scalar other) const {
-    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 357)(*this, other);
+    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 355)(*this, other);
 }
 inline Tensor & Tensor::mul_(Scalar other) {
-    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 358)(*this, other);
+    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 356)(*this, other);
 }
 inline Tensor Tensor::mv(const Tensor & vec) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 359)(*this, vec);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 357)(*this, vec);
 }
 inline Tensor Tensor::mvlgamma(int64_t p) const {
-    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 361)(*this, p);
+    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 359)(*this, p);
 }
 inline Tensor & Tensor::mvlgamma_(int64_t p) {
-    return find_op<Tensor &, Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 362)(*this, p);
+    return find_op<Tensor &, Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 360)(*this, p);
 }
 inline Tensor Tensor::narrow_copy(int64_t dim, int64_t start, int64_t length) const {
-    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 363)(*this, dim, start, length);
+    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 361)(*this, dim, start, length);
 }
 inline Tensor Tensor::narrow(int64_t dim, int64_t start, int64_t length) const {
-    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 364)(*this, dim, start, length);
+    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 362)(*this, dim, start, length);
 }
 inline Tensor Tensor::permute(IntArrayRef dims) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 389)(*this, dims);
+    return find_op<Tensor, const Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 387)(*this, dims);
 }
 inline Tensor Tensor::pin_memory() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 391)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 389)(*this);
 }
 inline Tensor Tensor::pinverse(double rcond) const {
-    return find_op<Tensor, const Tensor &, double>(tensorTypeIdToBackend(type_id()), is_variable(), 392)(*this, rcond);
+    return find_op<Tensor, const Tensor &, double>(tensorTypeIdToBackend(type_id()), is_variable(), 390)(*this, rcond);
 }
 inline Tensor Tensor::reciprocal() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 426)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 424)(*this);
 }
 inline Tensor & Tensor::reciprocal_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 427)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 425)(*this);
 }
 inline Tensor Tensor::neg() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 429)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 427)(*this);
 }
 inline Tensor & Tensor::neg_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 430)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 428)(*this);
 }
 inline Tensor Tensor::repeat(IntArrayRef repeats) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 432)(*this, repeats);
+    return find_op<Tensor, const Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 430)(*this, repeats);
 }
 inline Tensor Tensor::repeat_interleave(const Tensor & repeats, c10::optional<int64_t> dim) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, c10::optional<int64_t>>(tensorTypeIdToBackend(type_id()), is_variable(), 434)(*this, repeats, dim);
+    return find_op<Tensor, const Tensor &, const Tensor &, c10::optional<int64_t>>(tensorTypeIdToBackend(type_id()), is_variable(), 432)(*this, repeats, dim);
 }
 inline Tensor Tensor::repeat_interleave(int64_t repeats, c10::optional<int64_t> dim) const {
-    return find_op<Tensor, const Tensor &, int64_t, c10::optional<int64_t>>(tensorTypeIdToBackend(type_id()), is_variable(), 435)(*this, repeats, dim);
+    return find_op<Tensor, const Tensor &, int64_t, c10::optional<int64_t>>(tensorTypeIdToBackend(type_id()), is_variable(), 433)(*this, repeats, dim);
 }
 inline Tensor Tensor::reshape(IntArrayRef shape) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 436)(*this, shape);
+    return find_op<Tensor, const Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 434)(*this, shape);
 }
 inline Tensor Tensor::reshape_as(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 438)(*this, other);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 436)(*this, other);
 }
 inline Tensor Tensor::round() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 439)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 437)(*this);
 }
 inline Tensor & Tensor::round_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 440)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 438)(*this);
 }
 inline Tensor Tensor::relu() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 444)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 442)(*this);
 }
 inline Tensor & Tensor::relu_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 445)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 443)(*this);
 }
 inline Tensor Tensor::prelu(const Tensor & weight) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 446)(*this, weight);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 444)(*this, weight);
 }
 inline std::tuple<Tensor,Tensor> Tensor::prelu_backward(const Tensor & grad_output, const Tensor & weight) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 447)(grad_output, *this, weight);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 445)(grad_output, *this, weight);
 }
 inline Tensor Tensor::hardshrink(Scalar lambd) const {
-    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 448)(*this, lambd);
+    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 446)(*this, lambd);
 }
 inline Tensor Tensor::hardshrink_backward(const Tensor & grad_out, Scalar lambd) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 449)(grad_out, *this, lambd);
+    return find_op<Tensor, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 447)(grad_out, *this, lambd);
 }
 inline Tensor Tensor::rsqrt() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 450)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 448)(*this);
 }
 inline Tensor & Tensor::rsqrt_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 451)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 449)(*this);
 }
 inline Tensor Tensor::select(int64_t dim, int64_t index) const {
-    return find_op<Tensor, const Tensor &, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 453)(*this, dim, index);
+    return find_op<Tensor, const Tensor &, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 451)(*this, dim, index);
 }
 inline Tensor Tensor::sigmoid() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 458)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 456)(*this);
 }
 inline Tensor & Tensor::sigmoid_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 459)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 457)(*this);
 }
 inline Tensor Tensor::sin() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 461)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 459)(*this);
 }
 inline Tensor & Tensor::sin_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 462)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 460)(*this);
 }
 inline Tensor Tensor::sinh() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 464)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 462)(*this);
 }
 inline Tensor & Tensor::sinh_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 465)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 463)(*this);
 }
 inline Tensor Tensor::detach() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 467)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 465)(*this);
 }
 inline Tensor & Tensor::detach_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 468)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 466)(*this);
 }
 inline int64_t Tensor::size(int64_t dim) const {
-    return find_op<int64_t, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 469)(*this, dim);
+    return find_op<int64_t, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 467)(*this, dim);
 }
 inline Tensor Tensor::slice(int64_t dim, int64_t start, int64_t end, int64_t step) const {
-    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 470)(*this, dim, start, end, step);
+    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 468)(*this, dim, start, end, step);
 }
 inline std::tuple<Tensor,Tensor> Tensor::slogdet() const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 471)(*this);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 469)(*this);
 }
 inline Tensor Tensor::smm(const Tensor & mat2) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 472)(*this, mat2);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 470)(*this, mat2);
 }
 inline Tensor Tensor::softmax(int64_t dim, ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, int64_t, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 473)(*this, dim, dtype);
+    return find_op<Tensor, const Tensor &, int64_t, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 471)(*this, dim, dtype);
 }
 inline Tensor Tensor::softmax(int64_t dim) const {
-    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 474)(*this, dim);
+    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 472)(*this, dim);
 }
 inline std::vector<Tensor> Tensor::split(int64_t split_size, int64_t dim) const {
-    return find_op<std::vector<Tensor>, const Tensor &, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 484)(*this, split_size, dim);
+    return find_op<std::vector<Tensor>, const Tensor &, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 482)(*this, split_size, dim);
 }
 inline std::vector<Tensor> Tensor::split_with_sizes(IntArrayRef split_sizes, int64_t dim) const {
-    return find_op<std::vector<Tensor>, const Tensor &, IntArrayRef, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 485)(*this, split_sizes, dim);
+    return find_op<std::vector<Tensor>, const Tensor &, IntArrayRef, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 483)(*this, split_sizes, dim);
 }
 inline Tensor Tensor::squeeze() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 486)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 484)(*this);
 }
 inline Tensor Tensor::squeeze(int64_t dim) const {
-    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 487)(*this, dim);
+    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 485)(*this, dim);
 }
 inline Tensor & Tensor::squeeze_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 488)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 486)(*this);
 }
 inline Tensor & Tensor::squeeze_(int64_t dim) {
-    return find_op<Tensor &, Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 489)(*this, dim);
+    return find_op<Tensor &, Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 487)(*this, dim);
 }
 inline Tensor Tensor::sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 490)(*this, mat1, mat2, beta, alpha);
+    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 488)(*this, mat1, mat2, beta, alpha);
 }
 inline Tensor Tensor::stft(int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const Tensor & window, bool normalized, bool onesided) const {
-    return find_op<Tensor, const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const Tensor &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 494)(*this, n_fft, hop_length, win_length, window, normalized, onesided);
+    return find_op<Tensor, const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const Tensor &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 492)(*this, n_fft, hop_length, win_length, window, normalized, onesided);
 }
 inline int64_t Tensor::stride(int64_t dim) const {
-    return find_op<int64_t, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 495)(*this, dim);
+    return find_op<int64_t, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 493)(*this, dim);
 }
 inline Tensor Tensor::sum(ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 496)(*this, dtype);
+    return find_op<Tensor, const Tensor &, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 494)(*this, dtype);
 }
 inline Tensor Tensor::sum() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 497)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 495)(*this);
 }
 inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim, ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef, bool, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 498)(*this, dim, keepdim, dtype);
+    return find_op<Tensor, const Tensor &, IntArrayRef, bool, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 496)(*this, dim, keepdim, dtype);
 }
 inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 499)(*this, dim, keepdim);
+    return find_op<Tensor, const Tensor &, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 497)(*this, dim, keepdim);
 }
 inline Tensor Tensor::sum(IntArrayRef dim, ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 500)(*this, dim, dtype);
+    return find_op<Tensor, const Tensor &, IntArrayRef, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 498)(*this, dim, dtype);
 }
 inline Tensor Tensor::sum_to_size(IntArrayRef size) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 504)(*this, size);
+    return find_op<Tensor, const Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 502)(*this, size);
 }
 inline Tensor Tensor::sqrt() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 505)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 503)(*this);
 }
 inline Tensor & Tensor::sqrt_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 506)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 504)(*this);
 }
 inline Tensor Tensor::std(bool unbiased) const {
-    return find_op<Tensor, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 508)(*this, unbiased);
+    return find_op<Tensor, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 506)(*this, unbiased);
 }
 inline Tensor Tensor::std(IntArrayRef dim, bool unbiased, bool keepdim) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 509)(*this, dim, unbiased, keepdim);
+    return find_op<Tensor, const Tensor &, IntArrayRef, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 507)(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::prod(ScalarType dtype) const {
     return find_op<Tensor, const Tensor &, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 511)(*this, dtype);
@@ -688,616 +688,616 @@ inline Tensor Tensor::var(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return find_op<Tensor, const Tensor &, IntArrayRef, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 553)(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::view_as(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 555)(*this, other);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 557)(*this, other);
 }
 inline Tensor Tensor::where(const Tensor & condition, const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 556)(condition, *this, other);
+    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 558)(condition, *this, other);
 }
 inline Tensor Tensor::norm(c10::optional<Scalar> p, ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, c10::optional<Scalar>, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 577)(*this, p, dtype);
+    return find_op<Tensor, const Tensor &, c10::optional<Scalar>, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 579)(*this, p, dtype);
 }
 inline Tensor Tensor::norm(Scalar p) const {
-    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 578)(*this, p);
+    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 580)(*this, p);
 }
 inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) const {
-    return find_op<Tensor, const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 579)(*this, p, dim, keepdim, dtype);
+    return find_op<Tensor, const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 581)(*this, p, dim, keepdim, dtype);
 }
 inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim) const {
-    return find_op<Tensor, const Tensor &, c10::optional<Scalar>, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 580)(*this, p, dim, keepdim);
+    return find_op<Tensor, const Tensor &, c10::optional<Scalar>, IntArrayRef, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 582)(*this, p, dim, keepdim);
 }
 inline Tensor Tensor::clone() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 588)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 590)(*this);
 }
 inline Tensor & Tensor::resize_as_(const Tensor & the_template) {
-    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 589)(*this, the_template);
+    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 591)(*this, the_template);
 }
 inline Tensor Tensor::pow(Scalar exponent) const {
-    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 591)(*this, exponent);
+    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 593)(*this, exponent);
 }
 inline Tensor & Tensor::zero_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 592)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 594)(*this);
 }
 inline Tensor Tensor::sub(const Tensor & other, Scalar alpha) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 594)(*this, other, alpha);
+    return find_op<Tensor, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 596)(*this, other, alpha);
 }
 inline Tensor & Tensor::sub_(const Tensor & other, Scalar alpha) {
-    return find_op<Tensor &, Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 595)(*this, other, alpha);
+    return find_op<Tensor &, Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 597)(*this, other, alpha);
 }
 inline Tensor Tensor::sub(Scalar other, Scalar alpha) const {
-    return find_op<Tensor, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 596)(*this, other, alpha);
+    return find_op<Tensor, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 598)(*this, other, alpha);
 }
 inline Tensor & Tensor::sub_(Scalar other, Scalar alpha) {
-    return find_op<Tensor &, Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 597)(*this, other, alpha);
+    return find_op<Tensor &, Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 599)(*this, other, alpha);
 }
 inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 605)(*this, mat1, mat2, beta, alpha);
+    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 607)(*this, mat1, mat2, beta, alpha);
 }
 inline Tensor & Tensor::addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) {
-    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 606)(*this, mat1, mat2, beta, alpha);
+    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 608)(*this, mat1, mat2, beta, alpha);
 }
 inline Tensor & Tensor::sparse_resize_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) {
-    return find_op<Tensor &, Tensor &, IntArrayRef, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 613)(*this, size, sparse_dim, dense_dim);
+    return find_op<Tensor &, Tensor &, IntArrayRef, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 615)(*this, size, sparse_dim, dense_dim);
 }
 inline Tensor & Tensor::sparse_resize_and_clear_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) {
-    return find_op<Tensor &, Tensor &, IntArrayRef, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 614)(*this, size, sparse_dim, dense_dim);
+    return find_op<Tensor &, Tensor &, IntArrayRef, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 616)(*this, size, sparse_dim, dense_dim);
 }
-inline Tensor Tensor::sparse_mask(SparseTensorRef mask) const {
-    return find_op<Tensor, const Tensor &, SparseTensorRef>(tensorTypeIdToBackend(type_id()), is_variable(), 615)(*this, mask);
+inline Tensor Tensor::sparse_mask(const Tensor & mask) const {
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 617)(*this, mask);
 }
 inline Tensor Tensor::to_dense() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 616)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 618)(*this);
 }
 inline int64_t Tensor::sparse_dim() const {
-    return find_op<int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 618)(*this);
-}
-inline int64_t Tensor::_dimI() const {
-    return find_op<int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 619)(*this);
-}
-inline int64_t Tensor::dense_dim() const {
     return find_op<int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 620)(*this);
 }
-inline int64_t Tensor::_dimV() const {
+inline int64_t Tensor::_dimI() const {
     return find_op<int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 621)(*this);
 }
-inline int64_t Tensor::_nnz() const {
+inline int64_t Tensor::dense_dim() const {
     return find_op<int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 622)(*this);
 }
+inline int64_t Tensor::_dimV() const {
+    return find_op<int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 623)(*this);
+}
+inline int64_t Tensor::_nnz() const {
+    return find_op<int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 624)(*this);
+}
 inline Tensor Tensor::coalesce() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 623)(*this);
-}
-inline bool Tensor::is_coalesced() const {
-    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 624)(*this);
-}
-inline Tensor Tensor::_indices() const {
     return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 625)(*this);
 }
+inline bool Tensor::is_coalesced() const {
+    return find_op<bool, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 626)(*this);
+}
+inline Tensor Tensor::_indices() const {
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 627)(*this);
+}
 inline Tensor Tensor::_values() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 626)(*this);
-}
-inline Tensor & Tensor::_coalesced_(bool coalesced) {
-    return find_op<Tensor &, Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 627)(*this, coalesced);
-}
-inline Tensor Tensor::indices() const {
     return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 628)(*this);
 }
+inline Tensor & Tensor::_coalesced_(bool coalesced) {
+    return find_op<Tensor &, Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 629)(*this, coalesced);
+}
+inline Tensor Tensor::indices() const {
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 630)(*this);
+}
 inline Tensor Tensor::values() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 629)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 631)(*this);
 }
 inline int64_t Tensor::numel() const {
-    return find_op<int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 633)(*this);
+    return find_op<int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 635)(*this);
 }
 inline std::vector<Tensor> Tensor::unbind(int64_t dim) const {
-    return find_op<std::vector<Tensor>, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 634)(*this, dim);
+    return find_op<std::vector<Tensor>, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 636)(*this, dim);
 }
 inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
-    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 635)(*this, sparse_dim);
+    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 637)(*this, sparse_dim);
 }
 inline Tensor Tensor::to_sparse() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 636)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 638)(*this);
 }
 inline Tensor Tensor::to_mkldnn() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 637)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 639)(*this);
 }
-inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point) const {
-    return find_op<Tensor, const Tensor &, double, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 640)(*this, scale, zero_point);
+inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const {
+    return find_op<Tensor, const Tensor &, double, int64_t, ScalarType>(tensorTypeIdToBackend(type_id()), is_variable(), 642)(*this, scale, zero_point, dtype);
 }
 inline Tensor Tensor::dequantize() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 641)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 643)(*this);
 }
 inline Scalar Tensor::q_scale() const {
-    return find_op<Scalar, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 642)(*this);
+    return find_op<Scalar, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 645)(*this);
 }
 inline Scalar Tensor::q_zero_point() const {
-    return find_op<Scalar, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 643)(*this);
+    return find_op<Scalar, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 646)(*this);
 }
 inline Tensor Tensor::int_repr() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 644)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 647)(*this);
 }
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
-    return find_op<Tensor, const Tensor &, const TensorOptions &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 645)(*this, options, non_blocking, copy);
+    return find_op<Tensor, const Tensor &, const TensorOptions &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 649)(*this, options, non_blocking, copy);
 }
 inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking, bool copy) const {
-    return find_op<Tensor, const Tensor &, Device, ScalarType, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 646)(*this, device, dtype, non_blocking, copy);
+    return find_op<Tensor, const Tensor &, Device, ScalarType, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 650)(*this, device, dtype, non_blocking, copy);
 }
 inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy) const {
-    return find_op<Tensor, const Tensor &, ScalarType, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 647)(*this, dtype, non_blocking, copy);
+    return find_op<Tensor, const Tensor &, ScalarType, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 651)(*this, dtype, non_blocking, copy);
 }
 inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 648)(*this, other, non_blocking, copy);
+    return find_op<Tensor, const Tensor &, const Tensor &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 652)(*this, other, non_blocking, copy);
 }
 inline Scalar Tensor::item() const {
-    return find_op<Scalar, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 652)(*this);
+    return find_op<Scalar, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 656)(*this);
 }
 inline void* Tensor::data_ptr() const {
-    return find_op<void*, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 678)(*this);
+    return find_op<void*, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 682)(*this);
 }
 inline Tensor & Tensor::set_(Storage source) {
-    return find_op<Tensor &, Tensor &, Storage>(tensorTypeIdToBackend(type_id()), is_variable(), 679)(*this, source);
+    return find_op<Tensor &, Tensor &, Storage>(tensorTypeIdToBackend(type_id()), is_variable(), 683)(*this, source);
 }
 inline Tensor & Tensor::set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
-    return find_op<Tensor &, Tensor &, Storage, int64_t, IntArrayRef, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 680)(*this, source, storage_offset, size, stride);
+    return find_op<Tensor &, Tensor &, Storage, int64_t, IntArrayRef, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 684)(*this, source, storage_offset, size, stride);
 }
 inline Tensor & Tensor::set_(const Tensor & source) {
-    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 681)(*this, source);
+    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 685)(*this, source);
 }
 inline Tensor & Tensor::set_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 682)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 686)(*this);
 }
 inline bool Tensor::is_set_to(const Tensor & tensor) const {
-    return find_op<bool, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 683)(*this, tensor);
+    return find_op<bool, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 687)(*this, tensor);
 }
 inline Tensor & Tensor::masked_fill_(const Tensor & mask, Scalar value) {
-    return find_op<Tensor &, Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 684)(*this, mask, value);
+    return find_op<Tensor &, Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 688)(*this, mask, value);
 }
 inline Tensor Tensor::masked_fill(const Tensor & mask, Scalar value) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 685)(*this, mask, value);
+    return find_op<Tensor, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 689)(*this, mask, value);
 }
 inline Tensor & Tensor::masked_fill_(const Tensor & mask, const Tensor & value) {
-    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 686)(*this, mask, value);
+    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 690)(*this, mask, value);
 }
 inline Tensor Tensor::masked_fill(const Tensor & mask, const Tensor & value) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 687)(*this, mask, value);
+    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 691)(*this, mask, value);
 }
 inline Tensor & Tensor::masked_scatter_(const Tensor & mask, const Tensor & source) {
-    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 688)(*this, mask, source);
+    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 692)(*this, mask, source);
 }
 inline Tensor Tensor::masked_scatter(const Tensor & mask, const Tensor & source) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 689)(*this, mask, source);
+    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 693)(*this, mask, source);
 }
 inline Tensor Tensor::view(IntArrayRef size) const {
-    return find_op<Tensor, const Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 690)(*this, size);
+    return find_op<Tensor, const Tensor &, IntArrayRef>(tensorTypeIdToBackend(type_id()), is_variable(), 694)(*this, size);
 }
 inline Tensor & Tensor::put_(const Tensor & index, const Tensor & source, bool accumulate) {
-    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 691)(*this, index, source, accumulate);
+    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 695)(*this, index, source, accumulate);
 }
 inline Tensor & Tensor::index_add_(int64_t dim, const Tensor & index, const Tensor & source) {
-    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 692)(*this, dim, index, source);
+    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 696)(*this, dim, index, source);
 }
 inline Tensor Tensor::index_add(int64_t dim, const Tensor & index, const Tensor & source) const {
-    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 693)(*this, dim, index, source);
+    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 697)(*this, dim, index, source);
 }
 inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, Scalar value) {
-    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 694)(*this, dim, index, value);
+    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 698)(*this, dim, index, value);
 }
 inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, Scalar value) const {
-    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 695)(*this, dim, index, value);
+    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 699)(*this, dim, index, value);
 }
 inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, const Tensor & value) {
-    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 696)(*this, dim, index, value);
+    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 700)(*this, dim, index, value);
 }
 inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, const Tensor & value) const {
-    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 697)(*this, dim, index, value);
+    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 701)(*this, dim, index, value);
 }
 inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, const Tensor & src) {
-    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 698)(*this, dim, index, src);
-}
-inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, const Tensor & src) const {
-    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 699)(*this, dim, index, src);
-}
-inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, Scalar value) {
-    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 700)(*this, dim, index, value);
-}
-inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, Scalar value) const {
-    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 701)(*this, dim, index, value);
-}
-inline Tensor & Tensor::scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) {
     return find_op<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 702)(*this, dim, index, src);
 }
-inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tensor & src) const {
+inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, const Tensor & src) const {
     return find_op<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 703)(*this, dim, index, src);
 }
+inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, Scalar value) {
+    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 704)(*this, dim, index, value);
+}
+inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, Scalar value) const {
+    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 705)(*this, dim, index, value);
+}
+inline Tensor & Tensor::scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) {
+    return find_op<Tensor &, Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 706)(*this, dim, index, src);
+}
+inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tensor & src) const {
+    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 707)(*this, dim, index, src);
+}
 inline Tensor & Tensor::lt_(Scalar other) {
-    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 704)(*this, other);
-}
-inline Tensor & Tensor::lt_(const Tensor & other) {
-    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 705)(*this, other);
-}
-inline Tensor & Tensor::gt_(Scalar other) {
-    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 706)(*this, other);
-}
-inline Tensor & Tensor::gt_(const Tensor & other) {
-    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 707)(*this, other);
-}
-inline Tensor & Tensor::le_(Scalar other) {
     return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 708)(*this, other);
 }
-inline Tensor & Tensor::le_(const Tensor & other) {
+inline Tensor & Tensor::lt_(const Tensor & other) {
     return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 709)(*this, other);
 }
-inline Tensor & Tensor::ge_(Scalar other) {
+inline Tensor & Tensor::gt_(Scalar other) {
     return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 710)(*this, other);
 }
-inline Tensor & Tensor::ge_(const Tensor & other) {
+inline Tensor & Tensor::gt_(const Tensor & other) {
     return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 711)(*this, other);
 }
-inline Tensor & Tensor::eq_(Scalar other) {
+inline Tensor & Tensor::le_(Scalar other) {
     return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 712)(*this, other);
 }
-inline Tensor & Tensor::eq_(const Tensor & other) {
+inline Tensor & Tensor::le_(const Tensor & other) {
     return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 713)(*this, other);
 }
-inline Tensor & Tensor::ne_(Scalar other) {
+inline Tensor & Tensor::ge_(Scalar other) {
     return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 714)(*this, other);
 }
-inline Tensor & Tensor::ne_(const Tensor & other) {
+inline Tensor & Tensor::ge_(const Tensor & other) {
     return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 715)(*this, other);
 }
-inline Tensor Tensor::__and__(Scalar other) const {
-    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 716)(*this, other);
+inline Tensor & Tensor::eq_(Scalar other) {
+    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 716)(*this, other);
 }
-inline Tensor Tensor::__and__(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 717)(*this, other);
+inline Tensor & Tensor::eq_(const Tensor & other) {
+    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 717)(*this, other);
 }
-inline Tensor & Tensor::__iand__(Scalar other) {
+inline Tensor & Tensor::ne_(Scalar other) {
     return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 718)(*this, other);
 }
-inline Tensor & Tensor::__iand__(const Tensor & other) {
+inline Tensor & Tensor::ne_(const Tensor & other) {
     return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 719)(*this, other);
 }
-inline Tensor Tensor::__or__(Scalar other) const {
+inline Tensor Tensor::__and__(Scalar other) const {
     return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 720)(*this, other);
 }
-inline Tensor Tensor::__or__(const Tensor & other) const {
+inline Tensor Tensor::__and__(const Tensor & other) const {
     return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 721)(*this, other);
 }
-inline Tensor & Tensor::__ior__(Scalar other) {
+inline Tensor & Tensor::__iand__(Scalar other) {
     return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 722)(*this, other);
 }
-inline Tensor & Tensor::__ior__(const Tensor & other) {
+inline Tensor & Tensor::__iand__(const Tensor & other) {
     return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 723)(*this, other);
 }
-inline Tensor Tensor::__xor__(Scalar other) const {
+inline Tensor Tensor::__or__(Scalar other) const {
     return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 724)(*this, other);
 }
-inline Tensor Tensor::__xor__(const Tensor & other) const {
+inline Tensor Tensor::__or__(const Tensor & other) const {
     return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 725)(*this, other);
 }
-inline Tensor & Tensor::__ixor__(Scalar other) {
+inline Tensor & Tensor::__ior__(Scalar other) {
     return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 726)(*this, other);
 }
-inline Tensor & Tensor::__ixor__(const Tensor & other) {
+inline Tensor & Tensor::__ior__(const Tensor & other) {
     return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 727)(*this, other);
 }
-inline Tensor Tensor::__lshift__(Scalar other) const {
+inline Tensor Tensor::__xor__(Scalar other) const {
     return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 728)(*this, other);
 }
-inline Tensor Tensor::__lshift__(const Tensor & other) const {
+inline Tensor Tensor::__xor__(const Tensor & other) const {
     return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 729)(*this, other);
 }
-inline Tensor & Tensor::__ilshift__(Scalar other) {
+inline Tensor & Tensor::__ixor__(Scalar other) {
     return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 730)(*this, other);
 }
-inline Tensor & Tensor::__ilshift__(const Tensor & other) {
+inline Tensor & Tensor::__ixor__(const Tensor & other) {
     return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 731)(*this, other);
 }
-inline Tensor Tensor::__rshift__(Scalar other) const {
+inline Tensor Tensor::__lshift__(Scalar other) const {
     return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 732)(*this, other);
 }
-inline Tensor Tensor::__rshift__(const Tensor & other) const {
+inline Tensor Tensor::__lshift__(const Tensor & other) const {
     return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 733)(*this, other);
 }
-inline Tensor & Tensor::__irshift__(Scalar other) {
+inline Tensor & Tensor::__ilshift__(Scalar other) {
     return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 734)(*this, other);
 }
-inline Tensor & Tensor::__irshift__(const Tensor & other) {
+inline Tensor & Tensor::__ilshift__(const Tensor & other) {
     return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 735)(*this, other);
 }
+inline Tensor Tensor::__rshift__(Scalar other) const {
+    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 736)(*this, other);
+}
+inline Tensor Tensor::__rshift__(const Tensor & other) const {
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 737)(*this, other);
+}
+inline Tensor & Tensor::__irshift__(Scalar other) {
+    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 738)(*this, other);
+}
+inline Tensor & Tensor::__irshift__(const Tensor & other) {
+    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 739)(*this, other);
+}
 inline Tensor & Tensor::lgamma_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 736)(*this);
-}
-inline Tensor & Tensor::atan2_(const Tensor & other) {
-    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 737)(*this, other);
-}
-inline Tensor & Tensor::tril_(int64_t diagonal) {
-    return find_op<Tensor &, Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 738)(*this, diagonal);
-}
-inline Tensor & Tensor::triu_(int64_t diagonal) {
-    return find_op<Tensor &, Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 739)(*this, diagonal);
-}
-inline Tensor & Tensor::digamma_() {
     return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 740)(*this);
 }
+inline Tensor & Tensor::atan2_(const Tensor & other) {
+    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 741)(*this, other);
+}
+inline Tensor & Tensor::tril_(int64_t diagonal) {
+    return find_op<Tensor &, Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 742)(*this, diagonal);
+}
+inline Tensor & Tensor::triu_(int64_t diagonal) {
+    return find_op<Tensor &, Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 743)(*this, diagonal);
+}
+inline Tensor & Tensor::digamma_() {
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 744)(*this);
+}
 inline Tensor & Tensor::polygamma_(int64_t n) {
-    return find_op<Tensor &, Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 741)(*this, n);
+    return find_op<Tensor &, Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 745)(*this, n);
 }
 inline Tensor & Tensor::erfinv_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 742)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 746)(*this);
 }
 inline Tensor & Tensor::renorm_(Scalar p, int64_t dim, Scalar maxnorm) {
-    return find_op<Tensor &, Tensor &, Scalar, int64_t, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 743)(*this, p, dim, maxnorm);
+    return find_op<Tensor &, Tensor &, Scalar, int64_t, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 747)(*this, p, dim, maxnorm);
 }
 inline Tensor & Tensor::pow_(Scalar exponent) {
-    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 744)(*this, exponent);
+    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 748)(*this, exponent);
 }
 inline Tensor & Tensor::pow_(const Tensor & exponent) {
-    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 745)(*this, exponent);
+    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 749)(*this, exponent);
 }
 inline Tensor & Tensor::lerp_(const Tensor & end, Scalar weight) {
-    return find_op<Tensor &, Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 746)(*this, end, weight);
+    return find_op<Tensor &, Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 750)(*this, end, weight);
 }
 inline Tensor & Tensor::lerp_(const Tensor & end, const Tensor & weight) {
-    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 747)(*this, end, weight);
+    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 751)(*this, end, weight);
 }
 inline Tensor & Tensor::sign_() {
-    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 748)(*this);
+    return find_op<Tensor &, Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 752)(*this);
 }
 inline Tensor & Tensor::fmod_(Scalar other) {
-    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 749)(*this, other);
+    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 753)(*this, other);
 }
 inline Tensor & Tensor::fmod_(const Tensor & other) {
-    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 750)(*this, other);
+    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 754)(*this, other);
 }
 inline Tensor & Tensor::remainder_(Scalar other) {
-    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 751)(*this, other);
+    return find_op<Tensor &, Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 755)(*this, other);
 }
 inline Tensor & Tensor::remainder_(const Tensor & other) {
-    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 752)(*this, other);
+    return find_op<Tensor &, Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 756)(*this, other);
 }
 inline Tensor & Tensor::addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
-    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 753)(*this, batch1, batch2, beta, alpha);
+    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 757)(*this, batch1, batch2, beta, alpha);
 }
 inline Tensor Tensor::addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 755)(*this, batch1, batch2, beta, alpha);
+    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 759)(*this, batch1, batch2, beta, alpha);
 }
 inline Tensor & Tensor::addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
-    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 756)(*this, tensor1, tensor2, value);
+    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 760)(*this, tensor1, tensor2, value);
 }
 inline Tensor & Tensor::addcdiv_(const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
-    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 757)(*this, tensor1, tensor2, value);
+    return find_op<Tensor &, Tensor &, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 761)(*this, tensor1, tensor2, value);
 }
 inline Tensor & Tensor::random_(int64_t from, int64_t to, Generator * generator) {
-    return find_op<Tensor &, Tensor &, int64_t, int64_t, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 758)(*this, from, to, generator);
+    return find_op<Tensor &, Tensor &, int64_t, int64_t, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 762)(*this, from, to, generator);
 }
 inline Tensor & Tensor::random_(int64_t to, Generator * generator) {
-    return find_op<Tensor &, Tensor &, int64_t, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 759)(*this, to, generator);
+    return find_op<Tensor &, Tensor &, int64_t, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 763)(*this, to, generator);
 }
 inline Tensor & Tensor::random_(Generator * generator) {
-    return find_op<Tensor &, Tensor &, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 760)(*this, generator);
+    return find_op<Tensor &, Tensor &, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 764)(*this, generator);
 }
 inline Tensor & Tensor::uniform_(double from, double to, Generator * generator) {
-    return find_op<Tensor &, Tensor &, double, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 761)(*this, from, to, generator);
+    return find_op<Tensor &, Tensor &, double, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 765)(*this, from, to, generator);
 }
 inline Tensor & Tensor::normal_(double mean, double std, Generator * generator) {
-    return find_op<Tensor &, Tensor &, double, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 762)(*this, mean, std, generator);
+    return find_op<Tensor &, Tensor &, double, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 766)(*this, mean, std, generator);
 }
 inline Tensor & Tensor::cauchy_(double median, double sigma, Generator * generator) {
-    return find_op<Tensor &, Tensor &, double, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 763)(*this, median, sigma, generator);
+    return find_op<Tensor &, Tensor &, double, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 767)(*this, median, sigma, generator);
 }
 inline Tensor & Tensor::log_normal_(double mean, double std, Generator * generator) {
-    return find_op<Tensor &, Tensor &, double, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 764)(*this, mean, std, generator);
+    return find_op<Tensor &, Tensor &, double, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 768)(*this, mean, std, generator);
 }
 inline Tensor & Tensor::exponential_(double lambd, Generator * generator) {
-    return find_op<Tensor &, Tensor &, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 765)(*this, lambd, generator);
+    return find_op<Tensor &, Tensor &, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 769)(*this, lambd, generator);
 }
 inline Tensor & Tensor::geometric_(double p, Generator * generator) {
-    return find_op<Tensor &, Tensor &, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 766)(*this, p, generator);
+    return find_op<Tensor &, Tensor &, double, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 770)(*this, p, generator);
 }
 inline Tensor Tensor::diag(int64_t diagonal) const {
-    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 768)(*this, diagonal);
-}
-inline Tensor Tensor::cross(const Tensor & other, c10::optional<int64_t> dim) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, c10::optional<int64_t>>(tensorTypeIdToBackend(type_id()), is_variable(), 770)(*this, other, dim);
-}
-inline Tensor Tensor::triu(int64_t diagonal) const {
     return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 772)(*this, diagonal);
 }
+inline Tensor Tensor::cross(const Tensor & other, c10::optional<int64_t> dim) const {
+    return find_op<Tensor, const Tensor &, const Tensor &, c10::optional<int64_t>>(tensorTypeIdToBackend(type_id()), is_variable(), 774)(*this, other, dim);
+}
+inline Tensor Tensor::triu(int64_t diagonal) const {
+    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 776)(*this, diagonal);
+}
 inline Tensor Tensor::tril(int64_t diagonal) const {
-    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 774)(*this, diagonal);
+    return find_op<Tensor, const Tensor &, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 778)(*this, diagonal);
 }
 inline Tensor Tensor::trace() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 777)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 781)(*this);
 }
 inline Tensor Tensor::ne(Scalar other) const {
-    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 779)(*this, other);
-}
-inline Tensor Tensor::ne(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 781)(*this, other);
-}
-inline Tensor Tensor::eq(Scalar other) const {
     return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 783)(*this, other);
 }
-inline Tensor Tensor::eq(const Tensor & other) const {
+inline Tensor Tensor::ne(const Tensor & other) const {
     return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 785)(*this, other);
 }
-inline Tensor Tensor::ge(Scalar other) const {
+inline Tensor Tensor::eq(Scalar other) const {
     return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 787)(*this, other);
 }
-inline Tensor Tensor::ge(const Tensor & other) const {
+inline Tensor Tensor::eq(const Tensor & other) const {
     return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 789)(*this, other);
 }
-inline Tensor Tensor::le(Scalar other) const {
+inline Tensor Tensor::ge(Scalar other) const {
     return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 791)(*this, other);
 }
-inline Tensor Tensor::le(const Tensor & other) const {
+inline Tensor Tensor::ge(const Tensor & other) const {
     return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 793)(*this, other);
 }
-inline Tensor Tensor::gt(Scalar other) const {
+inline Tensor Tensor::le(Scalar other) const {
     return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 795)(*this, other);
 }
-inline Tensor Tensor::gt(const Tensor & other) const {
+inline Tensor Tensor::le(const Tensor & other) const {
     return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 797)(*this, other);
 }
-inline Tensor Tensor::lt(Scalar other) const {
+inline Tensor Tensor::gt(Scalar other) const {
     return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 799)(*this, other);
 }
-inline Tensor Tensor::lt(const Tensor & other) const {
+inline Tensor Tensor::gt(const Tensor & other) const {
     return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 801)(*this, other);
 }
+inline Tensor Tensor::lt(Scalar other) const {
+    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 803)(*this, other);
+}
+inline Tensor Tensor::lt(const Tensor & other) const {
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 805)(*this, other);
+}
 inline Tensor Tensor::take(const Tensor & index) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 803)(*this, index);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 807)(*this, index);
 }
 inline Tensor Tensor::index_select(int64_t dim, const Tensor & index) const {
-    return find_op<Tensor, const Tensor &, int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 805)(*this, dim, index);
+    return find_op<Tensor, const Tensor &, int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 809)(*this, dim, index);
 }
 inline Tensor Tensor::masked_select(const Tensor & mask) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 807)(*this, mask);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 811)(*this, mask);
 }
 inline Tensor Tensor::nonzero() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 809)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 813)(*this);
 }
 inline Tensor Tensor::gather(int64_t dim, const Tensor & index, bool sparse_grad) const {
-    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 811)(*this, dim, index, sparse_grad);
+    return find_op<Tensor, const Tensor &, int64_t, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 815)(*this, dim, index, sparse_grad);
 }
 inline Tensor Tensor::addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 814)(*this, tensor1, tensor2, value);
+    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 818)(*this, tensor1, tensor2, value);
 }
 inline Tensor Tensor::addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 816)(*this, tensor1, tensor2, value);
+    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 820)(*this, tensor1, tensor2, value);
 }
 inline std::tuple<Tensor,Tensor> Tensor::gels(const Tensor & A) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 818)(*this, A);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 822)(*this, A);
 }
 inline std::tuple<Tensor,Tensor> Tensor::triangular_solve(const Tensor & A, bool upper, bool transpose, bool unitriangular) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, bool, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 820)(*this, A, upper, transpose, unitriangular);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &, bool, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 824)(*this, A, upper, transpose, unitriangular);
 }
 inline std::tuple<Tensor,Tensor> Tensor::symeig(bool eigenvectors, bool upper) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 823)(*this, eigenvectors, upper);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 827)(*this, eigenvectors, upper);
 }
 inline std::tuple<Tensor,Tensor> Tensor::eig(bool eigenvectors) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 825)(*this, eigenvectors);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 829)(*this, eigenvectors);
 }
 inline std::tuple<Tensor,Tensor,Tensor> Tensor::svd(bool some, bool compute_uv) const {
-    return find_op<std::tuple<Tensor,Tensor,Tensor>, const Tensor &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 827)(*this, some, compute_uv);
+    return find_op<std::tuple<Tensor,Tensor,Tensor>, const Tensor &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 831)(*this, some, compute_uv);
 }
 inline Tensor Tensor::cholesky(bool upper) const {
-    return find_op<Tensor, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 829)(*this, upper);
+    return find_op<Tensor, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 833)(*this, upper);
 }
 inline Tensor Tensor::cholesky_solve(const Tensor & input2, bool upper) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 832)(*this, input2, upper);
+    return find_op<Tensor, const Tensor &, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 836)(*this, input2, upper);
 }
 inline std::tuple<Tensor,Tensor> Tensor::solve(const Tensor & A) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 834)(*this, A);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 838)(*this, A);
 }
 inline Tensor Tensor::cholesky_inverse(bool upper) const {
-    return find_op<Tensor, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 838)(*this, upper);
+    return find_op<Tensor, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 842)(*this, upper);
 }
 inline std::tuple<Tensor,Tensor> Tensor::pstrf(bool upper, Scalar tol) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, bool, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 840)(*this, upper, tol);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, bool, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 844)(*this, upper, tol);
 }
-inline std::tuple<Tensor,Tensor> Tensor::qr() const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 842)(*this);
+inline std::tuple<Tensor,Tensor> Tensor::qr(bool some) const {
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 846)(*this, some);
 }
 inline std::tuple<Tensor,Tensor> Tensor::geqrf() const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 844)(*this);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 849)(*this);
 }
 inline Tensor Tensor::orgqr(const Tensor & input2) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 846)(*this, input2);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 851)(*this, input2);
 }
 inline Tensor Tensor::ormqr(const Tensor & input2, const Tensor & input3, bool left, bool transpose) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 848)(*this, input2, input3, left, transpose);
+    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 853)(*this, input2, input3, left, transpose);
 }
 inline Tensor Tensor::lu_solve(const Tensor & LU_data, const Tensor & LU_pivots) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 851)(*this, LU_data, LU_pivots);
+    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 856)(*this, LU_data, LU_pivots);
 }
 inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generator * generator) const {
-    return find_op<Tensor, const Tensor &, int64_t, bool, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 853)(*this, num_samples, replacement, generator);
+    return find_op<Tensor, const Tensor &, int64_t, bool, Generator *>(tensorTypeIdToBackend(type_id()), is_variable(), 858)(*this, num_samples, replacement, generator);
 }
 inline Tensor Tensor::lgamma() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 857)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 862)(*this);
 }
 inline Tensor Tensor::digamma() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 859)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 864)(*this);
 }
 inline Tensor Tensor::polygamma(int64_t n) const {
-    return find_op<Tensor, int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 861)(n, *this);
+    return find_op<Tensor, int64_t, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 866)(n, *this);
 }
 inline Tensor Tensor::erfinv() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 863)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 868)(*this);
 }
 inline Tensor Tensor::dist(const Tensor & other, Scalar p) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 864)(*this, other, p);
+    return find_op<Tensor, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 869)(*this, other, p);
 }
 inline Tensor Tensor::atan2(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 866)(*this, other);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 871)(*this, other);
 }
 inline Tensor Tensor::lerp(const Tensor & end, Scalar weight) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 869)(*this, end, weight);
+    return find_op<Tensor, const Tensor &, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 874)(*this, end, weight);
 }
 inline Tensor Tensor::lerp(const Tensor & end, const Tensor & weight) const {
-    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 870)(*this, end, weight);
+    return find_op<Tensor, const Tensor &, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 875)(*this, end, weight);
 }
 inline Tensor Tensor::histc(int64_t bins, Scalar min, Scalar max) const {
-    return find_op<Tensor, const Tensor &, int64_t, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 872)(*this, bins, min, max);
+    return find_op<Tensor, const Tensor &, int64_t, Scalar, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 877)(*this, bins, min, max);
 }
 inline Tensor Tensor::sign() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 874)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 879)(*this);
 }
 inline Tensor Tensor::fmod(Scalar other) const {
-    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 876)(*this, other);
+    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 881)(*this, other);
 }
 inline Tensor Tensor::fmod(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 878)(*this, other);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 883)(*this, other);
 }
 inline Tensor Tensor::remainder(Scalar other) const {
-    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 880)(*this, other);
+    return find_op<Tensor, const Tensor &, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 885)(*this, other);
 }
 inline Tensor Tensor::remainder(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 882)(*this, other);
-}
-inline Tensor Tensor::min(const Tensor & other) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 884)(*this, other);
-}
-inline Tensor Tensor::min() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 885)(*this);
-}
-inline Tensor Tensor::max(const Tensor & other) const {
     return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 887)(*this, other);
 }
+inline Tensor Tensor::min(const Tensor & other) const {
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 889)(*this, other);
+}
+inline Tensor Tensor::min() const {
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 890)(*this);
+}
+inline Tensor Tensor::max(const Tensor & other) const {
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 892)(*this, other);
+}
 inline Tensor Tensor::max() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 888)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 893)(*this);
 }
 inline Tensor Tensor::median() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 889)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 894)(*this);
 }
 inline std::tuple<Tensor,Tensor> Tensor::sort(int64_t dim, bool descending) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 891)(*this, dim, descending);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 896)(*this, dim, descending);
 }
 inline Tensor Tensor::argsort(int64_t dim, bool descending) const {
-    return find_op<Tensor, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 892)(*this, dim, descending);
+    return find_op<Tensor, const Tensor &, int64_t, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 897)(*this, dim, descending);
 }
 inline std::tuple<Tensor,Tensor> Tensor::topk(int64_t k, int64_t dim, bool largest, bool sorted) const {
-    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 894)(*this, k, dim, largest, sorted);
+    return find_op<std::tuple<Tensor,Tensor>, const Tensor &, int64_t, int64_t, bool, bool>(tensorTypeIdToBackend(type_id()), is_variable(), 899)(*this, k, dim, largest, sorted);
 }
 inline Tensor Tensor::all() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 895)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 900)(*this);
 }
 inline Tensor Tensor::any() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 896)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 901)(*this);
 }
 inline Tensor Tensor::renorm(Scalar p, int64_t dim, Scalar maxnorm) const {
-    return find_op<Tensor, const Tensor &, Scalar, int64_t, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 898)(*this, p, dim, maxnorm);
+    return find_op<Tensor, const Tensor &, Scalar, int64_t, Scalar>(tensorTypeIdToBackend(type_id()), is_variable(), 903)(*this, p, dim, maxnorm);
 }
 inline Tensor Tensor::unfold(int64_t dimension, int64_t size, int64_t step) const {
-    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 899)(*this, dimension, size, step);
+    return find_op<Tensor, const Tensor &, int64_t, int64_t, int64_t>(tensorTypeIdToBackend(type_id()), is_variable(), 904)(*this, dimension, size, step);
 }
 inline bool Tensor::equal(const Tensor & other) const {
-    return find_op<bool, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 900)(*this, other);
+    return find_op<bool, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 905)(*this, other);
 }
 inline Tensor Tensor::pow(const Tensor & exponent) const {
-    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 902)(*this, exponent);
+    return find_op<Tensor, const Tensor &, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 907)(*this, exponent);
 }
 inline Tensor Tensor::alias() const {
-    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 911)(*this);
+    return find_op<Tensor, const Tensor &>(tensorTypeIdToBackend(type_id()), is_variable(), 916)(*this);
 }
 
 inline bool Tensor::is_variable() const noexcept {
@@ -1373,7 +1373,7 @@ inline bool is_quantized(Tensor self) {
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \
-    AT_CHECK(                                    \
+    TORCH_CHECK(                                    \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \

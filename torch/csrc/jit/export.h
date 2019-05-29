@@ -50,5 +50,11 @@ TORCH_API void ExportModule(
     const std::string& filename,
     const script::ExtraFilesMap& metadata = script::ExtraFilesMap());
 
+// Surrounding system can install an additional hook to produce extra files
+// with metadata based on environment every time a module is serialized.
+using ExportModuleExtraFilesHook =
+    std::function<script::ExtraFilesMap(const script::Module&)>;
+TORCH_API void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook);
+
 } // namespace jit
 } // namespace torch

@@ -2147,7 +2147,15 @@ add_docstr(torch.get_num_threads,
            r"""
 get_num_threads() -> int
 
-Gets the number of threads used for parallelizing CPU operations
+Returns the number of threads used for parallelizing CPU operations
+""")
+
+add_docstr(torch.get_num_interop_threads,
+           r"""
+get_num_interop_threads() -> int
+
+Returns the number of threads used for inter-op parallelism on CPU
+(e.g. in JIT interpreter)
 """)
 
 add_docstr(torch.gt,
@@ -3575,13 +3583,13 @@ Example::
 
 add_docstr(torch.ones,
            r"""
-ones(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+ones(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the shape defined
 by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}
@@ -3780,13 +3788,15 @@ Example::
 
 add_docstr(torch.qr,
            r"""
-qr(input, out=None) -> (Tensor, Tensor)
+qr(input, some=True, out=None) -> (Tensor, Tensor)
 
-Computes the QR decomposition of a matrix :attr:`input`, and returns a namedtuple
-(Q, R) of matrices such that :math:`\text{input} = Q R`, with :math:`Q` being an
-orthogonal matrix and :math:`R` being an upper triangular matrix.
+Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
+and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
+with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
+:math:`R` being an upper triangular matrix or batch of upper triangular matrices.
 
-This returns the thin (reduced) QR factorization.
+If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
+Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
 .. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
           are large
@@ -3795,12 +3805,16 @@ This returns the thin (reduced) QR factorization.
           give you the same one across platforms - it will depend on your
           LAPACK implementation.
 
-.. note:: Irrespective of the original strides, the returned matrix :math:`Q` will be
-          transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
-
 Args:
-    input (Tensor): the input 2-D tensor
+    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
+                batch dimensions consisting of matrices of dimension :math:`m \times n`.
+    some (bool, optional): Set to ``True`` for reduced QR decomposition and ``False`` for
+                complete QR decomposition.
     out (tuple, optional): tuple of `Q` and `R` tensors
+                satisfying :code:`input = torch.matmul(Q, R)`.
+                The dimensions of `Q` and `R` are :math:`(*, m, k)` and :math:`(*, k, n)`
+                respectively, where :math:`k = \min(m, n)` if :attr:`some:` is ``True`` and
+                :math:`k = m` otherwise.
 
 Example::
 
@@ -3822,6 +3836,12 @@ Example::
     tensor([[ 1.,  0.,  0.],
             [ 0.,  1., -0.],
             [ 0., -0.,  1.]])
+    >>> a = torch.randn(3, 4, 5)
+    >>> q, r = torch.qr(a, some=False)
+    >>> torch.allclose(torch.matmul(q, r), a)
+    True
+    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(5))
+    True
 """)
 
 add_docstr(torch.rand,
@@ -4304,6 +4324,16 @@ To ensure that the correct number of threads is used, set_num_threads
 must be called before running eager, JIT or autograd code.
 """)
 
+add_docstr(torch.set_num_interop_threads,
+           r"""
+set_num_interop_threads(int)
+
+Sets the number of threads used for interop parallelism
+(e.g. in JIT interpreter) on CPU.
+WARNING: Can only be called once and before any inter-op parallel work
+is started (e.g. JIT execution).
+""")
+
 add_docstr(torch.sigmoid,
            r"""
 sigmoid(input, out=None) -> Tensor
@@ -4658,6 +4688,56 @@ Example::
             [ 0.1264, -0.5080,  1.6420,  0.1992]])
     >>> torch.std(a, dim=1)
     tensor([ 1.0311,  0.7477,  1.2204,  0.9087])
+""".format(**multi_dim_common))
+
+add_docstr(torch.std_mean,
+           r"""
+.. function:: std_mean(input, unbiased=True) -> (Tensor, Tensor)
+
+Returns the standard-deviation and mean of all elements in the :attr:`input` tensor.
+
+If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
+via the biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[0.3364, 0.3591, 0.9462]])
+    >>> torch.std_mean(a)
+    (tensor(0.3457), tensor(0.5472))
+
+.. function:: std(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
+
+Returns the standard-deviation and mean of each row of the :attr:`input` tensor in the
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
+reduce over all of them.
+
+{keepdim_details}
+
+If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
+via the biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    {dim}
+    {keepdim}
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.5648, -0.5984, -1.2676, -1.4471],
+            [ 0.9267,  1.0612,  1.1050, -0.6014],
+            [ 0.0154,  1.9301,  0.0125, -1.0904],
+            [-1.9711, -0.7748, -1.3840,  0.5067]])
+    >>> torch.std_mean(a, 1)
+    (tensor([0.9110, 0.8197, 1.2552, 1.0608]), tensor([-0.6871,  0.6229,  0.2169, -0.9058]))
 """.format(**multi_dim_common))
 
 add_docstr(torch.sum,
@@ -5513,15 +5593,64 @@ Example::
     tensor([ 1.7444,  1.1363,  0.7356,  0.5112])
 """.format(**multi_dim_common))
 
+add_docstr(torch.var_mean,
+           r"""
+.. function:: var_mean(input, unbiased=True) -> (Tensor, Tensor)
+
+Returns the variance and mean of all elements in the :attr:`input` tensor.
+
+If :attr:`unbiased` is ``False``, then the variance will be calculated via the
+biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[0.0146, 0.4258, 0.2211]])
+    >>> torch.var_mean(a)
+    (tensor(0.0423), tensor(0.2205))
+
+.. function:: var_mean(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
+
+Returns the variance and mean of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim`.
+
+{keepdim_details}
+
+If :attr:`unbiased` is ``False``, then the variance will be calculated via the
+biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    {dim}
+    {keepdim}
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[-1.5650,  2.0415, -0.1024, -0.5790],
+            [ 0.2325, -2.6145, -1.6428, -0.3537],
+            [-0.2159, -1.1069,  1.2882, -1.3265],
+            [-0.6706, -1.5893,  0.6827,  1.6727]])
+    >>> torch.var_mean(a, 1)
+    (tensor([2.3174, 1.6403, 1.4092, 2.0791]), tensor([-0.0512, -1.0946, -0.3403,  0.0239]))
+""".format(**multi_dim_common))
+
 add_docstr(torch.zeros,
            r"""
-zeros(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+zeros(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the shape defined
 by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}

@@ -73,6 +73,27 @@ else()
       "Cannot find threading library. Caffe2 requires Threads to compile.")
 endif()
 
+if (USE_TBB)
+  message(STATUS "Compiling TBB from source")
+  # Unset our restrictive C++ flags here and reset them later.
+  # Remove this once we use proper target_compile_options.
+  set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  set(CMAKE_CXX_FLAGS)
+
+  set(TBB_ROOT_DIR "${CMAKE_SOURCE_DIR}/third_party/tbb")
+  set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
+  set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
+
+  install(TARGETS tbb EXPORT Caffe2Targets DESTINATION lib)
+
+  set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
+endif()
+
 # ---[ protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_LITE_PROTO)
@@ -1100,15 +1121,6 @@ if (NOT INTERN_BUILD_MOBILE)
       SET(CMAKE_C_STANDARD 11)
     ENDIF ()
   ENDIF()
-
-  if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
-      if (CUDA_VERSION VERSION_LESS "8.0")
-        MESSAGE(STATUS "Found gcc >=5 and CUDA <= 7.5, adding workaround C++ flags")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORCE_INLINES -D_MWAITXINTRIN_H_INCLUDED -D__STRICT_ANSI__")
-      endif()
-    endif()
-  endif()
 
   LIST(APPEND CUDA_NVCC_FLAGS -Wno-deprecated-gpu-targets)
   LIST(APPEND CUDA_NVCC_FLAGS --expt-extended-lambda)

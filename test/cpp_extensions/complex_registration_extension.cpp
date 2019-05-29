@@ -36,6 +36,30 @@ struct ComplexCPUType : public at::CPUTypeDefault {
   Backend backend() const override;
   const char* toString() const override;
   TypeID ID() const override;
+
+  static Tensor empty(IntArrayRef size, const TensorOptions & options) {
+    AT_ASSERT(options.device().is_cpu());
+
+    for (auto x: size) {
+      TORCH_CHECK(x >= 0, "Trying to create tensor using size with negative dimension: ", size);
+    }
+    auto* allocator = at::getCPUAllocator();
+    int64_t nelements = at::prod_intlist(size);
+    auto dtype = options.dtype();
+    auto storage_impl = c10::make_intrusive<StorageImpl>(
+        dtype,
+        nelements,
+        allocator->allocate(nelements * dtype.itemsize()),
+        allocator,
+        /*resizable=*/true);
+
+    auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUTensorId());
+    // Default TensorImpl has size [0]
+    if (size.size() != 1 || size[0] != 0) {
+      tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+    }
+    return tensor;
+  }
 };
 
 struct ComplexHooks : public at::ComplexHooksInterface {
@@ -57,34 +81,10 @@ TypeID ComplexCPUType::ID() const {
   return TypeID::ComplexCPU;
 }
 
-static Tensor empty_complex(IntArrayRef size, const TensorOptions & options) {
-  AT_ASSERT(options.device().is_cpu());
-
-  for (auto x: size) {
-    AT_CHECK(x >= 0, "Trying to create tensor using size with negative dimension: ", size);
-  }
-  auto* allocator = at::getCPUAllocator();
-  int64_t nelements = at::prod_intlist(size);
-  auto dtype = options.dtype();
-  auto storage_impl = c10::make_intrusive<StorageImpl>(
-      dtype,
-      nelements,
-      allocator->allocate(nelements * dtype.itemsize()),
-      allocator,
-      /*resizable=*/true);
-
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUTensorId());
-  // Default TensorImpl has size [0]
-  if (size.size() != 1 || size[0] != 0) {
-    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-  }
-  return tensor;
-}
-
 static auto complex_empty_registration = register_op(
   Backend::ComplexCPU,
   "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
-  &empty_complex);
+  &ComplexCPUType::empty);
 
 REGISTER_COMPLEX_HOOKS(ComplexHooks);
 

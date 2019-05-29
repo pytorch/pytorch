@@ -139,11 +139,6 @@ private:
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
 
-struct CAFFE2_API NonVariableTypeMode {
-  static bool is_enabled();
-  static void set_enabled(bool enabled);
-};
-
 // A RAII, thread local (!) guard that has the following effect:
 //
 // Upon construction: sets NonVariableTypeMode_enabled for the current thread to
@@ -176,7 +171,7 @@ inline Type& legacyTensorType(const TensorImpl& tensor) {
   return globalLegacyTypeDispatch().getType(
       tensorTypeIdToBackend(tensor.type_id()),
       typeMetaToScalarType(tensor.dtype()),
-      tensor.is_variable() && !at::NonVariableTypeMode::is_enabled());
+      tensor.is_variable());
 }
 
 inline void initializeLegacyTypeDispatchFor(const TensorImpl& tensor) {
@@ -184,7 +179,7 @@ inline void initializeLegacyTypeDispatchFor(const TensorImpl& tensor) {
   globalLegacyTypeDispatch().getType(
       tensorTypeIdToBackend(tensor.type_id()),
       typeMetaToScalarType(tensor.dtype()),
-      tensor.is_variable() && !at::NonVariableTypeMode::is_enabled());
+      tensor.is_variable());
 }
 
 } // namespace at

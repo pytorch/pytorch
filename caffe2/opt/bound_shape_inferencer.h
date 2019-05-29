@@ -9,8 +9,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-C10_DECLARE_bool(caffe2_extract_feature_length_for_shape_inference);
-
 namespace caffe2 {
 // This struct stores the max bound size for batch in the general sense. We have
 // the conventioal batch size and the look-up sequence, which is also batch in a
@@ -40,7 +38,8 @@ class BoundShapeInferencerBase {
 
   virtual void InferBoundShapeAndType(
       const NetDef& net,
-      const std::unordered_map<std::string, ShapeInfo>& info) = 0;
+      const std::unordered_map<std::string, ShapeInfo>& info,
+      caffe2::Workspace* ws) = 0;
 
   const ShapeInfoMap& shape_info() const {
     return shape_info_;
@@ -71,10 +70,10 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
       : BoundShapeInferencerBase(spec) {}
 
   virtual ~BoundShapeInferencer() override {}
-
   void InferBoundShapeAndType(
       const NetDef& net,
-      const std::unordered_map<std::string, ShapeInfo>& info) override;
+      const std::unordered_map<std::string, ShapeInfo>& info,
+      caffe2::Workspace* ws) override;
 
  protected:
   TensorShape& CheckAndSetTensorShapeAndType(
@@ -92,6 +91,8 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
       TensorProto::DataType type,
       bool is_quantized);
 
+  virtual void InferOps(const OperatorDef& op, caffe2::Workspace* ws);
+
   void InferConcatInputs(const OperatorDef& op);
 
   void InferGivenTensorFill(const OperatorDef& op);
@@ -101,11 +102,12 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   void InferShape(const OperatorDef& op);
   void InferReshape(const OperatorDef& op);
   void InferLengthsRangeFill(const OperatorDef& op);
-  void InferClipRangesGatherSigridHash(const OperatorDef& op);
 
   // Standard shape/type inference using op schema registered shape inference
   // function
   void InferCommonOp(const OperatorDef& op);
+
+  void EnsureShapeNames(std::unordered_map<std::string, ShapeInfo>* info) const;
 
   ShapeInfo::DimType current_dim_type_{ShapeInfo::DimType::BATCH};
   int64_t current_max_batch_size_{0};
