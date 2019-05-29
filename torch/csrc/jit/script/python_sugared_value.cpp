@@ -330,12 +330,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
             m.graph()->insertGetAttr(self_, field), v, attr);
       }
     } else if (py::isinstance<py::function>(attr)) {
-      auto stub =
-          py::module::import("torch.jit").attr("_get_method_stub")(attr);
+      auto stub = py::module::import("torch.jit")
+                      .attr("_create_method_from_fn")(py_module_, attr);
       if (!stub.is_none()) {
-        // Add the method to the module
-        py::module::import("torch.jit")
-            .attr("_create_methods_from_stubs")(py_module_, stub);
         return SimpleValue(self_).attr(loc, m, field);
       }
     }

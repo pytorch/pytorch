@@ -960,10 +960,11 @@ def _try_compile_fn(fn):
     return torch.jit.script(fn, _rcb=rcb)
 
 
-def _get_method_stub(method):
-    if _jit_internal.get_ignore_attribute(method):
+def _create_method_from_fn(module, fn):
+    if _jit_internal.get_ignore_attribute(fn):
         return None
-    return [script_method(method, createResolutionCallbackFromClosure(method))]
+    stub = script_method(fn, createResolutionCallbackFromClosure(fn))
+    _create_methods_from_stubs(self, (stub,))
 
 
 # ScriptClasses must be new-style classes because we construct them using their
@@ -1536,6 +1537,10 @@ if _enabled:
             return self.forward.graph_for(*args, **kwargs)
 
     class WeakScriptModuleProxy(ScriptModule):
+        """
+        Copies the parameters, buffers, constants, attributes, and submodules
+        of an nn.Module into itself.
+        """
         def __init__(self, original, stubs):
             # Guards behavior of __setattr__ and __getattr__ so ScriptModule
             # __init__ can run correctly
@@ -1562,6 +1567,7 @@ if _enabled:
                     continue
                 elif isinstance(item, (Parameter, Module, Attribute)):
                     if isinstance(item, (ModuleList, Sequential)):
+                        # These are in __constants__, so ignore them here
                         continue
                     ScriptModule.__setattr__(self, name, item)
 
@@ -1647,13 +1653,13 @@ def _convert_to_script_module(mod, methods=None):
     """
     if methods is None:
         methods = ('forward',)
-    exported = ()
-    if hasattr(mod, '__torchscript_export__'):
-        exported = tuple(mod.__torchscript_export__)
-    methods = methods + exported
-
-    if mod in _jit_internal.weak_modules:
-        return _jit_internal.weak_modules[mod]
+    exported = []
+    for name in dir(mod):
+        item = getattr(mod, name)
+        if callable(item):
+            if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
+                exported.append(name)
+    methods = methods + tuple(exported)
 
     def make_stub(method):
         func = get_function_from_type(type(mod), method)
