@@ -16,7 +16,7 @@ using namespace at::cuda;
 
 template <typename dst_t, typename src_t>
 void copy_kernel_impl(TensorIterator& iter) {
-  gpu_unary_kernel(iter, []GPU_LAMBDA(src_t x) -> dst_t {
+  gpu_kernel(iter, []GPU_LAMBDA(src_t x) -> dst_t {
     return static_cast<dst_t>(static_cast<native::inter_copy_type_t<dst_t>>(x));
   });
 }
