@@ -1,4 +1,4 @@
-#if AT_PARALLEL_OPENMP
+#if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE
 #include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
 
@@ -35,9 +35,9 @@ std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
     int pool_size,
     bool create_new) {
   // For now, the only accepted device id is 0
-  AT_CHECK(device_id == 0);
+  TORCH_CHECK(device_id == 0);
   // Create new thread pool
-  AT_CHECK(create_new);
+  TORCH_CHECK(create_new);
   return std::make_shared<PTThreadPool>(pool_size);
 }
 
@@ -46,10 +46,10 @@ std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
 C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool);
 
 void set_num_interop_threads(int nthreads) {
-  AT_CHECK(nthreads > 0, "Expected positive number of threads");
+  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
 
   int no_value = NOT_SET;
-  AT_CHECK(num_interop_threads.compare_exchange_strong(no_value, nthreads),
+  TORCH_CHECK(num_interop_threads.compare_exchange_strong(no_value, nthreads),
       "Error: cannot set number of interop threads after parallel work "
       "has started or set_num_interop_threads called");
 }
@@ -66,7 +66,7 @@ int get_num_interop_threads() {
   }
 }
 
-void launch(const std::function<void()>& func) {
+void launch(std::function<void()> func) {
   get_pool().run(func);
 }
 

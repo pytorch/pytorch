@@ -182,7 +182,7 @@ void testDifferentiate() {
 
   auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_captured_inputs = {0, 1};
-  std::vector<size_t> expected_captured_outputs = {1, 2};
+  std::vector<size_t> expected_captured_outputs = {1, 2, 3, 4, 5, 6, 7};
   std::vector<size_t> expected_input_vjps = {0, 1};
   std::vector<size_t> expected_output_vjps = {0, 1};
   ASSERT_EQ(grad_spec.f_real_outputs, 1);
@@ -228,7 +228,9 @@ void testDifferentiateWithRequiresGrad() {
   std::vector<size_t> expected_output_vjps = {0}; // only a requires grad
   ASSERT_EQ(grad_spec.f_real_outputs, 2);
   ASSERT_EQ(grad_spec.df_input_captured_inputs, std::vector<size_t>({0}));
-  ASSERT_EQ(grad_spec.df_input_captured_outputs, std::vector<size_t>({2, 3}));
+  ASSERT_EQ(
+      grad_spec.df_input_captured_outputs,
+      std::vector<size_t>({2, 3, 4, 5, 6}));
   ASSERT_EQ(grad_spec.df_input_vjps, expected_input_vjps);
   ASSERT_EQ(grad_spec.df_output_vjps, expected_output_vjps);
   testing::FileCheck()

@@ -3583,13 +3583,13 @@ Example::
 
 add_docstr(torch.ones,
            r"""
-ones(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+ones(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the shape defined
 by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}
@@ -5632,13 +5632,13 @@ Example::
 
 add_docstr(torch.zeros,
            r"""
-zeros(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+zeros(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the shape defined
 by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}

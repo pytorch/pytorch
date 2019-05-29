@@ -574,6 +574,33 @@ class TorchIntegration(hu.HypothesisTestCase):
     def test_lengths_max_op_cuda(self):
         self._test_lengths_max_op(device="cuda")
 
+    def _test_resize_nearest_op(self, device):
+        data = np.random.rand(1, 2, 3, 4).astype(np.float32)
+
+        def _resize_nearest_ref(X):
+            ref_op = core.CreateOperator(
+                "ResizeNearest", ["X"], ["Y"],
+                width_scale=2.0, height_scale=1.5, order="NCHW",
+            )
+            workspace.FeedBlob("X", X)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _resize_nearest_ref(data)
+        actual_output = torch.ops._caffe2.ResizeNearest(
+            torch.tensor(data).to(device),
+            order="NCHW", width_scale=2.0, height_scale=1.5,
+        )
+
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_resize_nearest_op_cpu(self):
+        return self._test_resize_nearest_op("cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_resize_nearest_op_cuda(self):
+        return self._test_resize_nearest_op("cuda")
+
 
 if __name__ == '__main__':
     unittest.main()
