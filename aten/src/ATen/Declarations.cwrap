@@ -2432,25 +2432,6 @@
     res2 -= 1;  // LAPACK returns 1-indexed pivots
 ]]
 [[
-  name: _th_qr
-  cname: qr
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0,1
-  arguments:
-    - arg: THTensor* res1
-      output: True
-    - arg: THTensor* res2
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_geqrf
   cname: geqrf
   types:

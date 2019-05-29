@@ -1197,8 +1197,8 @@ inline Tensor Tensor::cholesky_inverse(bool upper) const {
 inline std::tuple<Tensor,Tensor> Tensor::pstrf(bool upper, Scalar tol) const {
     return dispatch_type().pstrf(*this, upper, tol);
 }
-inline std::tuple<Tensor,Tensor> Tensor::qr() const {
-    return dispatch_type().qr(*this);
+inline std::tuple<Tensor,Tensor> Tensor::qr(bool some) const {
+    return dispatch_type().qr(*this, some);
 }
 inline std::tuple<Tensor,Tensor> Tensor::geqrf() const {
     return dispatch_type().geqrf(*this);

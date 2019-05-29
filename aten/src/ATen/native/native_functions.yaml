@@ -3577,16 +3577,16 @@
   dispatch:
     CPU: legacy::cpu::_th_pstrf
 
-- func: qr(Tensor self, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
-  dispatch:
-    CPU: legacy::cpu::_th_qr_out
-    CUDA: legacy::cuda::_th_qr_out
+- func: qr(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
 
-- func: qr(Tensor self) -> (Tensor Q, Tensor R)
+- func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
   variants: method, function
+
+- func: _qr_helper(Tensor self, bool some) -> (Tensor, Tensor)
+  variants: function
   dispatch:
-    CPU: legacy::cpu::_th_qr
-    CUDA: legacy::cuda::_th_qr
+    CPU: _qr_helper_cpu
+    CUDA: _qr_helper_cuda
 
 - func: geqrf(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
