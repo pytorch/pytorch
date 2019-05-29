@@ -217,11 +217,7 @@ public:
     return map(std::cos);
   }
   Vec256<T> cosh() const {
-    Vec256<T> ret;
-    for (int64_t i = 0; i != size(); i++) {
-      ret[i] = std::cosh((double)(values[i]));
-    }
-    return ret;
+    return map(std::cosh);
   }
   Vec256<T> floor() const {
     return map(std::floor);
@@ -239,11 +235,7 @@ public:
     return map(std::sin);
   }
   Vec256<T> sinh() const {
-    Vec256<T> ret;
-    for (int64_t i = 0; i != size(); i++) {
-      ret[i] = std::sinh((double)(values[i]));
-    }
-    return ret;
+    return map(std::sin);
   }
   Vec256<T> tan() const {
     return map(std::tan);
