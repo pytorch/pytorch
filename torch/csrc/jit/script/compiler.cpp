@@ -397,19 +397,19 @@ struct Environment {
           {"float",
            makeMagic(
                "__float__",
-               std::make_shared<CastValue>(FloatType::get(), aten::Float))},
+               std::make_shared<CastValue>(FloatType::get(), prim::Float))},
           {"int",
            makeMagic(
                "__int__",
-               std::make_shared<CastValue>(IntType::get(), aten::Int))},
+               std::make_shared<CastValue>(IntType::get(), prim::Int))},
           {"bool",
            makeMagic(
                "__bool__",
-               std::make_shared<CastValue>(BoolType::get(), aten::Bool))},
+               std::make_shared<CastValue>(BoolType::get(), prim::Bool))},
           {"str",
            makeMagic(
                "__str__",
-               std::make_shared<CastValue>(StringType::get(), aten::Str))},
+               std::make_shared<CastValue>(StringType::get(), prim::str))},
           {"getattr", std::make_shared<GetAttrValue>()},
           {"isinstance", std::make_shared<IsInstanceValue>()},
           // todo(zach): remove when we can correctly export torch.full via ONNX
