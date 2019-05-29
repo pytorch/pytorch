@@ -1092,14 +1092,14 @@ struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
 // This type represents a Python Function
 struct CAFFE2_API FunctionType : public Type {
-  static FunctionTypePtr create(std::shared_ptr<torch::jit::script::Function> function) {
-    return FunctionTypePtr(new FunctionType(function)); // NOLINT(modernize-make-shared)
+  static FunctionTypePtr create(
+      std::shared_ptr<torch::jit::script::Function> function) {
+    return FunctionTypePtr(
+        new FunctionType(function)); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(FunctionType);
   bool operator==(const Type& rhs) const override {
-
-    if (auto func_type = rhs.cast<FunctionType>())
-    {
+    if (auto func_type = rhs.cast<FunctionType>()) {
       return func_type->function_ == function_;
     }
 
@@ -1109,20 +1109,16 @@ struct CAFFE2_API FunctionType : public Type {
     return "Function";
   }
   std::string python_str() const override {
-    throw std::runtime_error("Not yet implemented");
+    throw "Function";
   }
-
   std::shared_ptr<torch::jit::script::Function> function() const {
     return function_;
   }
-
   static const TypeKind Kind = TypeKind::FunctionType;
-  // global singleton
-  static FunctionTypePtr get();
-private:
+
+ private:
   FunctionType(std::shared_ptr<torch::jit::script::Function> function)
-  : Type(TypeKind::FunctionType)
-  , function_(function) {}
+      : Type(TypeKind::FunctionType), function_(function) {}
 
   std::shared_ptr<torch::jit::script::Function> function_;
 };
