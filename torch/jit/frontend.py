@@ -148,8 +148,9 @@ def get_jit_class_def(cls, self_name):
     sourcelines, file_lineno = inspect.getsourcelines(cls)
     source = ''.join(sourcelines)
     filename = inspect.getsourcefile(cls)
-    py_ast = ast.parse(dedent(source))
-    leading_whitespace_len = len(source.split('\n', 1)) - len(source.split('\n', 1))
+    dedent_src = dedent(source)
+    py_ast = ast.parse(dedent_src)
+    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
     return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 

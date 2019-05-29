@@ -46,29 +46,13 @@ struct Source {
   }
 
   // Calculate the line (within the original source file, if present) on which
-  // `offset` resides.
-  size_t source_lineno_for_offset(size_t offset) const {
-    auto segment_offset = lineno_for_offset(offset);
+  // `lineno` resides.
+  size_t lineno_to_source_lineno(size_t lineno) const {
     if (filename_) {
-      return segment_offset + starting_line_no_;
+      return lineno + starting_line_no_;
     } else {
-      return segment_offset;
+      return lineno;
     }
-  }
-
-  std::tuple<size_t, size_t> line_col_to_byte_offs(
-      int line,
-      int start_col,
-      int end_col) {
-    // Python has a weird convention where col_offset points to the column
-    // *before* the token starts.
-    start_col++;
-    end_col++;
-    // Also, lines are counted from 1.
-    line--;
-    auto line_start = line_starting_offsets_.at(line);
-    return std::make_tuple<size_t, size_t>(
-        line_start + start_col, line_start + end_col);
   }
 
   const std::string& text() const {

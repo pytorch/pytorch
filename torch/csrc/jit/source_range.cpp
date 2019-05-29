@@ -43,10 +43,11 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   AT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
 
   if (source_->filename()) {
+    auto lineno = source_->lineno_for_offset(start());
     auto col_offset = (int)start() -
-        (int)source_->offset_for_line(source_->lineno_for_offset(start()));
+        (int)source_->offset_for_line(lineno);
     out << "at " << *source_->filename() << ":"
-        << source_->source_lineno_for_offset(start()) << ":" << col_offset
+        << source_->lineno_to_source_lineno(lineno) << ":" << col_offset
         << "\n";
   }
   out << str.substr(begin_highlight, end_line - begin_highlight) << "\n";

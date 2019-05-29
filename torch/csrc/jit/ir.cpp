@@ -219,7 +219,6 @@ std::ostream& Node::print(
     std::ostream& out,
     size_t level,
     std::vector<const Node*>* groups) const {
-  auto& source = sourceRange().source();
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";

@@ -27,11 +27,26 @@ struct SourceRangeFactory {
   SourceRange create(int line, int start_col, int end_col) {
     size_t start_byte_offset, end_byte_offset;
     std::tie(start_byte_offset, end_byte_offset) =
-        source_->line_col_to_byte_offs(
+        line_col_to_byte_offs(
             line,
             start_col + leading_whitespace_chars_,
             end_col + leading_whitespace_chars_);
     return SourceRange(source_, start_byte_offset, end_byte_offset);
+  }
+
+  std::tuple<size_t, size_t> line_col_to_byte_offs(
+      int line,
+      int start_col,
+      int end_col) {
+    // Python has a weird convention where col_offset points to the column
+    // *before* the token starts.
+    start_col++;
+    end_col++;
+    // Also, lines are counted from 1.
+    line--;
+    auto line_start = source_->offset_for_line(line);
+    return std::make_tuple<size_t, size_t>(
+        line_start + start_col, line_start + end_col);
   }
 
   std::shared_ptr<Source> source_;
