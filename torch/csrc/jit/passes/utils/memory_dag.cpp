@@ -8,16 +8,16 @@
 namespace torch {
 namespace jit {
 namespace {
-std::vector<const Element*> decomprMap;
+std::vector<const Element*> indexToElementMap;
 } // namespace
 unsigned Element::indexCount = 0;
 Element::Element(const Value* value_) : value(value_), index(indexCount++) {
-  decomprMap.push_back(this);
+  indexToElementMap.push_back(this);
 }
 
-const Element* Element::toElement(unsigned x) {
-  TORCH_INTERNAL_ASSERT(x < decomprMap.size());
-  auto res = decomprMap[x];
+const Element* Element::fromIndex(unsigned x) {
+  TORCH_INTERNAL_ASSERT(x < indexToElementMap.size());
+  auto res = indexToElementMap[x];
   return res;
 }
 
@@ -55,11 +55,11 @@ void collectAllContainedMemoryLocations(
   cont.set(compIdx);
 
   for (const auto& mem_loc : elem->getMemoryLocations()) {
-    collectAllContainedMemoryLocations(Element::toElement(mem_loc), cont);
+    collectAllContainedMemoryLocations(Element::fromIndex(mem_loc), cont);
   }
 
   for (const auto& contained : elem->contained_elements) {
-    collectAllContainedMemoryLocations(Element::toElement(contained), cont);
+    collectAllContainedMemoryLocations(Element::fromIndex(contained), cont);
   }
 }
 
@@ -131,17 +131,17 @@ void Element::bfs(BfsDirection dir, MemoryLocations& res) const {
   ska::flat_hash_set<int> seen;
   queue.push(this->index);
   while (!queue.empty()) {
-    const auto el = queue.front();
+    const auto index = queue.front();
     queue.pop();
-    seen.insert(el);
-    auto decompEl = Element::toElement(el);
-    if (decompEl->pointsTo.empty()) {
-      res.set(el);
+    seen.insert(index);
+    auto el = Element::fromIndex(index);
+    if (el->pointsTo.empty()) {
+      res.set(index);
     }
 
     switch (dir) {
       case BfsDirection::POINTS_TO: {
-        for (auto ptr : decompEl->pointsTo) {
+        for (auto ptr : el->pointsTo) {
           if (!seen.count(ptr)) {
             queue.push(ptr);
           }
@@ -149,7 +149,7 @@ void Element::bfs(BfsDirection dir, MemoryLocations& res) const {
       } break;
 
       case BfsDirection::POINTED_FROM: {
-        for (auto ptr : decompEl->pointedFrom) {
+        for (auto ptr : el->pointedFrom) {
           if (!seen.count(ptr)) {
             queue.push(ptr);
           }

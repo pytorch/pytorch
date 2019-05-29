@@ -142,7 +142,7 @@ struct Element {
   void bfs(BfsDirection dir, MemoryLocations& res) const;
 
   // Converts from the compressed index representation
-  static const Element* toElement(unsigned x);
+  static const Element* fromIndex(unsigned x);
 };
 } // namespace jit
 } // namespace torch
