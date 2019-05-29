@@ -48,7 +48,7 @@ static int64_t count_specified_dimensions(PyObject* index) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     if (THPVariable_Check(obj)) {
       auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
-      if (var.scalar_type() == kByte) {
+      if (var.scalar_type() == kByte || var.scalar_type() == kBool) {
         count += var.dim();
       } else {
         count++;
@@ -168,8 +168,8 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
     } else if (THPVariable_Check(obj)) {
       auto& var = THPVariable_Unpack(obj);
       auto scalar_type = var.scalar_type();
-      if (var.dim() == 0 && at::isIntegralType(scalar_type)) {
-        if (scalar_type != at::kByte) {
+      if (var.dim() == 0 && (at::isIntegralType(scalar_type) || scalar_type == ScalarType::Bool)) {
+        if (scalar_type != at::kByte && scalar_type != at::kBool) {
           result = applySelect(result, dim, THPUtils_unpackLong(obj), i);
         } else {
           result = result.unsqueeze(dim);

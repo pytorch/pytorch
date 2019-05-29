@@ -1777,7 +1777,7 @@ Example::
 
 add_docstr_all('qr',
                r"""
-qr() -> (Tensor, Tensor)
+qr(some=True) -> (Tensor, Tensor)
 
 See :func:`torch.qr`
 """)
