@@ -123,6 +123,7 @@ option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
+option(USE_TBB "Use Thread Builing Block library" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -276,6 +277,10 @@ endif()
 
 if(NAMEDTENSOR_ENABLED)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNAMEDTENSOR_ENABLED")
+endif()
+
+if(USE_TBB)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DCAFFE2_INTRA_OP_PARALLEL_CAN_USE_TBB")
 endif()
 
 # ---[ Whitelist file if whitelist is specified
