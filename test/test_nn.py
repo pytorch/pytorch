@@ -7830,7 +7830,7 @@ class TestNN(NNTestCase):
         self.assertNotEqual(m.fc1.weight._grad.type(), sparse_tensor.type())
         self.assertFalse(m.fc1.weight._grad._is_same_impl_type(sparse_tensor))
 
-        m._apply(lambda t: torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1])))
+        m = m._apply(lambda t: torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1])))
 
         self.assertEqual(m.fc1.weight.type(), sparse_tensor.type())
         self.assertTrue(m.fc1.weight._is_same_impl_type(sparse_tensor))
