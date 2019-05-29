@@ -63,9 +63,7 @@ private:
   RegistrationHandleRAII listenerRegistrationHandle_;
 };
 
-template<class Data> CAFFE2_API OperatorMetadataType<Data>& operatorMetadataTypeSingleton() {
-  static_assert(guts::false_t<Data>::value, "Please define TORCH_DEFINE_OPERATOR_METADATA_TYPE");
-}
+template<class Data> CAFFE2_API OperatorMetadataType<Data>& operatorMetadataTypeSingleton();
 
 }
 

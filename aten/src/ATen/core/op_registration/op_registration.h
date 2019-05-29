@@ -10,6 +10,7 @@
 #include <ATen/core/op_registration/kernel_function.h>
 #include <ATen/core/op_registration/kernel_lambda.h>
 #include <ATen/core/op_registration/infer_schema.h>
+#include <ATen/core/op_registration/operator_metadata.h>
 
 namespace c10 {
 
@@ -252,6 +253,12 @@ public:
       return std::move(*this).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(c10::nullopt, std::forward<Lambda>(functor));
     }
 
+    Options&& aliasAnalysis(AliasAnalysisKind aliasAnalysisKind) && {
+      TORCH_CHECK(!aliasAnalysisKind_.has_value(), "You can only call aliasAnalysis() once per operator registration.");
+      aliasAnalysisKind_ = aliasAnalysisKind;
+      return std::move(*this);
+    }
+
   private:
     Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
@@ -292,6 +299,7 @@ public:
     };
 
     std::vector<KernelRegistrationConfig> kernels;
+    optional<AliasAnalysisKind> aliasAnalysisKind_;
     friend class RegisterOperators;
   };
 
@@ -400,6 +408,7 @@ private:
   void registerOp_(FunctionSchema&& schema, Options&& options);
   void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config);
   void registerSchemaOnly_(FunctionSchema&& schema);
+  void registerOptions_(OperatorHandle op, Options&& options);
 
   class OperatorRegistrar;
 

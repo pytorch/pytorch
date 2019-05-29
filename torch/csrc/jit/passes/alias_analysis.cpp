@@ -217,7 +217,7 @@ void AliasDb::analyze(Node* node) {
 // the registered analyzer.
 bool AliasDb::tryRegisteredAnalysis(Node* node) {
   const Operator& op = getOperatorFor(node);
-  auto analysis = op.options().aliasAnalysis();
+  auto analysis = op.aliasAnalysisKind();
   switch (analysis) {
     case AliasAnalysisKind::PURE:
       analyzeCreator(node);

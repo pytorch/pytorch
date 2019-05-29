@@ -76,7 +76,7 @@ IValue wrap(IValue&& ivalue) {
 // TODO This currently only handles tensors with requires_grad==False correctly.
 //      It should also handle autograd.
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
-  return Operator(op.schema(), [op](Stack& stack) {
+  return Operator(op, [op](Stack& stack) {
       RECORD_FUNCTION(op.schema().name(), stack);
 
       const auto input_size = op.schema().arguments().size();

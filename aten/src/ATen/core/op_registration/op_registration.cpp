@@ -2,6 +2,7 @@
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/script/function_schema_parser.h>
 #endif
+#include <ATen/core/dispatch/OperatorMetadata.h>
 
 namespace c10 {
 
@@ -124,12 +125,24 @@ void RegisterOperators::checkNoDuplicateKernels_(const FunctionSchema& schema, c
 }
 
 void RegisterOperators::registerOp_(FunctionSchema&& schema, Options&& options) {
+  std::string op_name = schema.name();
+  std::string overload_name = schema.overload_name();
+
   if (0 == options.kernels.size()) {
     registerSchemaOnly_(std::move(schema));
   } else {
     for (auto& kernel : options.kernels) {
       registerSchemaAndKernel_(schema, std::move(kernel));
     }
+  }
+
+  auto op_handle = c10::Dispatcher::singleton().findSchema(op_name.c_str(), overload_name.c_str()).value();
+  registerOptions_(op_handle, std::move(options));
+}
+
+void RegisterOperators::registerOptions_(OperatorHandle op, Options&& options) {
+  if (options.aliasAnalysisKind_.has_value()) {
+    set_op_metadata<AliasAnalysisKind>(op, *options.aliasAnalysisKind_);
   }
 }
 
