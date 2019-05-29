@@ -81,7 +81,6 @@ struct THCNumerics<bool> {
   static inline __host__ __device__ bool mul(bool a, bool b) { return a && b; }
   static inline __host__ __device__ bool sub(bool a, bool b) { return a - b; }
   static inline __host__ __device__ bool div(bool a, bool b) { return a / b; }
-  static inline __host__ __device__ bool pow(bool a, bool b) { return powi<bool>(a, b); }
   static inline __host__ __device__ bool neg(bool a) { return !a; }
   static inline __host__ __device__ bool abs(bool a) { return a; }
   static inline __host__ __device__ bool isnan(bool a) { return false; }
