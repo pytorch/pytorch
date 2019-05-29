@@ -522,7 +522,7 @@ class CyclicLR(_LRScheduler):
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = torch.optim.CyclicLR(optimizer)
+        >>> scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.01, max_lr=0.1)
         >>> data_loader = torch.utils.data.DataLoader(...)
         >>> for epoch in range(10):
         >>>     for batch in data_loader:
