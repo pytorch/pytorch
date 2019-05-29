@@ -144,7 +144,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
               // in the list are constants
               const std::vector<double>& value = iter->toDoubleListRef();
               std::vector<Value*> info(value.size());
-              for (int value_index = 0; value_index < value.size(); ++value_index) {
+              for (size_t value_index = 0; value_index < value.size(); ++value_index) {
                 info[value_index] = graph->insertConstant(value[value_index]);
                 tracer::recordSourceLocation(info[value_index]->node());
               }

@@ -1777,7 +1777,7 @@ Example::
 
 add_docstr_all('qr',
                r"""
-qr() -> (Tensor, Tensor)
+qr(some=True) -> (Tensor, Tensor)
 
 See :func:`torch.qr`
 """)
@@ -3029,15 +3029,6 @@ add_docstr_all('det',
 det() -> Tensor
 
 See :func:`torch.det`
-""")
-
-add_docstr_all('dequantize_linear',
-               r"""
-dequantize_linear(int_tensor, scale, zero_point) -> Tensor
-
-Dequantize an int Tensor that represents the underlying quantized data
-using affine quantization scheme with given scale and zero_point.
-returns a float Tensor.
 """)
 
 add_docstr_all('where',

@@ -18,5 +18,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Build libtorch')
     options = parser.parse_args()
 
-    build_caffe2(version=None, cmake_python_library=None,
-                 build_python=False, rerun_cmake=True, build_dir='.')
+    build_caffe2(version=None, cmake_python_library=None, build_python=False,
+                 rerun_cmake=True, cmake_only=False, build_dir='.')
