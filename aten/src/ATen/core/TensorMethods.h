@@ -3,7 +3,6 @@
 #include <c10/core/Scalar.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/macros/Macros.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 
@@ -744,7 +743,7 @@ inline Tensor & Tensor::sparse_resize_(IntArrayRef size, int64_t sparse_dim, int
 inline Tensor & Tensor::sparse_resize_and_clear_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) {
     return dispatch_type().sparse_resize_and_clear_(*this, size, sparse_dim, dense_dim);
 }
-inline Tensor Tensor::sparse_mask(SparseTensorRef mask) const {
+inline Tensor Tensor::sparse_mask(const Tensor & mask) const {
     return dispatch_type().sparse_mask(*this, mask);
 }
 inline Tensor Tensor::to_dense() const {
