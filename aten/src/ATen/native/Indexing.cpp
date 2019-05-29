@@ -242,18 +242,23 @@ Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, 
   return self.clone().index_put_(indices, value, accumulate);
 }
 
-Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
+Tensor & _index_put_unsafe_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
   if (accumulate && self.type().device_type() == kCUDA) {
-      index_put_accum_stub(self.type().device_type(), self, indices, value);
+      index_put_accum_stub(self.type().device_type(), self, indices, value, unsafe);
       return self;
   } 
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
   index_put_stub(iter->device_type(), *iter, info.indexed_sizes, info.indexed_strides, accumulate);
   return self;
+}
+
+
+Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate) {
+  return at::_index_put_unsafe_(self, indices, value, accumulate, false);
 }
 
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {

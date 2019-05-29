@@ -125,7 +125,7 @@ static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
 }
 
 static std::tuple<Tensor, int64_t, int64_t, int64_t> 
-computeLinearIndex(const Tensor & src, TensorList indices) {
+computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
   auto strides = computeLinearStride(src);
   const auto& backend = src.type().backend();
 
@@ -139,7 +139,7 @@ computeLinearIndex(const Tensor & src, TensorList indices) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's backend
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
-      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i), false) * strides[i]).toBackend(backend);
+      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i), check_range) * strides[i]).toBackend(backend);
       if (linearIndex.defined()) {
         linearIndex += index;
       } else {
@@ -161,7 +161,7 @@ computeLinearIndex(const Tensor & src, TensorList indices) {
 }
 
 
-static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, TensorList orig) {
+static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, TensorList orig, bool check_range) {
   checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
@@ -179,13 +179,13 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
   }
   int64_t nElemBefore, strideBefore, nElemAfter;
   Tensor linearIndex;
-  std::tie(linearIndex, nElemBefore, strideBefore, nElemAfter) = computeLinearIndex(self, indices);
+  std::tie(linearIndex, nElemBefore, strideBefore, nElemAfter) = computeLinearIndex(self, indices, check_range);
   return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, inversePerm);
 }
 
 
 namespace {
-void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & value) {
+void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & value, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
@@ -193,7 +193,7 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
   Tensor linearIndex, expandedValue, src;
   int64_t nElemBefore, strideBefore, sliceSize;
   std::vector<int64_t> inversePerm;
-  std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices);
+  std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices, !unsafe);
   int64_t num_indices = linearIndex.numel();
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
