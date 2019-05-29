@@ -58,6 +58,7 @@ if has_cuda_support:
         return np.asarray(C.get_cuda_peer_access_pattern())
 
     GetDeviceProperties = C.get_device_properties
+    GetGPUMemoryInfo = C.get_gpu_memory_info
 else:
     NumCudaDevices = lambda: 0 # noqa
     GetCUDAVersion = lambda: 0 # noqa
@@ -70,6 +71,7 @@ if has_hip_support:
     def GetGpuPeerAccessPattern():
         return np.asarray(C.get_hip_peer_access_pattern())
     GetDeviceProperties = C.get_device_properties
+    GetGPUMemoryInfo = C.get_gpu_memory_info
 
 if not has_gpu_support:
     # setting cuda as the default GpuDeviceType as some tests
@@ -78,12 +80,12 @@ if not has_gpu_support:
     NumGpuDevices = lambda: 0 # noqa
     GetDeviceProperties = lambda x: None # noqa
     GetGpuPeerAccessPattern = lambda: np.array([]) # noqa
+    GetGPUMemoryInfo = lambda: None # noqa
 
 IsNUMAEnabled = C.is_numa_enabled
 GetNumNUMANodes = C.get_num_numa_nodes
 GetBlobNUMANode = C.get_blob_numa_node
 GetBlobSizeBytes = C.get_blob_size_bytes
-GetGPUMemoryInfo = C.get_gpu_memory_info
 
 
 def FillRandomNetworkInputs(net, input_dims, input_types):
