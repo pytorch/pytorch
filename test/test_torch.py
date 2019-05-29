@@ -898,6 +898,14 @@ class _TestTorchMixin(object):
             res1val = torchfn(m1)
             self.assertTrue(math.isnan(res1val))
 
+        # Bool
+        m1 = torch.tensor([True, False, True], dtype=torch.bool)
+        res1 = torchfn(m1)
+        res2 = m1[0]
+        for i in iter_indices(m1):
+            res2 = mathfn(res2, m1[i])
+        self.assertEqual(res1, res2)
+
     def test_max(self):
         self._testSelection(torch.max, max)
 
