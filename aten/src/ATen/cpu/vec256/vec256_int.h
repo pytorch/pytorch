@@ -2,7 +2,7 @@
 
 #include <ATen/cpu/vec256/intrinsics.h>
 #include <ATen/cpu/vec256/vec256_base.h>
-#include <iostream>
+
 namespace at {
 namespace vec256 {
 namespace {
