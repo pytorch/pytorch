@@ -71,11 +71,6 @@
         <<: *setup_linux_system_environment
     - run:
         <<: *binary_checkout
-    # N.B. This sources binary_populate_env so that it takes the Pytorch
-    # version listed there. The only variables it needs are the date and the
-    # version string.
-    - run:
-        <<: *binary_populate_env
     - run:
         <<: *binary_install_miniconda
     - run:
@@ -83,13 +78,18 @@
         no_output_timeout: "1h"
         command: |
           set +x
-          echo "declare -x \"AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}\"" >> /home/circleci/project/env
+          echo "declare -x \"AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}\"" > /home/circleci/project/env
           echo "declare -x \"AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}\"" >> /home/circleci/project/env
+          export DATE="$(date -u +%Y_%m_%d)"
+          retry () {
+              $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+          }
           source /home/circleci/project/env
           set -eux -o pipefail
 
+          # This is hardcoded to match binary_install_miniconda.sh
+          export PATH="/home/circleci/project/miniconda/bin:$PATH"
           # Not any awscli will work. Most won't. This one will work
-          export PATH="$MINICONDA_ROOT/bin:$PATH"
           retry conda create -qyn aws36 python=3.6
           source activate aws36
           pip install awscli==1.16.46

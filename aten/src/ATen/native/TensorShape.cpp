@@ -5,7 +5,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
@@ -48,7 +47,7 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::legacy::th::_th_cat_out(result, tensors, dim);
+  return at::_cat_out(result, tensors, dim);
 }
 
 static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_except /* should already be wrapped */) {
@@ -178,7 +177,7 @@ Tensor cat(TensorList tensors, int64_t dim) {
   }
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::legacy::th::_th_cat(tensors, dim);
+  return at::_cat(tensors, dim);
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -302,9 +301,6 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto tid = self.type_id();
-  TORCH_CHECK(
-      tid == CPUTensorId() || tid == CUDATensorId(),
-      "as_strided is only implemented for strided CPU, CUDA and QuantizedCPU tensors.");
   auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid);
   setStrided(result, size, stride, storage_offset);
   return result;
@@ -313,9 +309,6 @@ Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef s
 Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto tid = self.type_id();
-  TORCH_CHECK(
-      tid == QuantizedCPUTensorId(),
-      "as_strided is only implemented for strided CPU, CUDA and QuantizedCPU tensors.");
   auto result = detail::make_tensor<QTensorImpl>(Storage(self.storage()), tid, get_qtensorimpl(self)->quantizer());
   setStrided(result, size, stride, storage_offset);
   return result;

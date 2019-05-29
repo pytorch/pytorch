@@ -3396,11 +3396,15 @@ class TestNN(NNTestCase):
                         batch_size=_batch_size, src_lengths=src_lengths_tensor
                     )
                     src_len_mask = src_len_mask_int != 1
-                result, result_weight = multihead_attn_module(
+
+                result, result_weight = torch.nn.functional.multi_head_attention_forward(
                     _Q, _K, _V,
-                    key_padding_mask=src_len_mask,
-                    need_weights=True,
-                    attn_mask=attn_mask_tensor)
+                    d_model, nheads,
+                    multihead_attn_module.in_proj_weight, multihead_attn_module.in_proj_bias,
+                    multihead_attn_module.bias_k, multihead_attn_module.bias_v,
+                    multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
+                    multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
+                    multihead_attn_module.training, src_len_mask, True, attn_mask_tensor) 
 
                 result = result.squeeze(0).detach().numpy()
 
@@ -4395,6 +4399,19 @@ class TestNN(NNTestCase):
         bn.load_state_dict(state_dict)
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
+
+    @unittest.skipIf(not PY3, 'Python 2.7 generates cyclic trash')
+    def test_load_state_dict_ref_cycle(self):
+        # load_state_dict shouldn't cause a reference cycle involving Tensors
+        import gc
+
+        m = torch.nn.LSTM(16, 16, bidirectional=True)
+
+        gc.collect()
+        m.load_state_dict(deepcopy(m).state_dict())
+        refcycles = gc.collect()
+
+        self.assertEqual(refcycles, 0)
 
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)

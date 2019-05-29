@@ -45,16 +45,13 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
-    int32_t weight_zero_point_int32 = weight.q_zero_point().toInt() - 128;
+    int32_t weight_zero_point_int32 = weight.q_zero_point().toInt();
 
     // TODO: contiguous is called for further JIT optimizations.
     auto weight_contig = weight.contiguous();
 
-    std::vector<int8_t> weight_int8(K * N);
-    int8_t* weight_ptr_int8 = weight_int8.data();
-    uint8_t* weight_ptr_uint8 =
-        reinterpret_cast<uint8_t*>(weight_contig.data<c10::quint8>());
-    convert_uint8_int8(K, N, weight_ptr_uint8, weight_ptr_int8);
+    int8_t* weight_ptr_int8 =
+        reinterpret_cast<int8_t*>(weight_contig.data<c10::qint8>());
 
     std::vector<int32_t> col_offsets(N);
     calc_col_offsets_transpose(
@@ -95,8 +92,8 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_linear_prepack(Tensor W) -> Tensor W_prepack",
-    c10::kernel<QFCPackWeightInt8>(),
-    c10::dispatchKey(QuantizedCPUTensorId()));
+    c10::RegisterOperators::options()
+      .kernel<QFCPackWeightInt8>(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at
