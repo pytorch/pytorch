@@ -13,6 +13,10 @@ if (NOT BUILD_PYTHON)
   return()
 endif()
 
+if (USE_TBB)
+include_directories(${TBB_ROOT_DIR}/include)
+endif()
+
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
 
@@ -46,6 +50,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/TypeInfo.cpp
     ${TORCH_SRC_DIR}/csrc/Generator.cpp
     ${TORCH_SRC_DIR}/csrc/Layout.cpp
+    ${TORCH_SRC_DIR}/csrc/MemoryFormat.cpp
     ${TORCH_SRC_DIR}/csrc/Module.cpp
     ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
     ${TORCH_SRC_DIR}/csrc/Size.cpp
@@ -89,6 +94,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/tensor_dtypes.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_layouts.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_list.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_memoryformats.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
@@ -241,10 +247,6 @@ if (USE_NCCL)
     endif()
 endif()
 
-
-
-
-
 add_custom_target(torch_python_stubs DEPENDS "${TORCH_SRC_DIR}/__init__.pyi")
 # For Declarations.yaml dependency
 add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
@@ -260,8 +262,6 @@ add_custom_command(
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
     )
-
-
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 

@@ -508,13 +508,13 @@
   other: grad.clone().masked_fill_(self > other, 0)
 
 - name: mean(Tensor self)
-  self: grad.expand(self.sizes()) / self.numel()
+  self: mean_backward(grad, self.sizes(), self.numel())
 
 - name: mean(Tensor self, ScalarType dtype)
   self: grad.expand(self.sizes()).to(self.scalar_type()) / self.numel()
 
 - name: mean(Tensor self, IntArrayRef dim, bool keepdim)
-  self: sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim)
+  self: mean_backward(grad, self.sizes(), dim, keepdim)
 
 - name: mean(Tensor self, IntArrayRef dim, ScalarType dtype)
   self: sum_backward(grad, self.sizes(), dim, false).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
@@ -683,7 +683,7 @@
   index: non_differentiable
   source: grad.take(index)
 
-- name: qr(Tensor self)
+- name: qr(Tensor self, bool some)
   self: not_implemented("qr")
 
 - name: random_(Tensor self, int64_t from, int64_t to, Generator generator)
@@ -789,10 +789,10 @@
   self: unsqueeze_to(grad, dim, self.sizes())
 
 - name: std(Tensor self, bool unbiased)
-  self: var_backward(grad / (result * 2), self, unbiased)
+  self: std_backward(result, grad, self, unbiased)
 
 - name: std(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
-  self: var_backward(grad / (result * 2), self, dim, unbiased, keepdim)
+  self: std_backward(result, grad, self, dim, unbiased, keepdim)
 
 - name: sub(Tensor self, Tensor other, *, Scalar alpha)
   self: grad
@@ -926,7 +926,7 @@
 - name: zero_(Tensor self)
   self: zeros_like(grad)
 
-- name: sparse_mask(Tensor self, SparseTensorRef mask)
+- name: sparse_mask(Tensor self, Tensor mask)
   self: not_implemented("sparse_mask")
   mask: not_implemented("sparse_mask")
 
@@ -1517,8 +1517,19 @@
 - name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first)
   input: _pack_padded_sequence_backward(grad, input.sizes(), result1, batch_first)
 
-# TH wrappers
+- name: std_mean(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
+  self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, true)
 
+- name: var_mean(Tensor self, IntArrayRef dim, bool unbiased, bool keepdim)
+  self: var_std_mean_backward(grads, self, result0, result1, dim, unbiased, keepdim, false)
+
+- name: std_mean(Tensor self, bool unbiased)
+  self: var_std_mean_backward(grads, self, result0, result1, unbiased, true)
+
+- name: var_mean(Tensor self, bool unbiased)
+  self: var_std_mean_backward(grads, self, result0, result1, unbiased, false)
+
+# TH wrappers
 - name: eq(Tensor self, Scalar other)
   output_differentiability: [False]
 
@@ -1556,7 +1567,4 @@
   output_differentiability: [False]
 
 - name: multinomial(Tensor self, int64_t num_samples, bool replacement, *, Generator generator)
-  output_differentiability: [False]
-
-- name: is_nonzero(Tensor self)
   output_differentiability: [False]

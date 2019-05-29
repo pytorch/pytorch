@@ -85,23 +85,38 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
   return legacy::cpu::_th_clamp_min_out(result, self, min);
 }
 
+Tensor& fill_out(Tensor& self, const Scalar value) {
+  auto iter = TensorIterator::nullary_op(self);
+  fill_stub(iter->device_type(), *iter, value);
+  return self;
+}
+
+Tensor& fill_(Tensor& self, Scalar value) {
+  return fill_out(self, value);
+}
+
+Tensor& fill_(Tensor& self, const Tensor& value) {
+  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
+  return fill_out(self, value.item());
+}
+
 Tensor mvlgamma(const Tensor& self, int64_t p) {
-  AT_CHECK(at::isFloatingType(self.scalar_type()),
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
            "mvlgamma is not implemented for ", self.type());
-  AT_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
+  TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
-  AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
+  TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
 }
 
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
-  AT_CHECK(at::isFloatingType(self.scalar_type()),
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
            "mvlgamma is not implemented for ", self.type());
-  AT_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
+  TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
-  AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
+  TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
@@ -155,7 +170,7 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     checkBackend(#op, {result}, Backend::CPU);                  \
     assert_no_internal_overlap(result, #op);                    \
     result.resize_(self.sizes());                               \
-    return at::legacy::cpu::_th_##op##_out(result, self);        \
+    return legacy::cpu::_th_##op##_out(result, self);        \
   }
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple
@@ -214,6 +229,6 @@ DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trunc_stub);
-
+DEFINE_DISPATCH(fill_stub);
 }
 } // namespace at

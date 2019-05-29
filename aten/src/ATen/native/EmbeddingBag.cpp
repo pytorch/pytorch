@@ -339,7 +339,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
 
   if (per_sample_weights.defined()) {
-    AT_CHECK(mode == MODE_SUM,
+    TORCH_CHECK(mode == MODE_SUM,
         "embedding_bag: per_sample_weights only supported with mode='sum'");
     auto per_input_weights_arg = TensorArg(
         per_sample_weights,"per_sample_weights", 1);
@@ -624,7 +624,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     const Tensor& offsets,
     const Tensor& offset2bag,
     int64_t mode) {
-  AT_CHECK(
+  TORCH_CHECK(
       mode == MODE_SUM,
       "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
 
