@@ -3433,6 +3433,7 @@ def foo(x):
         self.assertEqual(4, w(3))
         w.train(False)
         self.assertEqual(7, w(3))
+        self.assertFalse("training" in w.state_dict())
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -6008,7 +6009,11 @@ a")
             # type: (int, int) -> int
             return math.gcd(x, y)
 
-        for inputs in [(2, 4), (-5, -15), (-5, 15), (10, 0), (0, 10), (-5, 0), (0, -5), (0, 0), (0, -0)]:
+        max_int = 2147483647
+        min_int = -2147483647 - 1
+        int_vals = list(range(-5, 5, 1)) + [max_int + 5, max_int * 2, min_int - 5, min_int * 2]
+        vals = [(i, j) for i in int_vals for j in int_vals]
+        for inputs in vals:
             self.checkScript(test_gcd, inputs)
 
     def test_math_ops1(self):
@@ -11557,6 +11562,14 @@ a")
         x = torch.rand(2, 3, 4)
         traced = torch.jit.trace(foo, (x,))
         FileCheck().check("aten::contiguous").run(str(traced.graph))
+
+    def test_trace_inverse(self):
+        def foo(x):
+            return ~x
+
+        foo_traced = torch.jit.trace(foo, torch.zeros(3, 4, dtype=torch.uint8))
+        eg = torch.zeros(3, dtype=torch.uint8)
+        self.assertEqual(foo_traced(eg), foo(eg))
 
     def test_weak_module(self):
 
