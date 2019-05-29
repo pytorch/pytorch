@@ -1,21 +1,22 @@
-#include <ATen/CPUGenerator.h>
-#include <ATen/CheckGenerator.h>
-#include <ATen/Config.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Generator.h>
-#include <ATen/Parallel.h>
 #include <cmath>
 #include <type_traits>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/CPUGenerator.h>
+#include <ATen/CheckGenerator.h>
+#include <ATen/Generator.h>
+#include <ATen/Parallel.h>
 
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
 #include <ATen/cpu/vml.h>
+#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec256/functional.h>
 
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UnaryOps.h>
 
 #include <ATen/native/cpu/Loops.h>
+
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -24,8 +25,7 @@
 #include <TH/THGenerator.hpp>
 #include <TH/THRandom.h>
 
-namespace at {
-namespace native {
+namespace at { namespace native {
 namespace {
 
 using namespace vec256;
@@ -55,20 +55,21 @@ static void abs_kernel(TensorIterator& iter) {
 }
 
 static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
-  if (iter.dtype() == ScalarType::Half) {
+  if( iter.dtype() == ScalarType::Half ) {
     auto value = value_scalar.to<at::Half>().x;
     using H = decltype(value);
     nullary_kernel_vec(
-        iter, [=]() -> H { return value; }, [=]() { return Vec256<H>(value); });
+        iter,
+        [=]() -> H { return value; },
+        [=]() { return Vec256<H>(value); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(
-        at::ScalarType::Bool, iter.dtype(), "fill_cpu", [&]() {
-          scalar_t value = value_scalar.to<scalar_t>();
-          nullary_kernel_vec(
-              iter,
-              [=]() -> scalar_t { return value; },
-              [=]() { return Vec256<scalar_t>(value); });
-        });
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "fill_cpu", [&]() {
+      scalar_t value = value_scalar.to<scalar_t>();
+      nullary_kernel_vec(
+          iter,
+          [=]() -> scalar_t { return value; },
+          [=]() { return Vec256<scalar_t>(value); });
+    });
   }
 }
 
@@ -142,8 +143,8 @@ void bernoulli_mkl_kernel(Tensor& self, const double p, Generator* gen) {
       tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
     }
 
-    scalar_t* self_ptr = self.data<scalar_t>();
-    int* sample_int_ptr = tmp_int_tensor.data<int>();
+    scalar_t *self_ptr = self.data<scalar_t>();
+    int *sample_int_ptr = tmp_int_tensor.data<int>();
 
     auto sample = [&](int64_t begin, int64_t end) {
       int64_t len = end - begin;
@@ -151,18 +152,14 @@ void bernoulli_mkl_kernel(Tensor& self, const double p, Generator* gen) {
         VSLStreamStatePtr stream;
         vslNewStream(&stream, VSL_BRNG_MCG31, seed);
         vslSkipAheadStream(stream, begin);
-        viRngBernoulli(
-            VSL_RNG_METHOD_BERNOULLI_ICDF,
-            stream,
-            len,
-            sample_int_ptr + begin,
-            p);
+        viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, len,
+          sample_int_ptr + begin, p);
         vslDeleteStream(&stream);
 
         // vectorized copy if using buffer and contiguous, i.e., being non-int
         // type and contiguous
         if (!std::is_same<scalar_t, int>::value && contig) {
-          scalar_t* self_seg = self_ptr + begin;
+          scalar_t *self_seg = self_ptr + begin;
           int* tmp_seg = sample_int_ptr + begin;
           at::vec256::convert<int, scalar_t>(tmp_seg, self_seg, len);
         }
@@ -183,7 +180,9 @@ static void rsqrt_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
     unary_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return ((scalar_t)1) / std::sqrt(a); },
+        [=](scalar_t a) -> scalar_t {
+          return ((scalar_t)1) / std::sqrt(a);
+        },
         [=](Vec256<scalar_t> a) { return a.rsqrt(); });
   });
 }
@@ -258,5 +257,4 @@ IMPLEMENT_FLOAT_KERNEL(FLOATING, tan)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, tanh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, trunc)
 
-} // namespace native
-} // namespace at
+}} // namespace at::native
