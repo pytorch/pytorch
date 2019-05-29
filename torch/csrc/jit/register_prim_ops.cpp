@@ -2094,6 +2094,29 @@ RegisterOperators reg2({
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
 
+    // only used internally in range() translation
+    Operator(
+        "aten::__range_length(int lo, int hi, int step) -> int",
+        [](Stack& stack) {
+          int64_t lo, hi, step;
+          pop(stack, lo, hi, step);
+          if (step > 0 && lo < hi)
+            push(stack, 1 + (hi - 1 - lo) / step);
+          else if (step < 0 && lo > hi)
+            push(stack, 1 + (lo - 1 - hi) / (0 - step));
+          else
+            push(stack, 0);
+          return 0;
+        }),
+    Operator(
+        "aten::__derive_index(int index, int start, int step) -> int",
+        [](Stack& stack) {
+          int64_t index, start, step;
+          pop(stack, index, start, step);
+          push(stack, start + index * step);
+          return 0;
+        }),
+
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),

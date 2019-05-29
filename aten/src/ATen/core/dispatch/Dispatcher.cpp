@@ -58,7 +58,7 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema) {
     if (found->schema() != schema) {
       std::ostringstream str;
       str << schema << " vs " << found->schema();
-      AT_ERROR("Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
+      TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
     }
     return *found;
   }
@@ -89,7 +89,7 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   // reduce refcount and actually deregister if no references left
-  AT_ASSERT(op.operatorIterator_->refcount > 0);
+  TORCH_INTERNAL_ASSERT(op.operatorIterator_->refcount > 0);
   --op.operatorIterator_->refcount;
   if (0 == op.operatorIterator_->refcount) {
     op.operatorIterator_->op.prepareForDeregistration();

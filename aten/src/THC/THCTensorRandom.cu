@@ -39,6 +39,8 @@ THC_API __host__ void THCRandom_getRNGState(THCState* state, THByteTensor *rng_s
   THByteTensor_resize1d(rng_state, total_size);
   THArgCheck(THByteTensor_nElement(rng_state) == total_size, 1, "RNG state is wrong size");
   THArgCheck(THByteTensor_isContiguous(rng_state), 1, "RNG state must be contiguous");
+  // since curandStateMTGP is not used anymore, fill gen_states of THCGenerator with deterministic garbage value of -1
+  THCudaCheck(cudaMemset(THByteTensor_data(rng_state), -1, states_size));
   memcpy(THByteTensor_data(rng_state) + states_size, &gen->state.initial_seed, seed_size);
   memcpy(THByteTensor_data(rng_state) + states_size + seed_size, &gen->state.philox_seed_offset, offset_size);
 }
@@ -59,6 +61,8 @@ THC_API __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_s
   else {
     THArgCheck(THByteTensor_nElement(rng_state) == total_size, 1, "RNG state is wrong size");
   }
+  // since curandStateMTGP is not used anymore, fill gen_states of THCGenerator with deterministic garbage value of -1
+  THCudaCheck(cudaMemset(gen->state.gen_states, -1, states_size));
   THArgCheck(THByteTensor_isContiguous(rng_state), 1, "RNG state must be contiguous");
   memcpy(&gen->state.initial_seed, THByteTensor_data(rng_state) + states_size, seed_size);
   if (!no_philox_seed) {
