@@ -42,7 +42,7 @@ class QuantizedLinear(torch.jit.ScriptModule):
         out = torch.fbgemm_linear_int8_weight(
             input.float(), self.weight, self.packed_tensor_ptr, self.col_offsets,
             self.scale, self.zero_point, self.bias)
-        return out.float()
+        return out.to(input.dtype)
 
     def extra_repr(self):
         repr = 'in_features={in_features}, out_features={out_features}, ' \

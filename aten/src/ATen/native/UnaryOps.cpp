@@ -8,7 +8,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
+#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
 
@@ -58,11 +58,11 @@ Tensor& _clamp_out_cpu(
     optional<Scalar> min,
     optional<Scalar> max) {
   if (min && max) {
-    legacy::th::_th_clamp_out(result, self, *min, *max);
+    legacy::cpu::_th_clamp_out(result, self, *min, *max);
   } else if (max) {
-    legacy::th::_th_clamp_max_out(result, self, *max);
+    legacy::cpu::_th_clamp_max_out(result, self, *max);
   } else if (min) {
-    legacy::th::_th_clamp_min_out(result, self, *min);
+    legacy::cpu::_th_clamp_min_out(result, self, *min);
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
@@ -70,19 +70,19 @@ Tensor& _clamp_out_cpu(
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
-  return legacy::th::_th_clamp_max_out(self, self, max);
+  return legacy::cpu::_th_clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  return legacy::th::_th_clamp_max_out(result, self, max);
+  return legacy::cpu::_th_clamp_max_out(result, self, max);
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
-  return legacy::th::_th_clamp_min_out(self, self, min);
+  return legacy::cpu::_th_clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  return legacy::th::_th_clamp_min_out(result, self, min);
+  return legacy::cpu::_th_clamp_min_out(result, self, min);
 }
 
 Tensor& fill_out(Tensor& self, const Scalar value) {
@@ -170,7 +170,7 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     checkBackend(#op, {result}, Backend::CPU);                  \
     assert_no_internal_overlap(result, #op);                    \
     result.resize_(self.sizes());                               \
-    return at::legacy::th::_th_##op##_out(result, self);        \
+    return legacy::cpu::_th_##op##_out(result, self);        \
   }
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple

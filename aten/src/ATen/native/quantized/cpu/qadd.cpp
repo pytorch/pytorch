@@ -38,12 +38,10 @@ static auto registry = c10::RegisterOperators()
 .op("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
-      .kernel<QAddInt8</*ReLUFused=*/false>>()
-      .dispatchKey(QuantizedCPUTensorId()))
+      .kernel<QAddInt8</*ReLUFused=*/false>>(QuantizedCPUTensorId()))
 .op("quantized::add_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
      "-> Tensor qc",
     c10::RegisterOperators::options()
-      .kernel<QAddInt8</*ReLUFused=*/true>>()
-      .dispatchKey(QuantizedCPUTensorId()));
+      .kernel<QAddInt8</*ReLUFused=*/true>>(QuantizedCPUTensorId()));
 }  // namespace
 }}  // namespace at::native

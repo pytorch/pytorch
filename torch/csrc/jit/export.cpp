@@ -550,6 +550,7 @@ ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
 void ScriptModuleSerializer::serialize(
     const script::Module& module,
     const script::ExtraFilesMap& extra_files) {
+  C10_LOG_API_USAGE_ONCE("torch.script.save");
   torch::ModelDef model_def;
   convertModel(module, &model_def, extra_files);
   std::string output;
