@@ -524,7 +524,7 @@ struct CAFFE2_API Type {
   virtual std::tuple<Tensor,Tensor> solve(const Tensor & self, const Tensor & A) const = 0;
   virtual Tensor cholesky_inverse(const Tensor & self, bool upper) const = 0;
   virtual std::tuple<Tensor,Tensor> pstrf(const Tensor & self, bool upper, Scalar tol) const = 0;
-  virtual std::tuple<Tensor,Tensor> qr(const Tensor & self) const = 0;
+  virtual std::tuple<Tensor,Tensor> qr(const Tensor & self, bool some) const = 0;
   virtual std::tuple<Tensor,Tensor> geqrf(const Tensor & self) const = 0;
   virtual Tensor orgqr(const Tensor & self, const Tensor & input2) const = 0;
   virtual Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) const = 0;
