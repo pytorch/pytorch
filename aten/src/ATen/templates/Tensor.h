@@ -254,7 +254,7 @@ class CAFFE2_API Tensor {
   TensorOptions options() const;
 
   void* data_ptr() const {
-    return this->unsafeGetTensorImpl()->slow_data();
+    return this->unsafeGetTensorImpl()->data();
   }
 
   template<typename T>
