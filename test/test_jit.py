@@ -11563,6 +11563,14 @@ a")
         traced = torch.jit.trace(foo, (x,))
         FileCheck().check("aten::contiguous").run(str(traced.graph))
 
+    def test_trace_inverse(self):
+        def foo(x):
+            return ~x
+
+        foo_traced = torch.jit.trace(foo, torch.zeros(3, 4, dtype=torch.uint8))
+        eg = torch.zeros(3, dtype=torch.uint8)
+        self.assertEqual(foo_traced(eg), foo(eg))
+
     def test_weak_module(self):
 
         @torch._jit_internal.weak_module
