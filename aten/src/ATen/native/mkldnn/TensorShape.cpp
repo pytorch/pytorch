@@ -46,7 +46,8 @@ Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
 
 Tensor mkldnn_clone(const Tensor& self) {
   ideep::tensor& src = itensor_from_mkldnn(self);
-  ideep::tensor dst{src};
+  ideep::tensor dst;
+  ideep::direct_copy::compute<AllocForMKLDNN>(src, dst);
   return new_with_itensor_mkldnn(std::move(dst), self.options());
 }
 

@@ -42,11 +42,11 @@ Tensor & celu_(Tensor & self, Scalar alpha) {
 }
 
 Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
-  return at::rrelu_with_noise(self, at::empty({0}, self.options()), lower, upper, training, generator);
+  return at::rrelu_with_noise(self, at::empty_like(self), lower, upper, training, generator);
 }
 
 Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
-  return at::rrelu_with_noise_(self, at::empty({0}, self.options()), lower, upper, training, generator);
+  return at::rrelu_with_noise_(self, at::empty_like(self), lower, upper, training, generator);
 }
 
 // computes `result = self <= threshold ? value : other`

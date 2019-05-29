@@ -2,6 +2,95 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathPairwise.cu"
 #else
 
+int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
+  if (!THCTensor_(isSameSizeAs(state, self_, src_))) {
+    return 0;
+  }
+
+  // This is not as efficient as TH, but the basic idea: create a buffer that stores
+  // 1 if the two tensors are equal at a position, otherwise 0. If the minimum value
+  // in this buffer is 1, the two tensors are equal, otherwise they are not
+
+  THCudaByteTensor *buf = THCudaByteTensor_newWithSize(state, self_->sizes(), {});
+
+  if (!THC_pointwiseApply3<uint8_t, scalar_t, scalar_t>(state, buf, self_, src_, TensorEQOp<scalar_t, unsigned char>())) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
+
+  unsigned char min = THCudaByteTensor_minall(state, buf);
+
+  THCudaByteTensor_free(state, buf);
+
+  return min != 0;
+}
+
+void THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
+{
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+  return THError("bitand only supported for integer type tensors");
+#else
+  if (self_ == src_) {
+    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorBitAndConstantOp<scalar_t>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src_);
+
+    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorBitAndConstantOp<scalar_t>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+void THCTensor_(bitor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
+{
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+  return THError("bitor only supported for integer type tensors");
+#else
+  if (self_ == src_) {
+    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorBitOrConstantOp<scalar_t>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src_);
+
+    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorBitOrConstantOp<scalar_t>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+void THCTensor_(bitxor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
+{
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+  return THError("bitxor only supported for integer type tensors");
+#else
+  if (self_ == src_) {
+    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorBitXorConstantOp<scalar_t>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src_);
+
+    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorBitXorConstantOp<scalar_t>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+#endif
+}
+
+#if !defined(THC_REAL_IS_BOOL)
+
 void THCTensor_(add)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
@@ -196,91 +285,6 @@ void THCTensor_(triu)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
   THCudaCheck(cudaGetLastError());
 }
 
-int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  if (!THCTensor_(isSameSizeAs(state, self_, src_))) {
-    return 0;
-  }
-
-  // This is not as efficient as TH, but the basic idea: create a buffer that stores
-  // 1 if the two tensors are equal at a position, otherwise 0. If the minimum value
-  // in this buffer is 1, the two tensors are equal, otherwise they are not
-
-  THCudaByteTensor *buf = THCudaByteTensor_newWithSize(state, self_->sizes(), {});
-
-  if (!THC_pointwiseApply3<uint8_t, scalar_t, scalar_t>(state, buf, self_, src_, TensorEQOp<scalar_t, unsigned char>())) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  unsigned char min = THCudaByteTensor_minall(state, buf);
-
-  THCudaByteTensor_free(state, buf);
-
-  return min != 0;
-}
-
-void THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
-{
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-  return THError("bitand only supported for integer type tensors");
-#else
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorBitAndConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorBitAndConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
 #endif
-}
-
-void THCTensor_(bitor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
-{
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-  return THError("bitor only supported for integer type tensors");
-#else
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorBitOrConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorBitOrConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-#endif
-}
-
-void THCTensor_(bitxor)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
-{
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-  return THError("bitxor only supported for integer type tensors");
-#else
-  if (self_ == src_) {
-    if (!THC_pointwiseApply1<scalar_t>(state, self_, TensorBitXorConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src_);
-
-    if (!THC_pointwiseApply2<scalar_t, scalar_t>(state, self_, src_, TensorBitXorConstantOp<scalar_t>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-#endif
-}
 
 #endif

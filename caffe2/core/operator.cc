@@ -29,8 +29,14 @@ C10_DEFINE_bool(
 C10_DEFINE_bool(
     caffe2_operator_throw_if_fp_exceptions,
     false,
-    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID, "
-    "FE_OVERFLOW) are detected when running any operator.");
+    "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID) "
+    "are detected when running any operator. FE_OVERFLOW is handled separately "
+    "by caffe2_operator_throw_if_fp_overflow_exceptions option.");
+C10_DEFINE_bool(
+    caffe2_operator_throw_if_fp_overflow_exceptions,
+    false,
+    "If set, throws if floating point exception FE_OVERFLOW is detected when "
+    "running any operator.");
 
 namespace caffe2 {
 
@@ -43,6 +49,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       input_size_(operator_def.input_size()),
       event_(caffe2::make_unique<Event>(device_option_)) {
   static GlobalInitIsCalledGuard guard;
+  inputs_.reserve(operator_def.input_size());
   for (const string& input_str : operator_def.input()) {
     auto* blob = ws->GetBlob(input_str);
     CAFFE_ENFORCE(
@@ -56,6 +63,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 
   GetOperatorLogger()(operator_def);
 
+  outputs_.reserve(operator_def.output_size());
   for (const string& output_str : operator_def.output()) {
     outputs_.push_back(CHECK_NOTNULL(ws->CreateBlob(output_str)));
   }
@@ -109,6 +117,9 @@ OperatorBase::OperatorBase(
 #endif
 
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
+  CAFFE_ENFORCE(
+      isLegacyOperator(),
+      "InputTensorShapes() not supported for operators exported to c10.");
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
     tps.push_back(GetTensorShapeOfBlob(blob));
@@ -380,6 +391,7 @@ C10_DEFINE_REGISTRY(
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
+  C10_LOG_API_USAGE_ONCE("caffe2.gradient_maker");
   std::unique_ptr<GradientMakerBase> maker(
       GradientRegistry()->Create(def.type(), def, g_output));
   CAFFE_ENFORCE(maker,
@@ -596,10 +608,28 @@ void LoadInt8TensorInfoOfBlob(
 }
 
 TensorShape GetTensorShapeOfBlob(const Blob* b) {
+  TensorShape tp;
+#ifndef C10_MOBILE
+  auto function_ptr =
+      ExternalTensorFunctionsBaseRegistry()->Create(b->meta().id());
+  if (function_ptr != nullptr) {
+    // This is dnnlowp tensor and we cant deal with it using regular path
+    auto dtype = function_ptr->GetExternalTensorType(b->GetRaw());
+    tp.set_data_type(TypeMetaToDataType(dtype));
+
+    size_t _capacity;
+    DeviceOption _device;
+    auto dshape =
+        function_ptr->GetExternalTensorInfo(b->GetRaw(), &_capacity, &_device);
+    for (auto d : dshape) {
+      tp.add_dims(d);
+    }
+    return tp;
+  }
+#endif
+
   TypeCall type_fun = GetTypeCallFunction(b->meta().id());
   TensorInfoCall tensor_info_fun = GetTensorInfoFunction(b->meta().id());
-  TensorShape tp;
-
   if (type_fun) {
     tp.set_data_type(TypeMetaToDataType(type_fun(b->GetRaw())));
   }
@@ -756,5 +786,13 @@ c10::optional<int> OperatorBase::argumentIndexWithName(
 }
 
 OperatorBase::~OperatorBase() noexcept = default;
+
+#ifndef C10_MOBILE
+C10_DEFINE_TYPED_REGISTRY(
+    ExternalTensorFunctionsBaseRegistry,
+    TypeIdentifier,
+    ExternalTensorFunctionsBase,
+    std::unique_ptr);
+#endif
 
 }  // namespace caffe2

@@ -44,6 +44,10 @@ FIND_PACKAGE(MPI)
 
 INCLUDE_DIRECTORIES(${CAFFE2_INCLUDE_DIR})
 
+if (USE_TBB)
+  include_directories(${TBB_ROOT_DIR}/include)
+endif()
+
 IF(USE_CUDA)
   FIND_PACKAGE(CUDA 7.5)
   IF(CUDA_FOUND)
