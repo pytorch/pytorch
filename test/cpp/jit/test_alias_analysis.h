@@ -13,6 +13,8 @@ namespace jit {
 // Fixture to set up a graph and make assertions clearer
 struct TopoMoveTestFixture {
   // hi
+  // hi 2
+  // add this
   TopoMoveTestFixture() {
     createGraph();
     aliasDb = torch::make_unique<AliasDb>(graph);
