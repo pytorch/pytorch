@@ -61,6 +61,19 @@ inline std::string Join(const std::string& delimiter, const Container& v) {
   return s.str();
 }
 
+
+inline std::vector<std::string> Split(const std::string& input, const std::string& delimiter) {
+
+  std::vector<std::string> tokens;
+  size_t last = 0, next = 0;
+  while ((next = input.find(delimiter, last)) != std::string::npos) {
+    tokens.push_back(input.substr(last, next-last));
+    last = next + 1;
+  }
+  tokens.push_back(input.substr(last));
+  return tokens;
+}
+
 // Replace all occurrences of "from" substring to "to" string.
 // Returns number of replacements
 size_t C10_API ReplaceAll(std::string& s, const char* from, const char* to);

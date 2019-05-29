@@ -1,12 +1,14 @@
-#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -558,7 +560,6 @@ struct to_ir {
       throw ErrorReport(def.decl().params().range())
           << "methods must have a self argument";
     }
-
     method.setSchema(emitDef(def, self, graph->block()));
     runCleanupPasses(graph);
   }
@@ -594,6 +595,7 @@ struct to_ir {
 
   void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
     // remove any uses of tuples that we inserted that are not needed
+    Inline(*to_clean);
     LowerSimpleTuples(to_clean);
     ConstantPooling(to_clean);
     // For jitter
@@ -2156,7 +2158,6 @@ struct to_ir {
       if (trees.size() < 1) {
         throw ErrorReport(loc) << "Expected at least one argument to fork()";
       }
-
       auto forked = emitSugaredExpr(Expr(trees[0]), 1);
       TreeList sliced_trees(trees.begin() + 1, trees.end());
       auto inputs = getNamedValues(sliced_trees, true);
@@ -2370,10 +2371,9 @@ struct to_ir {
                      std::make_shared<BuiltinFunction>(aten::neg, at::nullopt))
                      ->call(tree->range(), method, named_values, {}, 0));
 
-    // constant fold the input if possible
-
-    // can occur with desugared class type __neg__ function
-    if (neg_val->node()->inputs().size() == 0) {
+    // if we emitted a aten::neg and not some other overloaded function,
+    // then try to constantfold
+    if (neg_val->node()->kind() != aten::neg) {
       return neg_val;
     }
     auto maybe_constant_input = toIValue(neg_val->node()->input());
