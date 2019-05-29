@@ -11,6 +11,8 @@
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
 
+#pragma GCC diagnostic ignored "-Wint-in-bool-context"
+
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
 #elif defined(_WIN32)
