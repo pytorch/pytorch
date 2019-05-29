@@ -1,8 +1,9 @@
-#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/script/module_python.h>
+#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -94,6 +95,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
+  std::cout << "Matching python schema " << m.getSchema().name() << std::endl;
   auto inputs = toValues(*m.graph(), inputs_);
   auto schema = getSchema(inputs.size(), n_binders);
 
@@ -221,6 +223,8 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
   std::vector<NamedValue> new_inputs = inputs.vec();
   new_inputs.insert(new_inputs.begin(), module_);
 
+  std::cout << "Matching non-python schema " << caller.getSchema().name()
+            << std::endl;
   for (const std::string& method_name : method_names_) {
     auto cls = module_->type()->expect<ClassType>();
     std::shared_ptr<Function> fn = cls->getMethod(method_name);

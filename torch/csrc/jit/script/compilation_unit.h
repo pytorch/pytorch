@@ -191,6 +191,10 @@ struct TORCH_API CompilationUnit {
   CompilationUnit() = default;
 
   std::shared_ptr<Function> find_function(const std::string& name) const {
+    std::cout << "Looking for function " << name << std::endl;
+    for (auto i : dict_) {
+      std::cout << i.first << std::endl;
+    }
     auto it = dict_.find(name);
     if (it == dict_.end())
       return nullptr;
@@ -272,7 +276,7 @@ struct TORCH_API CompilationUnit {
   ClassTypePtr get_class(const c10::QualifiedName& name) const {
     std::cout << "Getting class: " << name.name() << std::endl;
     for (const auto& i : classes_) {
-      std::cout << i->str() << std::endl;
+      std::cout << i->qualname() << std::endl;
     }
     for (const auto& cls : classes_) {
       if (cls->qualname() == name.qualifiedName()) {

@@ -13,23 +13,27 @@
 #include <torch/csrc/utils/variadic.h>
 #include <iostream>
 
-using namespace std;
 namespace torch {
 namespace jit {
 template <class CurClass>
 struct class_ {
-  class_(string className) {
-    cout << "className: " << className << endl;
+  shared_ptr<CompilationUnit> cu;
+  class_(string className) : cu(std::make_shared<CompilationUnit>()) {
     auto cu = std::make_shared<CompilationUnit>();
-    std::cout << "class 24: "
-              << &torch::jit::script::CompilationUnit::_get_python_cu()
-              << std::endl;
     auto classType = ClassType::create(c10::QualifiedName(className), cu);
-    cout << "Registering: " << className << endl;
-    std::cout << "this thread: " << std::this_thread::get_id() << std::endl;
-    // cout<<"python_cu: "<<&CompilationUnit::_get_python_cu()<<endl;
     CompilationUnit::_get_python_cu().register_class(classType);
+    auto func = []() { return new CurClass; };
+    auto graph = std::make_shared<Graph>();
+    auto input = graph->addInput()->setType(classType);
+    graph->registerOutput(input);
+    cu->create_function("__init__", graph);
   }
+  // todo: Doesn't work yet
+  // template<typename Func>
+  // class_& def(string name, Func f) {
+  //   auto graph = std::make_shared<Graph>();
+  //   cu->create_function(name, make_shared<Graph>());
+  // }
 };
 
 } // namespace jit

@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/script/compilation_unit.h>
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/script/function_schema_parser.h>
@@ -40,7 +39,6 @@ private:
 };
 
 void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNameStr, Options&& options) {
-  std::cout<<"operator 43: " <<&torch::jit::script::CompilationUnit::_get_python_cu()<<" "<<schemaOrNameStr<<std::endl;
   #if defined(CAFFE2_IS_XPLAT_BUILD)
     throw std::logic_error("Tried to register operator " + schemaOrNameStr + ". We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
   #else
@@ -94,7 +92,6 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const std::string
 }
 
 void RegisterOperators::checkSchemaAndRegisterOp_(FunctionSchema schema, Options&& options) {
-  std::cout<<"operator 97: " <<&torch::jit::script::CompilationUnit::_get_python_cu()<<" "<<schema.name()<<std::endl;
   for (auto& kernel : options.kernels) {
     if (nullptr != kernel.inferred_function_schema.get()) {
       c10::optional<std::string> schema_difference = findSchemaDifferences(schema, *kernel.inferred_function_schema);
@@ -139,8 +136,6 @@ void RegisterOperators::registerOp_(FunctionSchema&& schema, Options&& options) 
 void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel) {
   AT_ASSERTM(kernel.kernel_func != nullptr && static_cast<bool>(kernel.cache_creator_func), "Kernel must be set");
 
-
-  std::cout<<"operator 142: " <<&torch::jit::script::CompilationUnit::_get_python_cu()<<" "<<schema.name()<<std::endl;
   registrars_.emplace_back(std::move(schema), kernel.dispatch_key, kernel.kernel_func, std::move(kernel.cache_creator_func));
 }
 

@@ -96,6 +96,8 @@ struct PythonResolver : public Resolver {
       return classType_;
     }
     AutoGIL ag;
+    return CompilationUnit::_get_python_cu().get_class(
+        c10::QualifiedName(name));
     py::object obj = rcb_(name);
     std::cout << "part 1" << std::endl;
     if (obj.is(py::none())) {

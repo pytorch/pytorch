@@ -1,9 +1,8 @@
 #pragma once
 
-#include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/stack.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
+#include <ATen/core/stack.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
@@ -17,6 +16,8 @@ namespace detail {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
+
+
 
 /// Adds the elements of the `tuple` as input nodes to the traced graph.
 template <size_t... Is, typename... Types>
@@ -235,9 +236,6 @@ struct TORCH_API RegisterOperators {
   /// Calls `op(...)` with the given operator name and implementation.
   template <typename Implementation>
   RegisterOperators(const std::string& name, Implementation&& implementation) {
-    std::cout << "operator 239: "
-              << &torch::jit::script::CompilationUnit::_get_python_cu() << " "
-              << name << std::endl;
     op(name, std::forward<Implementation>(implementation));
   }
 
@@ -249,6 +247,7 @@ struct TORCH_API RegisterOperators {
       const std::string& name,
       Implementation&& implementation,
       OperatorOptions options) {
+
     registerOperator(createOperator(
         name, std::forward<Implementation>(implementation), options));
     return *this;
@@ -258,16 +257,12 @@ struct TORCH_API RegisterOperators {
   RegisterOperators& op(
       const std::string& name,
       Implementation&& implementation) {
-    std::cout << "operator 262: "
-              << &torch::jit::script::CompilationUnit::_get_python_cu() << " "
-              << name << std::endl;
-    registrars_.emplace_back(std::make_shared<c10::RegisterOperators>(
-        name, std::forward<Implementation>(implementation)));
+    registrars_.emplace_back(std::make_shared<c10::RegisterOperators>(name, std::forward<Implementation>(implementation)));
 
     return *this;
   }
 
- private:
+private:
   // A c10::RegisterOperators instance is not copyable, so to make
   // torch::jit::RegisterOperators copyable, we use shared_ptrs.
   // We need to keep the c10::RegisterOperators instances around
