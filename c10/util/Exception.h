@@ -228,8 +228,8 @@ inline std::string if_empty_then(std::string x, std::string y) {
         "Expected " #cond " to be true, but got false.  "   \
         "(Could this error message be improved?  If so, "   \
         "please report an enhancement request to PyTorch.)" \
-      ) \
-    ); \
+      )                                                     \
+    );                                                      \
   }
 #endif
 // TODO: We're going to get a lot of similar looking string literals

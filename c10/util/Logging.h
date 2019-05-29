@@ -213,7 +213,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
     using namespace ::c10::enforce_detail;                             \
     const EnforceFailMessage& CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_ = \
         (condition);                                                   \
-    if (C10_UNLIKELY(CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_.bad())) {   \
+    if (C10_UNLIKELY(CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_.bad())) {  \
       ::c10::ThrowEnforceNotMet(                                       \
           __FILE__,                                                    \
           __LINE__,                                                    \
