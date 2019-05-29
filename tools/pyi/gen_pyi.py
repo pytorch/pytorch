@@ -112,7 +112,6 @@ def type_to_python(typename, size=None):
         'Storage': 'Storage',
         'BoolTensor': 'Tensor',
         'IndexTensor': 'Tensor',
-        'SparseTensorRef': 'Tensor',
         'Tensor': 'Tensor',
         'IntArrayRef': '_size',
         'IntArrayRef[]': 'Union[_int, _size]',

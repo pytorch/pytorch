@@ -157,8 +157,5 @@
 #include <THNN/generic/VolumetricDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/VolumetricDilatedMaxPooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SpatialClassNLLCriterion.c>
 #include <TH/THGenerateFloatTypes.h>
