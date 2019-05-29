@@ -320,10 +320,11 @@ class _DataLoaderIter(object):
     #           `_DataLoaderiter._try_get_batch()` for details.
     #
     #           Additionally, for child exit on non-Windows platforms, we also
-    #           register a SIGCHLD handler (which is supported on Windows) on
-    #           the main process, which checks if any of the workers fail in the
-    #           (Python) handler. This is more efficient and faster in detecting
-    #           worker failures, compared to only using the above mechanism.
+    #           register a SIGCHLD handler (which is not supported on Windows)
+    #           on the main process, which checks if any of the workers fail in
+    #           the (Python) handler. This is more efficient and faster in
+    #           detecting worker failures, compared to only using the above
+    #           mechanism.
     #           See `DataLoader.cpp` and `_utils/signal_handling.py` for details.
     #
     #           For `.get()` calls where the sender(s) is not the workers, we
@@ -453,7 +454,6 @@ class _DataLoaderIter(object):
             self.workers = []
             for i in range(self.num_workers):
                 index_queue = multiprocessing.Queue()
-                index_queue.cancel_join_thread()
                 w = multiprocessing.Process(
                     target=_utils.worker._worker_loop,
                     args=(self.dataset, index_queue,
@@ -638,8 +638,6 @@ class _DataLoaderIter(object):
                     # Use hasattr in case error happens before we set the attribute.
                     # First time do `worker_result_queue.put` in this process.
 
-                    # `cancel_join_thread` in case that `pin_memory_thread` exited.
-                    self.worker_result_queue.cancel_join_thread()
                     self.worker_result_queue.put(None)
                     self.pin_memory_thread.join()
                     # Indicate that no more data will be put on this queue by the
@@ -650,6 +648,9 @@ class _DataLoaderIter(object):
                     # out even if there is data in the queue.
                     self.worker_result_queue.close()
 
+                    # `cancel_join_thread` in case that `pin_memory_thread` exited.
+                    self.worker_result_queue.cancel_join_thread()
+
                 # Exit workers now.
                 for q in self.index_queues:
                     q.put(None)
@@ -658,6 +659,8 @@ class _DataLoaderIter(object):
                     q.close()
                 for w in self.workers:
                     w.join()
+                for q in self.index_queues:
+                    q.cancel_join_thread()
             finally:
                 # Even though all this function does is putting into queues that
                 # we have called `cancel_join_thread` on, weird things can
