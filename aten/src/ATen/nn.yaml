@@ -5,6 +5,12 @@
   scalar_check:
     output: 'false'
     grad_input: 'false'
+  CPU:
+    forward_scalar_types: ['Float', 'Double', 'Half']
+    backward_scalar_types: ['Float', 'Double', 'Half']
+  GPU:
+    forward_scalar_types: ['Float', 'Double', 'Half']
+    backward_scalar_types: ['Float', 'Double', 'Half']
 
 - name: _thnn_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::Mean)
   cname: AbsCriterion
