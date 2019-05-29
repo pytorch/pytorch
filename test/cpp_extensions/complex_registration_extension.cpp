@@ -36,8 +36,8 @@ struct ComplexCPUType : public at::CPUTypeDefault {
   const char* toString() const override;
   TypeID ID() const override;
 
-  Tensor empty(IntArrayRef size, const TensorOptions & options, MemoryFormat memory_format) const override {
-    TORCH_CHECK(memory_format != MemoryFormat::Contiguous, "unsupported memory format")
+  Tensor empty(IntArrayRef size, const TensorOptions & options, c10::optional<c10::MemoryFormat> optional_memory_format) const override {
+    TORCH_CHECK(!optional_memory_format.has_value(), "memory format is not supported")
     AT_ASSERT(options.device().is_cpu());
 
     for (auto x: size) {
