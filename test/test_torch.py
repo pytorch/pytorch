@@ -11145,17 +11145,17 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # Checking for runtime error, as this is the expected behaviour
             with self.assertRaises(RuntimeError):
                 torch.unique(
-                    x_ill_formed_empty, 
-                    return_inverse=True, 
-                    return_counts=True, 
-                    dim=1) 
+                    x_ill_formed_empty,
+                    return_inverse=True,
+                    return_counts=True,
+                    dim=1)
 
             # test along dim2
             with self.assertRaises(RuntimeError):
                 torch.unique(
-                    x_ill_formed_empty_another, 
-                    return_inverse=True, 
-                    return_counts=True, 
+                    x_ill_formed_empty_another,
+                    return_inverse=True,
+                    return_counts=True,
                     dim=2)
 
             # test consecutive version
@@ -11585,6 +11585,10 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         like = torch.empty_like(nhwc)
         self.assertTrue(like.is_contiguous())
         self.assertFalse(like.is_contiguous(memory_format=torch.channels_last))
+
+        sparse = x.to_sparse()
+        with self.assertRaises(RuntimeError):
+            z = torch.empty_like(sparse, memory_format=torch.preserve_format)
 
     def test_memory_format_empty(self):
         with self.assertRaises(RuntimeError):
