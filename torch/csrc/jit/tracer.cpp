@@ -620,7 +620,7 @@ void ArgumentStash::stashIntArrayRefElem(
   Value* ten = getValueTrace(var);
   auto& g = *ten->owningGraph();
   WithInsertPoint guard(ten->node()->next());
-  auto prim = g.insert(aten::Int, {ten});
+  auto prim = g.insert(prim::Int, {ten});
   list_trace[idx] = prim;
 }
 
@@ -637,9 +637,9 @@ void ArgumentStash::stashValue(
   auto& g = *ten->owningGraph();
 
   if (type == IntType::get()) {
-    ten = g.insert(aten::Int, {ten});
+    ten = g.insert(prim::Int, {ten});
   } else if (type == FloatType::get()) {
-    ten = g.insert(aten::Float, {ten});
+    ten = g.insert(prim::Float, {ten});
   }
 
   stash.values.emplace(arg_name, ten);
