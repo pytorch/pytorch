@@ -898,6 +898,14 @@ class _TestTorchMixin(object):
             res1val = torchfn(m1)
             self.assertTrue(math.isnan(res1val))
 
+        # Bool
+        m1 = torch.tensor([True, False, True], dtype=torch.bool)
+        res1 = torchfn(m1)
+        res2 = m1[0]
+        for i in iter_indices(m1):
+            res2 = mathfn(res2, m1[i])
+        self.assertEqual(res1, res2)
+
     def test_max(self):
         self._testSelection(torch.max, max)
 
@@ -2828,7 +2836,28 @@ class _TestTorchMixin(object):
         t = torch.arange(-10, 10, dtype=torch.int8)
         scale = 3
         zero_point = 2
-        qt = torch.dequantize_linear(t, scale, zero_point, torch.float)
+        qt = torch._dequantize_linear(t, scale, zero_point, torch.qint8)
+        qt2 = torch._per_tensor_affine_qtensor(t, scale, zero_point)
+        self.assertEqual(qt, qt2.dequantize())
+
+    def test_qtensor_per_channel_affine(self):
+        r = np.random.rand(3, 2) * 2 - 4
+        r = torch.from_numpy(r).float()
+        scales = torch.tensor([2.0, 3.0]).float()
+        zero_points = torch.tensor([5, 10]).int()
+        axis = [1]
+
+        def quantize_c(data, scales, zero_points):
+            res = torch.empty((3, 2))
+            quant_min, quant_max = 0, 255
+            for i in range(3):
+                for j in range(2):
+                    res[i][j] = np.clip(np.round(data[i][j] / scales[j]) + zero_points[j], quant_min, quant_max)
+            return res
+        qr = torch.quantize_linear_per_channel(r, scales, zero_points, axis, torch.quint8)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
 
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
@@ -5134,105 +5163,45 @@ class _TestTorchMixin(object):
             with self.assertRaisesRegex(RuntimeError, err_str):
                 torch.triangular_solve(b, A)
 
+    @staticmethod
+    def _test_qr(self, cast):
+        def run_test(tensor_dims, some):
+            A = cast(torch.randn(*tensor_dims))
+            Q, R = torch.qr(A, some=some)
+
+            # Check0: Q[-2:] = (m, n_columns), R[-2:] = (n_columns, n)
+            m, n = tensor_dims[-2:]
+            n_columns = m if (not some) and m > n else min(m, n)
+            self.assertEqual(Q.size(-2), m)
+            self.assertEqual(R.size(-1), n)
+            self.assertEqual(Q.size(-1), n_columns)
+
+            # Check1: A = QR
+            self.assertEqual(A, torch.matmul(Q, R))
+
+            # Check2: A = QR (with out)
+            Q_out, R_out = cast(torch.Tensor()), cast(torch.Tensor())
+            torch.qr(A, some=some, out=(Q_out, R_out))
+            self.assertEqual(A, torch.matmul(Q_out, R_out))
+
+            # Check3: Q == Q_out, R == R_out
+            self.assertEqual(Q, Q_out)
+            self.assertEqual(R, R_out)
+
+            # Check4: Q^{T}Q = I, triu(R) = R
+            self.assertEqual(torch.matmul(Q.transpose(-2, -1), Q),
+                             cast(torch.eye(n_columns).expand(Q.shape[:-2] + (n_columns, n_columns))))
+            self.assertEqual(R.triu(), R)
+
+        tensor_dims_list = [(3, 5), (5, 5), (5, 3),  # Single matrix
+                            (7, 3, 5), (7, 5, 5), (7, 5, 3),  # 3-dim Tensors
+                            (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)]  # 4-dim Tensors
+        for tensor_dims, some in product(tensor_dims_list, [True, False]):
+            run_test(tensor_dims, some)
+
     @skipIfNoLapack
     def test_qr(self):
-
-        # Since the QR decomposition is unique only up to the signs of the rows of
-        # R, we must ensure these are positive before doing the comparison.
-        def canonicalize(q, r):
-            d = r.diag().sign().diag()
-            return torch.mm(q, d), torch.mm(d, r)
-
-        def canon_and_check(q, r, expected_q, expected_r):
-            q_canon, r_canon = canonicalize(q, r)
-            expected_q_canon, expected_r_canon = canonicalize(expected_q, expected_r)
-            self.assertEqual(q_canon, expected_q_canon)
-            self.assertEqual(r_canon, expected_r_canon)
-
-        def check_qr(a, expected_q, expected_r):
-            # standard invocation
-            q, r = torch.qr(a)
-            canon_and_check(q, r, expected_q, expected_r)
-
-            # in-place
-            q, r = torch.Tensor(), torch.Tensor()
-            torch.qr(a, out=(q, r))
-            canon_and_check(q, r, expected_q, expected_r)
-
-            # manually calculate qr using geqrf and orgqr
-            m = a.size(0)
-            n = a.size(1)
-            k = min(m, n)
-            result, tau = torch.geqrf(a)
-            self.assertEqual(result.size(0), m)
-            self.assertEqual(result.size(1), n)
-            self.assertEqual(tau.size(0), k)
-            r = torch.triu(result.narrow(0, 0, k))
-            q = torch.orgqr(result, tau)
-            q, r = q.narrow(1, 0, k), r
-            canon_and_check(q, r, expected_q, expected_r)
-
-        # check square case
-        a = torch.Tensor(((1, 2, 3), (4, 5, 6), (7, 8, 10)))
-
-        expected_q = torch.Tensor((
-            (-1.230914909793328e-01, 9.045340337332914e-01, 4.082482904638621e-01),
-            (-4.923659639173310e-01, 3.015113445777629e-01, -8.164965809277264e-01),
-            (-8.616404368553292e-01, -3.015113445777631e-01, 4.082482904638634e-01)))
-        expected_r = torch.Tensor((
-            (-8.124038404635959e+00, -9.601136296387955e+00, -1.193987e+01),
-            (0.000000000000000e+00, 9.045340337332926e-01, 1.507557e+00),
-            (0.000000000000000e+00, 0.000000000000000e+00, 4.082483e-01)))
-
-        check_qr(a, expected_q, expected_r)
-
-        # check rectangular thin
-        a = torch.Tensor((
-            (1, 2, 3),
-            (4, 5, 6),
-            (7, 8, 9),
-            (10, 11, 13),
-        ))
-        expected_q = torch.Tensor((
-            (-0.0776150525706334, -0.833052161400748, 0.3651483716701106),
-            (-0.3104602102825332, -0.4512365874254053, -0.1825741858350556),
-            (-0.5433053679944331, -0.0694210134500621, -0.7302967433402217),
-            (-0.7761505257063329, 0.3123945605252804, 0.5477225575051663)
-        ))
-        expected_r = torch.Tensor((
-            (-12.8840987267251261, -14.5916298832790581, -17.0753115655393231),
-            (0, -1.0413152017509357, -1.770235842976589),
-            (0, 0, 0.5477225575051664)
-        ))
-
-        check_qr(a, expected_q, expected_r)
-
-        # check rectangular fat
-        a = torch.Tensor((
-            (1, 2, 3, 4),
-            (5, 6, 7, 8),
-            (9, 10, 11, 13)
-        ))
-        expected_q = torch.Tensor((
-            (-0.0966736489045663, 0.907737593658436, 0.4082482904638653),
-            (-0.4833682445228317, 0.3157348151855452, -0.8164965809277254),
-            (-0.870062840141097, -0.2762679632873518, 0.4082482904638621)
-        ))
-        expected_r = torch.Tensor((
-            (-1.0344080432788603e+01, -1.1794185166357092e+01,
-             -1.3244289899925587e+01, -1.5564457473635180e+01),
-            (0.0000000000000000e+00, 9.4720444555662542e-01,
-             1.8944088911132546e+00, 2.5653453733825331e+00),
-            (0.0000000000000000e+00, 0.0000000000000000e+00,
-             1.5543122344752192e-15, 4.0824829046386757e-01)
-        ))
-        check_qr(a, expected_q, expected_r)
-
-        # check big matrix
-        a = torch.randn(1000, 1000)
-        q, r = torch.qr(a)
-        a_qr = torch.mm(q, r)
-        self.assertEqual(a, a_qr, prec=1e-3)
+        self._test_qr(self, lambda t: t)
 
     @skipIfNoLapack
     def test_ormqr(self):
@@ -7329,6 +7298,14 @@ class _TestTorchMixin(object):
         self._test_advancedindex_big(self, lambda x: x)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_empty_storage_view(self):
+        # we should be able to "modify" slices of a 0-element
+        # array without an error being raised due to
+        # trying to resize its storage
+        t = torch.from_numpy(np.empty((0, 4)))
+        t[:, 1::2] *= 1
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):
             npt = tensor.numpy()
@@ -8383,8 +8360,15 @@ class _TestTorchMixin(object):
             evalues, evectors = fn(torch.symeig, (0, 0), True)
             self.assertEqual([(0,), (0, 0)], [evalues.shape, evectors.shape])
 
-            # qr, gels
-            self.assertRaises(RuntimeError, lambda: torch.qr(torch.randn(0, 0)))
+            # qr
+            q, r = fn(torch.qr, (3, 0), True)
+            self.assertEqual([(3, 0), (0, 0)], [q.shape, r.shape])
+            q, r = fn(torch.qr, (0, 3), True)
+            self.assertEqual([(0, 0), (0, 3)], [q.shape, r.shape])
+            q, r = fn(torch.qr, (3, 0), False)
+            self.assertEqual([(3, 3), (3, 0)], [q.shape, r.shape])
+
+            # gels
             self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0, 0), torch.randn(0, 0)))
             self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0,), torch.randn(0, 0)))
 
@@ -11027,6 +11011,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                [0., 1.]]],
                              dtype=dtype,
                              device=device)
+            x_empty = torch.empty(5, 0, dtype=dtype, device=device)
+            x_ill_formed_empty = torch.empty(5, 0, 0, dtype=dtype, device=device)
+            x_ill_formed_empty_another = torch.empty(5, 0, 5, dtype=dtype, device=device)
             expected_unique_dim0 = torch.tensor([[[1., 1.],
                                                   [0., 1.],
                                                   [2., 1.],
@@ -11057,7 +11044,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                                 device=device)
             expected_inverse_dim2 = torch.tensor([0, 1])
             expected_counts_dim2 = torch.tensor([1, 1])
-
+            expected_unique_empty = torch.tensor([], dtype=dtype, device=device)
+            expected_inverse_empty = torch.tensor([], dtype=torch.long, device=device)
+            expected_counts_empty = torch.tensor([], dtype=torch.long, device=device)
             # dim0
             x_unique = torch.unique(x, dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
@@ -11141,6 +11130,33 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_inverse_dim2, x_inverse)
             self.assertEqual(expected_counts_dim2, x_counts)
+
+            # test empty tensor
+            x_unique, x_inverse, x_counts = torch.unique(
+                x_empty,
+                return_inverse=True,
+                return_counts=True,
+                dim=1)
+            self.assertEqual(expected_unique_empty, x_unique)
+            self.assertEqual(expected_inverse_empty, x_inverse)
+            self.assertEqual(expected_counts_empty, x_counts)
+
+            # test not a well formed tensor
+            # Checking for runtime error, as this is the expected behaviour
+            with self.assertRaises(RuntimeError):
+                torch.unique(
+                    x_ill_formed_empty, 
+                    return_inverse=True, 
+                    return_counts=True, 
+                    dim=1) 
+
+            # test along dim2
+            with self.assertRaises(RuntimeError):
+                torch.unique(
+                    x_ill_formed_empty_another, 
+                    return_inverse=True, 
+                    return_counts=True, 
+                    dim=2)
 
             # test consecutive version
             y = torch.tensor(
