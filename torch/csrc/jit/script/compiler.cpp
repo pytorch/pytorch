@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -5,8 +6,8 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -596,6 +597,7 @@ struct to_ir {
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(to_clean);
     ConstantPooling(to_clean);
+    ConstantPropagation(to_clean);
     // For jitter
     CanonicalizeOutputs(to_clean);
   }

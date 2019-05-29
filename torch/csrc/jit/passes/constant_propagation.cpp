@@ -63,7 +63,6 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-
     auto new_output = tryInsertConstant(*graph, outputs[i]);
     if (new_output) {
       if (outputs[i].isNone()) {
@@ -172,8 +171,10 @@ void removeExtraLoopOutputs(Node* node) {
   for (size_t i_1 = node->outputs().size(); i_1 > 0; --i_1) {
     size_t i = i_1 - 1;
     // if the value is no longer changed remove output
-    if (loop_body->inputs().at(loop_body_offset + i) ==
-        loop_body->outputs().at(loop_body_offset + i)) {
+    if ((loop_body->inputs().at(loop_body_offset + i) ==
+         loop_body->outputs().at(loop_body_offset + i)) ||
+        (node->inputs().at(loop_input_offset + i)) ==
+            loop_body->outputs().at(loop_body_offset + i)) {
       auto node_input = node->inputs().at(loop_input_offset + i);
       node->outputs().at(i)->replaceAllUsesWith(node_input);
       loop_body->inputs()
