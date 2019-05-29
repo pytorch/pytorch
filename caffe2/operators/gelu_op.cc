@@ -7,6 +7,11 @@
 #include <string>
 #include <vector>
 
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif // _MSC_VER
+
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
@@ -18,7 +23,7 @@ bool GeluFunctor<CPUContext>::
 operator()(const int N, const T* X, T* Y, CPUContext* context) const {
   if (fast_gelu) {
     // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
-    constexpr T kAlpha = gelu_utils::kSqrt2 / gelu_utils::kSqrtPi;
+    constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2;
     ConstEigenVectorArrayMap<T> X_arr(X, N);
     EigenVectorArrayMap<T> Y_arr(Y, N);
     Y_arr = X_arr *
@@ -48,7 +53,7 @@ bool GeluGradientFunctor<CPUContext>::Forward(
   ConstEigenVectorArrayMap<T> X_arr(X, N);
   EigenVectorArrayMap<T> dX_arr(dX, N);
   if (fast_gelu) {
-    constexpr T kAlpha = gelu_utils::kSqrt2 / gelu_utils::kSqrtPi;
+    constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2;
     constexpr T kBeta = kAlpha * gelu_utils::kFastCoeff * T(3);
     dX_arr = ((X_arr + X_arr.cube() * gelu_utils::kFastCoeff) * kAlpha).tanh();
     dX_arr =
@@ -56,7 +61,7 @@ bool GeluGradientFunctor<CPUContext>::Forward(
          X_arr * (T(1) - dX_arr.square()) * (kBeta * X_arr.square() + kAlpha)) *
         dY_arr * static_cast<T>(0.5);
   } else {
-    constexpr T kAlpha = T(1) / (gelu_utils::kSqrt2 * gelu_utils::kSqrtPi);
+    constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2 * T(0.5);
     math::CdfNorm<T, CPUContext>(N, X, dX, context);
     dX_arr = (dX_arr +
               X_arr * (-X_arr.square() * static_cast<T>(0.5)).exp() * kAlpha) *
