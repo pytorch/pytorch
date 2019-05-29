@@ -949,7 +949,7 @@ def _make_strong_submodule(field, module, parent):
 
 
 def _try_compile_fn(fn):
-    if _jit_internal.get_ignore_attribute(fn):
+    if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
 
@@ -961,7 +961,7 @@ def _try_compile_fn(fn):
 
 
 def _create_method_from_fn(module, fn):
-    if _jit_internal.get_ignore_attribute(fn):
+    if _jit_internal.is_ignored_fn(fn):
         return None
     stub = script_method(fn, createResolutionCallbackFromClosure(fn))
     _create_methods_from_stubs(self, (stub,))

@@ -223,15 +223,20 @@ def ignore(maybe_fn=None, *, drop_on_export=False):
 
 
 def should_drop_on_export(fn):
-    attr = get_ignore_attribute(fn)
-    if not attr:
+    attr = get_torchscript_modifier(fn)
+    if attr is None:
         return False
-    return attr["drop_on_export"]
+    return attr is FunctionModifiers.IGNORE_AND_DROP
+
+
+def is_ignored_fn(fn):
+    mod = get_torchscript_modifier(fn)
+    return  mod is FunctionModifiers.IGNORE_AND_DROP or mod is FunctionModifiers.IGNORE
 
 
 def get_torchscript_modifier(fn):
     if not callable(fn):
-        return False
+        return None
     if hasattr(fn, '__func__'):
         fn = fn.__func__
     return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
