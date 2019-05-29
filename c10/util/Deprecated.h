@@ -63,7 +63,7 @@
 #if defined(C10_DEFINE_DEPRECATED_USING)
 # undef C10_DEFINE_DEPRECATED_USING
 #endif
-# define C10_DEFINE_DEPRECATED_USING using TypeName = TypeThingy;
+# define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName = TypeThingy;
 #else
 // [[deprecated]] does work in windows without nvcc, though msc doesn't support
 // `__has_cpp_attribute` when c++14 is supported, otherwise __declspec(deprecated)
@@ -87,7 +87,7 @@
 # define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName __attribute__((deprecated)) = TypeThingy;
 #else
 // using cuda + gcc < 5, neither deprecated syntax is available so turning off.
-# define C10_DEFINE_DEPRECATED_USING using TypeName = TypeThingy;
+# define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName = TypeThingy;
 #endif
 #endif
 
