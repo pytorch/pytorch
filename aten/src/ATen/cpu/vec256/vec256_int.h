@@ -79,6 +79,15 @@ struct Vec256<int64_t> : public Vec256i {
     std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
     return loadu(tmp_values);
   }
+   Vec256<int64_t> map(double (*f)(double)) const {
+    __at_align32__ int64_t tmp[4];
+    store(tmp);
+    for (int64_t i = 0; i < 4; i++) {
+      tmp[i] = f(tmp[i]);
+    }
+    return loadu(tmp);
+  }
+
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
@@ -98,6 +107,8 @@ struct Vec256<int64_t> : public Vec256i {
   }
   Vec256<int64_t> frac() const;
   Vec256<int64_t> neg() const;
+  Vec256<int64_t> sinh() const;
+  Vec256<int64_t> cosh() const;
   Vec256<int64_t> operator==(const Vec256<int64_t>& other) const {
     return _mm256_cmpeq_epi64(values, other.values);
   }
@@ -173,6 +184,15 @@ struct Vec256<int32_t> : public Vec256i {
     std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
     return loadu(tmp_values);
   }
+  Vec256<int32_t> map(double (*f)(double)) const {
+    __at_align32__ int32_t tmp[8];
+    store(tmp);
+    for (int64_t i = 0; i < 8; i++) {
+      tmp[i] = f(tmp[i]);
+    }
+    return loadu(tmp);
+  }
+
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
@@ -189,6 +209,8 @@ struct Vec256<int32_t> : public Vec256i {
   }
   Vec256<int32_t> frac() const;
   Vec256<int32_t> neg() const;
+  Vec256<int32_t> sinh() const;
+  Vec256<int32_t> cosh() const;
   Vec256<int32_t> operator==(const Vec256<int32_t>& other) const {
     return _mm256_cmpeq_epi32(values, other.values);
   }
@@ -359,6 +381,16 @@ struct Vec256<int16_t> : public Vec256i {
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
     return loadu(tmp_values);
   }
+
+   Vec256<int16_t> map(double (*f)(double)) const {
+    __at_align32__ int16_t tmp[16];
+    store(tmp);
+    for (int64_t i = 0; i < 16; i++) {
+      tmp[i] = f(tmp[i]);
+    }
+    return loadu(tmp);
+  }
+
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
@@ -375,6 +407,8 @@ struct Vec256<int16_t> : public Vec256i {
   }
   Vec256<int16_t> frac() const;
   Vec256<int16_t> neg() const;
+  Vec256<int16_t> sinh() const;
+  Vec256<int16_t> cosh() const;
   Vec256<int16_t> operator==(const Vec256<int16_t>& other) const {
     return _mm256_cmpeq_epi16(values, other.values);
   }
@@ -438,6 +472,29 @@ Vec256<int16_t> Vec256<int16_t>::neg() const {
   return Vec256<int16_t>(0) - *this;
 }
 
+Vec256<int64_t> Vec256<int64_t>::sinh() const {
+  return map(std::sinh);
+}
+
+Vec256<int32_t> Vec256<int32_t>::sinh() const {
+  return map(std::sinh);
+}
+
+Vec256<int16_t> Vec256<int16_t>::sinh() const {
+  return map(std::sinh);
+}
+
+Vec256<int64_t> Vec256<int64_t>::cosh() const {
+  return map(std::cosh);
+}
+
+Vec256<int32_t> Vec256<int32_t>::cosh() const {
+  return map(std::cosh);
+}
+
+Vec256<int16_t> Vec256<int16_t>::cosh() const {
+  return map(std::cosh);
+}
 // Emulate operations with no native 64-bit support in avx,
 // by extracting each element, performing the operation pointwise,
 // then combining the results into a vector.

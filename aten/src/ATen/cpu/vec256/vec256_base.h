@@ -10,6 +10,7 @@
 #include <ATen/native/Copy.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
+#include <iostream>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -216,7 +217,11 @@ public:
     return map(std::cos);
   }
   Vec256<T> cosh() const {
-    return map(std::cosh);
+    Vec256<T> ret;
+    for (int64_t i = 0; i != size(); i++) {
+      ret[i] = std::cosh((double)(values[i]));
+    }
+    return ret;
   }
   Vec256<T> floor() const {
     return map(std::floor);
@@ -234,7 +239,11 @@ public:
     return map(std::sin);
   }
   Vec256<T> sinh() const {
-    return map(std::sinh);
+    Vec256<T> ret;
+    for (int64_t i = 0; i != size(); i++) {
+      ret[i] = std::sinh((double)(values[i]));
+    }
+    return ret;
   }
   Vec256<T> tan() const {
     return map(std::tan);
