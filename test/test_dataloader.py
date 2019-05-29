@@ -820,10 +820,6 @@ class TestDataLoader(TestCase):
                 exit_methods = [None, 'loader_error', 'loader_kill']
 
             for exit_method in exit_methods:
-                if exit_method == 'worker_kill' and hold_iter_reference:
-                    # FIXME: this combination sometimes hangs.
-                    continue
-
                 desc = []
                 desc.append('use_workers={}'.format(use_workers))
                 desc.append('pin_memory={}'.format(pin_memory))
