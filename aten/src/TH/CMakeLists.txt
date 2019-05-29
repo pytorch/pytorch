@@ -76,6 +76,7 @@ INSTALL(FILES
   THGenerateByteType.h
   THGenerateFloatTypes.h
   THGenerateIntTypes.h
+  THGenerateQTypes.h
   THLapack.h
   THLogAdd.h
   THMemoryFile.h

@@ -46,8 +46,7 @@ class Tensor(torch._C._TensorBase):
                     self.q_scale().item(),
                     self.q_zero_point().item(),
                     self.requires_grad,
-                    OrderedDict())
-                    # TODO: self.qscheme
+                    OrderedDict()) # TODO: self.qscheme()
             return (torch._utils._rebuild_qtensor, args)
         else:
             args = (self.storage(),
