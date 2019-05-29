@@ -351,11 +351,7 @@ void Module::train(bool on) {
   for (auto& submod : get_modules()) {
     submod->train(on);
   }
-  if (auto slot = find_attribute("training")) {
-    slot->setValue(on);
-  } else {
-    register_attribute("training", BoolType::get(), on);
-  }
+  register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
