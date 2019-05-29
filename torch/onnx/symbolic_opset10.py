@@ -5,7 +5,6 @@ import torch.onnx
 # ONNX symbolics
 import torch.onnx.utils
 
-import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset
 import torch.onnx.symbolic_opset9
 
@@ -138,21 +137,9 @@ def _slice_op(g, input, axes, starts, ends, steps=None):
     return g.op("Slice", input, starts, ends, axes, steps)
 
 
-@parse_args('v', 'v', 'v', 'v', 'i')
-def slice(g, self, dim, start, end, step):
-    if (start.node().kind() != 'onnx::Constant' or
-       end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant') \
-       and step != 1 :
-        start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
-        end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
-        dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
-        return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
-    else:
-        start = sym_help._parse_arg(start, 'i')
-        end = sym_help._parse_arg(end, 'i')
-        dim = sym_help._parse_arg(dim, 'i')
-        step = sym_help._parse_arg(step, 'i')
-        return _slice_op(g, self, axes=[dim], starts=[start], ends=[end], steps=[step])
+@parse_args('v', 'i', 'i', 'i', 'i')
+def slice(g, self, dim, start, end, step):   
+    return _slice_op(g, self, axes=[dim], starts=[start], ends=[end], steps=[step])
 
 
 @parse_args('v', 'is')

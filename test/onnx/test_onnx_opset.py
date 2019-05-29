@@ -122,10 +122,43 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Constant"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Slice",
-                   "input" : ["input1", "2", "3", "1", "4"]}]
+                   "attributes" : []}]
         ops = {9 : ops_9, 10 : ops_10}
         x = torch.randn(3)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+
+        class DynamicSliceModel(torch.nn.Module):
+            def forward(self, x):
+                results = []
+                for i in range(2):
+                    results.append(x[i:x.size(0) - i])
+                return tuple(results)
+
+        ops_9 = [{"op_name" : "Slice",
+                  "attributes" :
+                  [{"name": "axes", "ints": [0], "type": 7},
+                   {"name": "ends", "ints": [1], "type": 7},
+                   {"name": "starts", "ints": [0], "type": 7}]},
+                 {"op_name" : "Slice",
+                  "attributes" :
+                  [{"name": "axes", "ints": [0], "type": 7},
+                   {"name": "ends", "ints": [0], "type": 7},
+                   {"name": "starts", "ints": [1], "type": 7}]}]
+        ops_10 = [{"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Slice",
+                   "attributes" : []},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Slice",
+                   "attributes" : []}]
+        ops = {9 : ops_9, 10 : ops_10}
+        x = torch.rand(1, 2)
+        check_onnx_opsets_operator(DynamicSliceModel(), x, ops, opset_versions=[9, 10])
 
     def test_flip(self):
         class MyModule(Module):
@@ -137,7 +170,7 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Constant"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Slice",
-                   "input" : ["input1", "2", "3", "1", "4"]}]
+                   "attributes" : []}]
         ops = {10 : ops_10}
         import numpy
         x = torch.tensor(numpy.arange(6.0).reshape(2, 3))
