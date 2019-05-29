@@ -453,6 +453,9 @@ inline Tensor Tensor::narrow(int64_t dim, int64_t start, int64_t length) const {
 inline Tensor Tensor::permute(IntArrayRef dims) const {
     return dispatch_type().permute(*this, dims);
 }
+inline Tensor Tensor::T() const {
+    return dispatch_type().T(*this);
+}
 inline Tensor Tensor::pin_memory() const {
     return dispatch_type().pin_memory(*this);
 }
@@ -803,9 +806,6 @@ inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point, ScalarTy
 }
 inline Tensor Tensor::dequantize() const {
     return dispatch_type().dequantize(*this);
-}
-inline Tensor Tensor::dequantize_linear(double scale, int64_t zero_point, ScalarType dtype) const {
-    return dispatch_type().dequantize_linear(*this, scale, zero_point, dtype);
 }
 inline Scalar Tensor::q_scale() const {
     return dispatch_type().q_scale(*this);
@@ -1197,8 +1197,8 @@ inline Tensor Tensor::cholesky_inverse(bool upper) const {
 inline std::tuple<Tensor,Tensor> Tensor::pstrf(bool upper, Scalar tol) const {
     return dispatch_type().pstrf(*this, upper, tol);
 }
-inline std::tuple<Tensor,Tensor> Tensor::qr() const {
-    return dispatch_type().qr(*this);
+inline std::tuple<Tensor,Tensor> Tensor::qr(bool some) const {
+    return dispatch_type().qr(*this, some);
 }
 inline std::tuple<Tensor,Tensor> Tensor::geqrf() const {
     return dispatch_type().geqrf(*this);

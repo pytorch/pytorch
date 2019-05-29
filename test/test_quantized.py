@@ -1,21 +1,30 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import torch
-import torch.jit
 import numpy as np
 import unittest
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, skipIfNotRegistered
+
+import torch
+import torch.jit
 import torch.nn.functional as F
 
+from hypothesis import given
+from hypothesis_utils import qtensor
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests
+from common_utils import skipIfNotRegistered
 
 def canonical(graph):
     return str(torch._C._jit_pass_canonicalize(graph))
 
 
-def _quantize(x, scale, zero_point, qmin=0, qmax=255, qtype=np.uint8):
+def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
     """Quantizes a numpy array."""
-    qx = np.round(x / scale + zero_point)
-    qx = np.clip(qx, qmin, qmax).astype(qtype)
+    if qmin is None:
+        qmin = np.iinfo(dtype).min
+    if qmax is None:
+        qmax = np.iinfo(dtype).max
+    qx = np.round(x / scale + zero_point).astype(np.int64)
+    qx = np.clip(qx, qmin, qmax)
+    qx = qx.astype(dtype)
     return qx
 
 
@@ -25,13 +34,21 @@ def _dequantize(qx, scale, zero_point):
     return x
 
 
+def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
+    """Requantizes a numpy array, i.e., intermediate int32 or int16 values are
+    converted back to given type"""
+    qx = (x * multiplier).round() + zero_point
+    qx = np.clip(qx, qmin, qmax).astype(qtype)
+    return qx
+
+
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
 # for the 8-bit int multiplication. This instruction vertically multiplies each
 # unsigned 8-bit integer from a with the corresponding signed 8-bit integer from
 # b, producing intermediate signed 16-bit integers. This function modifies the
 # weights to eliminate the overflow on the signed 16-bit integers.
-def avoid_vpmaddubsw_overflow_fc(
+def avoid_vpmaddubsw_overflow_linear(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
     for i, j in np.ndindex((batch_size, output_channels)):
@@ -57,8 +74,8 @@ def avoid_vpmaddubsw_overflow_fc(
             assert -(1 << 15) <= x0 * w0 + x1 * w1 < (1 << 15)
 
 
-# Reference quantized FC operator
-def qfc_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
+# Reference quantized Linear operator
+def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp):
     row_offsets_ref = X_q.sum(axis=1).astype(np.int32).reshape((-1, 1))
     col_offsets_ref = W_q.sum(axis=1).astype(np.int32).reshape((1, -1))
     assert X_q.ndim == 2
@@ -112,22 +129,31 @@ graph(%x : (Tensor, float, int)):
 """,
         )
 
+    def test_set_data_tensorimpl_type(self):
+        # Dense tensor has impl of type `TensorImpl`, while quantized tensor has impl
+        # of type `QTensorImpl`.
+        x = torch.randn(1, 2)
+        x_q = torch.ops.c10.quantize(torch.randn(1, 2))
+        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
+            x.data = x_q
 
-class TestQuantizedOps(unittest.TestCase):
+
+class TestQuantizedOps(TestCase):
     """Tests the correctness of the quantized::relu op."""
-
-    def test_qrelu(self):
+    @given(Q=qtensor(shapes=(1, 2, (3, 4), (3, 2, 1, 2, 3))))
+    def test_qrelu(self, Q):
+        X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
         relu = torch.ops.quantized.relu
 
-        X = torch.arange(-5, 5, dtype=torch.float)
-        scale = 2.0
-        zero_point = 1
-        qX = X.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        Y = X.copy()
+        X = torch.from_numpy(X)
 
-        Y = X.numpy().copy()
-        Y[Y < 0] = 0
-        qY = _quantize(Y, scale, zero_point)
+        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
         qY_hat = relu(qX)
+
+        Y[Y < 0] = 0
+        qY = _quantize(Y, scale, zero_point, dtype=np_type)
         np.testing.assert_equal(qY, qY_hat.int_repr())
 
     """Tests the correctness of the add and add_relu op."""
@@ -193,16 +219,16 @@ class TestQuantizedOps(unittest.TestCase):
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
-    " Quantized FC requires FBGEMM. FBGEMM does not play"
+    " Quantized Linear requires FBGEMM. FBGEMM does not play"
     " well with UBSAN at the moment, so we skip the test if"
     " we are in a UBSAN environment.",
 )
-class TestQuantizedFC(unittest.TestCase):
-    """Tests the correctness of the quantized::fc op."""
+class TestQuantizedLinear(unittest.TestCase):
+    """Tests the correctness of the quantized::fbgemm_linear op."""
 
-    def test_qfc(self):
-        qfc_prepack = torch.ops.quantized.fbgemm_linear_prepack
-        qfc = torch.ops.quantized.fbgemm_linear
+    def test_qlinear(self):
+        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear = torch.ops.quantized.fbgemm_linear
 
         batch_size = 4
         input_channels = 16
@@ -233,7 +259,7 @@ class TestQuantizedFC(unittest.TestCase):
             np.random.rand(output_channels) * (b_value_max - b_value_min) + b_value_min
         ).astype(np.int32)
 
-        avoid_vpmaddubsw_overflow_fc(
+        avoid_vpmaddubsw_overflow_linear(
             batch_size,
             input_channels,
             output_channels,
@@ -258,13 +284,13 @@ class TestQuantizedFC(unittest.TestCase):
         Y_scale = 125.1234
         Y_zp = 5
 
-        # Reference quantized FC operator
-        Y_q_ref = qfc_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
+        # Reference quantized Linear operator
+        Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
 
-        # Weight prepacking operator for quantized FC
-        W_prepack = qfc_prepack(W_q)
-        # Quantized FC operator with prepacked weight
-        Y_q = qfc(X_q, W_prepack, b_q, Y_scale, Y_zp)
+        # Weight prepacking operator for quantized Linear
+        W_prepack = qlinear_prepack(W_q)
+        # Quantized Linear operator with prepacked weight
+        Y_q = qlinear(X_q, W_prepack, b_q, Y_scale, Y_zp)
 
         # Y_q_ref_real = _dequantize(Y_q_ref, Y_scale, Y_zp)
         # Y_q_real = Y_q.dequantize()
@@ -283,10 +309,10 @@ class TestQuantizedFC(unittest.TestCase):
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
 
-    """Tests the correctness of the quantized::fc op."""
-    def test_qfcrelu(self):
-        qfc_prepack = torch.ops.quantized.fbgemm_linear_prepack
-        qfcrelu = torch.ops.quantized.fbgemm_linear_relu
+    """Tests the correctness of the quantized::fbgemm_linear_relu op."""
+    def test_qlinear_relu(self):
+        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear_relu = torch.ops.quantized.fbgemm_linear_relu
 
         batch_size = 4
         input_channels = 16
@@ -317,7 +343,7 @@ class TestQuantizedFC(unittest.TestCase):
             np.random.rand(output_channels) * (b_value_max - b_value_min) + b_value_min
         ).astype(np.int32)
 
-        avoid_vpmaddubsw_overflow_fc(
+        avoid_vpmaddubsw_overflow_linear(
             batch_size,
             input_channels,
             output_channels,
@@ -342,14 +368,14 @@ class TestQuantizedFC(unittest.TestCase):
         Y_scale = 125.1234
         Y_zp = 5
 
-        # Reference quantized FC operator
-        Y_q_ref = qfc_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
+        # Reference quantized Linear operator
+        Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0, W_scale, W_zp, b_q0, Y_scale, Y_zp)
         Y_q_ref[Y_q_ref < Y_zp] = Y_zp
 
-        # Weight prepacking operator for quantized FC
-        W_prepack = qfc_prepack(W_q)
-        # Quantized FC operator with prepacked weight
-        Y_q = qfcrelu(X_q, W_prepack, b_q, Y_scale, Y_zp)
+        # Weight prepacking operator for quantized Linear
+        W_prepack = qlinear_prepack(W_q)
+        # Quantized Linear operator with prepacked weight
+        Y_q = qlinear_relu(X_q, W_prepack, b_q, Y_scale, Y_zp)
 
         # Y_q_ref_real = _dequantize(Y_q_ref, Y_scale, Y_zp)
         # Y_q_real = Y_q.dequantize()
@@ -367,6 +393,120 @@ class TestQuantizedFC(unittest.TestCase):
 
         # Assert equal
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
+
+
+@unittest.skipIf(
+    TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
+    " Quantized convolution requires FBGEMM. FBGEMM does not play"
+    " well with UBSAN at the moment, so we skip the test if"
+    " we are in a UBSAN environment.",
+)
+class TestQuantizedConv(unittest.TestCase):
+    """Tests the correctness of quantized convolution op."""
+    def test_qconv(self):
+
+        qconv = torch.ops.quantized.fbgemm_conv2d
+        qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
+
+        # N
+        batch_size = 1
+        # C
+        input_channels = 16
+        # H, W
+        height = width = 24
+        # K
+        output_channels = 8
+
+        kernel_h = kernel_w = 3
+        stride_h = stride_w = 1
+        padding_h = padding_w = 1
+        dilation_h = dilation_w = 1
+        groups = 1
+
+        W_value_min = 0
+        W_value_max = 5
+        # We use small values to avoid overflow.
+        # (the operator expects them in the format (output_channels, input_channels/groups, kernel_h, kernel_w))
+
+        W_init = torch.randint(
+            W_value_min,
+            W_value_max,
+            (output_channels, int(input_channels / groups), kernel_h, kernel_w),
+        )
+
+        b_init = torch.randint(0, 10, (output_channels,))
+
+        # Existing floating point conv operator
+        conv_op = torch.nn.Conv2d(
+            input_channels,
+            output_channels,
+            (kernel_h, kernel_w),
+            (stride_h, stride_w),
+            (padding_h, padding_w),
+            (dilation_h, dilation_w),
+            groups,
+        )
+
+        # assign the weights
+        conv_op.weight = torch.nn.Parameter(
+            W_init.to(dtype=torch.float), requires_grad=False
+        )
+        conv_op.bias = torch.nn.Parameter(
+            b_init.to(dtype=torch.float), requires_grad=False
+        )
+
+        X_value_min = 0
+        X_value_max = 4
+        X_init = torch.randint(
+            X_value_min, X_value_max, (batch_size, input_channels, height, width)
+        )
+
+        # run on an input tensor
+        result_ref = conv_op(X_init.to(dtype=torch.float))
+
+        # reformat X_init and W_init in the required format by conv operator
+        # NCHW -> NHWC
+        X_NHWC = X_init.permute([0, 2, 3, 1]).contiguous()
+        # KCRS -> RSCK
+        W_RSCK = W_init.permute([2, 3, 1, 0]).contiguous()
+
+        X_scale = 1.5
+        # Currently only 0 as zero point is supported.
+        X_zero_point = 0
+        X = X_scale * (X_NHWC - X_zero_point).to(dtype=torch.float)
+
+        W_scale = 2.5
+        W_zero_point = 0
+        W = W_scale * (W_RSCK - W_zero_point).to(dtype=torch.float)
+
+        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
+        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zero_point, dtype=torch.quint8)
+        b_q = b_init.to(dtype=torch.int32)
+
+        W_prepack = qconv_prepack(W_q, groups)
+        Y_scale = 7.3
+        Y_zero_point = 5
+
+        Y_q = qconv(
+            X_q,
+            W_prepack,
+            b_q,
+            [1, 1],  # stride
+            [1, 1],  # padding
+            [1, 1],  # dilation
+            [0, 0],  # output_padding
+            1,  # groups
+            Y_scale,
+            Y_zero_point,
+        )
+
+        result_NHWK = result_ref.permute([0, 2, 3, 1])
+        result_q = _requantize(
+            result_NHWK.numpy(), X_scale * W_scale / Y_scale, Y_zero_point
+        )
+
+        # Make sure the results match
+        np.testing.assert_equal(result_q, Y_q.int_repr().numpy())
 
 
 if __name__ == "__main__":

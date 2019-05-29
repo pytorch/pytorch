@@ -143,11 +143,12 @@ def run_cmake(version,
             cmake_args.append('-Thost=x64')
     try:
         import numpy as np
-        NUMPY_INCLUDE_DIR = np.get_include()
-        USE_NUMPY = True
     except ImportError:
         USE_NUMPY = False
         NUMPY_INCLUDE_DIR = None
+    else:
+        NUMPY_INCLUDE_DIR = np.get_include()
+        USE_NUMPY = True
 
     cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
     ldflags = os.getenv('LDFLAGS', "")
@@ -219,12 +220,22 @@ def run_cmake(version,
     if os.getenv('USE_OPENMP'):
         cmake_defines(cmake_args, USE_OPENMP=check_env_flag('USE_OPENMP'))
 
+    if os.getenv('USE_TBB'):
+        cmake_defines(cmake_args, USE_TBB=check_env_flag('USE_TBB'))
+
     if os.getenv('MKL_SEQ'):
         cmake_defines(cmake_args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
+
+    if os.getenv('MKL_TBB'):
+        cmake_defines(cmake_args, INTEL_MKL_TBB=check_env_flag('MKL_TBB'))
 
     mkldnn_threading = os.getenv('MKLDNN_THREADING')
     if mkldnn_threading:
         cmake_defines(cmake_args, MKLDNN_THREADING=mkldnn_threading)
+
+    parallel_backend = os.getenv('PARALLEL_BACKEND')
+    if parallel_backend:
+        cmake_defines(cmake_args, PARALLEL_BACKEND=parallel_backend)
 
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
@@ -261,6 +272,7 @@ def build_caffe2(version,
                  cmake_python_library,
                  build_python,
                  rerun_cmake,
+                 cmake_only,
                  build_dir):
     my_env = create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
@@ -275,6 +287,8 @@ def build_caffe2(version,
                   build_test,
                   build_dir,
                   my_env)
+    if cmake_only:
+        return
     if IS_WINDOWS:
         build_cmd = ['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--']
         if USE_NINJA:

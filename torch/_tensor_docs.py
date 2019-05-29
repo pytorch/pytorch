@@ -1777,7 +1777,7 @@ Example::
 
 add_docstr_all('qr',
                r"""
-qr() -> (Tensor, Tensor)
+qr(some=True) -> (Tensor, Tensor)
 
 See :func:`torch.qr`
 """)
@@ -3031,15 +3031,6 @@ det() -> Tensor
 See :func:`torch.det`
 """)
 
-add_docstr_all('dequantize_linear',
-               r"""
-dequantize_linear(int_tensor, scale, zero_point) -> Tensor
-
-Dequantize an int Tensor that represents the underlying quantized data
-using affine quantization scheme with given scale and zero_point.
-returns a float Tensor.
-""")
-
 add_docstr_all('where',
                r"""
 where(condition, y) -> Tensor
@@ -3204,4 +3195,12 @@ Is the :class:`torch.device` where this Tensor is.
 add_docstr_all('ndim',
                r"""
 Alias for :meth:`~Tensor.dim()`
+""")
+
+add_docstr_all('T',
+               r"""
+Is this Tensor with its dimensions reversed.
+
+If ``n`` is the number of dimensions in ``x``,
+``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 """)
