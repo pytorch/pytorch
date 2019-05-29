@@ -14,6 +14,7 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
   const int MIN_SZ = 60 * 60;
   return self.is_contiguous() && src.numel() != 0 && src.dim() == 2 &&
       src.stride(0) == 1 && src.stride(1) == src.size(0) &&
+      self.scalar_type() == src.scalar_type() &&
       self.numel() >= MIN_SZ;
 }
 
@@ -69,6 +70,13 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   });
 }
 
+// Devices directly supported by this copy implementation. Other device types
+// (e.g. XLA) may be supported by overriding copy_ and _copy_from.
+bool is_supported_device(Device device) {
+  DeviceType device_type = device.type();
+  return device_type == kCPU || device_type == kCUDA || device_type == kHIP;
+}
+
 } // namespace
 
 namespace at {
@@ -79,7 +87,6 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(self.defined(), "src is undefined");
 
-  Tensor b_src;
   if (self.is_sparse() && src.is_sparse()) {
     return at::copy_sparse_to_sparse_(self, src, non_blocking);
   } else if (self.is_sparse() || src.is_sparse()) {
@@ -88,6 +95,15 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
 
   if (self.is_same(src)) {
+    return self;
+  }
+
+  // Re-dispatch copies when src device not implemented here (e.g. XLA).
+  // This includes: cpu_tensor.copy_(xla_tensor) which
+  // calls xla_tensor._copy_from(cpu_tensor)
+  if (!is_supported_device(src.device())) {
+    TORCH_INTERNAL_ASSERT(is_supported_device(self.device()));
+    at::_copy_from(src, self, non_blocking);
     return self;
   }
 

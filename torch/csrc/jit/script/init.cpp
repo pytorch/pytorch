@@ -223,7 +223,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_and_output_shapes(
     output_values = output_values.at(0)->node()->inputs();
   }
   AT_ASSERT(output_values.size() == outputs.size());
-  for (size_t i = 0; i < retval->outputs().size(); ++i) {
+  for (size_t i = 0; i < outputs.size(); ++i) {
     auto scalar_type = outputs[i].scalar_type();
     auto sizes = outputs[i].sizes();
     auto type =
@@ -563,6 +563,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_jit_script_compile",
       [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
+        C10_LOG_API_USAGE_ONCE("torch.script.compile");
         CompilationUnit cu;
         cu.define({def}, {pythonResolver(rcb)}, nullptr);
         std::shared_ptr<Function> defined = cu.get_functions().at(0);
@@ -593,6 +594,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
          ResolutionCallback rcb) {
+        C10_LOG_API_USAGE_ONCE("torch.script.class");
         auto cu = std::make_shared<CompilationUnit>();
         auto classType =
             ClassType::create(c10::QualifiedName(qualifiedName), cu);

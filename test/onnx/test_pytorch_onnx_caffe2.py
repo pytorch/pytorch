@@ -52,6 +52,11 @@ def skipIfEmbed(func):
 def do_export(model, inputs, *args, **kwargs):
     f = io.BytesIO()
     out = torch.onnx._export(model, inputs, f, *args, **kwargs)
+    if isinstance(model, torch.jit.ScriptModule):
+        # Special case for common case of passing a single Tensor
+        if isinstance(inputs, torch.Tensor):
+            inputs = (inputs,)
+        out = model(*inputs)
     return f.getvalue(), out
 
 
@@ -154,6 +159,7 @@ def run_actual_test(testCaffe2Backend, model, train, batch_size, state_dict=None
 
     # Verify the model runs the same in Caffe2
     verify.verify(model, input, c2, rtol=rtol, atol=atol,
+                  example_outputs=example_outputs,
                   do_constant_folding=do_constant_folding,
                   opset_version=opset_version)
 

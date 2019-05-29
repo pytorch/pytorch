@@ -41,7 +41,7 @@ ReturnInfo makeReturnsFinal(
     const SourceRange& range,
     at::ArrayRef<TreeRef> stmts,
     bool return_none) {
-  std::vector<TreeRef> changed;
+  at::SmallVector<TreeRef, 4> changed;
   changed.reserve(stmts.size());
   for (size_t i = 0; i < stmts.size(); ++i) {
     const TreeRef& stmt = stmts[i];

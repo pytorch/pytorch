@@ -824,6 +824,22 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         run_model_test(self, model, train=False, input=(x),
                        batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_interpolate_upsample_dynamic_sizes(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                return nn.functional.interpolate(x,
+                                                 size=size,
+                                                 mode='nearest')
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        model = MyModel()
+        run_model_test(self, model, train=False, input=(x),
+                       batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_repeat_dim_overflow(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -1099,6 +1115,17 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.tensor([1.0, float('nan'), 2.0])
         run_model_test(self, IsNaNModel(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_scatter(self):
+        class ScatterModel(torch.nn.Module):
+            def forward(self, input, indices, values):
+                return input.scatter(1, indices, values)
+
+        input = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
+        run_model_test(self, ScatterModel(), train=False, input=(input, indices, values),
+                       batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
@@ -1432,9 +1459,18 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         class TopKModel(torch.nn.Module):
             def forward(self, input):
                 return torch.topk(input, 3)
-        model = TopKModel()
+
         x = torch.arange(1., 6.)
         run_model_test(self, TopKModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_topk_script(self):
+        class TopKModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.topk(input, 3, dim=0)
+
+        x = torch.randn(4, 3, requires_grad=True)
+        run_model_test(self, TopKModel(), train=False, input=(x,), batch_size=BATCH_SIZE, example_outputs=torch.topk(x, 3, dim=0))
 
     def test_floor(self):
         class FloorModel(torch.nn.Module):
