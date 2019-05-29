@@ -274,10 +274,6 @@ using IntArrayRef = ArrayRef<int64_t>;
 
 // This alias is deprecated because it doesn't make ownership
 // semantics obvious.  Use IntArrayRef instead!
-#ifdef defined(_MSC_VER) && !(defined(_MSVC_LANG) && _MSVC_LANG >= 201402L)
-using IntList = C10_DEPRECATED_USING ArrayRef<int64_t>;
-#else
-using IntList C10_DEPRECATED_USING = ArrayRef<int64_t>;
-#endif
+C10_DEFINE_DEPRECATED_USING(IntList, ArrayRef<int64_t>)
 
 } // namespace c10
