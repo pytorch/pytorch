@@ -126,6 +126,9 @@ struct Element {
   MemoryLocations pointedFrom;
 
   MemoryLocations contained_elements;
+  static unsigned indexCount;
+  signed index;
+  Element(const Value* value_);
 
   // Return the unique memory locations that `Element` might represent.
   TORCH_API const MemoryLocations& getMemoryLocations() const;
@@ -138,8 +141,7 @@ struct Element {
   // traversing in the direction `dir`.`fn` will be run on each element.
   void bfs(BfsDirection dir, MemoryLocations& res) const;
 
-  // Converts to and from the compressed index representation
-  static unsigned toIndex(const Element* x);
+  // Converts from the compressed index representation
   static const Element* toElement(unsigned x);
 };
 } // namespace jit

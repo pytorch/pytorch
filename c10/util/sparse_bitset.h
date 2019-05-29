@@ -154,12 +154,12 @@
      Copy &= ~0UL << BitPos;
 
      if (Copy != 0)
-       return WordPos * BITWORD_SIZE + __builtin_ctzl(Copy);
+       return WordPos * BITWORD_SIZE + llvm::countTrailingZeros(Copy);
 
      // Check subsequent words.
      for (unsigned i = WordPos+1; i < BITWORDS_PER_ELEMENT; ++i)
        if (Bits[i] != 0)
-         return i * BITWORD_SIZE + __builtin_ctzl(Bits[i]);
+         return i * BITWORD_SIZE + llvm::countTrailingZeros(Bits[i]);
      return -1;
    }
 

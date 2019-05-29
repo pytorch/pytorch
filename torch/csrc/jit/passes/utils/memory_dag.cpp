@@ -8,17 +8,11 @@
 namespace torch {
 namespace jit {
 namespace {
-ska::flat_hash_map<const Element*, unsigned> comprMap;
 std::vector<const Element*> decomprMap;
 } // namespace
-
-unsigned Element::toIndex(const Element* x) {
-  if (comprMap.count(x)) {
-    return comprMap[x];
-  }
-  comprMap[x] = comprMap.size();
-  decomprMap.push_back(x);
-  return comprMap[x];
+unsigned Element::indexCount = 0;
+Element::Element(const Value* value_) : value(value_), index(indexCount++) {
+  decomprMap.push_back(this);
 }
 
 const Element* Element::toElement(unsigned x) {
@@ -54,7 +48,7 @@ void collectAllContainedMemoryLocations(
     const Element* elem,
     MemoryLocations& cont) {
   // we have already recursed on this element
-  unsigned compIdx = Element::toIndex(elem);
+  unsigned compIdx = elem->index;
   if (cont.test(compIdx)) {
     return;
   }
@@ -101,18 +95,17 @@ bool MemoryDAG::mayContainAlias(
 
 // Make `v` point at `to`.
 void MemoryDAG::makePointerTo(Element* from, Element* to) {
-  from->pointsTo.set(Element::toIndex(to));
-  to->pointedFrom.set(Element::toIndex(from));
+  from->pointsTo.set(to->index);
+  to->pointedFrom.set(from->index);
 }
 
 void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
-  container->contained_elements.set(Element::toIndex(elem));
+  container->contained_elements.set(elem->index);
 }
 
 // Give `v` a fresh alias (i.e. it does not point to any value)
 Element* MemoryDAG::makeFreshValue(const Value* v) {
-  auto el = torch::make_unique<Element>();
-  el->value = v;
+  auto el = torch::make_unique<Element>(v);
 
   auto rawPtr = el.get();
   elements_.emplace(rawPtr, std::move(el));
@@ -135,8 +128,8 @@ const MemoryLocations& Element::getMemoryLocations() const {
 // traversing in the direction `dir`.`fn` will be run on each element.
 void Element::bfs(BfsDirection dir, MemoryLocations& res) const {
   std::queue<unsigned> queue;
-  std::unordered_set<int> seen;
-  queue.push(Element::toIndex(this));
+  ska::flat_hash_set<int> seen;
+  queue.push(this->index);
   while (!queue.empty()) {
     const auto el = queue.front();
     queue.pop();
