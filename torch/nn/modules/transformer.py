@@ -195,6 +195,10 @@ class TransformerDecoder(Module):
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
         This standard encoder layer is based on the paper "Attention Is All You Need".
+        Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, 
+        Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in 
+        Neural Information Processing Systems, pages 6000–6010.
+
         Users may modify or implement in a different way during application.
 
     Args:
@@ -241,6 +245,10 @@ class TransformerEncoderLayer(Module):
 class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
         This standard decoder layer is based on the paper "Attention Is All You Need".
+        Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, 
+        Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in 
+        Neural Information Processing Systems, pages 6000–6010.
+
         Users may modify or implement in a different way during application.
 
     Args:
