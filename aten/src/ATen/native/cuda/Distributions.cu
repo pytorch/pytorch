@@ -14,6 +14,7 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/LegacyTHFunctionsCUDA.h>
 
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorRandom.h>
@@ -566,13 +567,13 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generato
 Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
   auto mean_tensor = at::full({1}, mean, output.options());
-  at::native::addcmul_out(output, mean_tensor, output, std, 1);
+  at::native::legacy::cuda::addcmul_out(output, mean_tensor, output, std, 1);
   return output;
 }
 
 Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
-  at::native::addcmul_out(output, mean, output, std, 1);
+  at::native::legacy::cuda::addcmul_out(output, mean, output, std, 1);
   return output; 
 }
 
