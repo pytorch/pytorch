@@ -898,6 +898,14 @@ class _TestTorchMixin(object):
             res1val = torchfn(m1)
             self.assertTrue(math.isnan(res1val))
 
+        # Bool
+        m1 = torch.tensor([True, False, True], dtype=torch.bool)
+        res1 = torchfn(m1)
+        res2 = m1[0]
+        for i in iter_indices(m1):
+            res2 = mathfn(res2, m1[i])
+        self.assertEqual(res1, res2)
+
     def test_max(self):
         self._testSelection(torch.max, max)
 
@@ -2828,7 +2836,28 @@ class _TestTorchMixin(object):
         t = torch.arange(-10, 10, dtype=torch.int8)
         scale = 3
         zero_point = 2
-        qt = torch._dequantize_linear(t, scale, zero_point, torch.float)
+        qt = torch._dequantize_linear(t, scale, zero_point, torch.qint8)
+        qt2 = torch._per_tensor_affine_qtensor(t, scale, zero_point)
+        self.assertEqual(qt, qt2.dequantize())
+
+    def test_qtensor_per_channel_affine(self):
+        r = np.random.rand(3, 2) * 2 - 4
+        r = torch.from_numpy(r).float()
+        scales = torch.tensor([2.0, 3.0]).float()
+        zero_points = torch.tensor([5, 10]).int()
+        axis = [1]
+
+        def quantize_c(data, scales, zero_points):
+            res = torch.empty((3, 2))
+            quant_min, quant_max = 0, 255
+            for i in range(3):
+                for j in range(2):
+                    res[i][j] = np.clip(np.round(data[i][j] / scales[j]) + zero_points[j], quant_min, quant_max)
+            return res
+        qr = torch.quantize_linear_per_channel(r, scales, zero_points, axis, torch.quint8)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
 
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
@@ -10982,6 +11011,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                [0., 1.]]],
                              dtype=dtype,
                              device=device)
+            x_empty = torch.empty(5, 0, dtype=dtype, device=device)
+            x_ill_formed_empty = torch.empty(5, 0, 0, dtype=dtype, device=device)
+            x_ill_formed_empty_another = torch.empty(5, 0, 5, dtype=dtype, device=device)
             expected_unique_dim0 = torch.tensor([[[1., 1.],
                                                   [0., 1.],
                                                   [2., 1.],
@@ -11012,7 +11044,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                                 device=device)
             expected_inverse_dim2 = torch.tensor([0, 1])
             expected_counts_dim2 = torch.tensor([1, 1])
-
+            expected_unique_empty = torch.tensor([], dtype=dtype, device=device)
+            expected_inverse_empty = torch.tensor([], dtype=torch.long, device=device)
+            expected_counts_empty = torch.tensor([], dtype=torch.long, device=device)
             # dim0
             x_unique = torch.unique(x, dim=0)
             self.assertEqual(expected_unique_dim0, x_unique)
@@ -11096,6 +11130,33 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(expected_unique_dim2, x_unique)
             self.assertEqual(expected_inverse_dim2, x_inverse)
             self.assertEqual(expected_counts_dim2, x_counts)
+
+            # test empty tensor
+            x_unique, x_inverse, x_counts = torch.unique(
+                x_empty,
+                return_inverse=True,
+                return_counts=True,
+                dim=1)
+            self.assertEqual(expected_unique_empty, x_unique)
+            self.assertEqual(expected_inverse_empty, x_inverse)
+            self.assertEqual(expected_counts_empty, x_counts)
+
+            # test not a well formed tensor
+            # Checking for runtime error, as this is the expected behaviour
+            with self.assertRaises(RuntimeError):
+                torch.unique(
+                    x_ill_formed_empty, 
+                    return_inverse=True, 
+                    return_counts=True, 
+                    dim=1) 
+
+            # test along dim2
+            with self.assertRaises(RuntimeError):
+                torch.unique(
+                    x_ill_formed_empty_another, 
+                    return_inverse=True, 
+                    return_counts=True, 
+                    dim=2)
 
             # test consecutive version
             y = torch.tensor(
