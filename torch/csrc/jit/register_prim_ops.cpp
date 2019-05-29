@@ -2191,7 +2191,14 @@ RegisterOperators reg2({
           int64_t a, b;
           lldiv_t divresult = {};
           pop(stack, a, b);
+          if (b == 0) {
+            throw std::runtime_error("division by 0");
+          }
           divresult = lldiv(a, b);
+          if (divresult.rem && (a < 0) != (b < 0)) {
+            divresult.quot -= 1;
+            divresult.rem  += b;
+          }
           push(stack, static_cast<int64_t>(divresult.quot), \
             static_cast<int64_t>(divresult.rem));
           return 0;
@@ -2201,7 +2208,13 @@ RegisterOperators reg2({
         [](Stack& stack) {
           double a, b;
           pop(stack, a, b);
+          if (b == 0) {
+            throw std::runtime_error("division by 0");
+          }
           double rem = fmod(a, b);
+          if (rem && (a < 0) != (b < 0)) {
+            rem  += b;
+          }
           push(stack, (a - rem)/b, rem);
           return 0;
         }),

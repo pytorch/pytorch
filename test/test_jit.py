@@ -5641,8 +5641,20 @@ a")
             # type: (float, float) -> Tuple[float, float]
             return divmod(a, b)
 
-        self.checkScript(func_int, (1024, 10,))
-        self.checkScript(func_float, (5.3, 2))
+        self.checkScript(func_int, (1024, 10))
+        self.checkScript(func_int, (1024, -10))
+        self.checkScript(func_int, (-1024, 10))
+        self.checkScript(func_int, (-1024, -10))
+        self.checkScript(func_float, (5.3, 2.0))
+        self.checkScript(func_float, (5.3, -2.0))
+        self.checkScript(func_float, (-5.3, 2.0))
+        self.checkScript(func_float, (-5.3, -2.0))
+        with self.assertRaisesRegex(RuntimeError, 'division by 0'):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int)))
+            cu.func_int(1024, 0)
+        with self.assertRaisesRegex(RuntimeError, 'division by 0'):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float)))
+            cu.func_float(5.3, 0.0)
 
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
