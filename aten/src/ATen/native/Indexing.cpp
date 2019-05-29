@@ -242,7 +242,7 @@ Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, 
   return self.clone().index_put_(indices, value, accumulate);
 }
 
-Tensor & _index_put_unsafe_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
@@ -258,7 +258,7 @@ Tensor & _index_put_unsafe_(Tensor & self, TensorList indices, const Tensor & va
 
 
 Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate) {
-  return at::_index_put_unsafe_(self, indices, value, accumulate, false);
+  return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {

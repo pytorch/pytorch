@@ -5,18 +5,15 @@ namespace at { namespace native {
 
 [[noreturn]]
 static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, int64_t maskIdx) {
-  std::stringstream ss;
-  ss << "The shape of the mask " << mask.sizes() << " at index " << maskIdx;
-  ss << " does not match the shape of the indexed tensor " << self.sizes();
-  ss << " at index " << idx;
-  AT_INDEX_ERROR(ss.str());
+  TORCH_CHECK_INDEX(false, "The shape of the mask ", mask.sizes(), " at index ", maskIdx,
+  "does not match the shape of the indexed tensor ", self.sizes(), " at index ", idx);
 }
 
 
 static std::vector<Tensor> expandTensors(const Tensor & self, TensorList indices) {
-  // Expands ByteTensor (masks) or BoolTensor (masks) into the equivalent indexing by LongTensors
+  // If indices come in as ByteTensor or BoolTensor (masks), expand them into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
-  for (auto & index : indices) {
+  for (const auto & index : indices) {
     if (index.scalar_type() == kByte || index.scalar_type() == kBool) {
       // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
       // corresponding dimensions in self
@@ -28,15 +25,8 @@ static std::vector<Tensor> expandTensors(const Tensor & self, TensorList indices
       }
       // Replace with nonzeros
       auto nonzero = index.nonzero();
-      auto special_empty = false;
       for (int64_t j = 0; j < index.dim(); j++) {
-        if (special_empty) {
-          // We can't call select on an empty tensor so we just create an empty
-          // tensor.
-          result.emplace_back(at::empty({0}, nonzero.options()));
-        } else {
-          result.emplace_back(nonzero.select(1, j));
-        }
+        result.emplace_back(nonzero.select(1, j));
       }
     } else {
       result.emplace_back(index);

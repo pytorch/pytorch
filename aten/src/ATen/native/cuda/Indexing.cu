@@ -29,18 +29,18 @@ static const int WARP_SIZE = 32;
 
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel(
-  int64_t* input, int64_t* indices, scalar_t* grad_output, scalar_t* grad_weight,
+  int64_t* sorted_indices, int64_t* indices, scalar_t* grad_output, scalar_t* grad_weight,
   int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim) {
 //numel is total number of flattened indices, not expanded to dimensions that are not indexed.
 //stride is the cumulative size of the not-indexed last dimensions
 //stride_before is the stride of the dimension immediately preceding first indexed dimension
-//if indexing starts from the 0th dimension, stride_before does not matter because blockIdx.z will be 0 in thei case
+//if indexing starts from the 0th dimension, stride_before does not matter because blockIdx.z will be 0 in this case
 //outer_dim is number of elements in the first unindexed dimensions
   using accscalar_t = at::acc_type<scalar_t, true>;
   int idx = blockIdx.x * blockDim.y + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
-  // If the preceding input has the same as this input, then the warp
+  // If the preceding input has the same destination index as this input, then the warp
   // exits immediately. The warp also processes subsequent inputs with the
   // same value.
   //
@@ -50,13 +50,13 @@ __global__ void indexing_backward_kernel(
   // 5     <warp 3>
   // 8     <warp 4>
 
-  // Number of values proceessed by each thread (grain size)
+  // Number of values processed by each thread (grain size)
   for (int z = blockIdx.z; z < outer_dim; z += gridDim.z){
     if (idx < numel
-        && (idx == 0 || input[idx] != input[idx - 1])){
+        && (idx == 0 || sorted_indices[idx] != sorted_indices[idx - 1])){
       do {
         int start_feature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-        const int weight_row = ((int) input[idx]) * stride + z * stride_before;
+        const int weight_row = ((int) sorted_indices[idx]) * stride + z * stride_before;
         const int grad_row = ((int) indices[idx]) * stride + z * numel * stride;
         const accscalar_t scale = (accscalar_t)1.0;
 
@@ -89,7 +89,7 @@ __global__ void indexing_backward_kernel(
         }
 
         idx++;
-      } while (idx < numel && input[idx] == input[idx - 1]);
+      } while (idx < numel && sorted_indices[idx] == sorted_indices[idx - 1]);
     }
   }
 }
@@ -224,8 +224,8 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
       }
       TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
-      TORCH_INTERNAL_ASSERT(self.numel() < std::numeric_limits<int>::max(), "index_put_ with accumulation is not supported on large tensors, number of source elements =", self.numel());
-      TORCH_INTERNAL_ASSERT(value.numel() < std::numeric_limits<int>::max(), "index_put_ with accumulation is not supported on large tensors, number of source elements =", value.numel());
+      TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(), "index_put_ with accumulation is not supported on large tensors, number of source elements =", self.numel(), "file a support request on github");
+      TORCH_CHECK(value.numel() < std::numeric_limits<int>::max(), "index_put_ with accumulation is not supported on large tensors, number of source elements =", value.numel(), "file a support request on github");
       const int UNROLL = 4;
       const int indices_per_block = 4;
       dim3 grid(THCCeilDiv(num_indices, (int64_t) indices_per_block),
