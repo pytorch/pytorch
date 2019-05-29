@@ -3373,6 +3373,28 @@ def foo(x):
         self.assertEqual(D()(v), v + v)
 
 
+    def test_invalid_prefix_annotation(self):
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation1(a):
+                    #type: (Int) -> Int # noqa
+                    return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation2(a):
+                    #type   : (Int) -> Int # noqa
+                    return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation3(a):
+                    #     type: (Int) -> Int
+                    return a + 2
+
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
