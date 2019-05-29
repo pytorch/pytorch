@@ -480,10 +480,6 @@ class Conv3d(_ConvNd):
 
 @weak_module
 class _ConvTransposeMixin(object):
-    __constants__ = ['stride', 'padding', 'kernel_size', 'dim_size',
-                     'output_padding', 'groups', 'dilation', 'transposed',
-                     'bias', 'padding_mode']
-
     @weak_script_method
     def forward(self, input, output_size=None):
         # type(Tensor, Optional[List[int]]) -> Tensor
