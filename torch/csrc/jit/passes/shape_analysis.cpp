@@ -503,9 +503,9 @@ class ShapePropagator {
         return;
       }
       case prim::ImplicitTensorToNum:
-      case prim::Bool:
-      case prim::Int:
-      case prim::Float:
+      case aten::Bool:
+      case aten::Int:
+      case aten::Float:
         return; // correct num type is already set
       case prim::NumToTensor: {
         TypePtr typ = node->input()->type();
