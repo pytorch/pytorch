@@ -40,7 +40,7 @@ std::vector<IValue> runNode(Node* n) {
           // error gets caught within propagateNode()
           throw c10::Error("Can't insert requires grad as constant", "");
         }
-        return IValue(autograd::as_variable_ref(t).data());
+        return IValue(t);
       } else {
         return t;
       }

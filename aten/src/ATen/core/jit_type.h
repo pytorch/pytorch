@@ -494,6 +494,15 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
       return ProfiledTensorTypePtr(new ProfiledTensorType(scalar_type, device, sizes, strides, requires_grad));
   }
 
+  static ProfiledTensorTypePtr create(ProfiledTensorTypePtr pttp) {
+    return ProfiledTensorTypePtr(new ProfiledTensorType(
+        pttp->scalarType(),
+        pttp->device(),
+        pttp->sizes(),
+        pttp->strides(),
+        pttp->requiresGrad()));
+  }
+
   const VaryingShape& sizes() const { return sizes_; }
   const VaryingStrides& strides() const { return strides_; }
   c10::optional<at::Device> device() const { return device_; }
@@ -1271,7 +1280,7 @@ struct getTypePtr_<std::unordered_map<K, V>> final {
   }
 };
 template <class K, class V>
-struct getTypePtr_<c10::Dict<K, V>> final {
+struct getTypePtr_<c10::DictPtr<K, V>> final {
   static TypePtr call() {
     static auto type =
         DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());

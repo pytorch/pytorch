@@ -198,7 +198,7 @@ static void upsample_trilinear3d_out_cuda_template(
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_trilinear3d_out_cuda", {input_arg, output_arg});
 
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
       output_size.size());
@@ -237,8 +237,8 @@ static void upsample_trilinear3d_out_cuda_template(
       output_depth > 0 && output_height > 0 && output_width > 0);
 
   const int num_kernels = output_depth * output_height * output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -269,7 +269,7 @@ static void upsample_trilinear3d_out_cuda_template(
                 odata);
       });
 
-      AT_CUDA_CHECK(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_trilinear3d_backward_out_cuda_template(
@@ -284,12 +284,12 @@ static void upsample_trilinear3d_backward_out_cuda_template(
       "upsample_trilinear3d_backward_out_cuda",
       {grad_output_arg, grad_input_arg});
 
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
       output_size.size());
 
-  AT_CHECK(
+  TORCH_CHECK(
       input_size.size() == 5,
       "It is expected input_size equals to 5, but got size ",
       input_size.size());
@@ -322,8 +322,8 @@ static void upsample_trilinear3d_backward_out_cuda_template(
   grad_input.zero_();
 
   const int num_kernels = output_depth * output_height * output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -356,7 +356,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
                 odata);
       });
 
-      AT_CUDA_CHECK(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace
