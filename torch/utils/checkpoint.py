@@ -207,7 +207,7 @@ def checkpoint_sequential(functions, segments, *inputs, **kwargs):
                       'a TypeError will be raised after PyTorch 1.3',
                       DeprecationWarning)
     elif len(inputs) > 1:
-        warnings.warn('multiple inputs to checkpoint_sequential has been deprecated, '
+        warnings.warn('Multiple inputs to checkpoint_sequential has been deprecated, '
                       'a TypeError will be raised after PyTorch 1.3',
                       DeprecationWarning)
 
