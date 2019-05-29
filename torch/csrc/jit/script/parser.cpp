@@ -363,9 +363,9 @@ struct ParserImpl {
     auto ident = parseIdent();
     TreeRef type;
     if (L.nextIf(':')) {
-      type = Maybe<Expr>::create(L.cur().range, parseExp());
+      type = parseExp();
     } else {
-      type = Maybe<Expr>::create(L.cur().range);
+      type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
     }
     TreeRef def;
     if (L.nextIf('=')) {
@@ -374,7 +374,7 @@ struct ParserImpl {
       def = Maybe<Expr>::create(L.cur().range);
     }
     return Param::create(
-        type->range(), Ident(ident), Maybe<Expr>(type), Maybe<Expr>(def), kwarg_only);
+        type->range(), Ident(ident), Expr(type), Maybe<Expr>(def), kwarg_only);
   }
 
   Param parseBareTypeAnnotation() {
@@ -382,7 +382,7 @@ struct ParserImpl {
     return Param::create(
         type.range(),
         Ident::create(type.range(), ""),
-        Maybe<Expr>::create(type.range(), type),
+        type,
         Maybe<Expr>::create(type.range()),
         /*kwarg_only=*/false);
   }
