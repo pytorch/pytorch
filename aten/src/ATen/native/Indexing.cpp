@@ -220,7 +220,7 @@ static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedInd
 static std::unique_ptr<TensorIterator> make_index_iterator(const AdvancedIndex& info) {
   auto builder = TensorIterator::Builder();
   builder.dont_compute_common_dtype();
-  builder.add_output(Tensor(), info.src.type().backend(), info.src.scalar_type());
+  builder.add_output(Tensor(), info.src.device(), info.src.scalar_type());
   builder.add_input(info.src);
   for (auto& index : info.indices) {
     builder.add_input(index);
