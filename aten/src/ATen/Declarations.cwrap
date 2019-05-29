@@ -2687,25 +2687,6 @@
       default: 1
 ]]
 [[
-  name: _th_cauchy_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: cauchy
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
-    - arg: double median
-      default: 0
-    - arg: double sigma
-      default: 1
-]]
-[[
   name: _th_log_normal_
   cname: logNormal
   variants: function

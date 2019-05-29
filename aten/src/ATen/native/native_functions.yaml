@@ -3229,7 +3229,7 @@
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_cauchy_
+    CPU: cauchy_cpu_
     CUDA: cauchy_cuda_
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)

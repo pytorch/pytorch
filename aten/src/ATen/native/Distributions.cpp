@@ -171,6 +171,17 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
   return self;
 }
 
+  Tensor& cauchy_cpu_(Tensor& self, double median, double sigma, Generator* gen) {
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "cauchy_cpu", [&] {
+    THGenerator* generator = get_generator(gen);
+    std::lock_guard<std::mutex> lock(generator->mutex);
+    CPU_tensor_apply1<scalar_t>(
+        self, [generator, median, sigma](scalar_t& ret_val) {
+          ret_val = static_cast<scalar_t>(THRandom_cauchy(generator, median, sigma));
+        });
+  });
+  return self;
+}
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
