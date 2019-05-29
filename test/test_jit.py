@@ -6431,16 +6431,16 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
-    
-    def test_number_all(self):	
-        def int1():	
-            return all(torch.tensor([1,2,3],dtype=torch.uint8))	
-        def int2():	
-            return all(torch.tensor([1,0,3],dtype=torch.uint8))	
 
-        self.checkScript(int1, ())	
+    def test_number_all(self):
+        def int1():
+            return all(torch.tensor([1,2,3],dtype=torch.uint8))
+        def int2():
+            return all(torch.tensor([1,0,3],dtype=torch.uint8))
+
+        self.checkScript(int1, ())
         self.checkScript(int2, ())
-        
+
     def test_number_math(self):
         ops_template = dedent('''
         def func():
@@ -11922,6 +11922,8 @@ a")
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
+    @unittest.skipIf(hasattr(torch.jit, 'WeakScriptModuleProxy'), "# TODO: re-enable"
+                                                                  "this when WeakScriptModuleProxy has been deleted")
     def test_weak_module_isinstance(self):
         tester = self
 
