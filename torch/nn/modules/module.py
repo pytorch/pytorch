@@ -197,9 +197,17 @@ class Module(object):
             if param is not None:
                 # Tensors stored in modules are graph leaves, and we don't
                 # want to create copy nodes, so we have to unpack the data.
-                param.data = fn(param.data)
+                param_applied = fn(param.data)
+                if param._is_same_impl_type(param_applied):
+                    param.data = param_applied
+                else:
+                    param._set_impl(param_applied)
                 if param._grad is not None:
-                    param._grad.data = fn(param._grad.data)
+                    grad_applied = fn(param._grad.data)
+                    if param._grad._is_same_impl_type(grad_applied):
+                        param._grad.data = grad_applied
+                    else:
+                        param._grad._set_impl(grad_applied)
 
         for key, buf in self._buffers.items():
             if buf is not None:

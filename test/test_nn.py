@@ -7811,6 +7811,28 @@ class TestNN(NNTestCase):
         out = asfm.predict(x)
         self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
 
+    def test_module_apply_tensorimpl_type(self):
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.fc1 = nn.Linear(20, 10)
+
+        m = TestModule()
+
+        param_ref = m.fc1.weight
+
+        new_tensor = torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1]))
+        new_tensor_type_saved = new_tensor.type()
+
+        self.assertNotEqual(m.fc1.weight.type(), new_tensor_type_saved)
+        self.assertFalse(m.fc1.weight._is_same_impl_type(new_tensor))
+
+        m._apply(lambda t: new_tensor)
+
+        self.assertEqual(m.fc1.weight.type(), new_tensor_type_saved)
+        self.assertTrue(m.fc1.weight._is_same_impl_type(new_tensor))
+        self.assertEqual(param_ref, m.fc1.weight)
+
 
 class TestNNInit(TestCase):
     def setUp(self):

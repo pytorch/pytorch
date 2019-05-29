@@ -58,6 +58,25 @@ static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable__is_same_impl_type(PyObject *self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  auto& tensor = reinterpret_cast<THPVariable*>(arg)->cdata;
+  return PyBool_FromLong(self_.is_same_impl_type(tensor));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__set_impl(PyObject *self, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  auto& tensor = reinterpret_cast<THPVariable*>(arg)->cdata;
+  self_.set_data(tensor, /*change_impl_type=*/true);
+  return self;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
@@ -697,6 +716,8 @@ PyMethodDef variable_methods[] = {
   {"__invert__", (PyCFunction)THPVariable_invert, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
   {"_is_view", (PyCFunction)THPVariable__is_view, METH_NOARGS, NULL},
+  {"_is_same_impl_type", (PyCFunction)THPVariable__is_same_impl_type, METH_O, NULL},
+  {"_set_impl", (PyCFunction)THPVariable__set_impl, METH_O, NULL},
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},

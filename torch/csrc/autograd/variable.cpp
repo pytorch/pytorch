@@ -83,12 +83,16 @@ void Variable::backward(
   Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);
 }
 
-void Variable::set_data(const at::Tensor &new_data) {
+bool Variable::is_same_impl_type(const at::Tensor &tensor) {
+  return typeid(*unsafeGetTensorImpl()) == typeid(*(tensor.unsafeGetTensorImpl()));
+}
+
+void Variable::set_data(const at::Tensor &new_data, bool change_impl_type) {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` has the same derived
   // type of TensorImpl as `var`.
   TORCH_CHECK(
-    typeid(*(this->unsafeGetTensorImpl())) == typeid(*(new_data.unsafeGetTensorImpl())),
+    is_same_impl_type(new_data) || change_impl_type,
     "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have different types of TensorImpl.");
 
   // Resets gradient accumulator if metadata is out of date
@@ -112,7 +116,17 @@ void Variable::set_data(const at::Tensor &new_data) {
   // users need this API as an escape hatch for changing a tensor's metadata regardless of its
   // `allow_tensor_metadata_change_` value, and the users are responsible for ensuring this is
   // the behavior they want.
-  get()->shallow_copy_from(new_data.getIntrusivePtr());
+  if (change_impl_type) {
+    PyObject* self_pyobj_saved = get()->pyobj();
+    std::unique_ptr<c10::AutogradMetaInterface> self_autograd_meta_detached = get()->detach_autograd_meta();
+    impl_ = new_data.unsafeGetTensorImpl()->shallow_copy_and_detach(
+      /*version_counter=*/get()->version_counter(),
+      /*allow_tensor_metadata_change=*/get()->allow_tensor_metadata_change());
+    impl_->set_autograd_meta(std::move(self_autograd_meta_detached));
+    impl_->set_pyobj(self_pyobj_saved);
+  } else {
+    get()->shallow_copy_from(new_data.getIntrusivePtr());
+  }
 }
 
 Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)

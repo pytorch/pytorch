@@ -252,7 +252,10 @@ struct TORCH_API Variable : public at::Tensor {
   /// It is rarely necessary to call this; it's used, for example, when
   /// a non-sparse gradient gets added to a sparse gradient, requiring
   /// the type of the gradient `Variable` to become non-sparse.
-  void set_data(const at::Tensor &new_data);
+  void set_data(const at::Tensor &new_data, bool change_impl_type = false);
+
+  /// True if this `Variable` has the same derived type of TensorImpl as `tensor`.
+  bool is_same_impl_type(const at::Tensor &tensor);
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
   /// `Variable`.
