@@ -1405,9 +1405,6 @@
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
-- func: T(Tensor(a) self) -> Tensor(a)
-  variants: method
-
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
 
 - func: pin_memory(Tensor self) -> Tensor

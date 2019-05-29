@@ -452,9 +452,6 @@ inline Tensor Tensor::narrow(int64_t dim, int64_t start, int64_t length) const {
 inline Tensor Tensor::permute(IntArrayRef dims) const {
     return dispatch_type().permute(*this, dims);
 }
-inline Tensor Tensor::T() const {
-    return dispatch_type().T(*this);
-}
 inline Tensor Tensor::pin_memory() const {
     return dispatch_type().pin_memory(*this);
 }

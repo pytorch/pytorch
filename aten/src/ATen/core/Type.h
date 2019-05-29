@@ -274,7 +274,6 @@ struct CAFFE2_API Type {
   virtual Tensor narrow_copy(const Tensor & self, int64_t dim, int64_t start, int64_t length) const = 0;
   virtual Tensor narrow(const Tensor & self, int64_t dim, int64_t start, int64_t length) const = 0;
   virtual Tensor permute(const Tensor & self, IntArrayRef dims) const = 0;
-  virtual Tensor T(const Tensor & self) const = 0;
   virtual Tensor pin_memory(const Tensor & self) const = 0;
   virtual Tensor pinverse(const Tensor & self, double rcond) const = 0;
   virtual Tensor reciprocal(const Tensor & self) const = 0;
