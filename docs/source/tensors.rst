@@ -148,6 +148,7 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: device
    .. autoattribute:: grad
    .. autoattribute:: ndim
+   .. autoattribute:: T
 
    .. automethod:: abs
    .. automethod:: abs_
@@ -214,7 +215,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumsum
    .. automethod:: data_ptr
    .. automethod:: dequantize
-   .. automethod:: dequantize_linear
    .. automethod:: det
    .. automethod:: dense_dim
    .. automethod:: detach

@@ -1,6 +1,7 @@
-#pragma once
+#ifndef THC_INTEGER_DIVIDER_INC
+#define THC_INTEGER_DIVIDER_INC
 
-#include <c10/util/Exception.h>
+#include <assert.h>
 
 // A utility class to implement integer division by muliplication, given a fixed
 // divisor.
@@ -77,8 +78,8 @@ struct IntDivider<unsigned int> {
 
   IntDivider() { }  // Dummy constructor for arrays.
 
-  IntDivider(int64_t d) : divisor(static_cast<unsigned int>(d)) {
-    TORCH_INTERNAL_ASSERT(d >= 1 && d <= INT32_MAX);
+  IntDivider(unsigned int d) : divisor(d) {
+    assert(divisor >= 1 && divisor <= INT32_MAX);
 
     // TODO: gcc/clang has __builtin_clz() but it's not portable.
     for (shift = 0; shift < 32; shift++) if ((1U << shift) >= divisor) break;
@@ -86,7 +87,7 @@ struct IntDivider<unsigned int> {
     uint64_t one = 1;
     uint64_t magic = ((one << 32) * ((one << shift) - divisor)) / divisor + 1;
     m1 = magic;
-    TORCH_INTERNAL_ASSERT(m1 > 0 && m1 == magic);  // m1 must fit in 32 bits.
+    assert(m1 > 0 && m1 == magic);  // m1 must fit in 32 bits.
   }
 
   __host__ __device__ inline unsigned int div(unsigned int n) const {
@@ -115,3 +116,5 @@ struct IntDivider<unsigned int> {
   unsigned int m1;  // Magic number: m' above.
   unsigned int shift;  // Shift amounts.
 };
+
+#endif // THC_INTEGER_DIVIDER_INC
