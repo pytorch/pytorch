@@ -801,53 +801,64 @@ C10_LAUNCH_BOUNDS_1(512)
 #endif
 __global__
 void triu_tril_kernel(
-    scalar_t* result, scalar_t* self, int64_t k, int64_t N,
-    int64_t res_batch_stride, int64_t res_row_stride, int64_t res_col_stride,
-    int64_t self_batch_stride, int64_t self_row_stride, int64_t self_col_stride, int64_t self_ncol) {
+    scalar_t* result, scalar_t* self, int64_t k, int64_t N, int64_t dims,
+    const int64_t* res_strides, const int64_t* self_strides,
+    const int64_t* self_sizes) {
   int64_t linear_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_idx >= N) {
     return;
   }
 
-  int64_t self_batch_idx = blockIdx.y;
-  int64_t row = linear_idx / self_ncol;
-  int64_t col = linear_idx % self_ncol;
+  int64_t self_offset = 0, res_offset = 0;
+  // Compute column index and corresponding offset
+  int64_t col = linear_idx % self_sizes[dims - 1];
+  self_offset += self_strides[dims - 1] * col; 
+  res_offset += res_strides[dims - 1] * col;
+  linear_idx /= self_sizes[dims - 1];
+
+  // Compute row index and corresponding offset
+  int64_t row = linear_idx % self_sizes[dims - 2];
+  self_offset += self_strides[dims - 2] * row;
+  res_offset += res_strides[dims - 2] * row;
+  linear_idx /= self_sizes[dims - 2];
+
+  // Compute remaining offsets
+  int64_t running_index;
+  #pragma unroll
+  for (int64_t i = dims - 3; i >= 0; --i) {
+    running_index = linear_idx % self_sizes[i];
+    self_offset += running_index * self_strides[i];
+    res_offset += running_index * res_strides[i];
+    linear_idx /= self_sizes[i];
+  }
 
   bool mask = upper ? (col - row >= k) : (col - row <= k);
-
-  // Now compute the offset for the self and result tensor
-  int64_t res_offset = self_batch_idx * res_batch_stride + row * res_row_stride + col * res_col_stride;
-  int64_t self_offset = self_batch_idx * self_batch_stride + row * self_row_stride + col * self_col_stride;
   result[res_offset] = mask ? self[self_offset] : scalar_t(0);
 }
 
 template <bool upper>
 Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, const char* name) {
-  int64_t n_batches = batchCount(self), mat_size = self.size(-1) * self.size(-2),
-          res_batch_stride = result.dim() > 2 ? result.stride(-3) : 1,
-          res_row_stride = result.stride(-2), res_col_stride = result.stride(-1),
-          self_batch_stride = self.dim() > 2 ? self.stride(-3) : 1,
-          self_row_stride = self.stride(-2), self_col_stride = self.stride(-1);
+  int64_t N = self.numel();
   dim3 dim_block = cuda::getApplyBlock();
-  dim3 dim_grid((mat_size + dim_block.x - 1) / dim_block.x, n_batches);
+  dim3 dim_grid((N + dim_block.x - 1) / dim_block.x);
+  Tensor result_strides = at::from_blob(
+                        result.strides().vec().data(), {result.dim()}, at::kLong).to(self.device());
+  Tensor self_strides = at::from_blob(
+                        self.strides().vec().data(), {self.dim()}, at::kLong).to(self.device());
+  Tensor self_sizes = at::from_blob(
+                        self.sizes().vec().data(), {self.dim()}, at::kLong).to(self.device());
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), name, [&]{
     triu_tril_kernel<scalar_t, upper>
       <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        result.data<scalar_t>(), self.data<scalar_t>(), k, mat_size,
-        res_batch_stride, res_row_stride, res_col_stride,
-        self_batch_stride, self_row_stride, self_col_stride, self.size(-1));
+        result.data<scalar_t>(), self.data<scalar_t>(), k, N, self.dim(),
+        result_strides.data<int64_t>(), self_strides.data<int64_t>(), self_sizes.data<int64_t>());
   });
   AT_CUDA_CHECK(cudaGetLastError());
   return result;
 }
 
 Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  bool inplace = checkTrilTriuBatchContiguous(self);
-  Tensor self_c = inplace ? self : self.contiguous();
-  Tensor result = inplace ? self : at::empty_like(self);
-  tril_cuda_out(result, self_c, k);
-  if (!inplace) self.copy_(result);
-  return self;
+  return tril_cuda_out(self, self, k);
 }
 
 Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
@@ -857,17 +868,11 @@ Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
-  return triu_tril_cuda_template<false>(result, self_c, k, "tril");
+  return triu_tril_cuda_template<false>(result, self, k, "tril");
 }
 
 Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  bool inplace = checkTrilTriuBatchContiguous(self);
-  Tensor self_c = inplace ? self : self.contiguous();
-  Tensor result = inplace ? self : at::empty_like(self);
-  triu_cuda_out(result, self_c, k);
-  if (!inplace) self.copy_(result);
-  return self;
+  return triu_cuda_out(self, self, k);
 }
 
 Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
@@ -877,8 +882,7 @@ Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
   if (self.numel() == 0) {
     return result;
   }
-  Tensor self_c = checkTrilTriuBatchContiguous(self) ? self : self.contiguous();
-  return triu_tril_cuda_template<true>(result, self_c, k, "triu");
+  return triu_tril_cuda_template<true>(result, self, k, "triu");
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
