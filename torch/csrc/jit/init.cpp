@@ -559,7 +559,6 @@ void initJITBindings(PyObject* module) {
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
-  std::cout << "initializing jit script bindings" << std::endl;
   script::initJitScriptBindings(module);
 }
 } // namespace jit

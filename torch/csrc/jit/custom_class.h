@@ -17,7 +17,7 @@ namespace torch {
 namespace jit {
 template <class CurClass>
 struct class_ {
-  shared_ptr<CompilationUnit> cu;
+  std::shared_ptr<CompilationUnit> cu;
   class_(string className) : cu(std::make_shared<CompilationUnit>()) {
     auto cu = std::make_shared<CompilationUnit>();
     auto classType = ClassType::create(c10::QualifiedName(className), cu);
