@@ -12601,7 +12601,7 @@ a")
         transformer = nn.Transformer(d_model, nhead, num_encoder_layers, 
                                      num_decoder_layers, dim_feedforward, dropout=0.0)
         model = MyModule(transformer, tgt, src)
-        
+
         src = torch.randn(seq_length, bsz, d_model)
         tgt = torch.randn(tgt_length, bsz, d_model)
         jit_out = model(tgt, src)

@@ -242,7 +242,7 @@ class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
         This standard decoder layer is based on the paper "Attention Is All You Need".
         Users may modify or implement in a different way during application.
-        
+
     Args:
         d_model: the number of expected features in the input (required).
         nhead: the number of heads in the multiheadattention models (required).
