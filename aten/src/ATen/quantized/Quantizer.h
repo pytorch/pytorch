@@ -256,7 +256,7 @@ make_per_tensor_affine_quantizer(
 
 CAFFE2_API QuantizerPtr
 make_per_channel_affine_quantizer(
-    std::vector<float> scales, std::vector<int32_t> zero_points,
+    const std::vector<float>& scales, const std::vector<int32_t>& zero_points,
     IntArrayRef axis, ScalarType scalar_type);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer

@@ -21,7 +21,7 @@ Tensor quantize_linear_per_channel_cpu(
               "zero_points tensor must have dimension 1");
   TORCH_CHECK(scales.numel() == zero_points.numel(),
               "number of elements in scales and zero_points must match");
-  TORCH_CHECK(axis.size() == 1, "axis tensor must have size 1");
+  TORCH_CHECK(axis.size() == 1, "only axis of size 1 is supported right now");
   float* scales_data = scales.data<float>();
   int32_t* zero_points_data = zero_points.data<int32_t>();
   std::vector<float> scale_vals(scales_data, scales_data + scales.numel());
