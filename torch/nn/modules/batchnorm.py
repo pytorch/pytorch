@@ -400,7 +400,7 @@ class SyncBatchNorm(_BatchNorm):
         >>> output = m(input)
 
         >>> # network is nn.BatchNorm layer
-        >>> sync_bn_network = torch.nn.utils.convert_sync_batchnorm(network, process_group)
+        >>> sync_bn_network = nn.SyncBatchNorm.convert_sync_batchnorm(network, process_group)
         >>> # only single gpu per process is currently supported
         >>> ddp_sync_bn_network = torch.nn.parallel.DistributedDataParallel(
         >>>                         sync_bn_network,
