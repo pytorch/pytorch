@@ -591,11 +591,11 @@ void Module::to_impl(Ts&&... ts) {
   }
   // Then move every parameter to the new dtype/device.
   for (auto& parameter : parameters_) {
-    parameter->set_data(autograd::Variable(*parameter).data().to(ts...));
+    parameter->set_data(autograd::Variable(*parameter).to(ts...));
   }
   // Then move every buffer to the new dtype/device.
   for (auto& buffer : buffers_) {
-    buffer->set_data(autograd::Variable(*buffer).data().to(ts...));
+    buffer->set_data(autograd::Variable(*buffer).to(ts...));
   }
 }
 

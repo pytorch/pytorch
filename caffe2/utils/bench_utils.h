@@ -19,6 +19,8 @@
 
 #include <stdint.h>
 
+#include <c10/macros/Export.h>
+
 namespace caffe2 {
 
 CAFFE2_API uint32_t wipe_cache();
