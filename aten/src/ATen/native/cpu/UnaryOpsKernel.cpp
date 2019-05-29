@@ -119,13 +119,13 @@ static void cosh_kernel(TensorIterator& iter) {
 }
 
 #if !AT_MKL_ENABLED()
-void bernoulli_mkl_kernel(Tensor& output, const double p, Generator* gen) {
+void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
   // users to report this as a bug.
   AT_ASSERTM(false, "ATen not compiled with MKL");
 }
 #else
-void bernoulli_mkl_kernel(Tensor& self, const double p, Generator* gen) {
+void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
   THGenerator* generator = get_generator(gen);
   int64_t seed;
   {
