@@ -6,6 +6,7 @@ import torch.jit
 import numpy as np
 import unittest
 from common_utils import run_tests
+import torch.nn._intrinsic as _intrinsic
 
 
 # Reference method for quantizing a tensor.
@@ -31,7 +32,6 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
     """Tests the forward path of the FakeQuantizePerTensorAffine op."""
     def test_forward(self):
         np.random.seed(NP_RANDOM_SEED)
-        fake_quantize_per_tensor_affine_forward = torch.ops.quantized.fake_quantize_per_tensor_affine_forward
 
         scale = 3
         zero_point = 2
@@ -39,7 +39,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         X = np.random.rand(20, 20) * 125
         X_torch = torch.from_numpy(X).float()
         Y = _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, num_bits)
-        Y_prime = fake_quantize_per_tensor_affine_forward(
+        Y_prime = _intrinsic.fq_per_tensor_affine_forward(
             X=X_torch, scale=scale, zero_point=zero_point, num_bits=num_bits,
             quant_delay=0, iter=0)
         tolerance = 1e-6
@@ -60,7 +60,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         dX = _fake_quantize_per_tensor_affine_grad_reference(X, dY, scale, zero_point, num_bits)
         X_torch = torch.from_numpy(X).float()
         dY_torch = torch.from_numpy(dY).float()
-        dX_prime = fake_quantize_per_tensor_affine_backward(
+        dX_prime = _intrinsic.fq_per_tensor_affine_backward(
             X=X_torch, dY=dY_torch, scale=scale, zero_point=zero_point,
             num_bits=num_bits, quant_delay=0, iter=0)
         tolerance = 1e-6
@@ -79,7 +79,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         X = np.random.rand(20, 20) * 125
         X_torch = torch.from_numpy(X).float()
         Y = torch.dequantize(torch.quantize_linear(X_torch, scale, zero_point, torch.qint8))
-        Y_prime = fake_quantize_per_tensor_affine_forward(
+        Y_prime = _intrinsic.fq_per_tensor_affine_forward(
             X=X_torch, scale=scale, zero_point=zero_point, num_bits=num_bits,
             quant_delay=0, iter=0)
         tolerance = 1e-6
@@ -89,15 +89,13 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_forward_cuda(self):
         np.random.seed(NP_RANDOM_SEED)
-        fake_quantize_per_tensor_affine_forward = torch.ops.quantized.fake_quantize_per_tensor_affine_forward
-
         scale = 3
         zero_point = 2
         num_bits = 8
         X = np.random.rand(20, 20) * 125
         X_torch = torch.from_numpy(X).float().cuda()
         Y = _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, num_bits)
-        Y_prime = fake_quantize_per_tensor_affine_forward(
+        Y_prime = _intrinsic.fq_per_tensor_affine_forward(
             X=X_torch, scale=scale, zero_point=zero_point, num_bits=num_bits,
             quant_delay=0, iter=0)
         tolerance = 1e-6
@@ -108,7 +106,6 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_backward_cuda(self):
         np.random.seed(NP_RANDOM_SEED)
-        fake_quantize_per_tensor_affine_backward = torch.ops.quantized.fake_quantize_per_tensor_affine_backward
 
         scale = 3
         zero_point = 2
@@ -119,7 +116,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         dX = _fake_quantize_per_tensor_affine_grad_reference(X, dY, scale, zero_point, num_bits)
         X_torch = torch.from_numpy(X).float().cuda()
         dY_torch = torch.from_numpy(dY).float().cuda()
-        dX_prime = fake_quantize_per_tensor_affine_backward(
+        dX_prime = _intrinsic.fq_per_tensor_affine_backward(
             X=X_torch, dY=dY_torch, scale=scale, zero_point=zero_point,
             num_bits=num_bits, quant_delay=0, iter=0)
         tolerance = 1e-6
@@ -131,7 +128,6 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         Comparing numerical consistency between CPU quantize/dequantize op and the CUDA fake quantize op
         '''
         np.random.seed(NP_RANDOM_SEED)
-        fake_quantize_per_tensor_affine_forward = torch.ops.quantized.fake_quantize_per_tensor_affine_forward
 
         scale = 3
         zero_point = 2
@@ -139,7 +135,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         X = np.random.rand(20, 20) * 125
         X_torch = torch.from_numpy(X).float()
         Y = torch.dequantize(torch.quantize_linear(X_torch, scale, zero_point, torch.qint8))
-        Y_prime = fake_quantize_per_tensor_affine_forward(
+        Y_prime = _intrinsic.fq_per_tensor_affine_forward(
             X=X_torch.cuda(), scale=scale, zero_point=zero_point, num_bits=num_bits,
             quant_delay=0, iter=0)
         tolerance = 1e-6
