@@ -68,7 +68,11 @@
 // __declspec(deprecated) does work in windows without nvcc, when msc doesn't support
 // `__has_cpp_attribute`.
 #ifndef C10_DEFINE_DEPRECATED_USING
+#if defined(_MSVC_LANG) && _MSVC_LANG >= 201402L
+# define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName [[deprecated]] = TypeThingy;
+#else
 # define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName = __declspec(deprecated) TypeThingy;
+#endif
 #endif
 #endif
 #endif
