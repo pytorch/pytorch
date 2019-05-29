@@ -2840,6 +2840,25 @@ class _TestTorchMixin(object):
         qt2 = torch._per_tensor_affine_qtensor(t, scale, zero_point)
         self.assertEqual(qt, qt2.dequantize())
 
+    def test_qtensor_per_channel_affine(self):
+        r = np.random.rand(3, 2) * 2 - 4
+        r = torch.from_numpy(r).float()
+        scales = torch.tensor([2.0, 3.0]).float()
+        zero_points = torch.tensor([5, 10]).int()
+        axis = [1]
+
+        def quantize_c(data, scales, zero_points):
+            res = torch.empty((3, 2))
+            quant_min, quant_max = 0, 255
+            for i in range(3):
+                for j in range(2):
+                    res[i][j] = np.clip(np.round(data[i][j] / scales[j]) + zero_points[j], quant_min, quant_max)
+            return res
+        qr = torch.quantize_linear_per_channel(r, scales, zero_points, axis, torch.quint8)
+        rqr = qr.dequantize()
+        self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
+        self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
+
     def test_qtensor_permute(self):
         r = np.random.rand(100, 30) * 2 - 4
         r = torch.from_numpy(r).float()
@@ -11150,17 +11169,17 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # Checking for runtime error, as this is the expected behaviour
             with self.assertRaises(RuntimeError):
                 torch.unique(
-                    x_ill_formed_empty, 
-                    return_inverse=True, 
-                    return_counts=True, 
-                    dim=1) 
+                    x_ill_formed_empty,
+                    return_inverse=True,
+                    return_counts=True,
+                    dim=1)
 
             # test along dim2
             with self.assertRaises(RuntimeError):
                 torch.unique(
-                    x_ill_formed_empty_another, 
-                    return_inverse=True, 
-                    return_counts=True, 
+                    x_ill_formed_empty_another,
+                    return_inverse=True,
+                    return_counts=True,
                     dim=2)
 
             # test consecutive version
