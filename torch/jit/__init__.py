@@ -1425,6 +1425,8 @@ if _enabled:
         def __getattr__(self, attr):
             if '_c' not in self.__dict__:
                 raise RuntimeError("ScriptModule has not been initialized, did you forget to call super's init?")
+            if self._c._has_attribute(attr):
+                return self._c._get_attribute(attr)
             if self._c._has_method(attr):
                 if attr in self.__class__._methods:
                     original_method = self.__class__._methods[attr].original_method
@@ -1436,9 +1438,6 @@ if _enabled:
                 # to improve invocation performance
                 self.__dict__[attr] = script_method
                 return script_method
-
-            if self._c._has_attribute(attr):
-                return self._c._get_attribute(attr)
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
@@ -1447,9 +1446,9 @@ if _enabled:
                     # Compile weak script module
                     value = _make_strong(value)
                 if attr == 'training':
-                    if self._c._has_buffer('training'):
+                    if self._c._has_attribute('training'):
                         self.__dict__['training'] = value
-                        self._c._get_buffer('training').fill_(int(value))
+                        self._c._set_attribute('training', value)
                         return
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
