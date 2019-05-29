@@ -28,8 +28,7 @@ static auto registry = c10::RegisterOperators().op(
     c10::RegisterOperators::options()
       .kernel<
         decltype(sigmoid_op_cpu_impl<float>),
-        &sigmoid_op_cpu_impl<float>>()
-      .dispatchKey(CPUTensorId()));
+        &sigmoid_op_cpu_impl<float>>(CPUTensorId()));
 
 } // namespace
 
