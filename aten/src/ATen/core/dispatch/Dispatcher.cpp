@@ -6,8 +6,12 @@ namespace c10 {
 namespace detail {
 class RegistrationListenerList final {
 public:
-  void addListener(std::unique_ptr<OpRegistrationListener> listener) {
+  RegistrationHandleRAII addListener(std::unique_ptr<OpRegistrationListener> listener) {
     listeners_.push_back(std::move(listener));
+    auto inserted = --listeners_.end();
+    return RegistrationHandleRAII([this, inserted] {
+      listeners_.erase(inserted);
+    });
   }
 
   void callOnOperatorRegistered(const OperatorHandle& op) {
@@ -22,7 +26,7 @@ public:
     }
   }
 private:
-  std::vector<std::unique_ptr<OpRegistrationListener>> listeners_;
+  std::list<std::unique_ptr<OpRegistrationListener>> listeners_;
 };
 }
 
@@ -111,14 +115,14 @@ RegistrationHandleRAII Dispatcher::registerCatchallKernel(const OperatorHandle& 
   return op.operatorIterator_->op.registerCatchallKernel(DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
 }
 
-void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
+RegistrationHandleRAII Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   for (auto iter = operators_.begin(); iter != operators_.end(); ++iter) {
     listener->onOperatorRegistered(OperatorHandle(iter));
   }
 
-  listeners_->addListener(std::move(listener));
+  return listeners_->addListener(std::move(listener));
 }
 
 }
