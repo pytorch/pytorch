@@ -120,6 +120,11 @@ view of a storage and defines numeric operations on it.
     To change an existing tensor's :class:`torch.device` and/or :class:`torch.dtype`, consider using
     :meth:`~torch.Tensor.to` method on the tensor.
 
+.. warning::
+   Current implementation of :class:`torch.Tensor` introduces memory overhead,
+   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors. 
+   If this is your case, consider using one large structure.
+
 .. class:: Tensor()
 
    There are a few main ways to create a tensor, depending on your use case.
@@ -209,7 +214,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumsum
    .. automethod:: data_ptr
    .. automethod:: dequantize
-   .. automethod:: dequantize_linear
    .. automethod:: det
    .. automethod:: dense_dim
    .. automethod:: detach

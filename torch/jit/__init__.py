@@ -1425,6 +1425,8 @@ if _enabled:
         def __getattr__(self, attr):
             if '_c' not in self.__dict__:
                 raise RuntimeError("ScriptModule has not been initialized, did you forget to call super's init?")
+            if self._c._has_attribute(attr):
+                return self._c._get_attribute(attr)
             if self._c._has_method(attr):
                 if attr in self.__class__._methods:
                     original_method = self.__class__._methods[attr].original_method
@@ -1436,9 +1438,6 @@ if _enabled:
                 # to improve invocation performance
                 self.__dict__[attr] = script_method
                 return script_method
-
-            if self._c._has_attribute(attr):
-                return self._c._get_attribute(attr)
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
@@ -1447,9 +1446,9 @@ if _enabled:
                     # Compile weak script module
                     value = _make_strong(value)
                 if attr == 'training':
-                    if self._c._has_buffer('training'):
+                    if self._c._has_attribute('training'):
                         self.__dict__['training'] = value
-                        self._c._get_buffer('training').fill_(int(value))
+                        self._c._set_attribute('training', value)
                         return
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
@@ -1513,7 +1512,7 @@ if _enabled:
 
         def __getstate__(self):
             raise pickle.PickleError(
-                "ScriptModules cannot be saved using torch.save. " +
+                "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. " +
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
 
@@ -1733,10 +1732,16 @@ if _enabled:
 class _ConstModuleList(ScriptModule):
     def __init__(self, modules):
         super(_ConstModuleList, self).__init__()
-        for i, module in enumerate(modules):
-            if _is_weak_type(type(module)):
-                module = _make_strong(module)
-            self.add_module(str(i), module)
+        if isinstance(modules, OrderedDict):
+            for key, module in modules.items():
+                if _is_weak_type(type(module)):
+                    module = _make_strong(module)
+                self.add_module(key, module)
+        else:
+            for i, module in enumerate(modules):
+                if _is_weak_type(type(module)):
+                    module = _make_strong(module)
+                self.add_module(str(i), module)
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
@@ -1764,7 +1769,7 @@ class _ConstSequential(_ConstModuleList):
     __constants__ = ['mods']
 
     def __init__(self, mods):
-        super(_ConstSequential, self).__init__(mods._modules.values())
+        super(_ConstSequential, self).__init__(mods._modules)
 
         # we define the forward method via self.define rather than
         # making it a direct class member (with a @script) annotation

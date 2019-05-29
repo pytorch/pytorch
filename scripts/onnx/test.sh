@@ -24,20 +24,6 @@ done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
 pip install pytest scipy hypothesis
-
-install_torchvision() {
-  echo "Installing torchvision at branch master"
-  rm -rf vision
-  # TODO: This git clone is bad, it means pushes to torchvision can break
-  # PyTorch CI
-  git clone https://github.com/pytorch/vision --quiet
-  pushd vision
-  pip install -q --user .
-  popd
-  rm -rf vision
-}
-install_torchvision
-
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi

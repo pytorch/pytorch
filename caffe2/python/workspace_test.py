@@ -308,6 +308,18 @@ class TestWorkspace(unittest.TestCase):
         workspace.FeedBlob('bar', z)
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2)))
+        # NOTE: `workspace.FeedBlob('bar', z)` above creates a shallow-copy of `z`
+        # and assign it to `bar` in the Caffe2 workspace. Since it's a shallow-copy,
+        # any sizes or strides change to `bar` will not be propagated back to `z`,
+        # and we need to call `z = workspace.FetchTorch("bar")` to manually put
+        # the value of `bar` back into `z`.
+        #
+        # In the near future, we won't need to perform the shallow-copying of `z` and
+        # can directly pass it into the Caffe2 workspace, as long as `z` doesn't require
+        # grad. At that point we won't need to use `z = workspace.FetchTorch("bar")`
+        # to fetch `z` from the Caffe2 workspace, since it will exactly be the same as
+        # the original tensor `z`.
+        z = workspace.FetchTorch("bar")
         z[0,1] = 123
         np.testing.assert_array_equal(
             workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))
@@ -398,6 +410,18 @@ class TestWorkspaceGPU(test_util.TestCase):
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2),
             device_option=core.DeviceOption(workspace.GpuDeviceType)))
+        # NOTE: `workspace.FeedBlob('bar', z)` above creates a shallow-copy of `z`
+        # and assign it to `bar` in the Caffe2 workspace. Since it's a shallow-copy,
+        # any sizes or strides change to `bar` will not be propagated back to `z`,
+        # and we need to call `z = workspace.FetchTorch("bar")` to manually put
+        # the value of `bar` back into `z`.
+        #
+        # In the near future, we won't need to perform the shallow-copying of `z` and
+        # can directly pass it into the Caffe2 workspace, as long as `z` doesn't require
+        # grad. At that point we won't need to use `z = workspace.FetchTorch("bar")`
+        # to fetch `z` from the Caffe2 workspace, since it will exactly be the same as
+        # the original tensor `z`.
+        z = workspace.FetchTorch("bar")
         z[0,1] = 123
         np.testing.assert_array_equal(
             workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))

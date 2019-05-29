@@ -120,6 +120,14 @@ graph(%x : (Tensor, float, int)):
 """,
         )
 
+    def test_set_data_tensorimpl_type(self):
+        # Dense tensor has impl of type `TensorImpl`, while quantized tensor has impl
+        # of type `QTensorImpl`.
+        x = torch.randn(1, 2)
+        x_q = torch.ops.c10.quantize(torch.randn(1, 2))
+        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
+            x.data = x_q
+
 
 class TestQuantizedOps(unittest.TestCase):
     """Tests the correctness of the quantized::relu op."""

@@ -232,6 +232,13 @@ class TestMkldnn(TestCase):
             x.clone(),
             x.to_mkldnn().clone().to_dense(),
         )
+        # test whether share same memory
+        y = x.to_mkldnn()
+        z = y.clone().add_(y)
+        self.assertNotEqual(
+            y.to_dense(),
+            z.to_dense(),
+        )
 
     def test_linear(self):
         in_features = torch.randint(3, 10, (1,)).item()
@@ -273,6 +280,14 @@ class TestMkldnn(TestCase):
         self.assertEqual(
             module(*inputs).to_dense(),
             traced(*inputs).to_dense())
+
+    def test_set_data_tensorimpl_type(self):
+        # Dense tensor has impl of type `TensorImpl`, while MKL-DNN tensor has impl
+        # of type `OpaqueTensorImpl<IDeepTensorWrapperPtr>`.
+        x = torch.randn((1, 2), dtype=torch.float, device=torch.device('cpu'))
+        x_mkldnn = x.to_mkldnn()
+        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
+            x.data = x_mkldnn
 
 
 if __name__ == '__main__':

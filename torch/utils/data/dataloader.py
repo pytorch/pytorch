@@ -67,7 +67,7 @@ class DataLoader(object):
 
               Since workers rely on Python multiprocessing, worker launch behavior is different
               on Windows compared to Unix. On Unix fork() is used as the default
-              muliprocessing start method, so child workers typically can access the dataset and
+              multiprocessing start method, so child workers typically can access the dataset and
               Python argument functions directly through the cloned address space. On Windows, another
               interpreter is launched which runs your main script, followed by the internal
               worker function that receives the dataset, collate_fn and other arguments
@@ -142,6 +142,7 @@ class DataLoader(object):
                  batch_sampler=None, num_workers=0, collate_fn=default_collate,
                  pin_memory=False, drop_last=False, timeout=0,
                  worker_init_fn=None):
+        torch._C._log_api_usage_once("python.data_loader")
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers

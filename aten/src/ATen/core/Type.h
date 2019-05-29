@@ -393,7 +393,6 @@ struct CAFFE2_API Type {
   virtual Tensor to_mkldnn(const Tensor & self) const = 0;
   virtual Tensor quantize_linear(const Tensor & self, double scale, int64_t zero_point, ScalarType dtype) const = 0;
   virtual Tensor dequantize(const Tensor & self) const = 0;
-  virtual Tensor dequantize_linear(const Tensor & self, double scale, int64_t zero_point, ScalarType dtype) const = 0;
   virtual Scalar q_scale(const Tensor & self) const = 0;
   virtual Scalar q_zero_point(const Tensor & self) const = 0;
   virtual Tensor int_repr(const Tensor & self) const = 0;
