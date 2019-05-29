@@ -7,8 +7,28 @@
 namespace at {
 namespace native {
 
-Tensor quantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point, ScalarType dtype) {
+Tensor quantize_linear_cpu(
+    const Tensor& self, double scale, int64_t zero_point, ScalarType dtype) {
   auto quantizer = make_per_tensor_affine_quantizer(scale, zero_point, dtype);
+  return quantizer->quantize(self);
+}
+
+Tensor quantize_linear_per_channel_cpu(
+    const Tensor& self, const Tensor& scales, const Tensor& zero_points,
+    IntArrayRef axis, ScalarType dtype) {
+  TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
+  TORCH_CHECK(zero_points.dim() == 1,
+              "zero_points tensor must have dimension 1");
+  TORCH_CHECK(scales.numel() == zero_points.numel(),
+              "number of elements in scales and zero_points must match");
+  TORCH_CHECK(axis.size() == 1, "only axis of size 1 is supported right now");
+  float* scales_data = scales.data<float>();
+  int32_t* zero_points_data = zero_points.data<int32_t>();
+  std::vector<float> scale_vals(scales_data, scales_data + scales.numel());
+  std::vector<int32_t> zero_point_vals(
+      zero_points_data, zero_points_data + zero_points.numel());
+  auto quantizer = make_per_channel_affine_quantizer(
+      scale_vals, zero_point_vals, axis, dtype);
   return quantizer->quantize(self);
 }
 
@@ -16,7 +36,8 @@ Tensor dequantize_quant(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
-Tensor dequantize_linear_cpu(const Tensor& self, double scale, int64_t zero_point, ScalarType dtype) {
+Tensor dequantize_linear_cpu(
+    const Tensor& self, double scale, int64_t zero_point, ScalarType dtype) {
   TORCH_CHECK(isQIntType(toQIntType(self.scalar_type())),
            "Scalar type for quantized Tensor must have same underlying type as input.");
   TORCH_CHECK(dtype == toQIntType(self.scalar_type()), "ScalarType argument must match the corresponding quantized scalar type of input integer Tensor");
