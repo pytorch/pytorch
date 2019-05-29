@@ -31,7 +31,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
   register_extension_backend_op(
     Backend::MSNPU,
-    "empty(IntArrayRef size, TensorOptions options, MemoryFormat memory_format) -> Tensor", &empty_override);
+    "empty(IntArrayRef size, TensorOptions options, MemoryFormat? memory_format) -> Tensor", &empty_override);
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
   ASSERT_EQ(a.device().index(), 1);
@@ -41,7 +41,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty_like(a, at::kMSNPU));
   register_extension_backend_op(
     Backend::MSNPU,
-    "empty_like(Tensor self, TensorOptions options, MemoryFormat memory_format) -> Tensor", &empty_like_override);
+    "empty_like(Tensor self, TensorOptions options, MemoryFormat? memory_format) -> Tensor", &empty_like_override);
   Tensor b = empty_like(a, at::kMSNPU);
   ASSERT_EQ(test_int, 2);
 
@@ -60,6 +60,6 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(
     register_extension_backend_op(
       Backend::MSNPU,
-      "empty(IntArrayRef size, TensorOptions options, MemoryFormat memory_format) -> Tensor", &empty_override)
+      "empty(IntArrayRef size, TensorOptions options, MemoryFormat? memory_format) -> Tensor", &empty_override)
   );
 }
