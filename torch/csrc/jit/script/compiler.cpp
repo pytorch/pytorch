@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -7,6 +6,7 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -1396,17 +1396,85 @@ struct to_ir {
       const Ident& target,
       const List<Expr>& args,
       const List<Stmt>& body) {
-    // TODO: start, stop, step loop
-    if (args.size() != 1) {
-      throw ErrorReport(range)
-          << "range() expects 1 argument but got " << args.size();
+    Value *end_val = nullptr, *start_val = nullptr, *step_val = nullptr;
+    bool isSimpleRange = (args.size() == 1);
+    std::vector<Value*> argVals;
+    for (auto i : args) {
+      argVals.push_back(ensureInt(range, emitExpr(i)));
     }
-    auto max_trip_count_val = ensureInt(range, emitExpr(args[0]));
+    if (isSimpleRange) {
+      end_val = argVals[0];
+      start_val = end_val->owningGraph()->insertConstant(0);
+      step_val = end_val->owningGraph()->insertConstant(1);
+      start_val->node()->setSourceRange(range);
+      end_val->node()->setSourceRange(range);
+    } else if (args.size() == 2 || args.size() == 3) {
+      start_val = argVals[0];
+      end_val = argVals[1];
+      if (args.size() == 3) {
+        step_val = argVals[2];
+      } else {
+        step_val = end_val->owningGraph()->insertConstant(1);
+        step_val->node()->setSourceRange(range);
+      }
+    } else if (args.size() == 0) {
+      throw ErrorReport(range) << "range expected 1 arguments, got 0";
+    } else {
+      throw ErrorReport(range)
+          << "range expected at most 3 arguments, got " << args.size();
+    }
     const auto& ident_name = target.name();
-    auto assigner = [ident_name, range](
-                        Value* index, std::shared_ptr<Environment> env) {
-      env->setVar(range, ident_name, index);
+    AT_CHECK(
+        end_val != nullptr && start_val != nullptr && step_val != nullptr,
+        "Expected non-null pointers for range() arguments");
+    auto addOp = [end_val, range](
+                     Graph* g, NodeKind kind, ArrayRef<Value*> inputs) {
+      return g->insertNode(g->create(kind, inputs, 1))
+          ->setSourceRange(range)
+          ->output()
+          ->setType(IntType::get());
     };
+    auto assigner =
+        [addOp, ident_name, range, start_val, step_val, isSimpleRange](
+            Value* index, std::shared_ptr<Environment> env) {
+          Value* derived_index;
+          if (isSimpleRange) {
+            derived_index = index;
+          } else {
+            auto g = index->owningGraph();
+            derived_index =
+                addOp(g, aten::__derive_index, {index, start_val, step_val});
+          }
+          env->setVar(range, ident_name, derived_index);
+        };
+    Value* max_trip_count_val;
+    if (isSimpleRange) {
+      max_trip_count_val = end_val;
+    } else {
+      auto g = start_val->owningGraph();
+      Value* cond_value = emitBuiltinCall(
+          range,
+          *g,
+          aten::eq,
+          c10::nullopt,
+          {step_val, g->insertConstant(0)},
+          {},
+          /*required=*/true);
+      Node* n = g->insertNode(create(prim::If, range, 0));
+      n->addInput(cond_value);
+      auto true_block = n->addBlock();
+      n->addBlock();
+      {
+        WithInsertPoint guard(true_block);
+        g->insert(
+            prim::RaiseException,
+            {std::string("range() arg 3 must not be zero")},
+            {},
+            range);
+      }
+      max_trip_count_val =
+          addOp(g, aten::__range_length, {start_val, end_val, step_val});
+    }
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
