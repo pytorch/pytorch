@@ -29,8 +29,7 @@ namespace c10 {
  * >
  * > static auto registry = c10::RegisterOperators()
  * >     .op("my_op", c10::RegisterOperators::options()
- * >         .kernel<my_kernel_cpu>()
- * >         .dispatchKey(CPUTensorId()));
+ * >         .kernel<my_kernel_cpu>(CPUTensorId()));
  */
 class CAFFE2_API RegisterOperators final {
 public:
@@ -50,12 +49,19 @@ public:
     Options& operator=(Options&&) noexcept = delete;
 
     // internal-only for registering stack based kernels
-    Options&& kernel(KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator) && {
-      return std::move(*this).kernel(kernel_func, std::move(cache_creator), nullptr);
+    Options&& kernel(TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator) && {
+      return std::move(*this).kernel(dispatch_key, kernel_func, std::move(cache_creator), nullptr);
+    }
+
+    // internal-only for registering stack based catch-all kernels
+    Options&& catchAllKernel(KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator) && {
+      return std::move(*this).kernel(c10::nullopt, kernel_func, std::move(cache_creator), nullptr);
     }
 
     /**
-     * Use this to register an operator whose kernel is implemented as a functor
+     * Use this to register an operator whose kernel is implemented as a functor.
+     * The kernel is only called for inputs matching the given dispatch key.
+     * You can register multiple kernels for different dispatch keys.
      *
      * Example:
      *
@@ -68,8 +74,7 @@ public:
      * >
      * > static auto registry = c10::RegisterOperators()
      * >     .op("my_op", c10::RegisterOperators::options()
-     * >         .kernel<my_kernel_cpu>()
-     * >         .dispatchKey(CPUTensorId()));
+     * >         .kernel<my_kernel_cpu>(CPUTensorId()));
      *
      * The functor constructor can take arguments to configure the kernel.
      * The arguments are defined in the kernel registration.
@@ -87,20 +92,66 @@ public:
      * >
      * > static auto registry = c10::RegisterOperators()
      * >     .op("my_op", c10::RegisterOperators::options()
-     * >         .kernel<my_kernel_cpu>("some_configuration", 3, true)
-     * >         .dispatchKey(CPUTensorId()));
+     * >         .kernel<my_kernel_cpu>(CPUTensorId(), "some_configuration", 3, true));
      */
     template<class KernelFunctor, class... ConstructorParameters>
     // enable_if: only enable it if KernelFunctor is actually a functor
-    guts::enable_if_t<guts::is_functor<KernelFunctor>::value, Options&&> kernel(ConstructorParameters&&... constructorParameters) {
+    guts::enable_if_t<guts::is_functor<KernelFunctor>::value, Options&&> kernel(TensorTypeId dispatch_key, ConstructorParameters&&... constructorParameters) {
       static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
       static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
-      return std::move(*this).kernelFunctor<KernelFunctor, false>(std::forward<ConstructorParameters>(constructorParameters)...);
+      return std::move(*this).kernelFunctor<KernelFunctor, false>(dispatch_key, std::forward<ConstructorParameters>(constructorParameters)...);
     }
 
     /**
-     * Use this to register an operator whose kernel is implemented by a function:
+     * Use this to register an operator whose kernel is implemented as a functor.
+     * The kernel is a catch-all kernel, meaning it's called independent from
+     * the input. Dispatch is disabled for this operator.
+     *
+     * Example:
+     *
+     * > namespace {
+     * >   class my_kernel_cpu final : public c10::OperatorKernel {
+     * >   public:
+     * >     Tensor operator()(Tensor a, Tensor b) {...}
+     * >   };
+     * > }
+     * >
+     * > static auto registry = c10::RegisterOperators()
+     * >     .op("my_op", c10::RegisterOperators::options()
+     * >         .catchAllKernel<my_kernel_cpu>());
+     *
+     * The functor constructor can take arguments to configure the kernel.
+     * The arguments are defined in the kernel registration.
+     * Example:
+     *
+     * > namespace {
+     * >   class my_kernel_cpu final : public c10::OperatorKernel {
+     * >   public:
+     * >     explicit my_kernel_cpu(std::string some_configuration, int a, bool b)
+     * >         : ... {...}
+     * >
+     * >     Tensor operator()(Tensor a, Tensor b) {...}
+     * >   };
+     * > }
+     * >
+     * > static auto registry = c10::RegisterOperators()
+     * >     .op("my_op", c10::RegisterOperators::options()
+     * >         .catchAllKernel<my_kernel_cpu>("some_configuration", 3, true));
+     */
+    template<class KernelFunctor, class... ConstructorParameters>
+    // enable_if: only enable it if KernelFunctor is actually a functor
+    guts::enable_if_t<guts::is_functor<KernelFunctor>::value, Options&&> catchAllKernel(ConstructorParameters&&... constructorParameters) {
+      static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
+      static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
+
+      return std::move(*this).kernelFunctor<KernelFunctor, false>(c10::nullopt, std::forward<ConstructorParameters>(constructorParameters)...);
+    }
+
+    /**
+     * Use this to register an operator whose kernel is implemented by a function.
+     * The kernel is only called for inputs matching the given dispatch key.
+     * You can register multiple kernels for different dispatch keys.
      *
      * Example:
      *
@@ -108,19 +159,42 @@ public:
      * >
      * > static auto registry = c10::RegisterOperators()
      * >     .op("my_op", c10::RegisterOperators()
-     * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>()
-     * >         .dispatchKey(CPUTensorId()));
+     * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
      */
     template<class FuncType, FuncType* kernel_func>
     // enable_if: only enable it if FuncType is actually a function
-    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel() {
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel(TensorTypeId dispatch_key) {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
 
-      return kernel<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>();
+      return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
+    }
+
+    /**
+     * Use this to register an operator whose kernel is implemented by a function.
+     * The kernel is a catch-all kernel, meaning it's called independent from
+     * the input. Dispatch is disabled for this operator.
+     *
+     * Example:
+     *
+     * > namespace { Tensor my_kernel_cpu(Tensor a, Tensor b) {...} }
+     * >
+     * > static auto registry = c10::RegisterOperators()
+     * >     .op("my_op", c10::RegisterOperators()
+     * >         .catchAllKernel<decltype(my_kernel_cpu), &my_kernel_cpu>());
+     */
+    template<class FuncType, FuncType* kernel_func>
+    // enable_if: only enable it if FuncType is actually a function
+    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> catchAllKernel() {
+      static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
+
+      return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
     }
 
     /**
      * Use this to register an operator whose kernel is implemented as a lambda.
+     * The kernel is only called for inputs matching the given dispatch key.
+     * You can register multiple kernels for different dispatch keys.
+     *
      * The lambda must be stateless, i.e. not have a capture. If your kernel
      * needs to store some configuration parameters, write the kernel as a
      * functor instead.
@@ -129,12 +203,11 @@ public:
      *
      * > static auto registry = c10::RegisterOperators()
      * >     .op("my_op", c10::RegisterOperators::options()
-     * >         .kernel([] (Tensor a) -> Tensor {...})
-     * >         .dispatchKey(CPUTensorId()));
+     * >         .kernel(CPUTensorId(), [] (Tensor a) -> Tensor {...}));
      */
     template<class Lambda>
     // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
-    guts::enable_if_t<guts::is_functor<guts::decay_t<Lambda>>::value, Options&&> kernel(Lambda&& functor) {
+    guts::enable_if_t<guts::is_functor<guts::decay_t<Lambda>>::value, Options&&> kernel(TensorTypeId dispatch_key, Lambda&& functor) {
       static_assert(!std::is_base_of<OperatorKernel, Lambda>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
 
       // We don't support stateful lambdas (i.e. lambdas with a capture), because their
@@ -145,58 +218,55 @@ public:
       // issues this causes), let's just forbid stateful lambdas alltogether.
       static_assert(guts::is_stateless_lambda<guts::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel only works for stateless lambdas (i.e. lambdas without captures). If you need a cache, please use the functor based API kernel<Functor>() instead.");
 
-      return std::move(*this).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(std::forward<Lambda>(functor));
+      return std::move(*this).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(dispatch_key, std::forward<Lambda>(functor));
     }
 
     /**
-     * Use this to register an operator with a kernel for a certain dispatch key.
+     * Use this to register an operator whose kernel is implemented as a lambda.
+     * The kernel is a catch-all kernel, meaning it's called independent from
+     * the input. Dispatch is disabled for this operator.
+     *
+     * The lambda must be stateless, i.e. not have a capture. If your kernel
+     * needs to store some configuration parameters, write the kernel as a
+     * functor instead.
      *
      * Example:
      *
-     * > namespace {
-     * >   class my_kernel_cpu final : public c10::OperatorKernel {
-     * >   public:
-     * >     Tensor operator()(Tensor a, Tensor b) {...}
-     * >   };
-     * >   class my_kernel_cuda final : public c10::OperatorKernel {
-     * >   public:
-     * >     Tensor operator()(Tensor a, Tensor b) {...}
-     * >   };
-     * > }
-     * >
      * > static auto registry = c10::RegisterOperators()
      * >     .op("my_op", c10::RegisterOperators::options()
-     * >         .kernel<my_kernel_cpu>()
-     * >         .dispatchKey(CPUTensorId()))
-     * >     .op("my_op", c10::RegisterOperators::options()
-     * >         .kernel<my_kernel_cuda>()
-     * >         .dispatchKey(CUDATensorId()));
+     * >         .catchAllKernel([] (Tensor a) -> Tensor {...}));
      */
-    Options&& dispatchKey(TensorTypeId dispatch_key) && {
-      if (config.dispatch_key.has_value()) {
-        AT_ERROR("Operator registration: Cannot register multiple dispatch keys in the same op() call. Please call op() multiple times if you want to register multiple kernels.");
-      }
-      config.dispatch_key = dispatch_key;
-      return std::move(*this);
+    template<class Lambda>
+    // enable_if: only enable it if Lambda is a functor (note: lambdas are functors)
+    guts::enable_if_t<guts::is_functor<guts::decay_t<Lambda>>::value, Options&&> catchAllKernel(Lambda&& functor) {
+      static_assert(!std::is_base_of<OperatorKernel, Lambda>::value, "The kernel(x) API for registering a kernel is only meant to be used with lambdas. Your kernel is a functor. Please use the kernel<Functor>() API instead.");
+
+      // We don't support stateful lambdas (i.e. lambdas with a capture), because their
+      // behavior would be nonobvious. A functor kernel with cache gets a new instance of
+      // its cache each time the kernel is looked up from the dispatch table.
+      // A lambda with a capture would be global and share its capture between all kernel lookups.
+      // So, instead of making users having to think about it (including the thread-safety
+      // issues this causes), let's just forbid stateful lambdas alltogether.
+      static_assert(guts::is_stateless_lambda<guts::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel only works for stateless lambdas (i.e. lambdas without captures). If you need a cache, please use the functor based API kernel<Functor>() instead.");
+
+      return std::move(*this).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(c10::nullopt, std::forward<Lambda>(functor));
     }
 
   private:
-    Options&& kernel(KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
-      if (nullptr != config.kernel_func) {
-        AT_ERROR("Operator registration: Cannot register multiple kernels in the same op() call. Please call op() multiple times if you want to register multiple kernels.");
-      }
-      AT_ASSERTM(nullptr == config.cache_creator_func, "kernel_func was nullptr, so cache_creator_func must be too");
-      AT_ASSERTM(nullptr == config.inferred_function_schema, "kernel_func was nullptr, so inferred_function_schema must be too");
-
+    Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
+      KernelRegistrationConfig config;
+      config.dispatch_key = dispatch_key;
       config.kernel_func = kernel_func;
       config.cache_creator_func = std::move(cache_creator);
       config.inferred_function_schema = std::move(inferred_function_schema);
+      kernels.push_back(std::move(config));
       return std::move(*this);
     }
 
     template<class KernelFunctor, bool AllowDeprecatedTypes = false, class... ConstructorParameters>
-    Options&& kernelFunctor(ConstructorParameters&&... constructorParameters) && {
+    Options&& kernelFunctor(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
       return std::move(*this).kernel(
+        std::move(dispatch_key),
         &detail::wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes>::call,
         detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
         detail::FunctionSchemaInferer<KernelFunctor>()()
@@ -221,7 +291,7 @@ public:
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 
-    KernelRegistrationConfig config;
+    std::vector<KernelRegistrationConfig> kernels;
     friend class RegisterOperators;
   };
 
@@ -293,7 +363,7 @@ public:
    guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, RegisterOperators&&>
    op(const std::string& schemaOrName, FuncType* func, Options&& options = RegisterOperators::options()) && {
      constexpr bool AllowLegacyTypes = true;
-     return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(func));
+     return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, func));
    }
 
    /**
@@ -318,14 +388,18 @@ public:
       static_assert(!std::is_base_of<OperatorKernel, FuncType>::value, "c10::OperatorKernel is part of the new kernel registration API and shouldn't be used together with the deprecated registration API. Please use the new RegisterOperators::options().kernel() based API instead.");
 
       constexpr bool AllowLegacyTypes = true;
-      return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(std::forward<FuncType>(func)));
+      return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, std::forward<FuncType>(func)));
     }
 
 private:
-  void checkSchemaAndRegisterOp_(FunctionSchema&& schema, Options&& config);
+  void checkSchemaAndRegisterOp_(FunctionSchema schema, Options&& config);
   void checkSchemaAndRegisterOp_(const std::string& schemaOrName, Options&& config);
 
-  void registerOp_(FunctionSchema&& schema, Options&& config);
+  static c10::FunctionSchema inferSchemaFromKernels_(const std::string& opNameStr, const Options& options);
+  void checkNoDuplicateKernels_(const FunctionSchema& schema, const Options& options);
+  void registerOp_(FunctionSchema&& schema, Options&& options);
+  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config);
+  void registerSchemaOnly_(FunctionSchema&& schema);
 
   class OperatorRegistrar;
 

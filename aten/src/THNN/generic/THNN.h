@@ -526,28 +526,6 @@ TH_API void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
           int adjW, int adjH,
           accreal scale);
 
-TH_API void THNN_(SpatialDilatedMaxPooling_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THIndexTensor *indices,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int dilationW, int dilationH,
-          bool ceil_mode);
-TH_API void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THIndexTensor *indices,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int dilationW, int dilationH,
-          bool ceil_mode);
-
 TH_API void THNN_(SpatialMaxUnpooling_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -679,28 +657,6 @@ TH_API void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
           int dilationT, int dilationW, int dilationH,
           int aT, int aW, int aH,   // extra output adjustment
           accreal scale);           // scaling factor
-
-TH_API void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THIndexTensor *indices,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int pT, int pW, int pH,
-          int dilationT, int dilationW, int dilationH,
-          bool ceilMode);
-TH_API void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THIndexTensor *indices,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int pT, int pW, int pH,
-          int dilationT, int dilationW, int dilationH,
-          bool ceilMode);
 
 TH_API void THNN_(VolumetricMaxUnpooling_updateOutput)(
           THNNState *state,

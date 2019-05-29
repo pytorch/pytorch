@@ -35,6 +35,13 @@ namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
+namespace {
+ExportModuleExtraFilesHook& GetExtraFilesHook() {
+  static ExportModuleExtraFilesHook func = nullptr;
+  return func;
+};
+}
+
 class ScriptModuleSerializer;
 
 std::string getNodeStackTraceString(const Node* n) {
@@ -550,6 +557,7 @@ ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
 void ScriptModuleSerializer::serialize(
     const script::Module& module,
     const script::ExtraFilesMap& extra_files) {
+  C10_LOG_API_USAGE_ONCE("torch.script.save");
   torch::ModelDef model_def;
   convertModel(module, &model_def, extra_files);
   std::string output;
@@ -669,6 +677,14 @@ void ScriptModuleSerializer::convertModel(
   for (const auto& kv : extra_files) {
     const std::string key = "extra/" + kv.first;
     writer_.writeRecord(key, kv.second.data(), kv.second.size());
+  }
+  auto hook = GetExtraFilesHook();
+  if (hook) {
+    script::ExtraFilesMap hook_files = hook(module);
+    for (const auto& kv : hook_files) {
+      const std::string key = "extra/" + kv.first;
+      writer_.writeRecord(key, kv.second.data(), kv.second.size());
+    }
   }
 }
 
@@ -1070,6 +1086,10 @@ std::string prettyPrint(const onnx::ModelProto& model) {
 }
 
 } // namespace
+
+void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
+  GetExtraFilesHook() = hook;
+}
 
 std::string pretty_print_onnx(
     const std::shared_ptr<Graph>& graph,

@@ -174,6 +174,10 @@ struct SymbolicVariable {
     return create(aten::type_as, {*this, rhs})[0].typeLikeWithRhsScalarType(
         *this, rhs);
   }
+  SymbolicVariable size_if_not_equal(const SymbolicVariable other) const {
+    return create(aten::_size_if_not_equal, {this->size(), other.size()})[0]
+        .toType(OptionalType::create(ListType::ofInts()));
+  }
   SymbolicVariable narrow(int dim, int64_t start, int64_t length) const {
     return create(
         t("narrow"),
@@ -322,6 +326,11 @@ struct SymbolicVariable {
           ->insertNode(v->owningGraph()->createNone(IntType::get()))
           ->output();
     }
+  }
+
+  SymbolicVariable toType(TypePtr type) const {
+    v->setType(type);
+    return *this;
   }
 
   SymbolicVariable typeLikeWithScalarType(

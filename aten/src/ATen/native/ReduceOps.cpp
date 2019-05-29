@@ -4,7 +4,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -150,7 +149,7 @@ static std::unique_ptr<TensorIterator> make_reduction(
 }
 
 Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  return at::legacy::th::_th_cumsum(integer_upcast(self, dtype), dim);
+  return at::_cumsum(integer_upcast(self, dtype), dim);
 }
 
 Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
@@ -162,11 +161,11 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optiona
       " and ",
       toString(dtype.value()),
       ".");
-  return at::legacy::th::_th_cumsum_out(result, self.toType(result.scalar_type()), dim);
+  return at::_cumsum_out(result, self.toType(result.scalar_type()), dim);
 }
 
 Tensor cumprod(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  return at::legacy::th::_th_cumprod(integer_upcast(self, dtype), dim);
+  return at::_cumprod(integer_upcast(self, dtype), dim);
 }
 
 Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
@@ -178,7 +177,7 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
       " and ",
       toString(dtype.value()),
       ".");
-  return at::legacy::th::_th_cumprod_out(result, self.toType(result.scalar_type()), dim);
+  return at::_cumprod_out(result, self.toType(result.scalar_type()), dim);
 }
 
 
@@ -596,7 +595,7 @@ Tensor var(const Tensor& self, bool unbiased) {
            "var only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   TORCH_CHECK(at::isFloatingType(self.scalar_type()), "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  return trivial_return.has_value() ? trivial_return.value() : at::legacy::th::_th_var(self, unbiased);
+  return trivial_return.has_value() ? trivial_return.value() : at::_var(self, unbiased);
 }
 
 Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
@@ -613,7 +612,7 @@ Tensor std(const Tensor& self, bool unbiased) {
            "std only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   TORCH_CHECK(at::isFloatingType(self.scalar_type()), "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  return trivial_return.has_value() ? trivial_return.value() : at::legacy::th::_th_std(self, unbiased);
+  return trivial_return.has_value() ? trivial_return.value() : at::_std(self, unbiased);
 }
 
 Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {

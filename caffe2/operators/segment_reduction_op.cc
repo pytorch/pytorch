@@ -579,3 +579,36 @@ REGISTER_LENGTHS_OPS_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT(
     LengthsMaxWithMainInputAndForwardOutputGradient,
     AbstractLengthsDef<float, int, CPUContext, MaxReducerDef>);
 } // namespace caffe2
+
+// Macro doesn't like comma
+using LengthsSumCPUOp = caffe2::AbstractLengthsDef<
+    float,
+    int,
+    caffe2::CPUContext,
+    caffe2::SumReducerDef,
+    true>::ForwardOp;
+using LengthsMeanCPUOp = caffe2::AbstractLengthsDef<
+    float,
+    int,
+    caffe2::CPUContext,
+    caffe2::MeanReducerDef,
+    true>::ForwardOp;
+using LengthsMaxCPUOp = caffe2::AbstractLengthsDef<
+    float,
+    int,
+    caffe2::CPUContext,
+    caffe2::MaxReducerDef,
+    true>::ForwardOp;
+
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    LengthsSum,
+    "_caffe2::LengthsSum(Tensor data, Tensor lengths) -> Tensor",
+    LengthsSumCPUOp);
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    LengthsMean,
+    "_caffe2::LengthsMean(Tensor data, Tensor lengths) -> Tensor",
+    LengthsMeanCPUOp);
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    LengthsMax,
+    "_caffe2::LengthsMax(Tensor data, Tensor lengths) -> Tensor",
+    LengthsMaxCPUOp);

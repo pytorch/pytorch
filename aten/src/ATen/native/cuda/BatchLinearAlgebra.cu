@@ -126,6 +126,25 @@ void magmaTriangularSolveBatched(
   AT_ERROR("triangular_solve only takes float or double Tensors");
 }
 
+template<class scalar_t>
+inline magma_int_t magmaGeqrfOptimalBlocksize(magma_int_t m, magma_int_t n) {
+  AT_ERROR("geqrf only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void magmaGeqrf(
+    magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
+    scalar_t* tau, scalar_t* dT, magma_int_t* info, bool is_v2) {
+  AT_ERROR("geqrf only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void magmaOrgqr(
+    magma_int_t m, magma_int_t n, magma_int_t k, scalar_t* dA,
+    magma_int_t ldda, scalar_t* tau, scalar_t* dT, magma_int_t nb, magma_int_t* info) {
+  AT_ERROR("orgqr only takes float or doule Tensors");
+}
+
 template<>
 void magmaSolve<double>(
     magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda,
@@ -338,6 +357,52 @@ void magmaTriangularSolveBatched<float>(
     float** dA_array, magma_int_t ldda, float** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
   magmablas_strsm_batched(MagmaLeft, uplo, trans, diag, m, n, 1, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
+}
+
+template<>
+inline magma_int_t magmaGeqrfOptimalBlocksize<double>(magma_int_t m, magma_int_t n) {
+  return magma_get_dgeqrf_nb(m, n);
+}
+
+template<>
+inline magma_int_t magmaGeqrfOptimalBlocksize<float>(magma_int_t m, magma_int_t n) {
+  return magma_get_sgeqrf_nb(m, n);
+}
+
+template<>
+void magmaGeqrf<double>(
+    magma_int_t m, magma_int_t n, double* dA, magma_int_t ldda,
+    double* tau, double* dT, magma_int_t* info, bool is_v2) {
+  if (!is_v2) {
+    magma_dgeqrf_gpu(m, n, dA, ldda, tau, dT, info);
+  } else {
+    magma_dgeqrf2_gpu(m, n, dA, ldda, tau, info);
+  }
+}
+
+template<>
+void magmaGeqrf<float>(
+    magma_int_t m, magma_int_t n, float* dA, magma_int_t ldda,
+    float* tau, float* dT, magma_int_t* info, bool is_v2) {
+  if (!is_v2) {
+    magma_sgeqrf_gpu(m, n, dA, ldda, tau, dT, info);
+  } else {
+    magma_sgeqrf2_gpu(m, n, dA, ldda, tau, info);
+  }
+}
+
+template<>
+void magmaOrgqr<double>(
+    magma_int_t m, magma_int_t n, magma_int_t k, double* dA, magma_int_t ldda,
+    double* tau, double* dT, magma_int_t nb, magma_int_t* info) {
+  magma_dorgqr_gpu(m, n, k, dA, ldda, tau, dT, nb, info);
+}
+
+template<>
+void magmaOrgqr<float>(
+    magma_int_t m, magma_int_t n, magma_int_t k, float* dA, magma_int_t ldda,
+    float* tau, float* dT, magma_int_t nb, magma_int_t* info) {
+  magma_sorgqr_gpu(m, n, k, dA, ldda, tau, dT, nb, info);
 }
 #endif
 
@@ -868,6 +933,105 @@ std::tuple<Tensor, Tensor> _triangular_solve_helper_cuda(const Tensor& self, con
     apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, upper, transpose, unitriangular);
   });
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_qr(Tensor& Q, Tensor& R, int64_t n_columns, std::vector<int64_t>& infos) {
+#ifndef USE_MAGMA
+AT_ERROR("qr: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  auto q_data = Q.data<scalar_t>();
+  auto r_data = R.data<scalar_t>();
+  auto q_matrix_stride = matrixStride(Q);
+  auto r_matrix_stride = matrixStride(R);
+
+  magma_int_t m = magma_int_cast(Q.size(-2), "Q.size(-2)");
+  magma_int_t n = magma_int_cast(R.size(-1), "R.size(-1)");
+  magma_int_t k = m < n ? m : n;
+  magma_int_t nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
+  int64_t batch_size = batchCount(R);
+
+  Tensor tau = at::empty({k}, Q.options().device(at::kCPU));
+  Tensor work = at::empty({(2 * k + magma_roundup(n, 32)) * nb}, R.options());
+  scalar_t* tau_data = tau.data<scalar_t>();
+  scalar_t* work_data = work.data<scalar_t>();
+
+  // This phase computes R (the raw version)
+  // This uses MAGMA's ?geqrf2_gpu function
+  magma_int_t info = 0;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* r_working_ptr = &r_data[i * r_matrix_stride];
+    magmaGeqrf<scalar_t>(m, n, r_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/true);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+
+  // This phase computes Q (the raw version)
+  // We require to perform ?geqrf_gpu again due to this bug in MAGMA:
+  // - ?geqrf_gpu allows fast computation of Q via ?orgqr_gpu, but doesn't give R properly.
+  // - ?geqrf2_gpu gives correct R, but doesn't allow computation of Q via ?orgqr_gpu
+  // Refer to the below link for more details:
+  // http://icl.cs.utk.edu/magma/forum/viewtopic.php?f=2&t=1015&p=2800&hilit=geqrf_gpu#p2800
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* q_working_ptr = &q_data[i * q_matrix_stride];
+    magmaGeqrf<scalar_t>(m, n, q_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/false);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+    magmaOrgqr<scalar_t>(m, n_columns, k, q_working_ptr, m, tau_data, work_data, nb, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+
+  // Setup input geometry and inputs for apply_qr
+  std::vector<int64_t> q_sizes, q_strides;
+  int64_t n_columns_q;
+  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, some);
+  Tensor q_working_copy, r_working_copy;
+
+  // If there are no elements, then we simply return a pair of tensors of required dimensions
+  if (self.numel() == 0) {
+    // Fix the number of columns of q_working_copy appropriately
+    q_sizes[self.dim() - 1] = n_columns_q;
+    q_working_copy = at::eye(q_sizes[self.dim() - 2], q_sizes[self.dim() - 1], self.options());
+    q_working_copy = q_working_copy.expand_as(q_working_copy);
+
+    // We repurpose the same q_sizes for r_working_copy
+    // Fix the number of rows and columns of q_working_copy appropriately
+    q_sizes[self.dim() - 1] = self.size(-1);
+    q_sizes[self.dim() - 2] = n_columns_q;
+    r_working_copy = at::empty(q_sizes, self.options());
+    return std::make_tuple(q_working_copy, r_working_copy);
+  }
+
+  q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
+  q_working_copy.narrow(-1, 0, self.size(-1)).copy_(self);
+  r_working_copy = cloneBatchedColumnMajor(self);
+
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "qr_cuda", [&]{
+    apply_qr<scalar_t>(q_working_copy, r_working_copy, n_columns_q, infos);
+  });
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "qr_cuda");
+  } else {
+    singleCheckErrors(infos[0], "qr_cuda");
+  }
+
+  return std::make_tuple(q_working_copy.narrow_copy(-1, 0, n_columns_q),
+                         r_working_copy.narrow_copy(-2, 0, n_columns_q).triu_());
 }
 
 }}  // namespace at::native
