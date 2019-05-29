@@ -29,24 +29,18 @@ void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
   add_kernel(iter, -alpha_scalar);
 }
 
-template <typename T>
-T multiply(T a, T b) {
-  return a * b;
-}
-
-template<>
-bool multiply<bool>(bool a, bool b) {
-  return a && b;
-}
-
 void mul_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "mul_cpu", [&]() {
-    binary_kernel_vec(iter,
-      [=](scalar_t a, scalar_t b) -> scalar_t { return multiply(a, b); },
-      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-        return multiply(a, b);
-      });
-  });
+  if (iter.dtype() == ScalarType::Bool) {
+    binary_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
+  } else {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "mul_cpu", [&]() {
+      binary_kernel_vec(iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+          return a * b;
+        });
+    });
+  }
 }
 
 void div_kernel(TensorIterator& iter) {
