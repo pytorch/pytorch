@@ -6283,19 +6283,6 @@ a")
         x = torch.arange(4., requires_grad=True)
         self.checkScript(func, [x], optimize=True, capture_output=True)
 
-    def test_joined_str(self):
-        def func(x):
-            hello, test = "Hello", "test"
-            print(f"{hello + ' ' + test}, I'm a {test}")
-            print(f"format blank")
-            hi = 'hi'
-            print(f"stuff before {hi}")
-            print(f"{hi} stuff after")
-            return x + 1
-
-        x = torch.arange(4., requires_grad=True)
-        self.checkScript(func, [x], optimize=True, capture_output=True)
-
     def test_logical_short_circuit(self):
         @torch.jit.script
         def testNoThrows(t):
@@ -16189,3 +16176,7 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
+    if not PY2:
+        import test_jit_py3
+        suite = unittest.findTestCases(test_jit_py3)
+        unittest.TextTestRunner().run(suite)
