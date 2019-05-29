@@ -101,9 +101,10 @@ enum class TORCH_API ProfilerState {
     NVTX,  // only emit NVTX markers
 };
 
-struct ProfilerConfig {
+struct TORCH_API ProfilerConfig {
   ProfilerConfig(ProfilerState state, bool report_input_shapes)
       : state(state), report_input_shapes(report_input_shapes) {}
+  ~ProfilerConfig();
   ProfilerState state;
   bool report_input_shapes;
 };

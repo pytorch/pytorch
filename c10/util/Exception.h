@@ -163,7 +163,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // Assuming no bugs in PyTorch, the conditions tested by this macro should
 // always be true; e.g., it should be possible to disable all of these
 // conditions without changing observable user behavior.  If you would like to
-// do error reporting for user input, please use AT_CHECK instead.
+// do error reporting for user input, please use TORCH_CHECK instead.
 //
 // NOTE: It is SAFE to use this macro in production code; on failure, this
 // simply raises an exception, it does NOT unceremoniously quit the process
@@ -290,25 +290,22 @@ C10_DEPRECATED_MESSAGE("AT_WARN is deprecated, use TORCH_WARN instead.")
 */
 inline void deprecated_AT_WARN() {}
 
-/*
-// Deprecation disabled until we fix sites in our codebase
 C10_DEPRECATED_MESSAGE("AT_CHECK is deprecated, use TORCH_CHECK instead.")
-*/
 inline void deprecated_AT_CHECK() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
 C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an internal invariant failure, use " \
-                       "AT_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "AT_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
+                       "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
+                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERT() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
 C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an internal invariant failure, use " \
-                       "AT_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
-                       "AT_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
+                       "TORCH_INTERNAL_ASSERT instead; if you mean to do user error checking, use " \
+                       "TORCH_CHECK.  See https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERTM() {}
 

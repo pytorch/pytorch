@@ -430,9 +430,6 @@ void addInputs(Node* n, const char* name, const std::string& value) {
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
   n->addInput(getValueTrace(value));
 }
-void addInputs(Node* n, const char* name, const at::SparseTensorRef& value) {
-  detail::badArgType(value);
-}
 void addInputs(Node* n, const char* name, at::Generator* value) {
   if (value) {
     detail::badArgType(value);
@@ -449,6 +446,9 @@ void addInputs(Node* n, const char* name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
 void addInputs(Node* n, const char* name, at::ScalarType value) {
+  detail::genericAddInput(n, static_cast<int64_t>(value));
+}
+void addInputs(Node* n, const char* name, at::MemoryFormat value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
 void addInputs(

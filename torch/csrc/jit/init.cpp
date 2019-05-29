@@ -170,11 +170,13 @@ void initJITBindings(PyObject* module) {
             return InsertQuantDequantNodes(g, qparam_dict);
           })
       .def(
-          "_jit_pass_insert_quantdequant_for_param",
+          "_jit_pass_insert_quantdequant_for_weight_bias",
           [](std::shared_ptr<script::Module>& moduleObj,
              const std::string& method_name,
              const std::string& param_name,
              py::function pyGetQParamFunc) {
+            // For different static params we pass different getQParamFunc via
+            // same interface exposed by the quantizer.
             if (param_name == std::string("weight")) {
               auto getQParamFunc =
                   py::cast<std::function<std::tuple<std::string, float, int>(
@@ -185,6 +187,18 @@ void initJITBindings(PyObject* module) {
                   param_name,
                   getQParamFunc,
                   at::ScalarType::QInt8);
+            } else if (param_name == std::string("bias")) {
+              auto getQParamFunc =
+                  py::cast<std::function<std::tuple<std::string, float, int>(
+                      float, float)>>(pyGetQParamFunc);
+              InsertQuantDequantNodesForParam(
+                  moduleObj,
+                  method_name,
+                  param_name,
+                  getQParamFunc,
+                  at::ScalarType::QInt32);
+            } else {
+              TORCH_CHECK(false, "Invalid Param Name");
             }
           })
       .def(

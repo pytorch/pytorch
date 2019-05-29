@@ -53,7 +53,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/native/TensorIterator.h>
 
 #include <algorithm>
 #include <functional>
@@ -209,7 +210,7 @@ static std::unique_ptr<TensorIterator> make_index_put_iterator(const AdvancedInd
   builder.dont_compute_common_dtype();
   builder.dont_resize_outputs();
   builder.add_output(info.src);
-  builder.add_input(value, info.src.type().backend(), info.src.scalar_type());
+  builder.add_input(value, info.src.device(), info.src.scalar_type());
   for (auto& index : info.indices) {
     builder.add_input(index);
   }
@@ -299,7 +300,7 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
           "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
   }
 
-  return at::legacy::th::_th_index_copy_(self, dim, index, source);
+  return at::_index_copy_(self, dim, index, source);
 }
 
 Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
