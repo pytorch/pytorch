@@ -1530,9 +1530,9 @@ class _TestTorchMixin(object):
         self.assertEqual(m1 + m2, [])
 
         # bool
-        m1 = torch.tensor([True, False, False, True,  False, False], dtype=torch.bool)
-        m2 = torch.tensor([True, True,  False, False, False, True], dtype=torch.bool)
-        self.assertEqual(m1 + m2, torch.tensor([True, True, False, True,  False, True], dtype=torch.bool))
+        m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool)
+        m2 = torch.tensor([True, True, False, False, False, True], dtype=torch.bool)
+        self.assertEqual(m1 + m2, torch.tensor([True, True, False, True, False, True], dtype=torch.bool))
 
         # [res] torch.add([res,] tensor1, value, tensor2)
 
@@ -1613,8 +1613,8 @@ class _TestTorchMixin(object):
         self.assertEqual(res1, res2)
 
         a1 = torch.tensor([True, False, False, True], dtype=torch.bool)
-        a2 = torch.tensor([True, False,  True, False], dtype=torch.bool)
-        self.assertEqual(a1 * a2, torch.tensor([True, False,  False, False], dtype=torch.bool))
+        a2 = torch.tensor([True, False, True, False], dtype=torch.bool)
+        self.assertEqual(a1 * a2, torch.tensor([True, False, False, False], dtype=torch.bool))
 
     def test_div(self):
         m1 = torch.randn(10, 10)
