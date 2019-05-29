@@ -12,7 +12,9 @@ from ..._jit_internal import weak_module, weak_script_method, List
 @weak_module
 class _ConvNd(Module):
 
-    __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias', 'padding_mode']
+    __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias',
+                     'padding_mode', 'output_padding', 'in_channels',
+                     'out_channels', 'kernel_size']
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
