@@ -47,7 +47,14 @@ struct CAFFE2_API SourceRange {
       const std::exception& e,
       const std::string& additional = "") {
     std::stringstream msg;
-    msg << "\n" << e.what() << ":\n";
+    std::string what;
+    auto c10_error = dynamic_cast<const c10::Error*>(&e);
+    if (c10_error) {
+      what = c10_error->msg_without_backtrace();
+    } else {
+      what = e.what();
+    }
+    msg << "\n" << what << ":\n";
     if (!additional.empty()) {
       msg << additional << ":\n";
     }

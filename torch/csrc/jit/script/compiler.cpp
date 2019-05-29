@@ -24,7 +24,6 @@ namespace torch {
 namespace jit {
 namespace script {
 
-using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 using FunctionTable = std::unordered_map<std::string, Function&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
@@ -145,6 +144,13 @@ static Value* asSimple(const SugaredValuePtr& value) {
   }
   return nullptr;
 }
+
+static std::shared_ptr<MagicMethod> makeMagic(
+    const std::string& name,
+    SugaredValuePtr base) {
+  return std::make_shared<MagicMethod>(name, base);
+}
+
 // we consider _N where N is a number, to be a non-meaningful name
 // and do not record it as a unique name. This allows python printing to
 // be able to export and import more consistently named graphs
@@ -353,9 +359,9 @@ struct Environment {
               unshapedType(simple_parent->type()))) {
         std::stringstream errMsg;
         errMsg << "variable '" << name << "' previously has type "
-               << simple_parent->type()->str()
+               << simple_parent->type()->python_str()
                << " but is now being assigned to a value of type "
-               << as_simple_value->type()->str();
+               << as_simple_value->type()->python_str();
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
             as_simple_value->type()->kind() == TypeKind::ListType) {
@@ -388,17 +394,32 @@ struct Environment {
     if (!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
-          {"float", std::make_shared<CastValue>(FloatType::get(), prim::Float)},
-          {"int", std::make_shared<CastValue>(IntType::get(), prim::Int)},
-          {"bool", std::make_shared<CastValue>(BoolType::get(), prim::Bool)},
-          {"str", std::make_shared<CastValue>(StringType::get(), prim::str)},
+          {"float",
+           makeMagic(
+               "__float__",
+               std::make_shared<CastValue>(FloatType::get(), prim::Float))},
+          {"int",
+           makeMagic(
+               "__int__",
+               std::make_shared<CastValue>(IntType::get(), prim::Int))},
+          {"bool",
+           makeMagic(
+               "__bool__",
+               std::make_shared<CastValue>(BoolType::get(), prim::Bool))},
+          {"str",
+           makeMagic(
+               "__str__",
+               std::make_shared<CastValue>(StringType::get(), prim::str))},
           {"getattr", std::make_shared<GetAttrValue>()},
           {"isinstance", std::make_shared<IsInstanceValue>()},
           // todo(zach): remove when we can correctly export torch.full via ONNX
           // or we have implicit conversion that can convert numbers to tensors
           {"_to_tensor",
            std::make_shared<CastValue>(TensorType::get(), prim::NumToTensor)},
-          {"len", std::make_shared<OperatorOverload>(aten::len, "__len__")},
+          {"len",
+           makeMagic(
+               "__len__",
+               std::make_shared<BuiltinFunction>(aten::len, at::nullopt))},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
@@ -498,7 +519,7 @@ static Value* materializeConstant(
 static Value* ensureInt(const SourceRange& range, Value* v) {
   if (!v->type()->isSubtypeOf(IntType::get())) {
     throw ErrorReport(range)
-        << "expected a int but found a " << v->type()->str();
+        << "expected a int but found a " << v->type()->python_str();
   }
   return v;
 }
@@ -952,8 +973,7 @@ struct to_ir {
   }
 
   Node* create(Symbol kind, const SourceRange& loc, size_t n_outputs) {
-    return graph->create(kind, n_outputs)
-        ->setSourceRange(loc);
+    return graph->create(kind, n_outputs)->setSourceRange(loc);
   }
 
   Value* emitTernaryIf(const TernaryIf& expr) {
@@ -1106,8 +1126,8 @@ struct to_ir {
     auto unified = unifyTypes(true_type, false_type);
     if (!unified) {
       throw ErrorReport(range)
-          << "if-expression's true branch has type " << true_type->str()
-          << " but false branch has type " << false_type->str();
+          << "if-expression's true branch has type " << true_type->python_str()
+          << " but false branch has type " << false_type->python_str();
     }
 
     // Add op outputs
@@ -1118,26 +1138,21 @@ struct to_ir {
 
   Value* emitCond(const Expr& cond) {
     Value* v = emitExpr(cond);
-    if (!v->type()->isSubtypeOf(BoolType::get())) {
-      Value* cast_v = emitBuiltinCall(
-          cond.get()->range(),
-          *v->owningGraph(),
-          prim::Bool,
-          c10::nullopt,
-          {v},
-          {},
-          /*required*/ false);
-      if (cast_v == nullptr) {
-        ErrorReport error(cond);
-        error
-            << "expected a bool, int, float, or Tensor expression for condition but found "
-            << v->type()->str();
-        throw error;
-      } else {
-        v = cast_v;
-      }
+    Value* out;
+    try {
+      auto bool_cast = environment_stack->getSugaredVar("bool", cond.range());
+      out = asSimple(bool_cast->call(cond.get()->range(), method, {v}, {}, 0));
+    } catch (...) {
+      throw ErrorReport(cond.range()) << "Could not cast value of type "
+                                      << v->type()->python_str() << " to bool";
     }
-    return v;
+    // cast value not response for checking output type
+    if (!out->type()->isSubtypeOf(BoolType::get())) {
+      throw ErrorReport(cond)
+          << "expected a bool expression for condition but found "
+          << out->type()->python_str();
+    }
+    return out;
   }
 
   void emitIfElseBlocks(Value* cond_value, const If& stmt) {
@@ -1210,8 +1225,9 @@ struct to_ir {
       if (!unified) {
         ErrorReport error(stmt);
         error << "Type mismatch: " << x << " is set to type "
-              << tv->type()->str() << " in the true branch"
-              << " and type " << fv->type()->str() << " in the false branch";
+              << tv->type()->python_str() << " in the true branch"
+              << " and type " << fv->type()->python_str()
+              << " in the false branch";
         if (save_true->findInParentFrame(x) ||
             save_false->findInParentFrame(x)) {
           throw error;
@@ -2239,10 +2255,11 @@ struct to_ir {
             << arg->kind() << " instead";
       }
       if (class_arg->type_ != classNew->type_) {
-        throw ErrorReport(loc) << "Argument to __new__() must match the class "
-                               << "you are calling __new__() on. "
-                               << "Got: " << class_arg->type_->str()
-                               << ", expected: " << classNew->type_->str();
+        throw ErrorReport(loc)
+            << "Argument to __new__() must match the class "
+            << "you are calling __new__() on. "
+            << "Got: " << class_arg->type_->python_str()
+            << ", expected: " << classNew->type_->python_str();
       }
 
       return classNew->createObject(apply.range(), method);
@@ -2348,8 +2365,10 @@ struct to_ir {
     const auto& inputs = tree->trees();
     auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
     auto neg_val =
-        asSimple(OperatorOverload(aten::neg, "__neg__")
-                     .call(tree->range(), method, named_values, {}, 0));
+        asSimple(makeMagic(
+                     "__neg__",
+                     std::make_shared<BuiltinFunction>(aten::neg, at::nullopt))
+                     ->call(tree->range(), method, named_values, {}, 0));
 
     // constant fold the input if possible
 
@@ -2376,10 +2395,9 @@ struct to_ir {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes) {
     // Build the fork node without inputs
-    auto fork_node =
-        method.graph()
-            ->insertNode(method.graph()->create(prim::fork, 1))
-            ->setSourceRange(loc);
+    auto fork_node = method.graph()
+                         ->insertNode(method.graph()->create(prim::fork, 1))
+                         ->setSourceRange(loc);
     auto body_block = fork_node->addBlock();
 
     // Build a template of the graph to be executed
@@ -2437,8 +2455,10 @@ struct to_ir {
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto overload = getOperatorOverload(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-        return asSimple(OperatorOverload(kind, overload)
-                            .call(tree->range(), method, named_values, {}, 0));
+        return asSimple(
+            makeMagic(
+                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+                ->call(tree->range(), method, named_values, {}, 0));
       }
       case TK_NOT: {
         Value* input = emitCond(Expr(tree->trees()[0]));
@@ -2723,7 +2743,7 @@ struct to_ir {
       }
       throw ErrorReport(loc)
           << "Unsupported operation: indexing tensor with unsupported index type '"
-          << index->type()->str()
+          << index->type()->python_str()
           << "'. Only ints, slices, and tensors are supported";
     }
     // at::index takes in a List[Optional[Tensor]] where some dims can be None.
@@ -2980,8 +3000,7 @@ struct FunctionResolver : public Resolver {
       functionTable_;
 };
 
-CompilationUnit::CompilationUnit(const std::string& source)
-{
+CompilationUnit::CompilationUnit(const std::string& source) {
   // calles the define with native resolver to generate the graph for functions
   define(source, nativeResolver(), nullptr);
 }

@@ -29,11 +29,11 @@ export ASAN_OPTIONS=detect_leaks=0:symbolize=1
 # [2] https://wiki.gentoo.org/wiki/AddressSanitizer/Problems
 # [3] https://github.com/Kitware/CMake/commit/e9a1ddc594de6e6251bf06d732775dae2cabe4c8
 #
-# TODO: Make the ASAN flags a more unified env var
+# TODO: Make the ASAN flags a centralized env var and unify with USE_ASAN option
 CC="clang" CXX="clang++" LDSHARED="clang --shared" \
   CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
-  NO_CUDA=1 USE_MKLDNN=0 \
+  USE_ASAN=1 NO_CUDA=1 USE_MKLDNN=0 \
   python setup.py install
 
 assert_git_not_dirty

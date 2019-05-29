@@ -101,5 +101,38 @@ fbgemm::CompressedSparseColumn* ExtractOutlierMatrix(
     int M,
     int nbits_in_non_outlier,
     vector<std::int8_t>& W_quantized);
+/*
+ * Set up used onnxifi data type constexpr
+ * Should always be synced with onnxifi.h
+ */
+constexpr uint64_t kONNXIFI_DATATYPE_UINT8 = 2;
+constexpr uint64_t kONNXIFI_DATATYPE_INT32 = 6;
+constexpr uint64_t kONNXIFI_DATATYPE_INT8 = 3;
+
+class Int8DNNLowpPackedWeightBlobShapeFunctions
+    : public ExternalTensorFunctionsBase {
+ public:
+  explicit Int8DNNLowpPackedWeightBlobShapeFunctions()
+      : ExternalTensorFunctionsBase() {}
+  ~Int8DNNLowpPackedWeightBlobShapeFunctions() override {}
+  bool IsSameMetaType(TypeIdentifier id) override;
+  void SetupExternalTensorDescriptor(
+      const Blob* blob,
+      std::vector<std::vector<uint64_t>>* shapes,
+      std::vector<std::vector<float>>* all_scales,
+      std::vector<std::vector<float>>* all_offsets,
+      ExternalTensorDescriptor* desc) override;
+  void LoadInfoOfBlob(
+      const Blob* blob,
+      std::vector<float>* scale,
+      std::vector<float>* offset,
+      uint32_t* axis) override;
+  TypeIdentifier GetTypeMetaId(const string& name) override;
+  TypeMeta GetExternalTensorType(const void* c) override;
+  vector<int64_t> GetExternalTensorInfo(
+      const void* c,
+      size_t* capacity,
+      DeviceOption* device) override;
+};
 
 } // namespace caffe2
