@@ -403,6 +403,11 @@
   self: "accumulate ? grad : grad.clone().index_put_(indices, zeros_like(values), false)"
   values: grad.index(indices)
 
+- name: _index_put_impl_(Tensor self, TensorList indices, Tensor values, bool accumulate, bool unsafe)
+  self: "accumulate ? grad : grad.clone().index_put_(indices, zeros_like(values), false)"
+  values: grad.index(indices)
+
+
 - name: index_select(Tensor self, int64_t dim, Tensor index)
   self: at::zeros(self.sizes(), grad.options()).index_add_(dim, index, grad)
 
