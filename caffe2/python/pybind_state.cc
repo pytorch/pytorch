@@ -422,7 +422,15 @@ void addObjectMethods(py::module& m) {
       .def("_wrap_tensor_impl", [](Blob* blob, void* ptr) {
         auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
             unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
+        // TODO: In the near future, a PyTorch tensor without AutogradMeta will be
+        // a valid tensor. At that point, we will only accept non-requires-grad
+        // tensor into Caffe2 workspace, and don't need to perform shallow-copying
+        // here anymore.
+        p = p->shallow_copy_and_detach(
+            /*version_counter=*/p->version_counter(),
+            /*allow_tensor_metadata_change=*/p->allow_tensor_metadata_change());
         TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
+        TORCH_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
         auto at_tensor = at::Tensor::wrap_tensor_impl(std::move(p));
         BlobSetTensor(blob, Tensor(std::move(at_tensor)));
       });

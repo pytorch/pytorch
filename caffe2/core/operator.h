@@ -6,12 +6,15 @@
 #include <climits>
 #include <cstddef>
 #include <exception>
+#include <functional>
 #include <set>
+#include <string>
 #include <typeinfo>
 #include <vector>
 
-#include "c10/macros/Macros.h"
-#include "c10/util/Registry.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/Registry.h>
+#include <c10/util/typeid.h>
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
@@ -328,6 +331,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   Tensor* OutputTensorAlias(int idx, const Tensor& src) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "OutputTensorAlias(idx, src) not (yet) supported for operators exported to c10.");
     return BlobSetTensor(OutputBlob(idx),
                   src.Alias());
   }
@@ -351,6 +357,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // note this does not check if the two Blobs points to the same Tensor, or if
   // the Tensor pointers point to the same TensorImpl, or if the Storages alias
   inline bool IsInputOutputAlias(int i, int j) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "IsInputOutputAlias(i, j) not (yet) supported for operators exported to c10.");
     return inputs_.at(i) == outputs_.at(j);
   }
 
@@ -394,8 +403,18 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
   }
-  inline const vector<const Blob*>& Inputs() const { return inputs_; }
-  inline const vector<Blob*>& Outputs() { return outputs_; }
+  inline const vector<const Blob*>& Inputs() const {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "Inputs() not supported for operators exported to c10.");
+    return inputs_;
+  }
+  inline const vector<Blob*>& Outputs() {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "Outputs() not supported for operators exported to c10.");
+    return outputs_;
+  }
   vector<TensorShape> InputTensorShapes() const;
 
   virtual void WaitEvent(const Event& ev, int /*stream_id */ = -1) {
@@ -464,6 +483,10 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   virtual void AddRelatedBlobInfo(EnforceNotMet* err) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "AddRelatedBlobInfo(err) not supported for operators exported to c10.");
+
     if (!has_debug_def()) {
       return;
     }
@@ -1430,6 +1453,57 @@ CAFFE2_API std::set<std::string> GetRegisteredOperators();
 // Operator logging capabilities
 CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
 std::function<void(const OperatorDef&)> GetOperatorLogger();
+
+#ifndef C10_MOBILE
+// This is for transferring tensor data between C2 and backends.
+struct ExternalTensorDescriptor {
+  uint64_t dataType;
+  uint32_t dimensions;
+  const uint64_t* shape;
+  uint32_t quantizationAxis;
+  uint64_t quantizationParams;
+  const float* scales;
+  const int32_t* biases;
+  uint64_t buffer;
+};
+
+class ExternalTensorFunctionsBase {
+ public:
+  explicit ExternalTensorFunctionsBase() {}
+  virtual ~ExternalTensorFunctionsBase() {}
+  virtual bool IsSameMetaType(TypeIdentifier id) = 0;
+  virtual void SetupExternalTensorDescriptor(
+      const Blob* blob,
+      std::vector<std::vector<uint64_t>>* shapes,
+      std::vector<std::vector<float>>* all_scales,
+      std::vector<std::vector<float>>* all_offsets,
+      ExternalTensorDescriptor* desc) = 0;
+  virtual void LoadInfoOfBlob(
+      const Blob* blob,
+      std::vector<float>* scale,
+      std::vector<float>* offset,
+      uint32_t* axis) = 0;
+  virtual TypeIdentifier GetTypeMetaId(const string& name) = 0;
+  virtual TypeMeta GetExternalTensorType(const void* c) = 0;
+  virtual vector<int64_t> GetExternalTensorInfo(
+      const void* c,
+      size_t* capacity,
+      DeviceOption* device) = 0;
+};
+
+C10_DECLARE_TYPED_REGISTRY(
+    ExternalTensorFunctionsBaseRegistry,
+    TypeIdentifier,
+    ExternalTensorFunctionsBase,
+    std::unique_ptr);
+
+#define REGISTER_EXTERNAL_TENSOR_FUNCTIONS(id, ...) \
+  C10_REGISTER_TYPED_CLASS(ExternalTensorFunctionsBaseRegistry, id, __VA_ARGS__)
+inline unique_ptr<ExternalTensorFunctionsBase> CreateExternalTensorFunctions(
+    TypeIdentifier id) {
+  return ExternalTensorFunctionsBaseRegistry()->Create(id);
+}
+#endif // C10_MOBILE
 
 }  // namespace caffe2
 

@@ -638,6 +638,11 @@ def make_module(mod, _module_class, executor_options):
         _module_class = TopLevelTracedModule
     return _module_class(mod, **executor_options)
 
+def wrap_check_inputs(check_inputs):
+    if check_inputs is None:
+        return None
+
+    return [{'forward' : c} for c in check_inputs]
 
 def trace(func,
           example_inputs,
@@ -721,13 +726,14 @@ def trace(func,
 
     if isinstance(func, torch.nn.Module):
         return trace_module(func, {'forward': example_inputs}, optimize,
-                            check_trace, check_inputs,
+                            check_trace, wrap_check_inputs(check_inputs),
                             check_tolerance, _force_outplace, _module_class)
 
     if (hasattr(func, '__self__') and isinstance(func.__self__, torch.nn.Module) and
             func.__name__ == 'forward'):
+
         return trace_module(func.__self__, {'forward': example_inputs}, optimize,
-                            check_trace, check_inputs,
+                            check_trace, wrap_check_inputs(check_inputs),
                             check_tolerance, _force_outplace, _module_class)
 
     executor_options = {'optimize': bool(optimize)}
@@ -1419,6 +1425,8 @@ if _enabled:
         def __getattr__(self, attr):
             if '_c' not in self.__dict__:
                 raise RuntimeError("ScriptModule has not been initialized, did you forget to call super's init?")
+            if self._c._has_attribute(attr):
+                return self._c._get_attribute(attr)
             if self._c._has_method(attr):
                 if attr in self.__class__._methods:
                     original_method = self.__class__._methods[attr].original_method
@@ -1430,9 +1438,6 @@ if _enabled:
                 # to improve invocation performance
                 self.__dict__[attr] = script_method
                 return script_method
-
-            if self._c._has_attribute(attr):
-                return self._c._get_attribute(attr)
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
@@ -1441,9 +1446,9 @@ if _enabled:
                     # Compile weak script module
                     value = _make_strong(value)
                 if attr == 'training':
-                    if self._c._has_buffer('training'):
+                    if self._c._has_attribute('training'):
                         self.__dict__['training'] = value
-                        self._c._get_buffer('training').fill_(int(value))
+                        self._c._set_attribute('training', value)
                         return
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
@@ -1507,7 +1512,7 @@ if _enabled:
 
         def __getstate__(self):
             raise pickle.PickleError(
-                "ScriptModules cannot be saved using torch.save. " +
+                "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. " +
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
 
@@ -1727,10 +1732,16 @@ if _enabled:
 class _ConstModuleList(ScriptModule):
     def __init__(self, modules):
         super(_ConstModuleList, self).__init__()
-        for i, module in enumerate(modules):
-            if _is_weak_type(type(module)):
-                module = _make_strong(module)
-            self.add_module(str(i), module)
+        if isinstance(modules, OrderedDict):
+            for key, module in modules.items():
+                if _is_weak_type(type(module)):
+                    module = _make_strong(module)
+                self.add_module(key, module)
+        else:
+            for i, module in enumerate(modules):
+                if _is_weak_type(type(module)):
+                    module = _make_strong(module)
+                self.add_module(str(i), module)
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
@@ -1758,7 +1769,7 @@ class _ConstSequential(_ConstModuleList):
     __constants__ = ['mods']
 
     def __init__(self, mods):
-        super(_ConstSequential, self).__init__(mods._modules.values())
+        super(_ConstSequential, self).__init__(mods._modules)
 
         # we define the forward method via self.define rather than
         # making it a direct class member (with a @script) annotation
@@ -1798,46 +1809,50 @@ def _get_builtin_table():
     for mod in _modules_containing_builtins:
         register_all(mod)
 
-    _builtin_table[id(warnings.warn)] = "aten::warn"
-    _builtin_table[id(_single)] = "aten::_single"
-    _builtin_table[id(_pair)] = "aten::_pair"
-    _builtin_table[id(_triple)] = "aten::_triple"
-    _builtin_table[id(_quadruple)] = "aten::_quadruple"
-    _builtin_table[id(_list_with_default)] = "aten::list_with_default"
-    _builtin_table[id(_unwrap_optional)] = "aten::_unwrap_optional"
-    _builtin_table[id(cudnn.is_acceptable)] = "aten::cudnn_is_acceptable"
-    _builtin_table[id(torch._C._infer_size)] = "aten::_infer_size"
-    _builtin_table[id(torch.nn.functional._no_grad_embedding_renorm_)] = "aten::_no_grad_embedding_renorm_"
+    builtin_ops = [
+        # Pairs of (function, op_name)
+        (_list_with_default, "aten::list_with_default"),
+        (_pair, "aten::_pair"),
+        (_quadruple, "aten::_quadruple"),
+        (_single, "aten::_single"),
+        (_triple, "aten::_triple"),
+        (_unwrap_optional, "aten::_unwrap_optional"),
+        (_wait, 'aten::wait'),
+        (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
+        (math.ceil, "aten::ceil"),
+        (math.copysign, "aten::copysign"),
+        (math.erf, "aten::erf"),
+        (math.erfc, "aten::erfc"),
+        (math.exp, "aten::exp"),
+        (math.expm1, "aten::expm1"),
+        (math.fabs, "aten::fabs"),
+        (math.floor, "aten::floor"),
+        (math.gamma, "aten::gamma"),
+        (math.lgamma, "aten::lgamma"),
+        (math.log, "aten::log"),
+        (math.log10, "aten::log10"),
+        (math.log1p, "aten::log1p"),
+        (math.pow, "aten::pow"),
+        (math.sqrt, "aten::sqrt"),
+        (torch._C._infer_size, "aten::_infer_size"),
+        (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
+        (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
+        (torch.nn.functional.interpolate, "aten::__interpolate"),
+        (torch.nn.functional.upsample_bilinear, "aten::__upsample_bilinear"),
+        (torch.nn.functional.upsample_nearest, "aten::__upsample_nearest"),
+        (torch.nn.functional.upsample, "aten::__upsample"),
+        (torch.nn.init._no_grad_fill_, "aten::_no_grad_fill_"),
+        (torch.nn.init._no_grad_normal_, "aten::_no_grad_normal_"),
+        (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
+        (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
+        (torch.nn.utils.rnn.get_packed_sequence, "aten::_pack_sequence"),
+        (warnings.warn, "aten::warn"),
+    ]
 
-    _builtin_table[id(math.floor)] = "aten::floor"
-    _builtin_table[id(math.ceil)] = "aten::ceil"
-    _builtin_table[id(math.log)] = "aten::log"
-    _builtin_table[id(math.log1p)] = "aten::log1p"
-    _builtin_table[id(math.log10)] = "aten::log10"
-    _builtin_table[id(math.exp)] = "aten::exp"
-    _builtin_table[id(math.sqrt)] = "aten::sqrt"
-    _builtin_table[id(math.pow)] = "aten::pow"
-    _builtin_table[id(math.copysign)] = "aten::copysign"
-    _builtin_table[id(math.erf)] = "aten::erf"
-    _builtin_table[id(math.erfc)] = "aten::erfc"
-    _builtin_table[id(math.expm1)] = "aten::expm1"
-    _builtin_table[id(math.fabs)] = "aten::fabs"
-    _builtin_table[id(math.gamma)] = "aten::gamma"
-    _builtin_table[id(math.lgamma)] = "aten::lgamma"
+    for builtin, aten_op in builtin_ops:
+        _builtin_table[id(builtin)] = aten_op
     if not PY2:
         _builtin_table[id(math.gcd)] = "aten::gcd"
-
-    _builtin_table[id(torch.nn.functional.interpolate)] = "aten::__interpolate"
-    _builtin_table[id(torch.nn.functional.upsample_nearest)] = "aten::__upsample_nearest"
-    _builtin_table[id(torch.nn.functional.upsample)] = "aten::__upsample"
-    _builtin_table[id(torch.nn.functional.upsample_bilinear)] = "aten::__upsample_bilinear"
-    _builtin_table[id(torch.nn.functional.assert_int_or_pair)] = "aten::_assert_int_or_pair"
-    _builtin_table[id(torch.nn.utils.rnn.get_packed_sequence)] = "aten::_pack_sequence"
-
-    _builtin_table[id(torch.nn.init._no_grad_fill_)] = "aten::_no_grad_fill_"
-    _builtin_table[id(torch.nn.init._no_grad_normal_)] = "aten::_no_grad_normal_"
-    _builtin_table[id(torch.nn.init._no_grad_uniform_)] = "aten::_no_grad_uniform_"
-    _builtin_table[id(torch.nn.init._no_grad_zero_)] = "aten::_no_grad_zero_"
 
     return _builtin_table
 
@@ -1848,10 +1863,6 @@ def _register_builtin(fn, op):
 
 def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
-
-
-_register_builtin(len, 'aten::len')
-_register_builtin(_wait, 'aten::wait')
 
 # qualified_name => ScriptClass mapping
 _script_classes = {}

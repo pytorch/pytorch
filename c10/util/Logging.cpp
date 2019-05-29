@@ -76,7 +76,7 @@ APIUsageLoggerType* GetAPIUsageLogger() {
 } // namespace
 
 void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
-  AT_ASSERT(logger);
+  TORCH_CHECK(logger);
   *GetAPIUsageLogger() = logger;
 }
 

@@ -62,10 +62,8 @@ template <>
 bool ResizeNearestOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
 
-  const int batch_size = X.dim32(0),
-            num_channels = X.dim32(1),
-            input_height = X.dim32(2),
-            input_width = X.dim32(3);
+  const int batch_size = X.dim32(0), num_channels = X.dim32(1),
+            input_height = X.dim32(2), input_width = X.dim32(3);
   if (InputSize() == 2) {
     const auto& scales = Input(1);
     CAFFE_ENFORCE_EQ(scales.dim(), 1);
@@ -175,10 +173,8 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 
   const auto inputDims = dY.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
-  const int batch_size = dY.dim32(0),
-            num_channels = dY.dim32(1),
-            input_height = dY.dim32(2),
-            input_width = dY.dim32(3);
+  const int batch_size = dY.dim32(0), num_channels = dY.dim32(1),
+            input_height = dY.dim32(2), input_width = dY.dim32(3);
   const int output_height = X.dim32(2);
   const int output_width = X.dim32(3);
   if (InputSize() == 3) {
@@ -202,11 +198,11 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   for (int n = 0; n < batch_size; ++n) {
     for (int c = 0; c < num_channels; ++c) {
       for (int y = 0; y < input_height; ++y) {
-        const int out_y = std::min((int)(y / height_scale_),
-                                   (output_height - 1));
+        const int out_y =
+            std::min((int)(y / height_scale_), (output_height - 1));
         for (int x = 0; x < input_width; ++x) {
-          const int out_x = std::min((int)(x / width_scale_),
-                                     (output_width - 1));
+          const int out_x =
+              std::min((int)(x / width_scale_), (output_width - 1));
           dXdata[output_width * out_y + out_x] += dYdata[input_width * y + x];
         }
       }
@@ -335,12 +331,28 @@ class GetResizeNearestGradient : public GradientMakerBase {
           vector<string>{GO(0), I(0), I(1)},
           vector<string>{GI(0)});
     }
-    return SingleGradientDef("ResizeNearestGradient",
-                             "",
-                             vector<string>{GO(0), I(0)},
-                             vector<string>{GI(0)});
+    return SingleGradientDef(
+        "ResizeNearestGradient",
+        "",
+        vector<string>{GO(0), I(0)},
+        vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(ResizeNearest, GetResizeNearestGradient);
 
 } // namespace caffe2
+
+using ResizeNearestOpFloatCPU =
+    caffe2::ResizeNearestOp<float, caffe2::CPUContext>;
+
+// clang-format off
+C10_REGISTER_CAFFE2_OPERATOR_CPU(
+    ResizeNearest,
+    "_caffe2::ResizeNearest("
+      "Tensor X, "
+      "str order, "
+      "float width_scale, "
+      "float height_scale"
+    ") -> (Tensor Y)",
+    ResizeNearestOpFloatCPU);
+// clang-format on

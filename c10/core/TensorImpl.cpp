@@ -86,6 +86,7 @@ bool TensorImpl::compute_contiguous() const {
 }
 
 void TensorImpl::release_resources() {
+  autograd_meta_.reset();
   if (storage_) {
     storage_ = {};
   }
