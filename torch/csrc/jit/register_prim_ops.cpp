@@ -1083,18 +1083,20 @@ RegisterOperators logging_operators(
       DEFINE_INT_FLOAT_OP(aten_op, op, bool), DEFINE_STR_CMP_OP(aten_op, op)
 
 #define DEFINE_UNARY_OP(aten_op, op, int_result, float_result)            \
-  Operator(#aten_op "(int a) -> " #int_result, [](Stack& stack) {         \
-    int64_t a;                                                            \
-    pop(stack, a);                                                        \
-    push(stack, op);                                                      \
-    return 0;                                                             \
-  }),                                                                     \
-  Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) {     \
-    double a;                                                             \
-    pop(stack, a);                                                        \
-    push(stack, op);                                                      \
-    return 0;                                                             \
-  })
+  Operator(                                                               \
+      #aten_op "(int a) -> " #int_result,                                 \
+      [](Stack& stack) {                                                  \
+        int64_t a;                                                        \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
+      }),                                                                 \
+      Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) { \
+        double a;                                                         \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
+      })
 
 #define DEFINE_BOOL_OP(aten_op, op)                                \
   Operator(#aten_op "(bool a, bool b) -> bool", [](Stack& stack) { \
@@ -2121,8 +2123,8 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
 
-    DEFINE_UNARY_OP(aten::floor, std::floor(a), float, float),
-    DEFINE_UNARY_OP(aten::ceil, std::ceil(a), float, float),
+    DEFINE_UNARY_OP(aten::floor, (int64_t)std::floor(a), int, int),
+    DEFINE_UNARY_OP(aten::ceil, (int64_t)std::ceil(a), int, int),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
     DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
