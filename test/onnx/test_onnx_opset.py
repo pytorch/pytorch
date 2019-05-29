@@ -40,10 +40,10 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
                     assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
 
 
-def check_onnx_opsets_operator(module, x, ops, opset_versions):
+def check_onnx_opsets_operator(module, x, ops, opset_versions, example_outputs=None):
     for opset_version in opset_versions:
         f = io.BytesIO()
-        torch.onnx.export(module, x, f, opset_version=opset_version)
+        torch.onnx.export(module, x, f, opset_version=opset_version, example_outputs=example_outputs)
         model = onnx.load(io.BytesIO(f.getvalue()))
         check_onnx_opset_operator(model, ops[opset_version], opset_version)
 
@@ -74,6 +74,23 @@ class TestONNXOpset(TestCase):
         ops = {9 : ops_9, 10 : ops_10}
         x = torch.arange(1., 6., requires_grad=True)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+
+        # test with dynamic k
+        class MyModuleDynamic(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input, k):
+                return torch.topk(input, k)
+
+        ops_10 = [{"op_name" : "Unsqueeze", "attributes" : [{"name" : "axes", "ints" : [0], "type" : 7}]},
+                  {"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2}]}]
+        ops = {10 : ops_10}
+        x = torch.arange(1., 6., requires_grad=True)
+        k = torch.tensor(3)
+        module = MyModuleDynamic()
+        example_output = module(x, k)
+        check_onnx_opsets_operator(module, [x, k], ops,
+                                   opset_versions=[10],
+                                   example_outputs=example_output)
 
     def test_maxpool(self):
         module = torch.nn.MaxPool1d(2, stride=1)

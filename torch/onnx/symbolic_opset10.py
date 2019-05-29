@@ -5,6 +5,7 @@ import torch.onnx
 # ONNX symbolics
 import torch.onnx.utils
 
+import torch.onnx.symbolic_helper as sym_helper
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset
 import torch.onnx.symbolic_opset9
 
@@ -33,13 +34,15 @@ for black_listed_op in black_listed_operators:
 
 
 # Add new operator here
-@parse_args('v', 'i', 'i', 'i', 'i')
+@parse_args('v', 'v', 'i', 'i', 'i')
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
         _unimplemented("TopK", "Out parameter is not supported for topk")
     if not largest:
         _unimplemented("TopK", "Ascending TopK is not supported")
-    k = g.op("Constant", value_t=torch.tensor(k, dtype=torch.int64))
+    k = sym_helper._maybe_get_const(k, 'i')
+    if not sym_helper._is_value(k):
+        k = g.op("Constant", value_t=torch.tensor(k, dtype=torch.int64))
     from torch.onnx.symbolic_opset9 import unsqueeze
     k = unsqueeze(g, k, 0)
     return g.op("TopK", self, k, axis_i=dim, outputs=2)
