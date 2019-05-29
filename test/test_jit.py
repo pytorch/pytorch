@@ -1469,7 +1469,7 @@ graph(%x : Tensor,
             def forward(self, x):
                 x = x.quantize_linear(1.0, 0, torch.quint8)
                 x = x.int_repr()
-                x = torch._dequantize_linear(x, 1.0, 0, torch.float)
+                x = torch._dequantize_linear(x, 1.0, 0, torch.quint8)
                 x = self.conv1(x)
                 return x
 
@@ -3373,6 +3373,28 @@ def foo(x):
         self.assertEqual(D()(v), v + v)
 
 
+    def test_invalid_prefix_annotation(self):
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation1(a):
+                    #type: (Int) -> Int # noqa
+                    return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation2(a):
+                    #type   : (Int) -> Int # noqa
+                    return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation3(a):
+                    #     type: (Int) -> Int
+                    return a + 2
+
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -3433,7 +3455,6 @@ def foo(x):
         self.assertEqual(4, w(3))
         w.train(False)
         self.assertEqual(7, w(3))
-        self.assertFalse("training" in w.state_dict())
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -6120,6 +6141,41 @@ a")
         inputs = self._make_scalar_vars([0], torch.int64)
 
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
+
+    def test_script_for_in_range_start_end(self):
+        def fn():
+            x = 0
+            for i in range(7, 100):
+                x += i
+            return x
+        self.checkScript(fn, (), outputs=4929, optimize=True)
+
+    def test_script_for_in_range_start_end_step(self):
+        def fn(start, end, step):
+            # type: (int, int, int) -> int
+            x = 0
+            for i in range(start, end, step):
+                x += i
+            return x
+
+        def check(inp):
+            self.checkScript(fn, inp, outputs=fn(*inp), optimize=True)
+        check((7, 100, 7))
+        check((7, 100, -7))
+        check((2, -11, -3))
+        check((2, -11, 3))
+        check((2, 10, 3))
+        check((-2, -10, -10))
+
+    def test_script_for_zero_step(self):
+        @torch.jit.script
+        def fn():
+            x = 0
+            for i in range(2, -11, 0):
+                x += i
+            return x
+        with self.assertRaisesRegex(torch.jit.Error, "must not be zero"):
+            fn()
 
     def test_script_optional_none(self):
         def none_stmt(x):
@@ -9983,7 +10039,7 @@ a")
         self.checkScript(return_stmt, (torch.rand(1),))
 
     def test_for_range_no_arg(self):
-        with self.assertRaisesRegex(RuntimeError, r'range\(\) expects 1 argument but got 0'):
+        with self.assertRaisesRegex(RuntimeError, r'range expected 1 arguments, got 0'):
             @torch.jit.script
             def range_no_arg(x):
                 for _ in range():
@@ -14818,16 +14874,22 @@ def add_nn_module_test(*args, **kwargs):
                 def __init__(self):
                     super(TheModule, self).__init__()
                     self.submodule = nn_module(*constructor_args)
+
+            def make_module(script):
+                module = TheModule()
+                # check __repr__
+                str(module)
+                module.define(script)
+                return module
+
             # module cannot be imported / exported
             if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
                 with self.disableEmitHook():
-                    module = TheModule()
-                    module.define(script)
+                    module = make_module(script)
                     create_script_module.last_graph = module.graph
                     mod = module(*args)
             else:
-                module = TheModule()
-                module.define(script)
+                module = make_module(script)
                 self.assertExportImportModule(module, tensors)
                 create_script_module.last_graph = module.graph
                 mod = module(*args)
