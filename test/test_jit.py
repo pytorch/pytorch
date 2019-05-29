@@ -3455,7 +3455,6 @@ def foo(x):
         self.assertEqual(4, w(3))
         w.train(False)
         self.assertEqual(7, w(3))
-        self.assertFalse("training" in w.state_dict())
 
     def test_jitter_bug(self):
         @torch.jit.script
