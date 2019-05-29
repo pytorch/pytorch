@@ -298,6 +298,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const THPLayout &': 'layout',
         'const Device &': 'device',
         'c10::optional<ScalarType>': 'scalartypeOptional',
+        'c10::optional<MemoryFormat>': 'memoryformatOptional',
         'c10::optional<Scalar>': 'scalarOptional',
         'c10::optional<int64_t>': 'toInt64Optional',
         'c10::optional<bool>': 'toBoolOptional',
@@ -728,6 +729,13 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['flags'] += ' | METH_STATIC'
 
         py_methods.append(tmpl.substitute(env))
+
+        if env['name'] == 'empty_like':
+            print(env)
+            # halt()
+
+
+
         py_method_defs.append(PY_VARIABLE_METHOD_DEF.substitute(env))
 
     for name in sorted(python_functions.keys()):

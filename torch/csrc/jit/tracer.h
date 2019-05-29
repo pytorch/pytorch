@@ -23,7 +23,7 @@ namespace torch {
 namespace jit {
 
 namespace script {
-  struct Module;
+struct Module;
 }
 
 namespace tracer {
@@ -70,15 +70,12 @@ TORCH_API Value* getNestedOutputTrace(
     const std::shared_ptr<TracingState>& state,
     const IValue& iv);
 
-struct TypedStack : public std::pair<Stack, TupleTypePtr>
-{
+struct TypedStack : public std::pair<Stack, TupleTypePtr> {
   using pair::pair;
 
   // NB: The inherited default constructor gives nullptr for |type|,
   //     so we provide a saner one.
-  TypedStack()
-    : pair({}, TupleType::create({}))
-  {}
+  TypedStack() : pair({}, TupleType::create({})) {}
 
   Stack& stack() {
     return this->first;
@@ -93,7 +90,9 @@ struct TypedStack : public std::pair<Stack, TupleTypePtr>
   }
 };
 
-TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs, const std::shared_ptr<script::Module>& self=nullptr);
+TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(
+    TypedStack inputs,
+    const std::shared_ptr<script::Module>& self = nullptr);
 
 TORCH_API void exit(const Stack& outputs);
 
@@ -149,28 +148,29 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::ScalarType>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::MemoryFormat>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Generator* value);
 
-template<typename T>
+template <typename T>
 TORCH_API void addInputs(
     Node* n,
     const char* name,
     const std::vector<T>& value);
 
-template<typename K, typename V>
+template <typename K, typename V>
 TORCH_API void addInputs(
     Node* n,
     const char* name,
     const std::unordered_map<K, V>& value);
 
-template<typename T>
-void addInputs(
-    Node* n,
-    const char* name,
-    const std::vector<T>& value) {
+template <typename T>
+void addInputs(Node* n, const char* name, const std::vector<T>& value) {
   AT_ERROR("Tracing a list of arbitrary type is currently not supported!");
 }
-template<typename K, typename V>
+template <typename K, typename V>
 void addInputs(
     Node* n,
     const char* name,
@@ -206,7 +206,6 @@ TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 TORCH_API autograd::Variable getSizeOf(
     const autograd::Variable& var,
     int64_t dim);
-
 } // namespace tracer
 } // namespace jit
 } // namespace torch

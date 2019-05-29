@@ -136,6 +136,7 @@ struct PythonArgs {
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
   inline at::MemoryFormat memoryformat(int i);
+  inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -395,6 +396,12 @@ inline at::MemoryFormat PythonArgs::memoryformat(int i) {
   TORCH_CHECK(THPMemoryFormat_Check(args[i]), "memory_format arg must be an instance of the torch.memory_format");
   const auto memory_format = reinterpret_cast<THPMemoryFormat*>(args[i]);
   return memory_format->memory_format;
+}
+
+inline c10::optional<at::MemoryFormat> PythonArgs::memoryformatOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
+  return memoryformat(i);
 }
 
 inline std::string PythonArgs::string(int i) {
