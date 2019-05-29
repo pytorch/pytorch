@@ -15,7 +15,8 @@ from ..._jit_internal import weak_module, weak_script_method
 class _BatchNorm(Module):
     _version = 2
     __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
-                     'running_mean', 'running_var', 'num_batches_tracked']
+                     'running_mean', 'running_var', 'num_batches_tracked',
+                     'num_features', 'affine']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
