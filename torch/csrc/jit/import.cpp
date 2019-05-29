@@ -95,6 +95,7 @@ void ScriptModuleDeserializer::deserialize(
     script::ModuleLookup module_lookup,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
+  C10_LOG_API_USAGE_ONCE("torch.script.load");
   torch::ModelDef model_def;
   at::DataPtr data_ptr;
   size_t data_size;
@@ -134,11 +135,13 @@ void ScriptModuleDeserializer::deserialize(
   // Load extra files.
   for (const auto& kv : extra_files) {
     const std::string& key = "extra/" + kv.first;
-    at::DataPtr meta_ptr;
-    size_t meta_size;
-    std::tie(meta_ptr, meta_size) = reader_.getRecord(key);
-    extra_files[kv.first] =
-        std::string(static_cast<char*>(meta_ptr.get()), meta_size);
+    if (reader_.hasFile(key)) {
+      at::DataPtr meta_ptr;
+      size_t meta_size;
+      std::tie(meta_ptr, meta_size) = reader_.getRecord(key);
+      extra_files[kv.first] =
+          std::string(static_cast<char*>(meta_ptr.get()), meta_size);
+    }
   }
 
   loadTensorTable(&model_def);
