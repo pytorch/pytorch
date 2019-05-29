@@ -209,10 +209,8 @@ struct RNNDescriptors {
 		y_descs = fn.tensors.descriptors(y);
 		hx_desc.set(hx, 5);
 		hy_desc.set(hx, 5);
-		if (cx.defined()) {
-			cx_desc.set(cx, 5);
-			cy_desc.set(cx, 5);
-		}
+		cx_desc.set(hx, 5);
+		cy_desc.set(hx, 5);
 	}
 
 	std::vector<miopenTensorDescriptor_t> get_descs(const std::vector<TensorDescriptor>& descs) {
