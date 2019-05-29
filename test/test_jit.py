@@ -3676,7 +3676,7 @@ def foo(x):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
-        class FooBar:
+        class FooBar(object):
             def baz(x):
                 return torch.blargh(xyz)
 
