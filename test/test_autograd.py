@@ -3020,6 +3020,27 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
             gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
 
+    def test_gradcheck_nondeterministic(self):
+        class NonDetFunc(Function):
+            @staticmethod
+            def forward(ctx, x, jitter=0.0):
+                ctx._jitter = jitter
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return NonDetFunc.apply(grad_out, ctx._jitter) * (1 + torch.rand_like(grad_out) * ctx._jitter), None
+
+        inp = torch.randn(5, 5, requires_grad=True)
+        gradcheck(lambda x: NonDetFunc.apply(x, 0.0), inp)
+        with self.assertRaisesRegex(RuntimeError, 'Backward is not reentrant'):
+            gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp)
+        with self.assertRaisesRegex(RuntimeError, 'Backward is not reentrant'):
+            gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp)
+        gradcheck(lambda x: NonDetFunc.apply(x, 0.0), inp, nondet_tol=1e-5)
+        gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp, nondet_tol=1e-5)
+        gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp, nondet_tol=1e-5)
+
     @unittest.skipIf(not TEST_CUDA, "Requires cuda for multi device")
     def test_multi_device_reentrant_autograd(self):
         # Output on gpu so that this task will be associated with the gpu thread
