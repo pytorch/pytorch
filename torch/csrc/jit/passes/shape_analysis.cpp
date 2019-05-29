@@ -720,7 +720,7 @@ class ShapePropagator {
             "aten::log1p(Tensor self) -> Tensor",
             "aten::log2(Tensor self) -> Tensor",
             "aten::log_sigmoid(Tensor self) -> Tensor",
-            "aten::log_softmax(Tensor self, int dim) -> Tensor",
+            "aten::log_softmax(Tensor self, int dim, *, ScalarType? dtype) -> Tensor",
             "aten::floor(Tensor self) -> Tensor",
             "aten::frac(Tensor self) -> Tensor",
             "aten::flip(Tensor self, int[] dims) -> Tensor",
@@ -748,7 +748,7 @@ class ShapePropagator {
             "aten::sign(Tensor self) -> Tensor",
             "aten::sin(Tensor self) -> Tensor",
             "aten::sinh(Tensor self) -> Tensor",
-            "aten::softmax(Tensor self, int dim) -> Tensor",
+            "aten::softmax(Tensor self, int dim, ScalarType? dtype) -> Tensor",
             "aten::softplus(Tensor self, Scalar beta, Scalar threshold) -> Tensor",
             "aten::softshrink(Tensor self, Scalar lambd) -> Tensor",
             "aten::sqrt(Tensor self) -> Tensor",
@@ -763,8 +763,8 @@ class ShapePropagator {
             "aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
             "aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor",
             "aten::alias(Tensor self) -> Tensor",
-            "aten::cumprod(Tensor self, int dim) -> Tensor",
-            "aten::cumsum(Tensor self, int dim) -> Tensor",
+            "aten::cumprod(Tensor self, int dim, *, ScalarType? dtype) -> Tensor",
+            "aten::cumsum(Tensor self, int dim, *, ScalarType? dtype) -> Tensor",
 
             "aten::empty_like(Tensor self) -> Tensor",
             "aten::full_like(Tensor self, Scalar fill_value) -> Tensor",
@@ -1016,11 +1016,11 @@ class ShapePropagator {
             "aten::logdet(Tensor self) -> Tensor",
             "aten::max(Tensor self) -> Tensor",
             "aten::min(Tensor self) -> Tensor",
-            "aten::mean(Tensor self) -> Tensor",
+            "aten::mean(Tensor self, *, ScalarType? dtype) -> Tensor",
             "aten::median(Tensor self) -> Tensor",
             "aten::norm(Tensor self, Scalar p) -> Tensor",
             "aten::std(Tensor self, bool unbiased) -> Tensor",
-            "aten::sum(Tensor self) -> Tensor",
+            "aten::sum(Tensor self, *, ScalarType? dtype) -> Tensor",
             "aten::trace(Tensor self) -> Tensor",
             "aten::var(Tensor self, bool unbiased) -> Tensor",
             "aten::all(Tensor self) -> Tensor",
@@ -1044,8 +1044,8 @@ class ShapePropagator {
     //   - First input should be the only tensor input
     static const register_formula_for all_reduce_ops_with_integer_upcast{
         {
-            "aten::sum(Tensor self) -> Tensor",
-            "aten::prod(Tensor self) -> Tensor",
+            "aten::sum(Tensor self, *, ScalarType? dtype) -> Tensor",
+            "aten::prod(Tensor self, *, ScalarType? dtype) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto type =
@@ -1146,7 +1146,7 @@ class ShapePropagator {
     //   - has a bool keepdim argument
     static const register_formula_for dim_reduce_ops_with_integer_upcast{
         {
-            "aten::prod(Tensor self, int dim, bool keepdim) -> Tensor",
+            "aten::prod(Tensor self, int dim, bool keepdim, *, ScalarType? dtype) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           return multidim_reduce_with_postprocess(
@@ -1163,7 +1163,7 @@ class ShapePropagator {
     static const register_formula_for multidim_reduce_ops{
         {
             "aten::logsumexp(Tensor self, int[] dim, bool keepdim) -> Tensor",
-            "aten::mean(Tensor self, int[] dim, bool keepdim) -> Tensor",
+            "aten::mean(Tensor self, int[] dim, bool keepdim, *, ScalarType? dtype) -> Tensor",
             "aten::norm(Tensor self, Scalar? p, int[] dim, bool keepdim) -> Tensor",
             "aten::std(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
             "aten::var(Tensor self, int[] dim, bool unbiased, bool keepdim) -> Tensor",
@@ -1190,7 +1190,7 @@ class ShapePropagator {
     //   - has bool keepdim and int[] dim arguments
     static const register_formula_for multidim_reduce_ops_with_integer_upcast{
         {
-            "aten::sum(Tensor self, int[] dim, bool keepdim) -> Tensor",
+            "aten::sum(Tensor self, int[] dim, bool keepdim, *, ScalarType? dtype) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
@@ -1676,11 +1676,11 @@ class ShapePropagator {
       sizes.at(dim) = length;
       node->output()->setType(tp->withSizesStrides(sizes, tp->strides()));
       return true;
-    } else if (node->matches("aten::sum(Tensor self) -> Tensor")) {
+    } else if (node->matches("aten::sum(Tensor self, *, ScalarType? dtype) -> Tensor")) {
       node->output()->setType(tensor_types.at(0)->withSizes({}));
       return true;
     } else if (node->matches(
-                   "aten::sum(Tensor self, int[] dim, bool keepdim) -> Tensor",
+                   "aten::sum(Tensor self, int[] dim, bool keepdim, *, ScalarType? dtype) -> Tensor",
                    /*const_inputs=*/{attr::dim, attr::keepdim})) {
       auto& tp = tensor_types.at(0);
       auto sizes = tp->sizes();

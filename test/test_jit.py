@@ -5656,7 +5656,7 @@ a")
         self.checkScript(test_not_cast, (torch.tensor(1),))
         self.checkScript(test_not_cast, (torch.tensor(0),))
 
-        with self.assertRaisesRegex(RuntimeError, "Could not cast value of type Tuple\[Tensor, Tensor\]"):  # noqa: W605
+        with self.assertRaisesRegex(RuntimeError, "Could not cast value of type Tuple\\[Tensor, Tensor\\]"):  # noqa: W605
             @torch.jit.script
             def test_mult(x, y):
                 return not(x, y)
@@ -5681,7 +5681,7 @@ a")
         self.checkScript(test_cast_float, (0.,))
         self.checkScript(test_cast_float, (-1.,))
 
-        with self.assertRaisesRegex(RuntimeError, "Could not cast value of type Tuple\[int, int\] to bool"):  # noqa: W605
+        with self.assertRaisesRegex(RuntimeError, "Could not cast value of type Tuple\\[int, int\\] to bool"):  # noqa: W605
             @torch.jit.script
             def test_bad_conditional(x):
                 if (1, 2):
@@ -12161,6 +12161,14 @@ a")
         self.checkScript(fn2, ("abcdefghi",))
         self.checkScript(fn3, ("abcdefghi",))
         self.checkScript(fn4, ("abcdefghi",))
+
+    def test_optional_scalartype(self):
+        @torch.jit.script
+        def fn(a, b):
+            return torch.add(a.cumsum(0, dtype=torch.long).sum(dtype=None),
+                             b.cumprod(0, dtype=None).prod(dtype=torch.double))
+
+        self.assertExpectedGraph(fn.graph)
 
     def test_non_final_return(self):
 

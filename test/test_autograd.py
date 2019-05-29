@@ -824,7 +824,7 @@ class TestAutograd(TestCase):
 
         z = x.sum()
         base_mem = torch.cuda.memory_allocated()
-        z = ((x + 2) * m).sum()
+        z = ((x ) * m).sum()
         end_mem = torch.cuda.memory_allocated()
 
         # In the end the memory usage should remain equal, because neither of

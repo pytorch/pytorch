@@ -195,17 +195,11 @@ inline Tensor Tensor::cosh() const {
 inline Tensor & Tensor::cosh_() {
     return dispatch_type().cosh_(*this);
 }
-inline Tensor Tensor::cumsum(int64_t dim, ScalarType dtype) const {
+inline Tensor Tensor::cumsum(int64_t dim, c10::optional<ScalarType> dtype) const {
     return dispatch_type().cumsum(*this, dim, dtype);
 }
-inline Tensor Tensor::cumsum(int64_t dim) const {
-    return dispatch_type().cumsum(*this, dim);
-}
-inline Tensor Tensor::cumprod(int64_t dim, ScalarType dtype) const {
+inline Tensor Tensor::cumprod(int64_t dim, c10::optional<ScalarType> dtype) const {
     return dispatch_type().cumprod(*this, dim, dtype);
-}
-inline Tensor Tensor::cumprod(int64_t dim) const {
-    return dispatch_type().cumprod(*this, dim);
 }
 inline Tensor Tensor::det() const {
     return dispatch_type().det(*this);
@@ -372,11 +366,8 @@ inline Tensor & Tensor::log2_() {
 inline Tensor Tensor::logdet() const {
     return dispatch_type().logdet(*this);
 }
-inline Tensor Tensor::log_softmax(int64_t dim, ScalarType dtype) const {
+inline Tensor Tensor::log_softmax(int64_t dim, c10::optional<ScalarType> dtype) const {
     return dispatch_type().log_softmax(*this, dim, dtype);
-}
-inline Tensor Tensor::log_softmax(int64_t dim) const {
-    return dispatch_type().log_softmax(*this, dim);
 }
 inline Tensor Tensor::logsumexp(IntArrayRef dim, bool keepdim) const {
     return dispatch_type().logsumexp(*this, dim, keepdim);
@@ -393,20 +384,11 @@ inline std::tuple<Tensor,Tensor> Tensor::max(int64_t dim, bool keepdim) const {
 inline Tensor Tensor::max_values(IntArrayRef dim, bool keepdim) const {
     return dispatch_type().max_values(*this, dim, keepdim);
 }
-inline Tensor Tensor::mean(ScalarType dtype) const {
+inline Tensor Tensor::mean(c10::optional<ScalarType> dtype) const {
     return dispatch_type().mean(*this, dtype);
 }
-inline Tensor Tensor::mean() const {
-    return dispatch_type().mean(*this);
-}
-inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, ScalarType dtype) const {
+inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) const {
     return dispatch_type().mean(*this, dim, keepdim, dtype);
-}
-inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim) const {
-    return dispatch_type().mean(*this, dim, keepdim);
-}
-inline Tensor Tensor::mean(IntArrayRef dim, ScalarType dtype) const {
-    return dispatch_type().mean(*this, dim, dtype);
 }
 inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const {
     return dispatch_type().median(*this, dim, keepdim);
@@ -555,11 +537,8 @@ inline std::tuple<Tensor,Tensor> Tensor::slogdet() const {
 inline Tensor Tensor::smm(const Tensor & mat2) const {
     return dispatch_type().smm(*this, mat2);
 }
-inline Tensor Tensor::softmax(int64_t dim, ScalarType dtype) const {
+inline Tensor Tensor::softmax(int64_t dim, c10::optional<ScalarType> dtype) const {
     return dispatch_type().softmax(*this, dim, dtype);
-}
-inline Tensor Tensor::softmax(int64_t dim) const {
-    return dispatch_type().softmax(*this, dim);
 }
 inline std::vector<Tensor> Tensor::split(int64_t split_size, int64_t dim) const {
     return dispatch_type().split(*this, split_size, dim);
@@ -588,20 +567,11 @@ inline Tensor Tensor::stft(int64_t n_fft, c10::optional<int64_t> hop_length, c10
 inline int64_t Tensor::stride(int64_t dim) const {
     return dispatch_type().stride(*this, dim);
 }
-inline Tensor Tensor::sum(ScalarType dtype) const {
+inline Tensor Tensor::sum(c10::optional<ScalarType> dtype) const {
     return dispatch_type().sum(*this, dtype);
 }
-inline Tensor Tensor::sum() const {
-    return dispatch_type().sum(*this);
-}
-inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim, ScalarType dtype) const {
+inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) const {
     return dispatch_type().sum(*this, dim, keepdim, dtype);
-}
-inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim) const {
-    return dispatch_type().sum(*this, dim, keepdim);
-}
-inline Tensor Tensor::sum(IntArrayRef dim, ScalarType dtype) const {
-    return dispatch_type().sum(*this, dim, dtype);
 }
 inline Tensor Tensor::sum_to_size(IntArrayRef size) const {
     return dispatch_type().sum_to_size(*this, size);
@@ -618,20 +588,11 @@ inline Tensor Tensor::std(bool unbiased) const {
 inline Tensor Tensor::std(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return dispatch_type().std(*this, dim, unbiased, keepdim);
 }
-inline Tensor Tensor::prod(ScalarType dtype) const {
+inline Tensor Tensor::prod(c10::optional<ScalarType> dtype) const {
     return dispatch_type().prod(*this, dtype);
 }
-inline Tensor Tensor::prod() const {
-    return dispatch_type().prod(*this);
-}
-inline Tensor Tensor::prod(int64_t dim, bool keepdim, ScalarType dtype) const {
+inline Tensor Tensor::prod(int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) const {
     return dispatch_type().prod(*this, dim, keepdim, dtype);
-}
-inline Tensor Tensor::prod(int64_t dim, bool keepdim) const {
-    return dispatch_type().prod(*this, dim, keepdim);
-}
-inline Tensor Tensor::prod(int64_t dim, ScalarType dtype) const {
-    return dispatch_type().prod(*this, dim, dtype);
 }
 inline Tensor Tensor::t() const {
     return dispatch_type().t(*this);
