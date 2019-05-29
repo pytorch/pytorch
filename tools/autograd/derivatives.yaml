@@ -683,7 +683,7 @@
   index: non_differentiable
   source: grad.take(index)
 
-- name: qr(Tensor self)
+- name: qr(Tensor self, bool some)
   self: not_implemented("qr")
 
 - name: random_(Tensor self, int64_t from, int64_t to, Generator generator)
