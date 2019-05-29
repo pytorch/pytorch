@@ -201,13 +201,13 @@ class Module(object):
                 if param._is_same_impl_type(param_applied):
                     param.data = param_applied
                 else:
-                    param._set_impl(param_applied)
+                    param._set_data_change_impl(param_applied)
                 if param._grad is not None:
                     grad_applied = fn(param._grad.data)
                     if param._grad._is_same_impl_type(grad_applied):
                         param._grad.data = grad_applied
                     else:
-                        param._grad._set_impl(grad_applied)
+                        param._grad._set_data_change_impl(grad_applied)
 
         for key, buf in self._buffers.items():
             if buf is not None:
