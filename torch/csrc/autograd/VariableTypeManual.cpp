@@ -183,10 +183,6 @@ Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
   return checked_cast_variable(t, name, pos);
 }
 
-SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
-  return SparseTensorRef(checked_cast_variable(t.tref, name, pos));
-}
-
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     return Tensor();

@@ -1714,7 +1714,7 @@
     SparseCPU: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
 
-- func: _sparse_dense_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+- func: _sparse_dense_add(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: add_out_dense_sparse_cpu
     CUDA: add_out_dense_sparse_cuda
@@ -2389,7 +2389,7 @@
   requires_tensor: True
 
 
-- func: sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
+- func: sparse_mask(Tensor self, Tensor mask) -> Tensor
   variants: method
   dispatch:
     CPU: sparse_mask_cpu
@@ -3022,8 +3022,8 @@
 - func: __irshift__(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_ilshift_
-    CUDA: legacy::cuda::_th_ilshift_
+    CPU: legacy::cpu::_th_irshift_
+    CUDA: legacy::cuda::_th_irshift_
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
   variants: method
@@ -3579,16 +3579,16 @@
   dispatch:
     CPU: legacy::cpu::_th_pstrf
 
-- func: qr(Tensor self, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
-  dispatch:
-    CPU: legacy::cpu::_th_qr_out
-    CUDA: legacy::cuda::_th_qr_out
+- func: qr(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
 
-- func: qr(Tensor self) -> (Tensor Q, Tensor R)
+- func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
   variants: method, function
+
+- func: _qr_helper(Tensor self, bool some) -> (Tensor, Tensor)
+  variants: function
   dispatch:
-    CPU: legacy::cpu::_th_qr
-    CUDA: legacy::cuda::_th_qr
+    CPU: _qr_helper_cpu
+    CUDA: _qr_helper_cuda
 
 - func: geqrf(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
@@ -4761,30 +4761,30 @@
     CUDA: max_pool2d_with_indices_backward_cuda
 
 # Return: (Tensor output, Tensor indices)
-- func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
+- func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False, *, Tensor(a!) out, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_pool3d_with_indices_forward_out
-    CUDA: legacy::cuda::_thnn_max_pool3d_with_indices_forward_out
+    CPU: max_pool3d_with_indices_out_cpu
+    CUDA: max_pool3d_with_indices_out_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_pool3d_with_indices_forward
-    CUDA: legacy::cuda::_thnn_max_pool3d_with_indices_forward
+    CPU: max_pool3d_with_indices_cpu
+    CUDA: max_pool3d_with_indices_cuda
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_pool3d_with_indices_backward_out
-    CUDA: legacy::cuda::_thnn_max_pool3d_with_indices_backward_out
+    CPU: max_pool3d_with_indices_backward_out_cpu
+    CUDA: max_pool3d_with_indices_backward_out_cuda
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_pool3d_with_indices_backward
-    CUDA: legacy::cuda::_thnn_max_pool3d_with_indices_backward
+    CPU: max_pool3d_with_indices_backward_cpu
+    CUDA: max_pool3d_with_indices_backward_cuda
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
