@@ -7818,19 +7818,26 @@ class TestNN(NNTestCase):
                 self.fc1 = nn.Linear(20, 10)
 
         m = TestModule()
+        m.fc1.weight.grad = torch.randn(10, 20)
 
         param_ref = m.fc1.weight
+        param_grad_ref = m.fc1.weight.grad
 
         sparse_tensor = torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1]))
 
         self.assertNotEqual(m.fc1.weight.type(), sparse_tensor.type())
         self.assertFalse(m.fc1.weight._is_same_impl_type(sparse_tensor))
+        self.assertNotEqual(m.fc1.weight._grad.type(), sparse_tensor.type())
+        self.assertFalse(m.fc1.weight._grad._is_same_impl_type(sparse_tensor))
 
         m._apply(lambda t: torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1])))
 
         self.assertEqual(m.fc1.weight.type(), sparse_tensor.type())
         self.assertTrue(m.fc1.weight._is_same_impl_type(sparse_tensor))
+        self.assertEqual(m.fc1.weight._grad.type(), sparse_tensor.type())
+        self.assertTrue(m.fc1.weight._grad._is_same_impl_type(sparse_tensor))
         self.assertEqual(param_ref, m.fc1.weight)
+        self.assertEqual(param_grad_ref, m.fc1.weight._grad)
 
 
 class TestNNInit(TestCase):
