@@ -3,8 +3,10 @@ import copy
 import unittest
 
 import torch
+import torch.jit
 from torch.utils import mkldnn as mkldnn_utils
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, TemporaryFileName
+
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
 
@@ -88,7 +90,7 @@ class TestMkldnn(TestCase):
 
     def test_repr(self):
         self.assertTrue("layout=torch._mkldnn" in str(torch.randn((1, 2, 3, 4),
-                        dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
+                                                                  dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
 
     def test_conv2d(self):
         for groups in [1, 4]:
@@ -108,6 +110,9 @@ class TestMkldnn(TestCase):
                 self.assertEqual(
                     conv2d(x),
                     mkldnn_conv2d(x.to_mkldnn()).to_dense())
+
+                self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
+                self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
 
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
@@ -172,6 +177,9 @@ class TestMkldnn(TestCase):
                 bn(x),
                 mkldnn_bn(x.to_mkldnn()).to_dense())
 
+            self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
+
     def test_add(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 100, (1,)).item()
@@ -224,6 +232,13 @@ class TestMkldnn(TestCase):
             x.clone(),
             x.to_mkldnn().clone().to_dense(),
         )
+        # test whether share same memory
+        y = x.to_mkldnn()
+        z = y.clone().add_(y)
+        self.assertNotEqual(
+            y.to_dense(),
+            z.to_dense(),
+        )
 
     def test_linear(self):
         in_features = torch.randint(3, 10, (1,)).item()
@@ -231,11 +246,48 @@ class TestMkldnn(TestCase):
         x = torch.randn(3, in_features, dtype=torch.float32) * 10
 
         for bias in [True, False]:
-            linear = torch.nn.Linear(in_features, out_features).float()
+            linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
             mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
             self.assertEqual(
                 linear(x),
                 mkldnn_linear(x.to_mkldnn()).to_dense())
+
+            self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
+
+    def test_sigmoid(self):
+        x = torch.randn(4, 5, dtype=torch.float32) * 10
+        mkldnn_x = x.to_mkldnn()
+        self.assertEqual(
+            torch.sigmoid(x),
+            torch.sigmoid(mkldnn_x).to_dense(),
+        )
+        # inplace
+        torch.sigmoid_(x)
+        torch.sigmoid_(mkldnn_x)
+        self.assertEqual(x, mkldnn_x.to_dense())
+
+    def _test_serialization(self, module, inputs):
+        with TemporaryFileName() as fname:
+            torch.jit.save(module, fname)
+            loaded = torch.jit.load(fname)
+            self.assertEqual(
+                module(*inputs).to_dense(),
+                loaded(*inputs).to_dense())
+
+    def _test_tracing(self, module, inputs):
+        traced = torch.jit.trace(module, inputs, check_trace=False)
+        self.assertEqual(
+            module(*inputs).to_dense(),
+            traced(*inputs).to_dense())
+
+    def test_set_data_tensorimpl_type(self):
+        # Dense tensor has impl of type `TensorImpl`, while MKL-DNN tensor has impl
+        # of type `OpaqueTensorImpl<IDeepTensorWrapperPtr>`.
+        x = torch.randn((1, 2), dtype=torch.float, device=torch.device('cpu'))
+        x_mkldnn = x.to_mkldnn()
+        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
+            x.data = x_mkldnn
 
 
 if __name__ == '__main__':

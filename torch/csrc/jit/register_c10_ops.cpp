@@ -11,7 +11,11 @@ at::Tensor unwrap_tensor(at::Tensor&& tensor) {
   if (tensor.requires_grad()) {
     throw std::runtime_error("Autograd not yet supported for c10 ops.");
   }
-  return torch::autograd::Variable(std::move(tensor)).data();
+  if (tensor.is_variable()) {
+    return torch::autograd::Variable(std::move(tensor)).tensor_data();
+  } else {
+    return std::move(tensor);
+  }
 }
 
 IValue unwrap(IValue&& ivalue) {
@@ -39,7 +43,11 @@ IValue unwrap(IValue&& ivalue) {
 }
 
 at::Tensor wrap_tensor(at::Tensor&& tensor) {
-  return torch::autograd::make_variable(tensor);
+  if (tensor.is_variable()) {
+    return std::move(tensor);
+  } else {
+    return torch::autograd::make_variable(std::move(tensor));
+  }
 }
 
 IValue wrap(IValue&& ivalue) {
@@ -136,7 +144,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
               // in the list are constants
               const std::vector<double>& value = iter->toDoubleListRef();
               std::vector<Value*> info(value.size());
-              for (int value_index = 0; value_index < value.size(); ++value_index) {
+              for (size_t value_index = 0; value_index < value.size(); ++value_index) {
                 info[value_index] = graph->insertConstant(value[value_index]);
                 tracer::recordSourceLocation(info[value_index]->node());
               }
