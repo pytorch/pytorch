@@ -60,13 +60,12 @@ max_pool2d_with_indices_shape_check(
               "pad should be smaller than half of kernel size, but got ",
               "padW = ", padW, ", padH = ", padH, ", kW = ", kW, ", kH = ", kH);
 
-  if (outputWidth < 1 || outputHeight < 1) {
-    AT_ERROR("Given input size: (",
+  TORCH_CHECK(outputWidth >= 1 && outputHeight >= 1,
+              "Given input size: (",
               nInputPlane, "x", inputHeight, "x", inputWidth, "). ",
-             "Calculated output size: (",
+              "Calculated output size: (",
               nOutputPlane, "x", outputHeight, "x", outputWidth, "). ",
-             "Output size is too small");
-  }
+              "Output size is too small");
 }
 
 static inline void
