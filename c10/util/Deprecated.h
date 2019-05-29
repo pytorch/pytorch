@@ -71,6 +71,7 @@
 # define C10_DEFINE_DEPRECATED_USING(TypeName, TypeThingy) using TypeName = __declspec(deprecated) TypeThingy;
 #endif
 #endif
+#endif
 
 #if !defined(C10_DEFINE_DEPRECATED_USING) && defined(__GNUC__)
 // nvcc has a bug where it doesn't understand __attribute__((deprecated))
