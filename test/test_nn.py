@@ -7821,16 +7821,15 @@ class TestNN(NNTestCase):
 
         param_ref = m.fc1.weight
 
-        new_tensor = torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1]))
-        new_tensor_type_saved = new_tensor.type()
+        sparse_tensor = torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1]))
 
-        self.assertNotEqual(m.fc1.weight.type(), new_tensor_type_saved)
-        self.assertFalse(m.fc1.weight._is_same_impl_type(new_tensor))
+        self.assertNotEqual(m.fc1.weight.type(), sparse_tensor.type())
+        self.assertFalse(m.fc1.weight._is_same_impl_type(sparse_tensor))
 
-        m._apply(lambda t: new_tensor)
+        m._apply(lambda t: torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1])))
 
-        self.assertEqual(m.fc1.weight.type(), new_tensor_type_saved)
-        self.assertTrue(m.fc1.weight._is_same_impl_type(new_tensor))
+        self.assertEqual(m.fc1.weight.type(), sparse_tensor.type())
+        self.assertTrue(m.fc1.weight._is_same_impl_type(sparse_tensor))
         self.assertEqual(param_ref, m.fc1.weight)
 
 
