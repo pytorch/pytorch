@@ -2,7 +2,8 @@ import types
 import math
 from torch._six import inf
 from collections import Counter
-from functools import partial
+from functools import partial, wraps
+import warnings
 
 from .optimizer import Optimizer
 
@@ -24,6 +25,19 @@ class _LRScheduler(object):
                                    "in param_groups[{}] when resuming an optimizer".format(i))
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
         self.last_epoch = last_epoch
+
+        # Following https://github.com/pytorch/pytorch/issues/20124
+        # We would like to ensure that `lr_scheduler.step()` is called after
+        # `optimizer.step()`
+        def with_counter(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                wrapper.called += 1
+                return func(*args, **kwargs)
+            wrapper.called = 0
+            return wrapper
+
+        self.optimizer.step = with_counter(self.optimizer.step)
         self.step(last_epoch)
 
     def state_dict(self):
@@ -47,6 +61,15 @@ class _LRScheduler(object):
         raise NotImplementedError
 
     def step(self, epoch=None):
+        # Raise a warning if old pattern is detected
+        # https://github.com/pytorch/pytorch/issues/20124
+        if self.optimizer.step.called < 1:
+            warnings.warn("Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
+                          "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
+                          "`optimizer.step()` before `lr_scheduler.step()`.  Failure to do this "
+                          "will result in PyTorch skipping the first value of the learning rate schedule."
+                          "See more details at "
+                          "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         if epoch is None:
             epoch = self.last_epoch + 1
         self.last_epoch = epoch
