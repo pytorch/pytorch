@@ -62,9 +62,9 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   } catch (const c10::Error& error) {
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("nested_loop() expected a value of type 'List[List[Tensor]]'"
-                  " for argument 'a' but instead found type "
-                  "'List[List[List[t]]]'") == 0);
+            .find("Expected value of type Tensor[][] for argument 'a' in "
+                  "position 0, but instead got value of type t[][][]") == 0);
+
   };
 
   std::vector<torch::jit::IValue> gen_list;
@@ -81,9 +81,9 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
     //so the error message is not helpful here.
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("nested_loop() expected a value of type "
-                  "'List[List[Tensor]]' for argument 'a' but "
-                  "instead found type 'List[List[Tensor]]'") == 0);
+            .find("Expected value of type Tensor[][] for argument 'a' in "
+                  "position 0, but instead got value of type Tensor[][]") == 0);
+
   };
 }
 
