@@ -22,7 +22,7 @@ import warnings
 
 # This file exports ONNX ops for opset 9
 # Opset 9 is supported by ONNX release 1.4.1
-# release on 01/23/19 
+# release on 01/23/19
 
 
 # Note [Pointwise by scalar]
@@ -188,6 +188,10 @@ def atan(g, self):
 
 def sigmoid(g, self):
     return g.op("Sigmoid", self)
+
+
+def sign(g, self):
+    return g.op("Sign", self)
 
 
 def _slice_op(g, input, axes, starts, ends):
@@ -663,33 +667,77 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
-@parse_args('v', 'is')
 def upsample_nearest2d(g, input, output_size):
-    height_scale = float(output_size[-2]) / input.type().sizes()[-2]
-    width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-    scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
-                                                    width_scale]))
+    output_size = sym_help._maybe_get_const(output_size, 'is')
+    if sym_help._is_value(output_size):
+        offset = 2
+        input_length = len(input.type().sizes())
+        offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
+        dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        divisor = g.op(
+            "Slice",
+            g.op("Shape", input),
+            axes_i=[0], 
+            ends_i=[input_length],
+            starts_i=[offset]
+        )
+        divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        scale_dims = g.op("Div", dividend, divisor)
+        scales = g.op("Concat", offsets, scale_dims, axis_i=0)
+    else:
+        height_scale = float(output_size[-2]) / input.type().sizes()[-2]
+        width_scale = float(output_size[-1]) / input.type().sizes()[-1]
+        scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale, width_scale]))
 
-    return g.op("Upsample", input, scales,
-                mode_s="nearest")
+    return g.op("Upsample", input, scales, mode_s="nearest")
 
 
-@parse_args('v', 'is', 'i')
 def upsample_bilinear2d(g, input, output_size, align_corners):
+    align_corners = sym_help._maybe_get_scalar(align_corners)
     if align_corners:
         return _unimplemented("upsample_bilinear2d", "align_corners == True")
-    height_scale = float(output_size[-2]) / input.type().sizes()[-2]
-    width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-    scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
-                                                    width_scale]))
+
+    output_size = sym_help._maybe_get_const(output_size, 'is')
+    if sym_help._is_value(output_size):
+        offset = 2
+        input_length = len(input.type().sizes())
+        offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
+        dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        divisor = g.op(
+            "Slice",
+            g.op("Shape", input),
+            axes_i=[0], 
+            ends_i=[input_length],
+            starts_i=[offset]
+        )
+        divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        scale_dims = g.op("Div", dividend, divisor)
+        scales = g.op("Concat", offsets, scale_dims, axis_i=0)
+    else:
+        height_scale = float(output_size[-2]) / input.type().sizes()[-2]
+        width_scale = float(output_size[-1]) / input.type().sizes()[-1]
+        scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
+                                                        width_scale]))
     return g.op("Upsample", input, scales,
                 mode_s="linear")
 
 
-def wrap_logical_op_with_cast_to_uint8(func):
-    def wrap_with_cast(g, input, other):
-        return g.op("Cast", func(g, input, other), to_i=sym_help.cast_pytorch_to_onnx['Byte'])
-    return wrap_with_cast
+def wrap_logical_op_with_cast_to(to_type):
+    def decorator(fn):
+        def wrap_with_cast(g, input, other):
+            return g.op("Cast", fn(g, input, other), to_i=sym_help.cast_pytorch_to_onnx[to_type])
+        return wrap_with_cast
+    return decorator
+
+
+def wrap_logical_op_with_cast_to_and_from(to_type):
+    def decorator(fn):
+        def wrap_with_cast(g, input, other):
+            to_cast_func = globals()['_cast_{}'.format(to_type)]
+            from_cast_func = wrap_logical_op_with_cast_to(input.type().scalarType())(fn)
+            return from_cast_func(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
+        return wrap_with_cast
+    return decorator
 
 
 def wrap_logical_op_with_negation(func):
@@ -698,18 +746,18 @@ def wrap_logical_op_with_negation(func):
     return wrap_with_not
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 def eq(g, self, other):
     return g.op("Equal", self, other)
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 @wrap_logical_op_with_negation
 def ne(g, self, other):
     return g.op("Equal", self, other)
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 def gt(g, input, other):
     return gt_impl(g, input, other)
 
@@ -719,7 +767,7 @@ def gt_impl(g, input, other):
     return g.op("Greater", input, sym_help._if_scalar_type_as(g, other, input))
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 def lt(g, input, other):
     return lt_impl(g, input, other)
 
@@ -729,18 +777,28 @@ def lt_impl(g, input, other):
     return g.op("Less", input, sym_help._if_scalar_type_as(g, other, input))
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 @wrap_logical_op_with_negation
 def ge(g, input, other):
     other = sym_help._maybe_get_scalar(other)
     return lt_impl(g, input, sym_help._if_scalar_type_as(g, other, input))
 
 
-@wrap_logical_op_with_cast_to_uint8
+@wrap_logical_op_with_cast_to('Byte')
 @wrap_logical_op_with_negation
 def le(g, input, other):
     other = sym_help._maybe_get_scalar(other)
     return gt_impl(g, input, sym_help._if_scalar_type_as(g, other, input))
+
+
+@wrap_logical_op_with_cast_to_and_from('Bool')
+def __and_(g, input, other):
+    return g.op('And', input, other)
+
+
+@wrap_logical_op_with_cast_to_and_from('Bool')
+def __or_(g, input, other):
+    return g.op('Or', input, other)
 
 
 def where(g, condition, self, other):
@@ -1397,7 +1455,10 @@ def detach(g, input):
     return input
 
 
-def contiguous(g, input):
+@parse_args('v', 'i')
+def contiguous(g, input, memory_format):
+    if memory_format > 2:  # allower values are any, preserve and contiguous_format
+        raise RuntimeError("onnx memory_format support is not implemented")
     return input
 
 
@@ -1516,6 +1577,24 @@ def argmin(g, input, dim, keepdim):
         dim = _parse_arg(dim, 'i')
         keepdim = _parse_arg(keepdim, 'i')
         return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def scatter(g, self, dim, index, src):
+    return g.op("Scatter", self, index, src, axis_i=dim)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def scatter_add(g, self, dim, index, src):
+    if self.type().kind() != "CompleteTensorType":
+        return _unimplemented("scatter_add", "input size not accesible")
+    dtype = self.type().scalarType()
+    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    dims = self.type().sizes()
+    to_add = torch.zeros(dims)
+    to_add = g.op("Constant", value_t=to_add)
+    to_add = scatter(g, to_add, dim, index, src)
+    return add(g, self, to_add)
 
 
 def log2(g, self):

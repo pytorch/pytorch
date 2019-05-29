@@ -89,7 +89,7 @@ THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 /* Storage init */
 THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset, at::IntArrayRef sizes, at::IntArrayRef strides) {
   if (strides.data()) {
-    AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
+    TORCH_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
   THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
@@ -206,7 +206,7 @@ THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntArrayR
                                         inferred_size);
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
-    "across two contiguous subspaces). Call .contiguous() before .view().");
+    "across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
 
   // NOTE: This path of constructing the Tensor directly with the viewed Storage is necessary

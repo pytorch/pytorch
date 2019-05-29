@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <torch/csrc/jit/script/lexer.h>
+#include <c10/util/SmallVector.h>
 
 namespace torch {
 namespace jit {
@@ -29,7 +30,7 @@ namespace script {
 
 struct Tree;
 using TreeRef = std::shared_ptr<Tree>;
-using TreeList = std::vector<TreeRef>;
+using TreeList = at::SmallVector<TreeRef, 4>;
 
 static const TreeList empty_trees = {};
 

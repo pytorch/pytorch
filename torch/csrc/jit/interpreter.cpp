@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/interpreter.h>
 
 #include <ATen/core/ivalue.h>
+#include <ATen/Parallel.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
@@ -546,7 +547,7 @@ struct CodeImpl {
     list.size = 0;
   }
   void listInsert(ListHandle<int>& list, int value) {
-    AT_CHECK(
+    TORCH_CHECK(
         list.start + list.size == (int)int_data.size(),
         "another list already started");
     int_data.push_back(value);
@@ -557,7 +558,7 @@ struct CodeImpl {
     list.size = 0;
   }
   void listInsert(ListHandle<bool>& list, int value) {
-    AT_CHECK(
+    TORCH_CHECK(
         list.start + list.size == (int)bool_data.size(),
         "another list already started");
     bool_data.push_back(value);
@@ -700,8 +701,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         // the current thread will continue running before it suspends.
         InterpreterState state(intrusive_from_this());
         e.future->addCallback([state]() {
-          c10::global_work_queue().run(InterpreterContinuation(
-              state, Stack(), autograd::GradMode::is_enabled()));
+          at::launch(InterpreterContinuation(state, Stack(),
+              autograd::GradMode::is_enabled()));
         });
 
         return true;

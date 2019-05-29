@@ -20,6 +20,14 @@ struct FBGEMM_API PackedFCWeight {
   int w_zp;
 };
 
+struct FBGEMM_API PackedConvWeight {
+  std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
+  std::vector<int32_t> col_offsets;
+  std::vector<int32_t> kernel;
+  float w_scale;
+  int32_t w_zp;
+};
+
 // Convert the weight from uint8 to int8.
 static void convert_uint8_int8(
     int K,
