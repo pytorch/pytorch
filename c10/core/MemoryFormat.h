@@ -12,10 +12,6 @@
 // interrogation functions (internally and externally).
 //
 // Possible options are:
-//  Any:
-//    An operator can return Tensor with any memory format. This describes the
-//    current behavior of operators.
-//
 //  Preserve:
 //    If any of the input tensors is in channels_last format, operator output
 //    should be in channels_last format
@@ -28,14 +24,12 @@
 
 
 namespace c10 {
-enum class MemoryFormat : int8_t { Any, Preserve, Contiguous, ChannelsLast };
+enum class MemoryFormat : int8_t { Contiguous, Preserve, ChannelsLast };
 
 inline std::ostream& operator<<(
     std::ostream& stream,
     at::MemoryFormat memory_format) {
   switch (memory_format) {
-    case MemoryFormat::Any:
-      return stream << "Any";
     case MemoryFormat::Preserve:
       return stream << "Preserve";
     case MemoryFormat::Contiguous:

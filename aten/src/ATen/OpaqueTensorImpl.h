@@ -37,7 +37,7 @@ struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
     AT_ERROR("opaque tensors do not have strides");
   }
 
-  bool is_contiguous(c10::MemoryFormat memory_format=c10::MemoryFormat::Any) const override {
+  bool is_contiguous(c10::MemoryFormat memory_format=c10::MemoryFormat::Contiguous) const override {
     AT_ERROR("opaque tensors do not have is_contiguous");
   }
 

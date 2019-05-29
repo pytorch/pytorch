@@ -388,7 +388,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * compute_contiguous() for the exact definition of whether or not
    * a tensor is contiguous or not.
    */
-  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const;
+  virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const;
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
@@ -1320,7 +1320,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual void update_strides_to_format(MemoryFormat memory_format) {
     switch (memory_format) {
-      case MemoryFormat::Any:
       case MemoryFormat::Contiguous: {
         auto old_dim = sizes_.size();
         update_to_contiguous_strides(old_dim);
