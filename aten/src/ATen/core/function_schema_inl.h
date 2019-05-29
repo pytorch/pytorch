@@ -74,7 +74,7 @@ inline void FunctionSchema::checkArg(
     TORCH_CHECK(
         false,
         formatTypeMismatchMsg(
-            argument, attemptToRecoverType(value)->str(), pos));
+            argument, attemptToRecoverType(value)->python_str(), pos));
   }
 }
 

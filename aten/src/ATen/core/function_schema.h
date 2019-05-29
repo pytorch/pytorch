@@ -65,7 +65,7 @@ struct Argument {
     }
     return c10::str(
         "expected a value of type '",
-        type()->str(),
+        type()->python_str(),
         "' for argument '",
         name(),
         "' but instead found type '",
