@@ -91,6 +91,7 @@ private:
   // is this only specifyable as a keyword argument?
   bool kwarg_only_;
   c10::optional<AliasInfo> alias_info_;
+  bool is_inferred_type_;
 };
 
 namespace detail {
