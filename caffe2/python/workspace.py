@@ -83,6 +83,7 @@ IsNUMAEnabled = C.is_numa_enabled
 GetNumNUMANodes = C.get_num_numa_nodes
 GetBlobNUMANode = C.get_blob_numa_node
 GetBlobSizeBytes = C.get_blob_size_bytes
+GetGPUMemoryInfo = C.get_gpu_memory_info
 
 
 def FillRandomNetworkInputs(net, input_dims, input_types):
