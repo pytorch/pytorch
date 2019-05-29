@@ -58,7 +58,7 @@ static PyObject * THPVariable__is_view(PyObject *self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable__is_same_impl_type(PyObject *self, PyObject* arg)
+static PyObject * THPVariable__is_same_impl_type(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
@@ -67,7 +67,7 @@ static PyObject * THPVariable__is_same_impl_type(PyObject *self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable__set_data_change_impl(PyObject *self, PyObject *arg)
+static PyObject * THPVariable__set_data_change_impl(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
