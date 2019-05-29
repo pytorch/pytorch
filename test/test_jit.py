@@ -1469,7 +1469,7 @@ graph(%x : Tensor,
             def forward(self, x):
                 x = x.quantize_linear(1.0, 0, torch.quint8)
                 x = x.int_repr()
-                x = torch._dequantize_linear(x, 1.0, 0, torch.float)
+                x = torch._dequantize_linear(x, 1.0, 0, torch.quint8)
                 x = self.conv1(x)
                 return x
 
