@@ -2565,6 +2565,11 @@
   dispatch:
     CPU: quantize_linear_cpu
 
+- func: quantize_linear_per_channel(Tensor self, Tensor scales, Tensor zero_points, int[] axis, ScalarType dtype) -> Tensor
+  variants: function
+  dispatch:
+    CPU: quantize_linear_per_channel_cpu
+
 - func: dequantize(Tensor self) -> Tensor
   variants: function, method
   dispatch:

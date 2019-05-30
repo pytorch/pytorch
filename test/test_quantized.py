@@ -7,8 +7,10 @@ import torch
 import torch.jit
 import torch.nn.functional as F
 
-from hypothesis import given
-from hypothesis_utils import qtensor
+from hypothesis import assume, given
+from hypothesis import strategies as st
+from hypothesis_utils import qtensor, array_shapes
+
 from common_utils import TEST_WITH_UBSAN, TestCase, run_tests
 from common_utils import skipIfNotRegistered
 
@@ -139,8 +141,19 @@ graph(%x : (Tensor, float, int)):
 
 
 class TestQuantizedOps(TestCase):
+    """Computes the output shape given pooling parameters."""
+    def _pool_output_shape(self, input_size, kernel_size, padding, stride,
+                           dilation, ceiling_mode=False):
+        output_size = (
+            (input_size + 2 * padding - dilation * (kernel_size - 1) - 1
+             + (stride - 1 if ceiling_mode else 0)) / stride + 1)
+        if (padding > 0 and
+                ((output_size - 1) * stride >= input_size + padding)):
+            output_size += 1
+        return output_size
+
     """Tests the correctness of the quantized::relu op."""
-    @given(Q=qtensor(shapes=(1, 2, (3, 4), (3, 2, 1, 2, 3))))
+    @given(Q=qtensor(shapes=array_shapes(1, 5, 1, 5)))
     def test_qrelu(self, Q):
         X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
         relu = torch.ops.quantized.relu
@@ -215,6 +228,46 @@ class TestQuantizedOps(TestCase):
         qCrelu_hat = add_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
         np.testing.assert_equal(qCrelu, qCrelu_hat.int_repr(),
                                 "Quantized addition with ReLU failed.")
+
+    """Tests max pool operation on quantized tensors."""
+    @given(Q=qtensor(shapes=array_shapes(min_dims=3, max_dims=4,
+                                         min_side=1, max_side=10)),
+           kernel=st.sampled_from((3, 5, 7)),
+           stride=st.integers(1, 2),
+           dilation=st.integers(1, 2),
+           padding=st.integers(0, 2))
+    def test_max_pool2d(self, Q, kernel, stride, dilation, padding):
+        import torch.nn.functional as F
+        X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
+
+        # Check constraints
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iH, iW = X.shape[-2:]
+        oH = self._pool_output_shape(iH, kernel, padding, stride, dilation)
+        assume(oH > 0)
+        oW = self._pool_output_shape(iW, kernel, padding, stride, dilation)
+        assume(oW > 0)
+
+        k = (kernel, kernel)
+        s = (stride, stride)
+        d = (dilation, dilation)
+        p = (padding, padding)
+
+        q_max_pool = torch.ops.quantized.max_pool2d
+
+        a = torch.from_numpy(X)
+        qa = a.quantize_linear(scale=scale, zero_point=zero_point,
+                               dtype=torch_type)
+
+        a_hat = qa.dequantize()
+        a_pool = F.max_pool2d(a_hat, kernel_size=k, stride=s, padding=p,
+                              dilation=d)
+
+        qa_pool_hat = q_max_pool(qa, kernel_size=k, stride=s, padding=p,
+                                 dilation=d)
+        a_pool_hat = qa_pool_hat.dequantize()
+
+        np.testing.assert_equal(a_pool.numpy(), a_pool_hat.numpy())
 
 
 @unittest.skipIf(
