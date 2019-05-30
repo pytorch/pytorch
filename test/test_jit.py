@@ -332,7 +332,7 @@ class JitTestCase(TestCase):
                 self.assertMultiLineEqual(src, src2)
             except RuntimeError as e:
                 se = str(e)
-                if "could not export python function" not in se and \
+                if "Could not export Python function" not in se and \
                    "closures are not exportable" not in se:
                     raise
 
@@ -358,7 +358,6 @@ class JitTestCase(TestCase):
                 # save the module to a buffer
                 buffer = io.BytesIO()
                 torch.jit.save(module, buffer)
-
                 # copy the data in the buffer so we can restore it later. This
                 # is because py2 and py3 have different semantics with zipfile
                 # and it's easier to just work with a fresh copy each time.
@@ -372,7 +371,7 @@ class JitTestCase(TestCase):
                     main_module_code += line.decode()
             except RuntimeError as e:
                 se = str(e)
-                if "could not export python function" not in se and \
+                if "Could not export Python function" not in se and \
                    "closures are not exportable" not in se:
                     raise
                 else:
@@ -3680,6 +3679,23 @@ def foo(x):
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
 
+    def test_file_line_error(self):
+        def foobar(xyz):
+            return torch.blargh(xyz)
+
+        _, lineno = inspect.getsourcelines(foobar)
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:20".format(lineno + 1)):
+            scripted = torch.jit.script(foobar)
+
+    def test_file_line_error_class_defn(self):
+        class FooBar(object):
+            def baz(x):
+                return torch.blargh(xyz)
+
+        _, lineno = inspect.getsourcelines(FooBar)
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
+            torch.jit.script(FooBar)
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
@@ -5498,6 +5514,8 @@ a")
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
 
+
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_string_print(self):
         def func(a):
             print(a, "a" 'b' '''c''' """d""", 2, 1.5)
@@ -6259,6 +6277,7 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -6431,16 +6450,17 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
-    
-    def test_number_all(self):	
+
+    def test_number_all(self):
         def int1():	
-            return all(torch.tensor([1,2,3],dtype=torch.uint8))	
+            return all(torch.tensor([1, 2, 3], dtype=torch.uint8))
+
         def int2():	
-            return all(torch.tensor([1,0,3],dtype=torch.uint8))	
+            return all(torch.tensor([1, 0, 3], dtype=torch.uint8))
 
         self.checkScript(int1, ())	
         self.checkScript(int2, ())
-        
+
     def test_number_math(self):
         ops_template = dedent('''
         def func():
@@ -6899,7 +6919,7 @@ a")
         for inp, typ, type_hint in zip(inputs, type_literals, type_annotations):
             test(inp, typ, type_hint)
 
-        # test optional isintance check
+        # test optional isinstance check
         with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
             @torch.jit.script
             def opt_func(x):
@@ -12700,7 +12720,7 @@ a")
                 self.ignored_code(x)
                 return x
 
-            @torch.jit.ignore
+            @torch.jit.ignore(drop_on_export=True)
             def ignored_code(self, x):
                 self.some_state = torch.tensor((100,))
 
@@ -12980,6 +13000,71 @@ a")
         FileCheck().check_not("a_python_fn").run(graph)
         t = torch.ones(2, 2)
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
+
+    def test_module_recursive(self):
+        class Other(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self, x):
+                super(Other, self).__init__()
+                self.x = x
+                self.param = torch.nn.Parameter(torch.ones(2, 2))
+
+            def some_unscriptable_method(self):
+                a = 2
+                a = [2]
+                return a
+
+            def forward(self, t):
+                return t + self.x + self.param
+
+
+        class M(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.other = Other(200)
+
+            def forward(self, t):
+                return self.other(t) * 2
+
+        with torch.jit._enable_recursive_script():
+            sm = torch.jit.script(M())
+
+        self.assertExportImportModule(sm, (torch.ones(2, 2),))
+
+    def test_module_function_export(self):
+        class Other(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self, x):
+                super(Other, self).__init__()
+                self.x = x
+                self.param = torch.nn.Parameter(torch.ones(2, 2))
+
+            @torch.jit.export
+            def some_entry_point(self, y):
+                return y + 20
+
+            def forward(self, t):
+                return t + self.x + self.param
+
+
+        class M(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.other = Other(200)
+
+            def forward(self, t):
+                return self.other(t) * 2
+
+        with torch.jit._enable_recursive_script():
+            sm = torch.jit.script(M())
+
+        self.assertExportImportModule(sm, (torch.ones(2, 2),))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):

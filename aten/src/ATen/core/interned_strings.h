@@ -100,6 +100,7 @@ namespace c10 {
   _(prim, profile)                 \
   _(prim, AddStatValue)            \
   _(prim, TimePoint)               \
+  _(prim, CallFunction)            \
   _(aten, append)                  \
   _(aten, item)                    \
   _(aten, format)                  \
