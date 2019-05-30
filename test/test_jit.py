@@ -6431,7 +6431,16 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
+    
+    def test_number_all(self):	
+        def int1():	
+            return all(torch.tensor([1,2,3],dtype=torch.uint8))	
+        def int2():	
+            return all(torch.tensor([1,0,3],dtype=torch.uint8))	
 
+        self.checkScript(int1, ())	
+        self.checkScript(int2, ())
+        
     def test_number_math(self):
         ops_template = dedent('''
         def func():
@@ -6890,7 +6899,7 @@ a")
         for inp, typ, type_hint in zip(inputs, type_literals, type_annotations):
             test(inp, typ, type_hint)
 
-        # test optional isintance check
+        # test optional isinstance check
         with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
             @torch.jit.script
             def opt_func(x):
