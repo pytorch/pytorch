@@ -10,7 +10,7 @@ struct IsContiguous {
   static bool eval(const int64_t* strides) {
     using type = typename traits::template arg<n - 1>::type;
     return strides[n] == (s == n ? 0 : sizeof(type)) &&
-        IsContiguous<n - 1, traits>::eval(strides);
+        IsContiguous<n - 1, traits, s>::eval(strides);
   }
 };
 
@@ -28,9 +28,10 @@ static inline bool is_contiguous(const int64_t* strides) {
 }
 
 // input at `s` is scalar (stride 0); output and other inputs are contiguous
+// NB: output is typically at strides[0] so first input corresponds to s=1
 template <typename traits, int s>
 static inline bool is_contiguous_scalar(const int64_t* strides) {
-  static_assert(s < traits::arity, "scalar argument index out of bounds");
+  static_assert(s > 0 && s <= traits::arity, "scalar argument index out of bounds");
   return IsContiguous<traits::arity, traits, s>::eval(strides);
 }
 

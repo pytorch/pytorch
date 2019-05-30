@@ -303,7 +303,7 @@ void unary_kernel(TensorIterator& iter, func_t op) {
     // Specializations to encourage auto-vectorization (trick from Numpy's loops.c.src)
     if (is_contiguous<traits>(strides)) {
       unary_loop(data, strides, 0, n, op);
-    } else if (is_contiguous_scalar<traits, 0>(strides)) {
+    } else if (is_contiguous_scalar<traits, 1>(strides)) {
       unary_loop(data, strides, 0, n, op);
     } else {
       unary_loop(data, strides, 0, n, op);
@@ -323,7 +323,7 @@ void unary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
       [&](int ntensor, char** data, const int64_t* strides, int64_t n) {
         if (is_contiguous<traits>(strides)) {
           vectorized_unary_loop(data, n, op, vop);
-        } else if (is_contiguous_scalar<traits, 0>(strides)) {
+        } else if (is_contiguous_scalar<traits, 1>(strides)) {
           unary_loop(data, strides, 0, n, op);
         } else {
           unary_loop(data, strides, 0, n, op);
@@ -339,9 +339,9 @@ void binary_kernel(TensorIterator& iter, func_t op) {
     // Specializations to encourage auto-vectorization (trick from Numpy's loops.c.src)
     if (is_contiguous<traits>(strides)) {
       binary_loop(data, strides, 0, n, op);
-    } else if (is_contiguous_scalar<traits, 0>(strides)) {
-      binary_loop(data, strides, 0, n, op);
     } else if (is_contiguous_scalar<traits, 1>(strides)) {
+      binary_loop(data, strides, 0, n, op);
+    } else if (is_contiguous_scalar<traits, 2>(strides)) {
       binary_loop(data, strides, 0, n, op);
     } else {
       binary_loop(data, strides, 0, n, op);
@@ -364,9 +364,9 @@ void binary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
       vectorized_binary_loop(data, n, op, vop);
-    } else if (is_contiguous_scalar<traits, 0>(strides)) {
-      vectorized_binary_loop_s1(data, n, op, vop);
     } else if (is_contiguous_scalar<traits, 1>(strides)) {
+      vectorized_binary_loop_s1(data, n, op, vop);
+    } else if (is_contiguous_scalar<traits, 2>(strides)) {
       vectorized_binary_loop_s2(data, n, op, vop);
     } else {
       binary_loop(data, strides, 0, n, op);
