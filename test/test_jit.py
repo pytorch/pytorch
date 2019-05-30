@@ -5970,6 +5970,10 @@ a")
             # type: (float) -> float
             return math.log(x)
 
+        def test_log_base_float(x, y):
+            # type: (float, float) -> float
+            return math.log(x, y)
+
         def test_log1p_int(x):
             # type: (int) -> float
             return math.log1p(x)
@@ -6006,6 +6010,7 @@ a")
             # type: (float, float) -> float
             return math.pow(x, y)
 
+
         def test_pow_int(x, y):
             # type: (float, int) -> float
             return math.pow(x, y)
@@ -6014,6 +6019,7 @@ a")
         self.checkScript(test_ceil, (1.5,))
         self.checkScript(test_log_int, (2,))
         self.checkScript(test_log_float, (2.0,))
+        self.checkScript(test_log_base_float, (2.0, 5.0))
         self.checkScript(test_log1p_int, (1,))
         self.checkScript(test_log1p_float, (1.0,))
         self.checkScript(test_log10_int, (2,))
@@ -6022,6 +6028,7 @@ a")
         self.checkScript(test_exp_float, (2.0,))
         self.checkScript(test_sqrt_int, (2,))
         self.checkScript(test_sqrt_float, (2.0,))
+        self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
 
