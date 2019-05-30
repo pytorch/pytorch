@@ -9,6 +9,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <ATen/core/Dict.h>
+#include <ATen/core/List.h>
 
 namespace torch {
 namespace jit {
@@ -159,30 +160,33 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
 template <typename Elem>
 struct CAFFE2_API List : c10::intrusive_ptr_target {
  private:
-  std::vector<Elem> elements_;
+  c10::ListPtr<Elem> elements_;
 
  public:
   typedef Elem ElemType;
 
-  List(std::vector<Elem> elements_) : elements_(std::move(elements_)) {}
-  static c10::intrusive_ptr<List<Elem>> create(std::vector<Elem> elements_) {
+  List(c10::ListPtr<Elem> elements_) : elements_(std::move(elements_)) {}
+  static c10::intrusive_ptr<List<Elem>> create(c10::ListPtr<Elem> elements_) {
     return c10::make_intrusive<List<Elem>>(std::move(elements_));
   }
-  const std::vector<Elem>& elements() const & {
+  static c10::intrusive_ptr<List<Elem>> create(std::initializer_list<Elem> elements_) {
+    return create(c10::make_list<Elem>(elements_));
+  }
+  const c10::ListPtr<Elem>& elements() const & {
     return elements_;
   }
-  operator const std::vector<Elem>&() const {
+  operator const c10::ListPtr<Elem>&() const {
     return elements();
   }
 
-  std::vector<Elem>& elements() & {
+  c10::ListPtr<Elem>& elements() & {
     return elements_;
   }
-  operator std::vector<Elem>&() {
+  operator c10::ListPtr<Elem>&() {
     return elements();
   }
 
-  std::vector<Elem>&& elements() && {
+  c10::ListPtr<Elem>&& elements() && {
     return std::move(elements_);
   }
 };
@@ -190,10 +194,16 @@ struct CAFFE2_API List : c10::intrusive_ptr_target {
 struct Future;
 struct GenericDict;
 
-struct CAFFE2_API Tuple : public List<IValue> {
-  using List<IValue>::List;
-  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
+struct CAFFE2_API Tuple : public GenericList {
+  using GenericList::GenericList;
+  static c10::intrusive_ptr<Tuple> create(c10::impl::GenericListPtr elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_));
+  }
+  static c10::intrusive_ptr<Tuple> create(std::initializer_list<IValue> elements_) {
+    return create(c10::impl::make_generic_list(std::move(elements_)));
+  }
+  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
+    return create(c10::impl::make_generic_list(std::move(elements_)));
   }
 };
 
@@ -469,11 +479,11 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::GenericDict>, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
-DEFINE_TO(std::vector<int64_t>, toIntListRef)
-DEFINE_TO(std::vector<double>, toDoubleListRef)
-DEFINE_TO(std::vector<bool>, toBoolListRef)
-DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
-DEFINE_TO(std::vector<IValue>, toGenericListRef)
+DEFINE_TO(c10::ListPtr<int64_t>, toIntListRef)
+DEFINE_TO(c10::ListPtr<double>, toDoubleListRef)
+DEFINE_TO(c10::ListPtr<bool>, toBoolListRef)
+DEFINE_TO(c10::ListPtr<at::Tensor>, toTensorListRef)
+DEFINE_TO(c10::impl::GenericListPtr, toGenericListRef)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(IValue, toIValue)
@@ -490,6 +500,20 @@ std::vector<Elem> generic_to(
     const IValue* ivalue,
     _fake_type<std::vector<Elem>>) {
   return fmap(ivalue->toGenericListRef(), [](IValue item_ivalue) { return item_ivalue.to<Elem>(); });
+}
+
+template <typename Elem>
+c10::ListPtr<Elem> generic_to(
+    const IValue* ivalue,
+    _fake_type<c10::ListPtr<Elem>>) {
+  return impl::toTypedList<Elem>(ivalue->toGenericListRef());
+}
+
+template <typename Key, typename Value>
+c10::DictPtr<Key, Value> generic_to(
+    const IValue* ivalue,
+    _fake_type<c10::DictPtr<Key, Value>>) {
+  return impl::toTypedDict<Key, Value>(ivalue->toGenericDictRef());
 }
 
 template <typename K, typename V>
@@ -528,8 +552,12 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::IntList> v)
 : tag(Tag::IntList), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(std::vector<int64_t> v)
+inline IValue::IValue(c10::ListPtr<int64_t> v)
 : IValue(ivalue::IntList::create(std::move(v))) {}
+inline IValue::IValue(std::vector<int64_t> v)
+: IValue(c10::impl::toList(v)) {}
+inline IValue::IValue(c10::ArrayRef<int64_t> v)
+: IValue(c10::make_list<int64_t>(v)) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
 : tag(Tag::String), is_intrusive_ptr(true) {
@@ -542,29 +570,39 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::DoubleList> v)
 : tag(Tag::DoubleList), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(std::vector<double> v)
+inline IValue::IValue(c10::ListPtr<double> v)
 : IValue(ivalue::DoubleList::create(std::move(v))) {}
+inline IValue::IValue(std::vector<double> v)
+: IValue(c10::impl::toList(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::BoolList> v)
 : tag(Tag::BoolList), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(std::vector<bool> v)
+inline IValue::IValue(c10::ListPtr<bool> v)
 : IValue(ivalue::BoolList::create(std::move(v))) {}
+inline IValue::IValue(std::vector<bool> v)
+: IValue(c10::impl::toList(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::TensorList> v)
 : tag(Tag::TensorList), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(std::vector<at::Tensor> v)
+inline IValue::IValue(c10::ListPtr<at::Tensor> v)
 : IValue(ivalue::TensorList::create(std::move(v))) {}
+inline IValue::IValue(std::vector<at::Tensor> v)
+: IValue(c10::impl::toList(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericList> v)
 : tag(Tag::GenericList), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
-inline IValue::IValue(std::vector<IValue> v)
+inline IValue::IValue(c10::impl::GenericListPtr v)
 : IValue(ivalue::GenericList::create(std::move(v))) {}
+template<class T> inline IValue::IValue(c10::ListPtr<T> v)
+: IValue(impl::toGenericList<T>(std::move(v))) {}
+inline IValue::IValue(std::vector<IValue> v)
+: IValue(c10::impl::toList(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
 : tag(Tag::GenericDict), is_intrusive_ptr(true) {
@@ -572,6 +610,9 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
 }
 inline IValue::IValue(c10::impl::GenericDictPtr v)
 : IValue(ivalue::GenericDict::create(std::move(v))) {}
+template<class Key, class Value>
+inline IValue::IValue(c10::DictPtr<Key, Value> v)
+: IValue(impl::toGenericDict(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
@@ -582,23 +623,23 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
   payload.as_intrusive_ptr = v.release();
 }
 
-inline const std::vector<int64_t>& IValue::toIntListRef() const {
+inline const c10::ListPtr<int64_t>& IValue::toIntListRef() const {
   return toIntList()->elements();
 }
 
-inline const std::vector<double>& IValue::toDoubleListRef() const {
+inline const c10::ListPtr<double>& IValue::toDoubleListRef() const {
   return toDoubleList()->elements();
 }
 
-inline const std::vector<at::Tensor>& IValue::toTensorListRef() const {
+inline const c10::ListPtr<at::Tensor>& IValue::toTensorListRef() const {
   return toTensorList()->elements();
 }
 
-inline const std::vector<bool>& IValue::toBoolListRef() const {
+inline const c10::ListPtr<bool>& IValue::toBoolListRef() const {
   return toBoolList()->elements();
 }
 
-inline const std::vector<IValue>& IValue::toGenericListRef() const {
+inline const c10::impl::GenericListPtr& IValue::toGenericListRef() const {
   return toGenericList()->elements();
 }
 

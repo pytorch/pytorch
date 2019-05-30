@@ -231,7 +231,7 @@ class ShapePropagator {
                          ->create(
                              aten::expand,
                              {node->inputs().at(input_idx),
-                              graph->insertConstant(expected_size),
+                              graph->insertConstant(c10::impl::toList(expected_size)),
                               graph->insertConstant(false)})
                          ->insertBefore(node);
       PropagateShapeOnNode(expand);

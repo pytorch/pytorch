@@ -28,7 +28,7 @@ void testIValue() {
   ASSERT_TRUE(foo2.isDouble());
   ASSERT_EQ(foo2.toDouble(), 4.0);
   ASSERT_EQ(foo.use_count(), 2);
-  ASSERT_TRUE(ArrayRef<int64_t>(baz.toIntList()->elements()).equals({3, 4, 5}));
+  ASSERT_TRUE(c10::impl::toArrayRef(baz.toIntList()->elements()).equals({3, 4, 5}));
 
   auto move_it = std::move(baz).toIntList();
   ASSERT_EQ(foo.use_count(), 2);
@@ -38,15 +38,15 @@ void testIValue() {
   ASSERT_EQ(i.toInt(), 4);
   IValue dlist(DoubleList::create({3.5}));
   ASSERT_TRUE(dlist.isDoubleList());
-  ASSERT_TRUE(ArrayRef<double>(std::move(dlist).toDoubleList()->elements())
+  ASSERT_TRUE(c10::impl::toArrayRef(std::move(dlist).toDoubleList()->elements())
                   .equals({3.5}));
   ASSERT_TRUE(dlist.isNone());
   dlist = IValue(DoubleList::create({3.4}));
-  ASSERT_TRUE(ArrayRef<double>(dlist.toDoubleList()->elements()).equals({3.4}));
+  ASSERT_TRUE(c10::impl::toArrayRef(dlist.toDoubleList()->elements()).equals({3.4}));
   IValue the_list(Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   ASSERT_EQ(foo.use_count(), 3);
   ASSERT_TRUE(the_list.isTuple());
-  auto first = std::move(the_list).toTuple()->elements().at(1);
+  auto first = std::move(the_list).toTuple()->elements().get(1);
   ASSERT_EQ(first.toInt(), 4);
   at::Tensor tv = at::rand({3, 4});
   IValue ten(tv);

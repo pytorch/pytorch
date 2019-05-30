@@ -1301,7 +1301,8 @@ template<class T> struct getTypePtr_<std::vector<T>> final {
     return type;
   }
 };
-template<class T> struct getTypePtr_<ArrayRef<T>> final {
+template <class T>
+struct getTypePtr_<c10::ListPtr<T>> final {
   static TypePtr call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;

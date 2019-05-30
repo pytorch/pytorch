@@ -43,6 +43,7 @@ class ArrayRef final {
   using iterator = const T*;
   using const_iterator = const T*;
   using size_type = size_t;
+  using value_type = T;
 
   using reverse_iterator = std::reverse_iterator<iterator>;
 

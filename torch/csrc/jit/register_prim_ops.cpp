@@ -75,8 +75,11 @@ template <typename dtype> // int64_t, bool, double
 Operation listConstruct(int64_t num_inputs) {
   return [=](Stack& stack) {
     auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-    std::vector<dtype> vals =
-        fmap(inputs, [](const IValue& v) { return v.to<dtype>(); });
+    c10::ListPtr<dtype> vals = c10::make_list<dtype>();
+    vals.reserve(inputs.size());
+    for (const IValue& i : inputs) {
+      vals.push_back(i.template to<dtype>());
+    }
     drop(stack, num_inputs);
     push(stack, std::move(vals));
     return 0;
@@ -171,11 +174,12 @@ RegisterOperators reg(
          [](Stack& stack) {
            int64_t n;
            pop(stack, n);
-           std::vector<int64_t> elems(n);
+           c10::ListPtr<int64_t> elems = c10::make_list<int64_t>();
+           elems.reserve(n);
            for (int i = 0; i < n; i++) {
-             elems[i] = i;
+             elems.push_back(i);
            }
-           push(stack, jit::IntList::create(elems));
+           push(stack, jit::IntList::create(std::move(elems)));
            return 0;
          }),
      Operator(
@@ -502,7 +506,7 @@ RegisterOperators reg(
              size.reserve(8);
              for (size_t i = 0; i < num_inputs; ++i) {
                size = at::infer_size(
-                   size, peek(stack, i, num_inputs).toIntList()->elements());
+                   size, c10::impl::toArrayRef(peek(stack, i, num_inputs).toIntList()->elements()));
              }
              drop(stack, num_inputs);
              push(stack, std::move(size));
@@ -518,22 +522,22 @@ RegisterOperators reg(
              Shared<IntList> sizes_l;
              pop(stack, sizes_l);
              const auto& shape = sizes_l->elements();
-             std::vector<int64_t> regular_shape = shape;
-             std::vector<int64_t> last_shape = shape;
+             c10::ListPtr<int64_t> regular_shape = shape.copy();
+             c10::ListPtr<int64_t> last_shape = shape.copy();
              int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
              TORCH_CHECK(
                  dim < (int64_t)regular_shape.size(),
                  "Dimension out of range for chunk");
-             int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
-             regular_shape[dim] = split_size;
-             if (shape[dim] % chunks == 0) {
-               last_shape[dim] = split_size;
+             int64_t split_size = (regular_shape.get(dim) + chunks - 1) / chunks;
+             regular_shape.set(dim, split_size);
+             if (shape.get(dim) % chunks == 0) {
+               last_shape.set(dim, split_size);
              } else {
                int64_t num_splits = std::max<int64_t>(
-                   (shape[dim] + split_size - 1) / split_size, 1);
-               last_shape[dim] =
-                   split_size - (split_size * num_splits - shape[dim]);
-               AT_ASSERT(last_shape[dim] >= 0);
+                   (shape.get(dim) + split_size - 1) / split_size, 1);
+               last_shape.set(dim,
+                   split_size - (split_size * num_splits - shape.get(dim)));
+               AT_ASSERT(last_shape.get(dim) >= 0);
              }
              push(stack, std::move(regular_shape));
              push(stack, std::move(last_shape));
@@ -663,7 +667,7 @@ RegisterOperators reg(
            } else {
              push(
                  stack,
-                 at::sum_to(self.toTensor(), size.toIntList()->elements()));
+                 at::sum_to(self.toTensor(), c10::impl::toArrayRef(size.toIntList()->elements())));
            }
            return 0;
          }),
@@ -673,7 +677,18 @@ RegisterOperators reg(
            IValue self_size, other_size;
            pop(stack, self_size, other_size);
            const auto s = self_size.toIntList()->elements();
-           if (s == other_size.toIntList()->elements()) {
+           constexpr auto is_equal = [] (const c10::ListPtr<int64_t>& lhs, const c10::ListPtr<int64_t>& rhs) {
+             if (lhs.size() != rhs.size()) {
+               return false;
+             }
+             for (size_t i = 0; i < lhs.size(); ++i) {
+               if (lhs.get(i) != rhs.get(i)) {
+                 return false;
+               }
+             }
+             return true;
+           };
+           if (is_equal(s, other_size.toIntList()->elements())) {
              push(stack, IValue());
            } else {
              push(stack, s);
@@ -706,9 +721,9 @@ RegisterOperators reg(
            return [=](Stack& stack) {
              auto t = pop(stack).toTuple();
              const auto& elems = t->elements();
-             std::vector<IValue> output_elems;
+             c10::impl::GenericListPtr output_elems = c10::impl::make_generic_list();
              for (int64_t i = beg_ind; i < end_ind; ++i) {
-               output_elems.emplace_back(elems.at(i));
+               output_elems.emplace_back(elems.get(i));
              }
              push(stack, Tuple::create(std::move(output_elems)));
              return 0;
@@ -726,7 +741,7 @@ RegisterOperators reg(
                  norm_index > static_cast<int64_t>(elems.size())) {
                throw std::out_of_range("Tuple list index out of range");
              }
-             stack.emplace_back(elems.at(norm_index));
+             stack.emplace_back(elems.get(norm_index));
              return 0;
            };
          }),
@@ -739,7 +754,7 @@ RegisterOperators reg(
                  std::make_move_iterator(stack.end() - num_inputs),
                  std::make_move_iterator(stack.end())};
              drop(stack, num_inputs);
-             push(stack, Tuple::create(std::move(elems)));
+             push(stack, Tuple::create(c10::impl::toList(std::move(elems))));
              return 0;
            };
          }),
@@ -802,7 +817,7 @@ RegisterOperators reg(
                    num_outputs,
                    " elements in a list but found ",
                    list.size());
-               stack.insert(stack.end(), list.begin(), list.end());
+               push_list_elements(stack, list);
                return 0;
              };
            } else if (lt->getElementType() == FloatType::get()) {
@@ -815,7 +830,7 @@ RegisterOperators reg(
                    num_outputs,
                    " elements in a list but found ",
                    list.size());
-               stack.insert(stack.end(), list.begin(), list.end());
+               push_list_elements(stack, list);
                return 0;
              };
            } else if (lt->getElementType() == TensorType::get()) {
@@ -828,7 +843,7 @@ RegisterOperators reg(
                    num_outputs,
                    " elements in a list but found ",
                    list.size());
-               stack.insert(stack.end(), list.begin(), list.end());
+               push_list_elements(stack, list);
                return 0;
              };
            } else {
@@ -841,7 +856,7 @@ RegisterOperators reg(
                    num_outputs,
                    " elements in a list but found ",
                    list.size());
-               stack.insert(stack.end(), list.begin(), list.end());
+               push_list_elements(stack, list);
                return 0;
              };
            }
@@ -860,7 +875,7 @@ RegisterOperators reg(
            } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               std::vector<at::Tensor> vals;
+               c10::ListPtr<at::Tensor> vals = c10::make_list<at::Tensor>();
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]).toTensor());
@@ -872,7 +887,7 @@ RegisterOperators reg(
            } else {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               std::vector<IValue> vals;
+               c10::ListPtr<IValue> vals = c10::make_list<IValue>();
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
@@ -1130,23 +1145,33 @@ int stringSlice(Stack& stack) {
 
 // Equivalent to list.at(idx)
 template <typename TList> // something like Shared<IntList>
-typename TList::element_type::ElemType& getItem(TList& list, int64_t idx) {
+typename TList::element_type::ElemType getItem(TList& list, int64_t idx) {
   const int64_t list_size = list->elements().size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     throw std::out_of_range("list index out of range");
   }
-  return list->elements()[normalized_idx];
+  return list->elements().get(normalized_idx);
+}
+
+template <typename TList> // something like Shared<IntList>
+void setItem(TList& list, int64_t idx, typename TList::element_type::ElemType&& value) {
+  const int64_t list_size = list->elements().size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+  if (normalized_idx < 0 || normalized_idx >= list_size) {
+    throw std::out_of_range("list index out of range");
+  }
+  list->elements().set(normalized_idx, std::move(value));
 }
 
 // cannot return a reference to an element in a bool vector
-bool getBoolItem(const std::vector<bool>& list, int64_t idx) {
+bool getBoolItem(const c10::ListPtr<bool>& list, int64_t idx) {
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     throw std::out_of_range("list index out of range");
   }
-  return list[normalized_idx];
+  return list.get(normalized_idx);
 }
 
 template <typename TList, typename TElement>
@@ -1186,7 +1211,7 @@ int listPop(Stack& stack) {
     AT_ERROR("pop from empty list");
   }
 
-  push(stack, std::move(getItem(list, idx)));
+  push(stack, getItem(list, idx));
   elements.erase(elements.begin() + normalized_idx);
 
   return 0;
@@ -1364,7 +1389,10 @@ Operation listExtend(const Node* node) {
 
     auto& vec_a = a->elements();
     const auto& vec_b = b->elements();
-    vec_a.insert(vec_a.end(), vec_b.cbegin(), vec_b.cend());
+    vec_a.reserve(vec_a.size() + vec_b.size());
+    for (size_t i = 0; i < vec_b.size(); ++i) {
+      vec_a.push_back(vec_b.get(i));
+    }
     return 0;
   };
 }
@@ -1376,7 +1404,7 @@ Operation listCopy(const Node* node) {
     pop(stack, list);
 
     const auto& vec = list->elements();
-    auto out = vec;
+    auto out = vec.copy();
     push(stack, out);
     return 0;
   };
@@ -1415,12 +1443,26 @@ int listLen(Stack& stack) {
   return 0;
 }
 
+namespace {
+template<class T> bool is_equal(const c10::ListPtr<T>& lhs, const c10::ListPtr<T>& rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    if (lhs.get(i) != rhs.get(i)) {
+      return false;
+    }
+  }
+  return true;
+}
+}
+
 template <typename T>
 int listEq(Stack& stack) {
   T a;
   T b;
   pop(stack, a, b);
-  push(stack, a->elements() == b->elements() ? true : false);
+  push(stack, is_equal(a->elements(), b->elements()));
   return 0;
 }
 
@@ -1429,7 +1471,7 @@ int listNe(Stack& stack) {
   T a;
   T b;
   pop(stack, a, b);
-  push(stack, !(a->elements() == b->elements()));
+  push(stack, !is_equal(a->elements(), b->elements()));
   return 0;
 }
 
@@ -1439,8 +1481,8 @@ inline bool tensor_list_equal(Shared<TensorList> a, Shared<TensorList> b) {
   }
 
   for (size_t i = 0; i < a->elements().size(); ++i) {
-    const auto& a_element = a->elements()[i];
-    const auto& b_element = b->elements()[i];
+    const auto& a_element = a->elements().get(i);
+    const auto& b_element = b->elements().get(i);
     // This preserves Python's semantics, which uses eq() to compare two
     // elements, then passes the result to bool().
     // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
@@ -1487,13 +1529,13 @@ int listAdd(Stack& stack) {
   TList b;
   pop(stack, a, b);
 
-  std::vector<TElement> ret;
+  c10::ListPtr<TElement> ret = c10::make_list<TElement>();
   const auto total_size = a->elements().size() + b->elements().size();
   ret.reserve(total_size);
-  for (const auto& a_element : a->elements()) {
+  for (const TElement& a_element : a->elements()) {
     ret.push_back(a_element);
   }
-  for (const auto& b_element : b->elements()) {
+  for (const TElement& b_element : b->elements()) {
     ret.push_back(b_element);
   }
 
@@ -1507,12 +1549,12 @@ int listMulIntLeft(Stack& stack) {
   int64_t n;
   pop(stack, list, n);
 
-  std::vector<TElement> ret;
+  c10::ListPtr<TElement> ret = c10::make_list<TElement>();
   const auto size = list->elements().size() * n;
   ret.reserve(size);
 
   for (auto i = 0; i < n; i++) {
-    for (const auto& e : list->elements()) {
+    for (const TElement& e : list->elements()) {
       ret.push_back(e);
     }
   }
@@ -1527,12 +1569,12 @@ int listMulIntRight(Stack& stack) {
   int64_t n;
   pop(stack, n, list);
 
-  std::vector<TElement> ret;
+  c10::ListPtr<TElement> ret = c10::make_list<TElement>();
   const auto size = list->elements().size() * n;
   ret.reserve(size);
 
   for (auto i = 0; i < n; i++) {
-    for (const auto& e : list->elements()) {
+    for (const TElement& e : list->elements()) {
       ret.push_back(e);
     }
   }
@@ -1557,7 +1599,7 @@ int listSlice(Stack& stack) {
   const auto normalized_end =
       std::min(list_size, normalizeIndex(end, list_size));
 
-  std::vector<TElement> sliced_list;
+  c10::ListPtr<TElement> sliced_list = c10::make_list<TElement>();
   if (normalized_end <= normalized_start) {
     // early exit if the slice is trivially empty
     push(stack, sliced_list);
@@ -1605,7 +1647,7 @@ int listSetItem(Stack& stack) {
   TElement value;
 
   pop(stack, list, idx, value);
-  getItem(list, idx) = value;
+  setItem(list, idx, std::move(value));
 
   push(stack, list);
   return 0;
@@ -1647,7 +1689,7 @@ int dictLen(Stack& stack) {
 
 int dictKeys(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  std::vector<IValue> keys;
+  c10::impl::GenericListPtr keys = c10::impl::make_generic_list();
   keys.reserve(dict->elements().size());
   for (auto item : dict->elements()) {
     keys.push_back(item.key());
@@ -1657,9 +1699,9 @@ int dictKeys(Stack& stack) {
 }
 
 template <typename Elem>
-std::vector<Elem> makeListForDictValues(
+c10::impl::GenericListPtr makeListForDictValues(
     const c10::ivalue::GenericDict::IterationOrder& order) {
-  std::vector<Elem> values;
+  c10::impl::GenericListPtr values = c10::impl::make_generic_list();
   values.reserve(order.size());
   for (auto item : order) {
     values.push_back(item.second.to<Elem>());
@@ -1769,7 +1811,7 @@ RegisterOperators reg2({
         "aten::list(str t) -> str[]",
         [](Stack& stack) {
           auto str = pop(stack).toStringRef();
-          std::vector<IValue> chars;
+          c10::ListPtr<std::string> chars = c10::make_list<std::string>();
           chars.reserve(str.size());
           for (auto c : str) {
             chars.push_back(std::string(1, c));
@@ -2195,23 +2237,23 @@ RegisterOperators reg2({
         [](Stack& stack) {
           at::Tensor t;
           pop(stack, t);
-          std::vector<int64_t> elems;
+          c10::ListPtr<int64_t> elems = c10::make_list<int64_t>();
           elems.reserve(t.size(0));
           for (int i = 0; i < t.size(0); i++) {
             elems.push_back(*t[i].data<int32_t>());
           }
-          push(stack, jit::IntList::create(elems));
+          push(stack, jit::IntList::create(std::move(elems)));
           return 0;
         }),
     Operator(
         "aten::_list_to_tensor(int[] self) -> Tensor",
         [](Stack& stack) {
-          std::vector<int64_t> l;
+          c10::ListPtr<int64_t> l = c10::make_list<int64_t>();
           pop(stack, l);
           auto t = torch::empty(
               {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
           for (size_t i = 0; i < l.size(); i++) {
-            t[i] = l[i];
+            t[i] = l.get(i);
           }
           push(stack, t);
           return 0;
@@ -2334,14 +2376,14 @@ std::vector<int64_t> _output_size(
       std::vector<int64_t> repeated(dim, size.toInt());
       return repeated;
     } else {
-      return size.toIntListRef();
+      return c10::impl::toVector(size.toIntListRef());
     }
   }
   std::vector<double> scale_repeated;
   if (scale_factors.isDouble()) {
     scale_repeated = std::vector<double>(dim, scale_factors.toDouble());
   } else {
-    scale_repeated = scale_factors.toDoubleListRef();
+    scale_repeated = c10::impl::toVector(scale_factors.toDoubleListRef());
   }
   std::vector<int64_t> ret;
   for (size_t i = 0; i < dim; ++i) {
@@ -2460,7 +2502,7 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   } else if (int_ivalue.isIntList()) {
     auto int_list = int_ivalue.toIntListRef();
     std::vector<double> double_vec(int_list.begin(), int_list.end());
-    scale_factor_double = double_vec;
+    scale_factor_double = c10::impl::toList(double_vec);
   } else if (int_ivalue.isNone()) {
     return IValue();
   } else {

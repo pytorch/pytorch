@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <c10/util/ArrayRef.h>
+#include <ATen/core/List.h>
 
 namespace c10 {
 
@@ -29,6 +30,24 @@ inline auto fmap(T& inputs, const F& fn) -> std::vector<decltype(fn(*inputs.begi
   r.reserve(inputs.size());
   for(auto & input : inputs)
     r.push_back(fn(input));
+  return r;
+}
+
+template<typename F, typename T>
+inline auto fmap(const c10::ListPtr<T>& inputs, const F& fn) -> std::vector<decltype(fn(inputs.get(0)))> {
+  std::vector<decltype(fn(inputs.get(0)))> r;
+  r.reserve(inputs.size());
+  for(T input : inputs)
+    r.push_back(fn(std::move(input)));
+  return r;
+}
+
+template<typename F, typename T>
+inline auto fmap(c10::ListPtr<T>& inputs, const F& fn) -> std::vector<decltype(fn(inputs.get(0)))> {
+  std::vector<decltype(fn(inputs.get(0)))> r;
+  r.reserve(inputs.size());
+  for(T input : inputs)
+    r.push_back(fn(std::move(input)));
   return r;
 }
 

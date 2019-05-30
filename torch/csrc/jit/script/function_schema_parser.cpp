@@ -23,6 +23,7 @@ namespace jit {
 
 namespace script {
 namespace {
+
 struct SchemaParser {
   SchemaParser(const std::string& str)
       : L(str), type_parser(L, /*parse_complete_tensor_types*/ false) {}

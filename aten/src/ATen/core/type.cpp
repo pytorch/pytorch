@@ -175,7 +175,7 @@ TypePtr attemptToRecoverType(const IValue& ivalue) {
     if (ivalue_list.size() == 0) {
       return ListType::create(VarType::create("t"));
     }
-    return ListType::create(attemptToRecoverType(ivalue_list[0]));
+    return ListType::create(attemptToRecoverType(ivalue_list.get(0)));
   }
   if (ivalue.isGenericDict()) {
     const auto& dict = ivalue.toGenericDictRef();
@@ -209,7 +209,7 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     auto type_elem = tuple_type->elements();
     bool is_subvalue = true;
     for (size_t i = 0; i < type_elem.size() && is_subvalue; ++i) {
-      is_subvalue = isSubvalueOf(ivalue_elem[i], type_elem[i]);
+      is_subvalue = isSubvalueOf(ivalue_elem.get(i), type_elem[i]);
     }
     return is_subvalue;
   }

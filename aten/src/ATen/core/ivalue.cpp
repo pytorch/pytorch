@@ -25,7 +25,7 @@ std::ostream& printList(std::ostream & out, const List &v,
     if(i > 0)
       out << ", ";
     // make sure we use ivalue printing, and not default printing for the element type
-    out << IValue(v->elements()[i]);
+    out << IValue(v->elements().get(i));
   }
   out << finish;
   return out;

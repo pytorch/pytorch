@@ -284,13 +284,13 @@ struct SymbolicVariable {
     return create(aten::view, {*this, sizes})[0];
   }
   SymbolicVariable view(std::vector<std::int64_t> sizes) const {
-    return view(insertConstant(std::move(sizes)));
+    return view(insertConstant(c10::impl::toList(std::move(sizes))));
   }
   SymbolicVariable reshape(Value* sizes) const {
     return create(aten::reshape, {*this, sizes})[0];
   }
   SymbolicVariable reshape(std::vector<std::int64_t> sizes) const {
-    return reshape(insertConstant(std::move(sizes)));
+    return reshape(insertConstant(c10::impl::toList(std::move(sizes))));
   }
   SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
     return create(

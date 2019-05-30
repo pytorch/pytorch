@@ -70,11 +70,11 @@ void testCustomOperators() {
   }
   {
     // Check that lists work well.
-    RegisterOperators reg({createOperator(
+    RegisterOperators reg(
         "foo::lists(int[] ints, float[] floats, Tensor[] tensors) -> float[]",
         [](const std::vector<int64_t>& ints,
            const std::vector<double>& floats,
-           std::vector<at::Tensor> tensors) { return floats; })});
+           std::vector<at::Tensor> tensors) { return floats; });
 
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
     ASSERT_EQ(ops.size(), 1);
@@ -98,16 +98,16 @@ void testCustomOperators() {
         op->schema().returns()[0].type()->isSubtypeOf(ListType::ofFloats()));
 
     Stack stack;
-    push(stack, std::vector<int64_t>{1, 2});
-    push(stack, std::vector<double>{1.0, 2.0});
-    push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
+    push(stack, c10::make_list<int64_t>({1, 2}));
+    push(stack, c10::make_list<double>({1.0, 2.0}));
+    push(stack, c10::make_list<at::Tensor>({autograd::make_variable(at::ones(5))}));
     op->getOperation()(stack);
-    std::vector<double> output;
+    c10::ListPtr<double> output = c10::make_list<double>();
     pop(stack, output);
 
     ASSERT_EQ(output.size(), 2);
-    ASSERT_EQ(output[0], 1.0);
-    ASSERT_EQ(output[1], 2.0);
+    ASSERT_EQ(output.get(0), 1.0);
+    ASSERT_EQ(output.get(1), 2.0);
   }
   {
     RegisterOperators reg(
@@ -130,13 +130,13 @@ void testCustomOperators() {
         op->schema().returns()[0].type()->isSubtypeOf(ListType::ofTensors()));
 
     Stack stack;
-    push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
+    push(stack, c10::make_list<at::Tensor>({autograd::make_variable(at::ones(5))}));
     op->getOperation()(stack);
-    std::vector<at::Tensor> output;
+    c10::ListPtr<at::Tensor> output = c10::make_list<at::Tensor>();
     pop(stack, output);
 
     ASSERT_EQ(output.size(), 1);
-    ASSERT_TRUE(output[0].allclose(autograd::make_variable(at::ones(5))));
+    ASSERT_TRUE(output.get(0).allclose(autograd::make_variable(at::ones(5))));
   }
   {
     auto op = createOperator(
@@ -202,7 +202,7 @@ void testCustomOperators() {
     std::tie(state, std::ignore) = tracer::enter({});
 
     Stack stack;
-    push(stack, std::vector<double>{1.0});
+    push(stack, c10::make_list<double>({1.0}));
 
     ASSERT_THROWS_WITH(
         op.getOperation()(stack),

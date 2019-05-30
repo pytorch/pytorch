@@ -81,6 +81,13 @@ template <typename... Types>
 static inline void push(Stack& stack, Types&&... args) {
   (void)std::initializer_list<int>{(stack.emplace_back(std::forward<Types>(args)), 0)...};
 }
+template <class T>
+static inline void push_list_elements(Stack& stack, const c10::ListPtr<T>& elements) {
+  stack.reserve(stack.size() + elements.size());
+  for (T elem : elements) {
+    stack.push_back(std::move(elem));
+  }
+}
 
 // The packer here is carefully written not to make any unnecessary
 // copies.
