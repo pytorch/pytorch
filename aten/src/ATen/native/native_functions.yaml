@@ -2561,7 +2561,7 @@
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 
 - func: quantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
-  variants: function
+  variants: function, method
   dispatch:
     CPU: quantize_linear_cpu
 
