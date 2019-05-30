@@ -170,7 +170,9 @@ void removeExtraLoopOutputs(Node* node) {
       1; // offset to the loop carried dependencies in block inputs/outputs
   for (size_t i_1 = node->outputs().size(); i_1 > 0; --i_1) {
     size_t i = i_1 - 1;
-    // if the value is no longer changed remove output
+    // if the value of the loop block output equals its node input or its block
+    // input, than the value was not modified during the loop body,
+    // and we can remove it as a loop output
     if ((loop_body->inputs().at(loop_body_offset + i) ==
          loop_body->outputs().at(loop_body_offset + i)) ||
         (node->inputs().at(loop_input_offset + i)) ==
