@@ -57,7 +57,16 @@ Value* Function::try_emit_call(
     return nullptr;
 
   check_single_output();
-  return inlineCallTo(graph, *fn, matched_schema->inputs).at(0);
+  Value* fn_constant = graph.insertNode(graph.create(prim::Constant))
+                           ->output()
+                           ->setType(FunctionType::create(shared_from_this()));
+  matched_schema->inputs.insert(matched_schema->inputs.begin(), fn_constant);
+  Value* result =
+      graph
+          .insertNode(graph.create(prim::CallFunction, matched_schema->inputs))
+          ->output()
+          ->setType(matched_schema->return_types.at(0));
+  return result;
 }
 
 Value* Function::emit_call(
@@ -351,11 +360,7 @@ void Module::train(bool on) {
   for (auto& submod : get_modules()) {
     submod->train(on);
   }
-  if (auto slot = find_attribute("training")) {
-    slot->setValue(on);
-  } else {
-    register_attribute("training", BoolType::get(), on);
-  }
+  register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
