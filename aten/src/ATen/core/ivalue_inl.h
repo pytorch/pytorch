@@ -202,6 +202,9 @@ struct CAFFE2_API Tuple : public GenericList {
   static c10::intrusive_ptr<Tuple> create(std::initializer_list<IValue> elements_) {
     return create(c10::impl::make_generic_list(std::move(elements_)));
   }
+  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
+    return create(c10::impl::make_generic_list(std::move(elements_)));
+  }
 };
 
 struct Object;
@@ -551,7 +554,9 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::IntList> v)
 }
 inline IValue::IValue(c10::ListPtr<int64_t> v)
 : IValue(ivalue::IntList::create(std::move(v))) {}
-inline IValue::IValue(at::ArrayRef<int64_t> v)
+inline IValue::IValue(std::vector<int64_t> v)
+: IValue(c10::impl::toList(v)) {}
+inline IValue::IValue(c10::ArrayRef<int64_t> v)
 : IValue(c10::make_list<int64_t>(v)) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
@@ -567,6 +572,8 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::DoubleList> v)
 }
 inline IValue::IValue(c10::ListPtr<double> v)
 : IValue(ivalue::DoubleList::create(std::move(v))) {}
+inline IValue::IValue(std::vector<double> v)
+: IValue(c10::impl::toList(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::BoolList> v)
 : tag(Tag::BoolList), is_intrusive_ptr(true) {
@@ -574,6 +581,8 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::BoolList> v)
 }
 inline IValue::IValue(c10::ListPtr<bool> v)
 : IValue(ivalue::BoolList::create(std::move(v))) {}
+inline IValue::IValue(std::vector<bool> v)
+: IValue(c10::impl::toList(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::TensorList> v)
 : tag(Tag::TensorList), is_intrusive_ptr(true) {
@@ -592,6 +601,8 @@ inline IValue::IValue(c10::impl::GenericListPtr v)
 : IValue(ivalue::GenericList::create(std::move(v))) {}
 template<class T> inline IValue::IValue(c10::ListPtr<T> v)
 : IValue(impl::toGenericList<T>(std::move(v))) {}
+inline IValue::IValue(std::vector<IValue> v)
+: IValue(c10::impl::toList(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
 : tag(Tag::GenericDict), is_intrusive_ptr(true) {

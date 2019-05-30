@@ -210,7 +210,8 @@ struct CAFFE2_API IValue final {
   // IntList
   IValue(c10::intrusive_ptr<ivalue::IntList> v);
   IValue(c10::ListPtr<int64_t> v);
-  IValue(at::ArrayRef<int64_t> v);
+  IValue(c10::ArrayRef<int64_t> v);
+  IValue(std::vector<int64_t> v);
   bool isIntList() const { return Tag::IntList == tag; }
   c10::intrusive_ptr<ivalue::IntList> toIntList() &&;
   c10::intrusive_ptr<ivalue::IntList> toIntList() const &;
@@ -234,6 +235,7 @@ struct CAFFE2_API IValue final {
   // DoubleList
   IValue(c10::intrusive_ptr<ivalue::DoubleList> v);
   IValue(c10::ListPtr<double> v);
+  IValue(std::vector<double> v);
   bool isDoubleList() const { return Tag::DoubleList == tag; }
   c10::intrusive_ptr<ivalue::DoubleList> toDoubleList() &&;
   c10::intrusive_ptr<ivalue::DoubleList> toDoubleList() const &;
@@ -241,6 +243,7 @@ struct CAFFE2_API IValue final {
   // BoolList
   IValue(c10::intrusive_ptr<ivalue::BoolList> v);
   IValue(c10::ListPtr<bool> v);
+  IValue(std::vector<bool> v);
   bool isBoolList() const { return Tag::BoolList == tag; }
   c10::intrusive_ptr<ivalue::BoolList> toBoolList() &&;
   c10::intrusive_ptr<ivalue::BoolList> toBoolList() const &;
@@ -255,6 +258,7 @@ struct CAFFE2_API IValue final {
 
   //GenericList
   IValue(c10::intrusive_ptr<ivalue::GenericList> v);
+  IValue(std::vector<IValue> v);
   IValue(c10::ListPtr<IValue> v);
   bool isGenericList() const { return Tag::GenericList == tag; }
   c10::intrusive_ptr<ivalue::GenericList> toGenericList() &&;

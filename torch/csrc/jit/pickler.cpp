@@ -592,11 +592,11 @@ OpCode Unpickler::readInstruction() {
           AT_ERROR("Unknown list specialization");
         }
       } else {
-        stack_.emplace_back(c10::impl::make_generic_list());
+        stack_.emplace_back(std::vector<IValue>());
       }
     } break;
     case OpCode::EMPTY_TUPLE: {
-      stack_.emplace_back(c10::ivalue::Tuple::create(c10::impl::make_generic_list()));
+      stack_.emplace_back(c10::ivalue::Tuple::create({}));
     } break;
     case OpCode::BINPUT: {
       size_t memo_id = read<uint8_t>();
@@ -657,7 +657,7 @@ OpCode Unpickler::readInstruction() {
     case OpCode::TUPLE: {
       size_t start = marks_.back();
       marks_.pop_back();
-      auto tuple = c10::ivalue::Tuple::create(c10::impl::make_generic_list());
+      auto tuple = c10::ivalue::Tuple::create({});
       tuple->elements().reserve(stack_.size() - start);
       auto start_it = stack_.begin() + start;
       for (auto it = start_it; it != stack_.end(); ++it) {
