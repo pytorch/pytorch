@@ -3679,23 +3679,6 @@ def foo(x):
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
 
-    def test_file_line_error(self):
-        def foobar(xyz):
-            return torch.blargh(xyz)
-
-        _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:20".format(lineno + 1)):
-            scripted = torch.jit.script(foobar)
-
-    def test_file_line_error_class_defn(self):
-        class FooBar(object):
-            def baz(x):
-                return torch.blargh(xyz)
-
-        _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
-            torch.jit.script(FooBar)
-
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
@@ -6452,13 +6435,13 @@ a")
         self.checkScript(tensor_test, (x, y))
 
     def test_number_all(self):
-        def int1():	
+        def int1():
             return all(torch.tensor([1, 2, 3], dtype=torch.uint8))
 
-        def int2():	
+        def int2():
             return all(torch.tensor([1, 0, 3], dtype=torch.uint8))
 
-        self.checkScript(int1, ())	
+        self.checkScript(int1, ())
         self.checkScript(int2, ())
 
     def test_number_math(self):
