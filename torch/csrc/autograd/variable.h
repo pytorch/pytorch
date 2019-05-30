@@ -248,13 +248,29 @@ struct TORCH_API Variable : public at::Tensor {
       bool keep_graph,
       bool create_graph) const;
 
-  /// Sets the `Tensor` held by this `Variable` to the one supplied.
-  /// It is rarely necessary to call this; it's used, for example, when
-  /// a non-sparse gradient gets added to a sparse gradient, requiring
-  /// the type of the gradient `Variable` to become non-sparse.
+  /// Sets the tensor data held by this `Variable` to be the same as `new_data`.
+  /// It requires that `new_data` has the same derived type of TensorImpl as
+  /// this `Variable`.
   void set_data(const at::Tensor &new_data);
 
-  // yf225 TODO: add comment!
+  /// Sets the tensor data held by this `Variable` to be the same as `new_data`.
+  /// It allows this `Variable` and `new_data` to have different derived types
+  /// of TensorImpl.
+  /// Under the hood, this function changes `Variable`'s TensorImpl, but preserves
+  /// its `pyobj_` pointer, so that previous references to this `Variable` in Python
+  /// are still valid.
+  ///
+  /// It is rarely necessary to use this instead of `set_data()`. Example use cases
+  /// of this function are:
+  ///
+  /// 1. When a non-sparse gradient gets added to a sparse gradient, requiring the
+  /// type of the gradient `Variable` to become non-sparse. Since changing sparse-ness
+  /// of a tensor involves changing its TensorImpl type, it cannot be achieved by
+  /// `set_data()`.
+  ///
+  /// 2. When we use `model.to(device)` in Python to move `model` to a device that
+  /// requires a different TensorImpl type (e.g. XLA device), but want previous
+  /// references to `model`'s parameters to still be valid.
   void _set_data_change_impl(const at::Tensor &new_data);
 
   /// True if this `Variable` has the same derived type of TensorImpl as `tensor`.
@@ -339,7 +355,8 @@ struct TORCH_API Variable : public at::Tensor {
   Variable(c10::intrusive_ptr<at::TensorImpl> self);
   at::TensorImpl* get() const;
 
-  // yf225 TODO: add comment for this function
+  // Resets gradient accumulator if the current accumulator's input metadata is
+  // out of date.
   void reset_grad_accumulator(
     const c10::Device& new_device, const at::DeprecatedTypeProperties& new_type);
 };

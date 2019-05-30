@@ -89,7 +89,6 @@ bool Variable::is_same_impl_type(const at::Tensor &tensor) {
 
 void Variable::reset_grad_accumulator(
     const c10::Device& new_device, const at::DeprecatedTypeProperties& new_type) {
-  // Resets gradient accumulator if metadata is out of date
   Variable::AutogradMeta* autograd_meta = get_autograd_meta();
   std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
   auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
@@ -109,7 +108,7 @@ void Variable::set_data(const at::Tensor &new_data) {
     is_same_impl_type(new_data),
     "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have different types of TensorImpl.");
 
-  // yf225 TODO: add comment here?
+  // Resets gradient accumulator if metadata is out of date
   reset_grad_accumulator(new_data.device(), new_data.type());
 
   // Version counter is not shared when we replace a `Variable`'s tensor data
@@ -124,10 +123,11 @@ void Variable::set_data(const at::Tensor &new_data) {
 }
 
 void Variable::_set_data_change_impl(const at::Tensor &new_data) {
-  // yf225 TODO: add comment here?
+  // Resets gradient accumulator if metadata is out of date
   reset_grad_accumulator(new_data.device(), new_data.type());
 
-  // yf225 TODO: explain what's going on here!
+  // We change this `Variable`'s TensorImpl, but preserves its `pyobj_` pointer,
+  // so that previous references to this `Variable` in Python are still valid.
   auto new_impl = new_data.unsafeGetTensorImpl()->shallow_copy_and_detach(
     /*version_counter=*/get()->version_counter(),
     /*allow_tensor_metadata_change=*/get()->allow_tensor_metadata_change());

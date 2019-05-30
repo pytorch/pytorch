@@ -211,11 +211,11 @@ class TestAutograd(TestCase):
             params.backward(backward_grad_tensor)
             self.assertEqual(id(grad_saved) == id(params.grad), should_preserve_reference)
 
-        # Accumulate dense gradient to sparse gradient will change the `params.grad` reference
+        # Accumulate dense gradient to sparse gradient will preserve the `params.grad` reference
         _test_grad_tensor(
             torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
             torch.tensor([1.5, 1.5]),
-            False)
+            True)
 
         # Accumulate dense gradient to dense gradient will preserve the `params.grad` reference
         _test_grad_tensor(

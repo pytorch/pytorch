@@ -207,7 +207,12 @@ class Module(object):
                     if param._grad._is_same_impl_type(grad_applied):
                         param._grad.data = grad_applied
                     else:
-                        # yf225 TODO: comment why we don't use _set_data_change_impl here
+                        # NOTE: This breaks previous references to `param._grad`.
+                        #
+                        # TODO: Ideally, we should use something like
+                        # `param._grad._set_data_change_impl(grad_applied)`
+                        # instead to preserve previous references to `param._grad`,
+                        # but we haven't figured out a way to do so at the moment.
                         param._grad = grad_applied
 
         for key, buf in self._buffers.items():
