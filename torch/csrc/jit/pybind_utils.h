@@ -326,6 +326,8 @@ inline IValue toIValue(
     case TypeKind::VarType:
     case TypeKind::FutureType:
       break;
+    case TypeKind::FunctionType:
+      AT_ERROR("Function Values aren't yet supported");
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",
