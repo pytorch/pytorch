@@ -6457,6 +6457,21 @@ a")
 
         self.checkScript(int1, ())	
         self.checkScript(int2, ())
+
+    def test_number_sum(self):	
+        def int1():	
+            return sum(torch.tensor([1,2,3]))
+        def int2():	
+            return sum(torch.tensor([-1,0,1]))	
+        def float1():	
+            return sum(torch.tensor([1.2,2.3,3]))
+        def float2():	
+            return sum(torch.tensor([0.2,0.1,0.2]))
+
+	self.assertEqual(int1(), 6)
+        self.assertEqual(int2(), 0)
+        self.assertEqual(float1(), 6.5)
+        self.assertEqual(float2(), .5)
         
     def test_number_math(self):
         ops_template = dedent('''
