@@ -328,9 +328,7 @@ void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sp
   });
 }
 
-Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef sparse__, Scalar value) {
-  const SparseTensor& sparse_ = sparse__.tref;
-
+Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, Scalar value) {
   AT_ASSERT(!r.is_sparse());
   AT_ASSERT(!dense.is_sparse());
   AT_ASSERT(sparse_.is_sparse());

@@ -8,7 +8,6 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Half.h>
 #include <c10/core/TensorTypeIdRegistration.h>
@@ -275,7 +274,6 @@ struct CAFFE2_API Type {
   virtual Tensor narrow_copy(const Tensor & self, int64_t dim, int64_t start, int64_t length) const = 0;
   virtual Tensor narrow(const Tensor & self, int64_t dim, int64_t start, int64_t length) const = 0;
   virtual Tensor permute(const Tensor & self, IntArrayRef dims) const = 0;
-  virtual Tensor T(const Tensor & self) const = 0;
   virtual Tensor pin_memory(const Tensor & self) const = 0;
   virtual Tensor pinverse(const Tensor & self, double rcond) const = 0;
   virtual Tensor reciprocal(const Tensor & self) const = 0;
@@ -373,7 +371,7 @@ struct CAFFE2_API Type {
   virtual Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & sparse_resize_(Tensor & self, IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) const = 0;
   virtual Tensor & sparse_resize_and_clear_(Tensor & self, IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) const = 0;
-  virtual Tensor sparse_mask(const Tensor & self, SparseTensorRef mask) const = 0;
+  virtual Tensor sparse_mask(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor to_dense(const Tensor & self) const = 0;
   virtual int64_t sparse_dim(const Tensor & self) const = 0;
   virtual int64_t _dimI(const Tensor & self) const = 0;

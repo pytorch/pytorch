@@ -926,7 +926,7 @@
 - name: zero_(Tensor self)
   self: zeros_like(grad)
 
-- name: sparse_mask(Tensor self, SparseTensorRef mask)
+- name: sparse_mask(Tensor self, Tensor mask)
   self: not_implemented("sparse_mask")
   mask: not_implemented("sparse_mask")
 

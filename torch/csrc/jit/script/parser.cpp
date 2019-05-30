@@ -218,7 +218,7 @@ struct ParserImpl {
     return parseExp(0);
   }
   Expr parseExp(int precedence) {
-    TreeRef prefix = nullptr;
+    TreeRef prefix;
     int unary_prec;
     if (shared.isUnary(L.cur().kind, &unary_prec)) {
       auto kind = L.cur().kind;
