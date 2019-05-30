@@ -26,17 +26,17 @@ OperatorEntry::OperatorEntry(FunctionSchema&& schema)
 void OperatorEntry::prepareForDeregistration() {
   return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
     if (!dispatchTable.isEmpty()) {
-      AT_ERROR("Tried to deregister op schema for an operator that still has kernels registered. The operator schema is ", toString(schema_), ". Registered kernels for dispatch keys: ", dispatchTable.listAllDispatchKeys());
+      TORCH_INTERNAL_ASSERT(false, "Tried to deregister op schema for an operator that still has kernels registered. The operator schema is ", toString(schema_), ". Registered kernels for dispatch keys: ", dispatchTable.listAllDispatchKeys());
     }
   });
-  AT_ASSERTM(kernels_.is_left(), "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have a catch-all kernel. The operator schema is ", toString(schema_));
-  AT_ASSERTM(kernels_.left().size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have kernels for dispatch keys ", listAllDispatchKeys(kernels_.left()), ". The operator schema is ", toString(schema_));
+  TORCH_INTERNAL_ASSERT(kernels_.is_left(), "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have a catch-all kernel. The operator schema is ", toString(schema_));
+  TORCH_INTERNAL_ASSERT(kernels_.left().size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have kernels for dispatch keys ", listAllDispatchKeys(kernels_.left()), ". The operator schema is ", toString(schema_));
 }
 
 RegistrationHandleRAII OperatorEntry::registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
-  AT_CHECK(kernels_.is_left(), "Tried to register a kernel with dispatch key ", detail::dispatch_key_to_string(dispatch_key)," for an operator which already has a catch-all kernel registered. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is ", toString(schema_));
+  TORCH_CHECK(kernels_.is_left(), "Tried to register a kernel with dispatch key ", detail::dispatch_key_to_string(dispatch_key)," for an operator which already has a catch-all kernel registered. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is ", toString(schema_));
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
@@ -58,7 +58,7 @@ RegistrationHandleRAII OperatorEntry::registerCatchallKernel(DispatchTableEntry 
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   if (kernels_.is_left()) {
-    AT_CHECK(0 == kernels_.left().size(), "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys ", listAllDispatchKeys(kernels_.left()), ". An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is ", toString(schema_));
+    TORCH_CHECK(0 == kernels_.left().size(), "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys ", listAllDispatchKeys(kernels_.left()), ". An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is ", toString(schema_));
     kernels_ = make_right<ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>, std::list<DispatchTableEntry>>();
   }
 
@@ -81,11 +81,11 @@ RegistrationHandleRAII OperatorEntry::registerCatchallKernel(DispatchTableEntry 
 void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
-  AT_CHECK(kernels_.is_left(), "Tried deregister a kernel for dispatch key ", detail::dispatch_key_to_string(dispatch_key), " for an operator that only has a catch-all kernel. The operator schema is ", toString(schema_));
+  TORCH_CHECK(kernels_.is_left(), "Tried deregister a kernel for dispatch key ", detail::dispatch_key_to_string(dispatch_key), " for an operator that only has a catch-all kernel. The operator schema is ", toString(schema_));
 
   auto& kernels = kernels_.left();
   auto found = kernels.find(dispatch_key);
-  AT_ASSERTM(found != kernels.end(), "Tried to deregister a kernel for dispatch key ", detail::dispatch_key_to_string(dispatch_key), " but there are no kernels registered for this dispatch key. The operator schema is ", toString(schema_));
+  TORCH_INTERNAL_ASSERT(found != kernels.end(), "Tried to deregister a kernel for dispatch key ", detail::dispatch_key_to_string(dispatch_key), " but there are no kernels registered for this dispatch key. The operator schema is ", toString(schema_));
   auto& k = found->second;
   k.erase(kernel);
   if (k.empty()) {
@@ -99,7 +99,7 @@ void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<Dispa
 void OperatorEntry::deregisterCatchallKernel_(std::list<DispatchTableEntry>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
-  AT_CHECK(kernels_.is_right(), "Tried to deregister a catch-all kernel for an operator that doesn't have a catch-all kernel registered. The operator schema is ", toString(schema_));
+  TORCH_CHECK(kernels_.is_right(), "Tried to deregister a catch-all kernel for an operator that doesn't have a catch-all kernel registered. The operator schema is ", toString(schema_));
 
   auto& k = kernels_.right();
   k.erase(kernel);
@@ -114,7 +114,7 @@ void OperatorEntry::deregisterCatchallKernel_(std::list<DispatchTableEntry>::ite
 void OperatorEntry::updateDispatchTable_(TensorTypeId dispatch_key) {
   // precondition: kernelsMutex_ is locked
 
-  AT_ASSERTM(kernels_.is_left(), "Can't update the dispatch table a dispatch key ", detail::dispatch_key_to_string(dispatch_key), " because the operator only has catch-all kernels. The operator schema is ", toString(schema_));
+  TORCH_INTERNAL_ASSERT(kernels_.is_left(), "Can't update the dispatch table a dispatch key ", detail::dispatch_key_to_string(dispatch_key), " because the operator only has catch-all kernels. The operator schema is ", toString(schema_));
 
   auto& kernels = kernels_.left();
   auto k = kernels.find(dispatch_key);
