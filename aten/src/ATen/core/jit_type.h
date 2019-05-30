@@ -45,6 +45,7 @@ _(OptionalType) \
 _(VarType) \
 _(ProfiledTensorType) \
 _(DeviceObjType) \
+_(FunctionType) \
 _(ClassType) \
 
 enum class TypeKind {
@@ -1085,6 +1086,41 @@ struct CAFFE2_API StringType : public Type {
 private:
   StringType()
   : Type(TypeKind::StringType) {}
+};
+
+struct FunctionType;
+using FunctionTypePtr = std::shared_ptr<FunctionType>;
+// This type represents a Python Function
+struct CAFFE2_API FunctionType : public Type {
+  static FunctionTypePtr create(
+      std::shared_ptr<torch::jit::script::Function> function) {
+    return FunctionTypePtr(
+        new FunctionType(function)); // NOLINT(modernize-make-shared)
+  }
+  DEFINE_IS_SUBCLASS(FunctionType);
+  bool operator==(const Type& rhs) const override {
+    if (auto func_type = rhs.cast<FunctionType>()) {
+      return func_type->function_ == function_;
+    }
+
+    return false;
+  }
+  std::string str() const override {
+    return "Function";
+  }
+  std::string python_str() const override {
+    throw "Function";
+  }
+  std::shared_ptr<torch::jit::script::Function> function() const {
+    return function_;
+  }
+  static const TypeKind Kind = TypeKind::FunctionType;
+
+ private:
+  FunctionType(std::shared_ptr<torch::jit::script::Function> function)
+      : Type(TypeKind::FunctionType), function_(function) {}
+
+  std::shared_ptr<torch::jit::script::Function> function_;
 };
 
 struct NoneType;
