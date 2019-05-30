@@ -6027,11 +6027,11 @@ a")
             checkMathWrap(op, 2)
 
         checkMath("modf", 1, ret_type="Tuple[float, float]")
-        checkMathWrap("floor", ret_type="int")
-        checkMathWrap("ceil", ret_type="int")
         checkMath("pow", 2, is_float=False, ret_type="int")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
+            checkMathWrap("floor", ret_type="int")
+            checkMathWrap("ceil", ret_type="int")
             checkMathWrap("gcd", 2, is_float=False, ret_type="int")
 
 
