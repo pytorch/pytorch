@@ -2288,7 +2288,7 @@ struct to_ir {
               << "type must be a type identifier";
         }
         auto val = emitExpr(obj);
-        // Special casing for list and tuple since isintance(x, list) and
+        // Special casing for list and tuple since isinstance(x, list) and
         // isinstance(x, tuple) does not accept List[int] / Tuple[int] like
         // subscript type annotation in python
         if (*type_name == "list" && val->type()->cast<ListType>()) {
