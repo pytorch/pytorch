@@ -6431,16 +6431,16 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
-    
-    def test_number_all(self):	
-        def int1():	
-            return all(torch.tensor([1,2,3],dtype=torch.uint8))	
-        def int2():	
-            return all(torch.tensor([1,0,3],dtype=torch.uint8))	
 
-        self.checkScript(int1, ())	
+    def test_number_all(self):
+        def int1():
+            return all(torch.tensor([1,2,3],dtype=torch.uint8))
+        def int2():
+            return all(torch.tensor([1,0,3],dtype=torch.uint8))
+
+        self.checkScript(int1, ())
         self.checkScript(int2, ())
-        
+
     def test_number_math(self):
         ops_template = dedent('''
         def func():
@@ -12698,7 +12698,15 @@ a")
                 self.lstm = torch.nn.LSTM(5, 5)
                 self.lstm.cuda()
 
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.lstm(x)
+
         m = M()
+        m.cuda()
+        out = m(torch.ones(5, 5, 5).cuda())
+        self.assertTrue(out[0].is_cuda)
+
 
     def test_ignore_decorator(self):
         class M(torch.jit.ScriptModule):
