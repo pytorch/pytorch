@@ -18,24 +18,12 @@ struct GuardElimination {
   }
 
   void moveGuardsToDefs(Block* b) {
-    // alias analysis gets confused if we ask it to move expressions
-    // around prim::load, so we insert a dummy anchor to
-    // which we will be moving uses of params
-    // that alias analysis tells us are okay to move
-    auto start_node = b->owningGraph()->create(prim::Constant, 1);
-    start_node->output()->setType(IntType::create());
-    // the answer to the mystery of life
-    start_node->i_(attr::value, 42);
-    start_node->insertAfter(*b->nodes().begin());
     for (auto it = b->nodes().begin(); it != b->nodes().end();) {
       auto n = *it;
       if (n->kind() == prim::Guard) {
         // grab the next node before we move this one all the way back
         it++;
         auto guardee = n->inputs().at(0)->node();
-        if (guardee->kind() == prim::Param) {
-          guardee = start_node;
-        }
         aliasDb_->moveAfterTopologicallyValid(n, guardee);
       } else {
         it++;
@@ -73,6 +61,20 @@ struct GuardElimination {
     }
   }
 
+  bool guardsOutput(Node* guard) {
+    auto output = guard->input()->node();
+    auto it = guard;
+
+    while (it != output) {
+      if (it->kind() != prim::Guard && it->kind() != prim::Constant) {
+        return false;
+      }
+      it = it->prev();
+    }
+
+    return true;
+  }
+
   void eliminateGuards(Block* b) {
     // a very simple pass to eliminate redundant guards for ops
     // whose outputs are fully determined by their inputs
@@ -80,7 +82,7 @@ struct GuardElimination {
     // to remove a guard on ops' outputs
     for (auto it = b->nodes().rbegin(); it != b->nodes().rend();) {
       auto n = *it;
-      if (n->kind() == prim::Guard &&
+      if (n->kind() == prim::Guard && guardsOutput(n) &&
           removableGuard(n->inputs().at(0)->node())) {
         auto pttp = n->output()->type();
         n->output()->replaceAllUsesWith(n->inputs().at(0));
