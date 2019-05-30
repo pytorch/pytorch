@@ -30,6 +30,7 @@ TESTS = [
     'expecttest',
     'indexing',
     'indexing_cuda',
+    'jit',
     'logging',
     'mkldnn',
     'multiprocessing',
@@ -46,10 +47,9 @@ TESTS = [
     'type_hints',
     'utils',
     'namedtuple_return_api',
+    'jit_fuser',
     'tensorboard',
     'namedtensor',
-    'jit',
-    'jit_fuser',
 ]
 
 WINDOWS_BLACKLIST = [
