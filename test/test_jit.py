@@ -3696,6 +3696,16 @@ def foo(x):
         with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
             torch.jit.script(FooBar)
 
+    def test_file_line_graph(self):
+        def foobar(xyz):
+            return torch.neg(xyz)
+
+        scripted = torch.jit.script(foobar)
+
+        _, lineno = inspect.getsourcelines(foobar)
+        FileCheck().check('test_jit.py:{}:20'.format(lineno+1))\
+                   .run(scripted.graph.debug_str())
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
