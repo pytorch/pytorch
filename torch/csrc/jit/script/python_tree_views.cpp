@@ -14,44 +14,27 @@ namespace jit {
 namespace script {
 
 struct SourceRangeFactory {
-  SourceRangeFactory(
-      std::string text,
-      std::string filename,
-      size_t file_lineno,
-      size_t leading_whitespace_chars)
-      : source_(std::make_shared<Source>(
-            std::move(text),
-            std::move(filename),
-            file_lineno)),
-        leading_whitespace_chars_(leading_whitespace_chars) {}
-  SourceRange create(int line, int start_col, int end_col) {
-    size_t start_byte_offset, end_byte_offset;
-    std::tie(start_byte_offset, end_byte_offset) =
-        line_col_to_byte_offs(
-            line,
-            start_col + leading_whitespace_chars_,
-            end_col + leading_whitespace_chars_);
-    return SourceRange(source_, start_byte_offset, end_byte_offset);
+  SourceRangeFactory(std::string source)
+      : source_(std::make_shared<std::string>(std::move(source))) {
+    size_t pos = 0;
+    do {
+      line_len_prefix_sum_.push_back(pos);
+      pos++;
+    } while ((pos = source_->find('\n', pos)) != std::string::npos);
   }
-
-  std::tuple<size_t, size_t> line_col_to_byte_offs(
-      int line,
-      int start_col,
-      int end_col) {
+  SourceRange create(int line, int start_col, int end_col) {
     // Python has a weird convention where col_offset points to the column
     // *before* the token starts.
     start_col++;
     end_col++;
     // Also, lines are counted from 1.
     line--;
-    auto line_start = source_->offset_for_line(line);
-    return std::make_tuple<size_t, size_t>(
-        line_start + start_col, line_start + end_col);
+    auto line_start = line_len_prefix_sum_.at(line);
+    return SourceRange(source_, line_start + start_col, line_start + end_col);
   }
 
-  std::shared_ptr<Source> source_;
+  std::shared_ptr<std::string> source_;
   std::vector<size_t> line_len_prefix_sum_;
-  size_t leading_whitespace_chars_;
 };
 
 template <typename T>
@@ -82,7 +65,7 @@ void initTreeViewBindings(PyObject* module) {
       .def_property_readonly("start", &SourceRange::start)
       .def_property_readonly("end", &SourceRange::end);
   py::class_<SourceRangeFactory>(m, "SourceRangeFactory")
-      .def(py::init<std::string&&, std::string&&, size_t, size_t>())
+      .def(py::init<std::string&&>())
       .def("make_range", &SourceRangeFactory::create)
       .def(
           "make_raw_range",
@@ -90,7 +73,7 @@ void initTreeViewBindings(PyObject* module) {
             return SourceRange(self.source_, start, end);
           })
       .def_property_readonly("source", [](const SourceRangeFactory& self) {
-        return self.source_->text();
+        return *self.source_;
       });
 
   py::class_<TreeView>(m, "TreeView")
