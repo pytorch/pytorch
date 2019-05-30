@@ -33,6 +33,7 @@ from .utils import YamlLoader, split_name_params
 #      1. name of the argument that all outputs are view of
 #      2. map: output idx => name of the argument that this result is view of
 VIEW_FUNCTIONS = {
+    'T': 'self',
     'alias': 'self',
     'as_strided': 'self',
     'diagonal': 'self',
