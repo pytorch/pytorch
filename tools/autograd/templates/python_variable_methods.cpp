@@ -283,8 +283,8 @@ static Tensor dispatch_invert(const Tensor & self) {
 static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (self_.scalar_type() != at::kByte) {
-    throw TypeError("~ (operator.invert) is only implemented on byte tensors");
+  if (self_.scalar_type() != at::kByte && self_.scalar_type() != at::kBool) {
+    throw TypeError("~ (operator.invert) is only implemented on byte and bool tensors");
   }
   return THPVariable_Wrap(dispatch_invert(self_));
   END_HANDLE_TH_ERRORS

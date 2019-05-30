@@ -2243,8 +2243,8 @@ class TestDistributions(TestCase):
             self.assertEqual((beta_samples == 0).sum(), 0)
             self.assertEqual((beta_samples == 1).sum(), 0)
             # assert support is concentrated around 0 and 1
-            frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
-            frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+            frac_zeros = float((beta_samples < 0.1).byte().sum()) / num_samples
+            frac_ones = float((beta_samples > 0.9).byte().sum()) / num_samples
             self.assertEqual(frac_zeros, 0.5, 0.05)
             self.assertEqual(frac_ones, 0.5, 0.05)
 
@@ -2254,11 +2254,11 @@ class TestDistributions(TestCase):
         num_samples = 50000
         conc = torch.tensor(1e-2, dtype=torch.float64).cuda()
         beta_samples = Beta(conc, conc).sample([num_samples])
-        self.assertEqual((beta_samples == 0).sum(), 0)
-        self.assertEqual((beta_samples == 1).sum(), 0)
+        self.assertEqual((beta_samples == 0).byte().sum(), 0)
+        self.assertEqual((beta_samples == 1).byte().sum(), 0)
         # assert support is concentrated around 0 and 1
-        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
-        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
+        frac_zeros = float((beta_samples < 0.1).byte().sum()) / num_samples
+        frac_ones = float((beta_samples > 0.9).byte().sum()) / num_samples
         # TODO: increase precision once imbalance on GPU is fixed.
         self.assertEqual(frac_zeros, 0.5, 0.12)
         self.assertEqual(frac_ones, 0.5, 0.12)

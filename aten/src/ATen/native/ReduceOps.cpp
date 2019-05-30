@@ -435,7 +435,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor &self, IntArrayRef dims, bool
   if (self.numel() != 0) {
     auto maxes = at::max_values(self, dims, true);
     auto maxes_squeezed = (keepdim ? maxes : squeeze_multiple(maxes, dims));
-    maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
+    maxes_squeezed.masked_fill_((maxes_squeezed.abs() == INFINITY).to(at::kByte), 0);
     at::sum_out(result, at::exp(self - maxes), dims, keepdim);
     result.log_().add_(maxes_squeezed);
   } else {

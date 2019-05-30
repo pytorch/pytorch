@@ -9171,7 +9171,7 @@ class _TestTorchMixin(object):
             self.assertEqual(x.bernoulli().tolist(), trivial_p)
 
         def isBinary(t):
-            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
+            return (torch.ne(t, 0) == torch.ne(t, 1)).all().item() == False
 
         p = torch.rand(5, 5, dtype=p_dtype, device=device)
         self.assertTrue(isBinary(p.bernoulli()))

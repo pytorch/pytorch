@@ -89,7 +89,7 @@ class Geometric(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         value, probs = broadcast_all(value, self.probs.clone())
-        probs[(probs == 1) & (value == 0)] = 0
+        probs[(probs == 1).byte() & (value == 0).byte()] = 0
         return value * (-probs).log1p() + self.probs.log()
 
     def entropy(self):

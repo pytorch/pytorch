@@ -86,7 +86,7 @@ class TestIndexing(TestCase):
     def test_byte_mask2d(self):
         v = torch.randn(5, 7, 3)
         c = torch.randn(5, 7)
-        num_ones = (c > 0).sum()
+        num_ones = (c > 0).byte().sum()
         r = v[c > 0]
         self.assertEqual(r.shape, (num_ones, 3))
 

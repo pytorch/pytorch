@@ -177,11 +177,11 @@ _euler_gamma = 0.57721566490153286060
 @register_kl(Bernoulli, Bernoulli)
 def _kl_bernoulli_bernoulli(p, q):
     t1 = p.probs * (p.probs / q.probs).log()
-    t1[q.probs == 0] = inf
-    t1[p.probs == 0] = 0
+    t1[(q.probs == 0).byte()] = inf
+    t1[(p.probs == 0).byte()] = 0
     t2 = (1 - p.probs) * ((1 - p.probs) / (1 - q.probs)).log()
-    t2[q.probs == 1] = inf
-    t2[p.probs == 1] = 0
+    t2[(q.probs == 1).byte()] = inf
+    t2[(p.probs == 1).byte()] = 0
     return t1 + t2
 
 
@@ -204,7 +204,7 @@ def _kl_binomial_binomial(p, q):
     if (p.total_count < q.total_count).any():
         raise NotImplementedError('KL between Binomials where q.total_count > p.total_count is not implemented')
     kl = p.total_count * (p.probs * (p.logits - q.logits) + (-p.probs).log1p() - (-q.probs).log1p())
-    inf_idxs = p.total_count > q.total_count
+    inf_idxs = (p.total_count > q.total_count).byte()
     kl[inf_idxs] = _infinite_like(kl[inf_idxs])
     return kl
 
@@ -411,7 +411,7 @@ def _kl_pareto_pareto(p, q):
     t1 = q.alpha * scale_ratio.log()
     t2 = -alpha_ratio.log()
     result = t1 + t2 + alpha_ratio - 1
-    result[p.support.lower_bound < q.support.lower_bound] = inf
+    result[(p.support.lower_bound < q.support.lower_bound).byte()] = inf
     return result
 
 
@@ -481,7 +481,7 @@ def _kl_beta_normal(p, q):
 @register_kl(Beta, Uniform)
 def _kl_beta_uniform(p, q):
     result = -p.entropy() + (q.high - q.low).log()
-    result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = inf
+    result[(q.low > p.support.lower_bound).byte() | (q.high < p.support.upper_bound).byte()] = inf
     return result
 
 
@@ -632,7 +632,7 @@ def _kl_pareto_exponential(p, q):
     t2 = p.alpha.reciprocal()
     t3 = p.alpha * scale_rate_prod / (p.alpha - 1)
     result = t1 - t2 + t3 - 1
-    result[p.alpha <= 1] = inf
+    result[(p.alpha <= 1).byte()] = inf
     return result
 
 
@@ -644,7 +644,7 @@ def _kl_pareto_gamma(p, q):
     t3 = (1 - q.concentration) * common_term
     t4 = q.rate * p.alpha * p.scale / (p.alpha - 1)
     result = t1 + t2 + t3 + t4 - 1
-    result[p.alpha <= 1] = inf
+    result[(p.alpha <= 1).byte()] = inf
     return result
 
 # TODO: Add Pareto-Laplace KL Divergence
@@ -659,7 +659,7 @@ def _kl_pareto_normal(p, q):
     t3 = p.alpha * common_term.pow(2) / (p.alpha - 2)
     t4 = (p.alpha * common_term - q.loc).pow(2)
     result = t1 - t2 + (t3 + t4) / var_normal - 1
-    result[p.alpha <= 2] = inf
+    result[(p.alpha <= 2).byte()] = inf
     return result
 
 
@@ -677,14 +677,14 @@ def _kl_uniform_beta(p, q):
     t3 = (q.concentration0 - 1) * (_x_log_x((1 - p.high)) - _x_log_x((1 - p.low)) + common_term) / common_term
     t4 = q.concentration1.lgamma() + q.concentration0.lgamma() - (q.concentration1 + q.concentration0).lgamma()
     result = t3 + t4 - t1 - t2
-    result[(p.high > q.support.upper_bound) | (p.low < q.support.lower_bound)] = inf
+    result[(p.high > q.support.upper_bound).byte() | (p.low < q.support.lower_bound).byte()] = inf
     return result
 
 
 @register_kl(Uniform, Exponential)
 def _kl_uniform_exponetial(p, q):
     result = q.rate * (p.high + p.low) / 2 - ((p.high - p.low) * q.rate).log()
-    result[p.low < q.support.lower_bound] = inf
+    result[(p.low < q.support.lower_bound).byte()] = inf
     return result
 
 
@@ -696,7 +696,7 @@ def _kl_uniform_gamma(p, q):
     t3 = (1 - q.concentration) * (_x_log_x(p.high) - _x_log_x(p.low) - common_term) / common_term
     t4 = q.rate * (p.high + p.low) / 2
     result = -t1 + t2 + t3 + t4
-    result[p.low < q.support.lower_bound] = inf
+    result[(p.low < q.support.lower_bound).byte()] = inf
     return result
 
 
@@ -727,7 +727,7 @@ def _kl_uniform_pareto(p, q):
     t1 = (q.alpha * q.scale.pow(q.alpha) * (support_uniform)).log()
     t2 = (_x_log_x(p.high) - _x_log_x(p.low) - support_uniform) / support_uniform
     result = t2 * (q.alpha + 1) - t1
-    result[p.low < q.support.lower_bound] = inf
+    result[(p.low < q.support.lower_bound).byte()] = inf
     return result
 
 

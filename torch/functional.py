@@ -234,7 +234,7 @@ def isfinite(tensor):
     # overflow and it's finite.
     if not tensor.is_floating_point():
         return torch.ones_like(tensor, dtype=torch.uint8)
-    return (tensor == tensor) & (tensor.abs() != inf)
+    return (tensor == tensor).byte() & (tensor.abs() != inf).byte()
 
 
 def isinf(tensor):

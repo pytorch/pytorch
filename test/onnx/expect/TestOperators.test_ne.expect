@@ -66,7 +66,7 @@ graph {
     name: "4"
     type {
       tensor_type {
-        elem_type: 2
+        elem_type: 9
         shape {
           dim {
             dim_value: 1
