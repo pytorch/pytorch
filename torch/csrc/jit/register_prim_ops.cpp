@@ -147,7 +147,7 @@ int nminussumofbits(int v) {
   long w = (long)v;
   w -= (0xaaaaaaaa & w) >> 1;
   w = (w & 0x33333333) + ((w >> 2) & 0x33333333);
-  w = w + (w >> 4) & 0x0f0f0f0f;
+  w = (w + (w >> 4)) & 0x0f0f0f0f;
   w += w >> 8;
   w += w >> 16;
   return v - (int)(w & 0xff);
