@@ -25,6 +25,8 @@ fi
 
 apt-get update
 apt-get install -y --no-install-recommends clang-"$CLANG_VERSION" libclang-"$CLANG_VERSION"-dev
+apt-get install -y --no-install-recommends llvm-"$CLANG_VERSION" llvm-"$CLANG_VERSION"-dev
+
 rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Use update-alternatives to make this version the default
