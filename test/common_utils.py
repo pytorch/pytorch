@@ -594,7 +594,7 @@ class TestCase(expecttest.TestCase):
         r"""
         Test if :attr:`callable` raises a warning.
         """
-        with warnings.catch_warnings(record=True) as ws:
+        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             callable()
             self.assertTrue(len(ws) > 0, msg)
@@ -604,12 +604,52 @@ class TestCase(expecttest.TestCase):
         Test if :attr:`callable` raises any warning with message that contains
         the regex pattern :attr:`regex`.
         """
-        with warnings.catch_warnings(record=True) as ws:
+        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             callable()
             self.assertTrue(len(ws) > 0, msg)
             found = any(re.search(regex, str(w.message)) is not None for w in ws)
             self.assertTrue(found, msg)
+
+    @contextmanager
+    def _reset_warning_registry(self):
+        r"""
+        warnings.catch_warnings() in Python 2 misses already registered
+        warnings. We need to manually clear the existing warning registries to
+        ensure catching warnings in a scope.
+        """
+        # Python 3 has no problem.
+        if sys.version_info >= (3,):
+            yield
+            return
+
+        # Backup and clear all existing warning registries.
+        backup = {}
+        for name, mod in list(sys.modules.items()):
+            try:
+                reg = mod.__warningregistry__
+            except AttributeError:
+                continue
+            else:
+                backup[name] = reg.copy()
+                reg.clear()
+
+        yield
+
+        # Restore backed up warning registries.
+        for name, reg_orig in backup.items():
+            try:
+                mod = sys.modules[name]
+            except KeyError:
+                continue
+
+            try:
+                reg = mod.__warningregistry__
+            except AttributeError:
+                mod.__warningregistry__ = reg_orig
+            else:
+                reg.clear()
+                reg.update(reg_orig)
 
     def assertExpected(self, s, subname=None):
         r"""

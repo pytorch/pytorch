@@ -343,8 +343,8 @@ struct TORCH_API Module {
   }
   /// True if the module is in training mode.
   bool is_training() {
-    if (auto p = find_attribute("training")) {
-      return p->value().toBool();
+    if (auto p = find_buffer("training")) {
+      return p->value().toTensor().item<int64_t>() == 1;
     }
     // We are in training mode by default
     return true;
