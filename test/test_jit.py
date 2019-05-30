@@ -11925,7 +11925,6 @@ a")
     @unittest.skipIf(hasattr(torch.jit, 'WeakScriptModuleProxy'), "# TODO: re-enable"
                                                                   "this when WeakScriptModuleProxy has been deleted")
     def test_weak_module_isinstance(self):
-    def test_weak_module_isinstance(self):
         tester = self
 
         class M(torch.jit.ScriptModule):
@@ -12690,6 +12689,16 @@ a")
             return python_list_op(lst)
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_weak_cuda(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.lstm = torch.nn.LSTM(5, 5)
+                self.lstm.cuda()
+
+        m = M()
 
     def test_ignore_decorator(self):
         class M(torch.jit.ScriptModule):
