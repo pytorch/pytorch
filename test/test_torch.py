@@ -2859,6 +2859,30 @@ class _TestTorchMixin(object):
         self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
 
+    def test_qtensor_permute(self):
+        r = np.random.rand(100, 30) * 2 - 4
+        r = torch.from_numpy(r).float()
+        scale = 2
+        zero_point = 2
+        qr = r.quantize_linear(scale, zero_point, torch.qint8)
+        qr = qr.transpose(0, 1)
+        rqr = qr.dequantize()
+        # compare transpose + dequantized result with orignal transposed result
+        self.assertTrue(np.allclose(r.numpy().T, rqr.numpy(), atol=2 / scale))
+
+        qr = r.quantize_linear(scale, zero_point, torch.qint8)
+        qr1 = qr.permute([1, 0])
+        qr2 = qr.transpose(0, 1)
+        # compare int representation after transformations
+        self.assertTrue(torch.equal(qr1.int_repr(), qr2.int_repr()))
+        self.assertTrue(qr1.q_scale() == qr2.q_scale())
+        self.assertTrue(qr1.q_zero_point() == qr2.q_zero_point())
+        # compare dequantized result
+        self.assertTrue(np.array_equal(qr1.dequantize().numpy(), qr2.dequantize().numpy()))
+        # compare permuted + dequantized result with original transposed result
+        self.assertTrue(np.allclose(qr2.dequantize().numpy(), r.numpy().T, atol=2 / scale))
+        # make permuted result contiguous
+        self.assertTrue(torch.equal(qr2.contiguous().int_repr(), qr2.int_repr()))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
@@ -11145,17 +11169,17 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # Checking for runtime error, as this is the expected behaviour
             with self.assertRaises(RuntimeError):
                 torch.unique(
-                    x_ill_formed_empty, 
-                    return_inverse=True, 
-                    return_counts=True, 
-                    dim=1) 
+                    x_ill_formed_empty,
+                    return_inverse=True,
+                    return_counts=True,
+                    dim=1)
 
             # test along dim2
             with self.assertRaises(RuntimeError):
                 torch.unique(
-                    x_ill_formed_empty_another, 
-                    return_inverse=True, 
-                    return_counts=True, 
+                    x_ill_formed_empty_another,
+                    return_inverse=True,
+                    return_counts=True,
                     dim=2)
 
             # test consecutive version
