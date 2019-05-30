@@ -71,9 +71,11 @@ class Registry {
     if (registry_.count(key) != 0) {
       auto cur_priority = priority_[key];
       if (priority > cur_priority) {
+  #ifdef DEBUG
         std::string warn_msg =
             "Overwriting already registered item for key " + KeyStrRepr(key);
         fprintf(stderr, "%s\n", warn_msg.c_str());
+  #endif
         registry_[key] = creator;
         priority_[key] = priority;
       } else if (priority == cur_priority) {
@@ -182,18 +184,6 @@ class Registerer {
     return ObjectPtrType(new DerivedType(args...));
   }
 };
-
-/**
- * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
- * str and ending with a number that varies with the line.
- */
-#define C10_CONCATENATE_IMPL(s1, s2) s1##s2
-#define C10_CONCATENATE(s1, s2) C10_CONCATENATE_IMPL(s1, s2)
-#ifdef __COUNTER__
-#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
-#else
-#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
-#endif
 
 /**
  * C10_DECLARE_TYPED_REGISTRY is a macro that expands to a function

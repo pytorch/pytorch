@@ -58,7 +58,7 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema) {
     if (found->schema() != schema) {
       std::ostringstream str;
       str << schema << " vs " << found->schema();
-      AT_ERROR("Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
+      TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
     }
     return *found;
   }
@@ -89,7 +89,7 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   // reduce refcount and actually deregister if no references left
-  AT_ASSERT(op.operatorIterator_->refcount > 0);
+  TORCH_INTERNAL_ASSERT(op.operatorIterator_->refcount > 0);
   --op.operatorIterator_->refcount;
   if (0 == op.operatorIterator_->refcount) {
     op.operatorIterator_->op.prepareForDeregistration();
@@ -106,9 +106,9 @@ RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, Tens
   return op.operatorIterator_->op.registerKernel(std::move(dispatch_key), DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
 }
 
-RegistrationHandleRAII Dispatcher::registerFallbackKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func) {
+RegistrationHandleRAII Dispatcher::registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func) {
   // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.registerFallbackKernel(DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
+  return op.operatorIterator_->op.registerCatchallKernel(DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
 }
 
 void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {

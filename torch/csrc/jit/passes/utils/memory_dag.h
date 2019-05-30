@@ -29,23 +29,30 @@ struct Value;
 //
 // So, by traversing the "points-to" graph to the leaves, you can determine
 // which memory locations an element may point to.
-class MemoryDAG {
+class TORCH_API MemoryDAG {
  public:
+
+  // explicitly delete copy constructor because otherwise windows build is confused for an exported class
+  // see https://stackoverflow.com/a/51033485/105137
+  MemoryDAG() {}
+  MemoryDAG(const MemoryDAG&)=delete;
+  MemoryDAG& operator=(const MemoryDAG&)=delete;
+
   // Make `from` point at `to`.
-  TORCH_API void makePointerTo(Element* from, Element* to);
+  void makePointerTo(Element* from, Element* to);
 
   void addToContainedElements(Element* contained, Element* container);
 
   // Make a fresh element (i.e. an element that doesn't point to anything) and
   // return it.
-  TORCH_API Element* makeFreshValue(const Value* v);
+  Element* makeFreshValue(const Value* v);
 
   // Do `a` and `b` potentially share a memory location?
   bool mayAlias(const Element* a, const Element* b) const;
-  TORCH_API bool mayAlias(Element* a, Element* b) const;
+  bool mayAlias(Element* a, Element* b) const;
 
   // Does a hold reference to any memory that is stored in elem, or vice versa?
-  TORCH_API bool mayContainAlias(const Element* a, const Element* b) const;
+  bool mayContainAlias(const Element* a, const Element* b) const;
   bool mayContainAlias(Element* a, Element* b) const;
 
   bool mayContainAlias(

@@ -126,7 +126,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerFallbackKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
+  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
 
   /**
    * Perform a dynamic dispatch and get the kernel for an operator.
@@ -177,7 +177,8 @@ private:
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 
-struct CAFFE2_API SchemaRegistrationHandleRAII final {
+class CAFFE2_API SchemaRegistrationHandleRAII final {
+public:
   const OperatorHandle& opHandle() const {
     return opHandle_;
   }

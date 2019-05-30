@@ -9,7 +9,7 @@
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
 
-__global__ void expected_randoms(float* x, uint64_t counter_offset) {
+__global__ void expected_uniforms(float* x, uint64_t counter_offset) {
   for(int i=0; i < 4; i++) {
     curandStatePhilox4_32_10_t state;
     curand_init(
@@ -22,7 +22,43 @@ __global__ void expected_randoms(float* x, uint64_t counter_offset) {
   }
 }
 
-TEST(DistributionsTest, TestPhiloxIncrementSmallTensor) {
+/**
+ * Helper function that asserts call to uniform_ starts from the correct
+ * philox offset.
+ *   - Get 4 randoms with counter_offset for thread {0,1,2,3} from expected_uniforms
+ *     kernel above.
+ *   - Now get 4 more randoms from uniform_ (note thread {0,1,2,3} for this call should
+ *     start from a counter_offset value)
+ *   - the 4 randoms from expected_uniforms kernel and the 4 randoms from the previous call
+ *     of uniform_ should match, signifying that the philox offset was
+ *     incremented properly and no randoms are being reused from previous calls
+ */
+void assert_with_expected_uniforms(uint64_t counter_offset) {
+  // allocate 4 float on host memory
+  float *x;
+  cudaMallocManaged(&x, 4*sizeof(float));
+
+  // launch kernel to get expected randoms
+  expected_uniforms<<<1, 1>>>(x, counter_offset);
+
+  // Wait for GPU to finish before accessing on host
+  cudaDeviceSynchronize();
+
+  // get 4 new float from uniform_()
+  auto self = at::empty({4}, at::TensorOptions(at::kCUDA));
+  self.uniform_();
+
+  // check randoms from expected_uniforms kernel are equal to the randoms from the second
+  // call of uniform_()
+  for (int i = 0; i < 4; i++) {
+    ASSERT_EQ(self[i].item().to<float>(), x[i]);
+  }
+
+  // Free memory
+  cudaFree(x);
+}
+
+TEST(DistributionsTest, TestPhiloxIncrementSmallUniformTensor) {
   // Test Description:
   //   In Distributions.cu we mentioned that philox increment
   //   should be at least the number of curand() random numbers used in
@@ -33,13 +69,7 @@ TEST(DistributionsTest, TestPhiloxIncrementSmallTensor) {
   //      Once we get these 4 randoms, that would mean that philox counter for
   //      thread 0, 1, 2 and 3, was incremented by 4 (check calc_execution_policy
   //      function for details).
-  //    - Now get 4 randoms with offset=4 for thread {0,1,2,3} from expected_randoms
-  //      kernel above.
-  //    - Now get 4 more randoms from uniform_ (note thread {0,1,2,3} for this call would
-  //      start from a philox_offset value of 4)
-  //    - the 4 randoms from expected_randoms and the 4 randoms from the previous call
-  //      of uniform_ should match, signifying that the philox offset was 
-  //      incremented properly and no randoms are being reused from previous calls
+  //    - assert the call to uniform_ will start from counter_offset of 4
 
   // if cuda not available, return
   if (!at::cuda::is_available()) return;
@@ -49,32 +79,12 @@ TEST(DistributionsTest, TestPhiloxIncrementSmallTensor) {
 
   // get 4 randoms from uniform_(), philox offset is now incremented to 4 by this call
   at::empty({4}, at::TensorOptions(at::kCUDA)).uniform_();
-
-  // allocate 4 float on host memory
-  float *x;
-  cudaMallocManaged(&x, 4*sizeof(float));
-
-  // launch kernel to get expected randoms
-  expected_randoms<<<1, 1>>>(x, 4);
-
-  // Wait for GPU to finish before accessing on host
-  cudaDeviceSynchronize();
   
-  // get 4 new float from uniform_()
-  auto self = at::empty({4}, at::TensorOptions(at::kCUDA));
-  self.uniform_();
-  
-  // check randoms from expected_randoms kernel are equal to the randoms from the second
-  // call of uniform_()
-  for (int i = 0; i < 4; i++) {
-    ASSERT_EQ(self[i].item().to<float>(), x[i]);
-  }
-
-  // Free memory
-  cudaFree(x);
+  // expected uniforms will start from counter offset of 4
+  assert_with_expected_uniforms(4);
 }
 
-TEST(DistributionsTest, TestPhiloxIncrementBigTensor) {
+TEST(DistributionsTest, TestPhiloxIncrementBigUniformTensor) {
   // Test Description:
   //   In Distributions.cu we mentioned that philox increment
   //   should be at least the number of curand() random numbers used in
@@ -93,13 +103,7 @@ TEST(DistributionsTest, TestPhiloxIncrementBigTensor) {
   //      two calls of curand_unfiorm4 as a result of the unroll loop. Therefore,
   //      after this call to the unform_, counter_offset for the next call to uniform_
   //      will start from 8. This is what we test next.
-  //    - Now get 4 randoms with offset=8 for thread {0,1,2,3} from expected_randoms
-  //      kernel above.
-  //    - Now get 4 more randoms from uniform_ (note thread {0,1,2,3} for this call would
-  //      start from a philox_offset value of 8)
-  //    - the 4 randoms from expected_randoms kernel and the 4 randoms from the previous call
-  //      of uniform_ should match, signifying that the philox offset was
-  //      incremented properly and no randoms are being reused from previous calls
+  //    - assert that call to uniform_ will start from counter_offset of 8
 
   // if cuda not available, return
   if (!at::cuda::is_available()) return;
@@ -117,27 +121,7 @@ TEST(DistributionsTest, TestPhiloxIncrementBigTensor) {
 
   // get numel randoms from uniform_(), philox offset is now incremented to 8 by this call
   at::empty({numel}, at::TensorOptions(at::kCUDA)).uniform_();
-
-  // allocate 4 float on host memory
-  float *x;
-  cudaMallocManaged(&x, 4*sizeof(float));
-
-  // launch kernel to get expected randoms
-  expected_randoms<<<1, 1>>>(x, 8);
-
-  // Wait for GPU to finish before accessing on host
-  cudaDeviceSynchronize();
-
-  // get 4 new float from uniform_()
-  auto self = at::empty({4}, at::TensorOptions(at::kCUDA));
-  self.uniform_();
-
-  // check randoms from expected_randoms kernel are equal to the randoms from the second
-  // call of uniform_()
-  for (int i = 0; i < 4; i++) {
-    ASSERT_EQ(self[i].item().to<float>(), x[i]);
-  }
-
-  // Free memory
-  cudaFree(x);
+  
+  // expected uniforms will start from counter offset of 8
+  assert_with_expected_uniforms(8);
 }

@@ -69,7 +69,7 @@ static c10::optional<std::vector<int64_t>> canRunKernel(
     const KernelSpec& spec,
     at::TensorList args) {
   // Short-circuits on size mismatch
-  AT_CHECK(
+  TORCH_CHECK(
       args.size() == spec.inputChunks().size(),
       "Expected ",
       spec.inputChunks().size(),
