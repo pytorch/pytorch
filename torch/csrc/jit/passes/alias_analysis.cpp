@@ -83,14 +83,7 @@ bool AliasDb::hasWriters(const Value* v) const {
   if (isWriteCacheStale_) {
     rebuildWriteCache();
   }
-
-  for (const auto loc : elementMap_.at(v)->getMemoryLocations()) {
-    if (writeCache_.count(loc)) {
-      return true;
-    }
-  }
-
-  return false;
+  return writeCache_.intersects(elementMap_.at(v)->getMemoryLocations());
 }
 
 void AliasDb::getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks) const {
@@ -166,17 +159,17 @@ void AliasDb::dump() const {
   std::cout << "\n===2. ALIAS DB===\n";
   for (const auto& ptrPair : elementMap_) {
     const auto element = ptrPair.second;
-    if (element->pointsTo.size() > 0) {
+    if (!element->pointsTo.empty()) {
       std::cout << getElementName(element) << " points to: ";
       for (const auto pointedTo : element->pointsTo) {
-        std::cout << getElementName(pointedTo) << ", ";
+        std::cout << getElementName(Element::fromIndex(pointedTo)) << ", ";
       }
       std::cout << "\n";
     }
-    if (element->contained_elements.size() > 0) {
+    if (!element->contained_elements.empty()) {
       std::cout << getElementName(element) << " contains: ";
       for (const auto contained : element->contained_elements) {
-        std::cout << getElementName(contained) << ", ";
+        std::cout << getElementName(Element::fromIndex(contained)) << ", ";
       }
       std::cout << "\n";
     }
@@ -287,19 +280,11 @@ void AliasDb::analyzeImpl(Node* node) {
       // might be more complicated than just mapAliases
       // mapAliases(node->inputs(), node->outputs());
       return;
-    case aten::add:
-    case aten::sub:
-    case aten::mul:
-    case aten::div: {
-      // This is necessary because we sometimes get unschematized combinations
-      // of Tensor/primitive.
-      auto maybeSchema = node->maybeSchema();
-      if (!maybeSchema) {
-        return analyzeCreator(node);
-      }
-      // If the node has a schema, fall through and analyze it normally
-      break;
-    }
+    case prim::CallFunction:
+    case prim::CallMethod:
+      // TODO: this can be improved with summarizes of what the function does
+      // for now we assume the worst
+      return analyzeConservative(node);
     case prim::Print:
       // These ops do nothing
       return;
@@ -328,7 +313,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
   // see [custom operator aliasing]
   if (!node->kind().is_aten() && !node->kind().is_prim()) {
-    return analyzeCustomOp(node);
+    return analyzeConservative(node);
   }
 
   // Bind the schema's "formal" alias annotation to the actual values those
@@ -547,7 +532,7 @@ void AliasDb::analyzeWait(Node* node) {
     const auto el = pr.second;
     const auto& pointedFrom = el->pointedFrom;
     TORCH_INTERNAL_ASSERT(!pointedFrom.empty());
-    const auto wildcardValue = (*pointedFrom.begin())->value;
+    const auto wildcardValue = Element::fromIndex(*pointedFrom.begin())->value;
     TORCH_INTERNAL_ASSERT(wildcardValue);
     registerWrite(wildcardValue, node);
   }
@@ -576,10 +561,12 @@ void AliasDb::analyzeSetAttr(Node* node) {
   setWildcard(newValue);
 }
 
-// Custom ops may write to any input and produce wildcards
-void AliasDb::analyzeCustomOp(Node* node) {
+// Used for anything where we do not have accurate alias summaries
+// may write to any input and produce wildcards
+void AliasDb::analyzeConservative(Node* node) {
   for (const auto input : node->inputs()) {
     registerWrite(input, node);
+    setWildcard(input);
   }
 
   // TODO(suo): we can make the more refined assumption that outputs may only
@@ -1081,10 +1068,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::SetAttr,
       prim::profile,
       aten::wait,
-      aten::add,
-      aten::sub,
-      aten::mul,
-      aten::div,
   };
 
   // Operators that should not be used by alias analysis
@@ -1154,9 +1137,7 @@ void AliasDb::rebuildWriteCache() const {
     const auto& writtenValues = pr.second;
 
     for (const auto value : writtenValues) {
-      for (const auto loc : elementMap_.at(value)->getMemoryLocations()) {
-        writeCache_.insert(loc);
-      }
+      writeCache_ |= elementMap_.at(value)->getMemoryLocations();
     }
   }
   isWriteCacheStale_ = false;
