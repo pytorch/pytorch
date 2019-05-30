@@ -171,7 +171,7 @@ Operator(
 """)
 
 
-blacklisted_types = {'SparseTensorRef', 'Storage', 'void*'}
+blacklisted_types = {'Storage'}
 default_only_types = {'Generator'}
 
 

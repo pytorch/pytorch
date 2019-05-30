@@ -7,7 +7,6 @@
 #include <c10/core/QScheme.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
@@ -253,6 +252,10 @@ class CAFFE2_API Tensor {
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
   TensorOptions options() const;
+
+  void* data_ptr() const {
+    return this->unsafeGetTensorImpl()->data();
+  }
 
   template<typename T>
   T * data() const;

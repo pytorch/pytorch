@@ -112,7 +112,6 @@ def type_to_python(typename, size=None):
         'Storage': 'Storage',
         'BoolTensor': 'Tensor',
         'IndexTensor': 'Tensor',
-        'SparseTensorRef': 'Tensor',
         'Tensor': 'Tensor',
         'IntArrayRef': '_size',
         'IntArrayRef[]': 'Union[_int, _size]',
@@ -123,7 +122,6 @@ def type_to_python(typename, size=None):
         'int64_t': '_int',
         'accreal': 'Number',
         'real': 'Number',
-        'QScheme': 'QScheme',
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',

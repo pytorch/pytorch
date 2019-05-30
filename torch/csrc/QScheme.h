@@ -20,6 +20,6 @@ inline bool THPQScheme_Check(PyObject *obj) {
   return Py_TYPE(obj) == &THPQSchemeType;
 }
 
-PyObject * THPQScheme_New(at::QScheme memory_format, const std::string& name);
+PyObject * THPQScheme_New(at::QScheme qscheme, const std::string& name);
 
 void THPQScheme_init(PyObject *module);

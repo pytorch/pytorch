@@ -129,9 +129,7 @@ def type_argument_translations(arg):
         default = 'Reduction::Mean'
     elif default == 'contiguous_format':
         default = 'MemoryFormat::Contiguous'
-    elif default == 'NoQuant':
-        default = 'QScheme::NO_QUANT'
-    elif default == 'PerTensorAffine':
+    elif default == 'per_tensor_affine':
         default = 'QScheme::PER_TENSOR_AFFINE'
     else:
         try:

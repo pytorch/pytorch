@@ -12,6 +12,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/tensor_qschemes.h>
 
 namespace torch { namespace autograd { namespace utils {
 
@@ -60,7 +61,9 @@ inline PyObject* wrap(at::Scalar scalar) {
 }
 
 inline PyObject* wrap(at::QScheme qscheme) {
-  return wrap(at::Scalar(static_cast<int>(qscheme)));
+  auto* thp_qscheme = torch::utils::getTHPQScheme(qscheme);
+  Py_INCREF(thp_qscheme);
+  return thp_qscheme;
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor> tensors) {
