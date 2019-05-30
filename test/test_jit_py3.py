@@ -47,25 +47,25 @@ class TestScriptPy3(TestCase):
             os.close(w)
 
     def test_joined_str(self):
-      def func(x):
-          hello, test = "Hello", "test"
-          print(f"{hello + ' ' + test}, I'm a {test}")
-          print(f"format blank")
-          hi = 'hi'
-          print(f"stuff before {hi}")
-          print(f"{hi} stuff after")
-          return x + 1
+        def func(x):
+            hello, test = "Hello", "test"
+            print(f"{hello + ' ' + test}, I'm a {test}") # noqa E999
+            print(f"format blank")
+            hi = 'hi'
+            print(f"stuff before {hi}")
+            print(f"{hi} stuff after")
+            return x + 1
 
-      x = torch.arange(4., requires_grad=True)
-      # TODO: Add support for f-strings in string parser frontend
-      # self.checkScript(func, [x], optimize=True, capture_output=True)
+        x = torch.arange(4., requires_grad=True)
+        # TODO: Add support for f-strings in string parser frontend
+        # self.checkScript(func, [x], optimize=True, capture_output=True)
 
-      with self.capture_stdout() as captured:
-          out = func(x)
+        with self.capture_stdout() as captured:
+            out = func(x)
 
-      scripted = torch.jit.script(func)
-      with self.capture_stdout() as captured_script:
-          out_script = func(x)
+        scripted = torch.jit.script(func)
+        with self.capture_stdout() as captured_script:
+            out_script = func(x)
 
-      self.assertAlmostEqual(out, out_script)
-      self.assertEqual(captured, captured_script)
+        self.assertAlmostEqual(out, out_script)
+        self.assertEqual(captured, captured_script)
