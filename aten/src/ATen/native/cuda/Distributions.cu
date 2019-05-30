@@ -397,7 +397,7 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
 
 Tensor _dirichlet_grad_cuda(const Tensor& x, const Tensor& alpha, const Tensor& total) {
   Tensor ret = at::empty(x.sizes(), x.options());
-  AT_DISPATCH_FLOATING_TYPE_AND_HALF(x.scalar_type(), "_dirichlet_grad_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(x.scalar_type(), "_dirichlet_grad_cuda", [&] {
     dirichlet_grad_cuda_kernel<scalar_t>(ret, x, alpha, total);
   });
   return ret;
