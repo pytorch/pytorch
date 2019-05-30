@@ -122,7 +122,7 @@ avg_pool2d = _avg_pool('avg_pool2d', _pair)
 avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 
-def _slice_op(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
+def slice_op(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:
         starts = g.op("Unsqueeze", starts, axes_i=[0])
         ends = g.op("Unsqueeze", ends, axes_i=[0])
@@ -153,9 +153,9 @@ def slice(g, self, dim, start, end, step):
         end = [sym_help._parse_arg(end, 'i')]
         dim = [sym_help._parse_arg(dim, 'i')]
         dynamic_slice = False
-    return _slice_op(g, self, axes=dim, starts=start, ends=end, steps=[step], dynamic_slice=dynamic_slice)
+    return sym_help._slice_op(g, self, axes=dim, starts=start, ends=end, steps=[step], dynamic_slice=dynamic_slice)
 
 
 @parse_args('v', 'is')
 def flip(g, input, dims):
-    return _slice_op(g, input, axes=dims, starts=[-1] * len(dims), ends=[-9223372036854775807] * len(dims), steps=[-1] * len(dims))
+    return sym_help._slice_op(g, input, axes=dims, starts=[-1] * len(dims), ends=[-9223372036854775807] * len(dims), steps=[-1] * len(dims))
