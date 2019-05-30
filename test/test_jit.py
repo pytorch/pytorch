@@ -6014,7 +6014,7 @@ a")
                     raise AssertionError("Failed on {func_name} with inputs {a} {b}. Python: {resf}, Script: {resfs}".format(func_name=func_name, a=a, b=b, resf=resf, resfs=resfs))
 
 
-        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan"]
+        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan", "asinh", "atanh", "acosh", "sinh", "cosh", "tanh"]
         binary_float_ops = ["atan2", "fmod", "remainder", "copysign"]
         for op in unary_float_ops:
             checkMathWrap(op)
