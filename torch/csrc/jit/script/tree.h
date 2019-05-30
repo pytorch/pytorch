@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <torch/csrc/jit/script/lexer.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/SmallVector.h>
 
 namespace torch {
@@ -26,15 +27,15 @@ namespace script {
 // Compound objects are also always associated with a SourceRange for
 // reporting error message.
 
-// Memory management of trees is done using shared_ptr.
+// Memory management of trees is done using intrusive_ptr.
 
 struct Tree;
-using TreeRef = std::shared_ptr<Tree>;
+using TreeRef = c10::intrusive_ptr<Tree>;
 using TreeList = at::SmallVector<TreeRef, 4>;
 
 static const TreeList empty_trees = {};
 
-struct Tree : std::enable_shared_from_this<Tree> {
+struct Tree : c10::intrusive_ptr_target {
   Tree(int kind_) : kind_(kind_) {}
   int kind() const {
     return kind_;
@@ -56,14 +57,18 @@ struct Tree : std::enable_shared_from_this<Tree> {
   }
   virtual TreeRef map(const std::function<TreeRef(TreeRef)>& fn) {
     (void)fn;
-    return shared_from_this();
+    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
+                                           // from a raw `this` pointer
+                                           // so we need to bump the refcount
+                                           // to account for this ownership
+    return TreeRef::reclaim(this);
   }
   template <typename... Args>
-  void match(int k, Args&... args) {
+  void match(int k, Args&... args) const {
     matchD(k, "unknown", 0, args...);
   }
   template <typename... Args>
-  void matchD(int k, const char* filename, int lineno, Args&... args) {
+  void matchD(int k, const char* filename, int lineno, Args&... args) const {
     std::initializer_list<TreeRef*> vars = {args...};
     matchNumSubtreesD(k, filename, lineno, vars.size(), true);
     size_t i = 0;
@@ -79,7 +84,7 @@ struct Tree : std::enable_shared_from_this<Tree> {
       const char* filename,
       int lineno,
       size_t expected_subtrees,
-      bool allow_more) {
+      bool allow_more) const {
     if (kind() != k) {
       std::stringstream ss;
       ss << filename << ":" << lineno << ": expecting kind '" << kindToString(k)
@@ -110,7 +115,7 @@ struct String : public Tree {
   }
   template <typename... Args>
   static TreeRef create(Args&&... args) {
-    return std::make_shared<String>(std::forward<Args>(args)...);
+    return c10::make_intrusive<String>(std::forward<Args>(args)...);
   }
 
  private:
@@ -142,7 +147,7 @@ struct Compound : public Tree {
       int kind,
       const SourceRange& range_,
       TreeList&& trees_) {
-    return std::make_shared<Compound>(kind, range_, std::move(trees_));
+    return c10::make_intrusive<Compound>(kind, range_, std::move(trees_));
   }
   bool isAtom() const override {
     return false;
