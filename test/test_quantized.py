@@ -256,8 +256,8 @@ class TestQuantizedOps(TestCase):
         q_max_pool = torch.ops.quantized.max_pool2d
 
         a = torch.from_numpy(X)
-        qa = a.quantize_linear(scale=scale, zero_point=zero_point,
-                               dtype=torch_type)
+        qa = torch.quantize_linear(a, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
 
         a_hat = qa.dequantize()
         a_pool = F.max_pool2d(a_hat, kernel_size=k, stride=s, padding=p,
@@ -532,8 +532,10 @@ class TestQuantizedConv(unittest.TestCase):
         W_zero_point = 0
         W = W_scale * (W_RSCK - W_zero_point).to(dtype=torch.float)
 
-        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
-        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zero_point, dtype=torch.quint8)
+        X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zero_point,
+                                    dtype=torch.quint8)
+        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zero_point,
+                                    dtype=torch.quint8)
         b_q = b_init.to(dtype=torch.int32)
 
         W_prepack = qconv_prepack(W_q, groups)
