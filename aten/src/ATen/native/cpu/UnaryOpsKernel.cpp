@@ -104,7 +104,7 @@ static void sinh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinh_cpu", [&]() {
     unary_kernel(
         iter,
-        [=](scalar_t a) -> scalar_t { return std::sinh(a); }
+        [=](scalar_t a) -> scalar_t { return std::sinh(a); });
   });
 }
 
@@ -112,7 +112,7 @@ static void cosh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cosh_cpu", [&]() {
     unary_kernel(
         iter,
-        [=](scalar_t a) -> scalar_t { return std::cosh(a); }
+        [=](scalar_t a) -> scalar_t { return std::cosh(a); });
   });
 }
 
