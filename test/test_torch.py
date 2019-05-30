@@ -2898,7 +2898,6 @@ class _TestTorchMixin(object):
                 self.assertEqual(qr.int_repr(), qr2.int_repr())
                 self.assertEqual(qr.q_scale(), qr2.q_scale())
                 self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
->>>>>>> source: eea427b94abb torch-load-save - jerryzh: [pt1][quant] Add torc...
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
