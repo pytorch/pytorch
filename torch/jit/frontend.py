@@ -8,6 +8,9 @@ from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 
+# Borrowed from cPython implementation 
+# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411# 
+
 _reserved_prefix = '__jit'
 _reserved_names = {'print'}
 _identifier_chars = set(string.ascii_lowercase + string.ascii_uppercase + string.digits)
@@ -142,27 +145,35 @@ def get_jit_class_def(cls, self_name):
     method_defs = [get_jit_def(method[1],
                    self_name=self_name) for method in methods]
 
-    source = dedent(inspect.getsource(cls))
-    py_ast = ast.parse(source)
-    ctx = SourceContext(source, False)
+    sourcelines, file_lineno = inspect.getsourcelines(cls)
+    source = ''.join(sourcelines)
+    filename = inspect.getsourcefile(cls)
+    dedent_src = dedent(source)
+    py_ast = ast.parse(dedent_src)
+    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
+    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
     return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
 def get_jit_def(fn, self_name=None):
-    source = dedent(inspect.getsource(fn))
-    py_ast = ast.parse(source)
+    sourcelines, file_lineno = inspect.getsourcelines(fn)
+    source = ''.join(sourcelines)
+    filename = inspect.getsourcefile(fn)
+    dedent_src = dedent(source)
+    py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
+    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, _uses_true_division(fn))
+    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
     return build_def(ctx, py_ast.body[0], type_line, self_name)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
 class SourceContext(SourceRangeFactory):
-    def __init__(self, source, uses_true_division=True):
-        super(SourceContext, self).__init__(source)
+    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
+        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
 
 
