@@ -6009,14 +6009,13 @@ a")
                 if resf != resfs:
                     if isinstance(resf, Exception):
                         continue
-                    assert (type(resf) is type(resfs))
-                    if isinstance(resf, tuple) and (math.isnan(resf[0]) == math.isnan(resfs[0])):
-                        continue
-                    if isinstance(resf, float) and math.isnan(resf) and math.isnan(resfs):
-                        continue
-                    if isinstance(resf, float) and abs(resf - resfs) < 1e-4:
-                        continue
-                    # if (isinstance(resf, tuple) )
+                    if type(resf) == type(resfs):
+                        if isinstance(resf, tuple) and (math.isnan(resf[0]) == math.isnan(resfs[0])):
+                            continue
+                        if isinstance(resf, float) and math.isnan(resf) and math.isnan(resfs):
+                            continue
+                        if isinstance(resf, float) and abs(resf - resfs) < 1e-4:
+                            continue
                     raise AssertionError("Failed on {func_name} with inputs {a} {b}. Python: {resf}, Script: {resfs}".format(func_name=func_name, a=a, b=b, resf=resf, resfs=resfs))
 
 
