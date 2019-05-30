@@ -358,7 +358,6 @@ class JitTestCase(TestCase):
                 # save the module to a buffer
                 buffer = io.BytesIO()
                 torch.jit.save(module, buffer)
-
                 # copy the data in the buffer so we can restore it later. This
                 # is because py2 and py3 have different semantics with zipfile
                 # and it's easier to just work with a fresh copy each time.
@@ -5498,6 +5497,8 @@ a")
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
 
+
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_string_print(self):
         def func(a):
             print(a, "a" 'b' '''c''' """d""", 2, 1.5)
@@ -6235,6 +6236,7 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -8711,8 +8713,8 @@ a")
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"Expected a value of type Tensor for argument"
-                                                      r" '0' but found Tuple\[Tensor,"):
+            with self.assertRaisesRegex(RuntimeError, r"expected a value of type 'Tensor' for argument"
+                                                      r" '0' but instead found type 'Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -9645,12 +9647,12 @@ a")
             def f3(a):
                 torch.sum(dim=4)
 
-        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but found Tensor'):
+        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but instead found type \'Tensor'):
             @torch.jit.script
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but found List\[int\]'):
+        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but instead found type \'List\[int\]'):
             @torch.jit.script
             def f5(a):
                 torch.cat([3])
@@ -9660,7 +9662,7 @@ a")
             def f6(a):
                 a.expand(size=[3, [4]])
 
-        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type Tensor for argument \'self\''):
+        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type \'Tensor\' for argument \'self\''):
             @torch.jit.script
             def f7(a):
                 torch.sum([4])
@@ -13207,6 +13209,18 @@ a")
             def fn():
                 return random.randint()
 
+    def test_inferred_error_msg(self):
+        """
+        Test that when we get a type mismatch on a function where we inferred
+        the type to be tensor, a good error message is given.
+        """
+        @torch.jit.script
+        def foo(a):
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
+            foo(1)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -15546,7 +15560,7 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_type_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value of type bool"):
+        with self.assertRaisesRegex(RuntimeError, "expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
             class FooTest(object):
                 def __init__(self, x):
@@ -15762,7 +15776,7 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(test_list_no_reverse(), 1)
 
-        with self.assertRaisesRegex(RuntimeError, "bool for argument \'reverse"):
+        with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
             @torch.jit.script
             def test():
                 li = [Foo(1)]

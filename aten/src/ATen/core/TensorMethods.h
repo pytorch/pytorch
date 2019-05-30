@@ -827,9 +827,6 @@ inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) con
 inline Scalar Tensor::item() const {
     return dispatch_type().item(*this);
 }
-inline void* Tensor::data_ptr() const {
-    return dispatch_type().data_ptr(*this);
-}
 inline Tensor & Tensor::set_(Storage source) {
     return dispatch_type().set_(*this, source);
 }

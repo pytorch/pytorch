@@ -2700,10 +2700,6 @@
 
 # wrappers for legacy TH methods
 
-- func: data_ptr(Tensor self) -> void*
-  variants: method
-  device_guard: False
-
 - func: set_(Tensor(a!) self, Storage source) -> Tensor(a!)
   variants: method
   device_guard: False
