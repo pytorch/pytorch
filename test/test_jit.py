@@ -5952,6 +5952,23 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_math_ops(self):
+<<<<<<< HEAD
+        def checkMathWrap(func_name, num_args=1, is_float=True, **args):
+            if is_float:
+                checkMath(func_name, num_args, True, **args)
+                checkMath(func_name, num_args, False, **args)
+            else:
+                checkMath(func_name, num_args, is_float, **args)
+
+        inf = float("inf")
+        NaN = float("nan")
+        mx_int = 2147483647
+        mn_int = -2147483647 - 1
+        float_vals = [inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
+        int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2]
+
+        def checkMath(func_name, num_args, is_float=True, ret_type="float", debug=False, vals=None, args_type=None):
+=======
         def checkMathWrap(func_name, num_args=1, is_float=True, ret_type="float", debug=False, vals=None):
             if is_float:
                 checkMath(func_name, num_args, True, ret_type, debug, vals)
@@ -5960,6 +5977,7 @@ a")
                 checkMath(func_name, num_args, is_float, ret_type, debug, vals)
 
         def checkMath(func_name, num_args, is_float=True, ret_type="float", debug=False, vals=None):
+>>>>>>> 5fec433c4... Added factorial
             funcs_template = dedent('''
             def func(a, b):
                 # type: {args_type} -> {ret_type}
@@ -5971,9 +5989,8 @@ a")
                 args = "a, b"
             else:
                 raise RuntimeError("Test doesn't support more than 2 arguments")
-            args_type = "(float, float)"
-            if not is_float:
-                args_type = "(int, int)"
+            if args_type is None:
+                args_type = "(float, float)" if is_float else "(int, int)"
             funcs_str = funcs_template.format(func=func_name, args=args, args_type=args_type, ret_type=ret_type)
             scope = {}
             execWrapper(funcs_str, globals(), scope)
@@ -5981,18 +5998,12 @@ a")
             fs = cu.func
             f = scope['func']
 
-            inf = float("inf")
-            NaN = float("nan")
-            mx_int = 2147483647
-            mn_int = -2147483647 - 1
 
-            float_vals = [inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
-            int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2]
             if vals is None:
                 vals = float_vals if is_float else int_vals
-            inps = [(i, j) for i in vals for j in vals]
+                vals = [(i, j) for i in vals for j in vals]
 
-            for a, b in inps:
+            for a, b in vals:
                 resf = None
                 resfs = None
                 try:
