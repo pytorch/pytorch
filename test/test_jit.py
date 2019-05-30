@@ -5954,11 +5954,11 @@ a")
     def test_math_ops(self):
 
         def test_floor(x):
-            # type: (float) -> float
+            # type: (float) -> int
             return math.floor(x)
 
         def test_ceil(x):
-            # type: (float) -> float
+            # type: (float) -> int
             return math.ceil(x)
 
         def test_log_int(x):
@@ -6431,16 +6431,17 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
-    
-    def test_number_all(self):	
-        def int1():	
-            return all(torch.tensor([1,2,3],dtype=torch.uint8))	
-        def int2():	
-            return all(torch.tensor([1,0,3],dtype=torch.uint8))	
 
-        self.checkScript(int1, ())	
+    def test_number_all(self):
+        def int1():
+            return all(torch.tensor([1, 2, 3], dtype=torch.uint8))
+
+        def int2():
+            return all(torch.tensor([1, 0, 3], dtype=torch.uint8))
+
+        self.checkScript(int1, ())
         self.checkScript(int2, ())
-        
+
     def test_number_math(self):
         ops_template = dedent('''
         def func():
