@@ -424,6 +424,7 @@ struct Environment {
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
+          {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"rangelist",
@@ -2287,7 +2288,7 @@ struct to_ir {
               << "type must be a type identifier";
         }
         auto val = emitExpr(obj);
-        // Special casing for list and tuple since isintance(x, list) and
+        // Special casing for list and tuple since isinstance(x, list) and
         // isinstance(x, tuple) does not accept List[int] / Tuple[int] like
         // subscript type annotation in python
         if (*type_name == "list" && val->type()->cast<ListType>()) {
