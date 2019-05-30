@@ -135,7 +135,7 @@ struct CaptureList {
             lst.emplace_back(var_capture_it->unpack(saved_for));
             var_capture_it++;
           }
-          stack.emplace_back(TensorList::create(c10::impl::toList(std::move(lst))));
+          stack.emplace_back(TensorList::create(std::move(lst)));
         } break;
         case CAPTURE_IVALUE: {
           stack.push_back(*ivalue_capture_it++);
@@ -181,7 +181,7 @@ struct UnpackInstructions {
         } break;
         case PUSH_LIST: {
           std::vector<at::Tensor> lst(input_it, input_it + *sizes_it++);
-          stack.emplace_back(TensorList::create(c10::impl::toList(std::move(lst))));
+          stack.emplace_back(TensorList::create(std::move(lst)));
         } break;
       }
     }

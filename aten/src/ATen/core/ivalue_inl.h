@@ -169,8 +169,8 @@ struct CAFFE2_API List : c10::intrusive_ptr_target {
   static c10::intrusive_ptr<List<Elem>> create(c10::ListPtr<Elem> elements_) {
     return c10::make_intrusive<List<Elem>>(std::move(elements_));
   }
-  static c10::intrusive_ptr<List<Elem>> create(std::initializer_list<Elem> elements_) {
-    return create(c10::make_list<Elem>(elements_));
+  static c10::intrusive_ptr<List<Elem>> create(std::vector<Elem> elements_) {
+    return create(c10::impl::toList(std::move(elements_)));
   }
   const c10::ListPtr<Elem>& elements() const & {
     return elements_;

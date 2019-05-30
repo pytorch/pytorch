@@ -51,6 +51,18 @@ Operation noop(const Node* n) {
   return [](Stack& stack) { return 0; };
 }
 
+template<class T> bool is_equal(const c10::ListPtr<T>& lhs, const c10::ListPtr<T>& rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    if (lhs.get(i) != rhs.get(i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // using the rules from python_arg_parser FunctionParameter::check
 // tensor cannot have grad set, tensor must be 0 dim,
 // and if the dest is an int the source must be integral type
@@ -75,11 +87,8 @@ template <typename dtype> // int64_t, bool, double
 Operation listConstruct(int64_t num_inputs) {
   return [=](Stack& stack) {
     auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-    c10::ListPtr<dtype> vals = c10::make_list<dtype>();
-    vals.reserve(inputs.size());
-    for (const IValue& i : inputs) {
-      vals.push_back(i.template to<dtype>());
-    }
+    std::vector<dtype> vals =
+        fmap(inputs, [](const IValue& v) { return v.to<dtype>(); });
     drop(stack, num_inputs);
     push(stack, std::move(vals));
     return 0;
@@ -677,17 +686,6 @@ RegisterOperators reg(
            IValue self_size, other_size;
            pop(stack, self_size, other_size);
            const auto s = self_size.toIntList()->elements();
-           constexpr auto is_equal = [] (const c10::ListPtr<int64_t>& lhs, const c10::ListPtr<int64_t>& rhs) {
-             if (lhs.size() != rhs.size()) {
-               return false;
-             }
-             for (size_t i = 0; i < lhs.size(); ++i) {
-               if (lhs.get(i) != rhs.get(i)) {
-                 return false;
-               }
-             }
-             return true;
-           };
            if (is_equal(s, other_size.toIntList()->elements())) {
              push(stack, IValue());
            } else {
@@ -1441,20 +1439,6 @@ int listLen(Stack& stack) {
   const int64_t size = a->elements().size();
   push(stack, size);
   return 0;
-}
-
-namespace {
-template<class T> bool is_equal(const c10::ListPtr<T>& lhs, const c10::ListPtr<T>& rhs) {
-  if (lhs.size() != rhs.size()) {
-    return false;
-  }
-  for (size_t i = 0; i < lhs.size(); ++i) {
-    if (lhs.get(i) != rhs.get(i)) {
-      return false;
-    }
-  }
-  return true;
-}
 }
 
 template <typename T>

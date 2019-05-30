@@ -573,21 +573,21 @@ OpCode Unpickler::readInstruction() {
             value);
         PicklerClass cls = static_cast<PicklerClass>(uint8_t(value));
         if (cls == PicklerClass::INTLIST) {
-          stack_.emplace_back(c10::make_list<int64_t>());
+          stack_.emplace_back(std::vector<int64_t>());
         }
       } else if (stack_.size() > 0 && stack_.back().pickler_class_opt()) {
         // Check if we're in a GLOBAL opcode and if so, if it's a list
         // specialization
         if (stack_.back().pickler_class() == PicklerClass::INTLIST) {
-          stack_.emplace_back(c10::make_list<int64_t>());
+          stack_.emplace_back(std::vector<int64_t>());
         } else if (stack_.back().pickler_class() == PicklerClass::INTLIST) {
-          stack_.emplace_back(c10::make_list<int64_t>());
+          stack_.emplace_back(std::vector<int64_t>());
         } else if (stack_.back().pickler_class() == PicklerClass::TENSORLIST) {
-          stack_.emplace_back(c10::make_list<at::Tensor>());
+          stack_.emplace_back(std::vector<at::Tensor>());
         } else if (stack_.back().pickler_class() == PicklerClass::DOUBLELIST) {
-          stack_.emplace_back(c10::make_list<double>());
+          stack_.emplace_back(std::vector<double>());
         } else if (stack_.back().pickler_class() == PicklerClass::BOOLLIST) {
-          stack_.emplace_back(c10::make_list<bool>());
+          stack_.emplace_back(std::vector<bool>());
         } else {
           AT_ERROR("Unknown list specialization");
         }
