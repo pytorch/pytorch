@@ -1,6 +1,5 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Dict.h>
-
 #include <iostream>
 
 namespace c10 {
@@ -61,8 +60,10 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << *(tup->elements()[i]);
     }
     out << ")";
+  } else if (t.kind() == TypeKind::FunctionType) {
+    out << "Function";
   } else {
-    out << t.str();
+     out << t.str();
   }
   return out;
 }
