@@ -1,6 +1,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Formatting.h>
+#include <c10/util/StringUtil.h>
 #include <cmath>
 #include <ATen/core/Dict.h>
 
