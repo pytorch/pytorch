@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -7,6 +6,7 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -1608,22 +1608,16 @@ struct to_ir {
         if (apply.callee().kind() == TK_VAR) {
           auto exception_name = Var(apply.callee()).name().name();
           auto exception_arg_expr = Expr(apply.inputs()[0]);
-          auto exception_msg = asSimple(emitSugaredExpr(exception_arg_expr, 1));
+          auto exception_msg = emitExpr(exception_arg_expr);
           if (!exception_msg->type()->isSubtypeOf(StringType::get())) {
             exception_msg =
                 graph->insert(prim::str, {exception_msg}, {}, stmt.range());
           }
-          auto separator = insertConstant(*graph, ": ", nullptr, stmt.range());
-          auto exception_name_sep = graph->insert(
-              aten::add, {exception_name, separator}, {}, stmt.range());
-          auto final_msg = graph
-                               ->insert(
-                                   aten::add,
-                                   {exception_name_sep, exception_msg},
-                                   {},
-                                   exceptionNode->range())
-                               ->setType(StringType::get());
-          graph->insert(prim::RaiseException, {final_msg}, {}, stmt.range());
+          graph->insert(
+              prim::RaiseException,
+              {exception_name, exception_msg},
+              {},
+              stmt.range());
           return;
         }
       }
@@ -1631,7 +1625,8 @@ struct to_ir {
     const std::string exception = "Exception";
     auto string_input =
         insertConstant(*graph, exception, nullptr, stmt.range());
-    graph->insert(prim::RaiseException, {string_input}, {}, stmt.range());
+    graph->insert(
+        prim::RaiseException, {exception, exception}, {}, stmt.range());
   }
 
   void emitAssert(const Assert& stmt) {

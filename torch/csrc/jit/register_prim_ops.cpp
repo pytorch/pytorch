@@ -555,9 +555,11 @@ RegisterOperators reg(
            };
          }),
      Operator(
-         "prim::RaiseException(str msg) -> ()",
+         "prim::RaiseException(str exceptionName, str msg) -> ()",
          [](Stack& stack) {
-           throw JITException(pop(stack).toStringRef());
+           std::string exceptionName, msg;
+           pop(stack, exceptionName, msg);
+           throw JITException(exceptionName + ": " + msg);
            return 0;
          }),
 
