@@ -1413,11 +1413,23 @@ class _TestTorchMixin(object):
             self.assertTrue(x.all())
             self.assertTrue(x.any())
 
+            x = torch.ones(*size).bool()
+            self.assertTrue(x.all())
+            self.assertTrue(x.any())
+
+            x[3] = False
+            self.assertFalse(x.all())
+            self.assertTrue(x.any())
+
         test((10,))
         test((5, 5))
 
     def test_all_any_empty(self):
         x = torch.ByteTensor()
+        self.assertTrue(x.all())
+        self.assertFalse(x.any())
+
+        x = torch.BoolTensor()
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
@@ -1441,6 +1453,10 @@ class _TestTorchMixin(object):
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_all_any_empty_cuda(self):
         x = torch.cuda.ByteTensor()
+        self.assertTrue(x.all())
+        self.assertFalse(x.any())
+
+        x = torch.cuda.BoolTensor()
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
