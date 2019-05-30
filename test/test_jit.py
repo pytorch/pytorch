@@ -6899,7 +6899,7 @@ a")
         for inp, typ, type_hint in zip(inputs, type_literals, type_annotations):
             test(inp, typ, type_hint)
 
-        # test optional isintance check
+        # test optional isinstance check
         with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
             @torch.jit.script
             def opt_func(x):
