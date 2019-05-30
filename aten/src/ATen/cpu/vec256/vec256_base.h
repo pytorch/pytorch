@@ -24,12 +24,6 @@ namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-// Suppressing GCC warning about not using '&&' operator in bool multiplication
-// instead of '*'.
-#ifndef _MSC_VER
-#pragma GCC diagnostic ignored "-Wint-in-bool-context"
-#endif
-
 template<size_t n> struct int_of_size;
 
 #define DEFINE_INT_OF_SIZE(int_t) \
