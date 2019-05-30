@@ -15,7 +15,7 @@ public:
   explicit OperatorRegistrar(FunctionSchema&& schema, c10::optional<TensorTypeId> dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator)
   : op_(Dispatcher::singleton().registerSchema(std::move(schema))), kernel_registration_handle_(c10::nullopt) {
     // either both, kernel and cache_creator, or none must be set.
-    AT_ASSERT((kernel != nullptr) == static_cast<bool>(cache_creator));
+    TORCH_INTERNAL_ASSERT((kernel != nullptr) == static_cast<bool>(cache_creator));
 
     if (kernel != nullptr) {
       if (dispatch_key.has_value()) {
@@ -69,7 +69,7 @@ void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNam
 }
 
 c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const std::string& opNameStr, const RegisterOperators::Options& options) {
-  AT_ASSERTM(options.kernels.size() > 0, "Cannot infer operator schema in registration of operator ", opNameStr, " because there is no kernel specified.");
+  TORCH_CHECK(options.kernels.size() > 0, "Cannot infer operator schema in registration of operator ", opNameStr, " because there is no kernel specified.");
 
   c10::optional<FunctionSchema> inferred_schema = c10::nullopt;
   for (const auto& kernel : options.kernels) {
@@ -77,7 +77,7 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const std::string
       if (inferred_schema.has_value()) {
         c10::optional<std::string> schema_difference = findSchemaDifferences(*inferred_schema, *kernel.inferred_function_schema);
         if (schema_difference.has_value()) {
-          AT_ERROR("In operator registration: Tried to register kernels for same operator that infer a different function schema: [", toString(*inferred_schema), "] ",
+          TORCH_CHECK(false, "In operator registration: Tried to register kernels for same operator that infer a different function schema: [", toString(*inferred_schema), "] ",
                    "doesn't match [", toString(*kernel.inferred_function_schema), "]. ",
                    *schema_difference);
         }
@@ -86,7 +86,7 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const std::string
       }
     }
   }
-  AT_ASSERTM(inferred_schema.has_value(), "Cannot infer operator schema for this kind of kernel in registration of operator ", opNameStr,". Please explicitly specify the operator schema or specify at least one kernel for which we can infer the schema.");
+  TORCH_CHECK(inferred_schema.has_value(), "Cannot infer operator schema for this kind of kernel in registration of operator ", opNameStr,". Please explicitly specify the operator schema or specify at least one kernel for which we can infer the schema.");
 
   return *inferred_schema;
 }
@@ -96,7 +96,7 @@ void RegisterOperators::checkSchemaAndRegisterOp_(FunctionSchema schema, Options
     if (nullptr != kernel.inferred_function_schema.get()) {
       c10::optional<std::string> schema_difference = findSchemaDifferences(schema, *kernel.inferred_function_schema);
       if (schema_difference.has_value()) {
-        AT_ERROR("In operator registration: Specified function schema [", toString(schema), "] ",
+        TORCH_CHECK(false, "In operator registration: Specified function schema [", toString(schema), "] ",
                  "doesn't match inferred function schema [", toString(*kernel.inferred_function_schema), "]. ",
                  *schema_difference);
       }
@@ -114,10 +114,10 @@ void RegisterOperators::checkNoDuplicateKernels_(const FunctionSchema& schema, c
 
   for (const auto& kernel : options.kernels) {
     if (kernel.dispatch_key.has_value()) {
-      AT_CHECK(0 == dispatch_keys.count(*kernel.dispatch_key), "In operator registration: Tried to register multiple kernels with same dispatch key " + detail::dispatch_key_to_string(*kernel.dispatch_key) + " for operator schema " + toString(schema));
+      TORCH_CHECK(0 == dispatch_keys.count(*kernel.dispatch_key), "In operator registration: Tried to register multiple kernels with same dispatch key " + detail::dispatch_key_to_string(*kernel.dispatch_key) + " for operator schema " + toString(schema));
       dispatch_keys.insert(*kernel.dispatch_key);
     } else {
-      AT_CHECK(!has_catchall_kernel, "In operator registration: Tried to register multiple catch-all kernels for operator schema " + toString(schema));
+      TORCH_CHECK(!has_catchall_kernel, "In operator registration: Tried to register multiple catch-all kernels for operator schema " + toString(schema));
       has_catchall_kernel = true;
     }
   }
@@ -134,7 +134,7 @@ void RegisterOperators::registerOp_(FunctionSchema&& schema, Options&& options) 
 }
 
 void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel) {
-  AT_ASSERTM(kernel.kernel_func != nullptr && static_cast<bool>(kernel.cache_creator_func), "Kernel must be set");
+  TORCH_INTERNAL_ASSERT(kernel.kernel_func != nullptr && static_cast<bool>(kernel.cache_creator_func), "Kernel must be set");
 
   registrars_.emplace_back(std::move(schema), kernel.dispatch_key, kernel.kernel_func, std::move(kernel.cache_creator_func));
 }

@@ -38,7 +38,7 @@ using Kwargs = std::unordered_map<std::string, IValue>;
 // It contains schema information, and the executor that manages the
 // execution of the function. script::Method is a wrapper around a
 // underlying Function that also provides a `self` object.
-struct TORCH_API Function {
+struct TORCH_API Function : public std::enable_shared_from_this<Function> {
   Function(
       std::string name,
       bool optimize,
@@ -184,7 +184,8 @@ struct TORCH_API Function {
 // are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
-  // constructor that takes a set of functions to compile using the native resolver
+  // constructor that takes a set of functions to compile using the native
+  // resolver
   explicit CompilationUnit(const std::string& source);
   CompilationUnit() = default;
 
