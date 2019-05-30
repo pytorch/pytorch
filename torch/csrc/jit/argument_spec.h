@@ -77,6 +77,11 @@ struct ArgumentSpec {
   }
 
   void addTensor(const IValue& input, bool with_grad) {
+    if (input.isNone()) {
+      // Values to __setstate__ are all uninitialized before the method is
+      // called and can't be specialized
+      return;
+    }
     AT_ASSERT(input.isTensor());
     tensor_args.emplace_back();
     auto& arg = tensor_args.back();

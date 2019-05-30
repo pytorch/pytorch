@@ -275,6 +275,33 @@ void ScriptModuleDeserializer::moduleSetState(
   // TODO: once modules are first class in the interpreter and methods are not
   // lowered, change this to `module->run_method("__setstate__", {state});`
   setstate->run({module->module_object(), state});
+
+  for (const auto& slot : module->get_attributes()) {
+    // Verify that all the non-optional attributes have been initialized
+    // TODO: Issue #20497
+    if (slot.type()->kind() != TypeKind::OptionalType) {
+      AT_CHECK(
+          !slot.value().isNone(),
+          "The field '",
+          slot.name(),
+          "' was left unitialized after __setstate__, but expected a ",
+          "value of type '",
+          slot.type()->python_str(),
+          "'");
+    }
+  }
+  for (const auto& slot : module->get_parameters()) {
+    // Verify that all the non-optional attributes have been initialized
+    // TODO: Issue #20497
+    AT_CHECK(
+        !slot.value().isNone(),
+        "The field '",
+        slot.name(),
+        "' was left unitialized after __setstate__, but expected a ",
+        "value of type '",
+        slot.type()->python_str(),
+        "'");
+  }
 }
 
 void ScriptModuleDeserializer::convertModule(
@@ -289,7 +316,10 @@ void ScriptModuleDeserializer::convertModule(
   }
   for (int i = 0; i < module_def.parameters_size(); ++i) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
-    at::Tensor tensor = tensor_table_.at(param_def.tensor_id());
+    at::Tensor tensor;
+    if (param_def.tensor_id() != -1) {
+      tensor = tensor_table_.at(param_def.tensor_id());
+    }
     if (param_def.is_buffer()) {
       module->register_buffer(param_def.name(), tensor);
     } else {
@@ -332,24 +362,11 @@ void ScriptModuleDeserializer::convertModule(
         import_callback);
   }
 
+  // If the module_def has an index into the attributes table, get its state
+  // from there and call '__setstate__'
   if (module_def.has_get_state_attribute_id()) {
     moduleSetState(
         module, pickled_ivalues_.at(module_def.get_state_attribute_id()));
-  }
-
-  for (const auto& slot : module->get_attributes()) {
-    // Verify that all the non-optional attributes have been initialized
-    // TODO: Issue #20497
-    if (slot.type()->kind() != TypeKind::OptionalType) {
-      AT_CHECK(
-          !slot.value().isNone(),
-          "The field '",
-          slot.name(),
-          "' was left unitialized after __setstate__, but expected a ",
-          "value of type '",
-          slot.type()->python_str(),
-          "'");
-    }
   }
 }
 
