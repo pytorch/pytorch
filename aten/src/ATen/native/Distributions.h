@@ -391,8 +391,8 @@ C10_DEVICE static inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha,
       q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * (c[1][i][j][2] + b * c[1][i][j][3])));
     }
   }
-  const accscalar_t approx = x * digamma_one<accscalar_t, accscalar_t>(total) - digamma_one<accscalar_t, accscalar_t>(alpha) / beta;
-  return p / q * static_cast<scalar_t>(approx);
+  const scalar_t approx = x * (digamma_one<scalar_t, accscalar_t>(total) - digamma_one<scalar_t, accscalar_t>(alpha)) / beta;
+  return p / q * approx;
 }
 
 } // namespace
