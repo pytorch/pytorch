@@ -332,7 +332,7 @@ class JitTestCase(TestCase):
                 self.assertMultiLineEqual(src, src2)
             except RuntimeError as e:
                 se = str(e)
-                if "Could not export Python function" not in se and \
+                if "could not export python function" not in se and \
                    "closures are not exportable" not in se:
                     raise
 
@@ -358,7 +358,6 @@ class JitTestCase(TestCase):
                 # save the module to a buffer
                 buffer = io.BytesIO()
                 torch.jit.save(module, buffer)
-
                 # copy the data in the buffer so we can restore it later. This
                 # is because py2 and py3 have different semantics with zipfile
                 # and it's easier to just work with a fresh copy each time.
@@ -372,7 +371,7 @@ class JitTestCase(TestCase):
                     main_module_code += line.decode()
             except RuntimeError as e:
                 se = str(e)
-                if "Could not export Python function" not in se and \
+                if "could not export python function" not in se and \
                    "closures are not exportable" not in se:
                     raise
                 else:
@@ -3680,23 +3679,6 @@ def foo(x):
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
 
-    def test_file_line_error(self):
-        def foobar(xyz):
-            return torch.blargh(xyz)
-
-        _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:20".format(lineno + 1)):
-            scripted = torch.jit.script(foobar)
-
-    def test_file_line_error_class_defn(self):
-        class FooBar(object):
-            def baz(x):
-                return torch.blargh(xyz)
-
-        _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
-            torch.jit.script(FooBar)
-
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
@@ -5515,6 +5497,8 @@ a")
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
 
+
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_string_print(self):
         def func(a):
             print(a, "a" 'b' '''c''' """d""", 2, 1.5)
@@ -6276,6 +6260,7 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -6450,13 +6435,13 @@ a")
         self.checkScript(tensor_test, (x, y))
 
     def test_number_all(self):
-        def int1():	
+        def int1():
             return all(torch.tensor([1, 2, 3], dtype=torch.uint8))
 
-        def int2():	
+        def int2():
             return all(torch.tensor([1, 0, 3], dtype=torch.uint8))
 
-        self.checkScript(int1, ())	
+        self.checkScript(int1, ())
         self.checkScript(int2, ())
 
     def test_number_math(self):
@@ -8752,8 +8737,8 @@ a")
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"Expected a value of type Tensor for argument"
-                                                      r" '0' but found Tuple\[Tensor,"):
+            with self.assertRaisesRegex(RuntimeError, r"expected a value of type 'Tensor' for argument"
+                                                      r" '0' but instead found type 'Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -9686,12 +9671,12 @@ a")
             def f3(a):
                 torch.sum(dim=4)
 
-        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but found Tensor'):
+        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but instead found type \'Tensor'):
             @torch.jit.script
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but found List\[int\]'):
+        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but instead found type \'List\[int\]'):
             @torch.jit.script
             def f5(a):
                 torch.cat([3])
@@ -9701,7 +9686,7 @@ a")
             def f6(a):
                 a.expand(size=[3, [4]])
 
-        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type Tensor for argument \'self\''):
+        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type \'Tensor\' for argument \'self\''):
             @torch.jit.script
             def f7(a):
                 torch.sum([4])
@@ -12718,7 +12703,7 @@ a")
                 self.ignored_code(x)
                 return x
 
-            @torch.jit.ignore(drop_on_export=True)
+            @torch.jit.ignore
             def ignored_code(self, x):
                 self.some_state = torch.tensor((100,))
 
@@ -12999,71 +12984,6 @@ a")
         t = torch.ones(2, 2)
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
 
-    def test_module_recursive(self):
-        class Other(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self, x):
-                super(Other, self).__init__()
-                self.x = x
-                self.param = torch.nn.Parameter(torch.ones(2, 2))
-
-            def some_unscriptable_method(self):
-                a = 2
-                a = [2]
-                return a
-
-            def forward(self, t):
-                return t + self.x + self.param
-
-
-        class M(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self):
-                super(M, self).__init__()
-                self.other = Other(200)
-
-            def forward(self, t):
-                return self.other(t) * 2
-
-        with torch.jit._enable_recursive_script():
-            sm = torch.jit.script(M())
-
-        self.assertExportImportModule(sm, (torch.ones(2, 2),))
-
-    def test_module_function_export(self):
-        class Other(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self, x):
-                super(Other, self).__init__()
-                self.x = x
-                self.param = torch.nn.Parameter(torch.ones(2, 2))
-
-            @torch.jit.export
-            def some_entry_point(self, y):
-                return y + 20
-
-            def forward(self, t):
-                return t + self.x + self.param
-
-
-        class M(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self):
-                super(M, self).__init__()
-                self.other = Other(200)
-
-            def forward(self, t):
-                return self.other(t) * 2
-
-        with torch.jit._enable_recursive_script():
-            sm = torch.jit.script(M())
-
-        self.assertExportImportModule(sm, (torch.ones(2, 2),))
-
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):
         model = {
@@ -13312,6 +13232,18 @@ a")
             @torch.jit.script
             def fn():
                 return random.randint()
+
+    def test_inferred_error_msg(self):
+        """
+        Test that when we get a type mismatch on a function where we inferred
+        the type to be tensor, a good error message is given.
+        """
+        @torch.jit.script
+        def foo(a):
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
+            foo(1)
 
 
 class MnistNet(nn.Module):
@@ -15652,7 +15584,7 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_type_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value of type bool"):
+        with self.assertRaisesRegex(RuntimeError, "expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
             class FooTest(object):
                 def __init__(self, x):
@@ -15868,7 +15800,7 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(test_list_no_reverse(), 1)
 
-        with self.assertRaisesRegex(RuntimeError, "bool for argument \'reverse"):
+        with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
             @torch.jit.script
             def test():
                 li = [Foo(1)]

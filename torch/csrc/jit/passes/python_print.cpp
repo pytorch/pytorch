@@ -842,10 +842,10 @@ struct PythonPrintPass {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_ && !value->ignore_on_export) {
           throw script::ErrorReport(node->sourceRange())
-              << "Could not export Python function call '" << value->name()
-              << "'. Remove calls to Python functions before export. "
+              << "could not export python function call " << value->name()
+              << ". Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
-              << "If this is a nn.ModuleList, add it to __constants__";
+              << "If this is a nn.ModuleList, add it to __constants__.";
         }
 
         if (value->ignore_on_export) {

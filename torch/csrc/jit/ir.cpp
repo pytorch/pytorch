@@ -874,6 +874,7 @@ bool Node::hasSideEffects() const {
     case aten::manual_seed:
     case prim::AddStatValue:
     case prim::TimePoint:
+    case prim::CallFunction:
       return true;
   }
   // All other builtin ops are known to be safe.
@@ -1230,7 +1231,8 @@ void Node::removeFromList() {
 }
 
 inline const SourceRange& fakeRange() {
-  static SourceRange range(std::make_shared<Source>(""), 0, 1);
+  static SourceRange range(
+      std::make_shared<std::string>("<internally-created-node>"), 0, 1);
   return range;
 }
 
