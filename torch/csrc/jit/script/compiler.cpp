@@ -1439,8 +1439,7 @@ struct to_ir {
     AT_CHECK(
         end_val != nullptr && start_val != nullptr && step_val != nullptr,
         "Expected non-null pointers for range() arguments");
-    auto addOp = [end_val, range](
-                     Graph* g, NodeKind kind, ArrayRef<Value*> inputs) {
+    auto addOp = [range](Graph* g, NodeKind kind, ArrayRef<Value*> inputs) {
       return g->insertNode(g->create(kind, inputs, 1))
           ->setSourceRange(range)
           ->output()
@@ -1490,16 +1489,15 @@ struct to_ir {
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
-  void emitForInListLoop(
+  void emitForInList(
       const For& stmt,
-      const std::shared_ptr<torch::jit::script::SimpleValue>& siv) {
+      Value* listArg) {
     auto targets = stmt.targets();
     auto itrs = stmt.itrs();
     auto body = stmt.body();
     auto& range = stmt.range();
     auto target = Var(targets[0]).name();
-
-    auto listArg = siv->asValue(range, method);
+    method.graph();
     auto max_trip_count_val = emitBuiltinCall(
         range,
         *graph,
@@ -1590,6 +1588,13 @@ struct to_ir {
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
+  // Iterate over the keys of a dictionary
+  void emitForInDict(const For& stmt, Value* dict) {
+    Value* keys = emitBuiltinCall(
+        stmt.range(), *graph, aten::keys, c10::nullopt, {dict}, {}, true);
+    emitForInList(stmt, keys);
+  }
+
   void emitFor(const For& stmt) {
     // For now, we only support range loops. e.g. for i in range(3): ...
 
@@ -1629,18 +1634,22 @@ struct to_ir {
     auto sv = emitSugaredExpr(itrs[0], 1);
 
     auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
-
-    // for-in lists
-    if (siv && siv->getValue()->type()->kind() == TypeKind::ListType) {
-      emitForInListLoop(stmt, siv);
-      return;
-    }
-
-    // for-in tensors
-    if (siv && siv->getValue()->type()->isSubclass(TypeKind::TensorType)) {
+    if (siv) {
       auto value = siv->asValue(stmt.range(), method);
-      emitForInTensorLoop(stmt, value);
-      return;
+      // for-in lists
+      if (value->type()->kind() == TypeKind::ListType) {
+        return emitForInList(stmt, value);
+      }
+
+      // for-in dict
+      if (value->type()->kind() == TypeKind::DictType) {
+        return emitForInDict(stmt, value);
+      }
+
+      // for-in tensors
+      if (value->type()->isSubclass(TypeKind::TensorType)) {
+        return emitForInTensorLoop(stmt, value);
+      }
     }
 
     auto instances = sv->asTuple(stmt.range(), method);

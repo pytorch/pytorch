@@ -12773,6 +12773,16 @@ a")
 
         self.checkScript(length, (d,))
 
+    def test_dict_iteration(self):
+        def fn(x):
+            # type: (Dict[str, int]) -> int
+            sum = 0
+            for key in x:
+                sum += x[key]
+            return sum
+
+        self.checkScript(fn, ({"a": 1, "b": 2, "c": 3},))
+
     def test_dict(self):
         def simple(x):
             # type: (Dict[str, int]) -> Dict[str, int]

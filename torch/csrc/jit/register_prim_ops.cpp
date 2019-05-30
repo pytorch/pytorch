@@ -1656,7 +1656,7 @@ int dictKeys(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   std::vector<IValue> keys;
   keys.reserve(dict->elements().size());
-  for (auto item : dict->elements()) {
+  for (auto item : dict->iterationOrder()) {
     keys.push_back(item.key());
   }
   push(stack, IValue(keys));
