@@ -2142,59 +2142,11 @@ RegisterOperators reg2({
 
     DEFINE_INT_OP(aten::gcd, gcd(a, b)),
 
-<<<<<<< HEAD
     DEFINE_GENERIC_OP(
         aten::copysign,
         std::copysign(a, b),
         std::copysign(a, b),
         float,
-=======
-    Operator(
-        "aten::sqrt(float a) -> float",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          push(stack, std::sqrt(a));
-          return 0;
-        }),
-    Operator(
-        "aten::sqrt(int a) -> float",
-        [](Stack& stack) {
-          int64_t a;
-          pop(stack, a);
-          push(stack, std::sqrt(a));
-          return 0;
-        }),
-    DEFINE_GENERIC_PYTHON_OP(
-        aten::isnan,
-        std::isnan(a),
-        std::isnan(a),
-        float),
-    DEFINE_GENERIC_PYTHON_OP(
-        aten::asinh,
-        std::asinh(a),
-        std::asinh(a),
-        float),
-    DEFINE_GENERIC_PYTHON_OP(
-        aten::atanh,
-        std::atanh(a),
-        std::atanh(a),
-        float),
-    DEFINE_GENERIC_PYTHON_OP(
-        aten::cosh,
-        std::cosh(a),
-        std::cosh(a),
-        float),
-    DEFINE_GENERIC_PYTHON_OP(
-        aten::sinh,
-        std::sinh(a),
-        std::sinh(a),
-        float),
-    DEFINE_GENERIC_PYTHON_OP(
-        aten::tanh,
-        std::tanh(a),
-        std::tanh(a),
->>>>>>> Updated formatting
         float),
     DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a, b), float),
 
