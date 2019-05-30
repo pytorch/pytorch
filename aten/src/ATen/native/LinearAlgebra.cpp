@@ -582,11 +582,7 @@ batch_svd(const Tensor& self, bool some, bool compute_uv)
   const int64_t k = std::min<int64_t>(n, m);
   const int64_t nn = (some && compute_uv) ? k : n;
   const int64_t mm = (some && compute_uv) ? k : m;
-  int64_t p = 1;
-
-  for (int64_t i = 0; i < ndim-2; i++) {
-    p *= self.size(i);
-  }
+  const int64_t p = batchCount(self);
 
   Tensor t = self.reshape({p, n, m}).contiguous();
   Tensor u = at::zeros({p, n, nn}, self.options());
