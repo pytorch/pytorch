@@ -68,10 +68,11 @@ class TestOptim(TestCase):
                 y = grad[1]
                 v = torch.DoubleTensor([y - y / 4., y / 4.])
             x = sparse.DoubleTensor(i, v, torch.Size([2]))
-            if sparse_grad:
-                params.grad.data = x
-            else:
-                params.grad.data = x.to_dense()
+            with torch.no_grad():
+                if sparse_grad:
+                    params.grad = x
+                else:
+                    params.grad = x.to_dense()
             return loss
 
         for i in range(2000):
@@ -525,6 +526,82 @@ class TestLRScheduler(TestCase):
         self.opt = SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
+
+    def test_old_pattern_warning(self):
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        def old_pattern():
+            for e in range(epochs):
+                scheduler.step()
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_with_arg(self):
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_resuming(self):
+        epochs = 35
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+
+        def old_pattern():
+            for e in range(epochs):
+                scheduler.step()
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_resuming_with_arg(self):
+        epochs = 35
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+
+    def test_new_pattern_no_warning(self):
+        import warnings
+
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            for e in range(epochs):                
+                self.opt.step()
+                scheduler.step()
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+    def test_new_pattern_no_warning_with_arg(self):
+        import warnings
+
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            for e in range(epochs):                
+                self.opt.step()
+                scheduler.step(e)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
 
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3

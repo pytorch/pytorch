@@ -57,7 +57,16 @@ Value* Function::try_emit_call(
     return nullptr;
 
   check_single_output();
-  return inlineCallTo(graph, *fn, matched_schema->inputs).at(0);
+  Value* fn_constant = graph.insertNode(graph.create(prim::Constant))
+                           ->output()
+                           ->setType(FunctionType::create(shared_from_this()));
+  matched_schema->inputs.insert(matched_schema->inputs.begin(), fn_constant);
+  Value* result =
+      graph
+          .insertNode(graph.create(prim::CallFunction, matched_schema->inputs))
+          ->output()
+          ->setType(matched_schema->return_types.at(0));
+  return result;
 }
 
 Value* Function::emit_call(
@@ -108,11 +117,10 @@ void module_state_to(
     bool non_blocking) {
   // Need to access the `at::Tensor` as a `Variable` here.
   autograd::Variable variable = s.value().toTensor();
-  at::Tensor data = variable.data();
   // Use the data's original device or dtype if not supplied here.
-  auto new_data = data.to(
-      device.value_or(data.device()),
-      dtype.value_or(data.scalar_type()),
+  auto new_data = variable.to(
+      device.value_or(variable.device()),
+      dtype.value_or(variable.scalar_type()),
       non_blocking);
   variable.set_data(new_data);
 }
@@ -195,7 +203,9 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     }
     if (e.n->kind() != prim::GetAttr) {
       throw ErrorReport(e.n->sourceRange())
-          << "temporary: the only valid use of a module is looking up an attribute";
+          << "temporary: the only valid use of a module is looking up an "
+             "attribute but found "
+          << *e.n;
     }
     Slot slot(e.mod, e.mod->type()->getAttributeSlot(e.n->s(attr::name)));
     if (ClassTypePtr c = e.n->output()->type()->cast<ClassType>()) {

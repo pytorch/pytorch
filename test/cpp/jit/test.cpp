@@ -29,8 +29,10 @@
 #include <test/cpp/jit/test_netdef_converter.h>
 #include <test/cpp/jit/test_peephole_optimize.h>
 #include <test/cpp/jit/test_qualified_name.h>
+#include <test/cpp/jit/test_save_load.h>
 #include <test/cpp/jit/test_subgraph_matcher.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 using namespace torch::jit::script;
 using namespace torch::jit::test;
@@ -82,7 +84,8 @@ namespace jit {
   _(ModuleDefine)                  \
   _(QualifiedName)                 \
   _(ClassImport)                   \
-  _(ScriptObject)
+  _(ScriptObject)                  \
+  _(SaveExtraFilesHook)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
@@ -110,7 +113,7 @@ TH_FORALL_TESTS_CUDA(JIT_GTEST_CUDA)
 #endif
 
 #define JIT_TEST(name) test##name();
-void runJITCPPTests(bool runCuda) {
+TORCH_API void runJITCPPTests(bool runCuda) {
   TH_FORALL_TESTS(JIT_TEST)
   if (runCuda) {
     TH_FORALL_TESTS_CUDA(JIT_TEST)

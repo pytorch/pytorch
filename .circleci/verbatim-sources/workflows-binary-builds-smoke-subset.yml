@@ -1,5 +1,10 @@
-
       # Binary builds (subset, to smoke test that they'll work)
+      #
+      # NB: If you modify this file, you need to also modify
+      # the binary_and_smoke_tests_on_pr variable in
+      # pytorch-ci-hud to adjust the list of whitelisted builds
+      # at https://github.com/ezyang/pytorch-ci-hud/blob/master/src/BuildHistoryDisplay.js
+
       - binary_linux_manywheel_2.7mu_cpu_devtoolset3_build:
           requires:
             - setup

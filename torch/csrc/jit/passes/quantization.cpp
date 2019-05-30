@@ -30,6 +30,15 @@ int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
   return quantnodeLookup.find(n);
 }
 
+Value* getScaleValue(Node* n) {
+  if (n->kind().toQualString() != std::string("aten::_dequantize_linear")) {
+    return nullptr;
+  }
+  TORCH_CHECK(n->inputs().size() == 4);
+  // Fetch scale from the dequant node
+  return n->inputs()[1];
+}
+
 Node* traverseToQuantNode(Node* dq) {
   TORCH_INTERNAL_ASSERT(dq != nullptr);
   TORCH_INTERNAL_ASSERT(dq->inputs().size() != 0);
@@ -133,7 +142,7 @@ Node* createQuantNode(Value* v, Graph* g) {
 // Create Dequant node
 Node* createDeQuantNode(Value* v, Graph* g) {
   Node* dequant =
-      g->create(at::Symbol::fromQualString("aten::dequantize_linear"));
+      g->create(at::Symbol::fromQualString("aten::_dequantize_linear"));
   TORCH_INTERNAL_ASSERT(dequant != nullptr, "Failed to create dequant node");
   dequant->output()->setUniqueName(v->uniqueName() + ".dequant");
   return dequant;
@@ -152,7 +161,7 @@ Node* addQuantDeQuantNodesFor(
     Value* v,
     Node* insert_point,
     const std::tuple<std::string, float, int>& qparam,
-    at::ScalarType t = at::ScalarType::Undefined) {
+    at::ScalarType t) {
   TORCH_INTERNAL_ASSERT(v != nullptr);
   WithCurrentScope scope_guard(
       *insert_point->owningGraph(), insert_point->scope());
@@ -175,14 +184,11 @@ Node* addQuantDeQuantNodesFor(
     quant->addInput(qparam_value);
     dequant->addInput(qparam_value);
   }
-  // optional argument required only for quantization
-  // of specific attributes eg: bias.
-  if (t != at::ScalarType::Undefined) {
-    Value* scalartype_v = insertScalarType(quant, t);
-    TORCH_INTERNAL_ASSERT(scalartype_v != nullptr);
-    quant->addInput(scalartype_v);
-    dequant->addInput(scalartype_v);
-  }
+  // Add ScalarType Node for q-dq
+  Value* scalartype_v = insertScalarType(quant, t);
+  TORCH_INTERNAL_ASSERT(scalartype_v != nullptr);
+  quant->addInput(scalartype_v);
+  dequant->addInput(scalartype_v);
   return dequant;
 }
 
@@ -434,7 +440,10 @@ void InsertQuantDequantNodes(
   for (auto& v_to_quant : quantOutputs) {
     if (qparam_value_dict.count(v_to_quant) != 0) {
       Node* dq = addQuantDeQuantNodesFor(
-          v_to_quant, v_to_quant->node(), qparam_value_dict[v_to_quant]);
+          v_to_quant,
+          v_to_quant->node(),
+          qparam_value_dict[v_to_quant],
+          at::ScalarType::QUInt8);
       TORCH_INTERNAL_ASSERT(dq != nullptr);
       v_to_quant->replaceAllUsesWith(dq->output());
       // Above step replaces v->quant with vdq->quant. We need to restore link.
@@ -449,7 +458,10 @@ void InsertQuantDequantNodes(
   for (auto& param_info : quantInputs) {
     if (qparam_value_dict.count(param_info.v) != 0) {
       Node* dq = addQuantDeQuantNodesFor(
-          param_info.v, param_info.v->node(), qparam_value_dict[param_info.v]);
+          param_info.v,
+          param_info.v->node(),
+          qparam_value_dict[param_info.v],
+          at::ScalarType::QUInt8);
       TORCH_INTERNAL_ASSERT(dq != nullptr);
       param_info.n->replaceInputWith(param_info.v, dq->output());
     }
@@ -485,8 +497,59 @@ void InsertQuantDequantNodesForParam(
   }
 }
 
+void InsertQuantDequantNodesForParam(
+    script::Method& method,
+    const std::string& param_name,
+    const std::function<std::tuple<std::string, float, int>(float, float)>&
+        getQParamFunc,
+    at::ScalarType t) {
+  TORCH_CHECK(getQParamFunc != nullptr);
+  auto params_to_insert_qdq = getQuantizableParamsofName(method, param_name);
+
+  for (param_info_t& param_info : params_to_insert_qdq) {
+    // This getQParamFunc requires scale for weight and activation because for
+    // quantized ops that involve matmul with weight and bias(WX+b), input scale
+    // for bias is computed from input activation and weight. if weight attr
+    // not present we skip inserting q-dq node.
+    Node* n = param_info.n;
+    // Check if this node has weight attr as input
+    size_t param_index = getParamIndexinOpArgs(n, std::string("weight"));
+    if (param_index >= n->inputs().size()) {
+      // No attribute by name weight
+      continue;
+    }
+
+    std::vector<size_t> node_inputs_idx{0, param_index};
+    std::array<float, 2> scale_factors = {0, 0};
+    bool skip_node = false;
+    for (size_t idx = 0; idx < node_inputs_idx.size(); idx++) {
+      size_t input_index = node_inputs_idx[idx];
+      Value* input_value = n->inputs()[input_index];
+      Node* n_input_value = input_value->node();
+      Value* scale_value = getScaleValue(n_input_value);
+      if (!scale_value) {
+        // Dequant node pattern for input is missing
+        skip_node = true;
+        break;
+      }
+      c10::IValue scale_ivalue = toIValue(scale_value).value();
+      float input_scale = static_cast<float>(scale_ivalue.toDouble());
+      TORCH_CHECK(input_scale != 0.0);
+      scale_factors[idx] = input_scale;
+    }
+    if (skip_node) {
+      continue;
+    }
+    auto bias_qparam = getQParamFunc(scale_factors[0], scale_factors[1]);
+    Node* dq = addQuantDeQuantNodesFor(
+        param_info.v, param_info.v->node()->next(), bias_qparam, t);
+    TORCH_INTERNAL_ASSERT(dq != nullptr);
+    param_info.n->replaceInputWith(param_info.v, dq->output());
+  }
+}
+
 // Exposing the template api helps reuse the same interface for different
-// qparamfunc for different qschemes.
+// qparamfunc for different qschemes and params.
 template <typename Fn>
 void InsertQuantDequantNodesForParam(
     std::shared_ptr<script::Module>& moduleObj,
@@ -504,6 +567,14 @@ template TORCH_API void InsertQuantDequantNodesForParam(
     const std::string& method_name,
     const std::string& param_name,
     const std::function<std::tuple<std::string, float, int>(at::Tensor)>&
+        getQParamFunc,
+    at::ScalarType t);
+
+template TORCH_API void InsertQuantDequantNodesForParam(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::string& param_name,
+    const std::function<std::tuple<std::string, float, int>(float, float)>&
         getQParamFunc,
     at::ScalarType t);
 

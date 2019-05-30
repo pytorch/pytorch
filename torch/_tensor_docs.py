@@ -1777,7 +1777,7 @@ Example::
 
 add_docstr_all('qr',
                r"""
-qr() -> (Tensor, Tensor)
+qr(some=True) -> (Tensor, Tensor)
 
 See :func:`torch.qr`
 """)
@@ -3190,4 +3190,9 @@ Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.
+""")
+
+add_docstr_all('ndim',
+               r"""
+Alias for :meth:`~Tensor.dim()`
 """)
