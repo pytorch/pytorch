@@ -55,7 +55,7 @@ Elaborating further:
 
 If you use NumPy, then you have used Tensors (a.k.a ndarray).
 
-![Tensor illustration](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/tensor_illustration.png)
+![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
 
 PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerates the
 computation by a huge amount.
@@ -226,6 +226,26 @@ for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\
 
 python setup.py install
 
+```
+
+##### Adjust Build Options (Optional)
+
+You can adjust the configuration of cmake variables optionally (without building first), by doing
+the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
+with such a step.
+
+On Linux
+```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+python setup.py build --cmake-only
+ccmake build  # or cmake-gui build
+```
+
+On macOS
+```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
+ccmake build  # or cmake-gui build
 ```
 
 ### Docker Image

@@ -80,21 +80,22 @@ class ScriptModuleDeserializer final {
 };
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
-    : reader_(filename.c_str()), attribute_table_(c10::impl::make_generic_list()) {
+    : reader_(filename.c_str()) {
   // TODO appropriate support for mmap, right now still use stream reader
 }
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(std::istream* is)
-    : reader_(is), attribute_table_(c10::impl::make_generic_list()) {}
+    : reader_(is) {}
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(
     std::unique_ptr<ReadAdapterInterface> rai)
-    : reader_(std::move(rai)), attribute_table_(c10::impl::make_generic_list()) {}
+    : reader_(std::move(rai)) {}
 
 void ScriptModuleDeserializer::deserialize(
     script::ModuleLookup module_lookup,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
+  C10_LOG_API_USAGE_ONCE("torch.script.load");
   torch::ModelDef model_def;
   at::DataPtr data_ptr;
   size_t data_size;

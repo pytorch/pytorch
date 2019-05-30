@@ -335,6 +335,14 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("_register_module", &Module::register_module)
       .def("_register_buffer", &Module::register_buffer)
+      .def(
+          "_set_attribute",
+          [](Module& self, const std::string& name, py::object value) {
+            auto attr = self.find_attribute(name);
+            AT_CHECK(attr != nullptr, "Could not find attribute '", name, "'");
+            auto ivalue = toIValue(value, attr->type());
+            attr->setValue(ivalue);
+          })
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
       .def("_get_buffer", &Module::get_buffer)
@@ -563,6 +571,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_jit_script_compile",
       [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
+        C10_LOG_API_USAGE_ONCE("torch.script.compile");
         CompilationUnit cu;
         cu.define({def}, {pythonResolver(rcb)}, nullptr);
         std::shared_ptr<Function> defined = cu.get_functions().at(0);
@@ -593,6 +602,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
          ResolutionCallback rcb) {
+        C10_LOG_API_USAGE_ONCE("torch.script.class");
         auto cu = std::make_shared<CompilationUnit>();
         auto classType =
             ClassType::create(c10::QualifiedName(qualifiedName), cu);

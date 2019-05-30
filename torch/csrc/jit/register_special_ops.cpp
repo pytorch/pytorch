@@ -63,7 +63,7 @@ std::vector<int64_t> compute_sizes(const IValue& seq) {
     auto length = seq_list.size();
     AT_ASSERT(length != 0);
     sizes.push_back(length);
-    seq_recur = seq_list[0];
+    seq_recur = seq_list.get(0);
   }
   sizes.push_back(list_size(seq_recur));
   return sizes;
@@ -89,12 +89,12 @@ void storeLastDimension(
     const c10::ArrayRef<int64_t>& strides,
     int64_t dim,
     int elementSize,
-    const std::vector<DTYPE>& obj) {
+    const c10::ListPtr<DTYPE>& obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
   for (int64_t i = 0; i < n; i++) {
-    *(DTYPE*)data = obj[i];
+    *(DTYPE*)data = obj.get(i);
     data += strides[dim] * elementSize;
   }
 }
@@ -107,12 +107,12 @@ void storeLastDimension<bool>(
     const c10::ArrayRef<int64_t>& strides,
     int64_t dim,
     int elementSize,
-    const std::vector<bool>& obj) {
+    const c10::ListPtr<bool>& obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
   for (int64_t i = 0; i < n; i++) {
-    *(uint8_t*)data = static_cast<uint8_t>(obj[i]);
+    *(uint8_t*)data = static_cast<uint8_t>(obj.get(i));
     data += strides[dim] * elementSize;
   }
 }
@@ -133,7 +133,7 @@ void recursiveStore(
   if (dim + 1 < static_cast<long>(ndim)) {
     auto items = obj.toGenericListRef();
     for (int64_t i = 0; i < n; i++) {
-      recursiveStore(data, sizes, strides, dim + 1, elementSize, items[i]);
+      recursiveStore(data, sizes, strides, dim + 1, elementSize, items.get(i));
       data += strides[dim] * elementSize;
     }
   } else {
@@ -159,10 +159,10 @@ RegisterOperators reg({
 
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
-              (std::move(peek(stack, 1, 3))).toIntList()->elements(),
+              c10::impl::toArrayRef((std::move(peek(stack, 1, 3))).toIntList()->elements()),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
-          pack(stack, std::move(result));
+          pack(stack, c10::impl::toList(std::move(result)));
           return 0;
         }),
     Operator(
@@ -200,7 +200,7 @@ RegisterOperators reg({
           return [](Stack& stack) {
             auto a = pop(stack).toIntList()->elements();
             auto b = pop(stack).toIntList()->elements();
-            push(stack, at::infer_size(a, b));
+            push(stack, at::infer_size(c10::impl::toArrayRef(a), c10::impl::toArrayRef(b)));
             return 0;
           };
         }),
@@ -301,7 +301,7 @@ RegisterOperators reg({
           return [](Stack& stack) {
             auto a = pop(stack).toIntList()->elements();
             auto b = pop(stack).toIntList()->elements();
-            push(stack, at::infer_size(a, b));
+            push(stack, at::infer_size(c10::impl::toArrayRef(a), c10::impl::toArrayRef(b)));
             return 0;
           };
         }),
@@ -405,7 +405,7 @@ RegisterOperators reg({
           double a;
           double b;
           pop(stack, tensor, a, b);
-          push(stack, at::_th_uniform_(tensor, a, b));
+          push(stack, tensor.uniform_(a, b));
           return 0;
         }),
     Operator(
@@ -418,7 +418,7 @@ RegisterOperators reg({
           double mean;
           double std;
           pop(stack, tensor, mean, std);
-          push(stack, at::_th_normal_(tensor, mean, std));
+          push(stack, tensor.normal_(mean, std));
           return 0;
         }),
     Operator(

@@ -616,11 +616,11 @@ struct to_ir {
     return {def.name().name(), "", std::move(arguments), std::move(returns)};
   }
 
-  c10::impl::GenericList evaluateDefaults(
+  c10::impl::GenericListPtr evaluateDefaults(
       const SourceRange& r,
       const std::vector<Expr>& default_types,
       const std::vector<Expr>& default_exprs) {
-    c10::impl::GenericList default_values = c10::impl::make_generic_list();
+    c10::impl::GenericListPtr default_values = c10::impl::make_generic_list();
     if (default_exprs.empty())
       return default_values;
     // To evaluate the default expressions, we create a graph with no inputs,

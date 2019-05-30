@@ -174,6 +174,10 @@ struct SymbolicVariable {
     return create(aten::type_as, {*this, rhs})[0].typeLikeWithRhsScalarType(
         *this, rhs);
   }
+  SymbolicVariable size_if_not_equal(const SymbolicVariable other) const {
+    return create(aten::_size_if_not_equal, {this->size(), other.size()})[0]
+        .toType(OptionalType::create(ListType::ofInts()));
+  }
   SymbolicVariable narrow(int dim, int64_t start, int64_t length) const {
     return create(
         t("narrow"),
@@ -280,13 +284,13 @@ struct SymbolicVariable {
     return create(aten::view, {*this, sizes})[0];
   }
   SymbolicVariable view(std::vector<std::int64_t> sizes) const {
-    return view(insertConstant(std::move(sizes)));
+    return view(insertConstant(c10::impl::toList(std::move(sizes))));
   }
   SymbolicVariable reshape(Value* sizes) const {
     return create(aten::reshape, {*this, sizes})[0];
   }
   SymbolicVariable reshape(std::vector<std::int64_t> sizes) const {
-    return reshape(insertConstant(std::move(sizes)));
+    return reshape(insertConstant(c10::impl::toList(std::move(sizes))));
   }
   SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
     return create(
@@ -304,6 +308,10 @@ struct SymbolicVariable {
   SymbolicVariable typeLike(SymbolicVariable other) const {
     if (auto other_type = other.v->type()->cast<CompleteTensorType>())
       v->setType(other_type->contiguous());
+    return *this;
+  }
+  SymbolicVariable toType(TypePtr type) const {
+    v->setType(type);
     return *this;
   }
   SymbolicVariable typeLikeWithScalarType(

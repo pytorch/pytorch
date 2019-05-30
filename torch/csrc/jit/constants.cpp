@@ -60,7 +60,7 @@ c10::optional<Value*> tryInsertConstant(
         attr::value, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
     n->output()->setType(ListType::ofBools());
   } else if (val.isIntList()) {
-    n->is_(attr::value, val.toIntList()->elements());
+    n->is_(attr::value, c10::impl::toVector(val.toIntList()->elements()));
     n->output()->setType(ListType::ofInts());
   } else if (val.isTensorList()) {
     n->ts_(
@@ -141,19 +141,19 @@ RegisterOperators reg({
           } else if (type->isSubtypeOf(ListType::ofInts())) {
             const auto& is = node->is(attr::value);
             return [is](Stack& stack) {
-              push(stack, is);
+              push(stack, c10::impl::toList(std::move(is)));
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofBools())) {
             const auto bs = fmap<bool>(node->is(attr::value));
             return [bs](Stack& stack) {
-              push(stack, bs);
+              push(stack, c10::impl::toList(std::move(bs)));
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofTensors())) {
             const auto& ts = node->ts(attr::value);
             return [ts](Stack& stack) {
-              push(stack, ts);
+              push(stack, c10::impl::toList(std::move(ts)));
               return 0;
             };
           } else if (type == StringType::get()) {

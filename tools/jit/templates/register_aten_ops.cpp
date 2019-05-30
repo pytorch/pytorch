@@ -72,10 +72,10 @@ std::vector<Tensor> toListOfOptionalTensor(const IValue& v) {
 }
 
 template<size_t N>
-std::array<bool, N> as_bool_array(const std::vector<bool>& vec) {
+std::array<bool, N> as_bool_array(const c10::ListPtr<bool>& list) {
   std::array<bool, N> res;
-  AT_ASSERT(vec.size() == N);
-  std::copy(vec.begin(), vec.end(), res.begin());
+  AT_ASSERT(list.size() == N);
+  std::copy(list.begin(), list.end(), res.begin());
   return res;
 }
 

@@ -108,11 +108,10 @@ void module_state_to(
     bool non_blocking) {
   // Need to access the `at::Tensor` as a `Variable` here.
   autograd::Variable variable = s.value().toTensor();
-  at::Tensor data = variable.data();
   // Use the data's original device or dtype if not supplied here.
-  auto new_data = data.to(
-      device.value_or(data.device()),
-      dtype.value_or(data.scalar_type()),
+  auto new_data = variable.to(
+      device.value_or(variable.device()),
+      dtype.value_or(variable.scalar_type()),
       non_blocking);
   variable.set_data(new_data);
 }
@@ -352,7 +351,11 @@ void Module::train(bool on) {
   for (auto& submod : get_modules()) {
     submod->train(on);
   }
-  register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
+  if (auto slot = find_attribute("training")) {
+    slot->setValue(on);
+  } else {
+    register_attribute("training", BoolType::get(), on);
+  }
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {

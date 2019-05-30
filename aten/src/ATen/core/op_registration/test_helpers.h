@@ -41,8 +41,8 @@ struct InputToIValue<c10::ListPtr<c10::DictPtr<Key, Value>>> final {
   static c10::IValue call(T_&& v) {
     auto list = c10::ivalue::GenericList::create(c10::impl::make_generic_list());
     list->elements().reserve(v.size());
-    for (c10::DictPtr<Key, Value> e : v) {
-      list->elements().push_back(InputToIValue<c10::DictPtr<Key, Value>>::call(std::move(e)));
+    for (size_t i = 0; i < v.size(); ++i) {
+      list->elements().push_back(InputToIValue<c10::DictPtr<Key, Value>>::call(v.get(i)));
     }
     return list;
   }
@@ -53,8 +53,8 @@ struct InputToIValue<c10::ListPtr<std::string>> final {
   static c10::IValue call(T_&& v) {
     auto list = c10::ivalue::GenericList::create(c10::impl::make_generic_list());
     list->elements().reserve(v.size());
-    for (std::string e : v) {
-      list->elements().push_back(InputToIValue<std::string>::call(std::move(e)));
+    for (size_t i = 0; i < v.size(); ++i) {
+      list->elements().push_back(InputToIValue<std::string>::call(v.get(i)));
     }
     return list;
   }
@@ -122,7 +122,7 @@ template<class T>
 void expectListEquals(c10::ArrayRef<T> expected, c10::ListPtr<T> actual) {
   EXPECT_EQ(expected.size(), actual.size());
   for (size_t i = 0; i < expected.size(); ++i) {
-    EXPECT_EQ(expected[i], actual[i]);
+    EXPECT_EQ(expected[i], actual.get(i));
   }
 }
 

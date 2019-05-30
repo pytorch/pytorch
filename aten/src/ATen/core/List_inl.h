@@ -70,54 +70,74 @@ namespace detail {
   };
 }
 
+namespace impl {
+template<class T, class Iterator, class StorageT>
+ListElementReference<T, Iterator, StorageT>::operator T() && {
+  return detail::list_element_to<T>(*iterator_);
+}
+
+template<class T, class Iterator, class StorageT>
+ListElementReference<T, Iterator, StorageT>& ListElementReference<T, Iterator, StorageT>::operator=(T&& new_value) && {
+  *iterator_ = detail::list_element_from<T>::call(std::move(new_value));
+  return *this;
+}
+
+template<class T, class Iterator, class StorageT>
+ListElementReference<T, Iterator, StorageT>& ListElementReference<T, Iterator, StorageT>::operator=(const T& new_value) && {
+  *iterator_ = detail::list_element_from<T>::call(std::move(new_value));
+  return *this;
+}
+
+template<class T, class Iterator, class StorageT>
+ListElementReference<T, Iterator, StorageT>& ListElementReference<T, Iterator, StorageT>::operator=(ListElementReference<T, Iterator, StorageT>&& rhs) && {
+  *iterator_ = *rhs.iterator_;
+  return *this;
+}
+
+template<class T, class Iterator, class StorageT>
+void swap(ListElementReference<T, Iterator, StorageT>&& lhs, ListElementReference<T, Iterator, StorageT>&& rhs) {
+  std::swap(*lhs.iterator_, *rhs.iterator_);
+}
+}
+
+template<class T>
+void ListPtr<T>::set(size_type pos, const value_type& value) const {
+  impl_->list.at(pos) = detail::list_element_from<T>::call(value);
+}
+
+template<class T>
+void ListPtr<T>::set(size_type pos, value_type&& value) const {
+  impl_->list.at(pos) = detail::list_element_from<T>::call(std::move(value));
+}
+
 template<class T>
 typename ListPtr<T>::value_type ListPtr<T>::get(size_type pos) const {
   return detail::list_element_to<T>(impl_->list.at(pos));
 }
 
 template<class T>
-const typename ListPtr<T>::value_type ListPtr<T>::operator[](size_type pos) const {
-  return get(pos);
+impl::ListElementReference<T, typename detail::ListImpl<typename ListPtr<T>::StorageT>::list_type::iterator, typename ListPtr<T>::StorageT>
+ListPtr<T>::operator[](size_type pos) const {
+  impl_->list.at(pos); // Throw the exception if it is out of range.
+  return {impl_->list.begin() + pos};
 }
 
 template<class T>
-void ListPtr<T>::set(size_type pos, const value_type& value) {
-  impl_->list.at(pos) = detail::list_element_from<T>::call(value);
+typename ListPtr<T>::value_type ListPtr<T>::extract(size_type pos) const {
+  auto& elem = impl_->list.at(pos);
+  auto result = detail::list_element_to<T>(std::move(elem));
+  elem = detail::list_element_from<T>::call(T{});
+  return result;
 }
 
 template<class T>
-void ListPtr<T>::set(size_type pos, value_type&& value) {
-  impl_->list.at(pos) = detail::list_element_from<T>::call(std::move(value));
-}
-
-template<class T>
-typename ListPtr<T>::iterator ListPtr<T>::begin() {
+typename ListPtr<T>::iterator ListPtr<T>::begin() const {
   return iterator(impl_->list.begin());
 }
 
 template<class T>
-typename ListPtr<T>::const_iterator ListPtr<T>::begin() const {
-  return cbegin();
-}
-
-template<class T>
-typename ListPtr<T>::const_iterator ListPtr<T>::cbegin() const {
-  return const_iterator(impl_->list.cbegin());
-}
-
-template<class T>
-typename ListPtr<T>::iterator ListPtr<T>::end() {
+typename ListPtr<T>::iterator ListPtr<T>::end() const {
   return iterator(impl_->list.end());
-}
-
-template<class T>
-typename ListPtr<T>::const_iterator ListPtr<T>::end() const {
-  return cend();
-}
-
-template<class T>
-typename ListPtr<T>::const_iterator ListPtr<T>::cend() const {
-  return const_iterator(impl_->list.cend());
 }
 
 template<class T>
@@ -131,71 +151,71 @@ typename ListPtr<T>::size_type ListPtr<T>::size() const {
 }
 
 template<class T>
-void ListPtr<T>::reserve(size_type new_cap) {
+void ListPtr<T>::reserve(size_type new_cap) const {
   impl_->list.reserve(new_cap);
 }
 
 template<class T>
-void ListPtr<T>::clear() {
+void ListPtr<T>::clear() const {
   impl_->list.clear();
 }
 
 template<class T>
-typename ListPtr<T>::iterator ListPtr<T>::insert(const_iterator pos, const T& value) {
+typename ListPtr<T>::iterator ListPtr<T>::insert(iterator pos, const T& value) const {
   return iterator { impl_->list.insert(pos.iterator_, detail::list_element_from<T>::call(value)) };
 }
 
 template<class T>
-typename ListPtr<T>::iterator ListPtr<T>::insert(const_iterator pos, T&& value) {
+typename ListPtr<T>::iterator ListPtr<T>::insert(iterator pos, T&& value) const {
   return iterator { impl_->list.insert(pos.iterator_, detail::list_element_from<T>::call(std::move(value))) };
 }
 
 template<class T>
 template<class... Args>
-typename ListPtr<T>::iterator ListPtr<T>::emplace(const_iterator pos, Args&&... value) {
+typename ListPtr<T>::iterator ListPtr<T>::emplace(iterator pos, Args&&... value) const {
   // TODO Use list_element_from?
   return iterator { impl_->list.emplace(pos.iterator_, std::forward<Args>(value)...) };
 }
 
 template<class T>
-void ListPtr<T>::push_back(const T& value) {
+void ListPtr<T>::push_back(const T& value) const {
   impl_->list.push_back(detail::list_element_from<T>::call(value));
 }
 
 template<class T>
-void ListPtr<T>::push_back(T&& value) {
+void ListPtr<T>::push_back(T&& value) const {
   impl_->list.push_back(detail::list_element_from<T>::call(std::move(value)));
 }
 
 template<class T>
 template<class... Args>
-void ListPtr<T>::emplace_back(Args&&... args) {
+void ListPtr<T>::emplace_back(Args&&... args) const {
   // TODO Use list_element_from?
   impl_->list.emplace_back(std::forward<Args>(args)...);
 }
 
 template<class T>
-typename ListPtr<T>::iterator ListPtr<T>::erase(const_iterator pos) {
+typename ListPtr<T>::iterator ListPtr<T>::erase(iterator pos) const {
   return iterator { impl_->list.erase(pos.iterator_) };
 }
 
 template<class T>
-typename ListPtr<T>::iterator ListPtr<T>::erase(const_iterator first, const_iterator last) {
+typename ListPtr<T>::iterator ListPtr<T>::erase(iterator first, iterator last) const {
   return iterator { impl_->list.erase(first.iterator_, last.iterator_) };
 }
 
 template<class T>
-void ListPtr<T>::pop_back() {
+void ListPtr<T>::pop_back() const {
   impl_->list.pop_back();
 }
 
 template<class T>
-void ListPtr<T>::resize(size_type count) {
+void ListPtr<T>::resize(size_type count) const {
   impl_->list.resize(count, T{});
 }
 
 template<class T>
-void ListPtr<T>::resize(size_type count, const T& value) {
+void ListPtr<T>::resize(size_type count, const T& value) const {
   impl_->list.resize(count, value);
 }
 

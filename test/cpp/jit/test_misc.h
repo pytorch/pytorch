@@ -805,8 +805,8 @@ void testModuleConversion() {
 
     m->to(at::kCUDA);
     m->to(at::kCPU);
-    AT_ASSERT(m->get_parameter("foo").data().device().is_cpu());
-    AT_ASSERT(m->get_buffer("bar").data().device().is_cpu());
+    AT_ASSERT(m->get_parameter("foo").device().is_cpu());
+    AT_ASSERT(m->get_buffer("bar").device().is_cpu());
   }
   {
     // test cpu to cuda for params and buffers
@@ -814,8 +814,8 @@ void testModuleConversion() {
     m->register_buffer("bar", torch::ones({}));
 
     m->to(at::kCUDA);
-    AT_ASSERT(m->get_parameter("foo").data().device().is_cuda());
-    AT_ASSERT(m->get_buffer("bar").data().device().is_cuda());
+    AT_ASSERT(m->get_parameter("foo").device().is_cuda());
+    AT_ASSERT(m->get_buffer("bar").device().is_cuda());
   }
 }
 

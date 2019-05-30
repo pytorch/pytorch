@@ -2,7 +2,6 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/List.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir.h>

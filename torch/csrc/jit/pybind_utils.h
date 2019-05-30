@@ -94,6 +94,11 @@ inline TypedIValue toTypedIValue(py::handle input) {
     if (ten.is_sparse()) {
       AT_ERROR("sparse tensors not supported");
     }
+    if (ten.is_mkldnn()) {
+      // mkldnn tensor as opaque tensor doesn't have strides, so we can
+      // not create a CompleteTensorType
+      return TypedIValue(ten, DimensionedTensorType::create(ten));
+    }
     return TypedIValue(ten, CompleteTensorType::create(ten));
   } else if (six::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);

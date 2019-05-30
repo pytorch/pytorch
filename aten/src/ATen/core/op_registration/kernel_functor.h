@@ -91,9 +91,8 @@ namespace detail {
       auto list = std::move(v).to<intrusive_ptr<ivalue::List<T>>>();
       std::vector<T> result;
       result.reserve(list->elements().size());
-      // TODO move out of list (also check other list/dict places)
-      for (IValue elem : std::move(*list).elements()) {
-        result.push_back(ivalue_to_arg_type<T>::call(std::move(elem)));
+      for(size_t i = 0; i < list->elements().size(); ++i) {
+        result.push_back(ivalue_to_arg_type<T>::call(list->elements().extract(i)));
       }
       return result;
     }
@@ -104,9 +103,8 @@ namespace detail {
       auto list = std::move(v).toGenericList();
       std::vector<T> result;
       result.reserve(list->elements().size());
-      // TODO move out of list (also check other list/dict places)
-      for (IValue elem : std::move(*list).elements()) {
-        result.push_back(ivalue_to_arg_type<T>::call(std::move(elem)));
+      for(size_t i = 0; i < list->elements().size(); ++i) {
+        result.push_back(ivalue_to_arg_type<T>::call(list->elements().extract(i)));
       }
       return result;
     }
@@ -118,6 +116,7 @@ namespace detail {
       std::unordered_map<Key, Value> result;
       result.reserve(dict->elements().size());
       for (auto& element : dict->elements()) {
+        // TODO Move elements
         result.emplace(ivalue_to_arg_type<Key>::call(element.key()), ivalue_to_arg_type<Value>::call(element.value()));
       }
       return result;
@@ -155,9 +154,8 @@ namespace detail {
       auto list = std::move(v).to<intrusive_ptr<ivalue::List<T>>>();
       std::vector<T> result;
       result.reserve(list->elements().size());
-      // TODO move out of list (also check other list/dict places)
-      for (IValue elem : std::move(*list).elements()) {
-        result.push_back(legacy_ivalue_to_arg_type<T>::call(std::move(elem)));
+      for (size_t i = 0; i < list->elements().size(); ++i) {
+        result.push_back(legacy_ivalue_to_arg_type<T>::call(list->elements().extract(i)));
       }
       return result;
     }
@@ -168,9 +166,8 @@ namespace detail {
       auto list = std::move(v).toGenericList();
       std::vector<T> result;
       result.reserve(list->elements().size());
-      // TODO move out of list (also check other list/dict places)
-      for (IValue elem : std::move(*list).elements()) {
-        result.push_back(legacy_ivalue_to_arg_type<T>::call(std::move(elem)));
+      for (size_t i = 0; i < list->elements().size(); ++i) {
+        result.push_back(legacy_ivalue_to_arg_type<T>::call(list->elements().extract(i)));
       }
       return result;
     }
@@ -182,6 +179,7 @@ namespace detail {
       std::unordered_map<Key, Value> result;
       result.reserve(dict->elements().size());
       for (auto& element : dict->elements()) {
+        // TODO Move elements
         result.emplace(legacy_ivalue_to_arg_type<Key>::call(element.key()), legacy_ivalue_to_arg_type<Value>::call(element.value()));
       }
       return result;

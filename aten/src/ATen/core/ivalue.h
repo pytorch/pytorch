@@ -248,6 +248,7 @@ struct CAFFE2_API IValue final {
   //TensorList
   IValue(c10::intrusive_ptr<ivalue::TensorList> v);
   IValue(c10::ListPtr<at::Tensor> v);
+  IValue(std::vector<at::Tensor> v);
   bool isTensorList() const { return Tag::TensorList == tag; }
   c10::intrusive_ptr<ivalue::TensorList> toTensorList() &&;
   c10::intrusive_ptr<ivalue::TensorList> toTensorList() const &;

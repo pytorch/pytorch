@@ -36,14 +36,48 @@ struct ListImpl final : public c10::intrusive_ptr_target {
 
 namespace impl {
 
+template<class T, class Iterator, class StorageT> class ListIterator;
+
+template<class T, class Iterator, class StorageT> class ListElementReference;
+
+template<class T, class Iterator, class StorageT>
+void swap(ListElementReference<T, Iterator, StorageT>&& lhs, ListElementReference<T, Iterator, StorageT>&& rhs);
+
+template<class T, class Iterator, class StorageT>
+class ListElementReference final {
+public:
+  operator T() &&;
+
+  ListElementReference& operator=(T&& new_value) &&;
+
+  ListElementReference& operator=(const T& new_value) &&;
+
+  // assigning another ref to this assigns the underlying value
+  ListElementReference& operator=(ListElementReference&& rhs) &&;
+
+  friend void swap<T, Iterator, StorageT>(ListElementReference&& lhs, ListElementReference&& rhs);
+
+private:
+  ListElementReference(Iterator iter)
+  : iterator_(iter) {}
+
+  ListElementReference(const ListElementReference&) = delete;
+  ListElementReference& operator=(const ListElementReference&) = delete;
+
+  // allow moving, but only our friends (i.e. the ListPtr class) can move us
+  ListElementReference(ListElementReference&&) noexcept = default;
+  ListElementReference& operator=(ListElementReference&&) & noexcept = default;
+
+  friend class ListPtr<T>;
+  friend class ListIterator<T, Iterator, StorageT>;
+
+  Iterator iterator_;
+};
+
 // this wraps vector::iterator to make sure user code can't rely
 // on it being the type of the underlying vector.
-// ListT: The T in the list, i.e. int for ListPtr<int> or const int for ListPtr<const int>
-// IteratorT: The T for the iterator, i.e. int for ListPtr<int>::iterator and
-//   const int for ListPtr<int>::const_iterator or ListPtr<const int>::iterator or
-//   ListPtr<const int>::const_iterator.
-template<class ListT, class IteratorT, class Iterator, class StorageT>
-class ListIterator final : public std::iterator<std::random_access_iterator_tag, ListT> {
+template<class T, class Iterator, class StorageT>
+class ListIterator final : public std::iterator<std::random_access_iterator_tag, T> {
 public:
   explicit ListIterator() = default;
   ~ListIterator() = default;
@@ -75,38 +109,30 @@ public:
       return copy;
   }
 
-  ListIterator& operator+=(typename ListPtr<ListT>::size_type offset) {
+  ListIterator& operator+=(typename ListPtr<T>::size_type offset) {
       iterator_ += offset;
       return *this;
   }
 
-  ListIterator& operator-=(typename ListPtr<ListT>::size_type offset) {
+  ListIterator& operator-=(typename ListPtr<T>::size_type offset) {
       iterator_ -= offset;
       return *this;
   }
 
-  ListIterator operator+(typename ListPtr<ListT>::size_type offset) const {
+  ListIterator operator+(typename ListPtr<T>::size_type offset) const {
     return ListIterator{iterator_ + offset};
   }
 
-  ListIterator operator-(typename ListPtr<ListT>::size_type offset) const {
+  ListIterator operator-(typename ListPtr<T>::size_type offset) const {
     return ListIterator{iterator_ - offset};
   }
 
-  friend typename std::iterator<std::random_access_iterator_tag, ListT>::difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
+  friend typename std::iterator<std::random_access_iterator_tag, T>::difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
     return lhs.iterator_ - rhs.iterator_;
   }
 
-  const IteratorT operator*() const {
-      return detail::list_element_to<ListT>(*iterator_);
-  }
-
-  // the template automatically disables the operator when we are already a
-  // const_iterator, because that would cause a lot of compiler warnings otherwise.
-  template<class const_t_ = const IteratorT, class = guts::enable_if_t<!std::is_same<const_t_, IteratorT>::value>>
-  /* implicit */ operator ListIterator<ListT, const_t_, typename detail::ListImpl<StorageT>::list_type::const_iterator, StorageT>() const
-  {
-      return ListIterator<ListT, const_t_, typename detail::ListImpl<StorageT>::list_type::const_iterator, StorageT> { typename detail::ListImpl<StorageT>::list_type::const_iterator { iterator_ } };
+  ListElementReference<T, Iterator, StorageT> operator*() const {
+      return {iterator_};
   }
 
 private:
@@ -122,13 +148,32 @@ private:
     return !(lhs == rhs);
   }
 
-  friend class ListIterator<ListT, guts::remove_const_t<IteratorT>, typename detail::ListImpl<StorageT>::list_type::iterator, StorageT>;
-  friend class ListPtr<ListT>;
+  friend bool operator<(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ < rhs.iterator_;
+  }
+
+  friend bool operator<=(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ <= rhs.iterator_;
+  }
+
+  friend bool operator>(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ > rhs.iterator_;
+  }
+
+  friend bool operator>=(const ListIterator& lhs, const ListIterator& rhs) {
+    return lhs.iterator_ >= rhs.iterator_;
+  }
+
+  friend class ListIterator<T, typename detail::ListImpl<StorageT>::list_type::iterator, StorageT>;
+  friend class ListPtr<T>;
 };
 
 template<class T> ListPtr<T> toTypedList(ListPtr<IValue> list);
 template<class T> ListPtr<IValue> toGenericList(ListPtr<T> list);
 const IValue* ptr_to_first_element(const ListPtr<IValue>& list);
+template<class T> ListPtr<T> toList(std::vector<T> list);
+template<class T> ArrayRef<T> toArrayRef(const ListPtr<T>& list);
+template<class T> std::vector<T> toVector(const ListPtr<T>& list);
 
 }
 
@@ -173,10 +218,8 @@ private:
 public:
   using value_type = T;
   using size_type = typename detail::ListImpl<StorageT>::list_type::size_type;
-  using iterator = impl::ListIterator<T, T, typename detail::ListImpl<StorageT>::list_type::iterator, StorageT>;
-  using const_iterator = impl::ListIterator<T, const T, typename detail::ListImpl<StorageT>::list_type::const_iterator, StorageT>;
-  using reverse_iterator = impl::ListIterator<T, T, typename detail::ListImpl<StorageT>::list_type::reverse_iterator, StorageT>;
-  using const_reverse_iterator = impl::ListIterator<T, const T, typename detail::ListImpl<StorageT>::list_type::const_reverse_iterator, StorageT>;
+  using iterator = impl::ListIterator<T, typename detail::ListImpl<StorageT>::list_type::iterator, StorageT>;
+  using reverse_iterator = impl::ListIterator<T, typename detail::ListImpl<StorageT>::list_type::reverse_iterator, StorageT>;
   using internal_value_type_test_only = StorageT;
 
   /**
@@ -211,56 +254,46 @@ public:
   value_type get(size_type pos) const;
 
   /**
+   * Moves out the element at the specified location pos and returns it, with bounds checking.
+   * If pos is not within the range of the container, an exception of type std::out_of_range is thrown.
+   * The list contains an invalid element at position pos afterwards. Any operations
+   * on it before re-setting it are invalid.
+   */
+  value_type extract(size_type pos) const;
+
+  /**
    * Returns a reference to the element at specified location pos, with bounds checking.
    * If pos is not within the range of the container, an exception of type std::out_of_range is thrown.
+   *
+   * You cannot store the reference, but you can read it and assign new values to it:
+   *
+   *   ListPtr<int64_t> list = ...;
+   *   list[2] = 5;
+   *   int64_t v = list[1];
    */
-  const value_type operator[](size_type pos) const;
+  impl::ListElementReference<T, typename detail::ListImpl<StorageT>::list_type::iterator, StorageT> operator[](size_type pos) const;
 
   /**
    * Assigns a new value to the element at location pos.
    */
-  void set(size_type pos, const value_type& value);
+  void set(size_type pos, const value_type& value) const;
 
   /**
    * Assigns a new value to the element at location pos.
    */
-  void set(size_type pos, value_type&& value);
+  void set(size_type pos, value_type&& value) const;
 
   /**
    * Returns an iterator to the first element of the container.
    * If the container is empty, the returned iterator will be equal to end().
    */
-  iterator begin();
-
-  /**
-   * Returns an iterator to the first element of the container.
-   * If the container is empty, the returned iterator will be equal to end().
-   */
-  const_iterator begin() const;
-
-  /**
-   * Returns an iterator to the first element of the container.
-   * If the container is empty, the returned iterator will be equal to end().
-   */
-  const_iterator cbegin() const;
+  iterator begin() const;
 
   /**
    * Returns an iterator to the element following the last element of the container.
    * This element acts as a placeholder; attempting to access it results in undefined behavior.
    */
-  iterator end();
-
-  /**
-   * Returns an iterator to the element following the last element of the container.
-   * This element acts as a placeholder; attempting to access it results in undefined behavior.
-   */
-  const_iterator end() const;
-
-  /**
-   * Returns an iterator to the element following the last element of the container.
-   * This element acts as a placeholder; attempting to access it results in undefined behavior.
-   */
-  const_iterator cend() const;
+  iterator end() const;
 
   /**
    * Checks if the container has no elements.
@@ -275,25 +308,25 @@ public:
   /**
    * Increase the capacity of the vector to a value that's greater or equal to new_cap.
    */
-  void reserve(size_type new_cap);
+  void reserve(size_type new_cap) const;
 
   /**
    * Erases all elements from the container. After this call, size() returns zero.
    * Invalidates any references, pointers, or iterators referring to contained elements. Any past-the-end iterators are also invalidated.
    */
-  void clear();
+  void clear() const;
 
   /**
    * Inserts value before pos.
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
-  iterator insert(const_iterator pos, const T& value);
+  iterator insert(iterator pos, const T& value) const;
 
   /**
    * Inserts value before pos.
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
-  iterator insert(const_iterator pos, T&& value);
+  iterator insert(iterator pos, T&& value) const;
 
   /**
    * Inserts a new element into the container directly before pos.
@@ -301,19 +334,19 @@ public:
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
   template<class... Args>
-  iterator emplace(const_iterator pos, Args&&... value);
+  iterator emplace(iterator pos, Args&&... value) const;
 
   /**
    * Appends the given element value to the end of the container.
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
-  void push_back(const T& value);
+  void push_back(const T& value) const;
 
   /**
    * Appends the given element value to the end of the container.
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
-  void push_back(T&& value);
+  void push_back(T&& value) const;
 
   /**
    * Appends the given element value to the end of the container.
@@ -321,40 +354,40 @@ public:
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
   template<class... Args>
-  void emplace_back(Args&&... args);
+  void emplace_back(Args&&... args) const;
 
   /**
    * Removes the element at pos.
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
-  iterator erase(const_iterator pos);
+  iterator erase(iterator pos) const;
 
   /**
    * Removes the elements in the range [first, last).
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
-  iterator erase(const_iterator first, const_iterator last);
+  iterator erase(iterator first, iterator last) const;
 
   /**
    * Removes the last element of the container.
    * Calling pop_back on an empty container is undefined.
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
-  void pop_back();
+  void pop_back() const;
 
   /**
    * Resizes the container to contain count elements.
    * If the current size is less than count, additional default-inserted elements are appended.
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
-  void resize(size_type count);
+  void resize(size_type count) const;
 
   /**
    * Resizes the container to contain count elements.
    * If the current size is less than count, additional copies of value are appended.
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
-  void resize(size_type count, const T& value);
+  void resize(size_type count, const T& value) const;
 
 protected:
   explicit ListPtr(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
@@ -362,6 +395,9 @@ protected:
   template<class T_> friend ListPtr<IValue> impl::toGenericList(ListPtr<T_>);
   friend const IValue* impl::ptr_to_first_element(const ListPtr<IValue>& list);
   template<class T_, class Enable> friend struct detail::list_element_from;
+  template<class T_> friend ListPtr<T_> impl::toList(std::vector<T_> list);
+  template<class T_> friend ArrayRef<T_> impl::toArrayRef(const ListPtr<T_>& list);
+  template<class T_> friend std::vector<T_> impl::toVector(const ListPtr<T_>& list);
 };
 
 namespace impl {
@@ -393,6 +429,32 @@ GenericListPtr toGenericList(ListPtr<T> list) {
 inline const IValue* ptr_to_first_element(const GenericListPtr& list) {
   return &list.impl_->list[0];
 }
+
+template<class T>
+ArrayRef<T> toArrayRef(const ListPtr<T>& list) {
+  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename ListPtr<T>::StorageT>::value, "toArrayRef only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
+  return list.impl_->list;
+}
+
+template<class T>
+std::vector<T> toVector(const ListPtr<T>& list) {
+  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename ListPtr<T>::StorageT>::value, "toVector only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
+  std::vector<T> result;
+  result.reserve(list.size());
+  for (size_t i = 0; i < list.size(); ++i) {
+    result.push_back(list.get(i));
+  }
+  return result;
+}
+
+template<class T>
+ListPtr<T> toList(std::vector<T> list) {
+  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename ListPtr<T>::StorageT>::value, "toList only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
+  ListPtr<T> result = make_list<T>();
+  result.impl_->list = std::move(list);
+  return result;
+}
+
 }
 
 }

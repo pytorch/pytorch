@@ -169,6 +169,9 @@ struct CAFFE2_API List : c10::intrusive_ptr_target {
   static c10::intrusive_ptr<List<Elem>> create(c10::ListPtr<Elem> elements_) {
     return c10::make_intrusive<List<Elem>>(std::move(elements_));
   }
+  static c10::intrusive_ptr<List<Elem>> create(std::initializer_list<Elem> elements_) {
+    return create(c10::make_list<Elem>(elements_));
+  }
   const c10::ListPtr<Elem>& elements() const & {
     return elements_;
   }
@@ -195,6 +198,9 @@ struct CAFFE2_API Tuple : public GenericList {
   using GenericList::GenericList;
   static c10::intrusive_ptr<Tuple> create(c10::impl::GenericListPtr elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_));
+  }
+  static c10::intrusive_ptr<Tuple> create(std::initializer_list<IValue> elements_) {
+    return create(c10::impl::make_generic_list(std::move(elements_)));
   }
 };
 
@@ -575,6 +581,8 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::TensorList> v)
 }
 inline IValue::IValue(c10::ListPtr<at::Tensor> v)
 : IValue(ivalue::TensorList::create(std::move(v))) {}
+inline IValue::IValue(std::vector<at::Tensor> v)
+: IValue(c10::impl::toList(std::move(v))) {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericList> v)
 : tag(Tag::GenericList), is_intrusive_ptr(true) {

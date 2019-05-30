@@ -182,29 +182,29 @@ void Pickler::addIValue(const IValue& ivalue) {
   } else if (ivalue.isIntList()) {
     pushSpecializedList(
         ivalue, PicklerClass::INTLIST, [=](const IValue& ivalue) {
-          for (const auto& item : ivalue.toIntListRef()) {
+          for (const int64_t item : ivalue.toIntListRef()) {
             addIValue(item);
           }
         });
   } else if (ivalue.isTensorList()) {
     pushSpecializedList(
         ivalue, PicklerClass::TENSORLIST, [=](const IValue& ivalue) {
-          for (const auto& item : ivalue.toTensorListRef()) {
+          for (const at::Tensor& item : ivalue.toTensorListRef()) {
             addIValue(item);
           }
         });
   } else if (ivalue.isDoubleList()) {
     pushSpecializedList(
         ivalue, PicklerClass::DOUBLELIST, [=](const IValue& ivalue) {
-          for (const auto& item : ivalue.toDoubleListRef()) {
+          for (double item : ivalue.toDoubleListRef()) {
             addIValue(item);
           }
         });
   } else if (ivalue.isBoolList()) {
     pushSpecializedList(
         ivalue, PicklerClass::BOOLLIST, [=](const IValue& ivalue) {
-          for (const auto& item : ivalue.toBoolListRef()) {
-            addIValue(bool(item));
+          for (bool item : ivalue.toBoolListRef()) {
+            addIValue(item);
           }
         });
   } else {
@@ -483,7 +483,7 @@ void Pickler::pushGenericList(const IValue& ivalue) {
 
   push<OpCode>(OpCode::MARK);
 
-  for (const auto& item : list) {
+  for (const IValue& item : list) {
     addIValue(item);
   }
 
@@ -495,7 +495,7 @@ void Pickler::pushTuple(const IValue& ivalue) {
   push<OpCode>(OpCode::MARK);
   auto tuple = ivalue.toTuple()->elements();
 
-  for (const auto& item : tuple) {
+  for (const IValue& item : tuple) {
     addIValue(item);
   }
 
@@ -503,7 +503,7 @@ void Pickler::pushTuple(const IValue& ivalue) {
   pushMemoization(ivalue);
 }
 
-c10::impl::GenericListPtr Unpickler::parse_ivalue_list() {
+std::vector<IValue> Unpickler::parse_ivalue_list() {
   run();
   TORCH_CHECK(
       stack_.size() == 1,
@@ -513,9 +513,9 @@ c10::impl::GenericListPtr Unpickler::parse_ivalue_list() {
   auto value = stack_[0].ivalue();
   if (value.isGenericList()) {
     // TODO [unpickler refactor]
-    return std::move(std::move(value).toGenericList()->elements());
+    return c10::impl::toVector(value.toGenericListRef());
   }
-  return std::move(std::move(value).toTuple()->elements());
+  return c10::impl::toVector(value.toTuple()->elements());
 }
 
 double Unpickler::readFloat() {
@@ -573,21 +573,21 @@ OpCode Unpickler::readInstruction() {
             value);
         PicklerClass cls = static_cast<PicklerClass>(uint8_t(value));
         if (cls == PicklerClass::INTLIST) {
-          stack_.emplace_back(std::vector<int64_t>());
+          stack_.emplace_back(c10::make_list<int64_t>());
         }
       } else if (stack_.size() > 0 && stack_.back().pickler_class_opt()) {
         // Check if we're in a GLOBAL opcode and if so, if it's a list
         // specialization
         if (stack_.back().pickler_class() == PicklerClass::INTLIST) {
-          stack_.emplace_back(std::vector<int64_t>());
+          stack_.emplace_back(c10::make_list<int64_t>());
         } else if (stack_.back().pickler_class() == PicklerClass::INTLIST) {
-          stack_.emplace_back(std::vector<int64_t>());
+          stack_.emplace_back(c10::make_list<int64_t>());
         } else if (stack_.back().pickler_class() == PicklerClass::TENSORLIST) {
-          stack_.emplace_back(std::vector<at::Tensor>());
+          stack_.emplace_back(c10::make_list<at::Tensor>());
         } else if (stack_.back().pickler_class() == PicklerClass::DOUBLELIST) {
-          stack_.emplace_back(std::vector<double>());
+          stack_.emplace_back(c10::make_list<double>());
         } else if (stack_.back().pickler_class() == PicklerClass::BOOLLIST) {
-          stack_.emplace_back(std::vector<bool>());
+          stack_.emplace_back(c10::make_list<bool>());
         } else {
           AT_ERROR("Unknown list specialization");
         }

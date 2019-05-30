@@ -33,8 +33,6 @@
 #include <ATen/core/ivalue.h>
 #endif
 
-// TODO Use c10::ListPtr::extract() to move out values from newstyle_outputs_ instead of copying
-
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_overflow_exceptions);
 
@@ -202,7 +200,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       // any hypothetical input tensors that come after the list are not accessible.
       const auto& tensorList = newstyle_inputs_[0].toTensorListRef();
       DCHECK_LT(idx, tensorList.size());
-      ival = tensorList[idx];
+      ival = tensorList.get(idx);
     } else {
       // if the first input is not a tensor list, we get input tensors by indexing into the inputs.
       DCHECK_LT(idx, newstyle_inputs_.size());
@@ -240,7 +238,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return BlobGetMutableTensor(outputs_.at(idx), type);
     }
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-    auto output = newstyle_outputs_[idx];
+    auto output = newstyle_outputs_.get(idx);
     Tensor tensor = caffe2::Tensor(output);
     if (!tensor.defined() || tensor.GetDeviceType() != type) {
       // Fix tensor type
@@ -299,7 +297,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return BlobGetMutableTensor(outputs_.at(idx), dims, options);
     }
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-    auto output = newstyle_outputs_[idx];
+    auto output = newstyle_outputs_.get(idx);
     Tensor tensor =
         GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options);
     // assign it back in case it changed
@@ -335,6 +333,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   Tensor* OutputTensorAlias(int idx, const Tensor& src) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "OutputTensorAlias(idx, src) not (yet) supported for operators exported to c10.");
     return BlobSetTensor(OutputBlob(idx),
                   src.Alias());
   }
@@ -358,6 +359,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // note this does not check if the two Blobs points to the same Tensor, or if
   // the Tensor pointers point to the same TensorImpl, or if the Storages alias
   inline bool IsInputOutputAlias(int i, int j) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "IsInputOutputAlias(i, j) not (yet) supported for operators exported to c10.");
     return inputs_.at(i) == outputs_.at(j);
   }
 
@@ -401,8 +405,18 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
   }
-  inline const vector<const Blob*>& Inputs() const { return inputs_; }
-  inline const vector<Blob*>& Outputs() { return outputs_; }
+  inline const vector<const Blob*>& Inputs() const {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "Inputs() not supported for operators exported to c10.");
+    return inputs_;
+  }
+  inline const vector<Blob*>& Outputs() {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "Outputs() not supported for operators exported to c10.");
+    return outputs_;
+  }
   vector<TensorShape> InputTensorShapes() const;
 
   virtual void WaitEvent(const Event& ev, int /*stream_id */ = -1) {
@@ -471,6 +485,10 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   virtual void AddRelatedBlobInfo(EnforceNotMet* err) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "AddRelatedBlobInfo(err) not supported for operators exported to c10.");
+
     if (!has_debug_def()) {
       return;
     }
@@ -679,7 +697,7 @@ inline vector<int> OperatorBase::GetVectorFromIValueList<int>(
   const auto& vs = value.toIntListRef();
   vector<int> out;
   out.reserve(vs.size());
-  for (const auto& v : vs) {
+  for (const int64_t& v : vs) {
     out.emplace_back(v);
   }
   return out;
@@ -691,7 +709,7 @@ inline vector<float> OperatorBase::GetVectorFromIValueList<float>(
   const auto& vs = value.toDoubleListRef();
   vector<float> out;
   out.reserve(vs.size());
-  for (const auto& v : vs) {
+  for (const double& v : vs) {
     out.emplace_back(v);
   }
   return out;
@@ -1274,7 +1292,7 @@ C10_DECLARE_REGISTRY(
 #define REGISTER_CPU_GRADIENT_OPERATOR(...) /* No gradients. */
 #else
 #define REGISTER_CPU_GRADIENT_OPERATOR(...) \
-  MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
+  C10_MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
 #endif
 
 C10_DECLARE_REGISTRY(

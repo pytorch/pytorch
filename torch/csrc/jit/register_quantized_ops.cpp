@@ -28,15 +28,15 @@ using caffe2::int8::Int8TensorCPU;
 namespace {
 
 caffe2::Tensor from_at_tensor(const c10::IValue& v) {
-  return caffe2::Tensor(autograd::Variable(std::move(v).toTensor()).data());
+  return caffe2::Tensor(autograd::Variable(std::move(v).toTensor()).tensor_data());
 }
 
 Int8TensorCPU from_proxy(const c10::IValue& proxy) {
   auto t = std::move(proxy).toTuple();
   Int8TensorCPU r;
-  r.t = from_at_tensor(t->elements()[0]);
-  r.scale = t->elements()[1].toDouble();
-  r.zero_point = t->elements()[2].toInt();
+  r.t = from_at_tensor(t->elements().get(0));
+  r.scale = t->elements().get(1).toDouble();
+  r.zero_point = t->elements().get(2).toInt();
   return r;
 }
 
@@ -45,7 +45,7 @@ at::Tensor to_proxy(const caffe2::Tensor& t) {
 }
 
 c10::intrusive_ptr<c10::ivalue::Tuple> to_proxy(const Int8TensorCPU& t) {
-  return c10::ivalue::Tuple::create(c10::impl::make_generic_list({to_proxy(t.t), t.scale, t.zero_point}));
+  return c10::ivalue::Tuple::create({to_proxy(t.t), t.scale, t.zero_point});
 }
 
 // TODO: replace this with c10 registration when it's ready
