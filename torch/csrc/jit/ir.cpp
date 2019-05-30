@@ -994,7 +994,7 @@ void Node::destroy() {
 }
 
 void Node::cloneFrom(Node* s) {
-  s->source_range_ = s->source_range_;
+  source_range_ = s->source_range_;
   if (s->scope_ && !s->scope_->isBlank()) {
     scope_ = s->scope_;
   }
