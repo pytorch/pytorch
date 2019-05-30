@@ -97,9 +97,10 @@ struct ReduceAdd : public autograd::Function {
 // A friend function to Module, it recursively sets gradient edges pointing from
 // every parameter X in every module replica to the same parameter X in the
 // original module. See [Replicating Modules]
+template <typename ModuleType>
 void replicate_grad_edges(
     const std::shared_ptr<Module>& module,
-    const std::vector<std::shared_ptr<Module>>& replicas,
+    const std::vector<std::shared_ptr<ModuleType>>& replicas,
     const std::vector<Device>& devices) {
 
   for (auto& parameter : module->parameters_) {
@@ -152,9 +153,7 @@ std::vector<std::shared_ptr<ModuleType>> replicate(
   }
   // Configure gradient edges to point from replcia parameters to original
   // module parameters. See [Replicating Modules]
-  std::vector<std::shared_ptr<Module>> untyped_replicas(
-    replicas.begin(), replicas.end());
-  replicate_grad_edges(module, untyped_replicas, devices);
+  replicate_grad_edges(module, replicas, devices);
   return replicas;
 }
 

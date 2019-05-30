@@ -20,13 +20,6 @@
 using namespace torch::autograd;
 using namespace torch::nn;
 
-template <typename T>
-bool almost_equal(torch::Tensor left, torch::Tensor right, T tolerance = 1e-4) {
-  auto diff = (left - right).abs();
-  torch::Tensor ret = torch::all(diff < at::ones_like(diff) * tolerance);
-  return ret.item<bool>() == 1;
-}
-
 struct ParallelTest : torch::test::SeedingFixture {};
 
 TEST_F(ParallelTest, DifferentiableScatter_MultiCUDA) {
@@ -294,7 +287,7 @@ TEST_F(ParallelTest, DataParallelNumericalEquivalence_MultiCUDA) {
       for (auto it = params.begin(), it_dp = params_dp.begin();
           it != params.end() && it_dp != params.end();
           ++it, ++it_dp) {
-        ASSERT_TRUE(almost_equal(*it, *it_dp, 1e-4));
+        ASSERT_TRUE(torch::allclose(*it, *it_dp));
       }
     }
 }

@@ -489,9 +489,10 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
 
   // data parallel using this method to configure gradient edges during the
   // replicate step.
+  template <typename ModuleType>
   friend void replicate_grad_edges(
       const std::shared_ptr<Module>& module,
-      const std::vector<std::shared_ptr<Module>>& replicas,
+      const std::vector<std::shared_ptr<ModuleType>>& replicas,
       const std::vector<Device>& devices);
 
   // Private methods.
