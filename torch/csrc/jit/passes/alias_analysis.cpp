@@ -288,24 +288,10 @@ void AliasDb::analyzeImpl(Node* node) {
       // mapAliases(node->inputs(), node->outputs());
       return;
     case prim::CallFunction:
-    {
-      throw script::ErrorReport(node->sourceRange())
-        << "Alias summaries are required to support this feature.\n"
-        << "Node: " << *node << "\n";
-    }
-    case aten::add:
-    case aten::sub:
-    case aten::mul:
-    case aten::div: {
-      // This is necessary because we sometimes get unschematized combinations
-      // of Tensor/primitive.
-      auto maybeSchema = node->maybeSchema();
-      if (!maybeSchema) {
-        return analyzeCreator(node);
-      }
-      // If the node has a schema, fall through and analyze it normally
-      break;
-    }
+    case prim::CallMethod:
+      // TODO: this can be improved with summarizes of what the function does
+      // for now we assume the worst
+      return analyzeConservative(node);
     case prim::Print:
       // These ops do nothing
       return;
@@ -334,7 +320,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
   // see [custom operator aliasing]
   if (!node->kind().is_aten() && !node->kind().is_prim()) {
-    return analyzeCustomOp(node);
+    return analyzeConservative(node);
   }
 
   // Bind the schema's "formal" alias annotation to the actual values those
@@ -582,10 +568,12 @@ void AliasDb::analyzeSetAttr(Node* node) {
   setWildcard(newValue);
 }
 
-// Custom ops may write to any input and produce wildcards
-void AliasDb::analyzeCustomOp(Node* node) {
+// Used for anything where we do not have accurate alias summaries
+// may write to any input and produce wildcards
+void AliasDb::analyzeConservative(Node* node) {
   for (const auto input : node->inputs()) {
     registerWrite(input, node);
+    setWildcard(input);
   }
 
   // TODO(suo): we can make the more refined assumption that outputs may only
@@ -1087,10 +1075,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::SetAttr,
       prim::profile,
       aten::wait,
-      aten::add,
-      aten::sub,
-      aten::mul,
-      aten::div,
   };
 
   // Operators that should not be used by alias analysis
