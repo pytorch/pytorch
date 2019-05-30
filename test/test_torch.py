@@ -2864,13 +2864,13 @@ class _TestTorchMixin(object):
         r = torch.from_numpy(r).float()
         scale = 2
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point, torch.qint8)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
         qr = qr.transpose(0, 1)
         rqr = qr.dequantize()
         # compare transpose + dequantized result with orignal transposed result
         self.assertTrue(np.allclose(r.numpy().T, rqr.numpy(), atol=2 / scale))
 
-        qr = r.quantize_linear(scale, zero_point, torch.qint8)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
         qr1 = qr.permute([1, 0])
         qr2 = qr.transpose(0, 1)
         # compare int representation after transformations
