@@ -5,7 +5,6 @@
 #include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
-
 namespace {
 std::vector<int64_t> ConvertToVec(
     const ::google::protobuf::RepeatedField<::google::protobuf::int64>& in) {
@@ -72,25 +71,35 @@ void BoundShapeInferencer::InferOps(
 }
 
 void BoundShapeInferencer::InferBoundShapeAndType(
-    const NetDef& net,
+    NetDef& net,
     const std::unordered_map<std::string, ShapeInfo>& info,
     caffe2::Workspace* ws) {
   const static std::unordered_set<std::string> unsupported{"Tile"};
   shape_info_ = info;
 
-  for (const auto& op : net.op()) {
+  for (auto& op : *(net.mutable_op())) {
     VLOG(1) << op.type();
     if (unsupported.count(op.type())) {
       continue;
     }
-    InferOps(op, ws);
+    try {
+      InferOps(op, ws);
+      AddArgument(kShapeNotSupported, false, &op);
+    } catch (const std::exception& e) {
+      AddArgument(kShapeNotSupported, true, &op);
+    }
   }
 
   // Doing a reverse pass to infer the input shapes if applicable
   for (int i = net.op_size() - 1; i >= 0; --i) {
-    const auto& op = net.op(i);
+    auto& op = *(net.mutable_op(i));
     if (op.type() == "Concat") {
-      InferConcatInputs(op);
+      try {
+        InferConcatInputs(op);
+        AddArgument(kShapeNotSupported, false, &op);
+      } catch (const std::exception& e) {
+        AddArgument(kShapeNotSupported, true, &op);
+      }
     }
   }
 
@@ -530,9 +539,11 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   } catch (const caffe2::EnforceNotMet& e) {
     LOG(ERROR) << "Enforce not met while inferring shapes for " << op.type()
                << ": " << e.msg();
+    throw;
   } catch (const std::exception& e) {
     LOG(WARNING) << "Caught exception while inferring shapes for " << op.type()
                  << ": " << e.what();
+    throw;
   }
 }
 

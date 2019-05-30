@@ -10,6 +10,11 @@
 #include <unordered_set>
 
 namespace caffe2 {
+
+namespace {
+constexpr char kShapeNotSupported[] = "shape_not_supported";
+}
+
 // This struct stores the max bound size for batch in the general sense. We have
 // the conventioal batch size and the look-up sequence, which is also batch in a
 // sense.
@@ -37,7 +42,7 @@ class BoundShapeInferencerBase {
   virtual ~BoundShapeInferencerBase() {}
 
   virtual void InferBoundShapeAndType(
-      const NetDef& net,
+      NetDef& net,
       const std::unordered_map<std::string, ShapeInfo>& info,
       caffe2::Workspace* ws) = 0;
 
@@ -71,7 +76,7 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
 
   virtual ~BoundShapeInferencer() override {}
   void InferBoundShapeAndType(
-      const NetDef& net,
+      NetDef& net,
       const std::unordered_map<std::string, ShapeInfo>& info,
       caffe2::Workspace* ws) override;
 
