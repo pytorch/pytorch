@@ -24,7 +24,7 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
     auto alpha = alpha_scalar.to<bool>();
     binary_kernel(iter, [=](bool a, bool b) -> bool { return a + alpha * b; });
   } else {
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), iter.dtype(), "add_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_cpu", [&]() {
     auto alpha = alpha_scalar.to<scalar_t>();
     auto alpha_vec = Vec256<scalar_t>(alpha);
     binary_kernel_vec(iter,
