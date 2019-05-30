@@ -507,7 +507,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
 
 }
 
-std::tuple<Tensor, Tensor, Tensor> miopen_rnn_backward_input(
+std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
 	    const Tensor& input_r, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
 	    const Tensor& output_r, const Tensor& grad_output_r, const Tensor& grad_hy,
 	    const Tensor& grad_cy,
@@ -618,7 +618,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_rnn_backward_input(
 		dx = dx.transpose_(0, 1);
 	}
 
-	return std::make_tuple(dx, dhx, dcx);
+	return std::make_tuple(dx, dhx, dcx, workspace);
 }
 
 std::vector<Tensor> miopen_rnn_backward_weight(
@@ -628,7 +628,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 	    int64_t fn_mode, int64_t fn_hidden_size,
 	    int64_t fn_num_layers, bool batch_first, double fn_dropout,
 	    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
-	    const Tensor& fn_dropout_state, const Tensor& fn_reserve
+	    const Tensor& fn_dropout_state, const Tensor& fn_reserve, const Tensor& fn_workspace
 	    ) {
 	MatrixRef<Tensor> weight{ weight_arr, static_cast<size_t>(weight_stride0) };
 
@@ -677,18 +677,8 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 	FilterDescriptor w_desc;
 	w_desc.set(weight_buf, 3);
 
-	size_t workspace_size;
 	auto x_descs_arr = descs.get_x_descs();
 	auto y_descs_arr = descs.get_y_descs();
-
-	MIOPEN_CHECK(miopenGetRNNWorkspaceSize(
-		handle,
-		descs.rnn_desc.desc(),
-		fn.tensors.seq_length,
-		x_descs_arr.data(),
-		&workspace_size
-		));
-	auto workspace = at::empty(workspace_size, input.options().dtype(kByte));
 
 	MIOPEN_CHECK(miopenRNNBackwardWeights(
 		handle,
@@ -698,7 +688,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 		descs.hx_desc.desc(), hx.data_ptr(),
 		y_descs_arr.data(), y.data_ptr(),
 		w_desc.desc(), dw.data_ptr(),
-		workspace.data_ptr(), workspace.size(0),
+		fn_workspace.data_ptr(), fn_workspace.size(0),
 		fn_reserve.data_ptr(), fn_reserve.size(0)
 		));
 
@@ -732,11 +722,11 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
     auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx);
     auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx)) : grad_cy_r;
 
-    Tensor dx, dhx, dcx;
-    std::tie(dx, dhx, dcx) = at::native::miopen_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
+    Tensor dx, dhx, dcx, ws;
+    std::tie(dx, dhx, dcx, ws) = at::native::miopen_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
     std::vector<Tensor> dw;
     if (output_mask[3]) {
-		dw = at::native::miopen_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve);
+		dw = at::native::miopen_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, ws);
     }
     return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{dx, dhx, dcx, dw};
 }
