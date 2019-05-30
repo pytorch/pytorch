@@ -6035,8 +6035,6 @@ a")
 
         checkMath("modf", 1, ret_type="Tuple[float, float]")
         checkMath("frexp", 1, ret_type="Tuple[float, int]")
-        checkMathWrap("floor", 1, ret_type="int")
-        checkMathWrap("ceil", 1, ret_type="int")
         checkMath("isnan", 1, ret_type="bool")
         checkMath("isfinite", 1, ret_type="bool")
         checkMath("isinf", 1, ret_type="bool")
@@ -6044,9 +6042,10 @@ a")
         checkMath("pow", 2, is_float=False, ret_type="int")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
+            checkMathWrap("floor", ret_type="int")
+            checkMathWrap("ceil", ret_type="int")
             checkMathWrap("gcd", 2, is_float=False, ret_type="int")
         checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
-
 
     def test_if_nest_while(self):
         def func(a, b):
