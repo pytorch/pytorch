@@ -123,6 +123,7 @@ def _unpack_list(list_value):
 def parse_args(*arg_descriptors):
     def decorator(fn):
         fn._arg_descriptors = arg_descriptors
+
         def wrapper(g, *args):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)

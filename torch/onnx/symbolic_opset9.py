@@ -226,6 +226,7 @@ def overload_by_arg_count(fn):
 
 def _reduce_with_dtype(onnx_op, name):
     symbolic = _reduce_op_symbolic(onnx_op)
+
     @overload_by_arg_count
     def reduce(g, *args, **kwargs):
         @parse_args('v', 'none')
