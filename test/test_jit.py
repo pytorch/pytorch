@@ -6435,13 +6435,13 @@ a")
         self.checkScript(tensor_test, (x, y))
 
     def test_number_all(self):
-        def int1():	
+        def int1():
             return all(torch.tensor([1, 2, 3], dtype=torch.uint8))
 
-        def int2():	
+        def int2():
             return all(torch.tensor([1, 0, 3], dtype=torch.uint8))
 
-        self.checkScript(int1, ())	
+        self.checkScript(int1, ())
         self.checkScript(int2, ())
 
     def test_number_math(self):
