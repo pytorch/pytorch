@@ -92,14 +92,14 @@ export dry_run=false  # yf225 TODO: remove this when ready to merge
 if [ "$dry_run" = false ]; then
   echo "Pushing to pytorch.github.io:site"
   set +x
-  expect <<DONE
-    spawn git push origin master_test
-    expect "Username*"
-    send "pytorchbot\n"
-    expect "Password*"
-    send "${GITHUB_PYTORCHBOT_TOKEN}\n"
-    expect eof
-  DONE
+expect <<DONE
+  spawn git push origin master_test
+  expect "Username*"
+  send "pytorchbot\n"
+  expect "Password*"
+  send "${GITHUB_PYTORCHBOT_TOKEN}\n"
+  expect eof
+DONE
   set -x
 else
   echo "Skipping push due to dry_run"
