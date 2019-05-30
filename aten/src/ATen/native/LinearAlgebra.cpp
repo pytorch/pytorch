@@ -563,7 +563,7 @@ static Tensor move_to_end(const Tensor& self, IntArrayRef axes) {
 // Non-optimized batched svd implementation. This can be merged with at::svd
 // once at::svd has been ported to ATen.
 static std::tuple<Tensor, Tensor, Tensor>
-batch_svd(const Tensor& self, bool some, bool compute_uv)
+_batch_svd(const Tensor& self, bool some, bool compute_uv)
 {
   const int64_t ndim = self.ndimension();
 
@@ -617,14 +617,14 @@ Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
 
   Tensor p = move_to_end(self, dim);
-  return at::sum(std::get<1>(batch_svd(p, true, false)), -1, keepdim);
+  return at::sum(std::get<1>(_batch_svd(p, true, false)), -1, keepdim);
 }
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
 
   Tensor p = move_to_end(self, dim);
-  return at::sum_out(result, std::get<1>(batch_svd(p, true, false)), -1, keepdim);
+  return at::sum_out(result, std::get<1>(_batch_svd(p, true, false)), -1, keepdim);
 }
 
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
