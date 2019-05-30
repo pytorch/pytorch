@@ -13,7 +13,9 @@ namespace {
 
 // Suppressing GCC warning about not using '&&' operator in bool multiplication
 // instead of '*'.
+#ifndef _MSC_VER
 #pragma GCC diagnostic ignored "-Wint-in-bool-context"
+#endif
 
 using namespace vec256;
 
