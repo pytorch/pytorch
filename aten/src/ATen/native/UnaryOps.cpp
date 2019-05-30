@@ -157,22 +157,6 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     return result;                                              \
   }
 
-#define IMPLEMENT_UNARY_OP_TH(op)                               \
-  Tensor op(const Tensor& self) {                               \
-    Tensor result = at::empty({0}, self.options());             \
-    at::op##_out(result, self);                                 \
-    return result;                                              \
-  }                                                             \
-  Tensor& _##op##__cpu(Tensor& self) {                          \
-    return at::op##_out(self, self);                            \
-  }                                                             \
-  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
-    checkBackend(#op, {result}, Backend::CPU);                  \
-    assert_no_internal_overlap(result, #op);                    \
-    result.resize_(self.sizes());                               \
-    return legacy::cpu::_th_##op##_out(result, self);        \
-  }
-
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple
 
 IMPLEMENT_UNARY_OP_VEC(abs)
