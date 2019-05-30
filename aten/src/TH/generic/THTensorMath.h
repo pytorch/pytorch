@@ -183,8 +183,6 @@ TH_API accreal THTensor_(meanall)(THTensor *self);
 TH_API accreal THTensor_(varall)(THTensor *self, int biased);
 TH_API accreal THTensor_(stdall)(THTensor *self, int biased);
 TH_API accreal THTensor_(normall)(THTensor *t, scalar_t value);
-
-TH_API void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THTensor *total);
 #endif
 
 #endif

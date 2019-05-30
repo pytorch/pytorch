@@ -184,6 +184,18 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   return ret;
 }
 
+Tensor _dirichlet_grad_cpu(const Tensor& x, const Tensor& alpha, const Tensor& total) {
+  Tensor ret = at::empty(x.sizes(), x.options());
+  AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "_dirichlet_grad_cpu", [&] {
+    CPU_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(ret, x, alpha, total,
+      [](scalar_t& ret_val, const scalar_t& x_val, const scalar_t& alpha_val, const scalar_t& total_val) {
+        ret_val = dirichlet_grad_one<scalar_t, double>(x_val, alpha_val, total_val);
+      }
+    );
+  });
+  return ret;
+}
+
 /*
  * This section is a counterpart to Distributions.cu
  */
