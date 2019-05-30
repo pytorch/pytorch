@@ -10,6 +10,8 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/onnx/onnxifi_graph_info.h"
 #include "caffe2/onnx/onnxifi_init.h"
+#include "caffe2/opt/shape_info.h"
+#include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
@@ -24,17 +26,32 @@ class OnnxifiOp final : public Operator<Context> {
     uint64_t onnxifi_type;
   };
 
+  struct OutputReshapeInfo {
+    std::vector<Tensor> begins;
+    std::vector<Tensor> ends;
+    std::vector<bool> fast_path;
+    bool skip{false};
+  };
+
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   explicit OnnxifiOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+      : Operator<Context>(operator_def, ws),
+        use_onnx_(this->template GetSingleArgument<int>("use_onnx", 0)),
+        max_batch_size_(
+            this->template GetSingleArgument<int>("max_batch_size", 0)),
+        max_seq_size_(this->template GetSingleArgument<int>("max_seq_size", 0)),
+        nominal_batch_idx_(
+            this->template GetSingleArgument<int>("nominal_batch_idx", 0)) {
     lib_ = onnx::initOnnxifiLibrary();
     backend_graph_map_ptr_ = onnx::getOnnxBackendGraphMap();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
-    use_onnx_ = this->template GetSingleArgument<int>("use_onnx", 0);
     auto onnx_model_str =
         this->template GetSingleArgument<std::string>("onnx_model", "");
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
+    if (!use_onnx_) {
+      CAFFE_ENFORCE(ParseProtoFromLargeString(onnx_model_str, &netdef_));
+    }
 
     // Setup input/output descriptor templates
     input_names_ =
@@ -47,12 +64,18 @@ class OnnxifiOp final : public Operator<Context> {
       input_desc_.push_back(onnxTensorDescriptorV1());
       input_desc_.back().name = input.c_str();
     }
+    input_shapes_.resize(input_names_.size());
+    output_shapes_.resize(output_names_.size());
+    output_reshape_info_.begins.reserve(output_names_.size());
+    output_reshape_info_.ends.reserve(output_names_.size());
+    output_reshape_info_.fast_path.reserve(output_names_.size());
     int output_idx = 0;
     for (const auto& output : output_names_) {
       output_desc_.push_back(onnxTensorDescriptorV1());
       output_desc_.back().name = output.c_str();
 
       // For output, we try to get its output size hint
+      int64_t num_dims = 0;
       const std::string key = c10::str("output_shape_hint_", output_idx);
       auto output_shape_hint = this->template GetRepeatedArgument<int>(key);
       if (!output_shape_hint.empty()) {
@@ -61,29 +84,28 @@ class OnnxifiOp final : public Operator<Context> {
         for (size_t i = 1; i < output_shape_hint.size(); ++i) {
           info.dims.push_back(output_shape_hint[i]);
         }
+        num_dims = info.dims.size();
         output_shape_hints_.emplace(output_idx, std::move(info));
       }
+
+      // Initialize the tensors used to slice the output
+      output_reshape_info_.begins.emplace_back();
+      ReinitializeTensor(
+          &output_reshape_info_.begins.back(),
+          {num_dims},
+          at::dtype<int32_t>().device(CPU));
+      output_reshape_info_.ends.emplace_back();
+      ReinitializeTensor(
+          &output_reshape_info_.ends.back(),
+          {num_dims},
+          at::dtype<int32_t>().device(CPU));
+      output_reshape_info_.fast_path.push_back(false);
       ++output_idx;
     }
-    input_shapes_.resize(input_names_.size());
-    output_shapes_.resize(output_names_.size());
 
     // Get output resizing hints
     adjust_output_batch_ =
         this->template GetSingleArgument<int>("adjust_output_batch", 0);
-    permit_unknown_output_batch_size_ = this->template GetSingleArgument<int>(
-        "permit_unknown_output_batch_size", 0);
-    auto output_resize_hints =
-        this->template GetRepeatedArgument<int>("output_resize_hints");
-    CAFFE_ENFORCE_EQ(
-        output_resize_hints.size() % 2,
-        0,
-        "output_resize_hints must have even size: ",
-        output_resize_hints.size());
-    for (int i = 0; i < output_resize_hints.size(); ++i) {
-      auto k = output_resize_hints[i++];
-      batch_pos_map_.emplace(k, output_resize_hints[i]);
-    }
 
     // Encode arguments starting with "custom_" to backend
     std::vector<uint64_t> property_pointers;
@@ -98,6 +120,30 @@ class OnnxifiOp final : public Operator<Context> {
     // cached backend and therefore there is no need to repeat the above
     // process.
     buildBackendAndGraph(ws, property_pointers, onnx_model_str);
+
+    // Get the weights (initializer) a second time to fill in its shape info
+    std::vector<std::string> weight_names;
+    std::vector<std::vector<uint64_t>> weight_shapes;
+    auto initializers =
+        this->template GetRepeatedArgument<std::string>("initializers");
+    std::vector<std::vector<float>> dummy_scales;
+    std::vector<std::vector<float>> dummy_offsets;
+    buildInitializationList(
+        ws,
+        initializers,
+        &weight_names,
+        &weight_shapes,
+        &dummy_scales,
+        &dummy_offsets);
+    for (int i = 0; i < weight_names.size(); ++i) {
+      TensorShape shape;
+      const auto& shape0 = weight_shapes[i];
+      for (const auto d : shape0) {
+        shape.add_dims(d);
+      }
+      input_shape_info_[weight_names[i]] =
+          ShapeInfo(ShapeInfo::DimType::CONSTANT, std::move(shape));
+    }
   }
 
   ~OnnxifiOp() {
@@ -197,7 +243,12 @@ class OnnxifiOp final : public Operator<Context> {
       std::vector<std::string> weight_names;
       std::vector<std::vector<uint64_t>> weight_shapes;
       auto weight_descs = buildInitializationList(
-          ws, initializers, &weight_names, &weight_shapes);
+          ws,
+          initializers,
+          &weight_names,
+          &weight_shapes,
+          &all_scales_,
+          &all_offsets_);
 
       onnxGraph graph{nullptr};
       CAFFE_ENFORCE_EQ(
@@ -247,16 +298,23 @@ class OnnxifiOp final : public Operator<Context> {
 #endif
   }
 
-  std::vector<int> extractOutputBatchSizes() const;
+  void extractOutputBatchSizes();
 
-  void maybeAdjustOutputBatchSizes(
-      const std::vector<int>& real_output_batch_sizes);
+  // If needed, adjust output tensor shape based on the real input batch size.
+  // If the output shape is conditioned on first dim (batch size), we have a
+  // fast path to shrink the tensor shape by just manipulating the meta data.
+  // Otherwise, we have to slice it in the middle of the dimension with copy
+  // invoked. This is a slow path and we don't expect it to happen very often.
+  // We can already omit this step by setting "adjust_output_batch_" to false
+  void maybeAdjustOutputBatchSizes();
 
   std::vector<onnxTensorDescriptorV1> buildInitializationList(
       Workspace* ws,
       const std::vector<std::string>& initializers,
       std::vector<std::string>* weight_names,
-      std::vector<std::vector<uint64_t>>* weight_shapes);
+      std::vector<std::vector<uint64_t>>* weight_shapes,
+      std::vector<std::vector<float>>* all_scales,
+      std::vector<std::vector<float>>* all_offsets) const;
 
   // pointer to loaded onnxifi library
   onnxifi_library* lib_{nullptr};
@@ -271,6 +329,9 @@ class OnnxifiOp final : public Operator<Context> {
   // input/output descriptors
   std::vector<onnxTensorDescriptorV1> input_desc_;
   std::vector<onnxTensorDescriptorV1> output_desc_;
+
+  // Output reshape info
+  OutputReshapeInfo output_reshape_info_;
 
 #ifdef ONNXIFI_ENABLE_EXT
   // onnxifi extension mode function pointer
@@ -287,7 +348,18 @@ class OnnxifiOp final : public Operator<Context> {
 
   std::shared_ptr<onnxTraceEventList> traces_{nullptr};
 #endif
+
+  // ONNX model or not
   bool use_onnx_{false};
+
+  // max batch size
+  int max_batch_size_;
+
+  // max sequence lookup size
+  int max_seq_size_;
+
+  // index of the input whose first dimension represents the batch size
+  int nominal_batch_idx_{0};
 
   // We bind the op input/output by position while ONNXIFI binds input/output by
   // names. In addition, op input/output names can be writtten by, for example,
@@ -295,6 +367,9 @@ class OnnxifiOp final : public Operator<Context> {
   // bind them by position.
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
+
+  // NetDef of the onnxifi subgraph for shape inference
+  NetDef netdef_;
 
   std::vector<c10::SmallVector<uint64_t, 4>> input_shapes_;
   std::vector<c10::SmallVector<uint64_t, 4>> output_shapes_;
@@ -311,18 +386,13 @@ class OnnxifiOp final : public Operator<Context> {
   // output shape hints
   std::unordered_map<int, TensorInfo> output_shape_hints_;
 
+  // input shape info. Used by shape inference when inputs are not at
+  // max_batch_size
+  std::unordered_map<std::string, ShapeInfo> input_shape_info_;
+
   // Whether we need to resize outputs or not
   bool adjust_output_batch_{false};
 
-  // Whether we allow unknown output batch size. This is often needed when
-  // we explicitly blacklist operators out of the onnxifi op.
-  bool permit_unknown_output_batch_size_{false};
-
-  // Output resizing hint map
-  // key: max batch size
-  // value: position of the input where the real batch size can be extracted
-  // from its first dimension
-  std::unordered_map<int, int> batch_pos_map_;
   // Whether we enable tracing in one run of inference
   bool enable_tracing_{false};
 };
