@@ -1224,7 +1224,7 @@ graph(%x : Tensor,
   %2 : int = prim::Constant[value=1]()
   %3 : Tensor = aten::add(%x, %y, %2)
   %4 : int = aten::add(%2, %20)
-  %5 : bool = prim::Bool(%4)
+  %5 : bool = aten::Bool(%4)
   %z : int = prim::If(%5)
     # CHECK: block
     block0():
@@ -6431,15 +6431,6 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
-
-    def test_number_all(self):
-        def int1():
-            return all(torch.tensor([1,2,3],dtype=torch.uint8))
-        def int2():
-            return all(torch.tensor([1,0,3],dtype=torch.uint8))
-
-        self.checkScript(int1, ())
-        self.checkScript(int2, ())
 
     def test_number_math(self):
         ops_template = dedent('''
@@ -11925,6 +11916,7 @@ a")
     @unittest.skipIf(hasattr(torch.jit, 'WeakScriptModuleProxy'), "# TODO: re-enable"
                                                                   "this when WeakScriptModuleProxy has been deleted")
     def test_weak_module_isinstance(self):
+    def test_weak_module_isinstance(self):
         tester = self
 
         class M(torch.jit.ScriptModule):
@@ -14885,22 +14877,16 @@ def add_nn_module_test(*args, **kwargs):
                 def __init__(self):
                     super(TheModule, self).__init__()
                     self.submodule = nn_module(*constructor_args)
-
-            def make_module(script):
-                module = TheModule()
-                # check __repr__
-                str(module)
-                module.define(script)
-                return module
-
             # module cannot be imported / exported
             if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
                 with self.disableEmitHook():
-                    module = make_module(script)
+                    module = TheModule()
+                    module.define(script)
                     create_script_module.last_graph = module.graph
                     mod = module(*args)
             else:
-                module = make_module(script)
+                module = TheModule()
+                module.define(script)
                 self.assertExportImportModule(module, tensors)
                 create_script_module.last_graph = module.graph
                 mod = module(*args)
