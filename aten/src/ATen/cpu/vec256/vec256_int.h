@@ -437,6 +437,7 @@ Vec256<int32_t> Vec256<int32_t>::neg() const {
 Vec256<int16_t> Vec256<int16_t>::neg() const {
   return Vec256<int16_t>(0) - *this;
 }
+
 // Emulate operations with no native 64-bit support in avx,
 // by extracting each element, performing the operation pointwise,
 // then combining the results into a vector.
