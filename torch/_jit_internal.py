@@ -24,6 +24,10 @@ weak_types = weakref.WeakKeyDictionary()  # noqa: T484
 # argument
 boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 
+# Python Op functions that should be ignored by the compiler. These will be replaced
+# with an operator that always throws an error
+ignored_fns = weakref.WeakSet()  # noqa: T484
+
 COMPILATION_PENDING = object()
 COMPILED = object()
 
@@ -156,90 +160,9 @@ def boolean_dispatch(arg_name, arg_index, default, if_true, if_false, module_nam
     return fn
 
 
-
-class FunctionModifiers(object):
-    """
-    Used to denote the behavior of a function in TorchScript. See export() and
-    ignore() for details.
-    """
-    IGNORE_AND_DROP = "ignore (leave as a call to Python, replace with a 'raise' on torch.jit.save)"
-    IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
-    EXPORT = "export (compile this function even if nothing calls it)"
-    DEFAULT = "default (compile if called from a exported function / forward)"
-
-
-def export(fn):
-    """
-    This decorator indicates that a method is used as an entry point into a
-    ScriptModule. `forward` implicitly is used as an entry point, so it does
-    not need this decorator.
-
-    Methods are added to a ScriptModule as they are called in Python. If a
-    method is never called, it will not be included in the ScriptModule when
-    saving. This decorator explicitly marks that a method should be included
-    even if it is not called from Python.
-    """
-    fn._torchscript_modifier = FunctionModifiers.EXPORT
+def ignore(fn):
+    ignored_fns.add(fn)
     return fn
-
-
-def ignore(maybe_fn=None, *, drop_on_export=False):
-    """
-    This decorator indicates to the compiler that a function or method should
-    be ignored and left as a Python function.
-
-    With `drop_on_export=False` (the default), calls to this function will
-    prevent saving a TorchScript model.
-
-    With `drop_on_export=True`, any calls to this function from other
-    TorchScript code will be replaced with a `raise`. This allows you to leave
-    code in your TorchScript model that is only ever run when the Python
-    interpreter is present.
-    """
-    if maybe_fn is None:
-        # No positional args passed, so the decorator as been used with a kwarg,
-        # like @torch.jit.ignore(drop_on_export=True)
-        def decorator(fn):
-            if drop_on_export:
-                fn._torchscript_modifier = FunctionModifiers.IGNORE_AND_DROP
-            else:
-                fn._torchscript_modifier = FunctionModifiers.IGNORE
-            return fn
-        return decorator
-
-    if callable(maybe_fn):
-        # used without any args, so drop_on_export is actually a function
-        #   @torch.jit.ignore
-        #   def fn(...):
-        maybe_fn._torchscript_modifier = FunctionModifiers.IGNORE
-        return maybe_fn
-    else:
-        if isinstance(maybe_fn, bool):
-            correct_usage = "@torch.jit.ignore(drop_on_export={})".format("True" if maybe_fn else "False")
-            raise RuntimeError("drop_on_export must be used as a kwarg, e.g. "
-                               "'{}' ".format(correct_usage))
-        raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
-                           "a function but got {}".format(maybe_fn))
-
-
-def should_drop_on_export(fn):
-    attr = get_torchscript_modifier(fn)
-    if attr is None:
-        return False
-    return attr is FunctionModifiers.IGNORE_AND_DROP
-
-
-def is_ignored_fn(fn):
-    mod = get_torchscript_modifier(fn)
-    return  mod is FunctionModifiers.IGNORE_AND_DROP or mod is FunctionModifiers.IGNORE
-
-
-def get_torchscript_modifier(fn):
-    if not callable(fn):
-        return None
-    if hasattr(fn, '__func__'):
-        fn = fn.__func__
-    return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
 
 
 def _parameter_list(parameter_names_fn):
