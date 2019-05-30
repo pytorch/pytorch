@@ -287,6 +287,12 @@ void AliasDb::analyzeImpl(Node* node) {
       // might be more complicated than just mapAliases
       // mapAliases(node->inputs(), node->outputs());
       return;
+    case prim::CallFunction:
+    {
+      throw script::ErrorReport(node->sourceRange())
+        << "Alias summaries are required to support this feature.\n"
+        << "Node: " << *node << "\n";
+    }
     case aten::add:
     case aten::sub:
     case aten::mul:
