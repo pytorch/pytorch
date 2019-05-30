@@ -47,7 +47,7 @@ namespace {
 // wired at all)
 
 // --------------------------------------------------------------------
-// addmm(Tensor, SparseTensorRef, Tensor, Scalar, Scalar)  [broadcasts]
+// addmm(Tensor, SparseTensor, Tensor, Scalar, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 
 Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseTensor& sparse_, const Tensor& dense, Scalar beta, Scalar alpha) {
@@ -244,13 +244,11 @@ SparseTensor hspmm_sparse_cuda(const SparseTensor& sparse, const Tensor& dense) 
 }
 
 // --------------------------------------------------------------------
-// add(Tensor, SparseTensorRef, Scalar)
+// add(Tensor, SparseTensor, Scalar)
 //    formerly known as spcadd
 // --------------------------------------------------------------------
 
-Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorRef sparse_, at::Scalar value) {
-  const SparseTensor& sparse = sparse_.tref;
-
+Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseTensor& sparse, at::Scalar value) {
   AT_ASSERT(dense.is_cuda()); // dispatch argument
   TORCH_CHECK(sparse.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
