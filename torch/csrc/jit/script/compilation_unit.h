@@ -167,7 +167,7 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
   std::once_flag executor_init_;
 
   // an optional function that actually creates the method when
-  // emit_call_to(this,...) is first called. this is used by the compiler so
+  // ensure_defined() is called. This is used by the compiler so
   // that it can construct methods out of order
   std::function<void(Function&)> function_creator_;
 
