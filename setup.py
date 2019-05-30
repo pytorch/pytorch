@@ -198,10 +198,16 @@ RUN_BUILD_DEPS = True
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
 RERUN_CMAKE = False
+CMAKE_ONLY = False
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == '--cmake':
         RERUN_CMAKE = True
+        continue
+    if arg == '--cmake-only':
+        # Stop once cmake terminates. Leave users a chance to adjust build
+        # options.
+        CMAKE_ONLY = True
         continue
     if arg == 'rebuild' or arg == 'build':
         arg = 'build'  # rebuild is gone, make it build
@@ -306,7 +312,13 @@ def build_deps():
                  cmake_python_library=cmake_python_library,
                  build_python=True,
                  rerun_cmake=RERUN_CMAKE,
+                 cmake_only=CMAKE_ONLY,
                  build_dir='build')
+    if CMAKE_ONLY:
+        report('Finished running cmake. Run "ccmake build" or '
+               '"cmake-gui build" to adjust build options and '
+               '"python setup.py install" to build.')
+        sys.exit()
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
