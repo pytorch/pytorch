@@ -67,11 +67,9 @@ class AliasDb {
   // `Elements`.
   template <
       typename... Other1,
-      template <typename, typename...>
-      class T,
+      template <typename, typename...> class T,
       typename... Other2,
-      template <typename, typename...>
-      class U>
+      template <typename, typename...> class U>
   bool mayAlias(
       const T<const Value*, Other1...>& a,
       const U<const Value*, Other2...>& b) const {
@@ -173,7 +171,7 @@ class AliasDb {
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeTupleConstruct(Node* node);
-  void analyzeCustomOp(Node* node);
+  void analyzeConservative(Node* node);
   void analyzeContainerConstruct(Node* node);
   bool tryRegisteredAnalysis(Node* node);
 

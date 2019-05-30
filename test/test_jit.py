@@ -358,7 +358,6 @@ class JitTestCase(TestCase):
                 # save the module to a buffer
                 buffer = io.BytesIO()
                 torch.jit.save(module, buffer)
-
                 # copy the data in the buffer so we can restore it later. This
                 # is because py2 and py3 have different semantics with zipfile
                 # and it's easier to just work with a fresh copy each time.
@@ -5498,6 +5497,8 @@ a")
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
 
+
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_string_print(self):
         def func(a):
             print(a, "a" 'b' '''c''' """d""", 2, 1.5)
@@ -5952,84 +5953,85 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_math_ops(self):
+        def checkMathWrap(func_name, num_args=1, is_float=True, **args):
+            if is_float:
+                checkMath(func_name, num_args, True, **args)
+                checkMath(func_name, num_args, False, **args)
+            else:
+                checkMath(func_name, num_args, is_float, **args)
 
-        def test_floor(x):
-            # type: (float) -> int
-            return math.floor(x)
+        inf = float("inf")
+        NaN = float("nan")
+        mx_int = 2147483647
+        mn_int = -2147483647 - 1
+        float_vals = [inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
+        int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2]
 
-        def test_ceil(x):
-            # type: (float) -> int
-            return math.ceil(x)
-
-        def test_log_int(x):
-            # type: (int) -> float
-            return math.log(x)
-
-        def test_log_float(x):
-            # type: (float) -> float
-            return math.log(x)
-
-        def test_log_base_float(x, y):
-            # type: (float, float) -> float
-            return math.log(x, y)
-
-        def test_log1p_int(x):
-            # type: (int) -> float
-            return math.log1p(x)
-
-        def test_log1p_float(x):
-            # type: (float) -> float
-            return math.log1p(x)
-
-        def test_log10_int(x):
-            # type: (int) -> float
-            return math.log10(x)
-
-        def test_log10_float(x):
-            # type: (float) -> float
-            return math.log10(x)
-
-        def test_exp_int(x):
-            # type: (int) -> float
-            return math.exp(x)
-
-        def test_exp_float(x):
-            # type: (float) -> float
-            return math.exp(x)
-
-        def test_sqrt_int(x):
-            # type: (int) -> float
-            return math.sqrt(x)
-
-        def test_sqrt_float(x):
-            # type: (float) -> float
-            return math.sqrt(x)
-
-        def test_pow_float(x, y):
-            # type: (float, float) -> float
-            return math.pow(x, y)
+        def checkMath(func_name, num_args, is_float=True, ret_type="float", debug=False, vals=None, args_type=None):
+            funcs_template = dedent('''
+            def func(a, b):
+                # type: {args_type} -> {ret_type}
+                return math.{func}({args})
+            ''')
+            if num_args == 1:
+                args = "a"
+            elif num_args == 2:
+                args = "a, b"
+            else:
+                raise RuntimeError("Test doesn't support more than 2 arguments")
+            if args_type is None:
+                args_type = "(float, float)" if is_float else "(int, int)"
+            funcs_str = funcs_template.format(func=func_name, args=args, args_type=args_type, ret_type=ret_type)
+            scope = {}
+            execWrapper(funcs_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(funcs_str)
+            fs = cu.func
+            f = scope['func']
 
 
-        def test_pow_int(x, y):
-            # type: (float, int) -> float
-            return math.pow(x, y)
+            if vals is None:
+                vals = float_vals if is_float else int_vals
+                vals = [(i, j) for i in vals for j in vals]
 
-        self.checkScript(test_floor, (1.5,))
-        self.checkScript(test_ceil, (1.5,))
-        self.checkScript(test_log_int, (2,))
-        self.checkScript(test_log_float, (2.0,))
-        self.checkScript(test_log_base_float, (2.0, 5.0))
-        self.checkScript(test_log1p_int, (1,))
-        self.checkScript(test_log1p_float, (1.0,))
-        self.checkScript(test_log10_int, (2,))
-        self.checkScript(test_log10_float, (2.0,))
-        self.checkScript(test_exp_int, (2,))
-        self.checkScript(test_exp_float, (2.0,))
-        self.checkScript(test_sqrt_int, (2,))
-        self.checkScript(test_sqrt_float, (2.0,))
-        self.checkScript(test_pow_float, (2.0, 2.0))
-        self.checkScript(test_pow_float, (2.0, 2.0))
-        self.checkScript(test_pow_int, (2.0, 2))
+            for a, b in vals:
+                resf = None
+                resfs = None
+                try:
+                    resf = f(a, b)
+                except Exception as e:
+                    resf = e
+                try:
+                    resfs = fs(a, b)
+                except Exception as e:
+                    resfs = e
+                if debug:
+                    print("in: ", a, b)
+                    print("out: ", resf, resfs)
+                if resf != resfs:
+                    if isinstance(resf, Exception):
+                        continue
+                    if type(resf) == type(resfs):
+                        if isinstance(resf, tuple) and (math.isnan(resf[0]) == math.isnan(resfs[0])):
+                            continue
+                        if isinstance(resf, float) and math.isnan(resf) and math.isnan(resfs):
+                            continue
+                        if isinstance(resf, float) and abs(resf - resfs) < 1e-4:
+                            continue
+                    raise AssertionError("Failed on {func_name} with inputs {a} {b}. Python: {resf}, Script: {resfs}".format(func_name=func_name, a=a, b=b, resf=resf, resfs=resfs))
+
+
+        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc", "expm1", "fabs"]
+        for op in unary_float_ops:
+            checkMathWrap(op)
+
+        checkMathWrap("copysign", 2)
+        checkMath("pow", 2, is_float=False, ret_type="int")
+        checkMath("pow", 2, is_float=True, ret_type="float")
+        if not PY2:
+            checkMathWrap("floor", ret_type="int")
+            checkMathWrap("ceil", ret_type="int")
+            checkMathWrap("gcd", 2, is_float=False, ret_type="int")
+
 
     @unittest.skipIf(PY2, "Requires python 3")
     def test_math_gcd(self):
@@ -6043,52 +6045,6 @@ a")
         vals = [(i, j) for i in int_vals for j in int_vals]
         for inputs in vals:
             self.checkScript(test_gcd, inputs)
-
-    def test_math_ops1(self):
-        funcs_template = dedent('''
-        def func():
-            return math.{func}({scalar})
-        ''')
-
-        def run_test(code):
-            scope = {}
-            execWrapper(code, globals(), scope)
-            cu = torch.jit.CompilationUnit(code)
-            self.assertEqual(cu.func(), scope['func']())
-
-        special_domain = ['gamma', 'lgamma']
-
-        for func in ['erf', 'erfc', 'expm1', 'fabs', 'gamma', 'lgamma']:
-            for scalar in [1, 10, 0, -1, -1.5, 5.0, 1.5]:
-                if func in special_domain and scalar in [0, -1]:
-                    continue
-                code = funcs_template.format(func=func, scalar=scalar)
-                run_test(code)
-
-    def test_math_copysign(self):
-
-        def func1(x, y):
-            # type: (int, int) -> float
-            return math.copysign(x, y)
-
-        def func2(x, y):
-            # type: (int, float) -> float
-            return math.copysign(x, y)
-
-        def func3(x, y):
-            # type: (float, int) -> float
-            return math.copysign(x, y)
-
-        def func4(x, y):
-            # type: (float, float) -> float
-            return math.copysign(x, y)
-
-        inputs = [(3.3, 5.5), (3.3, -5.5), (-3.3, 5.5), (-3.3, -5.5), (3.3, 0.0), (0.0, 3.3)]
-        for a, b in inputs:
-            self.checkScript(func1, (int(a), int(b)))
-            self.checkScript(func2, (int(a), b))
-            self.checkScript(func3, (a, int(b)))
-            self.checkScript(func4, (a, b))
 
     def test_if_nest_while(self):
         def func(a, b):
@@ -6266,6 +6222,7 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -8742,8 +8699,8 @@ a")
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"Expected a value of type Tensor for argument"
-                                                      r" '0' but found Tuple\[Tensor,"):
+            with self.assertRaisesRegex(RuntimeError, r"expected a value of type 'Tensor' for argument"
+                                                      r" '0' but instead found type 'Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -9676,12 +9633,12 @@ a")
             def f3(a):
                 torch.sum(dim=4)
 
-        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but found Tensor'):
+        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but instead found type \'Tensor'):
             @torch.jit.script
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but found List\[int\]'):
+        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but instead found type \'List\[int\]'):
             @torch.jit.script
             def f5(a):
                 torch.cat([3])
@@ -9691,7 +9648,7 @@ a")
             def f6(a):
                 a.expand(size=[3, [4]])
 
-        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type Tensor for argument \'self\''):
+        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type \'Tensor\' for argument \'self\''):
             @torch.jit.script
             def f7(a):
                 torch.sum([4])
@@ -13238,6 +13195,18 @@ a")
             def fn():
                 return random.randint()
 
+    def test_inferred_error_msg(self):
+        """
+        Test that when we get a type mismatch on a function where we inferred
+        the type to be tensor, a good error message is given.
+        """
+        @torch.jit.script
+        def foo(a):
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
+            foo(1)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -15577,7 +15546,7 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_type_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value of type bool"):
+        with self.assertRaisesRegex(RuntimeError, "expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
             class FooTest(object):
                 def __init__(self, x):
@@ -15793,7 +15762,7 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(test_list_no_reverse(), 1)
 
-        with self.assertRaisesRegex(RuntimeError, "bool for argument \'reverse"):
+        with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
             @torch.jit.script
             def test():
                 li = [Foo(1)]
