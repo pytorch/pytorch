@@ -1655,7 +1655,7 @@ class TestCaffe2Backend(unittest.TestCase):
         class TupleModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, a):
-                # type: (Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor])
+                # type: (Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
                 return a
 
         x = (torch.randn(3, 4), torch.randn(4, 3))
