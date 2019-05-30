@@ -368,7 +368,7 @@ struct Token {
 
 struct Lexer {
   explicit Lexer(const std::string& str)
-      : file(std::make_shared<std::string>(str)),
+      : source(std::make_shared<Source>(str)),
         pos(0),
         nesting(0),
         indent_stack(),
@@ -485,9 +485,9 @@ struct Lexer {
     int kind;
     size_t start;
     size_t length;
-    AT_ASSERT(file);
+    AT_ASSERT(source);
     if (!shared.match(
-            *file,
+            source->text(),
             pos,
             nesting > 0,
             whitespace_token,
@@ -496,14 +496,15 @@ struct Lexer {
             &length)) {
       expected(
           "a valid token",
-          Token((*file)[start], SourceRange(file, start, start + 1)));
+          Token(
+              (source->text())[start], SourceRange(source, start, start + 1)));
     }
-    auto t = Token(kind, SourceRange(file, start, start + length));
+    auto t = Token(kind, SourceRange(source, start, start + length));
     pos = start + length;
     return t;
   }
 
-  std::shared_ptr<std::string> file;
+  std::shared_ptr<Source> source;
   size_t pos;
   size_t nesting; // depth of ( [ { nesting...
   std::vector<int> indent_stack; // stack of identation level of blocks
