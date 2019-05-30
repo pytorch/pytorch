@@ -20,7 +20,11 @@ namespace {
 using namespace vec256;
 
 void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, iter.dtype(), "add_cpu", [&]() {
+  if (iter.dtype() == ScalarType::Bool) {
+    auto alpha = alpha_scalar.to<bool>();
+    binary_kernel(iter, [=](bool a, bool b) -> bool { return a + alpha * b; });
+  } else {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), iter.dtype(), "add_cpu", [&]() {
     auto alpha = alpha_scalar.to<scalar_t>();
     auto alpha_vec = Vec256<scalar_t>(alpha);
     binary_kernel_vec(iter,
@@ -28,7 +32,8 @@ void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
       [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
         return vec256::fmadd(b, alpha_vec, a);
       });
-  });
+    });
+  }
 }
 
 void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
