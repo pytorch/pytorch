@@ -430,7 +430,7 @@ RegisterOperators reg(
          push(stack, sum);
          return 0;
          }),
-    Operator(
+     Operator(
          "aten:sum(Tensor self) -> float",
          [](Stack& stack) {
          at::Tensor x;
