@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/detail/IndexUtils.cuh>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -801,39 +802,40 @@ C10_LAUNCH_BOUNDS_1(512)
 #endif
 __global__
 void triu_tril_kernel(
-    scalar_t* result, scalar_t* self, int64_t k, int64_t N, int64_t dims,
-    const int64_t* res_strides, const int64_t* self_strides,
-    const int64_t* self_sizes) {
+    cuda::detail::TensorInfo<scalar_t, int64_t> result_info,
+    const cuda::detail::TensorInfo<scalar_t, int64_t> self_info, int64_t k, int64_t N) {
   int64_t linear_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_idx >= N) {
     return;
   }
 
-  int64_t self_offset = 0, res_offset = 0;
+  auto dims = self_info.dims;
+
+  int64_t self_offset = 0, result_offset = 0;
   // Compute column index and corresponding offset
-  int64_t col = linear_idx % self_sizes[dims - 1];
-  self_offset += self_strides[dims - 1] * col; 
-  res_offset += res_strides[dims - 1] * col;
-  linear_idx /= self_sizes[dims - 1];
+  int64_t col = linear_idx % self_info.sizes[dims - 1];
+  self_offset += self_info.strides[dims - 1] * col; 
+  result_offset += result_info.strides[dims - 1] * col;
+  linear_idx /= self_info.sizes[dims - 1];
 
   // Compute row index and corresponding offset
-  int64_t row = linear_idx % self_sizes[dims - 2];
-  self_offset += self_strides[dims - 2] * row;
-  res_offset += res_strides[dims - 2] * row;
-  linear_idx /= self_sizes[dims - 2];
+  int64_t row = linear_idx % self_info.sizes[dims - 2];
+  self_offset += self_info.strides[dims - 2] * row;
+  result_offset += result_info.strides[dims - 2] * row;
+  linear_idx /= self_info.sizes[dims - 2];
 
   // Compute remaining offsets
   int64_t running_index;
   #pragma unroll
   for (int64_t i = dims - 3; i >= 0; --i) {
-    running_index = linear_idx % self_sizes[i];
-    self_offset += running_index * self_strides[i];
-    res_offset += running_index * res_strides[i];
-    linear_idx /= self_sizes[i];
+    running_index = linear_idx % self_info.sizes[i];
+    self_offset += running_index * self_info.strides[i];
+    result_offset += running_index * result_info.strides[i];
+    linear_idx /= self_info.sizes[i];
   }
 
   bool mask = upper ? (col - row >= k) : (col - row <= k);
-  result[res_offset] = mask ? self[self_offset] : scalar_t(0);
+  result_info.data[result_offset] = mask ? self_info.data[self_offset] : scalar_t(0);
 }
 
 template <bool upper>
@@ -841,17 +843,12 @@ Tensor& triu_tril_cuda_template(Tensor& result, const Tensor& self, int64_t k, c
   int64_t N = self.numel();
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid((N + dim_block.x - 1) / dim_block.x);
-  Tensor result_strides = at::from_blob(
-                        result.strides().vec().data(), {result.dim()}, at::kLong).to(self.device());
-  Tensor self_strides = at::from_blob(
-                        self.strides().vec().data(), {self.dim()}, at::kLong).to(self.device());
-  Tensor self_sizes = at::from_blob(
-                        self.sizes().vec().data(), {self.dim()}, at::kLong).to(self.device());
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, self.scalar_type(), name, [&]{
+    auto result_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(result);
+    auto self_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(self);
     triu_tril_kernel<scalar_t, upper>
       <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        result.data<scalar_t>(), self.data<scalar_t>(), k, N, self.dim(),
-        result_strides.data<int64_t>(), self_strides.data<int64_t>(), self_sizes.data<int64_t>());
+        result_info, self_info, k, N);
   });
   AT_CUDA_CHECK(cudaGetLastError());
   return result;
