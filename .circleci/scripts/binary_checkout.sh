@@ -39,10 +39,10 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+git clone -q https://github.com/pjh5/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
-git fetch origin
-git reset origin/master --hard
+git fetch conda35_fix
+git reset --hard
 echo "Using builder from "
 git --no-pager log --max-count 1
 popd
