@@ -358,7 +358,6 @@ class JitTestCase(TestCase):
                 # save the module to a buffer
                 buffer = io.BytesIO()
                 torch.jit.save(module, buffer)
-
                 # copy the data in the buffer so we can restore it later. This
                 # is because py2 and py3 have different semantics with zipfile
                 # and it's easier to just work with a fresh copy each time.
@@ -1469,7 +1468,7 @@ graph(%x : Tensor,
             def forward(self, x):
                 x = x.quantize_linear(1.0, 0, torch.quint8)
                 x = x.int_repr()
-                x = torch._dequantize_linear(x, 1.0, 0, torch.float)
+                x = torch._dequantize_linear(x, 1.0, 0, torch.quint8)
                 x = self.conv1(x)
                 return x
 
@@ -3372,6 +3371,28 @@ def foo(x):
 
         self.assertEqual(D()(v), v + v)
 
+
+    def test_invalid_prefix_annotation(self):
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation1(a):
+                    #type: (Int) -> Int # noqa
+                    return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation2(a):
+                    #type   : (Int) -> Int # noqa
+                    return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation3(a):
+                    #     type: (Int) -> Int
+                    return a + 2
 
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
@@ -5476,6 +5497,8 @@ a")
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
 
+
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_string_print(self):
         def func(a):
             print(a, "a" 'b' '''c''' """d""", 2, 1.5)
@@ -6008,7 +6031,11 @@ a")
             # type: (int, int) -> int
             return math.gcd(x, y)
 
-        for inputs in [(2, 4), (-5, -15), (-5, 15), (10, 0), (0, 10), (-5, 0), (0, -5), (0, 0), (0, -0)]:
+        max_int = 2147483647
+        min_int = -2147483647 - 1
+        int_vals = list(range(-5, 5, 1)) + [max_int + 5, max_int * 2, min_int - 5, min_int * 2]
+        vals = [(i, j) for i in int_vals for j in int_vals]
+        for inputs in vals:
             self.checkScript(test_gcd, inputs)
 
     def test_math_ops1(self):
@@ -6116,6 +6143,41 @@ a")
 
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
 
+    def test_script_for_in_range_start_end(self):
+        def fn():
+            x = 0
+            for i in range(7, 100):
+                x += i
+            return x
+        self.checkScript(fn, (), outputs=4929, optimize=True)
+
+    def test_script_for_in_range_start_end_step(self):
+        def fn(start, end, step):
+            # type: (int, int, int) -> int
+            x = 0
+            for i in range(start, end, step):
+                x += i
+            return x
+
+        def check(inp):
+            self.checkScript(fn, inp, outputs=fn(*inp), optimize=True)
+        check((7, 100, 7))
+        check((7, 100, -7))
+        check((2, -11, -3))
+        check((2, -11, 3))
+        check((2, 10, 3))
+        check((-2, -10, -10))
+
+    def test_script_for_zero_step(self):
+        @torch.jit.script
+        def fn():
+            x = 0
+            for i in range(2, -11, 0):
+                x += i
+            return x
+        with self.assertRaisesRegex(torch.jit.Error, "must not be zero"):
+            fn()
+
     def test_script_optional_none(self):
         def none_stmt(x):
             output = None
@@ -6198,6 +6260,7 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -6370,6 +6433,16 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
+
+    def test_number_all(self):
+        def int1():
+            return all(torch.tensor([1, 2, 3], dtype=torch.uint8))
+
+        def int2():
+            return all(torch.tensor([1, 0, 3], dtype=torch.uint8))
+
+        self.checkScript(int1, ())
+        self.checkScript(int2, ())
 
     def test_number_math(self):
         ops_template = dedent('''
@@ -6829,7 +6902,7 @@ a")
         for inp, typ, type_hint in zip(inputs, type_literals, type_annotations):
             test(inp, typ, type_hint)
 
-        # test optional isintance check
+        # test optional isinstance check
         with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
             @torch.jit.script
             def opt_func(x):
@@ -8664,8 +8737,8 @@ a")
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"Expected a value of type Tensor for argument"
-                                                      r" '0' but found Tuple\[Tensor,"):
+            with self.assertRaisesRegex(RuntimeError, r"expected a value of type 'Tensor' for argument"
+                                                      r" '0' but instead found type 'Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -9598,12 +9671,12 @@ a")
             def f3(a):
                 torch.sum(dim=4)
 
-        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but found Tensor'):
+        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but instead found type \'Tensor'):
             @torch.jit.script
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but found List\[int\]'):
+        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but instead found type \'List\[int\]'):
             @torch.jit.script
             def f5(a):
                 torch.cat([3])
@@ -9613,7 +9686,7 @@ a")
             def f6(a):
                 a.expand(size=[3, [4]])
 
-        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type Tensor for argument \'self\''):
+        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type \'Tensor\' for argument \'self\''):
             @torch.jit.script
             def f7(a):
                 torch.sum([4])
@@ -9978,7 +10051,7 @@ a")
         self.checkScript(return_stmt, (torch.rand(1),))
 
     def test_for_range_no_arg(self):
-        with self.assertRaisesRegex(RuntimeError, r'range\(\) expects 1 argument but got 0'):
+        with self.assertRaisesRegex(RuntimeError, r'range expected 1 arguments, got 0'):
             @torch.jit.script
             def range_no_arg(x):
                 for _ in range():
@@ -11557,6 +11630,14 @@ a")
         x = torch.rand(2, 3, 4)
         traced = torch.jit.trace(foo, (x,))
         FileCheck().check("aten::contiguous").run(str(traced.graph))
+
+    def test_trace_inverse(self):
+        def foo(x):
+            return ~x
+
+        foo_traced = torch.jit.trace(foo, torch.zeros(3, 4, dtype=torch.uint8))
+        eg = torch.zeros(3, dtype=torch.uint8)
+        self.assertEqual(foo_traced(eg), foo(eg))
 
     def test_weak_module(self):
 
@@ -13217,6 +13298,18 @@ a")
             def fn():
                 return random.randint()
 
+    def test_inferred_error_msg(self):
+        """
+        Test that when we get a type mismatch on a function where we inferred
+        the type to be tensor, a good error message is given.
+        """
+        @torch.jit.script
+        def foo(a):
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
+            foo(1)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -14870,16 +14963,22 @@ def add_nn_module_test(*args, **kwargs):
                 def __init__(self):
                     super(TheModule, self).__init__()
                     self.submodule = nn_module(*constructor_args)
+
+            def make_module(script):
+                module = TheModule()
+                # check __repr__
+                str(module)
+                module.define(script)
+                return module
+
             # module cannot be imported / exported
             if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
                 with self.disableEmitHook():
-                    module = TheModule()
-                    module.define(script)
+                    module = make_module(script)
                     create_script_module.last_graph = module.graph
                     mod = module(*args)
             else:
-                module = TheModule()
-                module.define(script)
+                module = make_module(script)
                 self.assertExportImportModule(module, tensors)
                 create_script_module.last_graph = module.graph
                 mod = module(*args)
@@ -15550,7 +15649,7 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_type_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value of type bool"):
+        with self.assertRaisesRegex(RuntimeError, "expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
             class FooTest(object):
                 def __init__(self, x):
@@ -15766,7 +15865,7 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(test_list_no_reverse(), 1)
 
-        with self.assertRaisesRegex(RuntimeError, "bool for argument \'reverse"):
+        with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
             @torch.jit.script
             def test():
                 li = [Foo(1)]

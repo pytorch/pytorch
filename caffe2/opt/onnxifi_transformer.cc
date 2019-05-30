@@ -192,9 +192,7 @@ std::unordered_set<string> toHashSet(
   return std::unordered_set<string>(strs.begin(), strs.end());
 }
 
-int64_t getBlob1stDimSize(
-    const ShapeInfo& shape_info,
-    const string& blob_name) {
+int64_t getBlob1stDimSize(const ShapeInfo& shape_info) {
   if (shape_info.shape.dims_size() == 0) {
     return 0;
   } else {
@@ -233,72 +231,13 @@ OnnxifiTransformer::~OnnxifiTransformer() {
   }
 }
 
-std::unordered_map<int, std::string>
-OnnxifiTransformer::generateBatchPaddingHints(
-    const NetDef& onnxifi_net,
-    const ShapeInfoMap& shape_hints) {
-  std::unordered_map<int, std::string> batch_pos_map;
-  if (!opts_.adjust_batch) {
-    return batch_pos_map;
-  }
-  const auto external_inputs = toHashSet(onnxifi_net.external_input());
-  const auto external_outputs = toHashSet(onnxifi_net.external_output());
-  for (const auto& op : onnxifi_net.op()) {
-    for (auto i = 0; i < op.input_size(); ++i) {
-      const auto& input_blob = op.input(i);
-      if (external_inputs.count(input_blob)) {
-        auto shape_info_it = shape_hints.find(input_blob);
-        if (shape_info_it == shape_hints.end()) {
-          LOG(WARNING) << "Cannot find shape_info for external input blob: "
-                       << input_blob;
-          continue;
-        }
-        if (shape_info_it->second.dim_type == ShapeInfo::DimType::BATCH ||
-            shape_info_it->second.dim_type == ShapeInfo::DimType::SEQ) {
-          batch_pos_map.emplace(
-              getBlob1stDimSize(shape_info_it->second, input_blob), input_blob);
-        }
-      }
-    }
-
-    // Correctness check on the output
-    for (const auto& output_blob : op.output()) {
-      if (external_outputs.count(output_blob)) {
-        auto shape_info_it = shape_hints.find(output_blob);
-        CAFFE_ENFORCE(
-            shape_info_it != shape_hints.end(),
-            "Cannot find shape info for ",
-            output_blob,
-            " to adjust output batch size");
-        if (shape_info_it->second.dim_type == ShapeInfo::DimType::BATCH) {
-          auto max_batch_size =
-              getBlob1stDimSize(shape_info_it->second, output_blob);
-
-          if (!opts_.permit_unknown_output_batch_size) {
-            CAFFE_ENFORCE(
-                batch_pos_map.count(max_batch_size),
-                "Cannot find input with max batch size: ",
-                max_batch_size);
-          }
-        } else if (shape_info_it->second.dim_type == ShapeInfo::DimType::SEQ) {
-          LOG(WARNING) << "It's unusual that output tensor " << output_blob
-                       << " is of dim_type SEQ. "
-                       << "AdjustBatchOp won't attached "
-                       << "and it might degrade the performance";
-        }
-      }
-    }
-  }
-  return batch_pos_map;
-}
-
-OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
+OperatorDef OnnxifiTransformer::buildOnnxifiOp(
     const std::string& onnx_model_str,
     const std::unordered_map<std::string, TensorShape>& output_shape_hints,
     const std::unordered_set<std::string>& initialization_list,
     const std::vector<std::string>& external_inputs,
     const std::vector<std::string>& external_outputs,
-    const std::unordered_map<int, std::string>& batch_pos_map) {
+    const std::unordered_map<std::string, ShapeInfo>& shape_hints) {
   OperatorDef op;
   op.set_type("Onnxifi");
   auto* onnx_model_arg = op.add_arg();
@@ -332,6 +271,25 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
     output_names->add_strings(output);
   }
 
+  // Find out the index of input that has a nominal batch size
+  const auto max_batch_size = opts_.bound_shape_spec.max_batch_size;
+  idx = 0;
+  int nominal_batch_idx{0};
+  for (const auto& input : external_inputs) {
+    if (!initialization_list.count(input)) {
+      const auto it = shape_hints.find(input);
+      CAFFE_ENFORCE(
+          it != shape_hints.end(), "Input shape for ", input, " not found");
+      const auto& info = it->second;
+      if (info.dim_type == ShapeInfo::DimType::BATCH &&
+          getBlob1stDimSize(info) == max_batch_size) {
+        nominal_batch_idx = idx;
+        break;
+      }
+      ++idx;
+    }
+  }
+
   // Add output size hints
   for (int i = 0; i < op.output_size(); ++i) {
     const auto& o = op.output(i);
@@ -362,24 +320,12 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
   // Add output resizing hints
   if (opts_.adjust_batch) {
     AddArgument("adjust_output_batch", 1, &op);
-    auto* resize_arg = op.add_arg();
-    resize_arg->set_name("output_resize_hints");
-    for (const auto kv : batch_pos_map) {
-      const auto it = input_pos_map.find(kv.second);
-      CAFFE_ENFORCE(
-          it != input_pos_map.end(),
-          "Cannot find input in OnnxifiOp: ",
-          kv.second);
-      resize_arg->add_ints(kv.first);
-      resize_arg->add_ints(it->second);
-    }
   } else {
     AddArgument("adjust_output_batch", 0, &op);
   }
-
-  if (opts_.permit_unknown_output_batch_size) {
-    AddArgument("permit_unknown_output_batch_size", 1, &op);
-  }
+  AddArgument("max_batch_size", opts_.bound_shape_spec.max_batch_size, &op);
+  AddArgument("max_seq_size", opts_.bound_shape_spec.max_seq_size, &op);
+  AddArgument("nominal_batch_idx", nominal_batch_idx, &op);
 
   return op;
 }
@@ -418,9 +364,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
       onnxifi_net.add_external_output(o);
     }
   }
-
-  // Add batch padding hints
-  auto batch_pos_map = generateBatchPaddingHints(onnxifi_net, shape_hints);
 
   // Figure out weights and add it to external_inputs too
   std::unordered_set<std::string> initialization_list;
@@ -466,13 +409,13 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
       onnxifi_net.external_output().end());
   std::string model_str;
   onnxifi_net.SerializeToString(&model_str);
-  auto onnxifi_op = BuildOnnxifiOp(
+  auto onnxifi_op = buildOnnxifiOp(
       model_str,
       output_shape_hints,
       initialization_list,
       onnxifi_net_inputs,
       onnxifi_net_outputs,
-      batch_pos_map);
+      shape_hints);
   NetDef net_opt = composeResultNet(onnxifi_op);
 
   // Debugging stuff
@@ -500,7 +443,6 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   fillModelInfo(&onnx_model);
 
   caffe2::NetDef onnxifi_net(net);
-  auto batch_pos_map = generateBatchPaddingHints(onnxifi_net, *shape_hints);
 
   // Convert c2 ops to onnx ops, add const weights if there are any
   DeviceOption option;
@@ -593,13 +535,13 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
   // Onnx model is ready. Build ONNXIFI Op
   std::string model_str;
   onnx_model.SerializeToString(&model_str);
-  auto onnxifi_op = BuildOnnxifiOp(
+  auto onnxifi_op = buildOnnxifiOp(
       model_str,
       output_shape_hints,
       initialization_list,
       onnxifi_net_inputs,
       onnxifi_net_outputs,
-      batch_pos_map);
+      *shape_hints);
   NetDef net_opt = composeResultNet(onnxifi_op);
 
   // Debugging stuff

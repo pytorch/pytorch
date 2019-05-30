@@ -24,8 +24,8 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
 
-#include <cctype>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <exception>
 #include <fstream>
@@ -63,8 +63,7 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
     throw std::runtime_error(
         "Cannot input a tensor of dimension other than 0 as a scalar argument");
   }
-  if (toInt &&
-      !isIntegralType(t.scalar_type())) {
+  if (toInt && !isIntegralType(t.scalar_type())) {
     std::stringstream ss;
     ss << "Cannot input a tensor of type " << t.scalar_type()
        << " as an integral argument";
@@ -98,9 +97,9 @@ static int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 
-static int gcd(int a, int b) {
+static int64_t gcd(int64_t a, int64_t b) {
   while (b != 0) {
-    int r = a % b;
+    int64_t r = a % b;
     a = b;
     b = r;
   }
@@ -2094,6 +2093,29 @@ RegisterOperators reg2({
 
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
+
+    // only used internally in range() translation
+    Operator(
+        "aten::__range_length(int lo, int hi, int step) -> int",
+        [](Stack& stack) {
+          int64_t lo, hi, step;
+          pop(stack, lo, hi, step);
+          if (step > 0 && lo < hi)
+            push(stack, 1 + (hi - 1 - lo) / step);
+          else if (step < 0 && lo > hi)
+            push(stack, 1 + (lo - 1 - hi) / (0 - step));
+          else
+            push(stack, 0);
+          return 0;
+        }),
+    Operator(
+        "aten::__derive_index(int index, int start, int step) -> int",
+        [](Stack& stack) {
+          int64_t index, start, step;
+          pop(stack, index, start, step);
+          push(stack, start + index * step);
+          return 0;
+        }),
 
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
