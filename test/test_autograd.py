@@ -19,7 +19,7 @@ from torch.autograd.profiler import profile, format_time, EventList, FunctionEve
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
-                          load_tests, random_symmetric_pd_matrix)
+                          load_tests, random_symmetric_pd_matrix, IS_WINDOWS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -2797,6 +2797,7 @@ class TestAutograd(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.data.tolist(), [[1, 2], [1, 1], [1, 1]])
 
+    @unittest.skipIf(IS_WINDOWS, "This test is flaky on Windows")
     def test_inplace_view_saved_output(self):
         # Test an in-place operation on a view in which the in-place op saves
         # its output. Previously, this created a reference cycle.
