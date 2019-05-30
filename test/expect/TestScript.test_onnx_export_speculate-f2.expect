@@ -18,7 +18,7 @@ ModelProto {
             GraphProto {
               name: "torch-jit-export1"
               inputs: []
-              outputs: [{name: "9", type:Tensor dims: 1 20}]
+              outputs: [{name: "9", type:Tensor dims: }]
               initializers: []
               nodes: [
                 Node {type: "If", inputs: [7], outputs: [9], attributes: [{ name: 'then_branch', type: graph, value:
