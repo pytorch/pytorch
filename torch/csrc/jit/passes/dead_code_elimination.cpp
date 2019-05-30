@@ -23,6 +23,9 @@ class DeadCodeEliminator {
   // we mark "live" nodes that are necessary for the output. Nodes that have
   // side effects are also marked.
   void run(Block* block, bool recurse) {
+    // clean up unused fork inputs before starting the main algorithm
+    eliminateDeadForkInputs(block, recurse);
+
     // Initialize by marking the return node and all its consumed values as live
     mark(block->return_node());
 
@@ -40,6 +43,26 @@ class DeadCodeEliminator {
   }
 
  private:
+  void eliminateDeadForkInputs(Block* block, bool recurse) {
+    for (Node* node : block->nodes()) {
+      if (recurse) {
+        for (Block* sb : node->blocks()) {
+          eliminateDeadForkInputs(sb, recurse);
+        }
+      }
+      if (node->kind() != prim::fork) {
+        continue;
+      }
+      Graph& g = *node->g(attr::Subgraph);
+      for (size_t i = 0; i < g.inputs().size(); ++i) {
+        if (!g.inputs().at(i)->hasUses()) {
+          g.eraseInput(i);
+          node->removeInput(i);
+        }
+      }
+    }
+  }
+
   // Special handling for block return nodes. Unlike other nodes, the block
   // return node doesn't really "use" its inputs. Consider:
   //

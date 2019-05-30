@@ -189,9 +189,9 @@ template CAFFE2_API Tensor dequantize_tensor<qint32>(Tensor rtensor, Tensor qten
 template <typename T>
 Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
                                           Tensor qtensor,
-                                          std::vector<float> scales,
-                                          std::vector<int32_t> zero_points,
-                                          std::vector<int64_t> axis) {
+                                          const std::vector<float>& scales,
+                                          const std::vector<int32_t>& zero_points,
+                                          IntArrayRef axis) {
   auto fn_name = "quantize_tensor_per_channel_affine";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
@@ -221,9 +221,9 @@ Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
 template <typename T>
 Tensor dequantize_tensor_per_channel_affine(Tensor qtensor,
                                             Tensor rtensor,
-                                            std::vector<float> scales,
-                                            std::vector<int32_t> zero_points,
-                                            std::vector<int64_t> axis) {
+                                            const std::vector<float>& scales,
+                                            const std::vector<int32_t>& zero_points,
+                                            IntArrayRef axis) {
   auto fn_name = "dequantize_tensor_per_channel_affine";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
@@ -262,9 +262,9 @@ QuantizerPtr make_per_tensor_affine_quantizer(
 }
 
 QuantizerPtr make_per_channel_affine_quantizer(
-    std::vector<float> scales,
-    std::vector<int32_t> zero_points,
-    std::vector<int64_t> axis,
+    const std::vector<float>& scales,
+    const std::vector<int32_t>& zero_points,
+    IntArrayRef axis,
     ScalarType scalar_type) {
   return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
                                                         scales, zero_points, axis);

@@ -6,7 +6,6 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
@@ -466,7 +465,6 @@ class CAFFE2_API Tensor {
   Tensor narrow_copy(int64_t dim, int64_t start, int64_t length) const;
   Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
   Tensor permute(IntArrayRef dims) const;
-  Tensor T() const;
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
   Tensor reciprocal() const;
@@ -563,7 +561,7 @@ class CAFFE2_API Tensor {
   Tensor & addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1);
   Tensor & sparse_resize_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim);
   Tensor & sparse_resize_and_clear_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim);
-  Tensor sparse_mask(SparseTensorRef mask) const;
+  Tensor sparse_mask(const Tensor & mask) const;
   Tensor to_dense() const;
   int64_t sparse_dim() const;
   int64_t _dimI() const;
