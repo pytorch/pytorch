@@ -48,14 +48,9 @@ TESTS = [
     'namedtuple_return_api',
     'tensorboard',
     'namedtensor',
-]
-
-JIT_TESTS = [
     'jit',
     'jit_fuser',
 ]
-
-TESTS = TESTS + JIT_TESTS
 
 WINDOWS_BLACKLIST = [
     'distributed',
@@ -424,7 +419,7 @@ def main():
         shell(['coverage', 'erase'])
 
     if options.jit:
-        selected_tests = JIT_TESTS
+        selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     for test in selected_tests:
         test_name = 'test_{}'.format(test)
