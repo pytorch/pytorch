@@ -260,17 +260,10 @@ struct TORCH_API Variable : public at::Tensor {
   /// its `pyobj_` pointer, so that previous references to this `Variable` in Python
   /// are still valid.
   ///
-  /// It is rarely necessary to use this instead of `set_data()`. Example use cases
-  /// of this function are:
-  ///
-  /// 1. When a non-sparse gradient gets added to a sparse gradient, requiring the
-  /// type of the gradient `Variable` to become non-sparse. Since changing sparse-ness
-  /// of a tensor involves changing its TensorImpl type, it cannot be achieved by
-  /// `set_data()`.
-  ///
-  /// 2. When we use `model.to(device)` in Python to move `model` to a device that
-  /// requires a different TensorImpl type (e.g. XLA device), but want previous
-  /// references to `model`'s parameters to still be valid.
+  /// It is rarely necessary to use this instead of `set_data()`. We only use it
+  /// in this case: when we call `model.to(device)` in Python to move `model` to
+  /// a device that requires a different TensorImpl type (e.g. XLA device), but
+  /// want previous references to `model`'s parameters to still be valid.
   void _set_data_change_impl(const at::Tensor &new_data);
 
   /// True if this `Variable` has the same derived type of TensorImpl as `tensor`.
