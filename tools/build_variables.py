@@ -84,6 +84,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
     "torch/csrc/jit/passes/inline_autodiff_subgraphs.cpp",
+    "torch/csrc/jit/passes/inliner.cpp",
     "torch/csrc/jit/passes/inplace_check.cpp",
     "torch/csrc/jit/passes/insert_guards.cpp",
     "torch/csrc/jit/passes/loop_unrolling.cpp",
