@@ -6023,12 +6023,12 @@ a")
         for op in unary_float_ops:
             checkMathWrap(op)
 
-        checkMathWrap("floor", ret_type="int")
-        checkMathWrap("ceil", ret_type="int")
         checkMathWrap("copysign", 2)
         checkMath("pow", 2, is_float=False, ret_type="int")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
+            checkMathWrap("floor", ret_type="int")
+            checkMathWrap("ceil", ret_type="int")
             checkMathWrap("gcd", 2, is_float=False, ret_type="int")
 
 
