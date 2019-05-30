@@ -66,7 +66,10 @@ private:
 
   // allow moving, but only our friends (i.e. the ListPtr class) can move us
   ListElementReference(ListElementReference&&) noexcept = default;
-  ListElementReference& operator=(ListElementReference&&) & noexcept = default;
+  ListElementReference& operator=(ListElementReference&& rhs) & noexcept {
+    iterator_ = std::move(rhs.iterator_);
+    return *this;
+  }
 
   friend class ListPtr<T>;
   friend class ListIterator<T, Iterator, StorageT>;
@@ -271,7 +274,7 @@ public:
    *   list[2] = 5;
    *   int64_t v = list[1];
    */
-  impl::ListElementReference<T, typename detail::ListImpl<StorageT>::list_type::iterator, StorageT> operator[](size_type pos) const;
+  impl::ListElementReference<T, typename detail::ListImpl<typename ListPtr<T>::StorageT>::list_type::iterator, typename ListPtr<T>::StorageT> operator[](size_type pos) const;
 
   /**
    * Assigns a new value to the element at location pos.
