@@ -2160,6 +2160,18 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
     DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
     DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
+    DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
+    Operator(
+        "aten::modf(float a) -> (float, float)",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          double b, c;
+          b = modf(a, &c);
+          push(stack, b, c);
+          return 0;
+        }),
+    DEFINE_BINARY_FLOAT_OP(aten::mathremainder, std::remainder(a, b)),
 
     // TODO: move abs to aten namespace because it's schematized!
     DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),
