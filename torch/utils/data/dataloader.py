@@ -515,6 +515,7 @@ class _DataLoaderIter(object):
             # At timeout and error, we manually check whether any worker has
             # failed. Note that this is the only mechanism for Windows to detect
             # worker failures.
+            print('_try_get_batch timeout worker status: {}'.format([(w.pid, w.is_alive()) for w in self.workers]))
             if not all(w.is_alive() for w in self.workers):
                 pids_str = ', '.join(str(w.pid) for w in self.workers if not w.is_alive())
                 raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str))
@@ -658,6 +659,7 @@ class _DataLoaderIter(object):
                     # current process.
                     q.close()
                 for w in self.workers:
+                    print('joining worker {}'.format(w.pid))
                     w.join()
                 for q in self.index_queues:
                     q.cancel_join_thread()
