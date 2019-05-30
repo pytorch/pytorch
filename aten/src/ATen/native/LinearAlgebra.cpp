@@ -598,18 +598,16 @@ batch_svd(const Tensor& self, bool some, bool compute_uv)
     }
   }
 
-  std::vector<int64_t> shape = self.sizes().slice(0, ndim-2).vec();
-  shape.push_back(n);
+  std::vector<int64_t> shape = self.sizes().slice(0, ndim-1).vec();
+  shape[ndim-2] = k;
+  s = s.reshape(shape);
+
+  shape[ndim-2] = n;
   shape.push_back(nn);
   u = u.reshape(shape);
 
-  shape = self.sizes().slice(0, ndim-2).vec();
-  shape.push_back(k);
-  s = s.reshape(shape);
-
-  shape = self.sizes().slice(0, ndim-2).vec();
-  shape.push_back(m);
-  shape.push_back(mm);
+  shape[ndim-2] = m;
+  shape[ndim-1] = mm;
   v = v.reshape(shape);
 
   return std::tuple<Tensor, Tensor, Tensor>(u, s, v);
