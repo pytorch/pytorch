@@ -7,6 +7,12 @@ echo "deb https://nvidia.github.io/libnvidia-container/ubuntu16.04/amd64 /" | su
 echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 echo "deb https://nvidia.github.io/nvidia-docker/ubuntu16.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
 
+# Remove unnecessary sources
+sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+sudo rm -f /etc/apt/heroku.list
+sudo rm -f /etc/apt/openjdk-r-ubuntu-ppa-xenial.list
+sudo rm -f /etc/apt/partner.list
+
 sudo apt-get -y update
 sudo apt-get -y remove linux-image-generic linux-headers-generic linux-generic docker-ce
 # WARNING: Docker version is hardcoded here; you must update the
