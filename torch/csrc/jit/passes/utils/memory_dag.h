@@ -63,7 +63,7 @@ class TORCH_API MemoryDAG {
       const at::ArrayRef<Element*>& b) const;
 
   // Converts from the compressed index representation
-  const Element* fromIndex(int x) const;
+  const Element* fromIndex(unsigned x) const;
 
  private:
   bool mayAliasImpl(const Element* a, const Element* b) const;
@@ -99,8 +99,8 @@ struct Element {
   MemoryLocations pointedFrom;
 
   MemoryLocations contained_elements;
-  int index;
-  Element(MemoryDAG& dag_, const Value* value_, int index_);
+  unsigned index;
+  Element(MemoryDAG& dag_, const Value* value_, unsigned index_);
 
   // Return the unique memory locations that `Element` might represent.
   TORCH_API const MemoryLocations& getMemoryLocations() const;

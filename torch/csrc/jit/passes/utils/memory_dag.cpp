@@ -8,10 +8,10 @@
 namespace torch {
 namespace jit {
 
-Element::Element(MemoryDAG& dag_, const Value* value_, int index_)
+Element::Element(MemoryDAG& dag_, const Value* value_, unsigned index_)
   : dag(dag_), value(value_), index(index_) { }
 
-const Element* MemoryDAG::fromIndex(int x) const {
+const Element* MemoryDAG::fromIndex(unsigned x) const {
   TORCH_INTERNAL_ASSERT(x < indexToElementMap.size());
   return indexToElementMap[x].get();
 }

@@ -105,7 +105,7 @@ class AliasDb {
 
       do {
         ++it;
-      } while (it != a.cend() && *it == value);
+      } while (it != b.cend() && *it == value);
     }
     // No overlap, so group `a` and `b` do not share a memory location
     return false;
