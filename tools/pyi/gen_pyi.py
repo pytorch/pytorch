@@ -125,6 +125,7 @@ def type_to_python(typename, size=None):
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',
+        'QScheme': 'QScheme',
     }[typename]
 
     return typename
