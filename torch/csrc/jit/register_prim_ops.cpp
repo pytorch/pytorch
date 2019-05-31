@@ -100,8 +100,8 @@ void checkDoubleInRange(double a) {
   if (std::isnan(a) || std::isinf(a) ||
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
-    throw c10::Error(
-        "Cannot convert float " + std::to_string(a) + " to integer", "");
+    throw std::runtime_error(
+        "Cannot convert float " + std::to_string(a) + " to integer");
     return;
   }
 }

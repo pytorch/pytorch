@@ -874,7 +874,6 @@ bool Node::hasSideEffects() const {
     case aten::manual_seed:
     case prim::AddStatValue:
     case prim::TimePoint:
-    case prim::CallFunction:
       return true;
   }
   // All other builtin ops are known to be safe.
@@ -995,7 +994,7 @@ void Node::destroy() {
 }
 
 void Node::cloneFrom(Node* s) {
-  source_range_ = s->source_range_;
+  s->source_range_ = s->source_range_;
   if (s->scope_ && !s->scope_->isBlank()) {
     scope_ = s->scope_;
   }
