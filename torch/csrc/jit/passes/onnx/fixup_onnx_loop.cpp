@@ -26,6 +26,14 @@ Node* InsertCastForCond(Value* cond_val, Graph* graph, Node* consumer_node) {
   return cast_node;
 }
 
+bool IsCondCastRequired(Value* cond_val) {
+  auto type = cond_val->type();
+  if (type->isSubclass(TypeKind::DimensionedTensorType)) {
+    return type->expect<DimensionedTensorType>()->scalarType() != c10::kBool;
+  }
+  return !type->isSubclass(TypeKind::BoolType);
+}
+
 void FixupONNXLoops(Block* block) {
   for (auto* node : block->nodes()) {
     if (node->kind() == ::c10::onnx::Loop) {
@@ -34,10 +42,11 @@ void FixupONNXLoops(Block* block) {
 
       // add cast to condition input outside the loop.
       Value* cond_val = loop_node->inputs()[1];
-      InsertCastForCond(cond_val, graph, loop_node);
+      if (IsCondCastRequired(cond_val))
+        InsertCastForCond(cond_val, graph, loop_node);
 
       // Setup Loop input cond and i.
-      AT_ASSERT(loop_node->blocks().size() == 1);
+      TORCH_INTERNAL_ASSERT(loop_node->blocks().size() == 1);
       auto* sub_block = loop_node->blocks()[0];
       Value* cond = sub_block->insertInput(1, "cond");
       cond->setType(BoolType::create());
@@ -47,7 +56,8 @@ void FixupONNXLoops(Block* block) {
 
       // add cast to condition input inside the loop.
       Value* next_cond_val = sub_block->outputs()[0];
-      InsertCastForCond(next_cond_val, graph, sub_block->return_node());
+      if (IsCondCastRequired(next_cond_val))
+        InsertCastForCond(next_cond_val, graph, sub_block->return_node());
     }
     for (Block* block : node->blocks()) {
       FixupONNXLoops(block);
