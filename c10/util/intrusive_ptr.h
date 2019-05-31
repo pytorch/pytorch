@@ -271,19 +271,11 @@ class intrusive_ptr final {
     return target_;
   }
 
-  const TTarget& operator*() const noexcept {
+  TTarget& operator*() const noexcept {
     return *target_;
   }
 
-  TTarget& operator*() noexcept {
-    return *target_;
-  }
-
-  const TTarget* operator->() const noexcept {
-    return target_;
-  }
-
-  TTarget* operator->() noexcept {
+  TTarget* operator->() const noexcept {
     return target_;
   }
 
