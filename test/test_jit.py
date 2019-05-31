@@ -11949,6 +11949,8 @@ a")
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
+    @unittest.skipIf(hasattr(torch.jit, 'WeakScriptModuleProxy'), "# TODO: re-enable"
+                                                                  "this when WeakScriptModuleProxy has been deleted")
     def test_weak_module_isinstance(self):
         tester = self
 
@@ -12714,6 +12716,24 @@ a")
             return python_list_op(lst)
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_weak_cuda(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.lstm = torch.nn.LSTM(5, 5)
+                self.lstm.cuda()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.lstm(x)
+
+        m = M()
+        m.cuda()
+        out = m(torch.ones(5, 5, 5).cuda())
+        self.assertTrue(out[0].is_cuda)
+
 
     def test_ignore_decorator(self):
         class M(torch.jit.ScriptModule):
