@@ -2561,7 +2561,7 @@
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 
 - func: quantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
-  variants: function, method
+  variants: function
   dispatch:
     CPU: quantize_linear_cpu
 
@@ -2700,10 +2700,6 @@
 
 # wrappers for legacy TH methods
 
-- func: data_ptr(Tensor self) -> void*
-  variants: method
-  device_guard: False
-
 - func: set_(Tensor(a!) self, Storage source) -> Tensor(a!)
   variants: method
   device_guard: False
@@ -2717,6 +2713,7 @@
   dispatch:
     CPU: legacy::cpu::_th_set_
     CUDA: legacy::cuda::_th_set_
+    QuantizedCPU: set_storage_cpu
 
 - func: set_(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
