@@ -2565,6 +2565,11 @@
   dispatch:
     CPU: quantize_linear_cpu
 
+- func: quantize_linear_per_channel(Tensor self, Tensor scales, Tensor zero_points, int[] axis, ScalarType dtype) -> Tensor
+  variants: function
+  dispatch:
+    CPU: quantize_linear_per_channel_cpu
+
 - func: dequantize(Tensor self) -> Tensor
   variants: function, method
   dispatch:
@@ -2694,10 +2699,6 @@
 - func: _pad_packed_sequence(Tensor data, Tensor batch_sizes, bool batch_first, Scalar padding_value, int total_length) -> (Tensor, Tensor)
 
 # wrappers for legacy TH methods
-
-- func: data_ptr(Tensor self) -> void*
-  variants: method
-  device_guard: False
 
 - func: set_(Tensor(a!) self, Storage source) -> Tensor(a!)
   variants: method

@@ -343,21 +343,11 @@ inline IValue argumentToIValue(
   try {
     return toIValue(object, argument.type(), argument.N());
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(c10::str(
-        schema.name(),
-        "() expected value of type ",
-        argument.type()->str(),
-        " for argument '",
-        argument.name(),
-        "' in position ",
-        argumentPosition,
-        ", but instead got value of type ",
+    throw std::runtime_error(schema.formatTypeMismatchMsg(
+        argument,
         py::str(object.get_type().attr("__name__")),
-        ".",
-        "\nValue: ",
-        py::repr(object),
-        "\nDeclaration: ",
-        schema));
+        argumentPosition,
+        py::repr(object)));
   }
 }
 

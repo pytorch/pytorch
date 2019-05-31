@@ -3679,6 +3679,23 @@ def foo(x):
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
 
+    def test_file_line_error(self):
+        def foobar(xyz):
+            return torch.blargh(xyz)
+
+        _, lineno = inspect.getsourcelines(foobar)
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:20".format(lineno + 1)):
+            scripted = torch.jit.script(foobar)
+
+    def test_file_line_error_class_defn(self):
+        class FooBar(object):
+            def baz(self, xyz):
+                return torch.blargh(xyz)
+
+        _, lineno = inspect.getsourcelines(FooBar)
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
+            torch.jit.script(FooBar)
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
@@ -5970,6 +5987,10 @@ a")
             # type: (float) -> float
             return math.log(x)
 
+        def test_log_base_float(x, y):
+            # type: (float, float) -> float
+            return math.log(x, y)
+
         def test_log1p_int(x):
             # type: (int) -> float
             return math.log1p(x)
@@ -6006,6 +6027,7 @@ a")
             # type: (float, float) -> float
             return math.pow(x, y)
 
+
         def test_pow_int(x, y):
             # type: (float, int) -> float
             return math.pow(x, y)
@@ -6014,6 +6036,7 @@ a")
         self.checkScript(test_ceil, (1.5,))
         self.checkScript(test_log_int, (2,))
         self.checkScript(test_log_float, (2.0,))
+        self.checkScript(test_log_base_float, (2.0, 5.0))
         self.checkScript(test_log1p_int, (1,))
         self.checkScript(test_log1p_float, (1.0,))
         self.checkScript(test_log10_int, (2,))
@@ -6022,6 +6045,7 @@ a")
         self.checkScript(test_exp_float, (2.0,))
         self.checkScript(test_sqrt_int, (2,))
         self.checkScript(test_sqrt_float, (2.0,))
+        self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
 
@@ -6433,6 +6457,16 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
+
+    def test_number_all(self):
+        def int1():
+            return all(torch.tensor([1, 2, 3], dtype=torch.uint8))
+
+        def int2():
+            return all(torch.tensor([1, 0, 3], dtype=torch.uint8))
+
+        self.checkScript(int1, ())
+        self.checkScript(int2, ())
 
     def test_number_math(self):
         ops_template = dedent('''
@@ -6892,7 +6926,7 @@ a")
         for inp, typ, type_hint in zip(inputs, type_literals, type_annotations):
             test(inp, typ, type_hint)
 
-        # test optional isintance check
+        # test optional isinstance check
         with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
             @torch.jit.script
             def opt_func(x):
@@ -8727,8 +8761,8 @@ a")
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"Expected a value of type Tensor for argument"
-                                                      r" '0' but found Tuple\[Tensor,"):
+            with self.assertRaisesRegex(RuntimeError, r"expected a value of type 'Tensor' for argument"
+                                                      r" '0' but instead found type 'Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -9661,12 +9695,12 @@ a")
             def f3(a):
                 torch.sum(dim=4)
 
-        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but found Tensor'):
+        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but instead found type \'Tensor'):
             @torch.jit.script
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but found List\[int\]'):
+        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but instead found type \'List\[int\]'):
             @torch.jit.script
             def f5(a):
                 torch.cat([3])
@@ -9676,7 +9710,7 @@ a")
             def f6(a):
                 a.expand(size=[3, [4]])
 
-        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type Tensor for argument \'self\''):
+        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type \'Tensor\' for argument \'self\''):
             @torch.jit.script
             def f7(a):
                 torch.sum([4])
@@ -13223,6 +13257,18 @@ a")
             def fn():
                 return random.randint()
 
+    def test_inferred_error_msg(self):
+        """
+        Test that when we get a type mismatch on a function where we inferred
+        the type to be tensor, a good error message is given.
+        """
+        @torch.jit.script
+        def foo(a):
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
+            foo(1)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -15562,7 +15608,7 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_type_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value of type bool"):
+        with self.assertRaisesRegex(RuntimeError, "expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
             class FooTest(object):
                 def __init__(self, x):
@@ -15778,7 +15824,7 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(test_list_no_reverse(), 1)
 
-        with self.assertRaisesRegex(RuntimeError, "bool for argument \'reverse"):
+        with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
             @torch.jit.script
             def test():
                 li = [Foo(1)]
@@ -16166,3 +16212,7 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
+    if not PY2:
+        import test_jit_py3
+        suite = unittest.findTestCases(test_jit_py3)
+        unittest.TextTestRunner().run(suite)
