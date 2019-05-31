@@ -10,7 +10,7 @@
 #include <torch/csrc/jit/operator_options.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/dispatch/OperatorMetadata.h>
+#include <ATen/core/dispatch/OperatorOptions.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
@@ -135,16 +135,12 @@ struct TORCH_API Operator {
     return c10Handle_.has_value();
   }
 
-  AliasAnalysisKind aliasAnalysisKind() const {
+  c10::AliasAnalysisKind aliasAnalysisKind() const {
     if (!c10Handle_.has_value()) {
       // this is not a c10 op, it can't have alias analysis information
-      return AliasAnalysisKind::DEFAULT;
+      return c10::AliasAnalysisKind::DEFAULT;
     }
-    auto option = c10::get_op_metadata<c10::AliasAnalysisKind>(*c10Handle_);
-    if (!option.has_value()) {
-      return AliasAnalysisKind::DEFAULT;
-    }
-    return **option;
+    return c10Handle_->options().aliasAnalysis();
   }
 
  private:

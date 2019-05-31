@@ -6,12 +6,8 @@ namespace c10 {
 namespace detail {
 class RegistrationListenerList final {
 public:
-  RegistrationHandleRAII addListener(std::unique_ptr<OpRegistrationListener> listener) {
+  void addListener(std::unique_ptr<OpRegistrationListener> listener) {
     listeners_.push_back(std::move(listener));
-    auto inserted = --listeners_.end();
-    return RegistrationHandleRAII([this, inserted] {
-      listeners_.erase(inserted);
-    });
   }
 
   void callOnOperatorRegistered(const OperatorHandle& op) {
@@ -26,7 +22,7 @@ public:
     }
   }
 private:
-  std::list<std::unique_ptr<OpRegistrationListener>> listeners_;
+  std::vector<std::unique_ptr<OpRegistrationListener>> listeners_;
 };
 }
 
@@ -56,7 +52,7 @@ c10::optional<OperatorHandle> Dispatcher::findSchema(const char* operator_name, 
   return OperatorHandle(found);
 }
 
-OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema) {
+OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options) {
   const auto found = findSchema(schema.name().c_str(), schema.overload_name().c_str());
   if (found != c10::nullopt) {
     if (found->schema() != schema) {
@@ -64,18 +60,21 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema) {
       str << schema << " vs " << found->schema();
       AT_ERROR("Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
     }
+    if (found->options() != options) {
+      TORCH_CHECK(false, "Tried to register multiple operators with the same schema but different options: ", toString(schema));
+    }
     return *found;
   }
 
-  operators_.emplace_back(std::move(schema));
+  operators_.emplace_back(std::move(schema), std::move(options));
   return OperatorHandle(--operators_.end());
 }
 
-SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema) {
+SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
-  auto op = findOrRegisterSchema_(std::move(schema));
+  auto op = findOrRegisterSchema_(std::move(schema), std::move(options));
 
   ++op.operatorIterator_->refcount;
   if (1 == op.operatorIterator_->refcount) {
@@ -115,14 +114,14 @@ RegistrationHandleRAII Dispatcher::registerCatchallKernel(const OperatorHandle& 
   return op.operatorIterator_->op.registerCatchallKernel(DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
 }
 
-RegistrationHandleRAII Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
+void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   for (auto iter = operators_.begin(); iter != operators_.end(); ++iter) {
     listener->onOperatorRegistered(OperatorHandle(iter));
   }
 
-  return listeners_->addListener(std::move(listener));
+  listeners_->addListener(std::move(listener));
 }
 
 }

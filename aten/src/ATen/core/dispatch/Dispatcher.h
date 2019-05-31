@@ -72,14 +72,13 @@ class SchemaRegistrationHandleRAII;
 class CAFFE2_API Dispatcher final {
 private:
   struct OperatorDef final {
-    explicit OperatorDef(FunctionSchema&& schema)
-    : op(std::move(schema)), refcount(0) {}
+    explicit OperatorDef(FunctionSchema&& schema, OperatorOptions&& options)
+    : op(std::move(schema), std::move(options)), refcount(0) {}
 
     impl::OperatorEntry op;
     size_t refcount;
   };
   friend class OperatorHandle;
-  friend struct std::hash<OperatorHandle>;
 
 public:
   ~Dispatcher();
@@ -101,7 +100,7 @@ public:
    *         object that manages the lifetime of the registration. Once that
    *         object is destructed, the kernel will be deregistered.
    */
-  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema);
+  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema, OperatorOptions options);
 
   /**
    * Looks for an operator schema with the given name and overload name
@@ -139,16 +138,13 @@ public:
    * op is deregistered. Immediately after registering, this listener gets called
    * for all previously registered ops, so it can be used to keep track of ops
    * registered with this dispatcher.
-   *
-   * Keep the returned RegistrationHandleRAII around. In its destructor, it will
-   * remove the added registration listener from the dispatcher.
    */
-  RegistrationHandleRAII addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
+  void addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
 
 private:
   Dispatcher();
 
-  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
+  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
 
   void deregisterSchema_(const OperatorHandle& op);
 
@@ -173,15 +169,9 @@ public:
     return operatorIterator_->op.schema();
   }
 
-  friend bool operator==(OperatorHandle lhs, OperatorHandle rhs) {
-    return lhs.operatorIterator_ == rhs.operatorIterator_;
+  const OperatorOptions& options() const {
+    return operatorIterator_->op.options();
   }
-
-  friend bool operator!=(OperatorHandle lhs, OperatorHandle rhs) {
-    return !(lhs == rhs);
-  }
-
-  friend struct std::hash<OperatorHandle>;
 
 private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
@@ -190,17 +180,6 @@ private:
 
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
-}
-namespace std {
-  template<>
-  struct hash<c10::OperatorHandle> {
-    size_t operator()(c10::OperatorHandle x) const {
-      const auto* ptr = &*x.operatorIterator_;
-      return std::hash<decltype(ptr)>()(ptr);
-    }
-  };
-}
-namespace c10 {
 
 class CAFFE2_API SchemaRegistrationHandleRAII final {
 public:
