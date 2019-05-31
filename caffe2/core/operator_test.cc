@@ -374,8 +374,9 @@ TEST(OperatorGradientRegistryTest, GradientSimple) {
   EXPECT_EQ(grad_op_def.engine(), "DUMMY_ENGINE");
   EXPECT_EQ(grad_op_def.device_option().device_type(), PROTO_CPU);
   EXPECT_EQ(grad_op_def.arg_size(), 1);
-  EXPECT_EQ(grad_op_def.arg(0).SerializeAsString(),
-            MakeArgument<int>("arg", 1).SerializeAsString());
+  EXPECT_EQ(
+      grad_op_def.arg(0).SerializeAsString(),
+      MakeArgument<int>("arg", 1).SerializeAsString());
   // Checks the gradient name for input.
   EXPECT_EQ(meta.g_input_.size(), 1);
   EXPECT_TRUE(meta.g_input_[0].IsDense());
@@ -385,7 +386,8 @@ TEST(OperatorGradientRegistryTest, GradientSimple) {
   EXPECT_NE(ws.CreateBlob("out_grad"), nullptr);
   unique_ptr<OperatorBase> grad_op = CreateOperator(grad_op_def, &ws);
   EXPECT_NE(nullptr, grad_op.get());
-  EXPECT_EQ(static_cast<JustTest*>(grad_op.get())->type(), "FooGradientDummyEngine");
+  EXPECT_EQ(
+      static_cast<JustTest*>(grad_op.get())->type(), "FooGradientDummyEngine");
 }
 
 TEST(EnginePrefTest, PerOpEnginePref) {
