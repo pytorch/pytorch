@@ -92,7 +92,7 @@ export dry_run=false  # yf225 TODO: remove this when ready to merge
 if [ "$dry_run" = false ]; then
   echo "Pushing to pytorch.github.io:site"
   set +x
-expect <<DONE
+/usr/bin/expect <<DONE
   spawn git push origin master_test
   expect "Username*"
   send "pytorchbot\n"
