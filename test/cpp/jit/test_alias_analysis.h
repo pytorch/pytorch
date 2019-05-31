@@ -826,16 +826,6 @@ void testMemoryDAG() {
     ASSERT_TRUE(t.mayAlias(e, f));
     // But a and f don't alias
     ASSERT_FALSE(t.mayAlias(a, f));
-
-    /**
-     * Test mayAlias() set interface
-     */
-    std::multiset<const Element*> foo{c, c, d};
-    std::multiset<const Element*> bar{e, f};
-    std::unordered_set<const Element*> baz{f, g};
-    ASSERT_TRUE(t.mayAlias(foo, bar));
-    ASSERT_TRUE(t.mayAlias(bar, baz));
-    ASSERT_FALSE(t.mayAlias(foo, baz));
   }
 
   {
