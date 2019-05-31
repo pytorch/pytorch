@@ -223,7 +223,7 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
     elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
     else:
-        annotation_expr = EmptyTypeAnnotation(r)
+        annotation_expr = Var(Ident(r, 'Tensor'))
     return Param(annotation_expr, Ident(r, name), kwarg_only)
 
 
