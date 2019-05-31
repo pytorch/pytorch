@@ -551,8 +551,6 @@ struct to_ir {
   Function& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
-  std::unordered_map<int64_t, Value*> integral_constants;
-  std::unordered_map<double, Value*> fp_constants;
   ScriptTypeParser typeParser_;
 
   // Singly-linked list of environments. This top element contains a member
