@@ -1850,6 +1850,7 @@ def _get_builtin_table():
         (math.tanh, "aten::tanh"),
         (math.fmod, "aten::fmod"),
         (math.modf, "aten::modf"),
+        (math.remainder, "aten::mathremainder"),
         (math.factorial, "aten::factorial"),
         (math.frexp, "aten::frexp"),
         (math.isnan, "aten::isnan"),
@@ -1874,7 +1875,6 @@ def _get_builtin_table():
         _builtin_table[id(builtin)] = aten_op
     if not PY2:
         _builtin_table[id(math.gcd)] = "aten::gcd"
-        _builtin_table[id(math.remainder)] = "aten::mathremainder"
 
     return _builtin_table
 
