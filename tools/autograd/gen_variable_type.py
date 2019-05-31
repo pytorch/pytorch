@@ -520,13 +520,13 @@ def emit_body(declaration):
                 differentiable_outputs.append(output)
     elif uses_single_grad(func):
         candidate_differentiable_outputs = candidate_differentiable_outputs[:1]
-        differentiable_outputs = candidate_differentiable_outputs[:1]
+        differentiable_outputs = candidate_differentiable_outputs
     else:
         differentiable_outputs = candidate_differentiable_outputs
 
     requires_derivative = (
         base_name not in DONT_REQUIRE_DERIVATIVE and name not in DONT_REQUIRE_DERIVATIVE and
-        len(differentiable_inputs) > 0 and len(differentiable_outputs) > 0 and
+        len(differentiable_inputs) > 0 and len(candidate_differentiable_outputs) > 0 and
         strategy == 'use_derived')
 
     if func is not None and not requires_derivative:
@@ -878,10 +878,10 @@ def emit_body(declaration):
 
     body.append(pre_record_trace)
     body.append(emit_call(env))
-    body.extend(emit_increment_version())
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
+        body.extend(emit_increment_version())
         body.append(emit_history())
     # post_record_trace must appear before save_outputs so that saved outputs
     # have their tracing state saved (that is setup by recordTrace)
