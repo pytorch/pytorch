@@ -252,12 +252,12 @@ std::ostream& Node::print(
   }
 
   // In debug print, append file:line:col as a comment after each node
-  if (print_source_locations && source_range_ && source_range_->source()->filename()) {
+  if (print_source_locations && source_range_ &&
+      source_range_->source()->filename()) {
     auto range = sourceRange();
     auto source = range.source();
     auto lineno = source->lineno_for_offset(range.start());
-    auto col_offset = (int)range.start() -
-        (int)source->offset_for_line(lineno);
+    auto col_offset = (int)range.start() - (int)source->offset_for_line(lineno);
     out << " # " << source->filename().value() << ":"
         << source->lineno_to_source_lineno(lineno) << ":" << col_offset;
   }
@@ -282,7 +282,8 @@ std::ostream& operator<<(std::ostream& out, const Node& n) {
   return n.print(out, 0, nullptr);
 }
 
-std::ostream& Graph::print(std::ostream& out, bool print_source_locations) const {
+std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
+    const {
   out << "graph(" << const_value_list_with_types(inputs(), ",\n      ")
       << "):\n";
   std::vector<const Node*> groups;
