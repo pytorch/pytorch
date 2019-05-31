@@ -3679,6 +3679,23 @@ def foo(x):
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
 
+    def test_file_line_error(self):
+        def foobar(xyz):
+            return torch.blargh(xyz)
+
+        _, lineno = inspect.getsourcelines(foobar)
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:20".format(lineno + 1)):
+            scripted = torch.jit.script(foobar)
+
+    def test_file_line_error_class_defn(self):
+        class FooBar(object):
+            def baz(self, xyz):
+                return torch.blargh(xyz)
+
+        _, lineno = inspect.getsourcelines(FooBar)
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
+            torch.jit.script(FooBar)
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
@@ -5970,6 +5987,10 @@ a")
             # type: (float) -> float
             return math.log(x)
 
+        def test_log_base_float(x, y):
+            # type: (float, float) -> float
+            return math.log(x, y)
+
         def test_log1p_int(x):
             # type: (int) -> float
             return math.log1p(x)
@@ -6005,6 +6026,7 @@ a")
         def test_pow_float(x, y):
             # type: (float, float) -> float
             return math.pow(x, y)
+
 
         def test_pow_int(x, y):
             # type: (float, int) -> float
@@ -16249,3 +16271,7 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
+    if not PY2:
+        import test_jit_py3
+        suite = unittest.findTestCases(test_jit_py3)
+        unittest.TextTestRunner().run(suite)

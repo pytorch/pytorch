@@ -83,14 +83,7 @@ bool AliasDb::hasWriters(const Value* v) const {
   if (isWriteCacheStale_) {
     rebuildWriteCache();
   }
-
-  for (const auto loc : elementMap_.at(v)->getMemoryLocations()) {
-    if (writeCache_.count(loc)) {
-      return true;
-    }
-  }
-
-  return false;
+  return writeCache_.intersects(elementMap_.at(v)->getMemoryLocations());
 }
 
 void AliasDb::getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks) const {
@@ -166,17 +159,17 @@ void AliasDb::dump() const {
   std::cout << "\n===2. ALIAS DB===\n";
   for (const auto& ptrPair : elementMap_) {
     const auto element = ptrPair.second;
-    if (element->pointsTo.size() > 0) {
+    if (!element->pointsTo.empty()) {
       std::cout << getElementName(element) << " points to: ";
       for (const auto pointedTo : element->pointsTo) {
-        std::cout << getElementName(pointedTo) << ", ";
+        std::cout << getElementName(Element::fromIndex(pointedTo)) << ", ";
       }
       std::cout << "\n";
     }
-    if (element->contained_elements.size() > 0) {
+    if (!element->contained_elements.empty()) {
       std::cout << getElementName(element) << " contains: ";
       for (const auto contained : element->contained_elements) {
-        std::cout << getElementName(contained) << ", ";
+        std::cout << getElementName(Element::fromIndex(contained)) << ", ";
       }
       std::cout << "\n";
     }
@@ -539,7 +532,7 @@ void AliasDb::analyzeWait(Node* node) {
     const auto el = pr.second;
     const auto& pointedFrom = el->pointedFrom;
     TORCH_INTERNAL_ASSERT(!pointedFrom.empty());
-    const auto wildcardValue = (*pointedFrom.begin())->value;
+    const auto wildcardValue = Element::fromIndex(*pointedFrom.begin())->value;
     TORCH_INTERNAL_ASSERT(wildcardValue);
     registerWrite(wildcardValue, node);
   }
@@ -1144,9 +1137,7 @@ void AliasDb::rebuildWriteCache() const {
     const auto& writtenValues = pr.second;
 
     for (const auto value : writtenValues) {
-      for (const auto loc : elementMap_.at(value)->getMemoryLocations()) {
-        writeCache_.insert(loc);
-      }
+      writeCache_ |= elementMap_.at(value)->getMemoryLocations();
     }
   }
   isWriteCacheStale_ = false;
