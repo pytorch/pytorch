@@ -807,7 +807,18 @@ bool AliasDb::couldMoveBeforeTopologically(Node* n, Node* movePoint) {
 class AliasDb::WorkingSet {
  public:
   explicit WorkingSet(Node* mover, const AliasDb& aliasDb) : aliasDb_(aliasDb) {
-    add(mover);
+    mover_ = mover;
+    for (const auto user : getUsersSameBlock(mover_)) {
+      moverUsers_.insert(user);
+    }
+
+    for (const auto& write :
+         aliasDb_.getWrites(mover_, /*recurseBlocks=*/true)) {
+      moverWrites_.insert(write);
+    }
+    for (const auto& read : aliasDb_.getReads(mover_, /*recurseBlocks=*/true)) {
+      moverReads_.insert(read);
+    }
   }
 
   // Add `n` to the working set
@@ -826,37 +837,19 @@ class AliasDb::WorkingSet {
   }
 
   void eraseMover() {
-    auto mover = nodes_.front();
-    for (const auto user : getUsersSameBlock(mover)) {
-      const auto it = users_.find(user);
-      if (it != users_.end()) {
-        users_.erase(it);
-      }
-    }
-
-    for (const auto& write :
-         aliasDb_.getWrites(mover, /*recurseBlocks=*/true)) {
-      const auto it = writes_.find(write);
-      if (it != writes_.end()) {
-        writes_.erase(it);
-      }
-    }
-    for (const auto& read : aliasDb_.getReads(mover, /*recurseBlocks=*/true)) {
-      const auto it = reads_.find(read);
-      if (it != reads_.end()) {
-        reads_.erase(it);
-      }
-    }
-    nodes_.pop_front();
+    mover_ = nullptr;
+    moverWrites_.clear();
+    moverReads_.clear();
+    moverUsers_.clear();
   }
 
-  const std::list<Node*>& nodes() {
+  const std::vector<Node*>& dependentNodes() {
     return nodes_;
   }
 
   // Does the working set depend on `n`?
   bool dependsOn(Node* n) const {
-    if (nodes_.empty()) {
+    if (!mover_ && nodes_.empty()) {
       return false;
     }
 
@@ -865,7 +858,8 @@ class AliasDb::WorkingSet {
 
  private:
   bool hasDataDependency(Node* n) const {
-    if (n->isAfter(nodes_.front())) {
+    const Node* pivot = mover_ ? mover_ : nodes_.front();
+    if (n->isAfter(pivot)) {
       return producesFor(n);
     } else {
       return consumesFrom(n);
@@ -878,10 +872,16 @@ class AliasDb::WorkingSet {
     if (aliasDb_.mayAlias(nWrites, reads_)) {
       return true;
     }
+    if (mover_ && aliasDb_.mayAlias(nWrites, moverReads_)) {
+      return true;
+    }
 
     // Check that the working set doesn't write to anything that `n` uses.
     const auto nReads = aliasDb_.getReads(n, /*recurseBlocks=*/true);
     if (aliasDb_.mayAlias(writes_, nReads)) {
+      return true;
+    }
+    if (mover_ && aliasDb_.mayAlias(moverWrites_, nReads)) {
       return true;
     }
     return false;
@@ -891,12 +891,19 @@ class AliasDb::WorkingSet {
   bool producesFor(Node* n) const {
     // This equivalent to asking: does the total use-set of all the nodes in the
     // working set include `n`?
+    if (mover_ && moverUsers_.count(n)) {
+      return true;
+    }
     return users_.count(n) != 0;
   }
 
   // Does the working set consume any values produced by `n`?
   bool consumesFrom(Node* n) const {
     const auto users = getUsersSameBlock(n);
+
+    if (mover_ && users.count(mover_)) {
+      return true;
+    }
     return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
       return users.count(node) != 0;
     });
@@ -942,12 +949,20 @@ class AliasDb::WorkingSet {
   }
 
   const AliasDb& aliasDb_;
-  std::list<Node*> nodes_;
+  std::vector<Node*> nodes_;
+
+  // Mover dependencies. We track these separately since we may erase the mover
+  // from the working set.
+  Node* mover_;
+  std::unordered_set<const Value*> moverWrites_;
+  std::unordered_set<const Value*> moverReads_;
+  std::unordered_set<Node*> moverUsers_;
+
   // users => # of working set nodes it uses
-  std::unordered_multiset<Node*> users_;
+  std::unordered_set<Node*> users_;
   // Values written to by the working set => number of nodes writing to value
-  std::unordered_multiset<const Value*> writes_;
-  std::unordered_multiset<const Value*> reads_;
+  std::unordered_set<const Value*> writes_;
+  std::unordered_set<const Value*> reads_;
 };
 
 // Try to move `toMove` before/after `movePoint` while preserving value
@@ -1037,13 +1052,15 @@ bool AliasDb::tryMove(
     // Then move all of its dependencies on the other side of `movePoint`
     const auto reversed =
         moveSide == MoveSide::BEFORE ? MoveSide::AFTER : MoveSide::BEFORE;
-    for (auto n : workingSet.nodes()) {
+    for (auto n : workingSet.dependentNodes()) {
       move(n, curNode, reversed);
       curNode = n;
     }
   } else {
     // Just append/prepend everything to `movePoint`
-    for (auto n : workingSet.nodes()) {
+    move(toMove, curNode, moveSide);
+    curNode = toMove;
+    for (auto n : workingSet.dependentNodes()) {
       move(n, curNode, moveSide);
       curNode = n;
     }
