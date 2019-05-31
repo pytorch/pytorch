@@ -170,8 +170,7 @@ FunctionSchema inferAndCheckSchema(const std::string& schemaOrName) {
 template <typename Implementation>
 Operator createOperator(
     const std::string& schemaOrName,
-    Implementation&& implementation,
-    OperatorOptions options = OperatorOptions()) {
+    Implementation&& implementation) {
   using Traits = c10::guts::infer_function_traits_t<Implementation>;
   using ArgumentTypes =
       c10::guts::typelist::map_t<decay_t, typename Traits::parameter_types>;
@@ -214,8 +213,7 @@ Operator createOperator(
             tuple,
             typename MakeIndices<kNumberOfArguments>::indices{});
         return 0;
-      },
-      std::move(options));
+      });
 }
 
 /// Registration class for new operators. Effectively calls
@@ -237,20 +235,6 @@ struct TORCH_API RegisterOperators {
   template <typename Implementation>
   RegisterOperators(const std::string& name, Implementation&& implementation) {
     op(name, std::forward<Implementation>(implementation));
-  }
-
-  /// Creates a new operator from a name and implementation function (function
-  /// pointer or function object/lambda) using `torch::jit::createOperator`, and
-  /// then registers the operator.
-  template <typename Implementation>
-  RegisterOperators& op(
-      const std::string& name,
-      Implementation&& implementation,
-      OperatorOptions options) {
-
-    registerOperator(createOperator(
-        name, std::forward<Implementation>(implementation), options));
-    return *this;
   }
 
   template <typename Implementation>

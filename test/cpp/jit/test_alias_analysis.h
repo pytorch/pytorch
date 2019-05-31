@@ -884,13 +884,10 @@ void testMemoryDAG() {
 
 void testAliasRegistration() {
   {
-    auto opts = OperatorOptions().aliasAnalysis(AliasAnalysisKind::DEFAULT);
-    RegisterOperators reg({createOperator(
-        "foo::rand",
-        [](at::Tensor) -> at::Tensor {
-          return at::rand({2, 2});
-        },
-        opts)});
+    auto registry = torch::RegisterOperators()
+      .op("foo::rand", torch::RegisterOperators::options()
+        .catchAllKernel([](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
+        .aliasAnalysis(AliasAnalysisKind::DEFAULT));
     const auto rand_op = Symbol::fromQualString("foo::rand");
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
@@ -900,9 +897,10 @@ void testAliasRegistration() {
     ASSERT_TRUE(aliasDb.mayAlias(a, b));
   }
   {
-    auto opts = OperatorOptions().aliasAnalysis(AliasAnalysisKind::PURE);
-    RegisterOperators reg({createOperator(
-        "foo::pure", [](at::Tensor t) -> at::Tensor { return t * 2; }, opts)});
+    auto registry = torch::RegisterOperators()
+      .op("foo::pure", torch::RegisterOperators::options()
+        .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
+        .aliasAnalysis(AliasAnalysisKind::PURE));
     const auto rand_op = Symbol::fromQualString("foo::pure");
     auto graph = std::make_shared<Graph>();
     auto a = graph->addInput();
