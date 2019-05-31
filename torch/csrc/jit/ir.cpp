@@ -310,7 +310,7 @@ std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
 }
 
 std::ostream& operator<<(std::ostream& out, const Graph& g) {
-  return g.print(out, false);
+  return g.print(out, true);
 }
 
 static void checkSameDevice(const Node* node) {

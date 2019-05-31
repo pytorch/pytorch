@@ -138,7 +138,7 @@ def MiLSTMCell(x, hx, cx, w_ih, w_hh, alpha, beta_i, beta_h, bias):
 
 
 def canonical(graph):
-    return str(torch._C._jit_pass_canonicalize(graph))
+    return torch._C._jit_pass_canonicalize(graph).str(False)
 
 
 def get_lstm_inputs(device, training=False, seq_length=None):
@@ -3704,7 +3704,7 @@ def foo(x):
 
         _, lineno = inspect.getsourcelines(foobar)
         FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))\
-                   .run(scripted.graph.debug_str())
+                   .run(scripted.graph)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -13636,11 +13636,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         if quantized:
             snli = SNLIClassifier(Config()).cpu()
             torch.jit.quantized.quantize_linear_modules(snli)
-            traced = torch.jit.trace(snli, (premise, hypothesis))
-            traced.save('/tmp/foo')
-            traced = torch.jit.load('/tmp/foo')
-            print(traced.graph.debug_str())
-            import pdb; pdb.set_trace()
             # we don't do export/import checks because we would need to call
             # _pack/_unpack
             self.checkTrace(snli, (premise, hypothesis), inputs_require_grads=False,

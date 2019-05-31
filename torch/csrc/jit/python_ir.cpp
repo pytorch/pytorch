@@ -219,10 +219,10 @@ void initPythonIRBindings(PyObject* module_) {
             return ss.str();
           })
       .def(
-          "debug_str",
-          [](Graph& g) -> std::string {
+          "str",
+          [](Graph& g, bool print_source_ranges) {
             std::stringstream ss;
-            g.print(ss, true);
+            g.print(ss, print_source_ranges);
             return ss.str();
           })
       .def(
