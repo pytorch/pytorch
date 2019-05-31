@@ -62,6 +62,7 @@ CONFIG_TREE_DATA = OrderedDict(
 
 DEVTOOLSET_VERSIONS = [
     3,
+    7,
 ]
 
 
