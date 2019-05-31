@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
@@ -8,7 +9,6 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -500,24 +500,6 @@ struct Environment {
  private:
   ValueTable value_table;
 };
-
-template <class T>
-static Value* materializeConstant(
-    T val,
-    Graph& graph,
-    const SourceRange& r,
-    std::unordered_map<T, Value*>& map) {
-  auto existing_constant = map.find(val);
-  if (existing_constant != map.end()) {
-    return existing_constant->second;
-  }
-
-  WithInsertPoint guard(graph.block()->nodes().front());
-  auto new_constant = graph.insertConstant(val, nullptr, r);
-  map[val] = new_constant;
-
-  return new_constant;
-}
 
 static Value* ensureInt(const SourceRange& range, Value* v) {
   if (!v->type()->isSubtypeOf(IntType::get())) {
@@ -1354,11 +1336,8 @@ struct to_ir {
     WithInsertPoint guard(n);
 
     if (!max_trip_count_val) {
-      max_trip_count_val = materializeConstant(
-          std::numeric_limits<int64_t>::max(),
-          *graph,
-          range,
-          integral_constants);
+      max_trip_count_val = insertConstant(
+          *graph, std::numeric_limits<int64_t>::max(), nullptr, range);
     }
 
     cond_val = (cond) ? emitCond(cond.value())
@@ -2674,11 +2653,9 @@ struct to_ir {
 
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint())
-      return materializeConstant(
-          c.asFloatingPoint(), *graph, c.range(), fp_constants);
+      return insertConstant(*graph, c.asFloatingPoint(), nullptr, c.range());
     else
-      return materializeConstant(
-          c.asIntegral(), *graph, c.range(), integral_constants);
+      return insertConstant(*graph, c.asIntegral(), nullptr, c.range());
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
