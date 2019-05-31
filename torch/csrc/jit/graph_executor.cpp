@@ -371,13 +371,13 @@ struct DifferentiableGraphOp {
     if (!t.defined()) {
       return t;
     }
-    return autograd::as_variable_ref(std::move(t)).detach();
+    return autograd::as_variable_ref(t).detach();
   }
 
   void detach(IValue& v) const {
     if (v.isTensor()) {
       auto t = std::move(v).toTensor();
-      t = detach(t);
+      t = detach(std::move(t));
       v = IValue{t};
     } else if (v.isTensorList()) {
       c10::ListPtr<at::Tensor> lst = v.toTensorListRef();

@@ -242,7 +242,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return BlobGetMutableTensor(outputs_.at(idx), type);
     }
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-    auto output = newstyle_outputs_.get(idx);
+    at::Tensor output = newstyle_outputs_[idx];
     Tensor tensor = caffe2::Tensor(output);
     if (!tensor.defined() || tensor.GetDeviceType() != type) {
       // Fix tensor type
@@ -250,7 +250,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       output = at::Tensor(std::move(tensor.getIntrusivePtr()));
     }
     output_tensors_[idx] = caffe2::Tensor(output);
-    newstyle_outputs_.set(idx, std::move(output));
+    newstyle_outputs_[idx] = std::move(output);
     return &output_tensors_[idx];
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
@@ -272,7 +272,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   void SetOutputTensor(int idx, Tensor tensor) {
     if (!isLegacyOperator()) {
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-      newstyle_outputs_.set(idx, at::Tensor(tensor));
+      newstyle_outputs_[idx] = at::Tensor(tensor);
 
       // also update the tensor in the hack
       output_tensors_[idx] = std::move(tensor);
@@ -301,14 +301,14 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       return BlobGetMutableTensor(outputs_.at(idx), dims, options);
     }
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-    auto output = newstyle_outputs_.get(idx);
+    at::Tensor output = newstyle_outputs_[idx];
     Tensor tensor =
         GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options);
     // assign it back in case it changed
     output = at::Tensor(std::move(tensor.getIntrusivePtr()));
 
     output_tensors_[idx] = caffe2::Tensor(output);
-    newstyle_outputs_.set(idx, std::move(output));
+    newstyle_outputs_[idx] = std::move(output);
     return &output_tensors_[idx];
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");

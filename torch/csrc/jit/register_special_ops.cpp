@@ -63,7 +63,7 @@ std::vector<int64_t> compute_sizes(const IValue& seq) {
     auto length = seq_list.size();
     AT_ASSERT(length != 0);
     sizes.push_back(length);
-    seq_recur = seq_list.get(0);
+    seq_recur = seq_list[0];
   }
   sizes.push_back(list_size(seq_recur));
   return sizes;
@@ -94,7 +94,7 @@ void storeLastDimension(
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
   for (int64_t i = 0; i < n; i++) {
-    *(DTYPE*)data = obj.get(i);
+    *(DTYPE*)data = obj[i];
     data += strides[dim] * elementSize;
   }
 }
@@ -112,7 +112,7 @@ void storeLastDimension<bool>(
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
   for (int64_t i = 0; i < n; i++) {
-    *(uint8_t*)data = static_cast<uint8_t>(obj.get(i));
+    *(uint8_t*)data = static_cast<uint8_t>(obj[i]);
     data += strides[dim] * elementSize;
   }
 }
@@ -133,7 +133,7 @@ void recursiveStore(
   if (dim + 1 < static_cast<long>(ndim)) {
     auto items = obj.toGenericListRef();
     for (int64_t i = 0; i < n; i++) {
-      recursiveStore(data, sizes, strides, dim + 1, elementSize, items.get(i));
+      recursiveStore(data, sizes, strides, dim + 1, elementSize, items[i]);
       data += strides[dim] * elementSize;
     }
   } else {

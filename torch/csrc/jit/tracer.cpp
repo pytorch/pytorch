@@ -225,7 +225,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
     AT_ASSERT(
         elem_values.size() == num_elems && elem_types.size() == num_elems);
     for (size_t i = 0; i < num_elems; ++i) {
-      elems.set(i, addInput(state, elems.get(i), elem_types[i], elem_values[i]));
+      elems[i] = addInput(state, elems.get(i), elem_types[i], elem_values[i]);
     }
     return Tuple::create(std::move(elems));
   } else if (auto dict_type = type->cast<DictType>()) {
@@ -261,7 +261,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
     } else {
       auto elems = input.toGenericListRef();
       for (size_t i = 0; i < num_elems; i++) {
-        elems.set(i, addInput(state, elems.get(i), list_type->getElementType(), unpack_outputs[i]));
+        elems[i] = addInput(state, elems.get(i), list_type->getElementType(), unpack_outputs[i]);
       }
       return elems;
     }

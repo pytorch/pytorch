@@ -537,16 +537,16 @@ RegisterOperators reg(
              TORCH_CHECK(
                  dim < (int64_t)regular_shape.size(),
                  "Dimension out of range for chunk");
-             int64_t split_size = (regular_shape.get(dim) + chunks - 1) / chunks;
-             regular_shape.set(dim, split_size);
-             if (shape.get(dim) % chunks == 0) {
-               last_shape.set(dim, split_size);
+             int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
+             regular_shape[dim] =split_size;
+             if (shape[dim] % chunks == 0) {
+               last_shape[dim] = split_size;
              } else {
                int64_t num_splits = std::max<int64_t>(
-                   (shape.get(dim) + split_size - 1) / split_size, 1);
-               last_shape.set(dim,
-                   split_size - (split_size * num_splits - shape.get(dim)));
-               AT_ASSERT(last_shape.get(dim) >= 0);
+                   (shape[dim] + split_size - 1) / split_size, 1);
+               last_shape[dim] =
+                   split_size - (split_size * num_splits - shape[dim]);
+               AT_ASSERT(last_shape[dim] >= 0);
              }
              push(stack, std::move(regular_shape));
              push(stack, std::move(last_shape));
@@ -1091,23 +1091,30 @@ RegisterOperators logging_operators(
 #define DEFINE_BINARY_OP(aten_op, op)             \
   DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
       DEFINE_INT_FLOAT_OP(aten_op, op, float)
+
+#define DEFINE_BINARY_FLOAT_OP(aten_op, op)         \
+  DEFINE_GENERIC_OP(aten_op, op, op, float, float), \
+      DEFINE_INT_FLOAT_OP(aten_op, op, float)
+
 #define DEFINE_COMPARISON_OP(aten_op, op)         \
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
       DEFINE_INT_FLOAT_OP(aten_op, op, bool), DEFINE_STR_CMP_OP(aten_op, op)
 
 #define DEFINE_UNARY_OP(aten_op, op, int_result, float_result)            \
-  Operator(#aten_op "(int a) -> " #int_result, [](Stack& stack) {         \
-    int64_t a;                                                            \
-    pop(stack, a);                                                        \
-    push(stack, op);                                                      \
-    return 0;                                                             \
-  }),                                                                     \
-  Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) {     \
-    double a;                                                             \
-    pop(stack, a);                                                        \
-    push(stack, op);                                                      \
-    return 0;                                                             \
-  })
+  Operator(                                                               \
+      #aten_op "(int a) -> " #int_result,                                 \
+      [](Stack& stack) {                                                  \
+        int64_t a;                                                        \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
+      }),                                                                 \
+      Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) { \
+        double a;                                                         \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
+      })
 
 #define DEFINE_BOOL_OP(aten_op, op)                                \
   Operator(#aten_op "(bool a, bool b) -> bool", [](Stack& stack) { \
@@ -1169,7 +1176,7 @@ bool getBoolItem(const c10::ListPtr<bool>& list, int64_t idx) {
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     throw std::out_of_range("list index out of range");
   }
-  return list.get(normalized_idx);
+  return list[normalized_idx];
 }
 
 template <typename TList, typename TElement>
@@ -1465,8 +1472,8 @@ inline bool tensor_list_equal(Shared<TensorList> a, Shared<TensorList> b) {
   }
 
   for (size_t i = 0; i < a->elements().size(); ++i) {
-    const auto& a_element = a->elements().get(i);
-    const auto& b_element = b->elements().get(i);
+    at::Tensor a_element = a->elements()[i];
+    at::Tensor b_element = b->elements()[i];
     // This preserves Python's semantics, which uses eq() to compare two
     // elements, then passes the result to bool().
     // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
@@ -2150,6 +2157,7 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::floor, std::floor(a), float, float),
     DEFINE_UNARY_OP(aten::ceil, std::ceil(a), float, float),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
+    DEFINE_BINARY_FLOAT_OP(aten::log, std::log(a) / std::log(b)),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
     DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
     DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),

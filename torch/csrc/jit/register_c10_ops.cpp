@@ -23,13 +23,15 @@ IValue unwrap(IValue&& ivalue) {
   if (ivalue.isTensor() && ivalue.toTensor().defined()) {
     return unwrap_tensor(std::move(ivalue).toTensor());
   } else if (ivalue.isTensorList()) {
-    for (at::Tensor item : ivalue.toTensorList()->elements()) {
-      item = unwrap_tensor(std::move(item));
+    c10::ListPtr<at::Tensor> list = ivalue.toTensorList()->elements();
+    for (size_t i = 0; i < list.size(); ++i) {
+      list[i] = unwrap_tensor(list.extract(i));
     }
     return std::move(ivalue);
   } else if (ivalue.isGenericList()) {
-    for (IValue item : ivalue.toGenericList()->elements()) {
-      item = unwrap(std::move(item));
+    c10::impl::GenericListPtr list = ivalue.toGenericList()->elements();
+    for (size_t i = 0; i < list.size(); ++i) {
+      list[i] = unwrap(list.extract(i));
     }
     return std::move(ivalue);
   } else if (ivalue.isGenericDict()) {
@@ -54,13 +56,15 @@ IValue wrap(IValue&& ivalue) {
   if (ivalue.isTensor()) {
     return wrap_tensor(std::move(ivalue).toTensor());
   } else if (ivalue.isTensorList()) {
-    for (at::Tensor item : ivalue.toTensorList()->elements()) {
-      item = wrap_tensor(std::move(item));
+    c10::ListPtr<at::Tensor> list = ivalue.toTensorList()->elements();
+    for (size_t i = 0; i < list.size(); ++i) {
+      list[i] = wrap_tensor(list.extract(i));
     }
     return std::move(ivalue);
   } else if (ivalue.isGenericList()) {
-    for (IValue item : ivalue.toGenericList()->elements()) {
-      item = wrap(std::move(item));
+    c10::impl::GenericListPtr list = ivalue.toGenericList()->elements();
+    for (size_t i = 0; i < list.size(); ++i) {
+      list[i] = wrap(list.extract(i));
     }
     return std::move(ivalue);
   } else if (ivalue.isGenericDict()) {
