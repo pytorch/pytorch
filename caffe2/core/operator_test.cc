@@ -344,6 +344,7 @@ class GetFooGradient : public GradientMakerBase {
   }
 };
 
+GRADIENT_OPERATOR_SCHEMA(FooGradient).NumInputs(1).NumOutputs(1);
 REGISTER_CPU_GRADIENT_OPERATOR(FooGradient, FooGradientOp)
 REGISTER_CPU_GRADIENT_OPERATOR_WITH_ENGINE(
     FooGradient,
