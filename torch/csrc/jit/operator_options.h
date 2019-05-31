@@ -1,7 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/passes/alias_analysis.h>
-#include <ATen/core/op_registration/operator_metadata.h>
+#include <ATen/core/dispatch/OperatorOptions.h>
 
 namespace torch {
 namespace jit {

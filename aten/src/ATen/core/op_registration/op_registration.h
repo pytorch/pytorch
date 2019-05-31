@@ -10,7 +10,6 @@
 #include <ATen/core/op_registration/kernel_function.h>
 #include <ATen/core/op_registration/kernel_lambda.h>
 #include <ATen/core/op_registration/infer_schema.h>
-#include <ATen/core/op_registration/operator_metadata.h>
 
 namespace c10 {
 
@@ -406,9 +405,9 @@ private:
   static c10::FunctionSchema inferSchemaFromKernels_(const std::string& opNameStr, const Options& options);
   void checkNoDuplicateKernels_(const FunctionSchema& schema, const Options& options);
   void registerOp_(FunctionSchema&& schema, Options&& options);
-  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config);
-  void registerSchemaOnly_(FunctionSchema&& schema);
-  void registerOptions_(OperatorHandle op, Options&& options);
+  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options);
+  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options);
+  static OperatorOptions makeOperatorOptions_(const Options& options);
 
   class OperatorRegistrar;
 
