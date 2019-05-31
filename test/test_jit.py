@@ -15697,6 +15697,39 @@ class TestClassType(JitTestCase):
         output = m_loaded(input)
         self.assertEqual(input, output)
 
+    def test_save_load_with_classes_returned(self):
+        @torch.jit.script
+        class FooTest(object):
+            def __init__(self, x):
+                self.x = x
+
+            def clone(self):
+                clone = FooTest(self.x)
+                return clone
+
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                foo = FooTest(a)
+                foo_clone = foo.clone()
+                return foo_clone.x
+
+        m = MyMod()
+
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+
+        # classes are globally registered for now, so we need to clear the JIT
+        # registry to simulate loading a new model
+        torch._C._jit_clear_class_registry()
+
+        buffer.seek(0)
+        m_loaded = torch.jit.load(buffer)
+
+        input = torch.rand(2, 3)
+        output = m_loaded(input)
+        self.assertEqual(input, output)
+
     def test_save_load_with_classes_nested(self):
         @torch.jit.script  # noqa: B903
         class FooNestedTest(object):

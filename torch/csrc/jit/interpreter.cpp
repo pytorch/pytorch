@@ -512,9 +512,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
  private:
   // pc is critical for the interperter to pick up the progress from suspend
   size_t pc = 0;
-  int64_t stack_start_; // if we need to suspend, where do we reset the stack?
-                        // answer: to where it was when we were called, not
-                        // including any inputs to this function
+
+  // if we need to suspend, where do we reset the stack?
+  // answer: to where it was when we were called, not
+  // including any inputs to this function
+  int64_t stack_start_ = -1;
   c10::intrusive_ptr<Future> future;
   std::shared_ptr<CodeImpl> function; // keep function alive
 
@@ -535,8 +537,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   bool runImpl(Stack& stack) {
-    TORCH_INTERNAL_ASSERT(stack.size() >= function->n_inputs);
-    stack_start_ = stack.size() - function->n_inputs;
+    // if we have never run before, then we might have to return the
+    // stack when we suspend, record where it starts so we return the right
+    // stack
+    if (stack_start_ == -1) {
+      TORCH_INTERNAL_ASSERT(stack.size() >= function->n_inputs);
+      stack_start_ = stack.size() - function->n_inputs;
+    } else {
+      // during restarts, all of the stack is always our own, so we leave
+      // nothing
+      stack_start_ = 0;
+    }
     try {
       return runInterpreterLoop(stack);
     } catch (std::exception& e) {
