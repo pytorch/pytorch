@@ -6017,7 +6017,7 @@ a")
                         if isinstance(resf, float) and abs(resf - resfs) < 1e-4:
                             continue
                     raise AssertionError("Failed on {func_name} with inputs {a} {b}. Python: {resf}, Script: {resfs}"
-                                          .format(func_name=func_name, a=a, b=b, resf=resf, resfs=resfs))
+                                        .format(func_name=func_name, a=a, b=b, resf=resf, resfs=resfs))
 
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc", "expm1", "fabs"]
