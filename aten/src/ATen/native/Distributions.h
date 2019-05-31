@@ -338,7 +338,7 @@ C10_DEVICE static inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha,
   accscalar_t total_ = static_cast<accscalar_t>(total);
 
   const scalar_t beta = total - alpha;
-  const accscalar_t beta_ = static_cast<accscalar_t>(beta);
+  const accscalar_t beta_ = total_ - alpha_;
   const scalar_t boundary = total * x * (1 - x);
 
   // Use an asymptotic approximation for x close to 0.
@@ -357,7 +357,7 @@ C10_DEVICE static inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha,
   }
 
   // Use a rational correction to an analytic approximation.
-  static const scalar_t c[2][3][3][4] = {
+  static const accscalar_t c[2][3][3][4] = {
     {{{1.003668233, -0.01061107488, -0.0657888334, 0.01201642863},
       {0.6336835991, -0.3557432599, 0.05486251648, -0.001465281033},
       {-0.03276231906, 0.004474107445, 0.002429354597, -0.0001557569013}},
@@ -377,22 +377,22 @@ C10_DEVICE static inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha,
       {0.001925008108, -0.002869809258, 0.0008000589141, -6.063713228e-05},
       {-0.0003477407336, 6.959756487e-05, 1.097287507e-05, -1.650964693e-06}}},
   };
-  const scalar_t u = compat_log(x);
-  const scalar_t a = compat_log(alpha) - u;
-  const scalar_t b = compat_log(total) - a;
-  const scalar_t pow_u[3] = {1, u, u * u};
-  const scalar_t pow_a[3] = {1, a, a * a};
-  scalar_t p = 0.0;
-  scalar_t q = 0.0;
+  const accscalar_t u = compat_log(x_);
+  const accscalar_t a = compat_log(alpha_) - u;
+  const accscalar_t b = compat_log(total_) - a;
+  const accscalar_t pow_u[3] = {1, u, u * u};
+  const accscalar_t pow_a[3] = {1, a, a * a};
+  accscalar_t p = 0.0;
+  accscalar_t q = 0.0;
   for (int i = 0; i < 3; ++i) {
     for (int j = 0; j < 3; ++j) {
-      const scalar_t ua = pow_u[i] * pow_a[j];
+      const accscalar_t ua = pow_u[i] * pow_a[j];
       p += ua * (c[0][i][j][0] + b * (c[0][i][j][1] + b * (c[0][i][j][2] + b * c[0][i][j][3])));
       q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * (c[1][i][j][2] + b * c[1][i][j][3])));
     }
   }
-  const scalar_t approx = x * (digamma_one<scalar_t, accscalar_t>(total) - digamma_one<scalar_t, accscalar_t>(alpha)) / beta;
-  return p / q * approx;
+  const accscalar_t approx = x_ * (digamma_one<scalar_t, accscalar_t>(total_) - digamma_one<scalar_t, accscalar_t>(alpha_)) / beta_;
+  return static_cast<scalar_t>(p / q * approx);
 }
 
 } // namespace
