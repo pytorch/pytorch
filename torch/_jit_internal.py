@@ -225,7 +225,7 @@ def should_drop_on_export(fn):
 
 def is_ignored_fn(fn):
     mod = get_torchscript_modifier(fn)
-    return  mod is FunctionModifiers.IGNORE_AND_DROP or mod is FunctionModifiers.IGNORE
+    return mod is FunctionModifiers.IGNORE_AND_DROP or mod is FunctionModifiers.IGNORE
 
 
 def get_torchscript_modifier(fn):
