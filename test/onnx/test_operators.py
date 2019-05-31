@@ -255,7 +255,8 @@ class TestOperators(TestCase):
 
         dynamic_axes = {'input_1': [0, 2, 3], 'output_1': {0: 'output_1_variable_dim_0', 1: 'output_1_variable_dim_1'}}
         model_proto_name = 'conv2d.onnx'
-        torch.onnx.export(model, x, model_proto_name, verbose=True, input_names=["input_1"], output_names=["output_1"], example_outputs=y, dynamic_axes=dynamic_axes)
+        torch.onnx.export(model, x, model_proto_name, verbose=True, input_names=["input_1"], output_names=["output_1"],
+                          example_outputs=y, dynamic_axes=dynamic_axes)
 
         import onnx
         onnx_model = onnx.load(model_proto_name)

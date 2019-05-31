@@ -56,7 +56,7 @@ def set_training(model, mode):
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=False, example_outputs=None, strip_doc_string=True, dynamic_axes={}):
+           do_constant_folding=False, example_outputs=None, strip_doc_string=True, dynamic_axes=None):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -119,17 +119,39 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             trace.
         example_outputs: example outputs of the model that is being exported.
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict): 
-            a dictionary to specify dynamic axes of input/output. The dictionary takes an input/output 
-            name as key and maps it one of the values below:
-            (1)A list of integers specifiying the dynamic axes of provided input. In this scenario
+            a dictionary to specify dynamic axes of input/output, such that:            
+            - KEY:  input and/or output names
+            - VALUE: index of dynamic axes for given key and potentially the name to be used for
+            exported dynamic axes. In general the value is defined according to one of the following
+            ways or a combination of both:
+
+            (1). A list of integers specifiying the dynamic axes of provided input. In this scenario
             automated names will be generated and applied to dynamic axes of provided input/output 
             during export. 
-            OR
-            (2)An inner dictionary that specifies a mapping FROM the index of dynamic axis in 
+
+            OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in 
             corresponding input/output TO the name that is desired to be applied on such axis of 
             such input/output during export.
-            The options above shall be specific to each input/output and mixed use of 
-            (1) and (2) is allowed for combination of different inputs/outputs.
+
+            Example. if we have the following shape for inputs and outputs:             
+                shape(input_1) = ('b', 3, 'w', 'h')
+                and shape(input_2) = ('b', 4)           
+                and shape(output)  = ('b', 'd', 5)      
+
+            Then dynamic axes can be defined either as:
+            (a). ONLY INDICES:
+                 dynamic_axes = {'input_1':[0, 2, 3], 'input_2':[0], 'output':[0, 1]}
+                 where automatic names will be generated for exported dynamic axes
+
+            OR (b). INDICES WITH CORRESPONDING NAMES: 
+                dynamic_axes = {'input_1':{0:'batch', 1:'width', 2:'height'}, 
+                                 'input_2':{0:'batch'},
+                                 'output':{0:'batch', 1:'detections'}
+                 where provided names will be applied to exported dynamic axes
+
+            OR (c). MIXED MODE OF (a) and (b)
+                 dynamic_axes = {'input_1':[0, 2, 3], 'input_2':{0:'batch'}, 'output':[0,1]}
+
     """
     if aten or export_raw_ir:
         assert operator_export_type is None
@@ -362,7 +384,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=False,
-            strip_doc_string=True, dynamic_axes={}):
+            strip_doc_string=True, dynamic_axes=None):
     global __IN_ONNX_EXPORT
     assert __IN_ONNX_EXPORT is False
     __IN_ONNX_EXPORT = True
@@ -379,13 +401,17 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
 
         # TODO: Don't allocate a in-memory string for the protobuf
         defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
+        if dynamic_axes is None:
+            dynamic_axes = {}
+
         _validate_dynamic_axes(dynamic_axes, model, input_names, output_names)
 
         if export_params:
-            proto, export_map = graph._export_onnx(params_dict, opset_version, dynamic_axes, defer_weight_export, operator_export_type,
-                                                   strip_doc_string)
+            proto, export_map = graph._export_onnx(
+                params_dict, opset_version, dynamic_axes, defer_weight_export, operator_export_type, strip_doc_string)
         else:
-            proto, export_map = graph._export_onnx({}, opset_version, dynamic_axes, False, operator_export_type, strip_doc_string)
+            proto, export_map = graph._export_onnx(
+                {}, opset_version, dynamic_axes, False, operator_export_type, strip_doc_string)
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)
@@ -741,12 +767,18 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
     if len(dynamic_axes) == 0:
         return
 
-    # Extracting set of valid input/output names that shall be used for dynamic_axes
-    if (input_names is None) or len(input_names) == 0:
-        input_names = [x.uniqueName() for x in model.graph.inputs()]
-    if (output_names is None) or len(output_names) == 0:
-        output_names = [y.uniqueName() for y in model.graph.outputs()]
-    valid_names = set(input_names + output_names)
+    if(hasattr(model, 'graph')):
+        # Extracting set of valid input/output names that shall be used for dynamic_axes
+        if (input_names is None) or len(input_names) == 0:
+            input_names = [x.uniqueName() for x in model.graph.inputs()]
+        if (output_names is None) or len(output_names) == 0:
+            output_names = [y.uniqueName() for y in model.graph.outputs()]
+
+    valid_names = set()
+    if input_names is not None:
+        valid_names.add(x for x in input_names)
+    if output_names is not None:
+        valid_names.add(x for x in output_names)
 
     # If dynamic axes are provided as a list rather than dictionary, they should
     # first get converted to a dictionary in expected format. If desired axes names
@@ -756,8 +788,9 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
         if key not in valid_names:
             warnings.warn("Provided key {} for dynamic axes is not a valid input/output name".format(key))
         if isinstance(value, list):
-            warnings.warn('No names were found for specified dynamic axes of provided input. Automatically generated names will be applied to each dynamic axes of input {}'
-                          .format(key))
+            warnings.warn('No names were found for specified dynamic axes of provided input.' 
+                          'Automatically generated names will be applied to each dynamic axes of input {}'.format(key))
+
             value_dict = {}
             for i, x in enumerate(value):
                 if not isinstance(x, int):
