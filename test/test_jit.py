@@ -5962,10 +5962,11 @@ a")
 
         inf = float("inf")
         NaN = float("nan")
-        mx_int = 2147483647
-        mn_int = -2147483647 - 1
-        float_vals = [inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
-        int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2, 2 ** 63, -2 ** 63]
+        mx_int = 2**31 - 1
+        mn_int = -2**31
+        float_vals = ([inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2] +
+                      [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
+        int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2]
 
         def checkMath(func_name, num_args, is_float=True, ret_type="float", debug=False, vals=None, args_type=None):
 =======
@@ -5995,7 +5996,7 @@ a")
             scope = {}
             execWrapper(funcs_str, globals(), scope)
             cu = torch.jit.CompilationUnit(funcs_str)
-            fs = cu.func
+            f_script = cu.func
             f = scope['func']
 
 
@@ -6004,35 +6005,35 @@ a")
                 vals = [(i, j) for i in vals for j in vals]
 
             for a, b in vals:
-                resf = None
-                resfs = None
+                res_python = None
+                res_script = None
                 try:
-                    resf = f(a, b)
+                    res_python = f(a, b)
                 except Exception as e:
-                    resf = e
+                    res_python = e
                 try:
-                    resfs = fs(a, b)
+                    res_script = f_script(a, b)
                 except Exception as e:
-                    resfs = e
+                    res_script = e
                 if debug:
                     print("in: ", a, b)
-                    print("out: ", resf, resfs)
+                    print("out: ", res_python, res_script)
                 # We can't use assertEqual because of a couple of differences:
                 # 1. nan == nan should return true
                 # 2. When python functions throw an exception, we usually want to silently ignore them.
                 # (ie: We want to return `nan` for math.sqrt(-5))
-                if resf != resfs:
-                    if isinstance(resf, Exception):
+                if res_python != res_script:
+                    if isinstance(res_python, Exception):
                         continue
-                    if type(resf) == type(resfs):
-                        if isinstance(resf, tuple) and (math.isnan(resf[0]) == math.isnan(resfs[0])):
+
+                    if type(res_python) == type(res_script):
+                        if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
                             continue
-                        if isinstance(resf, float) and math.isnan(resf) and math.isnan(resfs):
+                        if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
                             continue
-                        if isinstance(resf, float) and abs(resf - resfs) < 1e-4:
-                            continue
-                    raise AssertionError("Failed on {func_name} with inputs {a} {b}. Python: {resf}, Script: {resfs}"
-                                         .format(func_name=func_name, a=a, b=b, resf=resf, resfs=resfs))
+                    msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
+                           .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
+                    self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
 
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan", "asinh", "atanh", "acosh", "sinh", "cosh", "tanh"]
