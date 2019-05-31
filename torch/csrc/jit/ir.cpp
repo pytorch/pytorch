@@ -254,7 +254,7 @@ std::ostream& Node::print(
   // In debug print, append file:line:col as a comment after each node
   if (print_source_locations && source_range_ &&
       source_range_->source()->filename()) {
-    auto range = sourceRange();
+    const auto& range = sourceRange();
     auto source = range.source();
     auto lineno = source->lineno_for_offset(range.start());
     auto col_offset = (int)range.start() - (int)source->offset_for_line(lineno);

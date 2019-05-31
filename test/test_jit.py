@@ -3703,7 +3703,7 @@ def foo(x):
         scripted = torch.jit.script(foobar)
 
         _, lineno = inspect.getsourcelines(foobar)
-        FileCheck().check('test_jit.py:{}:20'.format(lineno+1))\
+        FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))\
                    .run(scripted.graph.debug_str())
 
     def test_tensor_shape(self):
@@ -13636,6 +13636,11 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         if quantized:
             snli = SNLIClassifier(Config()).cpu()
             torch.jit.quantized.quantize_linear_modules(snli)
+            traced = torch.jit.trace(snli, (premise, hypothesis))
+            traced.save('/tmp/foo')
+            traced = torch.jit.load('/tmp/foo')
+            print(traced.graph.debug_str())
+            import pdb; pdb.set_trace()
             # we don't do export/import checks because we would need to call
             # _pack/_unpack
             self.checkTrace(snli, (premise, hypothesis), inputs_require_grads=False,
