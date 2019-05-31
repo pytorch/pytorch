@@ -33,7 +33,8 @@ __global__ void UpsampleBilinearKernel(
     float* __restrict__ Y) {
 
 
-  for (int index = threadIdx.x + blockIdx.x * blockDim.x; index < output_height * output_width; index += blockDim.x * gridDim.x){
+    const int size = output_height * output_width;
+    CUDA_1D_KERNEL_LOOP(index, size) {
     int indexTemp = index;
     const int out_x = indexTemp % output_width;
     indexTemp /= output_width;
