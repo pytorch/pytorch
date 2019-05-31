@@ -1413,11 +1413,23 @@ class _TestTorchMixin(object):
             self.assertTrue(x.all())
             self.assertTrue(x.any())
 
+            x = torch.ones(*size).bool()
+            self.assertTrue(x.all())
+            self.assertTrue(x.any())
+
+            x[3] = False
+            self.assertFalse(x.all())
+            self.assertTrue(x.any())
+
         test((10,))
         test((5, 5))
 
     def test_all_any_empty(self):
         x = torch.ByteTensor()
+        self.assertTrue(x.all())
+        self.assertFalse(x.any())
+
+        x = torch.BoolTensor()
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
@@ -1441,6 +1453,10 @@ class _TestTorchMixin(object):
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_all_any_empty_cuda(self):
         x = torch.cuda.ByteTensor()
+        self.assertTrue(x.all())
+        self.assertFalse(x.any())
+
+        x = torch.cuda.BoolTensor()
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
@@ -1529,6 +1545,11 @@ class _TestTorchMixin(object):
         m2 = torch.tensor([], dtype=torch.float)
         self.assertEqual(m1 + m2, [])
 
+        # bool
+        m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool)
+        m2 = torch.tensor([True, True, False, False, False, True], dtype=torch.bool)
+        self.assertEqual(m1 + m2, torch.tensor([True, True, False, True, False, True], dtype=torch.bool))
+
         # [res] torch.add([res,] tensor1, value, tensor2)
 
     def test_csub(self):
@@ -1606,6 +1627,10 @@ class _TestTorchMixin(object):
         for i in range(res1.size(0)):
             res2[i, 3] = res2[i, 3] * 2
         self.assertEqual(res1, res2)
+
+        a1 = torch.tensor([True, False, False, True], dtype=torch.bool)
+        a2 = torch.tensor([True, False, True, False], dtype=torch.bool)
+        self.assertEqual(a1 * a2, torch.tensor([True, False, False, False], dtype=torch.bool))
 
     def test_div(self):
         m1 = torch.randn(10, 10)
@@ -2883,6 +2908,21 @@ class _TestTorchMixin(object):
         self.assertTrue(np.allclose(qr2.dequantize().numpy(), r.numpy().T, atol=2 / scale))
         # make permuted result contiguous
         self.assertTrue(torch.equal(qr2.contiguous().int_repr(), qr2.int_repr()))
+
+    def test_qtensor_load_save(self):
+        scale = 2.0
+        zero_point = 10
+        r = torch.ones(15, dtype=torch.float) * 2
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
+            qr = torch.quantize_linear(r, scale, zero_point, dtype)
+            with tempfile.NamedTemporaryFile() as f:
+                # Serializing and Deserializing Tensor
+                torch.save(qr, f)
+                f.seek(0)
+                qr2 = torch.load(f)
+                self.assertEqual(qr.int_repr(), qr2.int_repr())
+                self.assertEqual(qr.q_scale(), qr2.q_scale())
+                self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
