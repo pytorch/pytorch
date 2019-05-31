@@ -21,7 +21,7 @@ class TransposeTest(hu.HypothesisTestCase):
         axes = np.arange(ndim)
         np.random.shuffle(axes)
 
-        if (use_axes):
+        if use_axes:
             op = core.CreateOperator(
                 "Transpose", ["X"], ["Y"], axes=axes, device_option=gc)
         else:
