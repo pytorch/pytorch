@@ -158,10 +158,8 @@ Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
-    auto& ostream = err() << "Expected a value of type "
-                          << concrete_type->python_str() << " for argument '"
-                          << arg.name() << "' but found "
-                          << value->type()->python_str() << "\n";
+    auto& ostream =
+        err() << arg.formatTypeMismatchMsg(value->type()->python_str());
 
     if (auto v = value->type()->cast<ListType>()) {
       if (v->getElementType()->isSubtypeOf(TensorType::get())) {
@@ -174,7 +172,7 @@ Value* tryMatchArgument(
     if (value->type() == NumberType::get() &&
         value->node()->kind() == aten::item) {
       ostream << "Use int(tensor) or float(tensor) to retrieve item() from a "
-                 "tensor with the appropriate type\n";
+              << "tensor with the appropriate type\n";
     }
     ostream << named_value.locOr(loc);
     return nullptr;

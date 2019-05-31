@@ -673,7 +673,7 @@ struct to_ir {
       auto param = *it;
       auto def = param.defaultValue();
       if (def.present()) {
-        default_types.emplace_back(param.type());
+        default_types.emplace_back(param.type().get());
         default_exprs.emplace_back(def.get());
       }
     }
@@ -686,15 +686,22 @@ struct to_ir {
 
       TypePtr type;
       c10::optional<int32_t> N;
-
-      // BroadcastList list can only appear at the argument level
-      if (auto maybe_broad_list =
-              typeParser_.parseBroadcastList(decl_arg.type())) {
-        type = maybe_broad_list->first;
-        N = maybe_broad_list->second;
-      } else {
-        type = typeParser_.parseTypeFromExpr(decl_arg.type());
+      bool is_inferred_type = false;
+      if (!decl_arg.type().present()) {
+        // If this param doesn't have a type, default to "tensor"
+        is_inferred_type = true;
+        type = TensorType::get();
         N = c10::nullopt;
+      } else {
+        // BroadcastList list can only appear at the argument level
+        if (auto maybe_broad_list =
+                typeParser_.parseBroadcastList(decl_arg.type().get())) {
+          type = maybe_broad_list->first;
+          N = maybe_broad_list->second;
+        } else {
+          type = typeParser_.parseTypeFromExpr(decl_arg.type().get());
+          N = c10::nullopt;
+        }
       }
       c10::optional<IValue> default_value = c10::nullopt;
       if (decl_arg.defaultValue().present()) {
@@ -705,7 +712,9 @@ struct to_ir {
           type,
           N,
           default_value,
-          decl_arg.kwarg_only());
+          decl_arg.kwarg_only(),
+          /*alias_info=*/c10::nullopt,
+          is_inferred_type);
       retval.push_back(arg);
     }
     return retval;

@@ -1631,10 +1631,7 @@ def _make_strong(mod):
     # Create proxy with stubs
     original_type = type(mod)
 
-    # Construct a new type that inherits from both WeakScriptModuleProxy and
-    # original_type so that isinstance checks work correctly
-    weak_type = type(original_type.__name__, (WeakScriptModuleProxy, original_type), {})
-    proxy = weak_type(mod, stubs)
+    proxy = WeakScriptModuleProxy(mod, stubs)
 
     _jit_internal.weak_modules[mod] = proxy
 
