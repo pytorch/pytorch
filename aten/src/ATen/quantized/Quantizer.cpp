@@ -15,36 +15,40 @@ void checkFloatCPUTensor(std::string fn_name, Tensor t) {
   TORCH_CHECK(
       t.scalar_type() == kFloat,
       fn_name,
-      "expects a Float Tensor.");
+      " expects a Float Tensor.");
   TORCH_CHECK(
       t.device() == kCPU,
       fn_name,
-      "expects a CPU Tensor.");
+      " expects a CPU Tensor.");
 }
 
 template <typename T>
 void checkQuantizedCPUTensor(std::string fn_name, Tensor t) {
   TORCH_CHECK(t.is_quantized(),
            fn_name,
-           "expects a quantized Tensor.");
+           " expects a quantized Tensor.");
   TORCH_CHECK(t.scalar_type() == caffe2::TypeMeta::Make<T>(),
            fn_name,
-           "expects a ",
+           " expects a ",
            caffe2::TypeMeta::Make<T>(),
-           "Tensor");
+           " Tensor");
   TORCH_CHECK(t.device() == kCPU,
            fn_name,
-           "expects a CPU quantized Tensor");
+           " expects a CPU quantized Tensor");
 }
 
 template <typename T>
 void checkZeroPoint(std::string fn_name, int32_t zero_point) {
   TORCH_CHECK(zero_point <= std::numeric_limits<T>::max(),
-           fn_name,
-           "zero_point is out of range.");
+              fn_name,
+              " zero_point ",
+              zero_point,
+              " is out of range.");
   TORCH_CHECK(zero_point >= std::numeric_limits<T>::min(),
-           fn_name,
-           "zero_point is out of range.");
+              fn_name,
+              " zero_point ",
+              zero_point,
+              " is out of range.");
 }
 
 template <typename T>
@@ -272,12 +276,10 @@ QuantizerPtr make_per_channel_affine_quantizer(
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
   // TODO: remove this when Variable and Tensor are merged
-  AT_ASSERTM(
+  TORCH_INTERNAL_ASSERT(
       !self.is_variable(),
       "_internal_get_QTensorImpl: should not be a variable");
-  // TODO: uncomment after is_quantized() is implemented
-  // AT_ASSERTM(self.is_quantized(), "_internal_get_QTensorImpl: not a quantized
-  // tensor");
+  TORCH_INTERNAL_ASSERT(self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
