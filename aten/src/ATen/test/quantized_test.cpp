@@ -18,7 +18,7 @@ TEST(TestQTensor, QuantDequantAPIs) {
   Tensor r = at::ones({num_elements});
   const float scale = 1.0;
   const int32_t zero_point = 2;
-  Tensor qr = r.quantize_linear(scale, zero_point, kQUInt8);
+  Tensor qr = at::quantize_linear(r, scale, zero_point, kQUInt8);
   ASSERT_EQ(qr.q_scale().to<float>(), scale);
   ASSERT_EQ(qr.q_zero_point().to<int32_t>(), zero_point);
   ASSERT_TRUE(qr.is_quantized());
@@ -60,7 +60,7 @@ TEST(TestQTensor, RoundingMode) {
     6, 6, 8, 8, 10, 10};  // scale = 1.0
 
   Tensor x = from_blob(x_values.data(), x_values.size());
-  Tensor qx = x.quantize_linear(/*scale=*/1.0, zero_point, kQUInt8);
+  Tensor qx = at::quantize_linear(x, /*scale=*/1.0, zero_point, kQUInt8);
 
   auto qx_data = qx.data<quint8>();
   for (int idx = 0; idx < x_values.size(); ++idx) {
@@ -73,7 +73,7 @@ TEST(TestQTensor, Item) {
   Tensor r = at::ones({1});
   const float scale = 1;
   const int32_t zero_point = 2;
-  Tensor qr = r.quantize_linear(scale, zero_point, kQUInt8);
+  Tensor qr = at::quantize_linear(r, scale, zero_point, kQUInt8);
   ASSERT_EQ(r.item().to<float>(), qr.item().to<float>());
 }
 
