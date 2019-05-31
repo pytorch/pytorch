@@ -1844,6 +1844,7 @@ def _get_builtin_table():
         (math.tan, "aten::tan"),
         (math.fmod, "aten::fmod"),
         (math.modf, "aten::modf"),
+        (math.remainder, "aten::mathremainder"),
         (torch._C._infer_size, "aten::_infer_size"),
         (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
         (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
@@ -1863,7 +1864,6 @@ def _get_builtin_table():
         _builtin_table[id(builtin)] = aten_op
     if not PY2:
         _builtin_table[id(math.gcd)] = "aten::gcd"
-        _builtin_table[id(math.remainder)] = "aten::mathremainder"
 
     return _builtin_table
 
