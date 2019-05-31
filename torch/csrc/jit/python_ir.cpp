@@ -681,12 +681,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
         return DictType::create(key, value);
-      }));
-  py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")
-      .def(py::init([](const std::string& name,
-                       std::shared_ptr<script::CompilationUnit> cu) {
-        return ClassType::create(c10::QualifiedName(name), cu);
-      }));
+      }))
+      .def("getKeyType", &DictType::getKeyType)
+      .def("getValueType", &DictType::getValueType);
   py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
       m, "OptionalType")
       .def(py::init([](TypePtr a) { return OptionalType::create(a); }))
