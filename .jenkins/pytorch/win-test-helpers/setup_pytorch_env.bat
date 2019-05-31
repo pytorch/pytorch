@@ -21,7 +21,7 @@ if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
     call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba
 )
-pip install -q ninja future hypothesis "librosa>=0.6.2" psutil
+pip install -q ninja future hypothesis "librosa>=0.6.2" psutil pillow
 :: No need to install faulthandler since we only test Python >= 3.6 on Windows
 :: faulthandler is builtin since Python 3.3
 
