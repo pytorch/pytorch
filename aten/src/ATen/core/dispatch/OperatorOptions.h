@@ -22,6 +22,14 @@ public:
     aliasAnalysisKind_ = v;
   }
 
+  friend bool operator==(const OperatorOptions& lhs, const OperatorOptions& rhs) {
+    return lhs.aliasAnalysisKind_ == rhs.aliasAnalysisKind_;
+  }
+
+  friend bool operator!=(const OperatorOptions& lhs, const OperatorOptions& rhs) {
+    return !(lhs == rhs);
+  }
+
 private:
   AliasAnalysisKind aliasAnalysisKind_ = AliasAnalysisKind::DEFAULT;
 };
