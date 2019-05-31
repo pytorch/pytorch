@@ -4774,6 +4774,41 @@ class TestNN(NNTestCase):
                              torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
                              1e-1 if dtype == torch.half else dtype2prec[dtype])
 
+    # Almost identical to the above `test_Conv2d_naive_groups`
+    # Covering special case when group > 1, input-channel / group < 16 and output-channel is multiple of 16
+    # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
+    # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
+    def test_Conv2d_groups_nobias_v2(self):
+        dev_dtypes = [("cpu", torch.float)]
+        if TEST_CUDA:
+            dev_dtypes += [("cuda", torch.float), ("cuda", torch.half)]
+        for device, dtype in dev_dtypes:
+            m = nn.Conv2d(4, 16, kernel_size=3, groups=2, bias=False).to(device, dtype)
+            i = torch.randn(2, 4, 6, 6, device=device, dtype=dtype, requires_grad=True)
+            output = m(i)
+            grad_output = torch.randn(2, 16, 4, 4, device=device, dtype=dtype)
+            output.backward(grad_output)
+
+            m1 = nn.Conv2d(2, 8, kernel_size=3, bias=False).to(device, dtype)
+            m1.weight.data.copy_(m.weight.data[:8])
+            i1 = Variable(i.data[:, :2].contiguous(), requires_grad=True)
+            output1 = m1(i1)
+            output1.backward(grad_output[:, :8].contiguous())
+
+            m2 = nn.Conv2d(2, 8, kernel_size=3, bias=False).to(device, dtype)
+            m2.weight.data.copy_(m.weight.data[8:])
+            i2 = Variable(i.data[:, 2:].contiguous(), requires_grad=True)
+            output2 = m2(i2)
+            output2.backward(grad_output[:, 8:].contiguous())
+
+            self.assertEqual(output, torch.cat([output1, output2], 1))
+            self.assertEqual(i.grad.data,
+                             torch.cat([i1.grad.data, i2.grad.data], 1),
+                             dtype2prec[dtype])
+            self.assertEqual(m.weight.grad.data,
+                             torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
+                             1e-1 if dtype == torch.half else dtype2prec[dtype])
+
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
