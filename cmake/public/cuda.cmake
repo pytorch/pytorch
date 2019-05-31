@@ -9,11 +9,21 @@ endif()
 # release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
 
- # we dont want to statically link cudart, because we rely on it's dynamic linkage in
- # python (follow along torch/cuda/__init__.py and usage of cudaGetErrorName).
- # Technically, we can link cudart here statically, and link libtorch_python.so
- # to a dynamic libcudart.so, but that's just wasteful
-SET(CUDA_USE_STATIC_CUDA_RUNTIME OFF CACHE INTERNAL "")
+# We don't want to statically link cudart, because we rely on it's dynamic linkage in
+# python (follow along torch/cuda/__init__.py and usage of cudaGetErrorName).
+# Technically, we can link cudart here statically, and link libtorch_python.so
+# to a dynamic libcudart.so, but that's just wasteful.
+# However, on Windows, if this one gets switched off, the error "cuda: unknown error"
+# will be raised when running the following code:
+# >>> import torch
+# >>> torch.cuda.is_available()
+# >>> torch.cuda.current_device()
+# More details can be found in the following links.
+# https://github.com/pytorch/pytorch/issues/20635
+# https://github.com/pytorch/pytorch/issues/17108
+if (NOT MSVC)
+  set(CUDA_USE_STATIC_CUDA_RUNTIME OFF CACHE INTERNAL "")
+endif()
 
 # Find CUDA.
 find_package(CUDA)

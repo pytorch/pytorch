@@ -994,7 +994,7 @@ void Node::destroy() {
 }
 
 void Node::cloneFrom(Node* s) {
-  s->source_range_ = s->source_range_;
+  source_range_ = s->source_range_;
   if (s->scope_ && !s->scope_->isBlank()) {
     scope_ = s->scope_;
   }
@@ -1230,8 +1230,7 @@ void Node::removeFromList() {
 }
 
 inline const SourceRange& fakeRange() {
-  static SourceRange range(
-      std::make_shared<std::string>("<internally-created-node>"), 0, 1);
+  static SourceRange range(std::make_shared<Source>(""), 0, 1);
   return range;
 }
 

@@ -268,6 +268,11 @@ def parse_args():
         action='store_true',
         help='print verbose information and test-by-test results')
     parser.add_argument(
+        '--jit',
+        '--jit',
+        action='store_true',
+        help='run all jit tests')
+    parser.add_argument(
         '-pt', '--pytest', action='store_true',
         help='If true, use `pytest` to execute the tests. E.g., this runs '
              'TestTorch with pytest in verbose and coverage mode: '
@@ -412,6 +417,9 @@ def main():
 
     if options.coverage:
         shell(['coverage', 'erase'])
+
+    if options.jit:
+        selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     for test in selected_tests:
         test_name = 'test_{}'.format(test)
