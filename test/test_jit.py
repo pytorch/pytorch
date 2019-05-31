@@ -6013,6 +6013,10 @@ a")
                 if debug:
                     print("in: ", a, b)
                     print("out: ", resf, resfs)
+                # We can't use assertEqual because of a couple of differences:
+                # 1. nan == nan should return true
+                # 2. When python functions throw an exception, we usually want to silently ignore them.
+                # (ie: We want to return `nan` for math.sqrt(-5))
                 if resf != resfs:
                     if isinstance(resf, Exception):
                         continue
