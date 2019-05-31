@@ -28,7 +28,7 @@ TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
     c10::optional<NamedValue> self,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
-    std::ostream& failure_messages,
+    std::function<void(std::ostream&)>& failure_messages,
     bool allow_conversions);
 
 TORCH_API bool convertibleToList(

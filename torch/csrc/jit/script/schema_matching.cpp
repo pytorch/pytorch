@@ -127,7 +127,8 @@ Value* tryMatchArgument(
     Graph& graph,
     const SourceRange& loc,
     const NamedValue& named_value,
-    const std::function<std::ostream&()>& err,
+    const std::function<void(std::ostream&)>& render_error_prefix,
+    std::function<void(std::ostream&)>& render_errors,
     bool allow_conversions,
     TypeEnv& type_env) {
   Value* value = named_value.value(graph);
@@ -145,10 +146,13 @@ Value* tryMatchArgument(
   const MatchTypeReturn matched_type =
       matchTypeVariables(arg.type(), value->type(), type_env);
   if (!matched_type.type) {
-    err() << "Could not match type " << value->type()->python_str() << " to "
-          << arg.type()->python_str() << " in argument '" << arg.name()
-          << "': " << matched_type.errMsg << "\n"
-          << named_value.locOr(loc);
+    render_errors = [&](std::ostream& stream) {
+      render_error_prefix(stream);
+      stream << "Could not match type " << value->type()->python_str() << " to "
+        << arg.type()->python_str() << " in argument '" << arg.name()
+        << "': " << matched_type.errMsg << "\n"
+        << named_value.locOr(loc);
+    };
     return nullptr;
   }
   const auto concrete_type = *matched_type.type;
@@ -158,23 +162,36 @@ Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
-    auto& ostream =
-        err() << arg.formatTypeMismatchMsg(value->type()->python_str());
+    render_errors = [&](std::ostream& stream) {
+      render_error_prefix(stream);
+      stream << arg.formatTypeMismatchMsg(value->type()->python_str());
+    };
 
     if (auto v = value->type()->cast<ListType>()) {
       if (v->getElementType()->isSubtypeOf(TensorType::get())) {
-        ostream << "Empty lists default to List[Tensor]. Use torch.jit."
-                   "annotate(List[my_type], []) to create an empty list of"
-                   " another type\n";
+        render_errors = [&](std::ostream& stream) {
+          render_errors(stream);
+          stream << "Empty lists default to List[Tensor]. Use torch.jit."
+                    "annotate(List[my_type], []) to create an empty list of"
+                    " another type\n";
+        };
       }
     }
 
     if (value->type() == NumberType::get() &&
         value->node()->kind() == aten::item) {
-      ostream << "Use int(tensor) or float(tensor) to retrieve item() from a "
-              << "tensor with the appropriate type\n";
+      render_errors = [&](std::ostream& stream) {
+        render_errors(stream);
+        stream << "Use int(tensor) or float(tensor) to retrieve item() from a "
+               << "tensor with the appropriate type\n";
+      };
     }
-    ostream << named_value.locOr(loc);
+
+    render_errors = [&](std::ostream& stream) {
+      render_errors(stream);
+      stream << named_value.locOr(loc);
+    };
+
     return nullptr;
   }
   return value;
@@ -200,7 +217,8 @@ Value* tryCreateList(
     Graph& graph,
     const SourceRange& loc,
     at::ArrayRef<NamedValue> varargs,
-    const std::function<std::ostream&()>& err,
+    const std::function<void(std::ostream&)>& render_error_prefix,
+    std::function<void(std::ostream&)>& render_errors,
     bool convert_tensor_to_num,
     TypeEnv& type_env) {
   Argument elem_arg("<varargs>", elem_type);
@@ -212,7 +230,8 @@ Value* tryCreateList(
         graph,
         loc,
         named_value,
-        err,
+        render_error_prefix,
+        render_errors,
         /*allow_conversions=*/convert_tensor_to_num,
         type_env);
     if (!matched_value) {
@@ -252,11 +271,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
     c10::optional<NamedValue> self,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    std::ostream& failure_messages,
+    std::function<void(std::ostream&)>& render_errors,
     bool allow_conversions) {
-  auto err = [&]() -> std::ostream& {
-    failure_messages << "\nfor operator " << schema << ":\n";
-    return failure_messages;
+  auto render_error_prefix = [&](std::ostream& stream) {
+    stream << "\nfor operator " << schema << ":\n";
   };
 
   // For VarTypes, maps VarType name to actual type as it's used with these
@@ -291,7 +309,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
               graph,
               loc,
               at::ArrayRef<NamedValue>(args).slice(used_args),
-              err,
+              render_error_prefix,
+              render_errors,
               allow_conversions,
               type_env);
           if (!list) {
@@ -310,9 +329,12 @@ c10::optional<MatchedSchema> tryMatchSchema(
     } else if (auto kwarg_idx = findInputWithName(arg.name(), kwargs)) {
       const NamedValue& nv = kwargs[*kwarg_idx];
       if (used_kwarg[*kwarg_idx]) {
-        err() << "argument " << nv.name()
-              << " specified twice in schema, submit a bug report!\n"
-              << nv.locOr(loc);
+        render_errors = [&](std::ostream& stream) {
+          render_error_prefix(stream);
+          stream << "argument " << nv.name()
+                 << " specified twice in schema, submit a bug report!\n"
+                 << nv.locOr(loc);
+        };
         return c10::nullopt;
       }
       used_kwarg[*kwarg_idx] = true;
@@ -322,15 +344,20 @@ c10::optional<MatchedSchema> tryMatchSchema(
       // default
       actual_named_value = NamedValue(*arg.default_value());
     } else {
-      err() << "argument " << schema.arguments()[schema_i].name()
-            << " not provided.\n"
-            << loc;
+      render_errors = [&](std::ostream& stream) {
+        render_error_prefix(stream);
+        stream << "argument " << schema.arguments()[schema_i].name()
+               << " not provided.\n"
+               << loc;
+      };
+
       return c10::nullopt;
     }
 
     // Make sure the actual_named_value found matches the type of arg
     Value* positional = tryMatchArgument(
-        arg, graph, loc, *actual_named_value, err, allow_conversions, type_env);
+        arg, graph, loc, *actual_named_value, render_error_prefix,
+        render_errors, allow_conversions, type_env);
     if (!positional) {
       return c10::nullopt;
     }
@@ -338,7 +365,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
   }
   // check for unused self argument
   if (self != c10::nullopt) {
-    err() << "provided self argument not used in schema\n";
+    render_errors = [&](std::ostream& stream) {
+      render_error_prefix(stream);
+      stream << "provided self argument not used in schema\n";
+    };
   }
 
   if (schema.is_vararg()) {
@@ -349,9 +379,13 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
   // check for unused positional arguments
   if (used_args < args.size()) {
-    err() << "expected at most " << used_args << " arguments "
-          << "but found " << args.size() << " positional arguments.\n"
-          << loc << "\n";
+    render_errors = [&](std::ostream& stream) {
+      render_error_prefix(stream);
+      stream << "expected at most " << used_args << " arguments "
+             << "but found " << args.size() << " positional arguments.\n"
+             << loc << "\n";
+    };
+
     return c10::nullopt;
   }
   // check for unused kwargs
@@ -359,9 +393,15 @@ c10::optional<MatchedSchema> tryMatchSchema(
     const auto& nv = kwargs[i];
     if (!used_kwarg[i]) {
       if (!schema.argumentIndexWithName(nv.name())) {
-        err() << "keyword argument " << nv.name() << " unknown\n";
+        render_errors = [&](std::ostream& stream) {
+          render_error_prefix(stream);
+          stream << "keyword argument " << nv.name() << " unknown\n";
+        };
       } else {
-        err() << "keyword argument " << nv.name() << " specified twice\n";
+        render_errors = [&](std::ostream& stream) {
+          render_error_prefix(stream);
+          stream << "keyword argument " << nv.name() << " specified twice\n";
+        };
       }
       return c10::nullopt;
     }
@@ -449,12 +489,12 @@ Value* emitBuiltinCall(
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
-  std::stringstream failure_messages;
+  std::function<void(std::ostream&)> render_errors;
   // first we try to match the schema without any conversion
   // if no schema matches then insert ImplicitTensorToNum
   for (bool allow_conversions : {false, true}) {
     // clear previous error messages
-    failure_messages.str("");
+    render_errors = [](std::ostream&) { };
     for (const std::shared_ptr<Operator>& op : variants) {
       const auto matched_schema = tryMatchSchema(
           op->schema(),
@@ -463,7 +503,7 @@ Value* emitBuiltinCall(
           self,
           inputs,
           attributes,
-          failure_messages,
+          render_errors,
           allow_conversions);
       if (matched_schema) {
         return emitBuiltinNode(*matched_schema, loc, graph, name);
@@ -476,7 +516,7 @@ Value* emitBuiltinCall(
               self,
               inputs,
               attributes,
-              failure_messages,
+              render_errors,
               allow_conversions)) {
         return result;
       }
@@ -506,6 +546,8 @@ Value* emitBuiltinCall(
     throw error;
   }
 
+  std::stringstream failure_messages;
+  render_errors(failure_messages);
   throw ErrorReport(loc) << "arguments for call are not valid:\n"
                          << prefixLine(failure_messages.str(), "  ")
                          << "for call at";

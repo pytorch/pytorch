@@ -39,7 +39,7 @@ Value* Function::try_emit_call(
     c10::optional<NamedValue> self,
     ArrayRef<NamedValue> args,
     ArrayRef<NamedValue> kwargs,
-    std::stringstream& failure_messages,
+    std::function<void(std::ostream&)>& render_errors,
     bool conv_tensors_to_nums) {
   ensure_defined();
   auto fn = this->graph();
@@ -51,7 +51,7 @@ Value* Function::try_emit_call(
       std::move(self),
       args,
       kwargs,
-      failure_messages,
+      render_errors,
       conv_tensors_to_nums);
   if (!matched_schema)
     return nullptr;
@@ -74,17 +74,21 @@ Value* Function::emit_call(
     const SourceRange& loc,
     ArrayRef<NamedValue> args,
     ArrayRef<NamedValue> kwargs) {
-  std::stringstream failure_messages;
+
+  std::function<void(std::ostream&)> render_errors = [](std::ostream&) { };
   if (auto result = try_emit_call(
           graph,
           loc,
           c10::nullopt,
           args,
           kwargs,
-          failure_messages,
+          render_errors,
           /*conv_tensors_to_nums=*/true)) {
     return result;
   }
+
+  std::stringstream failure_messages;
+  render_errors(failure_messages);
   throw ErrorReport(loc) << failure_messages.str();
 }
 

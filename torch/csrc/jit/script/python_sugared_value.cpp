@@ -97,7 +97,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
   auto inputs = toValues(*m.graph(), inputs_);
   auto schema = getSchema(inputs.size(), n_binders);
 
-  std::stringstream failure_messages;
+  std::function<void(std::ostream&)> render_errors = [](std::ostream&) { };
   c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
       schema,
       loc,
@@ -105,10 +105,13 @@ std::shared_ptr<SugaredValue> PythonValue::call(
       c10::nullopt,
       inputs_,
       attributes,
-      failure_messages,
+      render_errors,
       /*conv_tensor_to_num*/ true);
-  if (!matched_schema)
+  if (!matched_schema) {
+    std::stringstream failure_messages;
+    render_errors(failure_messages);
     throw ErrorReport(loc) << failure_messages.str();
+  }
 
   // Release the function object so we can wrap it in a PythonOp
   py::object func = self;
@@ -217,9 +220,10 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  std::stringstream err;
   std::vector<NamedValue> new_inputs = inputs.vec();
   new_inputs.insert(new_inputs.begin(), module_);
+
+  std::function<void(std::ostream&)> render_errors = [](std::ostream&) { };
 
   for (const std::string& method_name : method_names_) {
     auto cls = module_->type()->expect<ClassType>();
@@ -231,13 +235,16 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
         c10::nullopt,
         new_inputs,
         attributes,
-        err,
+        render_errors,
         true);
     if (match) {
       return MethodValue(module_, fn)
           .call(loc, caller, inputs, attributes, n_binders);
     }
   }
+
+  std::stringstream err;
+  render_errors(err);
   throw ErrorReport(loc) << "Could not find any matching overloads\n"
                          << err.str();
 }
