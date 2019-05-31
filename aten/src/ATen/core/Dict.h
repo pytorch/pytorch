@@ -129,6 +129,8 @@ private:
   friend class DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
   friend class DictPtr<Key, Value>;
   friend bool operator==<Key, Value, Iterator>(const DictIterator& lhs, const DictIterator& rhs);
+
+  // TODO We also need comparison operators <, >, <=, >=, see ListIterator.
 };
 
 template<class Key, class Value, class Iterator>
