@@ -475,60 +475,6 @@ void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Gene
    });
 }
 
-void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
-  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "normal_cuda", [&] {
-    using accscalar_t = at::acc_type<scalar_t, true>;
-    auto mean = static_cast<accscalar_t>(mean_);
-    auto std = static_cast<accscalar_t>(std_);
-    // define lambda to multiply std and add mean
-    auto normal_func = [mean, std] __device__ (accscalar_t rand) {
-      return static_cast<scalar_t>(rand * std + mean);
-    };
-    if (std::is_same<scalar_t, double>::value) {
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal2_double(state); },
-        normal_func);
-    } else {
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal4(state); },
-        normal_func);
-    }
-   });
-}
-
-void cauchy_kernel_cuda(TensorIterator& iter, double median_, double sigma_, Generator* gen_) {
-  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "cauchy_cuda", [&] {
-    using accscalar_t = at::acc_type<scalar_t, true>;
-    auto median = static_cast<accscalar_t>(median_);
-    auto sigma = static_cast<accscalar_t>(sigma_);
-    if (std::is_same<scalar_t, double>::value) {
-      // define lambda for cauchy transformation
-      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
-        return static_cast<scalar_t>(median + sigma * 
-                ::tan(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
-      };
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
-        cauchy_func);
-    } else {
-      // use __tanf fast approximation for peak bandwidth
-      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
-        return static_cast<scalar_t>(median + sigma * 
-                __tanf(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
-      };
-      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
-        cauchy_func);
-    }
-   });
-}
-
 void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* gen_) {
   auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exponential_cuda", [&] {
@@ -570,6 +516,60 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
    });
 }
 
+void log_normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
+  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "log_normal_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto mean = static_cast<accscalar_t>(mean_);
+    auto std = static_cast<accscalar_t>(std_);
+    if (std::is_same<scalar_t, double>::value) {
+      // define lambda for log_normal transformation
+      auto log_normal_func = [mean, std] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(::exp(rand * std + mean));
+      };
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal2_double(state); },
+        log_normal_func);
+    } else {
+      auto log_normal_func = [mean, std] __device__ (accscalar_t rand) {
+        // use __expf fast approximation for peak bandwidth
+        return static_cast<scalar_t>(__expf(rand * std + mean));
+      };
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal4(state); },
+        log_normal_func);
+    }
+   });
+}
+
+void geometric_kernel_cuda(TensorIterator& iter, double p_, Generator* gen_) {
+  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "geometric_cuda", [&] {
+    if (std::is_same<scalar_t, double>::value) {
+      // define lambda for geometric transformation
+      auto geometric_func = [p_] __device__ (double rand) {
+        return static_cast<scalar_t>(::ceil(::log(rand) / ::log(static_cast<double>(1.0)-p_)));
+      };
+      distribution_nullary_kernel<scalar_t, double, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+        geometric_func);
+    } else {
+      auto p = static_cast<float>(p_);
+      auto geometric_func = [p] __device__ (float rand) {
+        // use __logf fast approximation for peak bandwidth
+        return static_cast<scalar_t>(::ceil(__logf(rand) / __logf(static_cast<float>(1.0)-p)));
+      };
+      distribution_nullary_kernel<scalar_t, float, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+        geometric_func);
+    }
+   });
+}
+
 Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   uniform_kernel_cuda(*iter, from, to, gen);
@@ -605,59 +605,23 @@ Tensor& capped_random_cuda_(Tensor& self, int64_t to, Generator* gen) {
   return clamped_random_cuda_(self, 0, to, gen);
 }
 
-Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
-  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
-  auto iter = TensorIterator::nullary_op(self);
-  normal_kernel_cuda(*iter, mean, std, gen);
-  return self;
-}
-
-Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generator* gen) {
-  normal_cuda_(output, 0, std, gen);
-  output.add_(mean);
-  return output;
-}
-
-Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
-  normal_cuda_(output, 0, 1, gen);
-  auto mean_tensor = at::full({1}, mean, output.options());
-  at::native::legacy::cuda::_th_addcmul_out(output, mean_tensor, output, std, 1);
-  return output;
-}
-
-Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
-  normal_cuda_(output, 0, 1, gen);
-  at::native::legacy::cuda::_th_addcmul_out(output, mean, output, std, 1);
-  return output; 
-}
-
-Tensor normal_cuda(const Tensor& mean, double std, Generator* gen) {
-  Tensor ret = at::empty(mean.sizes(), mean.options());
-  normal_out_cuda(ret, mean, std, gen);
-  return ret;
-}
-
-Tensor normal_cuda(double mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty(std.sizes(), std.options());
-  normal_out_cuda(ret, mean, std, gen);
-  return ret;
-}
-
-Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty(mean.sizes(), mean.options());
-  normal_out_cuda(ret, mean, std, gen);
-  return ret;
-}
-
-Tensor& cauchy_cuda_(Tensor& self, double median, double sigma, Generator* gen) {
-  auto iter = TensorIterator::nullary_op(self);
-  cauchy_kernel_cuda(*iter, median, sigma, gen);
-  return self;
-}
-
 Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   exponential_kernel_cuda(*iter, lambda, gen);
+  return self;
+}
+
+Tensor& log_normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  auto iter = TensorIterator::nullary_op(self);
+  log_normal_kernel_cuda(*iter, mean, std, gen);
+  return self;
+}
+
+Tensor& geometric_cuda_(Tensor& self, double p, Generator* gen) {
+  TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
+  auto iter = TensorIterator::nullary_op(self);
+  geometric_kernel_cuda(*iter, p, gen);
   return self;
 }
 

@@ -3193,7 +3193,7 @@
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_log_normal_
-    CUDA: legacy::cuda::_th_log_normal_
+    CUDA: log_normal_cuda_
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
@@ -3205,7 +3205,7 @@
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_geometric_
-    CUDA: legacy::cuda::_th_geometric_
+    CUDA: geometric_cuda_
 
 # wrappers for TH functions
 
