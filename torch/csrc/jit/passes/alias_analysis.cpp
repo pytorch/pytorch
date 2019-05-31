@@ -584,6 +584,11 @@ void AliasDb::analyzeSetAttr(Node* node) {
 void AliasDb::analyzeConservative(Node* node) {
   for (const auto input : node->inputs()) {
     registerWrite(input, node);
+    // We may also write to any contained types
+    for (const auto& type : input->type()->containedTypes()) {
+      auto el = getOrCreateWildcard(type);
+      registerWrite(el, node);
+    }
     setWildcard(input);
   }
 
