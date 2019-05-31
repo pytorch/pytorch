@@ -10,10 +10,6 @@ namespace jit {
 
 struct Value;
 
-/**
- * A value with optional extra name and location information. Used during
- * schema matching to provide extra error information and resolve kwargs.
- */
 struct NamedValue {
   NamedValue(const SourceRange& loc, const std::string& name, Value* value)
       : loc_(loc), name_(name), value_(value) {}

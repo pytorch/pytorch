@@ -5,22 +5,10 @@
 namespace caffe2 {
 
 namespace {
-// Populate 'net_pos' argument for any ops that don't already have it. 'net_pos'
-// we populate here starts after the max 'net_pos' value we encountered.
 void annotateOpIndex(NetDef* net) {
-  // find the max net_pos that we have so far.
-  int i = -1;
-  for (const auto& op : net->op()) {
-    ArgumentHelper helper(op);
-    int old_index = helper.GetSingleArgument(op, kNetPos, -1);
-    i = std::max(i, old_index);
-  }
-
-  // populate net_pos for any op that doesn't already have it.
+  int i = 0;
   for (auto& op : *(net->mutable_op())) {
-    if (!ArgumentHelper::HasArgument(op, kNetPos)) {
-      AddArgument(kNetPos, ++i, &op);
-    }
+    AddArgument(kNetPos, i++, &op);
   }
 }
 } // namespace
