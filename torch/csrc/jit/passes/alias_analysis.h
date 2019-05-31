@@ -62,7 +62,7 @@ class AliasDb {
   TORCH_API bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`? i.e. may they overlap?
-  bool mayAlias(const ValueSet& a, const ValueSet& b) const;
+  TORCH_API bool mayAlias(const ValueSet& a, const ValueSet& b) const;
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
   TORCH_API bool hasWriters(const Node* n) const;
