@@ -1453,7 +1453,7 @@ int listEq(Stack& stack) {
   T a;
   T b;
   pop(stack, a, b);
-  push(stack, is_equal(a->elements(), b->elements()));
+  push(stack, list_is_equal(a->elements(), b->elements()));
   return 0;
 }
 
@@ -1462,7 +1462,7 @@ int listNe(Stack& stack) {
   T a;
   T b;
   pop(stack, a, b);
-  push(stack, !is_equal(a->elements(), b->elements()));
+  push(stack, !list_is_equal(a->elements(), b->elements()));
   return 0;
 }
 
