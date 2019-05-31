@@ -618,7 +618,8 @@ struct ParserImpl {
   SharedParserData& shared;
 };
 
-Parser::Parser(const std::shared_ptr<Source>& src) : pImpl(new ParserImpl(src)) {}
+Parser::Parser(const std::shared_ptr<Source>& src)
+    : pImpl(new ParserImpl(src)) {}
 
 Parser::~Parser() = default;
 
