@@ -86,6 +86,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     fbgemm::DoNothing<> NoOpObj{};
 
     auto bias_contig = bias.contiguous();
+    const auto* bias_ptr =
+        reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
 
     float act_scale = act.q_scale().toFloat();
     int32_t act_zero_point = act.q_zero_point().toInt();
@@ -104,7 +106,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         &weight_zero_point_int32,
         packA.getRowOffsetBuffer(),
         col_offsets.data(),
-        bias_contig.data<int32_t>(),
+        bias_ptr,
         K,
         groups);
 

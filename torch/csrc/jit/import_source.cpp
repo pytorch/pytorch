@@ -194,12 +194,12 @@ struct SourceImporter {
           class_qualifier + "." + class_def.name().name();
       auto class_type =
           ClassType::create(c10::QualifiedName(qualified_classname), cu);
+      owner.register_class(class_type);
       auto self = [&](Value* v) {
         v->setType(class_type);
         return std::make_shared<SimpleValue>(v);
       };
       cu->define(definitions, resolvers, self);
-      owner.register_class(class_type);
     }
   }
 

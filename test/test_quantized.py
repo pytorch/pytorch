@@ -332,9 +332,9 @@ class TestQuantizedLinear(unittest.TestCase):
         W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
         b = torch.from_numpy(_dequantize(b_q0, X_scale * W_scale, 0)).to(dtype=torch.float)
 
-        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
-        b_q = b.quantize_linear(scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
+        X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
+        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
 
         # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
         # Y_scale * 255 (max for uint8).
@@ -360,7 +360,7 @@ class TestQuantizedLinear(unittest.TestCase):
         X_fp32 = X_q.dequantize().to(dtype=torch.float)
         b_fp32 = b_q.dequantize().to(dtype=torch.float)
         Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
-        Y_q_ref2 = Y_fp32_ref.quantize_linear(Y_scale, Y_zp, torch.quint8)
+        Y_q_ref2 = torch.quantize_linear(Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
 
         # Assert equal
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
@@ -416,9 +416,9 @@ class TestQuantizedLinear(unittest.TestCase):
         W = torch.from_numpy(_dequantize(W_q0, W_scale, W_zp)).to(dtype=torch.float)
         b = torch.from_numpy(_dequantize(b_q0, X_scale * W_scale, 0)).to(dtype=torch.float)
 
-        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
-        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
-        b_q = b.quantize_linear(scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
+        X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
+        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
 
         # Compare X_scale * W_scale * input_channels * X_value_max * W_value_max with
         # Y_scale * 255 (max for uint8).
@@ -446,7 +446,7 @@ class TestQuantizedLinear(unittest.TestCase):
         b_fp32 = b_q.dequantize().to(dtype=torch.float)
         Y_fp32_ref = F.linear(X_fp32, W_fp32, b_fp32)
         Y_fp32_ref[Y_fp32_ref < 0.0] = 0.0
-        Y_q_ref2 = Y_fp32_ref.quantize_linear(Y_scale, Y_zp, torch.quint8)
+        Y_q_ref2 = torch.quantize_linear(Y_fp32_ref, Y_scale, Y_zp, torch.quint8)
 
         # Assert equal
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
@@ -480,7 +480,7 @@ class TestQuantizedConv(unittest.TestCase):
         dilation_h = dilation_w = 1
         groups = 1
 
-        W_value_min = 0
+        W_value_min = -5
         W_value_max = 5
         # We use small values to avoid overflow.
         # (the operator expects them in the format (output_channels, input_channels/groups, kernel_h, kernel_w))
@@ -536,9 +536,11 @@ class TestQuantizedConv(unittest.TestCase):
         W_zero_point = 0
         W = W_scale * (W_RSCK - W_zero_point).to(dtype=torch.float)
 
-        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
-        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zero_point, dtype=torch.quint8)
-        b_q = b_init.to(dtype=torch.int32)
+        b = X_scale * W_scale * (b_init - 0).to(dtype=torch.float)
+
+        X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
+        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zero_point, dtype=torch.qint8)
+        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
 
         W_prepack = qconv_prepack(W_q, groups)
         Y_scale = 7.3
