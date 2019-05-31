@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/dispatch/DispatchTable.h>
+#include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <list>
 
@@ -8,7 +9,7 @@ namespace c10 {
 namespace impl {
 
 // This is a private class used inside the Dispatcher to represent an operator
-// and it's dispatch table. This is not part of the public API.
+// and its dispatch table. This is not part of the public API.
 class OperatorEntry final {
 public:
   explicit OperatorEntry(FunctionSchema&& schema);
@@ -32,6 +33,10 @@ public:
 
   RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel);
   RegistrationHandleRAII registerCatchallKernel(DispatchTableEntry kernel);
+
+  OperatorOptions& options() {
+    return options_;
+  }
 
 private:
   void deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel);
@@ -75,6 +80,9 @@ private:
     std::list<DispatchTableEntry> // catch-all kernels
   > kernels_;
   std::mutex kernelsMutex_; // protects kernels_
+
+  // Some metadata about the operator
+  OperatorOptions options_;
 
   // This function re-establishes the invariant that dispatchTable
   // contains the front element from the kernels list for a given dispatch key.
