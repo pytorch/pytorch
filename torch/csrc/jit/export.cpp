@@ -511,7 +511,8 @@ class ScriptModuleSerializer final {
   // to dump the content of a tensor
   void writeTensorTable(torch::ModelDef* model_def);
 
-  // Write the list of ivalues to a file as a pickle program
+  // Write the list of ivalues to a file as a pickle program, this may write to
+  // the tensor_table_ or class_table_
   void writePickleArchive(
       const std::string& name,
       const std::vector<IValue>& ivalues);
@@ -818,7 +819,7 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
 void ScriptModuleSerializer::writePickleArchive(
     const std::string& name,
     const std::vector<IValue>& ivalues) {
-  Pickler pickler(&tensor_table_);
+  Pickler pickler(&tensor_table_, &class_table_);
   pickler.start();
   pickler.startTuple();
   for (const IValue& ivalue : ivalues) {

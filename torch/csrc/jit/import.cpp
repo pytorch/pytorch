@@ -59,8 +59,9 @@ class ScriptModuleDeserializer final {
 
   void loadTensorTable(torch::ModelDef* model_def);
   std::vector<IValue> loadPickleArchive(const std::string& name);
+  void loadModuleState(const torch::ModuleDef& module_def);
   void importCallback(const std::string& qualifier);
-  void moduleSetState(
+  void moduleRunSetState(
       const std::shared_ptr<script::Module>& module,
       IValue state);
 
@@ -145,13 +146,14 @@ void ScriptModuleDeserializer::deserialize(
   }
 
   loadTensorTable(&model_def);
-  if (model_def.proto_version() >= 2) {
-    pickled_ivalues_ = loadPickleArchive("attributes.pkl");
-  }
-
   // TODO: this can be simplified when C++/Python interop lands,
   // and the submodules would be created as the same in either C++ or Python
   convertModule(module_def);
+
+  if (model_def.proto_version() >= 2) {
+    pickled_ivalues_ = loadPickleArchive("attributes.pkl");
+    loadModuleState(module_def);
+  }
 }
 
 void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
@@ -166,7 +168,11 @@ std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::strin
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) =
       reader_.getRecord(name);
-  Unpickler unpickler(attributes_ptr.get(), attributes_size, &tensor_table_);
+  Unpickler unpickler(
+      attributes_ptr.get(),
+      attributes_size,
+      &tensor_table_,
+      &main_module_->class_compilation_unit());
   return unpickler.parse_ivalue_list();
 }
 
@@ -262,7 +268,7 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
       import_callback);
 }
 
-void ScriptModuleDeserializer::moduleSetState(
+void ScriptModuleDeserializer::moduleRunSetState(
     const std::shared_ptr<script::Module>& module,
     IValue state) {
   auto setstate = module->class_compilation_unit().find_function("__setstate__");
@@ -276,6 +282,60 @@ void ScriptModuleDeserializer::moduleSetState(
   // lowered, change this to `module->run_method("__setstate__", {state});`
   setstate->run({module->module_object(), state});
 }
+
+void ScriptModuleDeserializer::loadModuleState(
+    const torch::ModuleDef& module_def) {
+  std::shared_ptr<script::Module> module = moduleLookup_(moduleStack_);
+
+  for (int i = 0; i < module_def.submodules_size(); ++i) {
+    const torch::ModuleDef& sub_def = module_def.submodules(i);
+    moduleStack_.emplace_back(sub_def.name());
+    loadModuleState(sub_def);
+    moduleStack_.pop_back();
+  }
+
+  for (int i = 0; i < module_def.attributes_size(); ++i) {
+    const torch::AttributeDef& attr_def = module_def.attributes(i);
+    auto slot = module->find_attribute(attr_def.name());
+    AT_CHECK(
+        slot != nullptr,
+        "Expected an attribute ",
+        attr_def.name(),
+        " to exist");
+    IValue ivalue;
+    if (attr_def.id() >= 0) {
+      // attribute has no value in the table, set it to None for now. After
+      // __getstate__, check that all the attributes that are not Optional
+      // can't be None
+      ivalue = pickled_ivalues_.at(attr_def.id());
+    }
+
+    slot->setValue(ivalue);
+  }
+
+
+  // Run set_states for each module
+  if (module_def.has_get_state_attribute_id()) {
+    moduleRunSetState(
+        module, pickled_ivalues_.at(module_def.get_state_attribute_id()));
+  }
+
+  for (const auto& slot : module->get_attributes()) {
+    // Verify that all the non-optional attributes have been initialized
+    // TODO: Issue #20497
+    if (slot.type()->kind() != TypeKind::OptionalType) {
+      AT_CHECK(
+          !slot.value().isNone(),
+          "The field '",
+          slot.name(),
+          "' was left unitialized after __setstate__, but expected a ",
+          "value of type '",
+          slot.type()->python_str(),
+          "'");
+    }
+  }
+}
+
 
 void ScriptModuleDeserializer::convertModule(
     const torch::ModuleDef& module_def) {
@@ -304,16 +364,8 @@ void ScriptModuleDeserializer::convertModule(
       continue;
     }
 
-    IValue ivalue;
-    if (attr_def.id() >= 0) {
-      // attribute has no value in the table, set it to None for now. After
-      // __getstate__, check that all the attributes that are not Optional
-      // can't be None
-      ivalue = pickled_ivalues_.at(attr_def.id());
-    }
-
     module->register_attribute(
-        attr_def.name(), typeParser.parseType(attr_def.type()), ivalue);
+        attr_def.name(), typeParser.parseType(attr_def.type()), IValue());
   }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
@@ -330,26 +382,6 @@ void ScriptModuleDeserializer::convertModule(
         data_str,
         tensor_table_,
         import_callback);
-  }
-
-  if (module_def.has_get_state_attribute_id()) {
-    moduleSetState(
-        module, pickled_ivalues_.at(module_def.get_state_attribute_id()));
-  }
-
-  for (const auto& slot : module->get_attributes()) {
-    // Verify that all the non-optional attributes have been initialized
-    // TODO: Issue #20497
-    if (slot.type()->kind() != TypeKind::OptionalType) {
-      AT_CHECK(
-          !slot.value().isNone(),
-          "The field '",
-          slot.name(),
-          "' was left unitialized after __setstate__, but expected a ",
-          "value of type '",
-          slot.type()->python_str(),
-          "'");
-    }
   }
 }
 

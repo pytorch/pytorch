@@ -282,12 +282,12 @@ IValue getObjectState(const IValue& ivalue) {
   }
 
   // No __getstate__, do equivalent of 'return self.__dict__'
-  c10::ivalue::UnorderedMap state_dict;
+  auto state_dict = c10::make_dict<IValue, IValue>();
 
   for (size_t i = 0; i < object->type()->numAttributes(); ++i) {
     auto name = object->type()->getAttributeName(i);
     auto value = object->getSlot(i);
-    state_dict.insert({name, value});
+    state_dict.insert(name, value);
   }
 
   return state_dict;
@@ -822,7 +822,7 @@ OpCode Unpickler::readInstruction() {
             // Do equivalent of 'self.__dict__ = state'
             if (state.isGenericDict()) {
               for (auto entry : state.toGenericDictRef()) {
-                object->setAttr(entry.first.toStringRef(), entry.second);
+                object->setAttr(entry.key().toStringRef(), entry.value());
               }
             }
           }

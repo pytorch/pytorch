@@ -689,7 +689,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](TypePtr a) { return OptionalType::create(a); }))
       .def_static("ofTensor", &OptionalType::ofTensor)
       .def("getElementType", &OptionalType::getElementType);
-
+  py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")
+      .def(py::init([](const std::string& name,
+                       std::shared_ptr<script::CompilationUnit> cu) {
+        return ClassType::create(c10::QualifiedName(name), cu);
+      }));
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)
       .def_readonly("offset", &Use::offset);
