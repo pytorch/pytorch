@@ -219,4 +219,17 @@ void ListPtr<T>::resize(size_type count, const T& value) const {
   impl_->list.resize(count, value);
 }
 
+template<class T>
+bool list_is_equal(const ListPtr<T>& lhs, const ListPtr<T>& rhs) {
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    if (lhs.get(i) != rhs.get(i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 }

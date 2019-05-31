@@ -177,8 +177,8 @@ const IValue* ptr_to_first_element(const ListPtr<IValue>& list);
 template<class T> ListPtr<T> toList(std::vector<T> list);
 template<class T> ArrayRef<T> toArrayRef(const ListPtr<T>& list);
 template<class T> std::vector<T> toVector(const ListPtr<T>& list);
-
 }
+template<class T> bool list_is_equal(const ListPtr<T>& lhs, const ListPtr<T>& rhs);
 
 /**
  * An object of this class stores a list of values of type T.
@@ -391,6 +391,8 @@ public:
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
    */
   void resize(size_type count, const T& value) const;
+
+  friend bool list_is_equal<T>(const ListPtr& lhs, const ListPtr& rhs);
 
 protected:
   explicit ListPtr(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
