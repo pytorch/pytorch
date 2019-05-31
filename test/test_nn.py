@@ -3849,10 +3849,13 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @skipIfRocm
     def test_data_parallel_rnn(self):
+
         class Model(torch.nn.Module):
+
             def __init__(self):
                 super().__init__()
                 self.rnn = torch.nn.LSTM(300, 1024, 1, batch_first=True, bidirectional=True)
+
             def forward(self, x):
                 self.rnn.flatten_parameters()
                 return self.rnn(x)
