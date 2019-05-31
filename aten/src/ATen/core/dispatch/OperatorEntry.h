@@ -12,7 +12,7 @@ namespace impl {
 // and its dispatch table. This is not part of the public API.
 class OperatorEntry final {
 public:
-  explicit OperatorEntry(FunctionSchema&& schema);
+  explicit OperatorEntry(FunctionSchema&& schema, OperatorOptions&& options);
 
   OperatorEntry(const OperatorEntry&) = delete;
   OperatorEntry(OperatorEntry&&) noexcept = delete;
@@ -34,7 +34,7 @@ public:
   RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel);
   RegistrationHandleRAII registerCatchallKernel(DispatchTableEntry kernel);
 
-  OperatorOptions& options() {
+  const OperatorOptions& options() {
     return options_;
   }
 

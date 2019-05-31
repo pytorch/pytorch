@@ -252,6 +252,12 @@ public:
       return std::move(*this).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(c10::nullopt, std::forward<Lambda>(functor));
     }
 
+    Options&& aliasAnalysis(AliasAnalysisKind aliasAnalysisKind) && {
+      TORCH_CHECK(!aliasAnalysisKind_.has_value(), "You can only call aliasAnalysis() once per operator registration.");
+      aliasAnalysisKind_ = aliasAnalysisKind;
+      return std::move(*this);
+    }
+
   private:
     Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction&& cache_creator, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
@@ -292,6 +298,7 @@ public:
     };
 
     std::vector<KernelRegistrationConfig> kernels;
+    optional<AliasAnalysisKind> aliasAnalysisKind_;
     friend class RegisterOperators;
   };
 
@@ -398,8 +405,9 @@ private:
   static c10::FunctionSchema inferSchemaFromKernels_(const std::string& opNameStr, const Options& options);
   void checkNoDuplicateKernels_(const FunctionSchema& schema, const Options& options);
   void registerOp_(FunctionSchema&& schema, Options&& options);
-  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config);
-  void registerSchemaOnly_(FunctionSchema&& schema);
+  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options);
+  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options);
+  static OperatorOptions makeOperatorOptions_(const Options& options);
 
   class OperatorRegistrar;
 
