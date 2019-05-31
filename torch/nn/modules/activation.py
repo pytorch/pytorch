@@ -708,6 +708,8 @@ class MultiheadAttention(Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
+        self.head_dim = embed_dim // num_heads
+        assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
         self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
         if bias:
@@ -754,7 +756,7 @@ class MultiheadAttention(Module):
 
 
     Shape:
-        Inputs:
+        - Inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
           the embedding dimension.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
@@ -762,9 +764,9 @@ class MultiheadAttention(Module):
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
-        - attn_mask: :math:`(L, L)` where L is the target sequence length.
+        - attn_mask: :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
 
-        Outputs:
+        - Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
@@ -773,7 +775,7 @@ class MultiheadAttention(Module):
         return F.multi_head_attention_forward(
             query, key, value, self.embed_dim, self.num_heads,
             self.in_proj_weight, self.in_proj_bias, self.bias_k, self.bias_v, self.add_zero_attn,
-            self.dropout, self.out_proj, training=self.training,
+            self.dropout, self.out_proj.weight, self.out_proj.bias, training=self.training,
             key_padding_mask=key_padding_mask, need_weights=need_weights, attn_mask=attn_mask)
 
 
@@ -827,6 +829,7 @@ class PReLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['num_parameters']
 
     def __init__(self, num_parameters=1, init=0.25):
         self.num_parameters = num_parameters

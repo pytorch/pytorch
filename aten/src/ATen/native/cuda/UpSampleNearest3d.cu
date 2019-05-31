@@ -6,15 +6,14 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
+#include <ATen/LegacyTHFunctionsCUDA.h>
 
 namespace at {
 namespace native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void upsample_nearest3d_out_frame(
     const int n,
     const PackedTensorAccessor<scalar_t, 5> idata,
@@ -71,9 +70,7 @@ __global__ void upsample_nearest3d_out_frame(
 
 // Backward operation
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
-#endif
 __global__ void upsample_nearest3d_backward_out_frame(
     const int n,
     PackedTensorAccessor<scalar_t, 5> idata,
@@ -135,7 +132,7 @@ static void upsample_nearest3d_out_cuda_template(
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_nearest3d_out_cuda", {input_arg, output_arg});
 
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
       output_size.size());
@@ -174,8 +171,8 @@ static void upsample_nearest3d_out_cuda_template(
   output.zero_();
 
   const int num_kernels = output_depth * output_height * output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -192,7 +189,7 @@ static void upsample_nearest3d_out_cuda_template(
                stream>>>(num_kernels, idata, odata);
       });
 
-      AT_CUDA_CHECK(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_nearest3d_backward_out_cuda_template(
@@ -206,12 +203,12 @@ static void upsample_nearest3d_backward_out_cuda_template(
       "upsample_nearest3d_backward_out_cuda",
       {grad_output_arg, grad_input_arg});
 
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
       output_size.size());
 
-  AT_CHECK(
+  TORCH_CHECK(
       input_size.size() == 5,
       "It is expected input_size equals to 5, but got size ",
       input_size.size());
@@ -244,8 +241,8 @@ static void upsample_nearest3d_backward_out_cuda_template(
   grad_input.zero_();
 
   const int num_kernels = output_depth * output_height * output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = std::min(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -262,7 +259,7 @@ static void upsample_nearest3d_backward_out_cuda_template(
                stream>>>(num_kernels, idata, odata);
       });
 
-      AT_CUDA_CHECK(cudaGetLastError());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace

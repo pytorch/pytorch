@@ -8,7 +8,6 @@ import torch.nn as nn
 
 import itertools
 import io
-import unittest
 import inspect
 import glob
 import os
@@ -416,6 +415,10 @@ class TestOperators(TestCase):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x[:, 1:2], x)
 
+    def test_sign(self):
+        x = torch.rand(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.sign(), x)
+
     def test_narrow(self):
         x = torch.randn(3, 3, requires_grad=True)
         self.assertONNX(lambda x: torch.narrow(x, 0, 0, 2), x)
@@ -473,8 +476,11 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
-    def test_upsample(self):
+    def test_upsample_nearest(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
+
+    def test_upsample_bilinear(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
 
@@ -581,7 +587,7 @@ class TestOperators(TestCase):
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(
                     (scores), (bbox_deltas), (im_info), (anchors),
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0,
+                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
                 )
                 return a, b
 

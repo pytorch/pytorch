@@ -129,13 +129,13 @@ class LayerNorm(Module):
 
     .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
     """
-    __constants__ = ['normalized_shape', 'weight', 'bias', 'eps']
+    __constants__ = ['normalized_shape', 'weight', 'bias', 'eps', 'elementwise_affine']
 
     def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
         super(LayerNorm, self).__init__()
         if isinstance(normalized_shape, numbers.Integral):
             normalized_shape = (normalized_shape,)
-        self.normalized_shape = torch.Size(normalized_shape)
+        self.normalized_shape = tuple(normalized_shape)
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
