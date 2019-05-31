@@ -162,14 +162,14 @@ void AliasDb::dump() const {
     if (!element->pointsTo.empty()) {
       std::cout << getElementName(element) << " points to: ";
       for (const auto pointedTo : element->pointsTo) {
-        std::cout << getElementName(Element::fromIndex(pointedTo)) << ", ";
+        std::cout << getElementName(memoryDAG_->fromIndex(pointedTo)) << ", ";
       }
       std::cout << "\n";
     }
     if (!element->contained_elements.empty()) {
       std::cout << getElementName(element) << " contains: ";
       for (const auto contained : element->contained_elements) {
-        std::cout << getElementName(Element::fromIndex(contained)) << ", ";
+        std::cout << getElementName(memoryDAG_->fromIndex(contained)) << ", ";
       }
       std::cout << "\n";
     }
@@ -532,7 +532,7 @@ void AliasDb::analyzeWait(Node* node) {
     const auto el = pr.second;
     const auto& pointedFrom = el->pointedFrom;
     TORCH_INTERNAL_ASSERT(!pointedFrom.empty());
-    const auto wildcardValue = Element::fromIndex(*pointedFrom.begin())->value;
+    const auto wildcardValue = memoryDAG_->fromIndex(*pointedFrom.begin())->value;
     TORCH_INTERNAL_ASSERT(wildcardValue);
     registerWrite(wildcardValue, node);
   }
