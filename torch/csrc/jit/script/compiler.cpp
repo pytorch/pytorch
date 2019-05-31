@@ -1206,14 +1206,25 @@ struct to_ir {
     // ordered set, because we want deterministic graph output
     std::set<std::string> mutated_variables;
 
+    // var is only defined in one branch save error in case it's used later
+    auto err = [&](const std::string& v, const std::string& branch) {
+      ErrorReport error(stmt);
+      error << v << " is not defined in the " << branch;
+      environment_stack->setVariableTypeError(v, error.what());
+    };
+
     for (auto& v : save_true->definedVariables()) {
       if (save_false->findInAnyFrame(v)) {
         mutated_variables.insert(v);
+      } else {
+        err(v, "false branch");
       }
     }
     for (auto& v : save_false->definedVariables()) {
       if (save_true->findInAnyFrame(v)) {
         mutated_variables.insert(v);
+      } else {
+        err(v, "true branch");
       }
     }
 
@@ -1244,10 +1255,7 @@ struct to_ir {
             save_false->findInParentFrame(x)) {
           throw error;
         } else {
-          // error gets saved in the lowest environment because all
-          // variables are scoped to the function. doesn't matter if this
-          // accessed through save_true or save_false
-          save_true->setVariableTypeError(x, error.what());
+          environment_stack->setVariableTypeError(x, error.what());
           continue;
         }
       }
