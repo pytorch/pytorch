@@ -1782,6 +1782,13 @@ qr(some=True) -> (Tensor, Tensor)
 See :func:`torch.qr`
 """)
 
+add_docstr_all('qscheme',
+               r"""
+qscheme() -> QScheme
+
+Returns the quantization scheme of a given QTensor.
+""")
+
 add_docstr_all('quantize_linear',
                r"""
 quantize_linear(scale, zero_point) -> Tensor
