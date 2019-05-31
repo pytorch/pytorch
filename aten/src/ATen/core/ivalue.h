@@ -266,6 +266,8 @@ struct CAFFE2_API IValue final {
 
   template<class T>
   IValue(c10::ListPtr<T> v);
+  template<class T>
+  IValue(std::vector<T> v);
 
   // GenericDict
   IValue(c10::intrusive_ptr<ivalue::GenericDict> v);
@@ -276,6 +278,12 @@ struct CAFFE2_API IValue final {
 
   template<class Key, class Value>
   IValue(c10::DictPtr<Key, Value> v);
+
+  template<class Key, class Value>
+  IValue(std::unordered_map<Key, Value> v);
+
+  template<class T>
+  IValue(c10::optional<T> v);
 
   // ClassType
   IValue(c10::intrusive_ptr<ivalue::Object> v);

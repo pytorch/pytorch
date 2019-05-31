@@ -8,69 +8,9 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
 
-namespace detail {
-// InputToIValue takes a value and converts it to an IValue to be put on a stack.
-template<class T>
-struct InputToIValue final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    return c10::IValue(std::forward<T_>(v));
-  }
-};
-template<class T>
-struct InputToIValue<c10::optional<T>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    if (v.has_value()) {
-      return c10::IValue(std::move(*v));
-    } else {
-      return c10::IValue();
-    }
-  }
-};
-template<class T>
-struct InputToIValue<c10::ListPtr<T>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    return c10::IValue(std::move(v));
-  }
-};
-template<class Key, class Value>
-struct InputToIValue<c10::ListPtr<c10::DictPtr<Key, Value>>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    auto list = c10::ivalue::GenericList::create(c10::impl::make_generic_list());
-    list->elements().reserve(v.size());
-    for (size_t i = 0; i < v.size(); ++i) {
-      list->elements().push_back(InputToIValue<c10::DictPtr<Key, Value>>::call(v.get(i)));
-    }
-    return list;
-  }
-};
-template<>
-struct InputToIValue<c10::ListPtr<std::string>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    auto list = c10::ivalue::GenericList::create(c10::impl::make_generic_list());
-    list->elements().reserve(v.size());
-    for (size_t i = 0; i < v.size(); ++i) {
-      list->elements().push_back(InputToIValue<std::string>::call(v.get(i)));
-    }
-    return list;
-  }
-};
-template<class Key, class Value>
-struct InputToIValue<c10::DictPtr<Key, Value>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    return c10::IValue(c10::impl::toGenericDict(std::move(v)));
-  }
-};
-}
-
 template<class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
-  return {detail::InputToIValue<c10::guts::decay_t<Inputs>>::call(std::forward<Inputs>(inputs))...};
+  return {std::forward<Inputs>(inputs)...};
 }
 
 inline at::Tensor dummyTensor(c10::TensorTypeId dispatch_key) {

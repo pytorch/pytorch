@@ -492,37 +492,40 @@ DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 
-template <typename T>
+template <class T>
 struct _fake_type {};
 
-template <typename Elem>
+template <class Elem>
 std::vector<Elem> generic_to(
-    const IValue* ivalue,
+    IValue ivalue,
     _fake_type<std::vector<Elem>>) {
-  return fmap(ivalue->toGenericListRef(), [](IValue item_ivalue) { return item_ivalue.to<Elem>(); });
+  // We need to do a deep copy of the vector because there might be other
+  // references to this same IValue that also use the list. We can't just
+  // move the elements out.
+  return fmap(std::move(ivalue).to<ListPtr<Elem>>(), [](IValue item_ivalue) { return std::move(item_ivalue).to<Elem>(); });
 }
 
 template <typename Elem>
 c10::ListPtr<Elem> generic_to(
-    const IValue* ivalue,
+    IValue ivalue,
     _fake_type<c10::ListPtr<Elem>>) {
-  return impl::toTypedList<Elem>(ivalue->toGenericListRef());
+  return impl::toTypedList<Elem>(std::move(ivalue).toGenericListRef()); // TODO actually move in toGenericListRef, also check that special cases for int64_t, ... do move when called with std::move(ivalue).to<List<T>>
 }
 
 template <typename Key, typename Value>
 c10::DictPtr<Key, Value> generic_to(
-    const IValue* ivalue,
+    IValue ivalue,
     _fake_type<c10::DictPtr<Key, Value>>) {
-  return impl::toTypedDict<Key, Value>(ivalue->toGenericDictRef());
+  return impl::toTypedDict<Key, Value>(std::move(ivalue).toGenericDictRef()); // TODO actually move in toGenericDictRef
 }
 
 template <typename K, typename V>
 std::unordered_map<K, V> generic_to(
-    const IValue* ivalue,
+    IValue ivalue,
     _fake_type<std::unordered_map<K, V>>) {
   std::unordered_map<K, V> specialized_dict;
 
-  for (auto item : ivalue->toGenericDictRef()) {
+  for (auto item : std::move(ivalue).toGenericDictRef()) { // TODO actually move in toGenericDictRef
     specialized_dict[item.key().to<K>()] = item.value().to<V>();
   }
 
@@ -530,13 +533,23 @@ std::unordered_map<K, V> generic_to(
 }
 
 template <typename T>
+c10::optional<T> generic_to(
+    IValue ivalue,
+    _fake_type<c10::optional<T>>) {
+  if (ivalue.isNone()) {
+    return c10::nullopt;
+  }
+  return std::move(ivalue).to<T>();
+}
+
+template <typename T>
 inline T IValue::to() && {
-  return generic_to(this, _fake_type<T>{});
+  return generic_to(std::move(*this), _fake_type<T>{});
 }
 
 template <typename T>
 inline T IValue::to() const& {
-  return generic_to(this, _fake_type<T>{});
+  return generic_to(*this, _fake_type<T>{});
 }
 
 // note: when adding a DEFINE_TO case here you should also add a
@@ -599,10 +612,19 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericList> v)
 }
 inline IValue::IValue(c10::impl::GenericListPtr v)
 : IValue(ivalue::GenericList::create(std::move(v))) {}
-template<class T> inline IValue::IValue(c10::ListPtr<T> v)
-: IValue(impl::toGenericList<T>(std::move(v))) {}
 inline IValue::IValue(std::vector<IValue> v)
 : IValue(c10::impl::toList(std::move(v))) {}
+
+template<class T> inline IValue::IValue(c10::ListPtr<T> v)
+: IValue(impl::toGenericList<T>(std::move(v))) {}
+template<class T> inline IValue::IValue(std::vector<T> v)
+: IValue(impl::make_generic_list()) {
+  auto list = to<c10::ListPtr<T>>();
+  list.reserve(v.size());
+  for (auto& e : v) {
+    list.push_back(std::move(e));
+  }
+}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::GenericDict> v)
 : tag(Tag::GenericDict), is_intrusive_ptr(true) {
@@ -613,6 +635,21 @@ inline IValue::IValue(c10::impl::GenericDictPtr v)
 template<class Key, class Value>
 inline IValue::IValue(c10::DictPtr<Key, Value> v)
 : IValue(impl::toGenericDict(std::move(v))) {}
+
+template<class Key, class Value> inline IValue::IValue(std::unordered_map<Key, Value> v)
+: IValue(impl::make_generic_dict()) {
+  auto dict = to<c10::DictPtr<Key, Value>>();
+  dict.reserve(v.size());
+  for (auto& e : v) {
+    dict.insert(std::move(e.first), std::move(e.second));
+  }
+}
+
+template<class T> inline IValue::IValue(c10::optional<T> v): IValue() {
+  if (v.has_value()) {
+    *this = IValue(std::move(*v));
+  }
+}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
