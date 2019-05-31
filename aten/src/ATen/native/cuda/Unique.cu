@@ -145,7 +145,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
   
   // tensor is not well formed as it has 0 sized dimensions
   if (self.size(dim) == 0){
-    AT_CHECK(
+    TORCH_CHECK(
         num_zero_dims == 1,
         "Number of zero sized dimensions is more than one, so unique cannot be applied ")
     Tensor output = at::empty({0}, self.options());
@@ -156,7 +156,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     return std::make_tuple(output, inverse_indices, counts);
   }
 
-  AT_CHECK(num_zero_dims == 0,
+  TORCH_CHECK(num_zero_dims == 0,
     "There are 0 sized dimensions, and they aren't selected, so unique cannot be applied");
 
   int64_t num_inp = self.size(dim);
