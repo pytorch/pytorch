@@ -27,7 +27,7 @@ Node* InsertCastForCond(Value* cond_val, Graph* graph, Node* consumer_node) {
 }
 
 bool IsCondCastRequired(Value* cond_val) {
-  auto type = cond_val->type();
+  const auto& type = cond_val->type();
   if (type->isSubclass(TypeKind::DimensionedTensorType)) {
     return type->expect<DimensionedTensorType>()->scalarType() != c10::kBool;
   }
