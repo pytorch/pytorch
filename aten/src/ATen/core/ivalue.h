@@ -216,12 +216,18 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::IntList> toIntList() &&;
   c10::intrusive_ptr<ivalue::IntList> toIntList() const &;
 
-  const c10::ListPtr<int64_t>& toIntListRef() const;
-  const c10::ListPtr<double>& toDoubleListRef() const;
-  const c10::ListPtr<bool>& toBoolListRef() const;
-  const c10::ListPtr<at::Tensor>& toTensorListRef() const;
-  const c10::ListPtr<IValue>& toGenericListRef() const;
-  const c10::DictPtr<IValue, IValue>& toGenericDictRef() const;
+  const c10::ListPtr<int64_t>& toIntListRef() const &;
+  c10::ListPtr<int64_t> toIntListRef() &&;
+  const c10::ListPtr<double>& toDoubleListRef() const &;
+  c10::ListPtr<double> toDoubleListRef() &&;
+  const c10::ListPtr<bool>& toBoolListRef() const &;
+  c10::ListPtr<bool> toBoolListRef() &&;
+  const c10::ListPtr<at::Tensor>& toTensorListRef() const &;
+  c10::ListPtr<at::Tensor> toTensorListRef() &&;
+  const c10::ListPtr<IValue>& toGenericListRef() const &;
+  c10::ListPtr<IValue> toGenericListRef() &&;
+  const c10::DictPtr<IValue, IValue>& toGenericDictRef() const &;
+  c10::DictPtr<IValue, IValue> toGenericDictRef() &&;
   const std::string& toStringRef() const;
 
   // ConstantString

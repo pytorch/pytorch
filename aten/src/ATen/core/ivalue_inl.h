@@ -509,14 +509,14 @@ template <typename Elem>
 c10::ListPtr<Elem> generic_to(
     IValue ivalue,
     _fake_type<c10::ListPtr<Elem>>) {
-  return impl::toTypedList<Elem>(std::move(ivalue).toGenericListRef()); // TODO actually move in toGenericListRef, also check that special cases for int64_t, ... do move when called with std::move(ivalue).to<List<T>>
+  return impl::toTypedList<Elem>(std::move(ivalue).toGenericListRef());
 }
 
 template <typename Key, typename Value>
 c10::DictPtr<Key, Value> generic_to(
     IValue ivalue,
     _fake_type<c10::DictPtr<Key, Value>>) {
-  return impl::toTypedDict<Key, Value>(std::move(ivalue).toGenericDictRef()); // TODO actually move in toGenericDictRef
+  return impl::toTypedDict<Key, Value>(std::move(ivalue).toGenericDictRef());
 }
 
 template <typename K, typename V>
@@ -525,7 +525,7 @@ std::unordered_map<K, V> generic_to(
     _fake_type<std::unordered_map<K, V>>) {
   std::unordered_map<K, V> specialized_dict;
 
-  for (auto item : std::move(ivalue).toGenericDictRef()) { // TODO actually move in toGenericDictRef
+  for (auto item : std::move(ivalue).toGenericDictRef()) {
     specialized_dict[item.key().to<K>()] = item.value().to<V>();
   }
 
@@ -660,29 +660,52 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
   payload.as_intrusive_ptr = v.release();
 }
 
-inline const c10::ListPtr<int64_t>& IValue::toIntListRef() const {
+inline const c10::ListPtr<int64_t>& IValue::toIntListRef() const & {
   return toIntList()->elements();
 }
 
-inline const c10::ListPtr<double>& IValue::toDoubleListRef() const {
+inline c10::ListPtr<int64_t> IValue::toIntListRef() && {
+  return std::move(*this).toIntList()->elements();
+}
+
+inline const c10::ListPtr<double>& IValue::toDoubleListRef() const & {
   return toDoubleList()->elements();
 }
 
-inline const c10::ListPtr<at::Tensor>& IValue::toTensorListRef() const {
+inline c10::ListPtr<double> IValue::toDoubleListRef() && {
+  return std::move(*this).toDoubleList()->elements();
+}
+
+inline const c10::ListPtr<at::Tensor>& IValue::toTensorListRef() const & {
   return toTensorList()->elements();
 }
 
-inline const c10::ListPtr<bool>& IValue::toBoolListRef() const {
+inline c10::ListPtr<at::Tensor> IValue::toTensorListRef() && {
+  return std::move(*this).toTensorList()->elements();
+}
+
+inline const c10::ListPtr<bool>& IValue::toBoolListRef() const & {
   return toBoolList()->elements();
 }
 
-inline const c10::impl::GenericListPtr& IValue::toGenericListRef() const {
+inline c10::ListPtr<bool> IValue::toBoolListRef() && {
+  return std::move(*this).toBoolList()->elements();
+}
+
+inline const c10::impl::GenericListPtr& IValue::toGenericListRef() const & {
   return toGenericList()->elements();
 }
 
-inline const c10::impl::GenericDictPtr& IValue::
-    toGenericDictRef() const {
+inline c10::impl::GenericListPtr IValue::toGenericListRef() && {
+  return std::move(*this).toGenericList()->elements();
+}
+
+inline const c10::impl::GenericDictPtr& IValue::toGenericDictRef() const & {
   return toGenericDict()->elements();
+}
+
+inline c10::impl::GenericDictPtr IValue::toGenericDictRef() && {
+  return std::move(*this).toGenericDict()->elements();
 }
 
 inline const std::string& IValue::toStringRef() const {
