@@ -6093,8 +6093,8 @@ a")
         self.checkScript(test_atanh_int, (0,))
         self.checkScript(test_atanh_float, (.2,))
 
-        num_list_int = [-1000000, -1000, -2, 0, 1, 3, 1000, 10000000]
-        num_list_float = [-1000000.0, -1000.0, -2.0, -0.5, 0.0, .5, 1.0, 3.0, 1000.0, 10000000.0]
+        num_list_int = [-50, -10, -2, 0, 1, 3, 1000, 50]
+        num_list_float = [-50.0, -10.0, -2.0, -0.5, 0.0, .5, 1.0, 3.0, 10.0, 50.0]
         for i in num_list_int:
             self.checkScript(test_asinh_int, (i,))
             self.checkScript(test_cosh_int, (i,))
