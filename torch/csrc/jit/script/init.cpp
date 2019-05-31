@@ -95,8 +95,7 @@ struct PythonResolver : public Resolver {
       return classType_;
     }
     AutoGIL ag;
-    return CompilationUnit::_get_python_cu().get_class(
-        c10::QualifiedName(name));
+
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -375,6 +374,7 @@ void initJitScriptBindings(PyObject* module) {
               auto& buffer = attributes[i];
               py::tuple r(3);
               IValue v = buffer.value();
+              std::cout << "Creating 377" << std::endl;
               result[i] = std::make_tuple(
                   buffer.name(), buffer.type(), toPyObject(std::move(v)));
             }

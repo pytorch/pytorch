@@ -10,8 +10,8 @@ class Bar:
 
 @torch.jit.script
 def f():
-    a = Foo()
-    print(a)
+    print(torch.ops.my_ops.warp_perspective(torch.randn(5, 5)))
+    print(torch.ops.my_class.Foo())
 
 print(f.graph)
 f()

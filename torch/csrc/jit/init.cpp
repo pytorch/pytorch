@@ -40,6 +40,7 @@
 #include <torch/csrc/jit/python_arg_flatten.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/init.h>
 #include <torch/csrc/jit/script/jit_exception.h>
@@ -60,6 +61,7 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -432,6 +434,28 @@ void initJITBindings(PyObject* module) {
         } catch (const c10::Error& error) {
           throw std::runtime_error(error.what_without_backtrace());
         }
+      },
+      py::arg("qualified_name"));
+
+  py::class_<c10::ClassType, std::shared_ptr<c10::ClassType>>(m, "ClassType")
+      .def("__call__", [](ClassTypePtr x) {
+        auto obj = c10::ivalue::Object::create(x, 0);
+        Stack stackWithSelf = {obj};
+        std::cout << "Before 444" << std::endl;
+        auto res = torch::jit::toPyObject(
+            x->getMethod("__init__")->operator()(stackWithSelf));
+        std::cout << "After 444" << std::endl;
+        return res;
+      });
+  m.def(
+      "_jit_get_class",
+      [](const std::string& name) {
+        auto qualName = c10::QualifiedName(name);
+        auto res =
+            torch::jit::script::CompilationUnit::_get_python_cu().get_class(
+                qualName);
+        // py::module::import("torch.jit").attr("_add_script_class")(,qualName);
+        return res;
       },
       py::arg("qualified_name"));
 

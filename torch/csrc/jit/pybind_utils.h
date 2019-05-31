@@ -208,8 +208,7 @@ inline IValue createGenericDict(
   c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
   elems.reserve(py::len(obj));
   for (auto key : obj) {
-    elems.insert(
-        toIValue(key, key_type), toIValue(obj[key], value_type));
+    elems.insert(toIValue(key, key_type), toIValue(obj[key], value_type));
   }
   return at::ivalue::GenericDict::create(std::move(elems));
 }
@@ -422,7 +421,8 @@ inline py::object toPyObject(IValue&& ivalue) {
     const auto& elements = dict->elements();
     py::dict py_dict;
     for (auto pair : elements) {
-      py_dict[toPyObject(IValue{pair.key()})] = toPyObject(IValue{pair.value()});
+      py_dict[toPyObject(IValue{pair.key()})] =
+          toPyObject(IValue{pair.value()});
     }
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
@@ -430,6 +430,8 @@ inline py::object toPyObject(IValue&& ivalue) {
     auto& pyCu = script::CompilationUnit::_get_python_cu();
     const auto classType = pyCu.get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
+    std::cout << "name: " << obj->name() << std::endl;
+    std::cout << "slot size: " << obj->slots().size() << std::endl;
     auto pyClass =
         py::module::import("torch.jit").attr("_get_script_class")(obj->name());
     auto pyObj = pyClass.attr("__new__")(pyClass);
@@ -536,11 +538,13 @@ inline py::object createPyObjectForStack(Stack&& stack) {
   // Return a simple value and not a single-element tuple if there is only one
   // return value.
   if (stack.size() == 1) {
+    std::cout << "Creating 543" << std::endl;
     return toPyObject(std::move(stack[0]));
   }
 
   // If there is more than one return value, pop them into a py::tuple.
   py::tuple return_values(stack.size());
+  std::cout << "Creating 547" << std::endl;
   for (size_t ret = 0; ret < return_values.size(); ++ret) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
@@ -577,6 +581,8 @@ inline py::object invokeScriptMethodFromPython(
     AutoNoGIL no_gil_guard;
     callee.run(stack);
   }
+
+  std::cout << "Creating 584" << std::endl;
   return toPyObject(std::move(stack.back()));
 }
 
