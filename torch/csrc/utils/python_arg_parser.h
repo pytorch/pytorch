@@ -337,7 +337,17 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
     return (scalartype == at::ScalarType::Undefined) ?
             torch::tensors::get_default_scalar_type() : scalartype;
   }
-  return reinterpret_cast<THPDtype*>(args[i])->scalar_type;
+  PyObject *obj = args[i];
+  if (obj == (PyObject*)&PyFloat_Type) {
+    return at::ScalarType::Double;
+  }
+  if (obj == (PyObject*)&PyBool_Type) {
+    return at::ScalarType::Bool;
+  }
+  if (obj == (PyObject*)&PyLong_Type) {
+    return at::ScalarType::Long;
+  }
+  return reinterpret_cast<THPDtype*>(obj)->scalar_type;
 }
 
 inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
