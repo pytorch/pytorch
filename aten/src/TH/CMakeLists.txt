@@ -76,6 +76,10 @@ INSTALL(FILES
   THGenerateByteType.h
   THGenerateFloatTypes.h
   THGenerateIntTypes.h
+  THGenerateQUInt8Type.h
+  THGenerateQInt8Type.h
+  THGenerateQInt32Type.h
+  THGenerateQTypes.h
   THLapack.h
   THLogAdd.h
   THMemoryFile.h
