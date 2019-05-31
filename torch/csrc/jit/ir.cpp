@@ -255,7 +255,7 @@ std::ostream& Node::print(
   if (print_source_locations && source_range_ &&
       source_range_->source()->filename()) {
     const auto& range = sourceRange();
-    auto source = range.source();
+    const auto& source = range.source();
     auto lineno = source->lineno_for_offset(range.start());
     auto col_offset = (int)range.start() - (int)source->offset_for_line(lineno);
     out << " # " << source->filename().value() << ":"
