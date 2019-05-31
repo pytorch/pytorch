@@ -5964,7 +5964,7 @@ a")
         mx_int = 2147483647
         mn_int = -2147483647 - 1
         float_vals = [inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
-        int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2]
+        int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2, 2 ** 63, -2 ** 63]
 
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
             if is_float:
