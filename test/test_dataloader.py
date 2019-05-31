@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import math
 import sys
 import errno
@@ -307,6 +309,7 @@ class TestDataLoader(TestCase):
                         fail_msg += ', and is still alive.'
                     if loader_p.is_alive():
                         # this may kill the process, needs to run after the above lines
+                        print("loader (pid {}) current traces:".format(loader_p.pid))
                         loader_p.print_traces_of_all_threads()
                     self.fail(fail_msg)
 
@@ -326,6 +329,7 @@ class TestDataLoader(TestCase):
                     if loader_psutil_p.is_running():
                         err_msg += str(loader_psutil_p.as_dict(attrs=report_psutil_attrs))
                         # this may kill the process, needs to run after the above line
+                        print("loader (pid {}) current traces:".format(loader_p.pid))
                         loader_p.print_traces_of_all_threads()
                     else:
                         err_msg += 'exited with code {}'.format(loader_p.exitcode)
@@ -336,6 +340,7 @@ class TestDataLoader(TestCase):
                             if worker_psutil_p.is_running():
                                 err_msg += str(worker_psutil_p.as_dict(attrs=report_psutil_attrs))
                                 # this may kill the process, needs to run after the above line
+                                print("worker (pid {}) current traces:".format(worker_psutil_p.pid))
                                 print_traces_of_all_threads(worker_psutil_p.pid)
                             else:
                                 err_msg += 'exited with unknown code'
@@ -380,7 +385,7 @@ class TestDataLoader(TestCase):
                                 # handler. So we permit this as an allowed error as well.
                                 # After all, we are happy as long as it terminates.
                                 pass
-                            elif not Py3 and isinstance(loader_p.exception, OSError):
+                            elif not PY3 and isinstance(loader_p.exception, OSError):
                                 # Same reasoning as the above if-block for Py2,
                                 # where ConnectionRefusedError isn't a thing.
                                 if loader_p.exception.errno != errno.ECONNREFUSED:
