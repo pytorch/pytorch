@@ -6011,7 +6011,7 @@ a")
             return math.pow(x, y)
 
         def test_isnan(x):
-            # type: (float) -> boolean
+            # type: (float) -> bool
             return math.isnan(x)
 
         def test_asinh_int(x):
