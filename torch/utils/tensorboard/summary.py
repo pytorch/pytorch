@@ -312,10 +312,10 @@ def make_video(tensor, fps):
     try:  # newer version of moviepy use logger instead of progress_bar argument.
         clip.write_gif(filename, verbose=False, logger=None)
     except TypeError:
-      try:  # older version of moviepy does not support progress_bar argument.
-          clip.write_gif(filename, verbose=False, progress_bar=False)
-      except TypeError:
-          clip.write_gif(filename, verbose=False)
+        try:  # older version of moviepy does not support progress_bar argument.
+            clip.write_gif(filename, verbose=False, progress_bar=False)
+        except TypeError:
+            clip.write_gif(filename, verbose=False)
 
     with open(filename, 'rb') as f:
         tensor_string = f.read()
