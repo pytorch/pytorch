@@ -138,7 +138,7 @@ def MiLSTMCell(x, hx, cx, w_ih, w_hh, alpha, beta_i, beta_h, bias):
 
 
 def canonical(graph):
-    return str(torch._C._jit_pass_canonicalize(graph))
+    return torch._C._jit_pass_canonicalize(graph).str(False)
 
 
 def get_lstm_inputs(device, training=False, seq_length=None):
@@ -3695,6 +3695,16 @@ def foo(x):
         _, lineno = inspect.getsourcelines(FooBar)
         with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
             torch.jit.script(FooBar)
+
+    def test_file_line_graph(self):
+        def foobar(xyz):
+            return torch.neg(xyz)
+
+        scripted = torch.jit.script(foobar)
+
+        _, lineno = inspect.getsourcelines(foobar)
+        FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))\
+                   .run(scripted.graph)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
