@@ -7,8 +7,10 @@ from ..._jit_internal import weak_module, weak_script_method
 class PairwiseDistance(Module):
     r"""
     Computes the batchwise pairwise distance between vectors :math:`v_1`, :math:`v_2` using the p-norm:
+
     .. math ::
-        \Vert x \Vert _p = \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
+        \Vert x \Vert _p = \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}.
+
     Args:
         p (real): the norm degree. Default: 2
         eps (float, optional): Small value to avoid division by zero.
@@ -41,8 +43,10 @@ class PairwiseDistance(Module):
 @weak_module
 class CosineSimilarity(Module):
     r"""Returns cosine similarity between :math:`x_1` and :math:`x_2`, computed along dim.
+
     .. math ::
-        \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
+        \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}.
+
     Args:
         dim (int, optional): Dimension where cosine similarity is computed. Default: 1
         eps (float, optional): Small value to avoid division by zero.

@@ -736,16 +736,18 @@ class TestCaffe2End2End(TestCase):
                   decimal=7):
         np.random.seed(seed=0)
         try:
-            c2_init_net, c2_predict_net, value_info = self.model_downloader.get_c2_model(net_name)
+            c2_init_net, c2_predict_net, value_info, debug_str = self.model_downloader.get_c2_model_dbg(net_name)
         except (OSError, IOError) as e:
             # catch IOError/OSError that is caused by FileNotFoundError and PermissionError
+            # This is helpful because sometimes we get errors due to gfs not available
+            print("\n_test_net exception: ", e)
             self.skipTest(str(e))
 
         # start to run the model and compare outputs
         n, c, h, w = input_blob_dims
         data = np.random.randn(n, c, h, w).astype(np.float32)
         inputs = [data]
-        _, c2_outputs = c2_native_run_net(c2_init_net, c2_predict_net, inputs)
+        _, c2_outputs = c2_native_run_net(c2_init_net, c2_predict_net, inputs, debug_str)
         del _
 
         model = c2_onnx.caffe2_net_to_onnx_model(

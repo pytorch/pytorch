@@ -76,6 +76,13 @@ namespace torch {
 namespace jit {
 namespace script {
 
+#ifdef _MSC_VER
+C10_EXPORT double strtod_c(const char *nptr, char **endptr)
+{
+    static _locale_t loc = _create_locale(LC_ALL, "C");
+    return _strtod_l(nptr, endptr, loc);
+}
+#else
 C10_EXPORT double strtod_c(const char *nptr, char **endptr)
 {
     char *fail_pos;
@@ -240,6 +247,7 @@ invalid_string:
     errno = EINVAL;
     return -1.0;
 }
+#endif
 
 
 C10_EXPORT float strtof_c(const char *nptr, char **endptr)

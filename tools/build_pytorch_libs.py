@@ -81,14 +81,22 @@ elif REL_WITH_DEB_INFO:
 
 
 def overlay_windows_vcvars(env):
-    from distutils._msvccompiler import _get_vc_env
-    vc_arch = 'x64' if IS_64BIT else 'x86'
-    vc_env = _get_vc_env(vc_arch)
-    for k, v in env.items():
-        lk = k.lower()
-        if lk not in vc_env:
-            vc_env[lk] = v
-    return vc_env
+    if sys.version_info >= (3, 5):
+        from distutils._msvccompiler import _get_vc_env
+        vc_arch = 'x64' if IS_64BIT else 'x86'
+        vc_env = _get_vc_env(vc_arch)
+        # Keys in `_get_vc_env` are always lowercase.
+        # We turn them into uppercase before overlaying vcvars
+        # because OS environ keys are always uppercase on Windows.
+        # https://stackoverflow.com/a/7797329
+        vc_env = {k.upper(): v for k, v in vc_env.items()}
+        for k, v in env.items():
+            uk = k.upper()
+            if uk not in vc_env:
+                vc_env[uk] = v
+        return vc_env
+    else:
+        return env
 
 
 def mkdir_p(dir):
@@ -111,14 +119,12 @@ def create_build_env():
         my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
 
     if IS_WINDOWS:
-        my_env = overlay_windows_vcvars(my_env)
         # When using Ninja under Windows, the gcc toolchain will be chosen as default.
         # But it should be set to MSVC as the user's first choice.
         if USE_NINJA:
-            cc = my_env.get('CC', 'cl')
-            cxx = my_env.get('CXX', 'cl')
-            my_env['CC'] = cc
-            my_env['CXX'] = cxx
+            my_env = overlay_windows_vcvars(my_env)
+            my_env.setdefault('CC', 'cl')
+            my_env.setdefault('CXX', 'cl')
     return my_env
 
 
@@ -134,17 +140,18 @@ def run_cmake(version,
     if USE_NINJA:
         cmake_args.append('-GNinja')
     elif IS_WINDOWS:
+        cmake_args.append('-GVisual Studio 15 2017')
         if IS_64BIT:
-            cmake_args.append('-GVisual Studio 15 2017 Win64')
-        else:
-            cmake_args.append('-GVisual Studio 15 2017')
+            cmake_args.append('-Ax64')
+            cmake_args.append('-Thost=x64')
     try:
         import numpy as np
-        NUMPY_INCLUDE_DIR = np.get_include()
-        USE_NUMPY = True
     except ImportError:
         USE_NUMPY = False
         NUMPY_INCLUDE_DIR = None
+    else:
+        NUMPY_INCLUDE_DIR = np.get_include()
+        USE_NUMPY = True
 
     cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
     ldflags = os.getenv('LDFLAGS', "")
@@ -163,7 +170,6 @@ def run_cmake(version,
         BUILDING_WITH_TORCH_LIBS=os.getenv("BUILDING_WITH_TORCH_LIBS", "ON"),
         TORCH_BUILD_VERSION=version,
         CMAKE_BUILD_TYPE=build_type,
-        BUILD_TORCH=os.getenv("BUILD_TORCH", "ON"),
         BUILD_PYTHON=build_python,
         BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
         BUILD_BINARY=check_env_flag('BUILD_BINARY'),
@@ -175,6 +181,7 @@ def run_cmake(version,
         USE_CUDA=USE_CUDA,
         USE_DISTRIBUTED=USE_DISTRIBUTED,
         USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or check_negative_env_flag('USE_FBGEMM')),
+        NAMEDTENSOR_ENABLED=(check_env_flag('USE_NAMEDTENSOR') or check_negative_env_flag('NO_NAMEDTENSOR')),
         USE_NUMPY=USE_NUMPY,
         NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
         USE_SYSTEM_NCCL=USE_SYSTEM_NCCL,
@@ -206,7 +213,31 @@ def run_cmake(version,
         USE_REDIS=os.getenv('USE_REDIS'),
         USE_GLOG=os.getenv('USE_GLOG'),
         USE_GFLAGS=os.getenv('USE_GFLAGS'),
+        USE_ASAN=check_env_flag('USE_ASAN'),
         WERROR=os.getenv('WERROR'))
+
+    if os.getenv('_GLIBCXX_USE_CXX11_ABI'):
+        cmake_defines(cmake_args, GLIBCXX_USE_CXX11_ABI=os.getenv('_GLIBCXX_USE_CXX11_ABI'))
+
+    if os.getenv('USE_OPENMP'):
+        cmake_defines(cmake_args, USE_OPENMP=check_env_flag('USE_OPENMP'))
+
+    if os.getenv('USE_TBB'):
+        cmake_defines(cmake_args, USE_TBB=check_env_flag('USE_TBB'))
+
+    if os.getenv('MKL_SEQ'):
+        cmake_defines(cmake_args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
+
+    if os.getenv('MKL_TBB'):
+        cmake_defines(cmake_args, INTEL_MKL_TBB=check_env_flag('MKL_TBB'))
+
+    mkldnn_threading = os.getenv('MKLDNN_THREADING')
+    if mkldnn_threading:
+        cmake_defines(cmake_args, MKLDNN_THREADING=mkldnn_threading)
+
+    parallel_backend = os.getenv('PARALLEL_BACKEND')
+    if parallel_backend:
+        cmake_defines(cmake_args, PARALLEL_BACKEND=parallel_backend)
 
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
@@ -243,6 +274,7 @@ def build_caffe2(version,
                  cmake_python_library,
                  build_python,
                  rerun_cmake,
+                 cmake_only,
                  build_dir):
     my_env = create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
@@ -257,6 +289,8 @@ def build_caffe2(version,
                   build_test,
                   build_dir,
                   my_env)
+    if cmake_only:
+        return
     if IS_WINDOWS:
         build_cmd = ['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--']
         if USE_NINJA:

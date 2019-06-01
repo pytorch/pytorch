@@ -32,26 +32,26 @@ struct TORCH_API BatchSize : public CustomBatchRequest {
 /// The major feature of the `StreamSampler` is that it does not return
 /// particular indices, but instead only the number of elements to fetch from
 /// the dataset. The dataset has to decide how to produce those elements.
-class StreamSampler : public Sampler<BatchSize> {
+class TORCH_API StreamSampler : public Sampler<BatchSize> {
  public:
   /// Constructs the `StreamSampler` with the number of individual examples that
   /// should be fetched until the sampler is exhausted.
-  TORCH_API explicit StreamSampler(size_t epoch_size);
+  explicit StreamSampler(size_t epoch_size);
 
   /// Resets the internal state of the sampler.
-  TORCH_API void reset(optional<size_t> new_size = nullopt) override;
+  void reset(optional<size_t> new_size = nullopt) override;
 
   /// Returns a `BatchSize` object with the number of elements to fetch in the
   /// next batch. This number is the minimum of the supplied `batch_size` and
   /// the difference between the `epoch_size` and the current index. If the
   /// `epoch_size` has been reached, returns an empty optional.
-  TORCH_API optional<BatchSize> next(size_t batch_size) override;
+  optional<BatchSize> next(size_t batch_size) override;
 
   /// Serializes the `StreamSampler` to the `archive`.
-  TORCH_API void save(serialize::OutputArchive& archive) const override;
+  void save(serialize::OutputArchive& archive) const override;
 
   /// Deserializes the `StreamSampler` from the `archive`.
-  TORCH_API void load(serialize::InputArchive& archive) override;
+  void load(serialize::InputArchive& archive) override;
 
  private:
   size_t examples_retrieved_so_far_ = 0;

@@ -122,6 +122,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             -90,
             90,
             clip_angle_thresh,
+            legacy_plus_one=True,
         )
 
         torch.testing.assert_allclose(box_out, a)
@@ -161,6 +162,7 @@ class TorchIntegration(hu.HypothesisTestCase):
                 -90,
                 90,
                 clip_angle_thresh,
+                legacy_plus_one=True,
             )
         ]
         class_prob = np.random.randn(sum(roi_counts), num_classes).astype(np.float32)
@@ -203,6 +205,10 @@ class TorchIntegration(hu.HypothesisTestCase):
             soft_nms_sigma=0.5,
             soft_nms_min_score_thres=0.001,
             rotated=rotated,
+            cls_agnostic_bbox_reg=False,
+            input_boxes_include_bg_cls=True,
+            output_classes_include_bg_cls=True,
+            legacy_plus_one=True,
         )
 
         for o, o_ref in zip(outputs, output_refs):
@@ -255,6 +261,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             -90,
             90,
             1.0,
+            legacy_plus_one=True,
         )
         torch.testing.assert_allclose(rois, a)
         torch.testing.assert_allclose(rois_probs, b)
@@ -389,6 +396,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             -90,
             90,
             1.0,
+            legacy_plus_one=True,
         )
         torch.testing.assert_allclose(rois, a.cpu())
         torch.testing.assert_allclose(rois_probs, b.cpu())
@@ -448,6 +456,51 @@ class TorchIntegration(hu.HypothesisTestCase):
     def test_roi_align_cuda(self):
         self._test_roi_align(device="cuda")
 
+    @given(roi_counts=st.lists(st.integers(0, 5), min_size=1, max_size=10))
+    def test_collect_and_distribute_fpn_rpn_proposals_op(self, roi_counts):
+        batch_size = len(roi_counts)
+        im_dims = np.random.randint(100, 600, batch_size)
+        rpn_rois_and_scores = []
+        for i in range(5):
+            rpn_rois_and_scores.append(torch.Tensor(generate_rois(roi_counts, im_dims)))
+        for i in range(5):
+            rpn_rois_and_scores.append(torch.rand(sum(roi_counts)))
+
+        rois = torch.ops._caffe2.CollectRpnProposals(
+            rpn_rois_and_scores,
+            rpn_max_level=6,
+            rpn_min_level=2,
+            rpn_post_nms_topN=sum(roi_counts),
+        )
+        fpn_outputs = torch.ops._caffe2.DistributeFpnProposals(
+            rois,
+            roi_canonical_scale=224,
+            roi_canonical_level=4,
+            roi_max_level=5,
+            roi_min_level=2,
+            legacy_plus_one=True,
+        )
+
+        all_outputs = torch.ops._caffe2.CollectAndDistributeFpnRpnProposals(
+            rpn_rois_and_scores,
+            roi_canonical_scale=224,
+            roi_canonical_level=4,
+            roi_max_level=5,
+            roi_min_level=2,
+            rpn_max_level=6,
+            rpn_min_level=2,
+            rpn_post_nms_topN=sum(roi_counts),
+            legacy_plus_one=True,
+        )
+
+        rois_fpn_list = fpn_outputs[:-1]
+        rois_idx_restore_int32 = fpn_outputs[-1]
+
+        # [rois] + fpn_outputs should be equal to all_outputs
+        torch.testing.assert_allclose(rois, all_outputs[0])
+        for x, y in zip(fpn_outputs, all_outputs[1:]):
+            torch.testing.assert_allclose(x, y)
+
     @given(X=hu.tensor(),
            fast_gelu=st.booleans())
     def _test_gelu_op(self, X, fast_gelu, device):
@@ -467,6 +520,86 @@ class TorchIntegration(hu.HypothesisTestCase):
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
     def test_gelu_op_cuda(self):
         self._test_gelu_op(device="cuda")
+
+
+    @given(inputs=hu.lengths_tensor(
+        dtype=np.float32,
+        min_value=1,
+        max_value=5,
+        allow_empty=True,
+    ))
+    def _test_lengths_op(self, inputs, ref_op_name, torch_op, device):
+        data, lengths = inputs
+
+        def _lengths_ref(X, Y):
+            ref_op = core.CreateOperator(ref_op_name, ["X", "Y"], "out")
+            workspace.FeedBlob("X", X)
+            workspace.FeedBlob("Y", Y)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("out")
+
+        expected_output = _lengths_ref(data, lengths)
+        actual_output = torch_op(
+            torch.tensor(data), torch.tensor(lengths, dtype=torch.int32))
+
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def _test_lengths_sum_op(self, device):
+        self._test_lengths_op("LengthsSum", torch.ops._caffe2.LengthsSum, device)
+
+    def test_lengths_sum_op(self):
+        self._test_lengths_sum_op(device="cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_lengths_sum_op_cuda(self):
+        self._test_lengths_sum_op(device="cuda")
+
+    def _test_lengths_mean_op(self, device):
+        self._test_lengths_op("LengthsMean", torch.ops._caffe2.LengthsMean, device)
+
+    def test_lengths_mean_op(self):
+        self._test_lengths_mean_op(device="cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_lengths_mean_op_cuda(self):
+        self._test_lengths_mean_op(device="cuda")
+
+    def _test_lengths_max_op(self, device):
+        self._test_lengths_op("LengthsMax", torch.ops._caffe2.LengthsMax, device)
+
+    def test_lengths_max_op(self):
+        self._test_lengths_max_op(device="cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_lengths_max_op_cuda(self):
+        self._test_lengths_max_op(device="cuda")
+
+    def _test_resize_nearest_op(self, device):
+        data = np.random.rand(1, 2, 3, 4).astype(np.float32)
+
+        def _resize_nearest_ref(X):
+            ref_op = core.CreateOperator(
+                "ResizeNearest", ["X"], ["Y"],
+                width_scale=2.0, height_scale=1.5, order="NCHW",
+            )
+            workspace.FeedBlob("X", X)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _resize_nearest_ref(data)
+        actual_output = torch.ops._caffe2.ResizeNearest(
+            torch.tensor(data).to(device),
+            order="NCHW", width_scale=2.0, height_scale=1.5,
+        )
+
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_resize_nearest_op_cpu(self):
+        return self._test_resize_nearest_op("cpu")
+
+    @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
+    def test_resize_nearest_op_cuda(self):
+        return self._test_resize_nearest_op("cuda")
 
 
 if __name__ == '__main__':

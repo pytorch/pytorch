@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 
 namespace torch {
@@ -37,7 +36,7 @@ void RemoveInplaceOps(Block* block) {
       // create a replacement out of place op
       auto newNode = graph->create(inPlaceToOutOfPlace.at(node->kind()));
       newNode->insertBefore(node);
-
+      newNode->setScope(node->scope());
       // copy inputs
       for (auto input : node->inputs()) {
         newNode->addInput(input);

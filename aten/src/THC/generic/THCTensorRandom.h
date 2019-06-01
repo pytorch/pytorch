@@ -4,7 +4,6 @@
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
-THC_API void THCTensor_(uniform)(struct THCState *state, THCTensor *self, double a, double b);
 THC_API void THCTensor_(normal)(struct THCState *state, THCTensor *self, double mean, double stdv);
 THC_API void THCTensor_(normal_means)(struct THCState *state, THCTensor *self, THCTensor *means, double stddev);
 THC_API void THCTensor_(normal_stddevs)(struct THCState *state, THCTensor *self, double mean, THCTensor *stddevs);
@@ -18,9 +17,6 @@ THC_API void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor 
 
 #endif
 
-THC_API void THCTensor_(random)(struct THCState *state, THCTensor *self);
-THC_API void THCTensor_(clampedRandom)(struct THCState *state, THCTensor *self, int64_t min, int64_t max);
-THC_API void THCTensor_(cappedRandom)(struct THCState *state, THCTensor *self, int64_t max);
 THC_API void THCTensor_(geometric)(struct THCState *state, THCTensor *self, double p);
 
 #endif

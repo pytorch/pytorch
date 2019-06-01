@@ -58,6 +58,10 @@ class SparseLookup(ModelLayer):
         'Float16UniformFill'
     ]
 
+    _fp16_compatible_reducers = [
+        'Sum', 'Mean', 'Sqrt', 'PositionWeighted', 'RecencyWeighted',
+    ]
+
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
                  name='sparse_lookup', regularizer=None, **kwargs):
@@ -103,12 +107,25 @@ class SparseLookup(ModelLayer):
 
         self.weight_init = weight_init or default_init_op
 
+        # If fp16 is used, make sure fp16 init op is used
         if self.trainer_version == "fp16":
-            assert self.weight_init[0] in self._fp16_compatible_init_op_types,\
-                "Fp16 training is enabled. Init op for weight parameter must be fp16"\
+            assert self.reducer in self._fp16_compatible_reducers, (
+                "Fp16 training is enabled. The reducer specified is not supported. "
+                "Got {}. Supported reducers: {}. Right now, in general, sum, mean, "
+                "positional pooling are supported. Attention is not. Please check "
+                "if there is fp16 trained sparse features using advanced pooling.".format(
+                    self.reducer, self._fp16_compatible_reducers)
+            )
+
+            # if init op is UniformFill, we replace it directly
+            if self.weight_init[0] == "UniformFill":
+                self.weight_init = ("Float16UniformFill", self.weight_init[1])
+            assert self.weight_init[0] in self._fp16_compatible_init_op_types, (
+                "Fp16 training is enabled. Init op for weight parameter must be fp16 "
                 "compatibale. Got {}. Supported ops: {}".format(
                     self.weight_init[0],
                     self._fp16_compatible_init_op_types)
+            )
 
         if _is_id_list(self.input_record):
             sparse_key = self.input_record.items()

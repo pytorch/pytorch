@@ -68,7 +68,7 @@ struct OperatorRegistry {
         }
       }
 #endif
-      AT_CHECK(
+      TORCH_CHECK(
           op_ptr_it != operators_by_sig.end(),
           "Couldn't find an operator for ",
           name,
@@ -132,7 +132,8 @@ void registerOperator(Operator&& op) {
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }
-    if (!aliasAnalysisHasSpecialCaseFor(s)) {
+    if (op.isC10Op() && !aliasAnalysisHasSpecialCaseFor(s) &&
+        op.aliasAnalysisKind() == AliasAnalysisKind::DEFAULT) {
       AT_ERROR(
           "Missing special case in alias analysis for non-schematized"
           " operator ",
@@ -236,7 +237,7 @@ const Operator& getOperatorFor(const Node* node) {
   if (op)
     return *op;
 
-  auto er = script::ErrorReport(node->getSourceLocation());
+  auto er = script::ErrorReport(node->sourceRange());
   er << "Schema not found for node. File a bug report.\n";
   er << "Node: " << *node << "\n";
   er << "Input types:";

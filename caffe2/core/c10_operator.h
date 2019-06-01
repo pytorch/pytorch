@@ -1,5 +1,6 @@
 #pragma once
 
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/function_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
@@ -88,6 +89,9 @@ void call_caffe2_op_from_c10(
 }
 
 inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
+#if defined(CAFFE2_IS_XPLAT_BUILD)
+  throw std::logic_error("We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
+#else
   c10::FunctionSchema parsed_schema = torch::jit::parseSchema(schema_str);
   std::vector<c10::Argument> arguments = parsed_schema.arguments();
   arguments.emplace_back(
@@ -104,6 +108,7 @@ inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
     parsed_schema.is_vararg(),
     parsed_schema.is_varret()
   );
+#endif
 }
 
 inline std::unique_ptr<c10::KernelCache> noCache() {
@@ -150,7 +155,6 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
  * - If your operator has a variable number of input tensors, make the first (!)
  *   input an input of type TensorList. There must be no other tensor inputs.
  */
-#ifndef C10_MOBILE
 #define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)                  \
   namespace caffe2 {                                               \
   namespace _c10_ops {                                             \
@@ -174,24 +178,26 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
   static auto registry_##OperatorName##_##__COUNTER__ =                      \
       ::c10::RegisterOperators().op(                                         \
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
-          ::c10::kernel(                                                     \
-              &::caffe2::detail::call_caffe2_op_from_c10<                    \
-                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
-                  OperatorClass>,                                            \
-              &::caffe2::detail::noCache),                                   \
-          ::c10::dispatchKey(::c10::CPUTensorId()));
+          ::c10::RegisterOperators::options()                                \
+              .kernel(                                                       \
+                  ::c10::CPUTensorId(),                                      \
+                  &::caffe2::detail::call_caffe2_op_from_c10<                \
+                      ::caffe2::_c10_ops::schema_##OperatorName,             \
+                      OperatorClass>,                                        \
+                  &::caffe2::detail::noCache));
 
 #define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)       \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
   static auto registry_##OperatorName##_##__COUNTER__ =                      \
       ::c10::RegisterOperators().op(                                         \
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
-          ::c10::kernel(                                                     \
-              &::caffe2::detail::call_caffe2_op_from_c10<                    \
-                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
-                  OperatorClass>,                                            \
-              &::caffe2::detail::noCache),                                   \
-          ::c10::dispatchKey(::c10::CUDATensorId()));
+          ::c10::RegisterOperators::options()                                \
+              .kernel(                                                       \
+                  ::c10::CUDATensorId(),                                     \
+                  &::caffe2::detail::call_caffe2_op_from_c10<                \
+                      ::caffe2::_c10_ops::schema_##OperatorName,             \
+                      OperatorClass>,                                        \
+                  &::caffe2::detail::noCache));
 
 // You should never manually call the C10_REGISTER_CAFFE2_OPERATOR_HIP macro.
 // The C10_REGISTER_CAFFE2_OPERATOR_CUDA macro from above will be automatically
@@ -201,12 +207,13 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
   static auto registry_##OperatorName##_##__COUNTER__ =                      \
       ::c10::RegisterOperators().op(                                         \
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
-          ::c10::kernel(                                                     \
-              &::caffe2::detail::call_caffe2_op_from_c10<                    \
-                  ::caffe2::_c10_ops::schema_##OperatorName,                 \
-                  OperatorClass>,                                            \
-              &::caffe2::detail::noCache),                                   \
-          ::c10::dispatchKey(::c10::HIPTensorId()));
+          ::c10::RegisterOperators().options()                               \
+              .kernel(                                                       \
+                  ::c10::HIPTensorId(),                                      \
+                  &::caffe2::detail::call_caffe2_op_from_c10<                \
+                      ::caffe2::_c10_ops::schema_##OperatorName,             \
+                      OperatorClass>,                                        \
+                  &::caffe2::detail::noCache));
 
 #else
 // Don't use c10 dispatcher on mobile because of binary size

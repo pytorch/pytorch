@@ -79,6 +79,11 @@ bool isOnIdeepDevice(const repr::NeuralNetOperator& nnOp) {
 }
 
 bool isConvFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
+  // Here we only check the type of ConvFusion op (for FP32 only)
+  if (!repr::nn::is<repr::Conv>(convNode)) {
+    return false;
+  }
+
   auto conv = repr::nn::get<repr::Conv>(convNode);
   auto& op = getOpDef(*conv);
 
@@ -748,8 +753,8 @@ bool fusePreConvertOp(repr::NNModule* nn, caffe2::Workspace* ws) {
 
     bool is_op_found = false;
     auto seqNode = consumers.front();
-    for (int i = 0; i < op_list.size(); i++) {
-      if (isOpType(seqNode, op_list[i])) {
+    for (int j = 0; j < op_list.size(); j++) {
+      if (isOpType(seqNode, op_list[j])) {
         is_op_found = true;
         break;
       }

@@ -154,6 +154,27 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
     const bool consecutive,
     const bool return_inverse,
     const bool return_counts) {
+
+    auto sizes = self.sizes().vec();
+    // check how many zero dimensions exist
+    auto num_zero_dims = std::count(sizes.begin(), sizes.end(), 0);
+    
+    // tensor is not well formed as it has 0 sized dimensions
+    if (self.size(dim) == 0){
+      AT_CHECK(
+          num_zero_dims == 1,
+          "Number of zero sized dimensions is more than one, so unique cannot be applied ")
+      Tensor output = at::empty({0}, self.options());
+      Tensor inverse_indices =
+          at::empty({0}, self.options().dtype(kLong));
+      Tensor counts = at::empty({0}, self.options().dtype(kLong));
+
+      return std::make_tuple(output, inverse_indices, counts);
+    }
+    
+    AT_CHECK(num_zero_dims == 0,
+    "There are 0 sized dimensions, and they aren't selected, so unique cannot be applied");
+  
   // reshape tensor as [dim, -1]
   Tensor input_flat = self.transpose(dim, 0);
   auto orig_sizes = input_flat.sizes().vec();
@@ -225,16 +246,6 @@ std::tuple<Tensor, Tensor, Tensor>
 _unique2_cpu(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique", [&] {
     return unique_cpu_template<scalar_t>(self, sorted, return_inverse, return_counts);
-  });
-}
-
-std::tuple<Tensor, Tensor>
-_unique_dim_cpu(const Tensor& self, const int64_t dim, const bool sorted, const bool return_inverse) {
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "unique_dim", [&] {
-    // The current implementation using `dim` always sorts due to unhashable tensors
-    Tensor output, inverse;
-    std::tie(output, inverse, std::ignore) = _unique_dim_cpu_template<scalar_t>(self, dim, false, return_inverse, false);
-    return std::make_tuple(output, inverse);
   });
 }
 

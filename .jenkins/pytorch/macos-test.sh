@@ -8,7 +8,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 export PATH="/usr/local/bin:$PATH"
 
 # Set up conda environment
-export PYTORCH_ENV_DIR="${HOME}/pytorch-ci-env"
+export PYTORCH_ENV_DIR="${HOME}/workspace"
 # If a local installation of conda doesn't exist, we download and install conda
 if [ ! -d "${PYTORCH_ENV_DIR}/miniconda3" ]; then
   mkdir -p ${PYTORCH_ENV_DIR}
@@ -19,6 +19,12 @@ export PATH="${PYTORCH_ENV_DIR}/miniconda3/bin:$PATH"
 source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja six
 pip install -q hypothesis "librosa>=0.6.2" psutil
+
+# faulthandler become built-in since 3.3
+if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
+  pip install -q faulthandler
+fi
+
 if [ -z "${IN_CIRCLECI}" ]; then
   rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 fi

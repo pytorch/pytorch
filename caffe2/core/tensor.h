@@ -172,11 +172,11 @@ class CAFFE2_API Tensor final {
   }
 
   at::Device GetDevice() const {
-    return impl_.get()->GetDevice();
+    return impl_.get()->device();
   }
 
   /**
-   * @brief Copies the data from a source tensor, with a contex provided to
+   * @brief Copies the data from a source tensor, with a context provided to
    * carry out the underlying memcpy operation.  This method respects
    * caffe2_keep_on_shrink.
    *
@@ -519,8 +519,8 @@ class CAFFE2_API Tensor final {
     return impl_.get()->strides();
   }
 
-  inline bool is_contiguous() const {
-    return impl_.get()->is_contiguous();
+  inline bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const {
+    return impl_.get()->is_contiguous(memory_format);
   }
 
   /**
@@ -648,6 +648,9 @@ Tensor TensorCPUFromValues(at::IntArrayRef dims, at::ArrayRef<T> values) {
       r.dtype(), values.size(), values.data(), r.mutable_data<T>());
   return r;
 }
+
+vector<int64_t>
+GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device);
 
 class CAFFE2_API TensorPrinter {
  public:

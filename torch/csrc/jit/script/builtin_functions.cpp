@@ -1,6 +1,7 @@
+#include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/code_template.h>
-#include <torch/csrc/jit/script/builtin_functions.h>
+#include <torch/csrc/jit/script/resolver.h>
 
 namespace torch {
 namespace jit {
@@ -100,7 +101,7 @@ struct BuiltinFunctionRegistry {
   std::unordered_map<Symbol, std::vector<Function*>> builtins_by_name;
 };
 
-TORCH_API const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
+const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
   static BuiltinFunctionRegistry registry;
   return registry.getAllBuiltinFunctionsFor(name);
 }

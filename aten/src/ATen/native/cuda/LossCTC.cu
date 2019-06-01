@@ -179,9 +179,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
-  AT_CHECK((0 <= BLANK) && (BLANK < num_labels), "blank must be in label range");
-  AT_CHECK(input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
-  AT_CHECK(target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
+  TORCH_CHECK((0 <= BLANK) && (BLANK < num_labels), "blank must be in label range");
+  TORCH_CHECK(input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
+  TORCH_CHECK(target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 
   int64_t lp_input_stride = log_probs.stride(0);
   int64_t lp_char_stride = log_probs.stride(2);
@@ -211,13 +211,13 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
     }
     tg_target_stride = targets.stride(1);
     checkSize(c, targets_arg, 0, batch_size);
-    AT_CHECK(targets.size(1) >= max_target_length,
+    TORCH_CHECK(targets.size(1) >= max_target_length,
              "Expected tensor to have size at least ", max_target_length, " at dimension 1, but got size ", targets.size(1), " for ", targets_arg,
              " (while checking arguments for ", c, ")");
   }
   int64_t max_input_length = log_probs.size(0);
   for (int64_t b = 0; b < batch_size; b++) {
-    AT_CHECK(input_lengths[b] <= max_input_length,
+    TORCH_CHECK(input_lengths[b] <= max_input_length,
              "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", targets.size(0), " for ", targets_arg,
              " (while checking arguments for ", c, ")");
   }
@@ -511,13 +511,13 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
       tg_batch_offsets_data[i] = i * tg_batch_stride;
     }
     tg_target_stride = targets.stride(1);
-    max_target_length = targets.size(1);
+    max_target_length = log_alpha.size(2)/2; // targets.size(1) might be larger
   }
   auto target_lengths_t = at::tensor(target_lengths, targets.options().dtype(kLong));
   auto input_lengths_t = at::tensor(input_lengths, targets.options().dtype(kLong));
   tg_batch_offsets = tg_batch_offsets.cuda();
 
-  Tensor log_beta = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
+  auto log_beta = at::empty_like(log_alpha);
   Tensor grad = at::full_like(log_probs, neginf); // initialization for log(sum (alpha beta))
 
   // As above, there may be better configurations to use.

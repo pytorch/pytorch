@@ -19,6 +19,8 @@
 namespace torch {
 namespace jit {
 
+Symbol ConcretePythonOp::Kind = prim::PythonOp;
+
 using c10::Type;
 
 std::string getPythonName(const PyObject* obj_) {
@@ -217,6 +219,14 @@ void initPythonIRBindings(PyObject* module_) {
             return ss.str();
           })
       .def(
+          "str",
+          [](Graph& g, bool print_source_ranges) {
+            std::stringstream ss;
+            g.print(ss, print_source_ranges);
+            return ss.str();
+          },
+          py::arg("print_source_ranges") = true)
+      .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
             AliasDb db(g);
@@ -344,13 +354,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def("param_node", [](Graph& g) { return g.block()->param_node(); })
       .def("return_node", [](Graph& g) { return g.block()->return_node(); })
       .def(
-          "pretty_print",
-          [](Graph& g) {
-            std::ostringstream oss;
-            g.prettyPrint(oss);
-            return oss.str();
-          })
-      .GS(createFusionGroup)
+          "createFusionGroup",
+          [](Graph& g) { return g.createWithSubgraph(prim::FusionGroup); })
       .def(
           "createClone",
           [](Graph& g, Node* n, py::object fn) {
@@ -442,15 +447,9 @@ void initPythonIRBindings(PyObject* module_) {
             return ss.str();
           })
       .def(
-          "getSourceLocation",
-          [](Node& n) -> py::object {
-            std::stringstream ss;
-            if (auto sl = n.getSourceLocation()) {
-              sl->highlight(ss);
-              return py::str(ss.str());
-            } else {
-              return py::none();
-            }
+          "sourceRange",
+          [](Node& n) {
+            return n.sourceRange().str();
           })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
@@ -690,7 +689,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
         return DictType::create(key, value);
-      }));
+      }))
+      .def("getKeyType", &DictType::getKeyType)
+      .def("getValueType", &DictType::getValueType);
   py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
       m, "OptionalType")
       .def(py::init([](TypePtr a) { return OptionalType::create(a); }))
