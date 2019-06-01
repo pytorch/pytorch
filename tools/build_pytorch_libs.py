@@ -91,8 +91,9 @@ def overlay_windows_vcvars(env):
         # https://stackoverflow.com/a/7797329
         vc_env = {k.upper(): v for k, v in vc_env.items()}
         for k, v in env.items():
-            if k not in vc_env:
-                vc_env[k] = v
+            uk = k.upper()
+            if uk not in vc_env:
+                vc_env[uk] = v
         return vc_env
     else:
         return env
