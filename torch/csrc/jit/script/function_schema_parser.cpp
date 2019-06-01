@@ -25,8 +25,7 @@ namespace script {
 namespace {
 struct SchemaParser {
   SchemaParser(const std::string& str)
-      : L(std::make_shared<Source>(str)),
-        type_parser(L, /*parse_complete_tensor_types*/ false) {}
+      : L(str), type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
   either<OperatorName, FunctionSchema> parseDeclaration() {
     OperatorName name = parseName();

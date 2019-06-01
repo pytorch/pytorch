@@ -253,8 +253,7 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   at::DataPtr data;
   size_t size;
   std::tie(data, size) = reader_.getRecord(path);
-  auto src = std::make_shared<Source>(
-      std::string(static_cast<const char*>(data.get()), size), path, 0);
+  std::string src(static_cast<const char*>(data.get()), size);
   script::import_libs(
       main_module_->class_compilation_unit(),
       qualifier,
@@ -322,17 +321,13 @@ void ScriptModuleDeserializer::convertModule(
     std::tie(data, size) =
         reader_.getRecord(module_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
-    auto src = std::make_shared<Source>(
-        std::string(static_cast<const char*>(data.get()), size),
-        module_def.torchscript_arena().key(),
-        1);
 
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
     script::import_methods(
         main_module_->class_compilation_unit(),
         module,
-        src,
+        data_str,
         tensor_table_,
         import_callback);
   }
