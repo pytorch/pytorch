@@ -138,7 +138,7 @@ def MiLSTMCell(x, hx, cx, w_ih, w_hh, alpha, beta_i, beta_h, bias):
 
 
 def canonical(graph):
-    return str(torch._C._jit_pass_canonicalize(graph))
+    return torch._C._jit_pass_canonicalize(graph).str(False)
 
 
 def get_lstm_inputs(device, training=False, seq_length=None):
@@ -332,7 +332,7 @@ class JitTestCase(TestCase):
                 self.assertMultiLineEqual(src, src2)
             except RuntimeError as e:
                 se = str(e)
-                if "could not export python function" not in se and \
+                if "Could not export Python function" not in se and \
                    "closures are not exportable" not in se:
                     raise
 
@@ -365,13 +365,15 @@ class JitTestCase(TestCase):
 
                 # crack open the zip format to get at the main module code
                 archive = zipfile.ZipFile(buffer)
+                # check that we have no duplicate names
+                self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
                 main_module = archive.open('archive/code/archive.py')
                 main_module_code = ""
                 for line in main_module:
                     main_module_code += line.decode()
             except RuntimeError as e:
                 se = str(e)
-                if "could not export python function" not in se and \
+                if "Could not export Python function" not in se and \
                    "closures are not exportable" not in se:
                     raise
                 else:
@@ -3695,6 +3697,16 @@ def foo(x):
         _, lineno = inspect.getsourcelines(FooBar)
         with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
             torch.jit.script(FooBar)
+
+    def test_file_line_graph(self):
+        def foobar(xyz):
+            return torch.neg(xyz)
+
+        scripted = torch.jit.script(foobar)
+
+        _, lineno = inspect.getsourcelines(foobar)
+        FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))\
+                   .run(scripted.graph)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -8551,6 +8563,22 @@ a")
                 print(c0)
             return 1
 
+    def test_if_not_defined_error(self):
+        with self.assertRaisesRegex(RuntimeError, "c0 is not defined in the false branch"):
+            @torch.jit.script
+            def test():
+                if True:
+                    c0 = 1
+                return c0
+        with self.assertRaisesRegex(RuntimeError, "c0 is not defined in the true branch"):
+            @torch.jit.script
+            def test2():
+                if True:
+                    pass
+                else:
+                    c0 = 1
+                return c0
+
     def test_if_list_cat(self):
         # testing that different length lists don't throw error on cat in shape prop
         @torch.jit.script
@@ -11555,7 +11583,7 @@ a")
             raise 3 + 4
 
         # no control flow analysis yet
-        with self.assertRaisesRegex(RuntimeError, "undefined value a"):
+        with self.assertRaisesRegex(RuntimeError, "a is not defined in the false"):
             @torch.jit.script
             def foo():
                 if True:
@@ -11949,6 +11977,8 @@ a")
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
+    @unittest.skipIf(hasattr(torch.jit, 'WeakScriptModuleProxy'), "# TODO: re-enable"
+                                                                  "this when WeakScriptModuleProxy has been deleted")
     def test_weak_module_isinstance(self):
         tester = self
 
@@ -12715,6 +12745,24 @@ a")
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
 
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_weak_cuda(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.lstm = torch.nn.LSTM(5, 5)
+                self.lstm.cuda()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.lstm(x)
+
+        m = M()
+        m.cuda()
+        out = m(torch.ones(5, 5, 5).cuda())
+        self.assertTrue(out[0].is_cuda)
+
+
     def test_ignore_decorator(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -12727,7 +12775,7 @@ a")
                 self.ignored_code(x)
                 return x
 
-            @torch.jit.ignore
+            @torch.jit.ignore(drop_on_export=True)
             def ignored_code(self, x):
                 self.some_state = torch.tensor((100,))
 
@@ -13007,6 +13055,71 @@ a")
         FileCheck().check_not("a_python_fn").run(graph)
         t = torch.ones(2, 2)
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
+
+    def test_module_recursive(self):
+        class Other(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self, x):
+                super(Other, self).__init__()
+                self.x = x
+                self.param = torch.nn.Parameter(torch.ones(2, 2))
+
+            def some_unscriptable_method(self):
+                a = 2
+                a = [2]
+                return a
+
+            def forward(self, t):
+                return t + self.x + self.param
+
+
+        class M(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.other = Other(200)
+
+            def forward(self, t):
+                return self.other(t) * 2
+
+        with torch.jit._enable_recursive_script():
+            sm = torch.jit.script(M())
+
+        self.assertExportImportModule(sm, (torch.ones(2, 2),))
+
+    def test_module_function_export(self):
+        class Other(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self, x):
+                super(Other, self).__init__()
+                self.x = x
+                self.param = torch.nn.Parameter(torch.ones(2, 2))
+
+            @torch.jit.export
+            def some_entry_point(self, y):
+                return y + 20
+
+            def forward(self, t):
+                return t + self.x + self.param
+
+
+        class M(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.other = Other(200)
+
+            def forward(self, t):
+                return self.other(t) * 2
+
+        with torch.jit._enable_recursive_script():
+            sm = torch.jit.script(M())
+
+        self.assertExportImportModule(sm, (torch.ones(2, 2),))
 
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):

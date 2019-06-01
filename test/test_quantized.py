@@ -257,7 +257,7 @@ class TestQuantizedOps(TestCase):
 
         a = torch.from_numpy(X)
         qa = torch.quantize_linear(a, scale=scale, zero_point=zero_point,
-                               dtype=torch_type)
+                                   dtype=torch_type)
 
         a_hat = qa.dequantize()
         a_pool = F.max_pool2d(a_hat, kernel_size=k, stride=s, padding=p,
