@@ -6,6 +6,8 @@ TEST_DIR="$ROOT_DIR/caffe2_tests"
 gtest_reports_dir="${TEST_DIR}/cpp"
 pytest_reports_dir="${TEST_DIR}/python"
 
+exit 1
+
 # Figure out which Python to use
 PYTHON="$(which python)"
 if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then

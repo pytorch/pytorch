@@ -7,6 +7,8 @@
 @echo off
 setlocal
 
+exit /b 1
+
 SET ORIGINAL_DIR=%cd%
 SET CAFFE2_ROOT=%~dp0%..
 

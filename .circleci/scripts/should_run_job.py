@@ -69,19 +69,19 @@ RE_MARKER = re.compile(r'\[(?:([^ \[\]]+) )?(?:ci|test)(?: ([^ \[\]]+))?\]')
 
 markers = RE_MARKER.finditer(commit_msg)
 
-for m in markers:
-    if m.group(1) and m.group(2):
-        print("Unrecognized marker: {}".format(m.group(0)))
-        continue
-    spec = m.group(1) or m.group(2)
-    if spec in args.build_environment or spec == 'all':
-        print("Accepting {} due to commit marker {}".format(args.build_environment, m.group(0)))
-        sys.exit(0)
+# for m in markers:
+#     if m.group(1) and m.group(2):
+#         print("Unrecognized marker: {}".format(m.group(0)))
+#         continue
+#     spec = m.group(1) or m.group(2)
+#     if spec in args.build_environment or spec == 'all':
+#         print("Accepting {} due to commit marker {}".format(args.build_environment, m.group(0)))
+#         sys.exit(0)
 
-for spec in default_set:
-    if spec in args.build_environment:
-        print("Accepting {} as part of default set".format(args.build_environment))
-        sys.exit(0)
+# for spec in default_set:
+#     if spec in args.build_environment:
+#         print("Accepting {} as part of default set".format(args.build_environment))
+#         sys.exit(0)
 
 print("Rejecting {}".format(args.build_environment))
 sys.exit(1)

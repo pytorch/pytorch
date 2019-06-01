@@ -61,6 +61,10 @@ set PATH=%TMP_DIR_WIN%\bin;%PATH%
 :: Target only our CI GPU machine's CUDA arch to speed up the build
 set TORCH_CUDA_ARCH_LIST=5.2
 
+set SCCACHE_NO_DAEMON=1
+set SCCACHE_ERROR_LOG=%TMP_DIR_WIN%\error.log
+set RUST_LOG=sccache::compiler=debug
+
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
@@ -74,6 +78,12 @@ if not "%USE_CUDA%"=="1" (
     set NO_CUDA=1
     python setup.py install
   )
+  echo -------------------------------------------------------------------
+  type %SCCACHE_ERROR_LOG%
+  echo -------------------------------------------------------------------
+  type build\build.ninja
+  echo -------------------------------------------------------------------
+  exit /b 1
   if errorlevel 1 exit /b 1
   if not errorlevel 0 exit /b 1
 )
