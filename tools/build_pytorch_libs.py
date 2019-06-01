@@ -85,12 +85,14 @@ def overlay_windows_vcvars(env):
         from distutils._msvccompiler import _get_vc_env
         vc_arch = 'x64' if IS_64BIT else 'x86'
         vc_env = _get_vc_env(vc_arch)
+        # Keys in `_get_vc_env` are always lowercase.
+        # We turn them into uppercase before overlaying vcvars
+        # because OS environ keys are always uppercase on Windows.
+        # https://stackoverflow.com/a/7797329
+        vc_env = {k.upper(): v for k, v in vc_env.items()}
         for k, v in env.items():
-            # OS environ keys are always uppercase on Windows.
-            # https://stackoverflow.com/a/7797329
-            uk = k.upper()
-            if uk not in vc_env:
-                vc_env[uk] = v
+            if k not in vc_env:
+                vc_env[k] = v
         return vc_env
     else:
         return env
