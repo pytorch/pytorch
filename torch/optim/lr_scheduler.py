@@ -771,3 +771,117 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.last_epoch = math.floor(epoch)
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
+
+class OneCycleLR(_LRScheduler):
+    def __init__(self,
+                 optimizer,
+                 max_lr,
+                 num_epochs=None,
+                 train_dl=None,
+                 total_steps=None,
+                 pct_start=0.3,
+                 anneal_strategy='cos',
+                 cycle_momentum=True,
+                 base_momentum=0.85,
+                 max_momentum=0.95,
+                 div_factor=25.,
+                 final_div_factor=1e4,
+                 last_epoch=-1):
+
+        if not isinstance(optimizer, Optimizer):
+            raise TypeError('{} is not an Optimizer'.format(
+                type(optimizer).__name__))
+        self.optimizer = optimizer
+
+        max_lrs = self._format_param(_, self.optimizer, max_lr)
+
+        if total_steps is None and num_epochs is None and train_dl is None:
+            raise ValueError("You must define either total_steps OR (num_epochs AND train_dl)")
+        elif total_steps is None:
+            if num_epochs <= 0 or not isinstance(num_epochs, int):
+                raise ValueError("Expected non-negative integer num_epochs, but got {}".format(num_epochs))
+            if not hasattr(train_dl, '__len__'):
+                raise ValueError("len is not defined over given train_dl")
+            self.total_steps = num_epochs * len(train_dl)
+        else:
+            if total_steps <= 0 or not isinstance(total_steps, int):
+                raise ValueError("Expected non-negative integer total_steps, but got {}".format(total_steps))
+            self.total_steps = total_steps
+        self.step_size_up = float(pct_start * total_steps)
+        self.step_size_down = float(total_steps - step_size_up)
+
+        if anneal_strategy not in ['cos', 'linear', 'exp']:
+            raise ValueError("anneal_strategy must by one of 'cos', 'linear' or 'exp', instead got {}".format(anneal_strategy))
+        elif anneal_strategy == 'cos':
+            self.anneal_func = self._annealing_cos
+        elif anneal_strategy == 'linear':
+            self.anneal_func = self._annealing_linear
+        elif anneal_strategy == 'exp':
+            self.anneal_func = self._annealing_exp
+
+        self.cycle_momentum = cycle_momentum
+        if cycle_momentum:
+            if 'momentum' not in self.optimizer.defaults:
+                raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
+
+        if last_epoch == -1:
+            for idx, group in enumerate(self.optimizer.param_groups):
+                group['lr'] = max_lrs[idx]/div_factor
+                group['max_lr'] = max_lrs[idx]
+                group['min_lr'] = group['lr']/final_div_factor
+                if cycle_momentum:
+                    group['momentum'] = max_momentum
+
+        if cycle_momentum:
+            self.initial_momentum = max_momentum
+            self.min_momentum = base_momentum
+            self.max_momentum = max_momentum
+
+        super(OneCycleLR, self).__init__(optimizer, last_epoch)
+
+    def _format_param(self, name, optimizer, param):
+        """Return correctly formatted lr/momentum for each param group."""
+        if isinstance(param, (list, tuple)):
+            if len(param) != len(optimizer.param_groups):
+                raise ValueError("expected {} values for {}, got {}".format(
+                    len(optimizer.param_groups), name, len(param)))
+            return param
+        else:
+            return [param] * len(optimizer.param_groups)
+
+    def _annealing_cos(self, start, end, pct):
+        "Cosine anneal from `start` to `end` as pct goes from 0.0 to 1.0."
+        cos_out = math.cos(np.pi * pct) + 1
+        return end + (start-end)/2 * cos_out
+
+    def _annealing_linear(self, start, end, pct):
+        "Linearly anneal from `start` to `end` as pct goes from 0.0 to 1.0."
+        return (end - start) * pct + start
+
+    def _annealing_exp(self, start, end, pct):
+        "Exponentially anneal from `start` to `end` as pct goes from 0.0 to 1.0."
+        return start * (end/start) ** pct
+
+    def get_lr(self):
+        lrs = []
+        step_num = self.last_epoch
+
+        if step_num >= self.total_steps:
+            raise ValueError("Tried to step {} times. The specified number of total steps is {}".format(step_num + 1, self.total_steps))
+
+        for group in self.optimizer.param_groups:
+            if step_num <= self.step_size_up:
+                computed_lr = self.anneal_func(group['initial_lr'], group['max_lr'], step_num / self.step_size_up)
+                if cycle_momentum:
+                    computed_momentum = self.anneal_func(self.initial_momentum, self.min_momentum, step_num / self.step_size_up)
+            else:
+                down_step_num = step_num - self.step_size_up
+                computed_lr = self.anneal_func(group['max_lr'], group['min_lr'], down_step_num / self.step_size_down)
+                if cycle_momentum:
+                    computed_momentum = self.anneal_func(self.min_momentum, self.max_momentum, down_step_num / self.step_size_down)
+
+            lrs.append(computed_lr)
+            if cycle_momentum:
+                group['momentum'] = computed_momentum
+
+        return lrs
