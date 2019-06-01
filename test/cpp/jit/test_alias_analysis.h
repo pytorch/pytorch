@@ -724,7 +724,7 @@ graph():
   }
   {
     // test "conservative" analysis writes to the inside of a container.
-    torch::RegisterOperators(
+    auto ops = torch::RegisterOperators(
         "custom::conservative", [](std::vector<at::Tensor> in) { return in; });
 
     auto graph = std::make_shared<Graph>();
