@@ -117,7 +117,7 @@ bool in_parallel_region() {
 
 void intraop_launch(std::function<void()> func) {
   if (!in_parallel_region()) {
-    internal::_get_intraop_pool.run([func](){
+    internal::_get_intraop_pool().run([func](){
       func();
     });
   } else {

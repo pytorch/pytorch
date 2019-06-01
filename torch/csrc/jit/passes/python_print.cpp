@@ -800,6 +800,15 @@ struct PythonPrintPass {
     } else if (v.isDoubleList()) {
       printMaybeAnnotatedConstantList(
           stmt, "float", v.toDoubleListRef().size(), v);
+    } else if (v.isGenericList()) {
+      stmt << "[";
+      const char* delim = "";
+      for (const auto& g : v.toGenericListRef()) {
+        stmt << delim;
+        printConstant(stmt, g);
+        delim = ", ";
+      }
+      stmt << "]";
     } else {
       stmt << v;
     }
@@ -842,10 +851,10 @@ struct PythonPrintPass {
         auto value = static_cast<const PythonOp*>(node);
         if (enforce_importable_ && !value->ignore_on_export) {
           throw script::ErrorReport(node->sourceRange())
-              << "could not export python function call " << value->name()
-              << ". Remove calls to Python functions before export. "
+              << "Could not export Python function call '" << value->name()
+              << "'. Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
-              << "If this is a nn.ModuleList, add it to __constants__.";
+              << "If this is a nn.ModuleList, add it to __constants__";
         }
 
         if (value->ignore_on_export) {
@@ -868,16 +877,16 @@ struct PythonPrintPass {
         stmt << "annotate(" << node->output()->type()->python_str() << ", "
              << useOf(node->input()) << ")";
       } break;
-      case aten::Int: {
+      case prim::Int: {
         printValueList(stmt, node->inputs(), "int(", ")");
       } break;
-      case aten::Float: {
+      case prim::Float: {
         printValueList(stmt, node->inputs(), "float(", ")");
       } break;
-      case aten::Bool: {
+      case prim::Bool: {
         printValueList(stmt, node->inputs(), "bool(", ")");
       } break;
-      case aten::Str: {
+      case prim::str: {
         printValueList(stmt, node->inputs(), "str(", ")");
       } break;
       case prim::Print: {

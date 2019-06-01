@@ -8,7 +8,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-inline TypePtr unwrapOptional(TypePtr opt_type) {
+static inline TypePtr unwrapOptional(TypePtr opt_type) {
   if (auto unwrap_list_type = opt_type->cast<OptionalType>()) {
     return unwrap_list_type->getElementType();
   }
@@ -122,7 +122,7 @@ Value* tryConvertToType(
 // VarType, it will be added to the type_env through `matchTypeVariables` as
 // the corresponding actual type. If `allow_conversions` is true, implicit
 // conversions to the `arg` type may be performed through `tryConvertToType`.
-Value* tryMatchArgument(
+static Value* tryMatchArgument(
     const Argument& arg,
     Graph& graph,
     const SourceRange& loc,
@@ -158,10 +158,8 @@ Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
-    auto& ostream = err() << "Expected a value of type "
-                          << concrete_type->python_str() << " for argument '"
-                          << arg.name() << "' but found "
-                          << value->type()->python_str() << "\n";
+    auto& ostream =
+        err() << arg.formatTypeMismatchMsg(value->type()->python_str());
 
     if (auto v = value->type()->cast<ListType>()) {
       if (v->getElementType()->isSubtypeOf(TensorType::get())) {
@@ -174,7 +172,7 @@ Value* tryMatchArgument(
     if (value->type() == NumberType::get() &&
         value->node()->kind() == aten::item) {
       ostream << "Use int(tensor) or float(tensor) to retrieve item() from a "
-                 "tensor with the appropriate type\n";
+              << "tensor with the appropriate type\n";
     }
     ostream << named_value.locOr(loc);
     return nullptr;
@@ -197,7 +195,7 @@ c10::optional<size_t> findInputWithName(
 /// `elem_type`, nullptr is returned. This is used for creating lists from
 /// varargs so that calls like torch.zeros(1, 2, 3) will be matched to
 /// aten::zeros(int[]).
-Value* tryCreateList(
+static Value* tryCreateList(
     const TypePtr& elem_type,
     Graph& graph,
     const SourceRange& loc,
@@ -229,7 +227,7 @@ Value* tryCreateList(
 // Check if it is possible to convert all the remaining non-kwarg arguments
 // to a list. This allows zeros(IntArrayRef sizes) to work with zeros(1, 2) or
 // zeros(1)
-bool varargsCanBeUsedAsList(
+static bool varargsCanBeUsedAsList(
     const FunctionSchema& schema,
     size_t arg_index,
     const Argument& arg) {
@@ -391,7 +389,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
 // pack outputs of a function following python rules. If there is a single value
 // return a SimpleValue, otherwise pack all the values into a Tuple.
-Value* packOutputs(
+static Value* packOutputs(
     Graph& g,
     at::ArrayRef<Value*> values,
     c10::OptNameList field_names) {

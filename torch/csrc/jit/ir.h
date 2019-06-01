@@ -632,7 +632,8 @@ struct TORCH_API Node {
   std::ostream& print(
       std::ostream& out,
       size_t level,
-      std::vector<const Node*>* groups) const;
+      std::vector<const Node*>* groups,
+      bool print_source_locations = true) const;
 
   virtual ~Node() = default;
 
@@ -1176,6 +1177,10 @@ struct Graph {
   TORCH_API ~Graph();
 
   TORCH_API std::string toString() const;
+
+  TORCH_API std::ostream& print(
+      std::ostream& out,
+      bool print_source_locations = true) const;
 
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 

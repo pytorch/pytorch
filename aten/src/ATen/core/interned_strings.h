@@ -63,6 +63,10 @@ namespace c10 {
   _(prim, StringIndex)             \
   _(prim, NumToTensor)             \
   _(prim, ImplicitTensorToNum)     \
+  _(prim, Bool)                    \
+  _(prim, Int)                     \
+  _(prim, Float)                   \
+  _(prim, str)                     \
   _(prim, device)                  \
   _(prim, dtype)                   \
   _(prim, shape)                   \
@@ -78,15 +82,13 @@ namespace c10 {
   _(prim, max)                     \
   _(prim, abs)                     \
   _(prim, rangelist)               \
-  _(aten, Bool)                    \
-  _(aten, Int)                     \
-  _(aten, Float)                   \
-  _(aten, Str)                     \
   _(aten, _grad_sum_to_size)       \
   _(aten, _size_if_not_equal)      \
   _(aten, _ncf_unsqueeze)          \
   _(aten, warn)                    \
   _(aten, floordiv)                \
+  _(aten, __range_length)          \
+  _(aten, __derive_index)          \
   _(aten, __round_to_zero_floordiv)\
   _(aten, _unwrap_optional)        \
   _(prim, fork)                    \
@@ -98,6 +100,8 @@ namespace c10 {
   _(prim, profile)                 \
   _(prim, AddStatValue)            \
   _(prim, TimePoint)               \
+  _(prim, CallFunction)            \
+  _(prim, CallMethod)              \
   _(aten, append)                  \
   _(aten, item)                    \
   _(aten, format)                  \
