@@ -793,7 +793,7 @@ class OneCycleLR(_LRScheduler):
                 type(optimizer).__name__))
         self.optimizer = optimizer
 
-        max_lrs = self._format_param(_, self.optimizer, max_lr)
+        max_lrs = self._format_param('max_lr', self.optimizer, max_lr)
 
         if total_steps is None and num_epochs is None and train_dl is None:
             raise ValueError("You must define either total_steps OR (num_epochs AND train_dl)")
@@ -807,8 +807,8 @@ class OneCycleLR(_LRScheduler):
             if total_steps <= 0 or not isinstance(total_steps, int):
                 raise ValueError("Expected non-negative integer total_steps, but got {}".format(total_steps))
             self.total_steps = total_steps
-        self.step_size_up = float(pct_start * total_steps)
-        self.step_size_down = float(total_steps - step_size_up)
+        self.step_size_up = float(pct_start * total_steps) - 1
+        self.step_size_down = float(self.total_steps - self.step_size_up) - 1
 
         if anneal_strategy not in ['cos', 'linear', 'exp']:
             raise ValueError("anneal_strategy must by one of 'cos', 'linear' or 'exp', instead got {}".format(anneal_strategy))
@@ -820,7 +820,7 @@ class OneCycleLR(_LRScheduler):
             self.anneal_func = self._annealing_exp
 
         self.cycle_momentum = cycle_momentum
-        if cycle_momentum:
+        if self.cycle_momentum:
             if 'momentum' not in self.optimizer.defaults:
                 raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
 
@@ -829,10 +829,10 @@ class OneCycleLR(_LRScheduler):
                 group['lr'] = max_lrs[idx]/div_factor
                 group['max_lr'] = max_lrs[idx]
                 group['min_lr'] = group['lr']/final_div_factor
-                if cycle_momentum:
+                if self.cycle_momentum:
                     group['momentum'] = max_momentum
 
-        if cycle_momentum:
+        if self.cycle_momentum:
             self.initial_momentum = max_momentum
             self.min_momentum = base_momentum
             self.max_momentum = max_momentum
@@ -851,7 +851,7 @@ class OneCycleLR(_LRScheduler):
 
     def _annealing_cos(self, start, end, pct):
         "Cosine anneal from `start` to `end` as pct goes from 0.0 to 1.0."
-        cos_out = math.cos(np.pi * pct) + 1
+        cos_out = math.cos(math.pi * pct) + 1
         return end + (start-end)/2 * cos_out
 
     def _annealing_linear(self, start, end, pct):
@@ -872,16 +872,16 @@ class OneCycleLR(_LRScheduler):
         for group in self.optimizer.param_groups:
             if step_num <= self.step_size_up:
                 computed_lr = self.anneal_func(group['initial_lr'], group['max_lr'], step_num / self.step_size_up)
-                if cycle_momentum:
+                if self.cycle_momentum:
                     computed_momentum = self.anneal_func(self.initial_momentum, self.min_momentum, step_num / self.step_size_up)
             else:
                 down_step_num = step_num - self.step_size_up
                 computed_lr = self.anneal_func(group['max_lr'], group['min_lr'], down_step_num / self.step_size_down)
-                if cycle_momentum:
+                if self.cycle_momentum:
                     computed_momentum = self.anneal_func(self.min_momentum, self.max_momentum, down_step_num / self.step_size_down)
 
             lrs.append(computed_lr)
-            if cycle_momentum:
+            if self.cycle_momentum:
                 group['momentum'] = computed_momentum
 
         return lrs

@@ -12,7 +12,7 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
     ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler, \
-    CyclicLR, CosineAnnealingWarmRestarts
+    CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
 from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
 
@@ -1037,6 +1037,38 @@ class TestLRScheduler(TestCase):
                              max_momentum=max_lr,
                              mode='exp_range', gamma=gamma)
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target))
+
+    def test_onecycle_lr_invalid_anneal_strategy(self):
+        with self.assertRaises(ValueError):
+            scheduler = OneCycleLR(self.opt, max_lr=1e-3, total_steps=10, anneal_strategy="CATS")
+
+    def test_onecycle_lr_cannot_calculate_total_steps(self):
+        with self.assertRaises(ValueError):
+            scheduler = OneCycleLR(self.opt, max_lr=1e-3)
+
+    def test_onecycle_lr_linear_annealing(self):
+        lr_target = [1, 13, 25, 21.5, 18, 14.5, 11, 7.5, 4, 0.5]
+        momentum_target = [22, 11.5, 1, 4, 7, 10, 13, 16, 19, 22]
+        lr_targets = [lr_target, lr_target]
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = OneCycleLR(self.opt, max_lr=25, final_div_factor=2, base_momentum=1, max_momentum=22, total_steps=10, anneal_strategy='linear')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
+
+    def test_onecycle_lr_exponential_annealing(self):
+        lr_target = [1, 5, 25, 14.296509199195533, 8.1756070113073, 4.6753056338464924, 2.6736220001334834, 1.528938460803196, 0.8743393107950702, 0.5]
+        momentum_target = [22, 4.69041575982343, 1, 1.5551585367634633, 2.418518074468276, 3.761179029826073, 5.849229676529738, 9.096479464945414, 14.1464676944034, 22]
+        lr_targets = [lr_target, lr_target]
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = OneCycleLR(self.opt, max_lr=25, final_div_factor=2, base_momentum=1, max_momentum=22, total_steps=10, anneal_strategy='exp')
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
+
+    def test_onecycle_lr_cosine_annealing(self):
+        lr_target = [1, 13, 25, 23.786868631804634, 20.387750072769485, 15.475881440964852, 10.024118559035148, 5.112249927230515, 1.7131313681953668, 0.5]
+        momentum_target = [22, 11.5, 1, 2.0398268870245992, 4.953357080483297, 9.1635301934587, 13.8364698065413, 18.046642919516703, 20.9601731129754, 22]
+        lr_targets = [lr_target, lr_target]
+        momentum_targets = [momentum_target, momentum_target]
+        scheduler = OneCycleLR(self.opt, max_lr=25, final_div_factor=2, base_momentum=1, max_momentum=22, total_steps=10)
+        self._test_cycle_lr(scheduler, lr_targets, momentum_targets, 10)
 
     def test_lambda_lr(self):
         epochs = 10
