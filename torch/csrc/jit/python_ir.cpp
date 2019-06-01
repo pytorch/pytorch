@@ -219,6 +219,14 @@ void initPythonIRBindings(PyObject* module_) {
             return ss.str();
           })
       .def(
+          "str",
+          [](Graph& g, bool print_source_ranges) {
+            std::stringstream ss;
+            g.print(ss, print_source_ranges);
+            return ss.str();
+          },
+          py::arg("print_source_ranges") = true)
+      .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
             AliasDb db(g);
