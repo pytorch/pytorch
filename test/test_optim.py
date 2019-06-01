@@ -333,7 +333,7 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.AdamW(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
-    )
+        )
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
