@@ -85,10 +85,15 @@ def overlay_windows_vcvars(env):
         from distutils._msvccompiler import _get_vc_env
         vc_arch = 'x64' if IS_64BIT else 'x86'
         vc_env = _get_vc_env(vc_arch)
+        # Keys in `_get_vc_env` are always lowercase.
+        # We turn them into uppercase before overlaying vcvars
+        # because OS environ keys are always uppercase on Windows.
+        # https://stackoverflow.com/a/7797329
+        vc_env = {k.upper(): v for k, v in vc_env.items()}
         for k, v in env.items():
-            lk = k.lower()
-            if lk not in vc_env:
-                vc_env[lk] = v
+            uk = k.upper()
+            if uk not in vc_env:
+                vc_env[uk] = v
         return vc_env
     else:
         return env
@@ -118,10 +123,8 @@ def create_build_env():
         # But it should be set to MSVC as the user's first choice.
         if USE_NINJA:
             my_env = overlay_windows_vcvars(my_env)
-            cc = my_env.get('CC', 'cl')
-            cxx = my_env.get('CXX', 'cl')
-            my_env['CC'] = cc
-            my_env['CXX'] = cxx
+            my_env.setdefault('CC', 'cl')
+            my_env.setdefault('CXX', 'cl')
     return my_env
 
 
