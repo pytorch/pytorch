@@ -2247,7 +2247,7 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     return ret
 
 
-def _fspecial_gaussian(size, channel, sigma=1.5):
+def _fspecial_gaussian(size, channel, sigma):
     coords = torch.tensor([(x - (size - 1.) / 2.) for x in range(size)])
     coords = -coords ** 2 / (2. * sigma ** 2)
     grid = coords.view(1, -1) + coords.view(-1, 1)
@@ -2258,9 +2258,9 @@ def _fspecial_gaussian(size, channel, sigma=1.5):
     return kernel
 
 
-def _ssim(input, target, max_val, size, channel, kernel):
-    c1 = (0.01 * max_val) ** 2
-    c2 = (0.03 * max_val) ** 2
+def _ssim(input, target, max_val, k1, k2, channel, kernel):
+    c1 = (k1 * max_val) ** 2
+    c2 = (k2 * max_val) ** 2
 
     mu1 = conv2d(input, kernel,  groups=channel)
     mu2 = conv2d(target, kernel, groups=channel)
@@ -2281,9 +2281,11 @@ def _ssim(input, target, max_val, size, channel, kernel):
 
 
 @weak_script
-def ssim_loss(input, target, max_val, filter_size=11, size_average=None, reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, float, int, Optional[bool], Optional[bool], str) -> Tensor
-    r"""ssim_loss(input, target, max_val, filter_size, size_average=None, reduce=None, reduction='mean') -> Tensor
+def ssim_loss(input, target, max_val, filter_size=11, k1=0.01, k2=0.03,
+              sigma=1.5, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, float, int, float, float, float, Optional[bool], Optional[bool], str) -> Tensor
+    r"""ssim_loss(input, target, max_val, filter_size, k1, k2,
+                  sigma, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Measures the structural similarity index (SSIM) error.
 
@@ -2302,16 +2304,18 @@ def ssim_loss(input, target, max_val, filter_size=11, size_average=None, reduce=
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     _, channel, _, _ = input.size()
-    kernel = _fspecial_gaussian(filter_size, channel)
-    ret, _ = _ssim(input, target, max_val, filter_size, channel, kernel)
+    kernel = _fspecial_gaussian(filter_size, channel, sigma)
+    ret, _ = _ssim(input, target, max_val, k1, k2, channel, kernel)
 
     if reduction != 'none':
         ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
     return ret
 
-def ms_ssim_loss(input, target, max_val, filter_size=11, size_average=None, reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, float, int, Optional[bool], Optional[bool], str) -> Tensor
-    r"""ms_ssim_loss(input, target, max_val, filter_size, size_average=None, reduce=None, reduction='mean') -> Tensor
+def ms_ssim_loss(input, target, max_val, filter_size=11, k1=0.01, k2=0.03,
+                 sigma=1.5, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, float, int, float, float, float, Optional[bool], Optional[bool], str) -> Tensor
+    r"""ms_ssim_loss(input, target, max_val, filter_size, k1, k2,
+                     sigma, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     Measures the multi-scale structural similarity index (MS-SSIM) error.
 
@@ -2330,7 +2334,7 @@ def ms_ssim_loss(input, target, max_val, filter_size=11, size_average=None, redu
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
     _, channel, _, _ = input.size()
-    kernel = _fspecial_gaussian(filter_size, channel)
+    kernel = _fspecial_gaussian(filter_size, channel, sigma)
 
     weights = torch.tensor([0.0448, 0.2856, 0.3001, 0.2363, 0.1333])
     weights = weights.unsqueeze(-1).unsqueeze(-1)
@@ -2338,7 +2342,7 @@ def ms_ssim_loss(input, target, max_val, filter_size=11, size_average=None, redu
     mssim = []
     mcs = []
     for _ in range(levels):
-        ssim, cs = _ssim(input, target, max_val, filter_size, channel, kernel)
+        ssim, cs = _ssim(input, target, max_val, k1, k2, channel, kernel)
         ssim = ssim.mean((2, 3))
         cs = cs.mean((2, 3))
         mssim.append(ssim)

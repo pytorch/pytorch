@@ -474,10 +474,13 @@ class SSIMLoss(_Loss):
 
     Args:
         max_val (float): The difference between the maximum and minimum of the pixel value,
-        i.e., if for image x it holds min(x) = 0 and max(x) = 1, then max_val = 1.
-        The pixel value interval of both input and output should remain the same.
+            i.e., if for image x it holds min(x) = 0 and max(x) = 1, then max_val = 1.
+            The pixel value interval of both input and output should remain the same.
         filter_size (int, optional): By default, the mean and covariance of a pixel is obtained
-        by convolution with given filter_size. Default: 11
+            by convolution with given filter_size. Default: 11
+        k1 (float, optional): Coefficient related to c1 in the above equation. Default: 0.01
+        k2 (float, optional): Coefficient related to c2 in the above equation. Default: 0.03
+        sigma (float, optional): Standard deviation for Gaussian kernel. Default: 1.5
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
@@ -501,20 +504,24 @@ class SSIMLoss(_Loss):
     Examples::
 
         >>> loss = nn.SSIMLoss()
-        >>> input = torch.rand(3, 5, 32, 32, requires_grad=True)
-        >>> target = torch.rand(3, 5, 32, 32)
+        >>> input = torch.rand(3, 3, 256, 256, requires_grad=True)
+        >>> target = torch.rand(3, 3, 256, 256)
         >>> output = loss(input, target, max_val=1.)
         >>> output.backward()
     """
-    __constants__ = ['filter_size', 'reduction']
+    __constants__ = ['filter_size', 'k1', 'k2', 'sigma' 'reduction']
 
-    def __init__(self, filter_size=11, size_average=None, reduce=None, reduction='mean'):
+    def __init__(self, filter_size=11, k1=0.01, k2=0.03, sigma=1.5, size_average=None, reduce=None, reduction='mean'):
         super(SSIMLoss, self).__init__(size_average, reduce, reduction)
         self.filter_size = filter_size
+        self.k1 = k1
+        self.k2 = k2
+        self.sigma = sigma
 
     @weak_script_method
     def forward(self, input, target, max_val):
-        return F.ssim_loss(input, target, max_val=max_val, filter_size=self.filter_size, reduction=self.reduction)
+        return F.ssim_loss(input, target, max_val=max_val, filter_size=self.filter_size, k1=self.k1, k2=self.k2,
+                           sigma=self.sigma, reduction=self.reduction)
 
 @weak_module
 class MultiScaleSSIMLoss(_Loss):
@@ -552,6 +559,9 @@ class MultiScaleSSIMLoss(_Loss):
             The pixel value interval of both input and output should remain the same.
         filter_size (int, optional): By default, the mean and covariance of a pixel is obtained
             by convolution with given filter_size. Default: 11
+        k1 (float, optional): Coefficient related to c1 in the above equation. Default: 0.01
+        k2 (float, optional): Coefficient related to c2 in the above equation. Default: 0.03
+        sigma (float, optional): Standard deviation for Gaussian kernel. Default: 1.5
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
@@ -575,20 +585,24 @@ class MultiScaleSSIMLoss(_Loss):
     Examples::
 
         >>> loss = nn.MultiScaleSSIMLoss()
-        >>> input = torch.rand(3, 5, 128, 128, requires_grad=True)
-        >>> target = torch.rand(3, 5, 128, 128)
+        >>> input = torch.rand(3, 3, 256, 256, requires_grad=True)
+        >>> target = torch.rand(3, 3, 256, 256)
         >>> output = loss(input, target, max_val=1.)
         >>> output.backward()
     """
-    __constants__ = ['filter_size', 'reduction']
+    __constants__ = ['filter_size', 'k1', 'k2', 'sigma' 'reduction']
 
-    def __init__(self, filter_size=11, size_average=None, reduce=None, reduction='mean'):
+    def __init__(self, filter_size=11, k1=0.01, k2=0.03, sigma=1.5, size_average=None, reduce=None, reduction='mean'):
         super(MultiScaleSSIMLoss, self).__init__(size_average, reduce, reduction)
         self.filter_size = filter_size
+        self.k1 = k1
+        self.k2 = k2
+        self.sigma = sigma
 
     @weak_script_method
     def forward(self, input, target, max_val):
-        return F.ms_ssim_loss(input, target, max_val=max_val, filter_size=self.filter_size, reduction=self.reduction)
+        return F.ms_ssim_loss(input, target, max_val=max_val, k1=self.k1, k2=self.k2,
+                              sigma=self.sigma, filter_size=self.filter_size, reduction=self.reduction)
 
 
 @weak_module

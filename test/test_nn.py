@@ -6007,47 +6007,43 @@ class TestNN(NNTestCase):
         y.mean().backward()
         self.assertEqual(x.grad, None)
 
-    def test_ssim_loss_always_between_zero_and_one(self):
-        target = torch.rand(3, 5, 128, 128)
-        input = torch.rand(3, 5, 128, 128)
+    def test_ssim_loss_always_le_one(self):
+        target = torch.rand(3, 3, 256, 256)
+        input = torch.rand(3, 3, 256, 256)
         loss = nn.SSIMLoss(reduction='none')(input, target, max_val=1.)
-        m1 = loss < 0.
-        m2 = loss > 1.
-        m = m1 + m2
+        m = loss > 1
         self.assertEqual(m.sum(), 0)
 
-    def test_ms_ssim_loss_always_between_zero_and_one(self):
-        target = torch.rand(3, 5, 128, 128)
-        input = torch.rand(3, 5, 128, 128)
+    def test_ms_ssim_loss_always_le_one(self):
+        target = torch.rand(3, 3, 256, 256)
+        input = torch.rand(3, 3, 256, 256)
         loss = nn.MultiScaleSSIMLoss(reduction='none')(input, target, max_val=1.)
-        m1 = loss < 0.
-        m2 = loss > 1.
-        m = m1 + m2
+        m = loss > 1
         self.assertEqual(m.sum(), 0)
 
     def test_ssim_symmetry(self):
-        target = torch.rand(3, 5, 128, 128)
-        input = torch.rand(3, 5, 128, 128)
+        target = torch.rand(3, 3, 256, 256)
+        input = torch.rand(3, 3, 256, 256)
         l1 = nn.SSIMLoss(reduction='none')(input, target, max_val=1.)
         l2 = nn.SSIMLoss(reduction='none')(target, input, max_val=1.)
         self.assertEqual(l1, l2)
 
     def test_ms_ssim_symmetry(self):
-        target = torch.rand(3, 5, 128, 128)
-        input = torch.rand(3, 5, 128, 128)
+        target = torch.rand(3, 3, 256, 256)
+        input = torch.rand(3, 3, 256, 256)
         l1 = nn.MultiScaleSSIMLoss(reduction='none')(input, target, max_val=1.)
         l2 = nn.MultiScaleSSIMLoss(reduction='none')(target, input, max_val=1.)
         self.assertEqual(l1, l2)
 
     def test_ssim_equality(self):
-        target = torch.rand(3, 5, 128, 128)
+        target = torch.rand(3, 3, 256, 256)
         input = target
         loss = nn.SSIMLoss(reduction='none')(input, target, max_val=1.)
         loss = loss - 1.
         self.assertEqual(loss.sum(), 0)
 
     def test_ms_ssim_equality(self):
-        target = torch.rand(3, 5, 128, 128)
+        target = torch.rand(3, 3, 256, 256)
         input = target
         loss = nn.MultiScaleSSIMLoss(reduction='none')(input, target, max_val=1.)
         loss = loss - 1.
