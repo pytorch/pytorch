@@ -312,6 +312,7 @@ void AliasDb::analyzeImpl(Node* node) {
       TORCH_INTERNAL_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
 
+  const auto& schema = node->schema();
   // see [custom operator aliasing]
   if (!node->kind().is_aten() && !node->kind().is_prim()) {
     return analyzeConservative(node);
@@ -320,7 +321,6 @@ void AliasDb::analyzeImpl(Node* node) {
   // Bind the schema's "formal" alias annotation to the actual values those
   // schema arguments represent
   std::unordered_map<Symbol, Value*> formalToActual;
-  const auto& schema = node->schema();
   for (size_t i = 0; i < schema.arguments().size(); i++) {
     const auto& formal = schema.arguments()[i].alias_info();
     const auto& actualValue = node->inputs().at(i);
