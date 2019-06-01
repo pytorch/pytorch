@@ -10,6 +10,9 @@
 #include <torch/csrc/generic/serialization.h>
 #include <TH/THGenerateBoolType.h>
 
+#include <torch/csrc/generic/serialization.h>
+#include <TH/THGenerateQTypes.h>
+
 template <class io>
 void doRead(io fildes, void* buf, size_t nbytes);
 
