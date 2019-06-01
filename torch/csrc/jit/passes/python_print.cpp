@@ -800,6 +800,15 @@ struct PythonPrintPass {
     } else if (v.isDoubleList()) {
       printMaybeAnnotatedConstantList(
           stmt, "float", v.toDoubleListRef().size(), v);
+    } else if (v.isGenericList()) {
+      stmt << "[";
+      const char* delim = "";
+      for (const auto& g : v.toGenericListRef()) {
+        stmt << delim;
+        printConstant(stmt, g);
+        delim = ", ";
+      }
+      stmt << "]";
     } else {
       stmt << v;
     }

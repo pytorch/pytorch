@@ -3123,6 +3123,14 @@ graph(%Ra, %Rb):
                 # type: (Tensor, float, int) -> Tensor
                 return x + a + b
 
+        @torch.jit.script
+        def list_str_fn(x, a=['world']):
+            # type: (str, List[str]) -> str
+            return x + a[0]
+
+        self.assertEqual(list_str_fn("hello "), "hello world")
+
+
     def test_module_default_values(self):
         four = torch.tensor(4)
 
