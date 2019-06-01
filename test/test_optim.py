@@ -1042,6 +1042,10 @@ class TestLRScheduler(TestCase):
         with self.assertRaises(ValueError):
             scheduler = OneCycleLR(self.opt, max_lr=1e-3, total_steps=10, anneal_strategy="CATS")
 
+    def test_onecycle_lr_invalid_pct_start(self):
+        with self.assertRaises(ValueError):
+            scheduler = OneCycleLR(self.opt, max_lr=1e-3, total_steps=10, pct_start=1.1)
+
     def test_onecycle_lr_cannot_calculate_total_steps(self):
         with self.assertRaises(ValueError):
             scheduler = OneCycleLR(self.opt, max_lr=1e-3)
