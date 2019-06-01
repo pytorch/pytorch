@@ -218,7 +218,8 @@ static std::ostream& indent(std::ostream& out, size_t level) {
 std::ostream& Node::print(
     std::ostream& out,
     size_t level,
-    std::vector<const Node*>* groups) const {
+    std::vector<const Node*>* groups,
+    bool print_source_locations) const {
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
@@ -245,12 +246,23 @@ std::ostream& Node::print(
 
   out << "(" << inputs() << ")";
   std::string scName = scopeName();
-  if (scName.empty()) {
-    out << "\n";
-  } else {
+  if (!scName.empty()) {
     out << ", ";
-    out << "scope: " << scName << "\n";
+    out << "scope: " << scName;
   }
+
+  // In debug print, append file:line:col as a comment after each node
+  if (print_source_locations && source_range_ &&
+      source_range_->source()->filename()) {
+    const auto& range = sourceRange();
+    const auto& source = range.source();
+    auto lineno = source->lineno_for_offset(range.start());
+    auto col_offset = (int)range.start() - (int)source->offset_for_line(lineno);
+    out << " # " << source->filename().value() << ":"
+        << source->lineno_to_source_lineno(lineno) << ":" << col_offset;
+  }
+
+  out << "\n";
 
   for (size_t i = 0; i < blocks().size(); ++i) {
     auto b = blocks()[i];
@@ -270,14 +282,15 @@ std::ostream& operator<<(std::ostream& out, const Node& n) {
   return n.print(out, 0, nullptr);
 }
 
-std::ostream& operator<<(std::ostream& out, const Graph& g) {
-  out << "graph(" << const_value_list_with_types(g.inputs(), ",\n      ")
+std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
+    const {
+  out << "graph(" << const_value_list_with_types(inputs(), ",\n      ")
       << "):\n";
   std::vector<const Node*> groups;
-  for (auto n : g.nodes()) {
-    n->print(out, 1, &groups);
+  for (auto n : nodes()) {
+    n->print(out, 1, &groups, print_source_locations);
   }
-  out << "  return (" << g.outputs() << ")\n";
+  out << "  return (" << outputs() << ")\n";
   size_t i = 0;
   for (auto fg : groups) {
     out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
@@ -288,12 +301,16 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
   {
     out << "\n";
     out << "all_nodes:\n";
-    for (auto& n : g.all_nodes) {
+    for (auto& n : all_nodes) {
       printNode(out, const_cast<Node*>(n), nullptr);
     }
   }
   */
   return out;
+}
+
+std::ostream& operator<<(std::ostream& out, const Graph& g) {
+  return g.print(out, true);
 }
 
 static void checkSameDevice(const Node* node) {
