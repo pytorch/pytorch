@@ -365,6 +365,8 @@ class JitTestCase(TestCase):
 
                 # crack open the zip format to get at the main module code
                 archive = zipfile.ZipFile(buffer)
+                # check that we have no duplicate names
+                self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
                 main_module = archive.open('archive/code/archive.py')
                 main_module_code = ""
                 for line in main_module:
