@@ -613,7 +613,7 @@ void initJitScriptBindings(PyObject* module) {
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {
-    Parser p(std::make_shared<Source>(comment));
+    Parser p(comment);
     return Decl(p.parseTypeComment());
   });
 
@@ -657,7 +657,7 @@ void initJitScriptBindings(PyObject* module) {
         import_functions(
             CompilationUnit::_get_python_cu_const(),
             cu,
-            std::make_shared<Source>(src),
+            src,
             constant_table,
             self,
             nullptr);
