@@ -1,10 +1,12 @@
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
@@ -559,7 +561,6 @@ struct to_ir {
       throw ErrorReport(def.decl().params().range())
           << "methods must have a self argument";
     }
-
     method.setSchema(emitDef(def, self, graph->block()));
     runCleanupPasses(graph);
   }
@@ -595,6 +596,7 @@ struct to_ir {
 
   void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
     // remove any uses of tuples that we inserted that are not needed
+    Inline(*to_clean);
     LowerSimpleTuples(to_clean);
     ConstantPooling(to_clean);
     // For jitter
@@ -671,7 +673,7 @@ struct to_ir {
       auto param = *it;
       auto def = param.defaultValue();
       if (def.present()) {
-        default_types.emplace_back(param.type());
+        default_types.emplace_back(param.type().get());
         default_exprs.emplace_back(def.get());
       }
     }
@@ -684,15 +686,22 @@ struct to_ir {
 
       TypePtr type;
       c10::optional<int32_t> N;
-
-      // BroadcastList list can only appear at the argument level
-      if (auto maybe_broad_list =
-              typeParser_.parseBroadcastList(decl_arg.type())) {
-        type = maybe_broad_list->first;
-        N = maybe_broad_list->second;
-      } else {
-        type = typeParser_.parseTypeFromExpr(decl_arg.type());
+      bool is_inferred_type = false;
+      if (!decl_arg.type().present()) {
+        // If this param doesn't have a type, default to "tensor"
+        is_inferred_type = true;
+        type = TensorType::get();
         N = c10::nullopt;
+      } else {
+        // BroadcastList list can only appear at the argument level
+        if (auto maybe_broad_list =
+                typeParser_.parseBroadcastList(decl_arg.type().get())) {
+          type = maybe_broad_list->first;
+          N = maybe_broad_list->second;
+        } else {
+          type = typeParser_.parseTypeFromExpr(decl_arg.type().get());
+          N = c10::nullopt;
+        }
       }
       c10::optional<IValue> default_value = c10::nullopt;
       if (decl_arg.defaultValue().present()) {
@@ -703,7 +712,9 @@ struct to_ir {
           type,
           N,
           default_value,
-          decl_arg.kwarg_only());
+          decl_arg.kwarg_only(),
+          /*alias_info=*/c10::nullopt,
+          is_inferred_type);
       retval.push_back(arg);
     }
     return retval;
@@ -1195,14 +1206,25 @@ struct to_ir {
     // ordered set, because we want deterministic graph output
     std::set<std::string> mutated_variables;
 
+    // var is only defined in one branch save error in case it's used later
+    auto err = [&](const std::string& v, const std::string& branch) {
+      ErrorReport error(stmt);
+      error << v << " is not defined in the " << branch;
+      environment_stack->setVariableTypeError(v, error.what());
+    };
+
     for (auto& v : save_true->definedVariables()) {
       if (save_false->findInAnyFrame(v)) {
         mutated_variables.insert(v);
+      } else {
+        err(v, "false branch");
       }
     }
     for (auto& v : save_false->definedVariables()) {
       if (save_true->findInAnyFrame(v)) {
         mutated_variables.insert(v);
+      } else {
+        err(v, "true branch");
       }
     }
 
@@ -1233,10 +1255,7 @@ struct to_ir {
             save_false->findInParentFrame(x)) {
           throw error;
         } else {
-          // error gets saved in the lowest environment because all
-          // variables are scoped to the function. doesn't matter if this
-          // accessed through save_true or save_false
-          save_true->setVariableTypeError(x, error.what());
+          environment_stack->setVariableTypeError(x, error.what());
           continue;
         }
       }
@@ -2225,7 +2244,6 @@ struct to_ir {
       if (trees.size() < 1) {
         throw ErrorReport(loc) << "Expected at least one argument to fork()";
       }
-
       auto forked = emitSugaredExpr(Expr(trees[0]), 1);
       TreeList sliced_trees(trees.begin() + 1, trees.end());
       auto inputs = getNamedValues(sliced_trees, true);
@@ -2439,10 +2457,9 @@ struct to_ir {
                      std::make_shared<BuiltinFunction>(aten::neg, at::nullopt))
                      ->call(tree->range(), method, named_values, {}, 0));
 
-    // constant fold the input if possible
-
-    // can occur with desugared class type __neg__ function
-    if (neg_val->node()->inputs().size() == 0) {
+    // if we emitted a aten::neg and not some other overloaded function,
+    // then try to constantfold
+    if (neg_val->node()->kind() != aten::neg) {
       return neg_val;
     }
     auto maybe_constant_input = toIValue(neg_val->node()->input());
@@ -3124,7 +3141,7 @@ void CompilationUnit::define(
     const std::string& source,
     const ResolverPtr& resolver,
     const Self& self) {
-  Parser p(source);
+  Parser p(std::make_shared<Source>(source, "<string>", 1));
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
