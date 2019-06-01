@@ -3708,6 +3708,31 @@ def foo(x):
         FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))\
                    .run(scripted.graph)
 
+    def test_file_line_save_load(self):
+        class Scripted(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, xyz):
+                return torch.neg(xyz)
+
+        scripted = Scripted()
+
+        # NB: not using getExportImportCopy because that takes a different
+        # code path that calls CompilationUnit._import rather than
+        # going through the full save/load pathway
+        buffer = scripted.save_to_buffer()
+        bytesio = io.BytesIO(buffer)
+        scripted = torch.jit.load(bytesio)
+
+        FileCheck().check('code/archive.py:4:10').run(scripted.graph)
+
+    def test_file_line_string(self):
+        scripted = torch.jit.CompilationUnit('''
+def foo(xyz):
+    return torch.neg(xyz)
+        ''')
+
+        FileCheck().check('<string>:2:12').run(scripted.foo.graph)
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
