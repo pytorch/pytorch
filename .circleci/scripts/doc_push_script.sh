@@ -1,5 +1,9 @@
 # =================== The following code **should** be executed inside Docker container ===================
 
+# Install dependencies
+sudo apt-get -y update
+sudo apt-get -y install expect-dev
+
 # This is where the local pytorch install in the docker image is located
 pt_checkout="/var/lib/jenkins/workspace"
 
