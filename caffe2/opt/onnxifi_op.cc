@@ -1,4 +1,6 @@
-#include "caffe2/operators/onnxifi_op.h"
+#include "caffe2/opt/onnxifi_op.h"
+#include "caffe2/operators/slice_op.h"
+#include "caffe2/opt/bound_shape_inferencer.h"
 
 namespace caffe2 {
 
@@ -170,6 +172,7 @@ void BlobToTensorDescriptor(
     desc->quantizationParams = 0;
   }
 }
+
 } // namespace
 
 template <>
@@ -178,7 +181,9 @@ OnnxifiOp<CPUContext>::buildInitializationList(
     Workspace* ws,
     const std::vector<std::string>& initializers,
     std::vector<std::string>* weight_names,
-    std::vector<std::vector<uint64_t>>* weight_shapes) {
+    std::vector<std::vector<uint64_t>>* weight_shapes,
+    std::vector<std::vector<float>>* all_scales,
+    std::vector<std::vector<float>>* all_offsets) const {
   std::unordered_set<std::string> initialization_list(
       initializers.begin(), initializers.end());
   const std::vector<string>& ws_blobs = ws->Blobs();
@@ -194,7 +199,7 @@ OnnxifiOp<CPUContext>::buildInitializationList(
       onnxTensorDescriptorV1 tensor_desc;
       tensor_desc.name = weight_names->back().c_str();
       BlobToTensorDescriptor(
-          s, ws, &tensor_desc, weight_shapes, &all_scales_, &all_offsets_);
+          s, ws, &tensor_desc, weight_shapes, all_scales, all_offsets);
       descs.push_back(tensor_desc);
       initialization_list.erase(it);
     }
@@ -204,76 +209,99 @@ OnnxifiOp<CPUContext>::buildInitializationList(
 }
 
 template <>
-std::vector<int> OnnxifiOp<CPUContext>::extractOutputBatchSizes() const {
-  if (!adjust_output_batch_) {
-    return std::vector<int>();
+void OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
+  output_reshape_info_.skip = false;
+  if (use_onnx_ || !adjust_output_batch_) {
+    output_reshape_info_.skip = true;
+    return;
   }
 
-  CAFFE_ENFORCE_EQ(
-      input_shapes_.size(),
-      InputSize(),
-      "Input shapes and input size don't match. ",
-      input_shapes_.size(),
-      " vs ",
-      InputSize());
-  CAFFE_ENFORCE_EQ(
-      output_shapes_.size(),
-      OutputSize(),
-      "Output shapes and output size don't match. ",
-      output_shapes_.size(),
-      " vs ",
-      OutputSize());
+  // Get the real batch size from nominal input. If it's equal to
+  // max_batch_size, mark that we don't need to adjust batch size and return.
+  // Otherwise, do a pass of shape inference to get the real shapes of the
+  // outputs.
+  const auto& t = Input(nominal_batch_idx_);
+  const auto dims = t.sizes();
+  CAFFE_ENFORCE(
+      !t.sizes().empty(), input_names_[nominal_batch_idx_], " cannot be empty");
+  if (dims[0] == max_batch_size_) {
+    output_reshape_info_.skip = true;
+    return;
+  }
 
-  std::vector<int> adjusted_output_batch;
-  for (const auto& shape : output_shapes_) {
-    if (shape.empty()) {
-      adjusted_output_batch.push_back(0);
-    } else {
-      const auto max_output_batch_size = shape.front();
-      const auto it = batch_pos_map_.find(max_output_batch_size);
-      if (it == batch_pos_map_.end()) {
-        if (use_onnx_) {
-          // For ONNX path, it's possible that we have output batch size that is
-          // unknown, because we handle the second outout of Concat and Split in
-          // ONNX. But for C2 path, we should not meet with this condition.
-          adjusted_output_batch.push_back(0);
-          continue;
-        } else {
-          if (permit_unknown_output_batch_size_) {
-            adjusted_output_batch.push_back(0);
-            continue;
-          } else {
-            CAFFE_THROW(
-                "Unknow output max batch size: ", max_output_batch_size);
-          }
-        }
-      }
-      auto idx = it->second;
-      CAFFE_ENFORCE_LT(idx, input_shapes_.size(), "index out of bound");
-      const auto& input_shape = input_shapes_[idx];
-      // If input real batch size and output max size is the same, we don't need
-      // to adjust max batch size of the output
-      if (input_shape.empty() || input_shape.front() == max_output_batch_size) {
-        adjusted_output_batch.push_back(0);
+  BoundShapeSpec spec(dims[0], max_seq_size_);
+  auto bound_shape_inferencer =
+      BoundShapeInferencerRegistry()->Create("C10", spec);
+  for (int i = 0; i < InputSize(); ++i) {
+    const auto& t0 = Input(i);
+    const auto dim0 = t0.sizes();
+    TensorShape shape;
+    for (const auto d : dim0) {
+      shape.add_dims(d);
+    }
+    input_shape_info_[input_names_[i]] =
+        ShapeInfo(ShapeInfo::DimType::BATCH, std::move(shape));
+  }
+  bound_shape_inferencer->InferBoundShapeAndType(
+      netdef_, input_shape_info_, nullptr);
+  const auto& shape_info = bound_shape_inferencer->shape_info();
+  for (int i = 0; i < OutputSize(); ++i) {
+    const auto it = shape_info.find(output_names_[i]);
+    CAFFE_ENFORCE(it != shape_info.end());
+    const auto& real_shape = it->second.shape;
+    const auto& max_shape = output_shapes_[i];
+    CAFFE_ENFORCE_EQ(real_shape.dims_size(), max_shape.size());
+    const auto dim_size = real_shape.dims_size();
+    auto& begin = output_reshape_info_.begins[i];
+    begin.Resize(dim_size);
+    int32_t* begin_ptr = begin.template mutable_data<int32_t>();
+    auto& end = output_reshape_info_.ends[i];
+    end.Resize(dim_size);
+    int32_t* end_ptr = end.template mutable_data<int32_t>();
+    int32_t mismatch = 0;
+    for (int j = 0; j < dim_size; ++j) {
+      CAFFE_ENFORCE_GE(
+          max_shape[j],
+          real_shape.dims(j),
+          "It is weird that max shape of ",
+          output_names_[i],
+          " is smaller than real shape at dim ",
+          j,
+          " (",
+          max_shape[j],
+          " vs ",
+          real_shape.dims(j),
+          ")");
+      begin_ptr[j] = 0;
+      if (max_shape[j] > real_shape.dims(j)) {
+        end_ptr[j] = real_shape.dims(j);
+        mismatch += j;
       } else {
-        adjusted_output_batch.push_back(input_shape.front());
+        end_ptr[j] = -1;
       }
     }
+    output_reshape_info_.fast_path[i] = !mismatch;
   }
-
-  return adjusted_output_batch;
 }
 
 template <>
-void OnnxifiOp<CPUContext>::maybeAdjustOutputBatchSizes(
-    const std::vector<int>& real_output_batch_sizes) {
-  CAFFE_ENFORCE_EQ(real_output_batch_sizes.size(), output_shapes_.size());
-  for (int i = 0; i < real_output_batch_sizes.size(); ++i) {
-    if (!real_output_batch_sizes[i]) {
-      continue;
-    }
+void OnnxifiOp<CPUContext>::maybeAdjustOutputBatchSizes() {
+  if (output_reshape_info_.skip) {
+    return;
+  }
+  CPUContext context;
+  Tensor tmp(CPU);
+  for (int i = 0; i < OutputSize(); ++i) {
     auto* output_tensor = Output(i);
-    output_tensor->ShrinkTo(real_output_batch_sizes[i]);
+    const auto& end = output_reshape_info_.ends[i];
+    if (output_reshape_info_.fast_path[i]) {
+      output_tensor->ShrinkTo(end.data<int32_t>()[0]);
+    } else {
+      // We need to use generic Slice
+      SliceImpl<int32_t, CPUContext>(
+          &tmp, *output_tensor, output_reshape_info_.begins[i], end, &context);
+      output_tensor->CopyFrom(tmp);
+    }
   }
 }
 
@@ -361,7 +389,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
             &output_fence,
             traces_.get()),
         ONNXIFI_STATUS_SUCCESS);
-    output_batch_sizes = extractOutputBatchSizes();
+    extractOutputBatchSizes();
     CAFFE_ENFORCE_EQ(
         lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
@@ -393,7 +421,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
-    output_batch_sizes = extractOutputBatchSizes();
+    extractOutputBatchSizes();
     CAFFE_ENFORCE_EQ(
         lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
 
@@ -405,7 +433,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   }
 
   if (adjust_output_batch_) {
-    maybeAdjustOutputBatchSizes(output_batch_sizes);
+    maybeAdjustOutputBatchSizes();
   }
   enable_tracing_ = false;
   return true;

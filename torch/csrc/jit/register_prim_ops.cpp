@@ -179,6 +179,46 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         "prim::Bool(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_nonzero());
+           return 0;
+         }),
+     Operator(
+         "prim::Bool(int a) -> bool",
+         [](Stack& stack) {
+           int64_t i;
+           pop(stack, i);
+           push(stack, (bool)i);
+           return 0;
+         }),
+     Operator(
+         "prim::Bool(float a) -> bool",
+         [](Stack& stack) {
+           double d;
+           pop(stack, d);
+           push(stack, (bool)d);
+           return 0;
+         }),
+     Operator(
+         "prim::Int(Tensor a) -> int",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.item<int64_t>());
+           return 0;
+         }),
+     Operator(
+         "prim::Float(Tensor a) -> float",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.item<double>());
+           return 0;
+         }),
+     Operator(
          "prim::ImplicitTensorToNum(Tensor a) -> Scalar",
          [](const Node* node) -> Operation {
            if (node->output()->type() == IntType::get()) {
@@ -218,75 +258,7 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "aten::Bool(Tensor a) -> bool",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.is_nonzero());
-           return 0;
-         }),
-     Operator(
-         "aten::Bool(int a) -> bool",
-         [](Stack& stack) {
-           int64_t i;
-           pop(stack, i);
-           push(stack, (bool)i);
-           return 0;
-         }),
-     Operator(
-         "aten::Bool(float a) -> bool",
-         [](Stack& stack) {
-           double d;
-           pop(stack, d);
-           push(stack, (bool)d);
-           return 0;
-         }),
-     Operator(
-         "aten::Int(Tensor a) -> int",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<int64_t>());
-           return 0;
-         }),
-     Operator(
-         "aten::Int(float a) -> int",
-         [](Stack& stack) {
-           double d;
-           pop(stack, d);
-           push(stack, (int64_t)d);
-           return 0;
-         }),
-     Operator(
-         "aten::Int(bool a) -> int",
-         [](Stack& stack) {
-           bool b;
-           pop(stack, b);
-           push(stack, (int)b);
-           return 0;
-         }),
-     Operator(
-         "aten::Int(Scalar a) -> int",
-         [](Stack& stack) {
-           IValue scalar;
-           pop(stack, scalar);
-           if (scalar.isInt()) {
-             push(stack, scalar);
-           } else {
-             push(stack, static_cast<int64_t>(scalar.toDouble()));
-           }
-           return 0;
-         }),
-     Operator(
-         "aten::Float(Tensor a) -> float",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<double>());
-           return 0;
-         }),
-     Operator(
-         "aten::Float(Scalar a) -> float",
+         "prim::Float(Scalar a) -> float",
          [](Stack& stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -298,7 +270,7 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "aten::Float(int a) -> float",
+         "prim::Float(int a) -> float",
          [](Stack& stack) {
            int64_t i;
            pop(stack, i);
@@ -306,7 +278,15 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "aten::Float(bool a) -> float",
+         "prim::Int(float a) -> int",
+         [](Stack& stack) {
+           double d;
+           pop(stack, d);
+           push(stack, (int64_t)d);
+           return 0;
+         }),
+     Operator(
+         "prim::Float(bool a) -> float",
          [](Stack& stack) {
            bool b;
            pop(stack, b);
@@ -314,7 +294,27 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "aten::Float(str a) -> float",
+         "prim::Int(bool a) -> int",
+         [](Stack& stack) {
+           bool b;
+           pop(stack, b);
+           push(stack, (int)b);
+           return 0;
+         }),
+     Operator(
+         "prim::Int(Scalar a) -> int",
+         [](Stack& stack) {
+           IValue scalar;
+           pop(stack, scalar);
+           if (scalar.isInt()) {
+             push(stack, scalar);
+           } else {
+             push(stack, static_cast<int64_t>(scalar.toDouble()));
+           }
+           return 0;
+         }),
+     Operator(
+         "prim::Float(str a) -> float",
          [](Stack& stack) {
            auto s = pop(stack).toString();
            if (s->string() == "inf")
@@ -1078,23 +1078,30 @@ RegisterOperators logging_operators(
 #define DEFINE_BINARY_OP(aten_op, op)             \
   DEFINE_GENERIC_OP(aten_op, op, op, int, float), \
       DEFINE_INT_FLOAT_OP(aten_op, op, float)
+
+#define DEFINE_BINARY_FLOAT_OP(aten_op, op)         \
+  DEFINE_GENERIC_OP(aten_op, op, op, float, float), \
+      DEFINE_INT_FLOAT_OP(aten_op, op, float)
+
 #define DEFINE_COMPARISON_OP(aten_op, op)         \
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
       DEFINE_INT_FLOAT_OP(aten_op, op, bool), DEFINE_STR_CMP_OP(aten_op, op)
 
 #define DEFINE_UNARY_OP(aten_op, op, int_result, float_result)            \
-  Operator(#aten_op "(int a) -> " #int_result, [](Stack& stack) {         \
-    int64_t a;                                                            \
-    pop(stack, a);                                                        \
-    push(stack, op);                                                      \
-    return 0;                                                             \
-  }),                                                                     \
-  Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) {     \
-    double a;                                                             \
-    pop(stack, a);                                                        \
-    push(stack, op);                                                      \
-    return 0;                                                             \
-  })
+  Operator(                                                               \
+      #aten_op "(int a) -> " #int_result,                                 \
+      [](Stack& stack) {                                                  \
+        int64_t a;                                                        \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
+      }),                                                                 \
+      Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) { \
+        double a;                                                         \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
+      })
 
 #define DEFINE_BOOL_OP(aten_op, op)                                \
   Operator(#aten_op "(bool a, bool b) -> bool", [](Stack& stack) { \
@@ -2019,7 +2026,7 @@ RegisterOperators reg2({
           return 0;
         }),
     Operator(
-        "aten::Str(t elem) -> str",
+        "prim::str(t elem) -> str",
         [](Stack& stack) {
           std::stringstream ss;
           ss << pop(stack);
@@ -2094,6 +2101,29 @@ RegisterOperators reg2({
     // only used in loop unrolling, not exposed to end users
     DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
 
+    // only used internally in range() translation
+    Operator(
+        "aten::__range_length(int lo, int hi, int step) -> int",
+        [](Stack& stack) {
+          int64_t lo, hi, step;
+          pop(stack, lo, hi, step);
+          if (step > 0 && lo < hi)
+            push(stack, 1 + (hi - 1 - lo) / step);
+          else if (step < 0 && lo > hi)
+            push(stack, 1 + (lo - 1 - hi) / (0 - step));
+          else
+            push(stack, 0);
+          return 0;
+        }),
+    Operator(
+        "aten::__derive_index(int index, int start, int step) -> int",
+        [](Stack& stack) {
+          int64_t index, start, step;
+          pop(stack, index, start, step);
+          push(stack, start + index * step);
+          return 0;
+        }),
+
     DEFINE_INT_OP(aten::__and__, a& b),
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
@@ -2101,6 +2131,7 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::floor, std::floor(a), float, float),
     DEFINE_UNARY_OP(aten::ceil, std::ceil(a), float, float),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
+    DEFINE_BINARY_FLOAT_OP(aten::log, std::log(a) / std::log(b)),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
     DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
     DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
