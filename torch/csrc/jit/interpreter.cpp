@@ -211,7 +211,7 @@ struct CanEmitInline {
   Node* scanValue(Node* block_point, Value* v) {
     if (v->node() == block_point && canInline(v)) {
       block_point = scanNode(v->node());
-      can_emit_inline_[v->node()] = false;
+      can_emit_inline_[v->node()] = true;
     }
     return block_point;
   }
@@ -344,14 +344,6 @@ struct WithCurrentNode {
   Node* old_value_;
 };
 
-struct ReportIt {
-  ~ReportIt() {
-    std::cout << "nums = " << X << "\n";
-  }
-  int64_t X = 0;
-};
-ReportIt count;
-
 struct CodeImpl {
   friend struct InterpreterState;
   std::vector<Instruction> instructions_;
@@ -379,8 +371,9 @@ struct CodeImpl {
   // map from unique of nodes to register in register table
   std::unordered_map<Value*, int> value_to_reg_;
 
-  // running count of uses as we emit. When we reach use_count_[v] = v.uses().size()
-  // we know it is the final use and we can move rather than load.
+  // running count of uses as we emit. When we reach use_count_[v] =
+  // v.uses().size() we know it is the final use and we can move rather than
+  // load.
   std::unordered_map<Value*, size_t> use_count_;
 
   Node* current_node_; // used in creation of code to keep track
@@ -397,7 +390,6 @@ struct CodeImpl {
   }
 
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
-    count.X++;
     instructions_.emplace_back(op, X, N);
     instructions_source_.emplace_back(current_node_);
   }
@@ -432,7 +424,7 @@ struct CodeImpl {
       OpCode op;
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
-      } else if(drop) {
+      } else if (drop) {
         op = DROPR;
       } else if (moved) {
         op = MOVE;
@@ -650,13 +642,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   bool runInterpreterLoop(Stack& stack) {
-     function->dump(std::cout);
+    // function->dump(std::cout);
     Instruction* instructions = function->instructions_.data();
     IValue* constants = function->constant_table_.data();
     Operation* operators = function->operator_table_.data();
     while (true) {
-       std::cout << "RUNNING ";
-       function->dump(std::cout, pc);
+      // std::cout << "RUNNING ";
+      // function->dump(std::cout, pc);
       Instruction inst = instructions[pc];
       switch (inst.op) {
         case OP:
