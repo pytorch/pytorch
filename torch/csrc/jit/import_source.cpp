@@ -152,7 +152,7 @@ struct SourceResolver : public Resolver {
 struct SourceImporter {
   SourceImporter(
       const CompilationUnit& lib_cu,
-      const std::string& src,
+      const std::shared_ptr<Source>& src,
       const std::vector<at::Tensor>& constant_table,
       const std::function<void(const std::string&)>& import_callback)
       : p_(src),
@@ -269,7 +269,7 @@ struct SourceImporter {
 void import_functions(
     const CompilationUnit& lib_cu,
     CompilationUnit& cu,
-    const std::string& src,
+    const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const Self& self,
     const std::function<void(const std::string&)>& import_callback) {
@@ -280,7 +280,7 @@ void import_functions(
 void import_methods(
     const CompilationUnit& lib_cu,
     const std::shared_ptr<Module>& mod,
-    const std::string& src,
+    const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
   auto self = [&](Value* v) {
@@ -299,7 +299,7 @@ void import_methods(
 void import_libs(
     CompilationUnit& lib_cu,
     const std::string& class_qualifier,
-    const std::string& src,
+    const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
   SourceImporter importer(lib_cu, src, constant_table, import_callback);
