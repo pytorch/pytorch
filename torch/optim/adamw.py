@@ -62,12 +62,13 @@ class AdamW(Optimizer):
 
         for group in self.param_groups:
             for p in group['params']:
-                # Perform true weight decay
+                if p.grad is None:
+                    continue
+
+                # Perform stepweight decay
                 p.data.mul_(1 - group['lr'] * group['weight_decay'])
 
                 # Perform optimization step
-                if p.grad is None:
-                    continue
                 grad = p.grad.data
                 if grad.is_sparse:
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
