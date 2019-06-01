@@ -118,13 +118,12 @@ def create_build_env():
     if USE_CUDA:
         my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
 
-    if IS_WINDOWS:
-        # When using Ninja under Windows, the gcc toolchain will be chosen as default.
-        # But it should be set to MSVC as the user's first choice.
-        if USE_NINJA:
-            my_env = overlay_windows_vcvars(my_env)
-            my_env.setdefault('CC', 'cl')
-            my_env.setdefault('CXX', 'cl')
+    if IS_WINDOWS and USE_NINJA:
+        # When using Ninja under Windows, the gcc toolchain will be chosen as
+        # default. But it should be set to MSVC as the user's first choice.
+        my_env = overlay_windows_vcvars(my_env)
+        my_env.setdefault('CC', 'cl')
+        my_env.setdefault('CXX', 'cl')
     return my_env
 
 
