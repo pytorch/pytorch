@@ -156,9 +156,11 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
   return shape_map;
 }
 
-void BackendTransformerBase::addShapeToNet(
-    NetDef& shape_net,
-    const ShapeInfoMap& shape_hints) const {
+void BackendTransformerBase::dumpNet(
+    const NetDef& pred_net,
+    const ShapeInfoMap& shape_hints,
+    const std::string& fname) const {
+  NetDef shape_net(pred_net);
   auto* shape_arg = shape_net.add_arg();
   auto* qshape_arg = shape_net.add_arg();
   shape_arg->set_name("shape_info");
@@ -174,14 +176,6 @@ void BackendTransformerBase::addShapeToNet(
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
     }
   }
-}
-
-void BackendTransformerBase::dumpNet(
-    const NetDef& pred_net,
-    const ShapeInfoMap& shape_hints,
-    const std::string& fname) const {
-  NetDef shape_net(pred_net);
-  addShapeToNet(shape_net, shape_hints);
   WriteProtoToTextFile(shape_net, fname);
 }
 } // namespace caffe2
