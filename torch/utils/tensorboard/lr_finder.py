@@ -83,6 +83,7 @@ class LRFinder(object):
             g['lr'] = start_lr
 
         anneal_func = partial(self.__annealing_exp, start=start_lr, end=end_lr)
+
         def schedule_fn(step):
             return anneal_func(step / float(self.num_steps))
         scheduler = LambdaLR(opt, schedule_fn)
