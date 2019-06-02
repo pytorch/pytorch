@@ -95,10 +95,91 @@ void GeluKernelImpl(const Tensor& X, Tensor* Y) {
   }
 }
 
+#if AT_MKL_ENABLED()
+
+template <typename T>
+void GeluBackwardKernelMKLImpl(const Tensor& dY, const Tensor& X, Tensor* dX);
+
+// TODO(yangxm): Implement this by using template functions.
+#define DELEGATE_GELU_BACKWARD_KERNEL_MKL_IMPL(T, CdfNormFunc, ExpFunc)     \
+  template <>                                                               \
+  void GeluBackwardKernelMKLImpl<T>(                                        \
+      const Tensor& dY, const Tensor& X, Tensor* dX) {                      \
+    constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2 * T(0.5);                   \
+    Tensor scratch = at::native::empty_like(X);                             \
+    const int64_t N = X.numel();                                            \
+    const T* dY_data = dY.data<T>();                                        \
+    const T* X_data = X.data<T>();                                          \
+    T* dX_data = dX->data<T>();                                             \
+    T* scratch_data = scratch.data<T>();                                    \
+    CdfNormFunc(N, X_data, scratch_data);                                   \
+    for (int64_t i = 0; i < N; ++i) {                                       \
+      dX_data[i] = -T(0.5) * X_data[i] * X_data[i];                         \
+    }                                                                       \
+    ExpFunc(N, dX_data, dX_data);                                           \
+    for (int64_t i = 0; i < N; ++i) {                                       \
+      dX_data[i] =                                                          \
+          dY_data[i] * (scratch_data[i] + X_data[i] * dX_data[i] * kAlpha); \
+    }                                                                       \
+  }
+DELEGATE_GELU_BACKWARD_KERNEL_MKL_IMPL(float, vsCdfNorm, vsExp)
+DELEGATE_GELU_BACKWARD_KERNEL_MKL_IMPL(double, vdCdfNorm, vdExp)
+#undef DELEGATE_GELU_BACKWARD_KERNEL_MKL_IMPL
+
+#else // AT_MKL_ENABLED()
+
+template <typename T>
+void GeluBackwardKernelMKLImpl(const Tensor& dY, const Tensor& X, Tensor* dX) {
+  AT_ASSERTM(false, "ATen not compiled with MKL");
+}
+
+#endif // AT_MKL_ENABLED()
+
+template <typename T>
+void GeluBackwardKernelImplInternal(
+    const Tensor& dY,
+    const Tensor& X,
+    Tensor* dX) {
+  constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2 * T(0.5);
+  Tensor scratch = at::native::empty_like(X);
+  const int64_t N = X.numel();
+  const T* dY_data = dY.data<T>();
+  const T* X_data = X.data<T>();
+  T* dX_data = dX->data<T>();
+  T* scratch_data = scratch.data<T>();
+  for (int64_t i = 0; i < N; ++i) {
+    scratch_data[i] = X_data[i] * M_SQRT1_2;
+    dX_data[i] = -T(0.5) * X_data[i] * X_data[i];
+  }
+  // TODO(yangxm): Consider let forward pass preserve CdfNorm(X) in training
+  // pass to reduce this extra tensor.
+  scratch.erf_();
+  dX->exp_();
+  for (int64_t i = 0; i < N; ++i) {
+    dX_data[i] = dY_data[i] *
+        (T(0.5) * (T(1) + scratch_data[i]) + X_data[i] * dX_data[i] * kAlpha);
+  }
+}
+
+void GeluBackwardKernelImpl(const Tensor& dY, const Tensor& X, Tensor* dX) {
+  if (hasMKL()) {
+    AT_DISPATCH_FLOATING_TYPES(
+        X.scalar_type(), "GeluBackwardKernelImpl", [&]() {
+          GeluBackwardKernelMKLImpl<scalar_t>(dY, X, dX);
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(
+        X.scalar_type(), "GeluBackwardKernelImpl", [&]() {
+          GeluBackwardKernelImplInternal<scalar_t>(dY, X, dX);
+        });
+  }
+}
+
 } // namespace
 
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
 REGISTER_DISPATCH(GeluKernel, &GeluKernelImpl);
+REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
 
 } // namespace native
 } // namespace at

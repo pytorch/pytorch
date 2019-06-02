@@ -1035,7 +1035,7 @@
   self: glu_backward(grad, self, dim)
 
 - name: gelu(Tensor self)
-  self: not_implemented("gelu")
+  self: gelu_backward(grad, self)
 
 - name: hardshrink(Tensor self, Scalar lambd)
   self: hardshrink_backward(grad, self, lambd)
