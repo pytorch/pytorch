@@ -2,6 +2,7 @@ from copy import deepcopy
 from functools import partial
 from torch.optim.lr_scheduler import LambdaLR
 import matplotlib.pyplot as plt
+import math
 import torch
 
 from .writer import SummaryWriter
@@ -25,61 +26,80 @@ class LRFinder:
                  loss_func,
                  start_lr=1e-7,
                  end_lr=10.,
-                 num_it=100,
-                 log_dir=None):
-        self.model, self.train_dl, self.loss_func, self.num_it = model, train_dl, loss_func, num_it
+                 num_steps=100,
+                 log_dir=None,
+                 stop_early=True):
+        self.model, self.train_dl, self.loss_func, self.num_steps = model, train_dl, loss_func, num_steps
         self.has_run, self.losses, self.lrs = False, [], []
         self.log_dir, self.num_runs = log_dir, 0
         self.opt, self.scheduler = self.__get_opt_and_scheduler(opt, start_lr, end_lr)
+        self.stop_early = stop_early
 
     def __annealing_exp(self, pct, start, end):
         "Exponentially anneal from `start` to `end` as pct goes from 0.0 to 1.0."
         return (end/start) ** pct
 
     def __get_opt_and_scheduler(self, opt, start_lr, end_lr):
-        new_opt = deepcopy(opt)
-        for g in new_opt.param_groups:
+        torch.save(opt.state_dict(), "opt_initial")
+        for g in opt.param_groups:
             g['initial_lr'] = start_lr
             g['lr'] = start_lr
         anneal_func = partial(self.__annealing_exp, start=start_lr, end=end_lr)
-        schedule_func = lambda step: anneal_func(step/float(self.num_it))
-        scheduler = LambdaLR(new_opt, schedule_func)
-        return new_opt, scheduler
+        schedule_func = lambda step: anneal_func(step/float(self.num_steps))
+        scheduler = LambdaLR(opt, schedule_func)
+        torch.save(opt.state_dict(), "opt_start_find")
+        torch.save(scheduler.state_dict(), "scheduler_start_find")
+        return opt, scheduler
 
     def __split_list(self, vals, skip_start, skip_end):
         return vals[skip_start:-skip_end] if skip_end > 0 else vals[skip_start:]
 
     def find(self):
         self.has_run = False
-        # Save model initial state
-        torch.save(self.model.state_dict(), "tmp")
+        torch.save(self.model.state_dict(), "tmp_model")
         self.model.train()
+        self.opt.load_state_dict(torch.load("opt_start_find"))
+        self.scheduler.load_state_dict(torch.load("scheduler_start_find"))
 
         # Train model and record loss vs. lr
         smoothener = Smoothener()
         self.losses = []
         self.lrs = []
-        for i, (xb, yb) in enumerate(self.train_dl):
-            if i >= self.num_it:
+        n_epochs = math.ceil(self.num_steps/len(self.train_dl))
+        steps = 0
+        for _ in range(n_epochs):
+            for xb, yb in self.train_dl:
+                steps += 1
+                if steps > self.num_steps:
+                    break
+
+                for g in self.opt.param_groups:
+                    lr = g.get('lr')
+                    if lr is not None:
+                        break
+                loss = self.loss_func(self.model, xb, yb)
+                loss.backward()
+                self.opt.step()
+                self.scheduler.step()
+                self.opt.zero_grad()
+
+                smooth_loss = smoothener.smoothen(loss)
+                if steps == 1 or smooth_loss < best_loss:
+                    best_loss = smooth_loss
+                if self.stop_early and (smooth_loss > 4*best_loss or torch.isnan(smooth_loss)):
+                    stop = True
+                    break
+                else:
+                    stop = False
+                self.losses.append(smooth_loss.item())
+                self.lrs.append(lr)
+            if stop:
                 break
 
-            for g in self.opt.param_groups:
-                lr = g.get('lr')
-                if lr is not None:
-                    break
-            loss = self.loss_func(self.model, xb, yb)
-            smooth_loss = smoothener.smoothen(loss.item())
-            self.losses.append(smooth_loss)
-            self.lrs.append(lr)
-
-            self.opt.zero_grad()
-            loss.backward()
-            self.opt.step()
-            self.scheduler.step()
-
-        # Reload model initial state
-        self.model.load_state_dict(torch.load("tmp"))
+        # Reload initial state of model and opt
+        self.model.load_state_dict(torch.load("tmp_model"))
         self.model.eval()
+        self.opt.load_state_dict(torch.load("opt_initial"))
         self.has_run = True
 
     def plot(self, skip_start=10, skip_end=5, push_to_tensorboard=True):
