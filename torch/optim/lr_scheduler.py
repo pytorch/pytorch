@@ -921,9 +921,9 @@ class OneCycleLR(_LRScheduler):
 
         if last_epoch == -1:
             for idx, group in enumerate(self.optimizer.param_groups):
-                group['lr'] = max_lrs[idx]/div_factor
+                group['lr'] = max_lrs[idx] / div_factor
                 group['max_lr'] = max_lrs[idx]
-                group['min_lr'] = group['lr']/final_div_factor
+                group['min_lr'] = group['lr'] / final_div_factor
                 if self.cycle_momentum:
                     if self.use_beta1:
                         beta1, beta2 = group['betas']
@@ -951,7 +951,7 @@ class OneCycleLR(_LRScheduler):
     def _annealing_cos(self, start, end, pct):
         "Cosine anneal from `start` to `end` as pct goes from 0.0 to 1.0."
         cos_out = math.cos(math.pi * pct) + 1
-        return end + (start-end)/2 * cos_out
+        return end + (start - end) / 2 * cos_out
 
     def _annealing_linear(self, start, end, pct):
         "Linearly anneal from `start` to `end` as pct goes from 0.0 to 1.0."
@@ -959,14 +959,15 @@ class OneCycleLR(_LRScheduler):
 
     def _annealing_exp(self, start, end, pct):
         "Exponentially anneal from `start` to `end` as pct goes from 0.0 to 1.0."
-        return start * (end/start) ** pct
+        return start * (end / start) ** pct
 
     def get_lr(self):
         lrs = []
         step_num = self.last_epoch
 
         if step_num > self.total_steps:
-            raise ValueError("Tried to step {} times. The specified number of total steps is {}".format(step_num + 1, self.total_steps))
+            raise ValueError("Tried to step {} times. The specified number of total steps is {}"
+                                 .format(step_num + 1, self.total_steps))
 
         for group in self.optimizer.param_groups:
             if step_num <= self.step_size_up:
