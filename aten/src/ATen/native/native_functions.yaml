@@ -1587,6 +1587,12 @@
     CPU: prelu_backward_cpu
     CUDA: prelu_backward_cuda
 
+- func: gelu(Tensor self) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: gelu_cpu
+    CUDA: gelu_cuda
+
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   variants: function, method
   dispatch:
