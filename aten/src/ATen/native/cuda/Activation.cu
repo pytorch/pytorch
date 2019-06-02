@@ -1,10 +1,12 @@
+#include <ATen/native/Activation.h>
+
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/native/Activation.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <c10/cuda/CUDAMathCompat.h>
 
 
 namespace at { namespace native {
@@ -291,6 +293,24 @@ static void threshold_kernel(TensorIterator& iter, Scalar threshold, Scalar valu
   });
 }
 
+namespace {
+
+template <typename T>
+void GeluCUDAKernelImplInternal(const Tensor& X, Tensor* Y) {
+  at::cuda::CUDA_tensor_apply2<T, T>(X, *Y, [] __device__(const T& x, T& y) {
+    y = x * c10::cuda::compat::normcdf(x);
+  });
+}
+
+void GeluCUDAKernelImpl(const Tensor& X, Tensor* Y) {
+  AT_DISPATCH_FLOATING_TYPES(X.scalar_type(), "GeluCUDAKernelImpl", [&]() {
+    GeluCUDAKernelImplInternal<scalar_t>(X, Y);
+  });
+}
+
+} // namespace
+
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
+REGISTER_DISPATCH(GeluKernel, &GeluCUDAKernelImpl);
 
 }}  // namespace at::native

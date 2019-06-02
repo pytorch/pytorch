@@ -6059,6 +6059,33 @@ class TestNN(NNTestCase):
         y.mean().backward()
         self.assertEqual(x.grad, None)
 
+    @unittest.skipIf(
+        not TEST_NUMPY or not TEST_SCIPY, "Numpy or Scipy not found")
+    def test_gelu(self):
+        def _test_gelu(n, m, dtype, contiguous):
+            def _gelu_ref(X):
+                return X * stats.norm.cdf(X)
+
+            if contiguous:
+                X = torch.rand(n, m, dtype=dtype)
+            else:
+                X = torch.rand(n, m, dtype=dtype)[:, ::2]
+            res = F.gelu(X)
+            ref = _gelu_ref(X.numpy())
+            self.assertEqual(res, ref)
+
+            if TEST_CUDA:
+                res_cuda = F.gelu(X.cuda())
+                self.assertEqual(res_cuda.cpu(), ref)
+
+        for n in range(1, 10):
+            for m in range(1, 10):
+                _test_gelu(n, m, torch.float32, True)
+                _test_gelu(n, m, torch.float32, False)
+                _test_gelu(n, m, torch.float64, True)
+                _test_gelu(n, m, torch.float64, False)
+
+
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
         input = torch.ones(5)
