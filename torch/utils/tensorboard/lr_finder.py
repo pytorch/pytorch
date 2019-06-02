@@ -1,4 +1,3 @@
-from copy import deepcopy
 from functools import partial
 from torch.optim.lr_scheduler import LambdaLR
 import matplotlib.pyplot as plt
@@ -75,16 +74,18 @@ class LRFinder(object):
 
     def __annealing_exp(self, pct, start, end):
         "Exponentially anneal from `start` to `end` as pct goes from 0.0 to 1.0."
-        return (end/start) ** pct
+        return (end / start) ** pct
 
     def __get_opt_and_scheduler(self, opt, start_lr, end_lr):
         torch.save(opt.state_dict(), "opt_initial")
         for g in opt.param_groups:
             g['initial_lr'] = start_lr
             g['lr'] = start_lr
+
         anneal_func = partial(self.__annealing_exp, start=start_lr, end=end_lr)
-        schedule_func = lambda step: anneal_func(step/float(self.num_steps))
-        scheduler = LambdaLR(opt, schedule_func)
+        def schedule_fn(step):
+            return anneal_func(step / float(self.num_steps))
+        scheduler = LambdaLR(opt, schedule_fn)
         torch.save(opt.state_dict(), "opt_start_find")
         torch.save(scheduler.state_dict(), "scheduler_start_find")
         return opt, scheduler
@@ -105,7 +106,7 @@ class LRFinder(object):
         smoothener = Smoothener()
         self.losses = []
         self.lrs = []
-        n_epochs = math.ceil(self.num_steps/len(self.train_dl))
+        n_epochs = math.ceil(self.num_steps / len(self.train_dl))
         steps = 0
         for _ in range(n_epochs):
             for xb, yb in self.train_dl:
@@ -126,7 +127,7 @@ class LRFinder(object):
                 smooth_loss = smoothener.smoothen(loss)
                 if steps == 1 or smooth_loss < best_loss:
                     best_loss = smooth_loss
-                if self.stop_early and (smooth_loss > 4*best_loss or torch.isnan(smooth_loss)):
+                if self.stop_early and (smooth_loss > 4 * best_loss or torch.isnan(smooth_loss)):
                     stop = True
                     break
                 else:
