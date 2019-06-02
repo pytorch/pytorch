@@ -1148,6 +1148,19 @@ Applies element-wise :math:`\text{LogSigmoid}(x_i) = \log \left(\frac{1}{1 + \ex
 See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
+@weak_script
+def gelu(input):
+    r"""gelu(input) -> Tensor
+
+    Applies element-wise the function
+    :math:`\text{GeLU}(x) = x * \Phi(x)`
+
+    where `\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
+
+    See :`Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`.
+    """
+    return torch._C._nn.gelu(input)
+
 
 @weak_script
 def hardshrink(input, lambd=0.5):

@@ -371,4 +371,20 @@ Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar 
   return out_tensor;
 }
 
+
+Tensor gelu_cpu(const Tensor& self) {
+  const auto X = self.contiguous();
+  Tensor Y = at::native::empty_like(X);
+  GeluKernel(kCPU, X, &Y);
+  return Y;
+}
+
+Tensor gelu_cuda(const Tensor& self) {
+  Tensor Y = at::native::empty_like(self);
+  GeluKernel(kCUDA, self, &Y);
+  return Y;
+}
+
+DEFINE_DISPATCH(GeluKernel);
+
 }}  // namespace at::native
