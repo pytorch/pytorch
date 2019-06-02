@@ -210,7 +210,8 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     for (int64_t b = start; b < end; b++) {
       scalar_t nll = neg_log_likelihood.accessor<scalar_t, 1>()[b];
-      if (zero_infinity &&  nll == std::numeric_limits<scalar_t>::infinity()) {
+      if (zero_infinity &&
+          (nll == std::numeric_limits<scalar_t>::infinity() || std::isnan(nll))) {
         grad.narrow(1, b, 1).zero_();
         continue;
       }
@@ -364,6 +365,7 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
     res = std::get<0>(at::_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, zero_infinity));
     if (zero_infinity) {
       res = at::where(res == Scalar(std::numeric_limits<double>::infinity()), at::zeros({}, res.options()), res);
+      res = at::where(res != res, at::zeros({}, res.options()), res);
     }
   }
   if (reduction == Reduction::Mean) {

@@ -571,6 +571,8 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
     grad *= grad_out.view({1, batch_size, 1});
     if (zero_infinity) {
       grad = at::where(neg_log_likelihood.view({1, batch_size, 1}) == Scalar(INFINITY), at::zeros({}, grad.options()), grad);
+      grad = at::where(grad != grad, at::zeros({}, grad.options()), grad);
+      // to filter out NaN value
     }
 
     // For the non-blank characters, we use a kernel to compute the subtrahend.
