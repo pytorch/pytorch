@@ -778,8 +778,8 @@ class OneCycleLR(_LRScheduler):
     rate from an initial learning rate to some maximum learning rate and then
     from that maximum learning rate to some minimum learning rate much lower
     than the initial learning rate.
-    This policy was initially described in the paper `A disciplined approach to
-    neural network hyper-parameters: Part 1`_.
+    This policy was initially described in the paper `Super-Convergence:
+    Very Fast Training of Neural Networks Using Large Learning Rates`_.
 
     The 1cycle learning rate policy changes the learning rate after every batch.
     `step` should be called after a batch has been used for training.
@@ -861,7 +861,8 @@ class OneCycleLR(_LRScheduler):
         >>>         scheduler.step()
 
 
-    .. _A disciplined approach to neural network hyper-parameters\: Part 1: https://arxiv.org/abs/1803.09820
+    .. _Super-Convergence\: Very Fast Training of Neural Networks Using Large Learning Rates:
+        https://arxiv.org/abs/1708.07120
     """
     def __init__(self,
                  optimizer,
