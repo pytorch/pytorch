@@ -581,6 +581,12 @@
   save_mean: not_implemented("native_batch_norm_backward save_mean")
   save_invstd: not_implemented("native_batch_norm_backward save_invstd")
 
+- name: native_layer_norm(Tensor input, Tensor weight, Tensor bias, int64_t M, int64_t N, double eps)
+  input, weight, bias: native_layer_norm_backward(grad.contiguous(), input, result1, result2, weight, M, N, grad_input_mask)
+
+- name: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor weight, int64_t M, int64_t N, std::array<bool,3> output_mask)
+  grad_out, input, weight: native_layer_norm_double_backward(grads[0].contiguous(), grads[1].contiguous(), grads[2].contiguous(), grad_out.contiguous(), input, mean, rstd, weight, M, N, grad_input_mask)
+
 - name: ne_(Tensor self, Scalar other)
   self: zeros_like(self)
 
