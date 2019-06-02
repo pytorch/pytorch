@@ -897,7 +897,7 @@ class OneCycleLR(_LRScheduler):
             if not hasattr(train_dl, '__len__'):
                 raise ValueError("len is not defined over given train_dl")
             self.total_steps = num_epochs * len(train_dl)
-        self.step_size_up = float(pct_start * total_steps) - 1
+        self.step_size_up = float(pct_start * self.total_steps) - 1
         self.step_size_down = float(self.total_steps - self.step_size_up) - 1
 
         if pct_start < 0 or pct_start > 1 or not isinstance(pct_start, float):
@@ -914,8 +914,9 @@ class OneCycleLR(_LRScheduler):
 
         self.cycle_momentum = cycle_momentum
         if self.cycle_momentum:
-            if 'momentum' not in self.optimizer.defaults:
+            if 'momentum' not in self.optimizer.defaults and 'betas' not in self.optimizer.defaults:
                 raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
+            self.use_beta1 = 'betas' in self.optimizer.defaults
 
         if last_epoch == -1:
             for idx, group in enumerate(self.optimizer.param_groups):
@@ -923,7 +924,11 @@ class OneCycleLR(_LRScheduler):
                 group['max_lr'] = max_lrs[idx]
                 group['min_lr'] = group['lr']/final_div_factor
                 if self.cycle_momentum:
-                    group['momentum'] = max_momentum
+                    if self.use_beta1:
+                        beta1, beta2 = group['betas']
+                        group['betas'] = (max_momentum, beta2)
+                    else:
+                        group['momentum'] = max_momentum
 
         if self.cycle_momentum:
             self.initial_momentum = max_momentum
@@ -959,7 +964,7 @@ class OneCycleLR(_LRScheduler):
         lrs = []
         step_num = self.last_epoch
 
-        if step_num >= self.total_steps:
+        if step_num > self.total_steps:
             raise ValueError("Tried to step {} times. The specified number of total steps is {}".format(step_num + 1, self.total_steps))
 
         for group in self.optimizer.param_groups:
@@ -975,6 +980,10 @@ class OneCycleLR(_LRScheduler):
 
             lrs.append(computed_lr)
             if self.cycle_momentum:
-                group['momentum'] = computed_momentum
+                if self.use_beta1:
+                    beta1, beta2 = group['betas']
+                    group['betas'] = (computed_momentum, beta2)
+                else:
+                    group['momentum'] = computed_momentum
 
         return lrs
