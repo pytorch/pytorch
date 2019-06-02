@@ -7,18 +7,30 @@ import torch
 
 from .writer import SummaryWriter
 
-class Smoothener:
-    "Create a smooth moving average for a value (loss, etc) using `beta`."
+class Smoothener(object):
+    """Helper class for creating a smooth moving average for a value (loss, etc) using `beta`.
+    """
     def __init__(self, beta=0.98):
         self.beta, self.n, self.mov_avg = beta, 0, 0
 
     def smoothen(self, val):
-        "Add `val` to calculate updated smoothed value."
+        """Add `val` to calculate updated smoothed value.
+        """
         self.n += 1
         self.mov_avg = self.beta * self.mov_avg + (1 - self.beta) * val
         return self.mov_avg / (1 - self.beta ** self.n)
 
-class LRFinder:
+class LRFinder(object):
+    r"""The `LRFinder` class provides a means of quickly determining an optimal learning rate based on work that was
+        initially described in the paper `Cyclical Learning Rates for Training Neural Networks`_.
+
+    This implementation was adapted from the implementation from the fastai library: `fastai/fastai`_
+
+    .. _Cyclical Learning Rates for Training Neural Networks:
+        https://arxiv.org/abs/1506.01186
+    .. _fastai/fastai:
+        https://github.com/fastai/fastai/
+    """
     def __init__(self,
                  model,
                  train_dl,
@@ -29,6 +41,32 @@ class LRFinder:
                  num_steps=100,
                  log_dir=None,
                  stop_early=True):
+        """Args:
+          model (nn.Module): The model to be trained
+          train_dl (DataLoader): The training data
+          opt (Optimizer): The optimizer used for training
+          loss_func (func(nn.Module, torch.Tensor, torch.Tensor) -> torch.Tensor): A function that takes a model
+              (i.e. the model provided) along with an x batch and a y batch (i.e. as from train_dl) and produces a
+              scalar loss.
+              Example:
+                  >>> import torch.nn.functional as F
+                  >>> def loss_func(model, xb, yb):
+                  >>>     logits = model(xb)
+                  >>>     return F.cross_entropy(logits, yb)
+
+          start_lr (float): The learning rate at which to start the range test
+              Default: 1e-7
+          end_lr (float): The learning rate at which to end the range test
+              Default: 10.
+          num_steps (int): The number of total steps in the range test
+              Default: 100
+          log_dir (str): The logdir that Tensorboard is running on
+              If no log_dir is provided then it will default to the ./runs/ directory
+              Default: None
+          stop_early (bool): Flag representing whether to stop early when the loss begins to diverge
+              Default: True
+        """
+
         self.model, self.train_dl, self.loss_func, self.num_steps = model, train_dl, loss_func, num_steps
         self.has_run, self.losses, self.lrs = False, [], []
         self.log_dir, self.num_runs = log_dir, 0
@@ -55,6 +93,8 @@ class LRFinder:
         return vals[skip_start:-skip_end] if skip_end > 0 else vals[skip_start:]
 
     def find(self):
+        """Runs the LR range test
+        """
         self.has_run = False
         torch.save(self.model.state_dict(), "tmp_model")
         self.model.train()
@@ -103,7 +143,13 @@ class LRFinder:
         self.has_run = True
 
     def plot(self, skip_start=10, skip_end=5, push_to_tensorboard=True):
-        "Plot learning rate and losses, trimmed between `skip_start` and `skip_end`."
+        """Plots the results of the LR range test.
+
+        Args:
+            skip_start (int): The number of points to skip from the start of the plot
+            skip_end (int): The number of points to skip from the end of the plot
+            push_to_tensorboard (bool): Flag representing whether to push the generated plot to Tensorboard
+        """
         if not self.has_run:
             raise Exception("You need to run find() first!")
         lrs = self.__split_list(self.lrs, skip_start, skip_end)
