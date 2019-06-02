@@ -6067,16 +6067,19 @@ class TestNN(NNTestCase):
                 return X * stats.norm.cdf(X)
 
             if contiguous:
-                X = torch.rand(n, m, dtype=dtype)
+                X = torch.rand(n, m, dtype=dtype, requires_grad=True)
             else:
-                X = torch.rand(n, m, dtype=dtype)[:, ::2]
+                X = torch.rand(n, m, dtype=dtype, requires_grad=True)[:, ::2]
             res = F.gelu(X)
-            ref = _gelu_ref(X.numpy())
+            ref = _gelu_ref(X.detach().numpy())
             self.assertEqual(res, ref)
+            gradcheck(F.gelu, [X], eps=1e-4)
 
             if TEST_CUDA:
-                res_cuda = F.gelu(X.cuda())
+                X_cuda = X.cuda()
+                res_cuda = F.gelu(X_cuda)
                 self.assertEqual(res_cuda.cpu(), ref)
+                gradcheck(F.gelu, [X_cuda], eps=1e-4)
 
         for n in range(1, 10):
             for m in range(1, 10):

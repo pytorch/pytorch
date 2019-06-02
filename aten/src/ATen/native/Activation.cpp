@@ -385,6 +385,20 @@ Tensor gelu_cuda(const Tensor& self) {
   return Y;
 }
 
+Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
+  const auto X = self.contiguous();
+  Tensor dX = at::native::empty_like(X);
+  GeluBackwardKernel(kCPU, grad.contiguous(), X, &dX);
+  return dX;
+}
+
+Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
+  Tensor dX = at::native::empty_like(self);
+  GeluBackwardKernel(kCUDA, grad, self, &dX);
+  return dX;
+}
+
 DEFINE_DISPATCH(GeluKernel);
+DEFINE_DISPATCH(GeluBackwardKernel);
 
 }}  // namespace at::native
