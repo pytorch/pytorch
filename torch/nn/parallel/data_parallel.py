@@ -153,7 +153,7 @@ class DataParallel(Module):
         return self.gather(outputs, self.output_device)
 
     def replicate(self, module, device_ids):
-        return replicate(module, device_ids, not torch.is_grad_enabled())
+        return replicate(module, device_ids)
 
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
