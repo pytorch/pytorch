@@ -776,6 +776,8 @@ const std::vector<std::string> functions = {
             other_size = other.size()
             def backward(grad_output):
                 grad_self = (grad_output * condition.type_as(grad_output))._grad_sum_to_size(self_size)
+
+                //TODO: we should implement type promotion and replace '1-condition.byte()' with '!condition'
                 grad_other = (grad_output * (1 - condition.byte()).type_as(grad_output))._grad_sum_to_size(other_size)
                 return None, grad_self, grad_other
 
