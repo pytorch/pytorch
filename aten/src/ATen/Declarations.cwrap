@@ -2721,7 +2721,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: exponential
   variants: function
   return: self

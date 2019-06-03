@@ -516,6 +516,47 @@ void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generat
    });
 }
 
+void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* gen_) {
+  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exponential_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto lambda = static_cast<accscalar_t>(lambda_);
+    if (std::is_same<scalar_t, double>::value) {
+      // define lambda for exponential transformation
+      auto exponential_func = [lambda] __device__ (accscalar_t rand) {
+        accscalar_t sample;
+        // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
+        // Hence, squash the 1 to just below 1.
+        if(rand == static_cast<accscalar_t>(1.0)) {
+          sample = ::log(std::nextafter(1.0, 0.0));
+        } else {
+          sample = ::log(rand);
+        }
+        return static_cast<scalar_t>(static_cast<accscalar_t>(-1.0) / lambda * sample);
+      };
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+        exponential_func);
+    } else {
+      // use __logf fast approximation for peak bandwidth
+      auto exponential_func = [lambda] __device__ (accscalar_t rand) {
+        accscalar_t sample;
+        if(rand == static_cast<accscalar_t>(1.0)) {
+          sample = __logf(std::nextafter(1.0f, 0.0f));
+        } else {
+          sample = __logf(rand);
+        }
+        return static_cast<scalar_t>(static_cast<accscalar_t>(-1.0) / lambda * sample);
+      };
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+        exponential_func);
+    }
+   });
+}
+
 Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   uniform_kernel_cuda(*iter, from, to, gen);
@@ -593,6 +634,12 @@ Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
   Tensor ret = at::empty(mean.sizes(), mean.options());
   normal_out_cuda(ret, mean, std, gen);
   return ret;
+}
+
+Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  exponential_kernel_cuda(*iter, lambda, gen);
+  return self;
 }
 
 }} // namespace at::native
