@@ -29,8 +29,7 @@ static auto registry = c10::RegisterOperators().op(
     c10::RegisterOperators::options()
       .kernel<
         decltype(enforce_finite_op_impl_cpu<float>),
-        &enforce_finite_op_impl_cpu<float>>()
-      .dispatchKey(CPUTensorId()));
+        &enforce_finite_op_impl_cpu<float>>(CPUTensorId()));
 
 } // namespace
 

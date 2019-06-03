@@ -7,7 +7,6 @@
 
 // ${generated_comment}
 
-$th_headers
 $storage_tensor_headers
 #include <ATen/${Generator}.h>
 #include <c10/core/Allocator.h>
@@ -28,6 +27,7 @@ $storage_tensor_headers
 
 #include <ATen/Config.h>
 $extra_cuda_headers
+$legacy_th_headers
 
 namespace at {
 

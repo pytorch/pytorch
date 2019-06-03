@@ -66,12 +66,25 @@ struct THCNumerics<uint8_t> {
 
 template <>
 struct THCNumerics<bool> {
-  static inline __host__ __device__ bool lt(uint8_t a, uint8_t b) { return a < b; }
-  static inline __host__ __device__ bool le(uint8_t a, uint8_t b) { return a <= b; }
-  static inline __host__ __device__ bool gt(uint8_t a, uint8_t b) { return a > b; }
-  static inline __host__ __device__ bool ge(uint8_t a, uint8_t b) { return a >= b; }
-  static inline __host__ __device__ bool eq(uint8_t a, uint8_t b) { return a == b; }
-  static inline __host__ __device__ bool ne(uint8_t a, uint8_t b) { return a != b; }
+  static inline __host__ __device__ bool min() { return at::numeric_limits<bool>::lowest(); }
+  static inline __host__ __device__ bool max() { return at::numeric_limits<bool>::max(); }
+  static inline __host__ __device__ bool lower_bound() { return at::numeric_limits<bool>::lower_bound(); }
+  static inline __host__ __device__ bool upper_bound() { return at::numeric_limits<bool>::upper_bound(); }
+
+  static inline __host__ __device__ bool lt(bool a, bool b) { return a < b; }
+  static inline __host__ __device__ bool le(bool a, bool b) { return a <= b; }
+  static inline __host__ __device__ bool gt(bool a, bool b) { return a > b; }
+  static inline __host__ __device__ bool ge(bool a, bool b) { return a >= b; }
+  static inline __host__ __device__ bool eq(bool a, bool b) { return a == b; }
+  static inline __host__ __device__ bool ne(bool a, bool b) { return a != b; }
+  static inline __host__ __device__ bool add(bool a, bool b) { return a + b; }
+  static inline __host__ __device__ bool mul(bool a, bool b) { return a && b; }
+  static inline __host__ __device__ bool sub(bool a, bool b) { return a - b; }
+  static inline __host__ __device__ bool div(bool a, bool b) { return a / b; }
+  static inline __host__ __device__ bool neg(bool a) { return !a; }
+  static inline __host__ __device__ bool abs(bool a) { return a; }
+  static inline __host__ __device__ bool isnan(bool a) { return false; }
+  static inline __host__ __device__ bool isinf(bool a) { return false; }
 };
 
 template <>

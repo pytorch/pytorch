@@ -52,26 +52,29 @@ c10::optional<OperatorHandle> Dispatcher::findSchema(const char* operator_name, 
   return OperatorHandle(found);
 }
 
-OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema) {
+OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options) {
   const auto found = findSchema(schema.name().c_str(), schema.overload_name().c_str());
   if (found != c10::nullopt) {
     if (found->schema() != schema) {
       std::ostringstream str;
       str << schema << " vs " << found->schema();
-      AT_ERROR("Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
+      TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", str.str());
+    }
+    if (found->options() != options) {
+      TORCH_CHECK(false, "Tried to register multiple operators with the same schema but different options: ", toString(schema));
     }
     return *found;
   }
 
-  operators_.emplace_back(std::move(schema));
+  operators_.emplace_back(std::move(schema), std::move(options));
   return OperatorHandle(--operators_.end());
 }
 
-SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema) {
+SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
-  auto op = findOrRegisterSchema_(std::move(schema));
+  auto op = findOrRegisterSchema_(std::move(schema), std::move(options));
 
   ++op.operatorIterator_->refcount;
   if (1 == op.operatorIterator_->refcount) {
@@ -89,7 +92,7 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   // reduce refcount and actually deregister if no references left
-  AT_ASSERT(op.operatorIterator_->refcount > 0);
+  TORCH_INTERNAL_ASSERT(op.operatorIterator_->refcount > 0);
   --op.operatorIterator_->refcount;
   if (0 == op.operatorIterator_->refcount) {
     op.operatorIterator_->op.prepareForDeregistration();

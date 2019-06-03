@@ -7,8 +7,6 @@
 
 namespace caffe2 {
 
-namespace {
-
 template <class SIndex, class Context>
 bool SliceImpl(
     Tensor* output,
@@ -195,8 +193,6 @@ bool SliceImpl(
   }
   return true;
 }
-
-} // namespace
 
 template <class Context>
 class SliceOp : public Operator<Context> {
