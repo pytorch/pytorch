@@ -940,17 +940,35 @@ def createResolutionCallbackFromClosure(fn):
 
     return env
 
+def _create_constant_iterable_module(module):
+    for i, submodule in enumerate(module):
+        if isinstance(submodule, (ModuleList, Sequential)):
+            # Make each item in the module a constant
+            module[i] = _create_constant_iterable_module(submodule)
+
+    if isinstance(module, Sequential):
+        return _ConstSequential(module)
+    elif isinstance(module, ModuleList):
+        return _ConstModuleList(module)
+    else:
+        raise RuntimeError("Only nn.ModuleList and nn.Sequential can be made "
+                           "into constant modules, found {}".format(module))
+
 
 def _make_strong_submodule(field, module, parent):
     if field not in parent._modules:
         # It's not a submodule, don't do anything
         return None
+
     return _convert_to_script_module(module)
 
 
 def _try_compile_fn(fn):
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
+        return None
+
+    if isinstance(fn, torch.nn.Module):
         return None
 
     # We don't have the actual scope where the function was defined, but we can
@@ -1237,8 +1255,6 @@ def _create_methods_from_stubs(self, stubs):
 # has run. This has to occur after the user-defined __init__ so that
 # submodules and parameters are initialized _before_ the script compiler
 # resolve references to `self.param` or `self.module`.
-
-
 class ScriptMeta(type):
     # this has to inherit from pybind11's metaclass otherwise we get
     # issues because ScriptModule inherits from torch._C.ScriptModule,
@@ -1260,6 +1276,7 @@ class ScriptMeta(type):
                 cls._methods[v.original_method.__name__] = v
 
         original_init = getattr(cls, '__init__', lambda self: None)
+        print("set overloads", cls, name)
         cls._overloads = dict(getattr(cls, '__overloads__', {}))
 
         # after the user's __init__ register all the script methods
@@ -1537,6 +1554,11 @@ if _enabled:
             return self.forward.graph_for(*args, **kwargs)
 
     class WeakScriptModuleProxy(ScriptModule):
+        # TODO: [weak script refactor]
+        # WeakScriptModule proxy should be deleted since its functionality is
+        # subsumed by recursive scripting, and the copying code in init moved
+        # to a function to create a ScriptModule from an nn.Module without
+        # making a WeakScriptModuleProxy
         """
         Copies the parameters, buffers, constants, attributes, and submodules
         of an nn.Module into itself.
@@ -1568,7 +1590,13 @@ if _enabled:
                 elif isinstance(item, (Parameter, Module, Attribute)):
                     if isinstance(item, (ModuleList, Sequential)):
                         # These are in __constants__, so ignore them here
-                        continue
+
+                        if not torch._C._jit_recursive_script():
+                            # For recursive script, these are constantified after
+                            # they are used, so they don't need to be in constants.
+                            # The `continue` here should be deleted along with
+                            # [weak script refactor]
+                            continue
                     ScriptModule.__setattr__(self, name, item)
 
             # Copy buffers
@@ -1651,6 +1679,10 @@ def _convert_to_script_module(mod, methods=None):
     `('forward',)`. Methods accessed in forward are scripted on demand if
     `_enable_recursive_script()` is used.
     """
+    if isinstance(mod, (ModuleList, Sequential)):
+        # Create constant versions for the iterable modules
+        return _create_constant_iterable_module(mod)
+
     if methods is None:
         methods = ('forward',)
     exported = []

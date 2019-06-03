@@ -275,7 +275,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // This can also be a call to a non-script module, or a plain
   // python method. If so return this as a python value.
-
   py::object overloads =
       py_module_.attr("_overloads").attr("get")(field, py::none());
   if (!overloads.is_none()) {
@@ -327,7 +326,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         module_->register_module(field, submodule);
         auto v = module_->find_module(field);
         return std::make_shared<ModuleValue>(
-            m.graph()->insertGetAttr(self_, field), v, attr);
+            m.graph()->insertGetAttr(self_, field), v, result);
       }
     } else if (py::isinstance<py::function>(attr)) {
       auto stub = py::module::import("torch.jit")

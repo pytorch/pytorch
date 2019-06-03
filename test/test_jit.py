@@ -13133,86 +13133,6 @@ a")
                     continue
                 self.assertEqual(item[1], loaded_item)
 
-    def test_script_recurse(self):
-        def a_python_fn(a, b, c):
-            return a + b + c
-
-        with torch.jit._enable_recursive_script():
-            @torch.jit.script
-            def a_script_fn(d, e, f):
-                return a_python_fn(d, e, f)
-
-        graph = str(a_script_fn.graph)
-        FileCheck().check("aten::add").run(graph)
-        FileCheck().check_not("a_python_fn").run(graph)
-        t = torch.ones(2, 2)
-        self.assertEqual(a_script_fn(t, t, t), t + t + t)
-
-    def test_module_recursive(self):
-        class Other(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self, x):
-                super(Other, self).__init__()
-                self.x = x
-                self.param = torch.nn.Parameter(torch.ones(2, 2))
-
-            def some_unscriptable_method(self):
-                a = 2
-                a = [2]
-                return a
-
-            def forward(self, t):
-                return t + self.x + self.param
-
-
-        class M(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self):
-                super(M, self).__init__()
-                self.other = Other(200)
-
-            def forward(self, t):
-                return self.other(t) * 2
-
-        with torch.jit._enable_recursive_script():
-            sm = torch.jit.script(M())
-
-        self.assertExportImportModule(sm, (torch.ones(2, 2),))
-
-    def test_module_function_export(self):
-        class Other(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self, x):
-                super(Other, self).__init__()
-                self.x = x
-                self.param = torch.nn.Parameter(torch.ones(2, 2))
-
-            @torch.jit.export
-            def some_entry_point(self, y):
-                return y + 20
-
-            def forward(self, t):
-                return t + self.x + self.param
-
-
-        class M(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self):
-                super(M, self).__init__()
-                self.other = Other(200)
-
-            def forward(self, t):
-                return self.other(t) * 2
-
-        with torch.jit._enable_recursive_script():
-            sm = torch.jit.script(M())
-
-        self.assertExportImportModule(sm, (torch.ones(2, 2),))
-
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):
         model = {
@@ -13473,6 +13393,125 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
             foo(1)
+
+
+class TestRecursiveScript(JitTestCase):
+    """
+    Tests in this class are all run under `with torch.jit._enable_recursive_script()`
+    """
+    def run(self, result=None):
+        with torch.jit._enable_recursive_script():
+            super(TestRecursiveScript, self).run(result)
+
+    def checkModule(self, nn_module, args):
+        """
+        Check that a nn.Module's results in Script mode match eager and that it
+        can be exported
+        """
+        sm = torch.jit.script(nn_module)
+
+        eager_out = nn_module(*args)
+        script_out = sm(*args)
+
+        self.assertEqual(eager_out, script_out)
+        self.assertExportImportModule(sm, args)
+
+        return sm
+
+    def test_script_basic(self):
+        def a_python_fn(a, b, c):
+            return a + b + c
+
+        @torch.jit.script
+        def a_script_fn(d, e, f):
+            return a_python_fn(d, e, f)
+
+        graph = str(a_script_fn.graph)
+        FileCheck().check("aten::add").run(graph)
+        FileCheck().check_not("a_python_fn").run(graph)
+        t = torch.ones(2, 2)
+        self.assertEqual(a_script_fn(t, t, t), t + t + t)
+
+    def test_module_basic(self):
+        class Other(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self, x):
+                super(Other, self).__init__()
+                self.x = x
+                self.param = torch.nn.Parameter(torch.ones(2, 2))
+
+            def some_unscriptable_method(self):
+                a = 2
+                a = [2]
+                return a
+
+            def forward(self, t):
+                return t + self.x + self.param
+
+
+        class M(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.other = Other(200)
+
+            def forward(self, t):
+                return self.other(t) * 2
+
+        sm = torch.jit.script(M())
+
+        self.assertExportImportModule(sm, (torch.ones(2, 2),))
+
+    def test_module_function_export(self):
+        class Other(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self, x):
+                super(Other, self).__init__()
+                self.x = x
+                self.param = torch.nn.Parameter(torch.ones(2, 2))
+
+            @torch.jit.export
+            def some_entry_point(self, y):
+                return y + 20
+
+            def forward(self, t):
+                return t + self.x + self.param
+
+
+        class M(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.other = Other(200)
+
+            def forward(self, t):
+                return self.other(t) * 2
+
+        sm = torch.jit.script(M())
+        self.assertExportImportModule(sm, (torch.ones(2, 2),))
+
+    def test_iterable_modules(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.sequential = nn.Sequential(
+                    nn.Linear(5, 5),
+                    nn.Linear(5, 5),
+                    nn.Sequential(nn.Linear(5, 5), nn.Linear(5, 5))
+                )
+                self.module_list = nn.ModuleList([nn.Linear(5, 5), nn.Linear(5, 5)])
+
+            def forward(self, x):
+                for mod in self.module_list:
+                    x += mod(x)
+                x += self.sequential(x)
+                return x
+
+        self.checkModule(M(), (torch.randn(5, 5),))
 
 
 class MnistNet(nn.Module):
