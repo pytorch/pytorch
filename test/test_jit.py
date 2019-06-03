@@ -6027,7 +6027,7 @@ a")
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
                            "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
                            "asinh", "atanh", "acosh", "sinh", "cosh", "tanh"]
-        binary_float_ops = ["atan2", "fmod", "remainder", "copysign"]
+        binary_float_ops = ["atan2", "fmod", "copysign"]
         for op in unary_float_ops:
             checkMathWrap(op)
         for op in binary_float_ops:
