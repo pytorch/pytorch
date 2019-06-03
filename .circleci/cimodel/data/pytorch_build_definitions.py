@@ -18,7 +18,7 @@ DOCKER_IMAGE_VERSION = 300
 
 
 @dataclass
-class Conf(object):
+class Conf:
     distro: str
     parms: List[str]
     pyver: Optional[str] = None
