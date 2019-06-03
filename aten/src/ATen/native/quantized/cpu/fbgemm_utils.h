@@ -43,7 +43,7 @@ static void convert_int8_uint8(
     int len,
     const int8_t* src_int8,
     uint8_t* dst_uint8) {
-  for (size_t i = 0; i < len; ++i) {
+  for (int i = 0; i < len; ++i) {
     dst_uint8[i] =
         static_cast<uint8_t>(static_cast<int32_t>(src_int8[i]) + 128);
   }
