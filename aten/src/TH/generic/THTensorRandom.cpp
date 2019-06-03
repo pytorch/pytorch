@@ -247,9 +247,9 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
 
       J_sample = THLongTensor_fastGet1d(J, rand_ind);
 
-      sample_idx = J_sample*(1 -_mask) + (rand_ind+1L) * _mask;
+      sample_idx = J_sample*(1 -_mask) + rand_ind * _mask;
 
-      THLongTensor_fastSet1d(self, i, sample_idx-1L);
+      THLongTensor_fastSet1d(self, i, sample_idx);
     }
 }
 void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
