@@ -121,29 +121,6 @@ class OnnxifiOp final : public Operator<Context> {
     // process.
     buildBackendAndGraph(ws, property_pointers, onnx_model_str);
 
-    // Get the weights (initializer) a second time to fill in its shape info
-    std::vector<std::string> weight_names;
-    std::vector<std::vector<uint64_t>> weight_shapes;
-    auto initializers =
-        this->template GetRepeatedArgument<std::string>("initializers");
-    std::vector<std::vector<float>> dummy_scales;
-    std::vector<std::vector<float>> dummy_offsets;
-    buildInitializationList(
-        ws,
-        initializers,
-        &weight_names,
-        &weight_shapes,
-        &dummy_scales,
-        &dummy_offsets);
-    for (int i = 0; i < weight_names.size(); ++i) {
-      TensorShape shape;
-      const auto& shape0 = weight_shapes[i];
-      for (const auto d : shape0) {
-        shape.add_dims(d);
-      }
-      input_shape_info_[weight_names[i]] =
-          ShapeInfo(ShapeInfo::DimType::CONSTANT, std::move(shape));
-    }
   }
 
   ~OnnxifiOp() {
@@ -250,6 +227,18 @@ class OnnxifiOp final : public Operator<Context> {
           &all_scales_,
           &all_offsets_);
 
+      // Extra weight shapes
+      std::unordered_map<std::string, ShapeInfo> weight_shape_info;
+      for (int i = 0; i < weight_names.size(); ++i) {
+        TensorShape shape;
+        const auto& shape0 = weight_shapes[i];
+        for (const auto d : shape0) {
+          shape.add_dims(d);
+        }
+        weight_shape_info[weight_names[i]] =
+            ShapeInfo(ShapeInfo::DimType::CONSTANT, std::move(shape));
+      }
+
       onnxGraph graph{nullptr};
       CAFFE_ENFORCE_EQ(
           lib_->onnxInitGraph(
@@ -263,7 +252,7 @@ class OnnxifiOp final : public Operator<Context> {
           ONNXIFI_STATUS_SUCCESS);
 
       return std::make_shared<onnx::BackendGraphInfo>(
-          backend_id, backend, graph, lib_);
+          backend_id, backend, graph, lib_, std::move(weight_shape_info));
     };
     backend_graph_shared_ptr_ =
         backend_graph_map_ptr_->insert(op_id_string_, creator);
@@ -271,6 +260,7 @@ class OnnxifiOp final : public Operator<Context> {
     backend_id_ = backend_graph_shared_ptr_->backend_id;
     backend_ = backend_graph_shared_ptr_->backend;
     graph_ = backend_graph_shared_ptr_->graph;
+    input_shape_info_ = backend_graph_shared_ptr_->weight_shape_info;
 
     getExtFunctionPointers();
   }
