@@ -704,21 +704,6 @@ THC_API void THNN_(SpatialFullConvolution_accGradParameters)(
                   int adjW, int adjH,
                   accreal scale);
 
-THC_API void THNN_(SpatialMaxUnpooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCIndexTensor *indices,
-                  int owidth, int oheight);
-
-THC_API void THNN_(SpatialMaxUnpooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCIndexTensor *indices,
-                  int owidth, int oheight);
-
 THC_API void THNN_(SpatialSubSampling_updateOutput)(
                   THCState *state,
                   THCTensor *input,

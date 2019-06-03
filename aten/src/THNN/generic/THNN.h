@@ -526,20 +526,6 @@ TH_API void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
           int adjW, int adjH,
           accreal scale);
 
-TH_API void THNN_(SpatialMaxUnpooling_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THIndexTensor *indices,
-          int owidth, int oheight);
-TH_API void THNN_(SpatialMaxUnpooling_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THIndexTensor *indices,
-          int owidth, int oheight);
-
 TH_API void THNN_(unfolded_acc)(
           THTensor *finput,
           THTensor *input,
