@@ -30,7 +30,7 @@ class QAddInt8 final : public c10::OperatorKernel {
         return a_val + b_val;
       });
     }
-    return c.quantize_linear(scale, zero_point, qa.scalar_type());  // Requantize
+    return at::quantize_linear(c, scale, zero_point, qa.scalar_type());  // Requantize
   }
 };
 
