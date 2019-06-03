@@ -252,6 +252,13 @@ def enable_profiling_mode():
     yield
     torch._C._jit_set_profiling_mode(False)
 
+@contextmanager
+def enable_first_class_mode():
+    torch._C._jit_set_first_class_mode(True)
+    yield
+    torch._C._jit_set_first_class_mode(False)
+
+
 # note: not re-entrant, use unnested only
 @contextmanager
 def disable_autodiff_subgraph_inlining(enabled=True):
@@ -3371,6 +3378,21 @@ def foo(x):
 
         self.assertEqual(D()(v), v + v)
 
+    def test_first_class_module(self):
+        with enable_first_class_mode():
+            class Foo(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(Foo, self).__init__()
+                    self.foo = nn.Parameter(torch.rand(3, 4))
+
+                @torch.jit.script_method
+                def forward(self, input):
+                    self.foo = input
+                    return self.foo
+            foo = Foo()
+            input = torch.rand(3, 4)
+            foo.forward(input)
+            self.assertEqual(input, foo.foo)
 
     def test_invalid_prefix_annotation(self):
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
