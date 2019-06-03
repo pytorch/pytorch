@@ -1486,6 +1486,12 @@ def randn(g, *shapes):
     return g.op('RandomNormal', shape_i=shape)
 
 
+def rand(g, *shapes):
+    shapes_list = list(shapes)
+    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    return g.op('RandomUniform', shape_i=shape)
+
+
 def randn_like(g, self, *others):
     return g.op('RandomNormalLike', self)
 
