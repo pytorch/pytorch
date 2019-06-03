@@ -76,17 +76,20 @@ bool AliasDb::hasWriters(const Node* n) const {
 }
 
 bool AliasDb::hasWriters(const Value* v) const {
-  if (!elementMap_.count(v) || v->mustBeNone()) {
+  if (v->mustBeNone()) {
     return false;
   }
 
-  const auto& memoryLocations = elementMap_.at(v)->getMemoryLocations();
-  for (const auto& pr : writeIndex_) {
-    if (pr.second.intersects(memoryLocations)) {
-      return true;
-    }
+  auto it = elementMap_.find(v);
+  if (it == elementMap_.end()) {
+    return false;
   }
-  return false;
+
+  if (isWriteCacheStale_) {
+    rebuildWriteCache();
+  }
+  const auto& el = it->second;
+  return writeCache_.intersects(el->getMemoryLocations());
 }
 
 void AliasDb::getWritesImpl(Block* b, MemoryLocations& ret, bool recurseBlocks)
@@ -586,8 +589,10 @@ void AliasDb::analyzeConservative(Node* node) {
     registerWrite(input, node);
     // We may also write to any contained types
     for (const auto& type : input->type()->containedTypes()) {
-      auto el = getOrCreateWildcard(type);
-      registerWrite(el, node);
+      if (shouldAnnotate(type)) {
+        auto el = getOrCreateWildcard(type);
+        registerWrite(el, node);
+      }
     }
     setWildcard(input);
   }
@@ -1189,6 +1194,14 @@ void AliasDb::setWildcard(const Value* v) {
   auto e = getOrCreateWildcard(v->type());
   TORCH_INTERNAL_ASSERT(e != nullptr);
   memoryDAG_->makePointerTo(getOrCreateElement(v), e);
+}
+
+void AliasDb::rebuildWriteCache() const {
+  for (const auto& pr : writeIndex_) {
+    const auto& writtenLocs = pr.second;
+      writeCache_ |= writtenLocs;
+    }
+  isWriteCacheStale_ = false;
 }
 } // namespace jit
 } // namespace torch

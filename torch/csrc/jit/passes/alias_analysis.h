@@ -185,6 +185,10 @@ class AliasDb {
    */
   // Map of nodes to the memory locations that they write to
   ska::flat_hash_map<Node*, MemoryLocations> writeIndex_;
+  // Set of all memory locations that may have been written to.
+  mutable MemoryLocations writeCache_;
+  mutable bool isWriteCacheStale_ = true;
+  void rebuildWriteCache() const;
 };
 
 // Used to assert that unschematized operators have an analysis method written

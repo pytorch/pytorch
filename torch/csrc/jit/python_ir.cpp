@@ -214,10 +214,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "__repr__",
           [](Graph& g) {
-            std::stringstream ss;
-            ss << g;
-            return ss.str();
+            return g.toString();
           })
+      .def(
+          "str",
+          &Graph::toString,
+          py::arg("print_source_ranges") = true)
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
