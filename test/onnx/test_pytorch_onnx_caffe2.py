@@ -1735,6 +1735,18 @@ class TestCaffe2Backend(unittest.TestCase):
         y = torch.randint(0, 1, (3, 5))
         self.run_model_test(OrModel(), train=False, input=(x, y), batch_size=BATCH_SIZE)
 
+    def test_dropout(self):
+        class DropoutModel(torch.nn.Module):
+            def __init__(self):
+                super(DropoutModel, self).__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        x = torch.randn(1, 2, 3)
+        self.run_model_test(DropoutModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
 # a bit of metaprogramming to set up all the rnn tests
 
 

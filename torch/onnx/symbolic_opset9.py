@@ -1041,6 +1041,8 @@ def exp(g, self):
 def dropout(g, input, p, train):
     if not train:  # in eval mode, dropout is non-op
         return input
+    warnings.warn("Dropout is a training op and should not be exported in inference mode. "
+                  "Make sure to call eval() on the model, and to export it with param training=False.")
     r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
     return r
 
