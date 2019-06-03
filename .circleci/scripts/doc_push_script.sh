@@ -9,7 +9,7 @@ pt_checkout="/var/lib/jenkins/workspace"
 
 echo "doc_push_script.sh: Invoked with $*"
 
-git clone https://github.com/pytorch/pytorch.github.io -b site
+git clone https://github.com/pytorch/pytorch.github.io -b willfeng_test  # yf225 TODO: change all reference of `willfeng_test` to `site` in this file!
 pushd pytorch.github.io
 
 set -ex
@@ -97,7 +97,7 @@ if [ "$dry_run" = false ]; then
   echo "Pushing to pytorch.github.io:site"
   set +x
 /usr/bin/expect <<DONE
-  spawn git push origin master_test
+  spawn git push origin willfeng_test
   expect "Username*"
   send "pytorchbot\n"
   expect "Password*"
