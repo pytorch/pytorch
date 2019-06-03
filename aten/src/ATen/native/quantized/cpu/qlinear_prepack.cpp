@@ -19,7 +19,7 @@ namespace at {
 namespace native {
 namespace {
 
-class QFCPackWeightInt8 final : public c10::OperatorKernel {
+class QLinearPackWeightInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
   // Calculate the column offsets.
@@ -93,7 +93,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_linear_prepack(Tensor W) -> Tensor W_prepack",
     c10::RegisterOperators::options()
-      .kernel<QFCPackWeightInt8>(QuantizedCPUTensorId()));
+      .kernel<QLinearPackWeightInt8>(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at
