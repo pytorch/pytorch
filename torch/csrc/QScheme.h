@@ -6,7 +6,7 @@
 
 #include <string>
 
-const int QSCHEME_NAME_LEN = 64;
+constexpr int QSCHEME_NAME_LEN = 64;
 
 struct THPQScheme {
   PyObject_HEAD
