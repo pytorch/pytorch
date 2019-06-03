@@ -150,8 +150,15 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto data = as_variable_ref(r.tensor(1)).tensor_data();
-  auto var = make_variable(data, r.toBool(2));
+  auto data = as_variable_ref(r.tensor(1)).variable_data();
+  // yf225 TODO: This is the same issue as the ".data should not allow tensor metadata change"
+  // and here's what we should do:
+  // 1. Try to not set this flag to true, and then fix all call site errors in our test suite
+  // 2. Evaluate whether keeping this flag false is actually that important (since we already
+  // have a release where this breaks (i.e. a = torch.randn(3, 4); x = nn.Parameter(a); a.resize_(4, 5); x.shape is not changed!)
+  // and people are not complaining about it, so it's probably fine to just set this flag to true.
+  data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(false);
+  auto var = data.set_requires_grad(r.toBool(2));
   return THPVariable_NewWithVar((PyTypeObject*)cls, std::move(var));
   END_HANDLE_TH_ERRORS
 }

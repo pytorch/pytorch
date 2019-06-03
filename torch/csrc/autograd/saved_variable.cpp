@@ -22,7 +22,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
     has_grad_fn_ = !variable.is_leaf();
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
-    data_ = variable.tensor_data();
+    data_ = variable.variable_data();
     if (variable.is_leaf()) {
       grad_accumulator_ = variable.grad_accumulator();
     } else if (!is_output) {
@@ -78,11 +78,11 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
   // in-place functions on unpacked variables.
-  Variable var;
+  Variable var = as_variable_ref(data_).variable_data();
   if (grad_fn) {
-    var = make_variable(data_, Edge(std::move(grad_fn), output_nr_));
+    var.set_gradient_edge(Edge(std::move(grad_fn), output_nr_));
   } else {
-    var = make_variable(data_, requires_grad_);
+    var.set_requires_grad(requires_grad_);
   }
   var.set_version_counter(saved_version_);
 
