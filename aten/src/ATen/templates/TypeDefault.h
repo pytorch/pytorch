@@ -31,6 +31,8 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   Type & toBackend(Backend b) const override;
   Type & toScalarType(ScalarType s) const override;
 
+  Tensor & set_requires_grad(Tensor & self, bool requires_grad) const override;
+
   void backward(
       Tensor& self,
       c10::optional<Tensor> gradient,

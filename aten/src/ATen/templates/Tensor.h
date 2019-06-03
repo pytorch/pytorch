@@ -309,10 +309,7 @@ class CAFFE2_API Tensor {
 
   // ~~~~~ Autograd API ~~~~~
 
-  Tensor& set_requires_grad(bool requires_grad) {
-    impl_->set_requires_grad(requires_grad);
-    return *this;
-  }
+  Tensor& set_requires_grad(bool requires_grad);
   bool requires_grad() const {
     return impl_->requires_grad();
   }

@@ -49,6 +49,8 @@ struct TORCH_API VariableType final : public at::TypeDefault {
   static std::vector<at::Type*> allCUDATypes();
   static std::vector<at::Type*> allCPUTypes();
 
+  Tensor & set_requires_grad(Tensor & self, bool requires_grad) const override;
+
   void backward(
       Tensor& self,
       c10::optional<Tensor> gradient,

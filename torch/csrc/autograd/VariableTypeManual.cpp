@@ -206,6 +206,13 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
   return ret;
 }
 
+Tensor & VariableType::set_requires_grad(Tensor & self, bool requires_grad) const {
+  auto self_impl = self.unsafeGetTensorImpl();
+  TORCH_INTERNAL_ASSERT(self_impl->autograd_meta(), "set_requires_grad is not implemented for Tensor");
+  self_impl->autograd_meta()->set_requires_grad(requires_grad, self_impl);
+  return self;
+}
+
 void VariableType::backward(
     Tensor& self,
     c10::optional<Tensor> gradient,

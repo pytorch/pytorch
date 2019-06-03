@@ -100,6 +100,8 @@ struct CAFFE2_API Type {
     return backendToDeviceType(backend());
   }
 
+  virtual Tensor & set_requires_grad(Tensor & self, bool requires_grad) const = 0;
+
   virtual void backward(
       Tensor& self,
       c10::optional<Tensor> gradient,

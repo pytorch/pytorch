@@ -44,6 +44,10 @@ inline TensorOptions Tensor::options() const {
                         .is_variable(is_variable());
 }
 
+inline Tensor & Tensor::set_requires_grad(bool requires_grad) {
+  return dispatch_type().set_requires_grad(*this, requires_grad);
+}
+
 inline void Tensor::backward(
     c10::optional<Tensor> gradient,
     bool keep_graph,

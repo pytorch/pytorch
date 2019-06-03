@@ -518,17 +518,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // autograd metadata).
 
   /**
-   * Set whether or not a tensor requires gradient.
-   *
-   * It is only valid to call this method on a Variable.
-   * See Note [Tensor versus Variable in C++].
-   */
-  void set_requires_grad(bool requires_grad) {
-    TORCH_INTERNAL_ASSERT(autograd_meta(), "set_requires_grad is not implemented for Tensor");
-    autograd_meta()->set_requires_grad(requires_grad, this);
-  }
-
-  /**
    * True if a tensor requires gradient.  Tensors which require gradient
    * have history tracked for any operations performed on them, so that
    * we can automatically differentiate back to them.  A tensor that
