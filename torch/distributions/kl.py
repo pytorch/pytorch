@@ -177,11 +177,11 @@ _euler_gamma = 0.57721566490153286060
 @register_kl(Bernoulli, Bernoulli)
 def _kl_bernoulli_bernoulli(p, q):
     t1 = p.probs * (p.probs / q.probs).log()
-    t1[(q.probs == 0).byte()] = inf
-    t1[(p.probs == 0).byte()] = 0
+    t1[(q.probs == 0)] = inf
+    t1[(p.probs == 0)] = 0
     t2 = (1 - p.probs) * ((1 - p.probs) / (1 - q.probs)).log()
-    t2[(q.probs == 1).byte()] = inf
-    t2[(p.probs == 1).byte()] = 0
+    t2[(q.probs == 1)] = inf
+    t2[(p.probs == 1)] = 0
     return t1 + t2
 
 
@@ -204,7 +204,7 @@ def _kl_binomial_binomial(p, q):
     if (p.total_count < q.total_count).any():
         raise NotImplementedError('KL between Binomials where q.total_count > p.total_count is not implemented')
     kl = p.total_count * (p.probs * (p.logits - q.logits) + (-p.probs).log1p() - (-q.probs).log1p())
-    inf_idxs = (p.total_count > q.total_count).byte()
+    inf_idxs = (p.total_count > q.total_count)
     kl[inf_idxs] = _infinite_like(kl[inf_idxs])
     return kl
 
@@ -411,7 +411,7 @@ def _kl_pareto_pareto(p, q):
     t1 = q.alpha * scale_ratio.log()
     t2 = -alpha_ratio.log()
     result = t1 + t2 + alpha_ratio - 1
-    result[(p.support.lower_bound < q.support.lower_bound).byte()] = inf
+    result[(p.support.lower_bound < q.support.lower_bound)] = inf
     return result
 
 
@@ -481,7 +481,7 @@ def _kl_beta_normal(p, q):
 @register_kl(Beta, Uniform)
 def _kl_beta_uniform(p, q):
     result = -p.entropy() + (q.high - q.low).log()
-    result[(q.low > p.support.lower_bound).byte() | (q.high < p.support.upper_bound).byte()] = inf
+    result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = inf
     return result
 
 
