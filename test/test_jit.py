@@ -6069,22 +6069,83 @@ a")
             # type: (float, int) -> float
             return math.pow(x, y)
 
+        def test_isnan(x):
+            # type: (float) -> bool
+            return math.isnan(x)
+
+        def test_asinh_int(x):
+            # type: (int) -> float
+            return math.asinh(x)
+
+        def test_asinh_float(x):
+            # type: (float) -> float
+            return math.asinh(x)
+
+        def test_atanh_int(x):
+            # type: (int) -> float
+            return math.atanh(x)
+
+        def test_atanh_float(x):
+            # type: (float) -> float
+            return math.atanh(x)
+
+        def test_cosh_float(x):
+            # type: (float) -> float
+            return math.cosh(x)
+
+        def test_cosh_int(x):
+            # type: (int) -> float
+            return math.cosh(x)
+
+        def test_sinh_int(x):
+            # type: (int) -> float
+            return math.sinh(x)
+
+        def test_sinh_float(x):
+            # type: (float) -> float
+            return math.sinh(x)
+
+        def test_tanh_int(x):
+            # type: (int) -> float
+            return math.tanh(x)
+
+        def test_tanh_float(x):
+            # type: (float) -> float
+            return math.tanh(x)
+
         self.checkScript(test_floor, (1.5,))
         self.checkScript(test_ceil, (1.5,))
         self.checkScript(test_log_int, (2,))
         self.checkScript(test_log_float, (2.0,))
-        self.checkScript(test_log_base_float, (2.0, 5.0))
         self.checkScript(test_log1p_int, (1,))
         self.checkScript(test_log1p_float, (1.0,))
         self.checkScript(test_log10_int, (2,))
         self.checkScript(test_log10_float, (2.0,))
+        self.checkScript(test_log_base_float, (2.0, 5.0))
         self.checkScript(test_exp_int, (2,))
         self.checkScript(test_exp_float, (2.0,))
         self.checkScript(test_sqrt_int, (2,))
         self.checkScript(test_sqrt_float, (2.0,))
         self.checkScript(test_pow_float, (2.0, 2.0))
-        self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
+        self.checkScript(test_atanh_int, (0,))
+        self.checkScript(test_atanh_float, (.2,))
+
+        num_list_int = [-50, -10, -2, 0, 1, 3, 10, 50]
+        num_list_float = [-50.0, -10.0, -2.0, -0.5, 0.0, .5, 1.0, 3.0, 10.0, 50.0]
+        for i in num_list_int:
+            self.checkScript(test_asinh_int, (i,))
+            self.checkScript(test_cosh_int, (i,))
+            self.checkScript(test_sinh_int, (i,))
+            self.checkScript(test_tanh_int, (i,))
+
+        for i in num_list_float:
+            self.checkScript(test_isnan, (i,))
+            self.checkScript(test_asinh_float, (i,))
+            self.checkScript(test_cosh_float, (i,))
+            self.checkScript(test_sinh_float, (i,))
+            self.checkScript(test_tanh_float, (i,))
+
 
     @unittest.skipIf(PY2, "Requires python 3")
     def test_math_gcd(self):
