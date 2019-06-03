@@ -45,6 +45,8 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
   auto dim1 = x1.dim();
   auto dim2 = x2.dim();
 
+  //For batch calculation we expand all dimensions(except the last two) to one, with size that equals to product of them.
+  //The last two dimensions will stay the same
   IntArrayRef batch_tensor1(x1.sizes().data(), std::max<int64_t>(dim1 - 2, 0));
   IntArrayRef batch_tensor2(x2.sizes().data(), std::max<int64_t>(dim2 - 2, 0));
   std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
@@ -54,18 +56,14 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
   tensor2_expand_size.insert(tensor2_expand_size.end(), {r2, c2});
 
   int expand_batch_product = std::accumulate(expand_batch_portion.begin(), expand_batch_portion.end(), 1, std::multiplies<int64_t>());
-  std::vector<int64_t> tensor1_view({expand_batch_product});
-  tensor1_view.insert(tensor1_view.end(), {r1, c1});
-  std::vector<int64_t> tensor2_view({expand_batch_product});
-  tensor2_view.insert(tensor2_view.end(), {r2, c2});
+  std::vector<int64_t> tensor1_view{expand_batch_product, r1, c1};
+  std::vector<int64_t> tensor2_view{expand_batch_product, r2, c2};
 
   Tensor tensor1_expanded = x1.expand(tensor1_expand_size).contiguous().view(tensor1_view);
   Tensor tensor2_expanded = x2.expand(tensor2_expand_size).contiguous().view(tensor2_view);
 
   std::vector<int64_t> output_shape(expand_batch_portion);
-  output_shape.push_back(r1);
-  output_shape.push_back(r2);
-
+  output_shape.insert(output_shape.end(), {r1, r2});
   Tensor result = at::empty(output_shape, x1.options());
   if (r1 > 0 && r2 > 0) {
     if (c1 == 0) {
