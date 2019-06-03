@@ -470,8 +470,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   std::cout << "Creating 470" << std::endl;
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
   if (py::cast<bool>(isClass)) {
+    std::cout << "hey" << std::endl;
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
+    py::print(qualifiedName);
     auto& pyCu = CompilationUnit::_get_python_cu();
     if (auto classType = pyCu.get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);

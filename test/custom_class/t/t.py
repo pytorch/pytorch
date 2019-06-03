@@ -10,7 +10,7 @@ class Bar:
 
 @torch.jit.script
 def f():
-    print(Bar())
+    print(torch._C.Foo())
 
-print(f.graph)
 f()
+# print(f.graph)
