@@ -185,3 +185,6 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
 
 #include <torch/csrc/generic/serialization.cpp>
 #include <TH/THGenerateBoolType.h>
+
+#include <torch/csrc/generic/serialization.cpp>
+#include <TH/THGenerateQTypes.h>

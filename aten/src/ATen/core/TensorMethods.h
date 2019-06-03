@@ -443,1275 +443,1267 @@ inline std::tuple<Tensor,Tensor> Tensor::kthvalue(int64_t k, int64_t dim, bool k
 }
 inline Tensor Tensor::log() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 280)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 283)(*this);
 }
 inline Tensor & Tensor::log_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 281)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 284)(*this);
 }
 inline Tensor Tensor::log10() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 283)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 286)(*this);
 }
 inline Tensor & Tensor::log10_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 284)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 287)(*this);
 }
 inline Tensor Tensor::log1p() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 286)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 289)(*this);
 }
 inline Tensor & Tensor::log1p_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 287)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 290)(*this);
 }
 inline Tensor Tensor::log2() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 289)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 292)(*this);
 }
 inline Tensor & Tensor::log2_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 290)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 293)(*this);
 }
 inline Tensor Tensor::logdet() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 292)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 295)(*this);
 }
 inline Tensor Tensor::log_softmax(int64_t dim, ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 295)(*this, dim, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 298)(*this, dim, dtype);
 }
 inline Tensor Tensor::log_softmax(int64_t dim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 296)(*this, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 299)(*this, dim);
 }
 inline Tensor Tensor::logsumexp(IntArrayRef dim, bool keepdim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 299)(*this, dim, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 302)(*this, dim, keepdim);
 }
 inline Tensor Tensor::matmul(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 302)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 305)(*this, other);
 }
 inline Tensor Tensor::matrix_power(int64_t n) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 306)(*this, n);
+        tensorTypeIdToBackend(type_id()), is_variable(), 309)(*this, n);
 }
 inline std::tuple<Tensor,Tensor> Tensor::max(int64_t dim, bool keepdim) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, int64_t, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 307)(*this, dim, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 310)(*this, dim, keepdim);
 }
 inline Tensor Tensor::max_values(IntArrayRef dim, bool keepdim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 309)(*this, dim, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 312)(*this, dim, keepdim);
 }
 inline Tensor Tensor::mean(ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 315)(*this, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 318)(*this, dtype);
 }
 inline Tensor Tensor::mean() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 316)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 319)(*this);
 }
 inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, bool, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 317)(*this, dim, keepdim, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 320)(*this, dim, keepdim, dtype);
 }
 inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 318)(*this, dim, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 321)(*this, dim, keepdim);
 }
 inline Tensor Tensor::mean(IntArrayRef dim, ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 319)(*this, dim, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 322)(*this, dim, dtype);
 }
 inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, int64_t, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 323)(*this, dim, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 326)(*this, dim, keepdim);
 }
 inline std::tuple<Tensor,Tensor> Tensor::min(int64_t dim, bool keepdim) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, int64_t, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 325)(*this, dim, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 328)(*this, dim, keepdim);
 }
 inline Tensor Tensor::min_values(IntArrayRef dim, bool keepdim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 327)(*this, dim, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 330)(*this, dim, keepdim);
 }
 inline Tensor Tensor::mm(const Tensor & mat2) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 347)(*this, mat2);
+        tensorTypeIdToBackend(type_id()), is_variable(), 350)(*this, mat2);
 }
 inline std::tuple<Tensor,Tensor> Tensor::mode(int64_t dim, bool keepdim) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, int64_t, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 350)(*this, dim, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 353)(*this, dim, keepdim);
 }
 inline Tensor Tensor::mul(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 352)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 355)(*this, other);
 }
 inline Tensor & Tensor::mul_(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 353)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 356)(*this, other);
 }
 inline Tensor Tensor::mul(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 355)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 358)(*this, other);
 }
 inline Tensor & Tensor::mul_(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 356)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 359)(*this, other);
 }
 inline Tensor Tensor::mv(const Tensor & vec) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 357)(*this, vec);
+        tensorTypeIdToBackend(type_id()), is_variable(), 360)(*this, vec);
 }
 inline Tensor Tensor::mvlgamma(int64_t p) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 359)(*this, p);
+        tensorTypeIdToBackend(type_id()), is_variable(), 362)(*this, p);
 }
 inline Tensor & Tensor::mvlgamma_(int64_t p) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 360)(*this, p);
+        tensorTypeIdToBackend(type_id()), is_variable(), 363)(*this, p);
 }
 inline Tensor Tensor::narrow_copy(int64_t dim, int64_t start, int64_t length) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, int64_t, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 361)(*this, dim, start, length);
+        tensorTypeIdToBackend(type_id()), is_variable(), 364)(*this, dim, start, length);
 }
 inline Tensor Tensor::narrow(int64_t dim, int64_t start, int64_t length) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, int64_t, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 362)(*this, dim, start, length);
+        tensorTypeIdToBackend(type_id()), is_variable(), 365)(*this, dim, start, length);
 }
 inline Tensor Tensor::permute(IntArrayRef dims) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 387)(*this, dims);
+        tensorTypeIdToBackend(type_id()), is_variable(), 390)(*this, dims);
 }
 inline Tensor Tensor::pin_memory() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 389)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 392)(*this);
 }
 inline Tensor Tensor::pinverse(double rcond) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, double)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 390)(*this, rcond);
+        tensorTypeIdToBackend(type_id()), is_variable(), 393)(*this, rcond);
 }
 inline Tensor Tensor::reciprocal() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 424)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 427)(*this);
 }
 inline Tensor & Tensor::reciprocal_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 425)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 428)(*this);
 }
 inline Tensor Tensor::neg() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 427)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 430)(*this);
 }
 inline Tensor & Tensor::neg_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 428)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 431)(*this);
 }
 inline Tensor Tensor::repeat(IntArrayRef repeats) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 430)(*this, repeats);
+        tensorTypeIdToBackend(type_id()), is_variable(), 433)(*this, repeats);
 }
 inline Tensor Tensor::repeat_interleave(const Tensor & repeats, c10::optional<int64_t> dim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 432)(*this, repeats, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 435)(*this, repeats, dim);
 }
 inline Tensor Tensor::repeat_interleave(int64_t repeats, c10::optional<int64_t> dim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, c10::optional<int64_t>)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 433)(*this, repeats, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 436)(*this, repeats, dim);
 }
 inline Tensor Tensor::reshape(IntArrayRef shape) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 434)(*this, shape);
+        tensorTypeIdToBackend(type_id()), is_variable(), 437)(*this, shape);
 }
 inline Tensor Tensor::reshape_as(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 436)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 439)(*this, other);
 }
 inline Tensor Tensor::round() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 437)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 440)(*this);
 }
 inline Tensor & Tensor::round_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 438)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 441)(*this);
 }
 inline Tensor Tensor::relu() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 442)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 445)(*this);
 }
 inline Tensor & Tensor::relu_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 443)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 446)(*this);
 }
 inline Tensor Tensor::prelu(const Tensor & weight) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 444)(*this, weight);
+        tensorTypeIdToBackend(type_id()), is_variable(), 447)(*this, weight);
 }
 inline std::tuple<Tensor,Tensor> Tensor::prelu_backward(const Tensor & grad_output, const Tensor & weight) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 445)(grad_output, *this, weight);
+        tensorTypeIdToBackend(type_id()), is_variable(), 448)(grad_output, *this, weight);
 }
 inline Tensor Tensor::hardshrink(Scalar lambd) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 446)(*this, lambd);
+        tensorTypeIdToBackend(type_id()), is_variable(), 451)(*this, lambd);
 }
 inline Tensor Tensor::hardshrink_backward(const Tensor & grad_out, Scalar lambd) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 447)(grad_out, *this, lambd);
+        tensorTypeIdToBackend(type_id()), is_variable(), 452)(grad_out, *this, lambd);
 }
 inline Tensor Tensor::rsqrt() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 448)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 453)(*this);
 }
 inline Tensor & Tensor::rsqrt_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 449)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 454)(*this);
 }
 inline Tensor Tensor::select(int64_t dim, int64_t index) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 451)(*this, dim, index);
+        tensorTypeIdToBackend(type_id()), is_variable(), 456)(*this, dim, index);
 }
 inline Tensor Tensor::sigmoid() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 456)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 461)(*this);
 }
 inline Tensor & Tensor::sigmoid_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 457)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 462)(*this);
 }
 inline Tensor Tensor::sin() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 459)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 464)(*this);
 }
 inline Tensor & Tensor::sin_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 460)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 465)(*this);
 }
 inline Tensor Tensor::sinh() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 462)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 467)(*this);
 }
 inline Tensor & Tensor::sinh_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 463)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 468)(*this);
 }
 inline Tensor Tensor::detach() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 465)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 470)(*this);
 }
 inline Tensor & Tensor::detach_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 466)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 471)(*this);
 }
 inline int64_t Tensor::size(int64_t dim) const {
     return globalATenDispatch().getOp<int64_t (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 467)(*this, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 472)(*this, dim);
 }
 inline Tensor Tensor::slice(int64_t dim, int64_t start, int64_t end, int64_t step) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, int64_t, int64_t, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 468)(*this, dim, start, end, step);
+        tensorTypeIdToBackend(type_id()), is_variable(), 473)(*this, dim, start, end, step);
 }
 inline std::tuple<Tensor,Tensor> Tensor::slogdet() const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 469)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 474)(*this);
 }
 inline Tensor Tensor::smm(const Tensor & mat2) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 470)(*this, mat2);
+        tensorTypeIdToBackend(type_id()), is_variable(), 475)(*this, mat2);
 }
 inline Tensor Tensor::softmax(int64_t dim, ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 471)(*this, dim, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 476)(*this, dim, dtype);
 }
 inline Tensor Tensor::softmax(int64_t dim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 472)(*this, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 477)(*this, dim);
 }
 inline std::vector<Tensor> Tensor::split(int64_t split_size, int64_t dim) const {
     return globalATenDispatch().getOp<std::vector<Tensor> (const Tensor &, int64_t, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 482)(*this, split_size, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 487)(*this, split_size, dim);
 }
 inline std::vector<Tensor> Tensor::split_with_sizes(IntArrayRef split_sizes, int64_t dim) const {
     return globalATenDispatch().getOp<std::vector<Tensor> (const Tensor &, IntArrayRef, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 483)(*this, split_sizes, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 488)(*this, split_sizes, dim);
 }
 inline Tensor Tensor::squeeze() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 484)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 489)(*this);
 }
 inline Tensor Tensor::squeeze(int64_t dim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 485)(*this, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 490)(*this, dim);
 }
 inline Tensor & Tensor::squeeze_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 486)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 491)(*this);
 }
 inline Tensor & Tensor::squeeze_(int64_t dim) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 487)(*this, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 492)(*this, dim);
 }
 inline Tensor Tensor::sspaddmm(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 488)(*this, mat1, mat2, beta, alpha);
+        tensorTypeIdToBackend(type_id()), is_variable(), 493)(*this, mat1, mat2, beta, alpha);
 }
 inline Tensor Tensor::stft(int64_t n_fft, c10::optional<int64_t> hop_length, c10::optional<int64_t> win_length, const Tensor & window, bool normalized, bool onesided) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, c10::optional<int64_t>, c10::optional<int64_t>, const Tensor &, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 492)(*this, n_fft, hop_length, win_length, window, normalized, onesided);
+        tensorTypeIdToBackend(type_id()), is_variable(), 497)(*this, n_fft, hop_length, win_length, window, normalized, onesided);
 }
 inline int64_t Tensor::stride(int64_t dim) const {
     return globalATenDispatch().getOp<int64_t (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 493)(*this, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 498)(*this, dim);
 }
 inline Tensor Tensor::sum(ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 494)(*this, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 499)(*this, dtype);
 }
 inline Tensor Tensor::sum() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 495)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 500)(*this);
 }
 inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim, ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, bool, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 496)(*this, dim, keepdim, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 501)(*this, dim, keepdim, dtype);
 }
 inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 497)(*this, dim, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 502)(*this, dim, keepdim);
 }
 inline Tensor Tensor::sum(IntArrayRef dim, ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 498)(*this, dim, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 503)(*this, dim, dtype);
 }
 inline Tensor Tensor::sum_to_size(IntArrayRef size) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 502)(*this, size);
+        tensorTypeIdToBackend(type_id()), is_variable(), 507)(*this, size);
 }
 inline Tensor Tensor::sqrt() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 503)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 508)(*this);
 }
 inline Tensor & Tensor::sqrt_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 504)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 509)(*this);
 }
 inline Tensor Tensor::std(bool unbiased) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 506)(*this, unbiased);
+        tensorTypeIdToBackend(type_id()), is_variable(), 511)(*this, unbiased);
 }
 inline Tensor Tensor::std(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 507)(*this, dim, unbiased, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 512)(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::prod(ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 511)(*this, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 516)(*this, dtype);
 }
 inline Tensor Tensor::prod() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 512)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 517)(*this);
 }
 inline Tensor Tensor::prod(int64_t dim, bool keepdim, ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, bool, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 513)(*this, dim, keepdim, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 518)(*this, dim, keepdim, dtype);
 }
 inline Tensor Tensor::prod(int64_t dim, bool keepdim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 514)(*this, dim, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 519)(*this, dim, keepdim);
 }
 inline Tensor Tensor::prod(int64_t dim, ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 515)(*this, dim, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 520)(*this, dim, dtype);
 }
 inline Tensor Tensor::t() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 519)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 524)(*this);
 }
 inline Tensor & Tensor::t_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 520)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 525)(*this);
 }
 inline Tensor Tensor::tan() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 521)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 526)(*this);
 }
 inline Tensor & Tensor::tan_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 522)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 527)(*this);
 }
 inline Tensor Tensor::tanh() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 524)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 529)(*this);
 }
 inline Tensor & Tensor::tanh_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 525)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 530)(*this);
 }
 inline Tensor Tensor::transpose(int64_t dim0, int64_t dim1) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 532)(*this, dim0, dim1);
+        tensorTypeIdToBackend(type_id()), is_variable(), 537)(*this, dim0, dim1);
 }
 inline Tensor & Tensor::transpose_(int64_t dim0, int64_t dim1) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 533)(*this, dim0, dim1);
+        tensorTypeIdToBackend(type_id()), is_variable(), 538)(*this, dim0, dim1);
 }
 inline Tensor Tensor::flip(IntArrayRef dims) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 535)(*this, dims);
+        tensorTypeIdToBackend(type_id()), is_variable(), 540)(*this, dims);
 }
 inline Tensor Tensor::roll(IntArrayRef shifts, IntArrayRef dims) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, IntArrayRef)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 536)(*this, shifts, dims);
+        tensorTypeIdToBackend(type_id()), is_variable(), 541)(*this, shifts, dims);
 }
 inline Tensor Tensor::rot90(int64_t k, IntArrayRef dims) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, IntArrayRef)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 537)(*this, k, dims);
+        tensorTypeIdToBackend(type_id()), is_variable(), 542)(*this, k, dims);
 }
 inline Tensor Tensor::trunc() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 540)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 545)(*this);
 }
 inline Tensor & Tensor::trunc_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 541)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 546)(*this);
 }
 inline Tensor Tensor::type_as(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 543)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 548)(*this, other);
 }
 inline Tensor Tensor::unsqueeze(int64_t dim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 550)(*this, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 555)(*this, dim);
 }
 inline Tensor & Tensor::unsqueeze_(int64_t dim) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 551)(*this, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 556)(*this, dim);
 }
 inline Tensor Tensor::var(bool unbiased) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 552)(*this, unbiased);
+        tensorTypeIdToBackend(type_id()), is_variable(), 557)(*this, unbiased);
 }
 inline Tensor Tensor::var(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 553)(*this, dim, unbiased, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 558)(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::view_as(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 557)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 562)(*this, other);
 }
 inline Tensor Tensor::where(const Tensor & condition, const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 558)(condition, *this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 563)(condition, *this, other);
 }
 inline Tensor Tensor::norm(c10::optional<Scalar> p, ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, c10::optional<Scalar>, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 579)(*this, p, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 584)(*this, p, dtype);
 }
 inline Tensor Tensor::norm(Scalar p) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 580)(*this, p);
+        tensorTypeIdToBackend(type_id()), is_variable(), 585)(*this, p);
 }
 inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 581)(*this, p, dim, keepdim, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 586)(*this, p, dim, keepdim, dtype);
 }
 inline Tensor Tensor::norm(c10::optional<Scalar> p, IntArrayRef dim, bool keepdim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, c10::optional<Scalar>, IntArrayRef, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 582)(*this, p, dim, keepdim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 587)(*this, p, dim, keepdim);
 }
 inline Tensor Tensor::clone() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 590)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 595)(*this);
 }
 inline Tensor & Tensor::resize_as_(const Tensor & the_template) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 591)(*this, the_template);
+        tensorTypeIdToBackend(type_id()), is_variable(), 596)(*this, the_template);
 }
 inline Tensor Tensor::pow(Scalar exponent) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 593)(*this, exponent);
+        tensorTypeIdToBackend(type_id()), is_variable(), 598)(*this, exponent);
 }
 inline Tensor & Tensor::zero_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 594)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 599)(*this);
 }
 inline Tensor Tensor::sub(const Tensor & other, Scalar alpha) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 596)(*this, other, alpha);
+        tensorTypeIdToBackend(type_id()), is_variable(), 601)(*this, other, alpha);
 }
 inline Tensor & Tensor::sub_(const Tensor & other, Scalar alpha) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 597)(*this, other, alpha);
+        tensorTypeIdToBackend(type_id()), is_variable(), 602)(*this, other, alpha);
 }
 inline Tensor Tensor::sub(Scalar other, Scalar alpha) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 598)(*this, other, alpha);
+        tensorTypeIdToBackend(type_id()), is_variable(), 603)(*this, other, alpha);
 }
 inline Tensor & Tensor::sub_(Scalar other, Scalar alpha) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 599)(*this, other, alpha);
+        tensorTypeIdToBackend(type_id()), is_variable(), 604)(*this, other, alpha);
 }
 inline Tensor Tensor::addmm(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 607)(*this, mat1, mat2, beta, alpha);
+        tensorTypeIdToBackend(type_id()), is_variable(), 612)(*this, mat1, mat2, beta, alpha);
 }
 inline Tensor & Tensor::addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 608)(*this, mat1, mat2, beta, alpha);
+        tensorTypeIdToBackend(type_id()), is_variable(), 613)(*this, mat1, mat2, beta, alpha);
 }
 inline Tensor & Tensor::sparse_resize_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, IntArrayRef, int64_t, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 615)(*this, size, sparse_dim, dense_dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 620)(*this, size, sparse_dim, dense_dim);
 }
 inline Tensor & Tensor::sparse_resize_and_clear_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, IntArrayRef, int64_t, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 616)(*this, size, sparse_dim, dense_dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 621)(*this, size, sparse_dim, dense_dim);
 }
 inline Tensor Tensor::sparse_mask(const Tensor & mask) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 617)(*this, mask);
+        tensorTypeIdToBackend(type_id()), is_variable(), 622)(*this, mask);
 }
 inline Tensor Tensor::to_dense() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 618)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 623)(*this);
 }
 inline int64_t Tensor::sparse_dim() const {
     return globalATenDispatch().getOp<int64_t (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 620)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 625)(*this);
 }
 inline int64_t Tensor::_dimI() const {
     return globalATenDispatch().getOp<int64_t (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 621)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 626)(*this);
 }
 inline int64_t Tensor::dense_dim() const {
     return globalATenDispatch().getOp<int64_t (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 622)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 627)(*this);
 }
 inline int64_t Tensor::_dimV() const {
     return globalATenDispatch().getOp<int64_t (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 623)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 628)(*this);
 }
 inline int64_t Tensor::_nnz() const {
     return globalATenDispatch().getOp<int64_t (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 624)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 629)(*this);
 }
 inline Tensor Tensor::coalesce() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 625)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 630)(*this);
 }
 inline bool Tensor::is_coalesced() const {
     return globalATenDispatch().getOp<bool (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 626)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 631)(*this);
 }
 inline Tensor Tensor::_indices() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 627)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 632)(*this);
 }
 inline Tensor Tensor::_values() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 628)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 633)(*this);
 }
 inline Tensor & Tensor::_coalesced_(bool coalesced) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 629)(*this, coalesced);
+        tensorTypeIdToBackend(type_id()), is_variable(), 634)(*this, coalesced);
 }
 inline Tensor Tensor::indices() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 630)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 635)(*this);
 }
 inline Tensor Tensor::values() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 631)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 636)(*this);
 }
 inline int64_t Tensor::numel() const {
     return globalATenDispatch().getOp<int64_t (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 635)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 640)(*this);
 }
 inline std::vector<Tensor> Tensor::unbind(int64_t dim) const {
     return globalATenDispatch().getOp<std::vector<Tensor> (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 636)(*this, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 641)(*this, dim);
 }
 inline Tensor Tensor::to_sparse(int64_t sparse_dim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 637)(*this, sparse_dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 642)(*this, sparse_dim);
 }
 inline Tensor Tensor::to_sparse() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 638)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 643)(*this);
 }
 inline Tensor Tensor::to_mkldnn() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 639)(*this);
-}
-inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const {
-    return globalATenDispatch().getOp<Tensor (const Tensor &, double, int64_t, ScalarType)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 642)(*this, scale, zero_point, dtype);
+        tensorTypeIdToBackend(type_id()), is_variable(), 644)(*this);
 }
 inline Tensor Tensor::dequantize() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 644)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 649)(*this);
 }
 inline Scalar Tensor::q_scale() const {
     return globalATenDispatch().getOp<Scalar (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 646)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 651)(*this);
 }
 inline Scalar Tensor::q_zero_point() const {
     return globalATenDispatch().getOp<Scalar (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 647)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 652)(*this);
 }
 inline Tensor Tensor::int_repr() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 648)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 653)(*this);
 }
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const TensorOptions &, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 650)(*this, options, non_blocking, copy);
+        tensorTypeIdToBackend(type_id()), is_variable(), 655)(*this, options, non_blocking, copy);
 }
 inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking, bool copy) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Device, ScalarType, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 651)(*this, device, dtype, non_blocking, copy);
+        tensorTypeIdToBackend(type_id()), is_variable(), 656)(*this, device, dtype, non_blocking, copy);
 }
 inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, ScalarType, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 652)(*this, dtype, non_blocking, copy);
+        tensorTypeIdToBackend(type_id()), is_variable(), 657)(*this, dtype, non_blocking, copy);
 }
 inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 653)(*this, other, non_blocking, copy);
+        tensorTypeIdToBackend(type_id()), is_variable(), 658)(*this, other, non_blocking, copy);
 }
 inline Scalar Tensor::item() const {
     return globalATenDispatch().getOp<Scalar (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 657)(*this);
-}
-inline void* Tensor::data_ptr() const {
-    return globalATenDispatch().getOp<void* (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 683)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 662)(*this);
 }
 inline Tensor & Tensor::set_(Storage source) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Storage)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 684)(*this, source);
+        tensorTypeIdToBackend(type_id()), is_variable(), 688)(*this, source);
 }
 inline Tensor & Tensor::set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Storage, int64_t, IntArrayRef, IntArrayRef)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 685)(*this, source, storage_offset, size, stride);
+        tensorTypeIdToBackend(type_id()), is_variable(), 689)(*this, source, storage_offset, size, stride);
 }
 inline Tensor & Tensor::set_(const Tensor & source) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 686)(*this, source);
+        tensorTypeIdToBackend(type_id()), is_variable(), 690)(*this, source);
 }
 inline Tensor & Tensor::set_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 687)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 691)(*this);
 }
 inline bool Tensor::is_set_to(const Tensor & tensor) const {
     return globalATenDispatch().getOp<bool (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 688)(*this, tensor);
+        tensorTypeIdToBackend(type_id()), is_variable(), 692)(*this, tensor);
 }
 inline Tensor & Tensor::masked_fill_(const Tensor & mask, Scalar value) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 689)(*this, mask, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 693)(*this, mask, value);
 }
 inline Tensor Tensor::masked_fill(const Tensor & mask, Scalar value) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 690)(*this, mask, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 694)(*this, mask, value);
 }
 inline Tensor & Tensor::masked_fill_(const Tensor & mask, const Tensor & value) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 691)(*this, mask, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 695)(*this, mask, value);
 }
 inline Tensor Tensor::masked_fill(const Tensor & mask, const Tensor & value) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 692)(*this, mask, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 696)(*this, mask, value);
 }
 inline Tensor & Tensor::masked_scatter_(const Tensor & mask, const Tensor & source) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 693)(*this, mask, source);
+        tensorTypeIdToBackend(type_id()), is_variable(), 697)(*this, mask, source);
 }
 inline Tensor Tensor::masked_scatter(const Tensor & mask, const Tensor & source) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 694)(*this, mask, source);
+        tensorTypeIdToBackend(type_id()), is_variable(), 698)(*this, mask, source);
 }
 inline Tensor Tensor::view(IntArrayRef size) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, IntArrayRef)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 695)(*this, size);
+        tensorTypeIdToBackend(type_id()), is_variable(), 699)(*this, size);
 }
 inline Tensor & Tensor::put_(const Tensor & index, const Tensor & source, bool accumulate) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &, const Tensor &, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 696)(*this, index, source, accumulate);
+        tensorTypeIdToBackend(type_id()), is_variable(), 700)(*this, index, source, accumulate);
 }
 inline Tensor & Tensor::index_add_(int64_t dim, const Tensor & index, const Tensor & source) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 697)(*this, dim, index, source);
+        tensorTypeIdToBackend(type_id()), is_variable(), 701)(*this, dim, index, source);
 }
 inline Tensor Tensor::index_add(int64_t dim, const Tensor & index, const Tensor & source) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 698)(*this, dim, index, source);
+        tensorTypeIdToBackend(type_id()), is_variable(), 702)(*this, dim, index, source);
 }
 inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, Scalar value) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 699)(*this, dim, index, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 703)(*this, dim, index, value);
 }
 inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, Scalar value) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 700)(*this, dim, index, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 704)(*this, dim, index, value);
 }
 inline Tensor & Tensor::index_fill_(int64_t dim, const Tensor & index, const Tensor & value) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 701)(*this, dim, index, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 705)(*this, dim, index, value);
 }
 inline Tensor Tensor::index_fill(int64_t dim, const Tensor & index, const Tensor & value) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 702)(*this, dim, index, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 706)(*this, dim, index, value);
 }
 inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, const Tensor & src) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 703)(*this, dim, index, src);
+        tensorTypeIdToBackend(type_id()), is_variable(), 707)(*this, dim, index, src);
 }
 inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, const Tensor & src) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 704)(*this, dim, index, src);
+        tensorTypeIdToBackend(type_id()), is_variable(), 708)(*this, dim, index, src);
 }
 inline Tensor & Tensor::scatter_(int64_t dim, const Tensor & index, Scalar value) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 705)(*this, dim, index, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 709)(*this, dim, index, value);
 }
 inline Tensor Tensor::scatter(int64_t dim, const Tensor & index, Scalar value) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 706)(*this, dim, index, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 710)(*this, dim, index, value);
 }
 inline Tensor & Tensor::scatter_add_(int64_t dim, const Tensor & index, const Tensor & src) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 707)(*this, dim, index, src);
+        tensorTypeIdToBackend(type_id()), is_variable(), 711)(*this, dim, index, src);
 }
 inline Tensor Tensor::scatter_add(int64_t dim, const Tensor & index, const Tensor & src) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 708)(*this, dim, index, src);
+        tensorTypeIdToBackend(type_id()), is_variable(), 712)(*this, dim, index, src);
 }
 inline Tensor & Tensor::lt_(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 709)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 713)(*this, other);
 }
 inline Tensor & Tensor::lt_(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 710)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 714)(*this, other);
 }
 inline Tensor & Tensor::gt_(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 711)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 715)(*this, other);
 }
 inline Tensor & Tensor::gt_(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 712)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 716)(*this, other);
 }
 inline Tensor & Tensor::le_(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 713)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 717)(*this, other);
 }
 inline Tensor & Tensor::le_(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 714)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 718)(*this, other);
 }
 inline Tensor & Tensor::ge_(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 715)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 719)(*this, other);
 }
 inline Tensor & Tensor::ge_(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 716)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 720)(*this, other);
 }
 inline Tensor & Tensor::eq_(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 717)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 721)(*this, other);
 }
 inline Tensor & Tensor::eq_(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 718)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 722)(*this, other);
 }
 inline Tensor & Tensor::ne_(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 719)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 723)(*this, other);
 }
 inline Tensor & Tensor::ne_(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 720)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 724)(*this, other);
 }
 inline Tensor Tensor::__and__(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 721)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 725)(*this, other);
 }
 inline Tensor Tensor::__and__(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 722)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 726)(*this, other);
 }
 inline Tensor & Tensor::__iand__(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 723)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 727)(*this, other);
 }
 inline Tensor & Tensor::__iand__(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 724)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 728)(*this, other);
 }
 inline Tensor Tensor::__or__(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 725)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 729)(*this, other);
 }
 inline Tensor Tensor::__or__(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 726)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 730)(*this, other);
 }
 inline Tensor & Tensor::__ior__(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 727)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 731)(*this, other);
 }
 inline Tensor & Tensor::__ior__(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 728)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 732)(*this, other);
 }
 inline Tensor Tensor::__xor__(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 729)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 733)(*this, other);
 }
 inline Tensor Tensor::__xor__(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 730)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 734)(*this, other);
 }
 inline Tensor & Tensor::__ixor__(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 731)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 735)(*this, other);
 }
 inline Tensor & Tensor::__ixor__(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 732)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 736)(*this, other);
 }
 inline Tensor Tensor::__lshift__(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 733)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 737)(*this, other);
 }
 inline Tensor Tensor::__lshift__(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 734)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 738)(*this, other);
 }
 inline Tensor & Tensor::__ilshift__(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 735)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 739)(*this, other);
 }
 inline Tensor & Tensor::__ilshift__(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 736)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 740)(*this, other);
 }
 inline Tensor Tensor::__rshift__(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 737)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 741)(*this, other);
 }
 inline Tensor Tensor::__rshift__(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 738)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 742)(*this, other);
 }
 inline Tensor & Tensor::__irshift__(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 739)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 743)(*this, other);
 }
 inline Tensor & Tensor::__irshift__(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 740)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 744)(*this, other);
 }
 inline Tensor & Tensor::lgamma_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 741)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 745)(*this);
 }
 inline Tensor & Tensor::atan2_(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 742)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 746)(*this, other);
 }
 inline Tensor & Tensor::tril_(int64_t diagonal) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 743)(*this, diagonal);
+        tensorTypeIdToBackend(type_id()), is_variable(), 747)(*this, diagonal);
 }
 inline Tensor & Tensor::triu_(int64_t diagonal) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 744)(*this, diagonal);
+        tensorTypeIdToBackend(type_id()), is_variable(), 748)(*this, diagonal);
 }
 inline Tensor & Tensor::digamma_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 745)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 749)(*this);
 }
 inline Tensor & Tensor::polygamma_(int64_t n) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 746)(*this, n);
+        tensorTypeIdToBackend(type_id()), is_variable(), 750)(*this, n);
 }
 inline Tensor & Tensor::erfinv_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 747)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 751)(*this);
 }
 inline Tensor & Tensor::renorm_(Scalar p, int64_t dim, Scalar maxnorm) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar, int64_t, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 748)(*this, p, dim, maxnorm);
+        tensorTypeIdToBackend(type_id()), is_variable(), 752)(*this, p, dim, maxnorm);
 }
 inline Tensor & Tensor::pow_(Scalar exponent) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 749)(*this, exponent);
+        tensorTypeIdToBackend(type_id()), is_variable(), 753)(*this, exponent);
 }
 inline Tensor & Tensor::pow_(const Tensor & exponent) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 750)(*this, exponent);
+        tensorTypeIdToBackend(type_id()), is_variable(), 754)(*this, exponent);
 }
 inline Tensor & Tensor::lerp_(const Tensor & end, Scalar weight) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 751)(*this, end, weight);
+        tensorTypeIdToBackend(type_id()), is_variable(), 755)(*this, end, weight);
 }
 inline Tensor & Tensor::lerp_(const Tensor & end, const Tensor & weight) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 752)(*this, end, weight);
+        tensorTypeIdToBackend(type_id()), is_variable(), 756)(*this, end, weight);
 }
 inline Tensor & Tensor::sign_() {
     return globalATenDispatch().getOp<Tensor & (Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 753)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 757)(*this);
 }
 inline Tensor & Tensor::fmod_(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 754)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 758)(*this, other);
 }
 inline Tensor & Tensor::fmod_(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 755)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 759)(*this, other);
 }
 inline Tensor & Tensor::remainder_(Scalar other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 756)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 760)(*this, other);
 }
 inline Tensor & Tensor::remainder_(const Tensor & other) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 757)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 761)(*this, other);
 }
 inline Tensor & Tensor::addbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 758)(*this, batch1, batch2, beta, alpha);
+        tensorTypeIdToBackend(type_id()), is_variable(), 762)(*this, batch1, batch2, beta, alpha);
 }
 inline Tensor Tensor::addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 760)(*this, batch1, batch2, beta, alpha);
+        tensorTypeIdToBackend(type_id()), is_variable(), 764)(*this, batch1, batch2, beta, alpha);
 }
 inline Tensor & Tensor::addcmul_(const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 761)(*this, tensor1, tensor2, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 765)(*this, tensor1, tensor2, value);
 }
 inline Tensor & Tensor::addcdiv_(const Tensor & tensor1, const Tensor & tensor2, Scalar value) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, const Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 762)(*this, tensor1, tensor2, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 766)(*this, tensor1, tensor2, value);
 }
 inline Tensor & Tensor::random_(int64_t from, int64_t to, Generator * generator) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t, int64_t, Generator *)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 763)(*this, from, to, generator);
+        tensorTypeIdToBackend(type_id()), is_variable(), 767)(*this, from, to, generator);
 }
 inline Tensor & Tensor::random_(int64_t to, Generator * generator) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, int64_t, Generator *)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 764)(*this, to, generator);
+        tensorTypeIdToBackend(type_id()), is_variable(), 768)(*this, to, generator);
 }
 inline Tensor & Tensor::random_(Generator * generator) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, Generator *)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 765)(*this, generator);
+        tensorTypeIdToBackend(type_id()), is_variable(), 769)(*this, generator);
 }
 inline Tensor & Tensor::uniform_(double from, double to, Generator * generator) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, double, double, Generator *)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 766)(*this, from, to, generator);
+        tensorTypeIdToBackend(type_id()), is_variable(), 770)(*this, from, to, generator);
 }
 inline Tensor & Tensor::normal_(double mean, double std, Generator * generator) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, double, double, Generator *)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 767)(*this, mean, std, generator);
+        tensorTypeIdToBackend(type_id()), is_variable(), 771)(*this, mean, std, generator);
 }
 inline Tensor & Tensor::cauchy_(double median, double sigma, Generator * generator) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, double, double, Generator *)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 768)(*this, median, sigma, generator);
+        tensorTypeIdToBackend(type_id()), is_variable(), 772)(*this, median, sigma, generator);
 }
 inline Tensor & Tensor::log_normal_(double mean, double std, Generator * generator) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, double, double, Generator *)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 769)(*this, mean, std, generator);
+        tensorTypeIdToBackend(type_id()), is_variable(), 773)(*this, mean, std, generator);
 }
 inline Tensor & Tensor::exponential_(double lambd, Generator * generator) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, double, Generator *)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 770)(*this, lambd, generator);
+        tensorTypeIdToBackend(type_id()), is_variable(), 774)(*this, lambd, generator);
 }
 inline Tensor & Tensor::geometric_(double p, Generator * generator) {
     return globalATenDispatch().getOp<Tensor & (Tensor &, double, Generator *)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 771)(*this, p, generator);
+        tensorTypeIdToBackend(type_id()), is_variable(), 775)(*this, p, generator);
 }
 inline Tensor Tensor::diag(int64_t diagonal) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 773)(*this, diagonal);
+        tensorTypeIdToBackend(type_id()), is_variable(), 777)(*this, diagonal);
 }
 inline Tensor Tensor::cross(const Tensor & other, c10::optional<int64_t> dim) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, c10::optional<int64_t>)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 775)(*this, other, dim);
+        tensorTypeIdToBackend(type_id()), is_variable(), 779)(*this, other, dim);
 }
 inline Tensor Tensor::triu(int64_t diagonal) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 777)(*this, diagonal);
+        tensorTypeIdToBackend(type_id()), is_variable(), 781)(*this, diagonal);
 }
 inline Tensor Tensor::tril(int64_t diagonal) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 779)(*this, diagonal);
+        tensorTypeIdToBackend(type_id()), is_variable(), 783)(*this, diagonal);
 }
 inline Tensor Tensor::trace() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 782)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 786)(*this);
 }
 inline Tensor Tensor::ne(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 784)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 788)(*this, other);
 }
 inline Tensor Tensor::ne(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 786)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 790)(*this, other);
 }
 inline Tensor Tensor::eq(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 788)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 792)(*this, other);
 }
 inline Tensor Tensor::eq(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 790)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 794)(*this, other);
 }
 inline Tensor Tensor::ge(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 792)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 796)(*this, other);
 }
 inline Tensor Tensor::ge(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 794)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 798)(*this, other);
 }
 inline Tensor Tensor::le(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 796)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 800)(*this, other);
 }
 inline Tensor Tensor::le(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 798)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 802)(*this, other);
 }
 inline Tensor Tensor::gt(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 800)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 804)(*this, other);
 }
 inline Tensor Tensor::gt(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 802)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 806)(*this, other);
 }
 inline Tensor Tensor::lt(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 804)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 808)(*this, other);
 }
 inline Tensor Tensor::lt(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 806)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 810)(*this, other);
 }
 inline Tensor Tensor::take(const Tensor & index) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 808)(*this, index);
+        tensorTypeIdToBackend(type_id()), is_variable(), 812)(*this, index);
 }
 inline Tensor Tensor::index_select(int64_t dim, const Tensor & index) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 810)(*this, dim, index);
+        tensorTypeIdToBackend(type_id()), is_variable(), 814)(*this, dim, index);
 }
 inline Tensor Tensor::masked_select(const Tensor & mask) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 812)(*this, mask);
+        tensorTypeIdToBackend(type_id()), is_variable(), 816)(*this, mask);
 }
 inline Tensor Tensor::nonzero() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 814)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 818)(*this);
 }
 inline Tensor Tensor::gather(int64_t dim, const Tensor & index, bool sparse_grad) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, const Tensor &, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 816)(*this, dim, index, sparse_grad);
+        tensorTypeIdToBackend(type_id()), is_variable(), 820)(*this, dim, index, sparse_grad);
 }
 inline Tensor Tensor::addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 819)(*this, tensor1, tensor2, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 823)(*this, tensor1, tensor2, value);
 }
 inline Tensor Tensor::addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 821)(*this, tensor1, tensor2, value);
+        tensorTypeIdToBackend(type_id()), is_variable(), 825)(*this, tensor1, tensor2, value);
 }
 inline std::tuple<Tensor,Tensor> Tensor::gels(const Tensor & A) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 823)(*this, A);
+        tensorTypeIdToBackend(type_id()), is_variable(), 827)(*this, A);
 }
 inline std::tuple<Tensor,Tensor> Tensor::triangular_solve(const Tensor & A, bool upper, bool transpose, bool unitriangular) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, bool, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 825)(*this, A, upper, transpose, unitriangular);
+        tensorTypeIdToBackend(type_id()), is_variable(), 829)(*this, A, upper, transpose, unitriangular);
 }
 inline std::tuple<Tensor,Tensor> Tensor::symeig(bool eigenvectors, bool upper) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 828)(*this, eigenvectors, upper);
+        tensorTypeIdToBackend(type_id()), is_variable(), 832)(*this, eigenvectors, upper);
 }
 inline std::tuple<Tensor,Tensor> Tensor::eig(bool eigenvectors) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 830)(*this, eigenvectors);
+        tensorTypeIdToBackend(type_id()), is_variable(), 834)(*this, eigenvectors);
 }
 inline std::tuple<Tensor,Tensor,Tensor> Tensor::svd(bool some, bool compute_uv) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor,Tensor> (const Tensor &, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 832)(*this, some, compute_uv);
+        tensorTypeIdToBackend(type_id()), is_variable(), 836)(*this, some, compute_uv);
 }
 inline Tensor Tensor::cholesky(bool upper) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 834)(*this, upper);
+        tensorTypeIdToBackend(type_id()), is_variable(), 838)(*this, upper);
 }
 inline Tensor Tensor::cholesky_solve(const Tensor & input2, bool upper) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 837)(*this, input2, upper);
+        tensorTypeIdToBackend(type_id()), is_variable(), 841)(*this, input2, upper);
 }
 inline std::tuple<Tensor,Tensor> Tensor::solve(const Tensor & A) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 839)(*this, A);
+        tensorTypeIdToBackend(type_id()), is_variable(), 843)(*this, A);
 }
 inline Tensor Tensor::cholesky_inverse(bool upper) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 843)(*this, upper);
+        tensorTypeIdToBackend(type_id()), is_variable(), 847)(*this, upper);
 }
 inline std::tuple<Tensor,Tensor> Tensor::pstrf(bool upper, Scalar tol) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, bool, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 845)(*this, upper, tol);
+        tensorTypeIdToBackend(type_id()), is_variable(), 849)(*this, upper, tol);
 }
 inline std::tuple<Tensor,Tensor> Tensor::qr(bool some) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 847)(*this, some);
+        tensorTypeIdToBackend(type_id()), is_variable(), 851)(*this, some);
 }
 inline std::tuple<Tensor,Tensor> Tensor::geqrf() const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 850)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 854)(*this);
 }
 inline Tensor Tensor::orgqr(const Tensor & input2) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 852)(*this, input2);
+        tensorTypeIdToBackend(type_id()), is_variable(), 856)(*this, input2);
 }
 inline Tensor Tensor::ormqr(const Tensor & input2, const Tensor & input3, bool left, bool transpose) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, const Tensor &, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 854)(*this, input2, input3, left, transpose);
+        tensorTypeIdToBackend(type_id()), is_variable(), 858)(*this, input2, input3, left, transpose);
 }
 inline Tensor Tensor::lu_solve(const Tensor & LU_data, const Tensor & LU_pivots) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 857)(*this, LU_data, LU_pivots);
+        tensorTypeIdToBackend(type_id()), is_variable(), 861)(*this, LU_data, LU_pivots);
 }
 inline Tensor Tensor::multinomial(int64_t num_samples, bool replacement, Generator * generator) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, bool, Generator *)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 859)(*this, num_samples, replacement, generator);
+        tensorTypeIdToBackend(type_id()), is_variable(), 863)(*this, num_samples, replacement, generator);
 }
 inline Tensor Tensor::lgamma() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 863)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 867)(*this);
 }
 inline Tensor Tensor::digamma() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 865)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 869)(*this);
 }
 inline Tensor Tensor::polygamma(int64_t n) const {
     return globalATenDispatch().getOp<Tensor (int64_t, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 867)(n, *this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 871)(n, *this);
 }
 inline Tensor Tensor::erfinv() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 869)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 873)(*this);
 }
 inline Tensor Tensor::dist(const Tensor & other, Scalar p) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 870)(*this, other, p);
+        tensorTypeIdToBackend(type_id()), is_variable(), 874)(*this, other, p);
 }
 inline Tensor Tensor::atan2(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 872)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 876)(*this, other);
 }
 inline Tensor Tensor::lerp(const Tensor & end, Scalar weight) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 875)(*this, end, weight);
+        tensorTypeIdToBackend(type_id()), is_variable(), 879)(*this, end, weight);
 }
 inline Tensor Tensor::lerp(const Tensor & end, const Tensor & weight) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 876)(*this, end, weight);
+        tensorTypeIdToBackend(type_id()), is_variable(), 880)(*this, end, weight);
 }
 inline Tensor Tensor::histc(int64_t bins, Scalar min, Scalar max) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, Scalar, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 878)(*this, bins, min, max);
+        tensorTypeIdToBackend(type_id()), is_variable(), 882)(*this, bins, min, max);
 }
 inline Tensor Tensor::sign() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 880)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 884)(*this);
 }
 inline Tensor Tensor::fmod(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 882)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 886)(*this, other);
 }
 inline Tensor Tensor::fmod(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 884)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 888)(*this, other);
 }
 inline Tensor Tensor::remainder(Scalar other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 886)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 890)(*this, other);
 }
 inline Tensor Tensor::remainder(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 888)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 892)(*this, other);
 }
 inline Tensor Tensor::min(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 890)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 894)(*this, other);
 }
 inline Tensor Tensor::min() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 891)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 895)(*this);
 }
 inline Tensor Tensor::max(const Tensor & other) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 893)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 897)(*this, other);
 }
 inline Tensor Tensor::max() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 894)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 898)(*this);
 }
 inline Tensor Tensor::median() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 895)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 899)(*this);
 }
 inline std::tuple<Tensor,Tensor> Tensor::sort(int64_t dim, bool descending) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, int64_t, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 897)(*this, dim, descending);
+        tensorTypeIdToBackend(type_id()), is_variable(), 901)(*this, dim, descending);
 }
 inline Tensor Tensor::argsort(int64_t dim, bool descending) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 898)(*this, dim, descending);
+        tensorTypeIdToBackend(type_id()), is_variable(), 902)(*this, dim, descending);
 }
 inline std::tuple<Tensor,Tensor> Tensor::topk(int64_t k, int64_t dim, bool largest, bool sorted) const {
     return globalATenDispatch().getOp<std::tuple<Tensor,Tensor> (const Tensor &, int64_t, int64_t, bool, bool)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 900)(*this, k, dim, largest, sorted);
+        tensorTypeIdToBackend(type_id()), is_variable(), 904)(*this, k, dim, largest, sorted);
 }
 inline Tensor Tensor::all() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 901)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 905)(*this);
 }
 inline Tensor Tensor::any() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 902)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 906)(*this);
 }
 inline Tensor Tensor::renorm(Scalar p, int64_t dim, Scalar maxnorm) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, Scalar, int64_t, Scalar)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 904)(*this, p, dim, maxnorm);
+        tensorTypeIdToBackend(type_id()), is_variable(), 908)(*this, p, dim, maxnorm);
 }
 inline Tensor Tensor::unfold(int64_t dimension, int64_t size, int64_t step) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, int64_t, int64_t, int64_t)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 905)(*this, dimension, size, step);
+        tensorTypeIdToBackend(type_id()), is_variable(), 909)(*this, dimension, size, step);
 }
 inline bool Tensor::equal(const Tensor & other) const {
     return globalATenDispatch().getOp<bool (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 906)(*this, other);
+        tensorTypeIdToBackend(type_id()), is_variable(), 910)(*this, other);
 }
 inline Tensor Tensor::pow(const Tensor & exponent) const {
     return globalATenDispatch().getOp<Tensor (const Tensor &, const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 908)(*this, exponent);
+        tensorTypeIdToBackend(type_id()), is_variable(), 912)(*this, exponent);
 }
 inline Tensor Tensor::alias() const {
     return globalATenDispatch().getOp<Tensor (const Tensor &)>(
-        tensorTypeIdToBackend(type_id()), is_variable(), 917)(*this);
+        tensorTypeIdToBackend(type_id()), is_variable(), 921)(*this);
 }
 
 inline bool Tensor::is_variable() const noexcept {

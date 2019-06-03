@@ -12,8 +12,8 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 // table deregisters it in the destructor.
 class RegisterOperators::OperatorRegistrar final {
 public:
-  explicit OperatorRegistrar(FunctionSchema&& schema, c10::optional<TensorTypeId> dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator)
-  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), kernel_registration_handle_(c10::nullopt) {
+  explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<TensorTypeId> dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator)
+  : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
     // either both, kernel and cache_creator, or none must be set.
     TORCH_INTERNAL_ASSERT((kernel != nullptr) == static_cast<bool>(cache_creator));
 
@@ -124,23 +124,38 @@ void RegisterOperators::checkNoDuplicateKernels_(const FunctionSchema& schema, c
 }
 
 void RegisterOperators::registerOp_(FunctionSchema&& schema, Options&& options) {
+  std::string op_name = schema.name();
+  std::string overload_name = schema.overload_name();
+
+  auto operatorOptions = makeOperatorOptions_(options);
+
   if (0 == options.kernels.size()) {
-    registerSchemaOnly_(std::move(schema));
+    registerSchemaOnly_(std::move(schema), std::move(operatorOptions));
   } else {
     for (auto& kernel : options.kernels) {
-      registerSchemaAndKernel_(schema, std::move(kernel));
+      registerSchemaAndKernel_(schema, std::move(kernel), std::move(operatorOptions));
     }
   }
+
+  auto op_handle = c10::Dispatcher::singleton().findSchema(op_name.c_str(), overload_name.c_str()).value();
 }
 
-void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel) {
+OperatorOptions RegisterOperators::makeOperatorOptions_(const RegisterOperators::Options& options) {
+  OperatorOptions result;
+  if (options.aliasAnalysisKind_.has_value()) {
+    result.setAliasAnalysis(*options.aliasAnalysisKind_);
+  }
+  return result;
+}
+
+void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel, OperatorOptions&& operatorOptions) {
   TORCH_INTERNAL_ASSERT(kernel.kernel_func != nullptr && static_cast<bool>(kernel.cache_creator_func), "Kernel must be set");
 
-  registrars_.emplace_back(std::move(schema), kernel.dispatch_key, kernel.kernel_func, std::move(kernel.cache_creator_func));
+  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), kernel.dispatch_key, kernel.kernel_func, std::move(kernel.cache_creator_func));
 }
 
-void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema) {
-  registrars_.emplace_back(std::move(schema), c10::nullopt, nullptr, nullptr);
+void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& operatorOptions) {
+  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), c10::nullopt, nullptr, nullptr);
 }
 
 RegisterOperators::RegisterOperators() = default;
