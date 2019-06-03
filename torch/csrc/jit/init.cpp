@@ -56,6 +56,7 @@
 #include <pybind11/functional.h>
 
 #include <memory>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -95,6 +96,7 @@ CAFFE2_API void runJITCPPTests(bool runCuda);
 #endif
 
 void initJITBindings(PyObject* module) {
+  std::cout<<"99: "<<&module<<std::endl;
   auto m = py::handle(module).cast<py::module>();
 
   py::register_exception<JITException>(m, "JITException");

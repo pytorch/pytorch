@@ -1,0 +1,3 @@
+[submodule "tools/clang"]
+	path = tools/clang
+	url = ../../wjakob/clang-cindex-python3

@@ -1,0 +1,214 @@
+language: cpp
+dist: trusty
+sudo: false
+matrix:
+  include:
+  # This config does a few things:
+  # - Checks C++ and Python code styles (check-style.sh and flake8).
+  # - Makes sure sphinx can build the docs without any errors or warnings.
+  # - Tests setup.py sdist and install (all header files should be present).
+  # - Makes sure that everything still works without optional deps (numpy/scipy/eigen) and
+  #   also tests the automatic discovery functions in CMake (Python version, C++ standard).
+  - os: linux
+    dist: xenial # Necessary to run doxygen 1.8.15
+    env: STYLE DOCS PIP
+    cache: false
+    before_install:
+    - pyenv global $(pyenv whence 2to3)  # activate all python versions
+    - PY_CMD=python3
+    - $PY_CMD -m pip install --user --upgrade pip wheel setuptools
+    install:
+    - $PY_CMD -m pip install --user --upgrade sphinx sphinx_rtd_theme breathe flake8 pep8-naming pytest
+    - curl -fsSL https://sourceforge.net/projects/doxygen/files/rel-1.8.15/doxygen-1.8.15.linux.bin.tar.gz/download | tar xz
+    - export PATH="$PWD/doxygen-1.8.15/bin:$PATH"
+    script:
+    - tools/check-style.sh
+    - flake8
+    - $PY_CMD -m sphinx -W -b html docs docs/.build
+    - |
+      # Make sure setup.py distributes and installs all the headers
+      $PY_CMD setup.py sdist
+      $PY_CMD -m pip install --user -U ./dist/*
+      installed=$($PY_CMD -c "import pybind11; print(pybind11.get_include(True) + '/pybind11')")
+      diff -rq $installed ./include/pybind11
+    - |
+      # Barebones build
+      cmake -DCMAKE_BUILD_TYPE=Debug -DPYBIND11_WERROR=ON -DDOWNLOAD_CATCH=ON -DPYTHON_EXECUTABLE=$(which $PY_CMD)
+      make pytest -j 2
+      make cpptest -j 2
+  # The following are regular test configurations, including optional dependencies.
+  # With regard to each other they differ in Python version, C++ standard and compiler.
+  - os: linux
+    env: PYTHON=2.7 CPP=11 GCC=4.8
+    addons:
+      apt:
+        packages: [cmake=2.\*, cmake-data=2.\*]
+  - os: linux
+    env: PYTHON=3.6 CPP=11 GCC=4.8
+    addons:
+      apt:
+        sources: [deadsnakes]
+        packages: [python3.6-dev python3.6-venv, cmake=2.\*, cmake-data=2.\*]
+  - sudo: true
+    services: docker
+    env: PYTHON=2.7 CPP=14 GCC=6 CMAKE=1
+  - sudo: true
+    services: docker
+    env: PYTHON=3.5 CPP=14 GCC=6 DEBUG=1
+  - sudo: true
+    services: docker
+    env: PYTHON=3.6 CPP=17 GCC=7
+  - os: linux
+    env: PYTHON=3.6 CPP=17 CLANG=5.0
+    addons:
+      apt:
+        sources: [deadsnakes, llvm-toolchain-trusty-5.0, ubuntu-toolchain-r-test]
+        packages: [python3.6-dev python3.6-venv clang-5.0 llvm-5.0-dev, lld-5.0]
+  - os: osx
+    osx_image: xcode7.3
+    env: PYTHON=2.7 CPP=14 CLANG CMAKE=1
+  - os: osx
+    osx_image: xcode9
+    env: PYTHON=3.7 CPP=14 CLANG DEBUG=1
+  # Test a PyPy 2.7 build
+  - os: linux
+    env: PYPY=5.8 PYTHON=2.7 CPP=11 GCC=4.8
+    addons:
+      apt:
+        packages: [libblas-dev, liblapack-dev, gfortran]
+  # Build in 32-bit mode and tests against the CMake-installed version
+  - sudo: true
+    services: docker
+    env: ARCH=i386 PYTHON=3.5 CPP=14 GCC=6 INSTALL=1
+    script:
+      - |
+        $SCRIPT_RUN_PREFIX sh -c "set -e
+        cmake ${CMAKE_EXTRA_ARGS} -DPYBIND11_INSTALL=1 -DPYBIND11_TEST=0
+        make install
+        cp -a tests /pybind11-tests
+        mkdir /build-tests && cd /build-tests
+        cmake ../pybind11-tests ${CMAKE_EXTRA_ARGS} -DPYBIND11_WERROR=ON
+        make pytest -j 2"
+cache:
+  directories:
+  - $HOME/.local/bin
+  - $HOME/.local/lib
+  - $HOME/.local/include
+  - $HOME/Library/Python
+before_install:
+- |
+  # Configure build variables
+  if [ "$TRAVIS_OS_NAME" = "linux" ]; then
+    if [ -n "$CLANG" ]; then
+      export CXX=clang++-$CLANG CC=clang-$CLANG
+      EXTRA_PACKAGES+=" clang-$CLANG llvm-$CLANG-dev"
+    else
+      if [ -z "$GCC" ]; then GCC=4.8
+      else EXTRA_PACKAGES+=" g++-$GCC"
+      fi
+      export CXX=g++-$GCC CC=gcc-$GCC
+    fi
+    if [ "$GCC" = "6" ]; then DOCKER=${ARCH:+$ARCH/}debian:stretch
+    elif [ "$GCC" = "7" ]; then DOCKER=debian:buster EXTRA_PACKAGES+=" catch python3-distutils" DOWNLOAD_CATCH=OFF
+    fi
+  elif [ "$TRAVIS_OS_NAME" = "osx" ]; then
+    export CXX=clang++ CC=clang;
+  fi
+  if [ -n "$CPP" ]; then CPP=-std=c++$CPP; fi
+  if [ "${PYTHON:0:1}" = "3" ]; then PY=3; fi
+  if [ -n "$DEBUG" ]; then CMAKE_EXTRA_ARGS+=" -DCMAKE_BUILD_TYPE=Debug"; fi
+- |
+  # Initialize environment
+  set -e
+  if [ -n "$DOCKER" ]; then
+    docker pull $DOCKER
+
+    containerid=$(docker run --detach --tty \
+      --volume="$PWD":/pybind11 --workdir=/pybind11 \
+      --env="CC=$CC" --env="CXX=$CXX" --env="DEBIAN_FRONTEND=$DEBIAN_FRONTEND" \
+      --env=GCC_COLORS=\  \
+      $DOCKER)
+    SCRIPT_RUN_PREFIX="docker exec --tty $containerid"
+    $SCRIPT_RUN_PREFIX sh -c 'for s in 0 15; do sleep $s; apt-get update && apt-get -qy dist-upgrade && break; done'
+  else
+    if [ "$PYPY" = "5.8" ]; then
+      curl -fSL https://bitbucket.org/pypy/pypy/downloads/pypy2-v5.8.0-linux64.tar.bz2 | tar xj
+      PY_CMD=$(echo `pwd`/pypy2-v5.8.0-linux64/bin/pypy)
+      CMAKE_EXTRA_ARGS+=" -DPYTHON_EXECUTABLE:FILEPATH=$PY_CMD"
+    else
+      PY_CMD=python$PYTHON
+      if [ "$TRAVIS_OS_NAME" = "osx" ]; then
+        if [ "$PY" = "3" ]; then
+          brew update && brew upgrade python
+        else
+          curl -fsSL https://bootstrap.pypa.io/get-pip.py | $PY_CMD - --user
+        fi
+      fi
+    fi
+    if [ "$PY" = 3 ] || [ -n "$PYPY" ]; then
+      $PY_CMD -m ensurepip --user
+    fi
+    $PY_CMD -m pip install --user --upgrade pip wheel
+  fi
+  set +e
+install:
+- |
+  # Install dependencies
+  set -e
+  if [ -n "$DOCKER" ]; then
+    if [ -n "$DEBUG" ]; then
+      PY_DEBUG="python$PYTHON-dbg python$PY-scipy-dbg"
+      CMAKE_EXTRA_ARGS+=" -DPYTHON_EXECUTABLE=/usr/bin/python${PYTHON}dm"
+    fi
+    $SCRIPT_RUN_PREFIX sh -c "for s in 0 15; do sleep \$s; \
+      apt-get -qy --no-install-recommends install \
+        $PY_DEBUG python$PYTHON-dev python$PY-pytest python$PY-scipy \
+        libeigen3-dev libboost-dev cmake make ${EXTRA_PACKAGES} && break; done"
+  else
+
+    if [ "$CLANG" = "5.0" ]; then
+      if ! [ -d ~/.local/include/c++/v1 ]; then
+        # Neither debian nor llvm provide a libc++ 5.0 deb; luckily it's fairly quick
+        # to build, install (and cache), so do it ourselves:
+        git clone --depth=1 https://github.com/llvm-mirror/llvm.git llvm-source
+        git clone https://github.com/llvm-mirror/libcxx.git llvm-source/projects/libcxx -b release_50
+        git clone https://github.com/llvm-mirror/libcxxabi.git llvm-source/projects/libcxxabi -b release_50
+        mkdir llvm-build && cd llvm-build
+        # Building llvm requires a newer cmake than is provided by the trusty container:
+        CMAKE_VER=cmake-3.8.0-Linux-x86_64
+        curl https://cmake.org/files/v3.8/$CMAKE_VER.tar.gz | tar xz
+        ./$CMAKE_VER/bin/cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=~/.local ../llvm-source
+        make -j2 install-cxxabi install-cxx
+        cp -a include/c++/v1/*cxxabi*.h ~/.local/include/c++/v1
+        cd ..
+      fi
+      export CXXFLAGS="-isystem $HOME/.local/include/c++/v1 -stdlib=libc++"
+      export LDFLAGS="-L$HOME/.local/lib -fuse-ld=lld-$CLANG"
+      export LD_LIBRARY_PATH="$HOME/.local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+      if [ "$CPP" = "-std=c++17" ]; then CPP="-std=c++1z"; fi
+    fi
+
+    export NPY_NUM_BUILD_JOBS=2
+    echo "Installing pytest, numpy, scipy..."
+    ${PYPY:+travis_wait 30} $PY_CMD -m pip install --user --upgrade pytest numpy scipy \
+        ${PYPY:+--extra-index-url https://imaginary.ca/trusty-pypi}
+    echo "done."
+
+    mkdir eigen
+    curl -fsSL https://bitbucket.org/eigen/eigen/get/3.3.4.tar.bz2 | \
+        tar --extract -j --directory=eigen --strip-components=1
+    export CMAKE_INCLUDE_PATH="${CMAKE_INCLUDE_PATH:+$CMAKE_INCLUDE_PATH:}$PWD/eigen"
+  fi
+  set +e
+script:
+- $SCRIPT_RUN_PREFIX cmake ${CMAKE_EXTRA_ARGS}
+    -DPYBIND11_PYTHON_VERSION=$PYTHON
+    -DPYBIND11_CPP_STANDARD=$CPP
+    -DPYBIND11_WERROR=${WERROR:-ON}
+    -DDOWNLOAD_CATCH=${DOWNLOAD_CATCH:-ON}
+- $SCRIPT_RUN_PREFIX make pytest -j 2
+- $SCRIPT_RUN_PREFIX make cpptest -j 2
+- if [ -n "$CMAKE" ]; then $SCRIPT_RUN_PREFIX make test_cmake_build; fi
+after_failure: cat tests/test_cmake_build/*.log*
+after_script:
+- if [ -n "$DOCKER" ]; then docker stop "$containerid"; docker rm "$containerid"; fi
