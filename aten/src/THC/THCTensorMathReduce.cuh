@@ -8,6 +8,7 @@
 #include <THC/THCReduceAll.cuh>
 #include <THC/THCTensorCopy.hpp>
 #include <THC/THCThrustAllocator.cuh>
+#include <cub/block/block_reduce.cuh>
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
 #include <thrust/transform_reduce.h>
@@ -420,6 +421,7 @@ THC_transformReduceOuterDimIndex(THCState *state,
   THCudaCheck(cudaGetLastError());
 }
 
+
 /* Reduce the innermost dimension of a tensor (on thrust::pair functors which are (value, index))
  *
  * For an n-d tensor (n <= 4) where the reduction is along the innermost dimension:
@@ -439,50 +441,21 @@ kernelTransformReduceInnermostDimIndex(K *tgt1,
                                        unsigned row_size,
                                        thrust::pair<K, Index> init,
                                        BinaryFunction binary_op) {
-  __shared__ K sbuf[32][16 + 1]; // avoid bank conflict
-  __shared__ Index ibuf[32][16 + 1]; // avoid bank conflict
+   typedef cub::BlockReduce<thrust::pair<K, Index>, 128> BlockReduce;
+   __shared__ typename BlockReduce::TempStorage temp_storage;
 
-  for (unsigned block_row = blockIdx.x * blockDim.y;
-       block_row < num_rows;
-       block_row += blockDim.y * gridDim.x) {
-    unsigned row = block_row + threadIdx.y;
-    thrust::pair<K, Index> acc = init;
-    if (row < num_rows) {
-      K *src = src_ + row * row_size;
-      // Sequential reduction within a thread.
-      for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
-        acc = binary_op(acc, thrust::make_pair<K, Index>(src[col], col));
+    for (int row = blockIdx.x; row < num_rows; row += gridDim.x) {
+      thrust::pair<K, Index> red = init;
+      for (int col = threadIdx.x; col < row_size; col += blockDim.x) {
+        K *src = src_ + row * row_size;
+        red = binary_op(red, thrust::make_pair<K, Index>(src[col], col));
+      }
+      thrust::pair<K, Index> result = BlockReduce(temp_storage).Reduce(red, binary_op);
+      if (threadIdx.x == 0) {
+        tgt1[row] = result.first;
+        tgt2[row] = result.second;
       }
     }
-
-    sbuf[threadIdx.y][threadIdx.x] = acc.first;
-    ibuf[threadIdx.y][threadIdx.x] = acc.second;
-
-    __syncthreads();
-
-    // Reduce intermediate values to single value.
-    K* sline = &sbuf[threadIdx.y][0];
-    Index* iline = &ibuf[threadIdx.y][0];
-    for (unsigned s = 8; s > 0; s >>= 1) {
-      if (row < num_rows && threadIdx.x < s) {
-        thrust::pair<K, Index> arg1 =
-          thrust::make_pair<K, Index>(sline[threadIdx.x], iline[threadIdx.x]);
-        thrust::pair<K, Index> arg2 =
-          thrust::make_pair<K, Index>(sline[threadIdx.x + s], iline[threadIdx.x + s]);
-        thrust::pair<K, Index> res = binary_op(arg1, arg2);
-
-        sline[threadIdx.x] = res.first;
-        iline[threadIdx.x] = res.second;
-      }
-      __syncthreads();
-    }
-
-    if (row < num_rows && threadIdx.x == 0) {
-      tgt1[row] = sline[0];
-      tgt2[row] = iline[0];
-    }
-    __syncthreads();
-  }
 }
 
 template <typename ScalarTypeK,
@@ -503,12 +476,10 @@ THC_transformReduceInnermostDimIndex(THCState *state,
     num_rows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
   unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, ndim - 1);
-
-  dim3 threads(16, 32);
-  dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
+  int blocks = min(1024, num_rows);
 
   kernelTransformReduceInnermostDimIndex
-    <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    <<<blocks, 256, 0, THCState_getCurrentStream(state)>>>(
       tgt1->template data<ScalarTypeK>(),
       tgt2->template data<ScalarTypeIndex>(),
       src->template data<ScalarTypeK>(),
