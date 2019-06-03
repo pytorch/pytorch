@@ -495,6 +495,9 @@ DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 template <class T>
 struct _fake_type {};
 
+// generic_to<T> converts an IValue to a composite target type like List<T>,
+// Dict<...> or optional<T>. The _fake_type<T> parameter allows us to overload
+// based on the return type.
 template <class Elem>
 std::vector<Elem> generic_to(
     IValue ivalue,
