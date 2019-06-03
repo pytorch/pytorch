@@ -101,7 +101,7 @@ if [ "$dry_run" = false ]; then
   expect "Username*"
   send "pytorchbot\n"
   expect "Password*"
-  send "${GITHUB_PYTORCHBOT_TOKEN}\n"
+  send "$::env(GITHUB_PYTORCHBOT_TOKEN)\n"
   expect eof
 DONE
   set -x
