@@ -3,9 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from operator_benchmark import benchmark_core
+import benchmark_core
 
-import torch
 
 """PyTorch performance microbenchmarks.
 
@@ -13,34 +12,81 @@ This module contains PyTorch-specific functionalities for performance
 microbenchmarks.
 """
 
-
-def PyTorchOperatorTestCase(test_name, op_type, input_shapes, op_args, run_mode):
-    """Benchmark Tester function for Pytorch framework.
+class TorchBenchmarkBase(object):
+    """ This is a base class used to create Pytorch operator benchmark.
+        module_name is the name of the operator being benchmarked. 
+        test_name is the name (it's created by concatenating all the 
+        inputs) of a specific test
     """
-    inputs = []
-    is_contig = 'contig' not in op_args or op_args['contig']
-    dtype = op_args['dtype'] if 'dtype' in op_args else torch.float32
-    for shape in input_shapes:
-        tensor_shape = list(shape)
-        if not is_contig:
-            tensor_shape = [s * 2 for s in tensor_shape]
-        if dtype in [torch.float32, torch.float64]:  # skip float16
-            input = torch.rand(tensor_shape, dtype=dtype)
-        elif not dtype.is_floating_point:
-            input = torch.randint(low=0, high=100, size=tensor_shape, dtype=dtype)
-        else:
-            input = torch.ones(tensor_shape, dtype=dtype)
 
-        if not is_contig:
-            slices = []
-            for dim in tensor_shape:
-                slices.append(slice(0, dim, 2))
-            input = input[slices]
-            assert list(input.size()) == list(shape)
-            assert not input.is_contiguous()
-        inputs.append(input)
+    def __init__(self):
+        self.user_given_name = None
 
-    def benchmark_func(num_runs):
-        op_type(*(inputs + [num_runs]))
+    def forward(self):
+        pass 
 
-    benchmark_core.add_benchmark_tester("PyTorch", test_name, input_shapes, op_args, run_mode, benchmark_func)
+    def module_name(self):
+        """ this is used to label the operator being benchmarked
+        """
+        if self.user_given_name:
+            return self.user_given_name 
+        return self.__class__.__name__
+
+    def set_module_name(self, name): 
+        self.user_given_name = name
+
+    def test_name(self, **kargs):
+        """ FIXME(mingzhe0908):
+            this is a globally unique name which can be used to 
+            label a specific test 
+        """
+        test_name_str = []
+        for key in kargs:
+            value = kargs[key]
+            test_name_str.append(
+                key + str(value if type(value) != bool else int(value)))
+        return '_'.join(test_name_str)
+
+
+class PyTorchOperatorTestCase(object):
+    """ This class includes all the information needed to benchmark an operator. 
+        op_bench: it's a user-defined class (child of TorchBenchmarkBase)
+        which includes input and operator, .etc
+        test_config: a namedtuple includes test_name, input_shape, tag, run_backward.
+        When run_backward is false, the run_forward method will be executed, 
+        When run_backward is true, run_forward_eager and _output_mean will be 
+        executed to generate output. Then, run_backward will be executed.
+    """
+    def __init__(self, op_bench, test_config):
+        self.test_config = test_config
+        self.op_bench = op_bench
+        self.framework = "PyTorch"
+
+    def run_forward(self, num_runs):
+        """ TODO (mingzhe): when JIT is ready, switch this to JIT 
+            Run the forward path of an op in many iterations
+        """
+        for _ in range(num_runs):
+            self.op_bench.forward()
+
+    def _output_mean(self):
+        """ TODO (mingzhe): it is not necessary to sum up everything by myself, 
+            torch.autograd.backward do take a gradient tensor. By default, it 
+            is the same shape as your output tensor, with all 1s. 
+            Mathematically, it is the same as if the output is summed together. 
+            So we should be able to get ride of this method. 
+            dummy function for gradient calculation
+        """
+        self.mean = self.output.mean()
+
+    def run_backward(self, num_runs):
+        """ Run the backward path of an op in many iterations
+        """
+        # TODO: can we use JIT here to reduce python overhead?
+        for _ in range(num_runs):
+            self.mean.backward(retain_graph=True)
+
+
+def register_pytorch_op_test_case(op_bench, test_config):
+    test_case = PyTorchOperatorTestCase(op_bench, test_config)
+    benchmark_core._register_test(test_case)
