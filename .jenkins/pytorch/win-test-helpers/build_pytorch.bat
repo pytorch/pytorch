@@ -79,6 +79,9 @@ if not "%USE_CUDA%"=="1" (
 )
 
 if not "%USE_CUDA%"=="0" (
+  :: sccache will fail for CUDA builds if all cores are used for compiling
+  if not defined MAX_JOBS set /A MAX_JOBS=%NUMBER_OF_PROCESSORS%-1
+
   if "%REBUILD%"=="" (
     sccache --show-stats
     sccache --zero-stats
