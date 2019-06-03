@@ -2319,13 +2319,20 @@ graph(%Ra, %Rb):
         self.checkTrace(func3, (inp,))
 
         @torch.jit.script
-        def invalid_constant_baking(x, methods=["default"]):
+        def func4(x, a):
             # type: (Tensor, List[str]) -> Tensor
-            hw = x.shape[2:4]
-            return F.interpolate(x, hw, mode='bilinear', align_corners=True)
+            if len(a) == 2:
+                return x + 2
+            else:
+                return x
 
+        def invalid_constant_baking(x):
+            a = ["hello", "world"]
+            return func4(x, a)
+
+        # self.checkTrace(invalid_constant_baking, (inp,))
         with self.assertRaisesRegex(RuntimeError,
-                                    "Unknown type used in value trace lookup!"):
+                                    "Tracer cannot get value trace for type"):
             self.checkTrace(invalid_constant_baking, (inp,))
 
 
@@ -3136,14 +3143,6 @@ graph(%Ra, %Rb):
                 # type: (Tensor, float, int) -> Tensor
                 return x + a + b
 
-        @torch.jit.script
-        def list_str_fn(x, a=['world']):
-            # type: (str, List[str]) -> str
-            return x + a[0]
-
-        self.assertEqual(list_str_fn("hello "), "hello world")
-
-
     def test_module_default_values(self):
         four = torch.tensor(4)
 
@@ -3728,6 +3727,31 @@ def foo(x):
         _, lineno = inspect.getsourcelines(foobar)
         FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))\
                    .run(scripted.graph)
+
+    def test_file_line_save_load(self):
+        class Scripted(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, xyz):
+                return torch.neg(xyz)
+
+        scripted = Scripted()
+
+        # NB: not using getExportImportCopy because that takes a different
+        # code path that calls CompilationUnit._import rather than
+        # going through the full save/load pathway
+        buffer = scripted.save_to_buffer()
+        bytesio = io.BytesIO(buffer)
+        scripted = torch.jit.load(bytesio)
+
+        FileCheck().check('code/archive.py:4:10').run(scripted.graph)
+
+    def test_file_line_string(self):
+        scripted = torch.jit.CompilationUnit('''
+def foo(xyz):
+    return torch.neg(xyz)
+        ''')
+
+        FileCheck().check('<string>:2:12').run(scripted.foo.graph)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)

@@ -157,7 +157,9 @@ Value* getValueTrace(const IValue& var) {
       return *constant;
     }
     std::ostringstream os;
-    os << "Unknown type used in value trace lookup!";
+    os << "Tracer cannot get value trace for type " << var.tagKind() << ". "
+       << "The below value could not be materialized as a constant:\n"
+       << var;
     throw std::runtime_error(os.str());
   }
 }
