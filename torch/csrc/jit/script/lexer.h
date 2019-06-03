@@ -367,8 +367,8 @@ struct Token {
 };
 
 struct Lexer {
-  explicit Lexer(const std::string& str)
-      : source(std::make_shared<Source>(str)),
+  explicit Lexer(const std::shared_ptr<Source>& source)
+      : source(source),
         pos(0),
         nesting(0),
         indent_stack(),
