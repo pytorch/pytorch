@@ -2316,14 +2316,12 @@ class TestNN(NNTestCase):
         import torch
         torch.manual_seed(0)
         torch.cuda.set_device(0)
-
         num_draws = 100
         samples = torch.empty(shape)
         if cuda:
             samples = samples.cuda()
         for i in range(num_draws):
-            #gumbels = -samples.exponential_().log() 
-            gumbels = torch.empty(shape, device=torch.cuda.current_device()).exponential_() 
+            gumbels = -samples.exponential_().log() 
             isinf = torch.isinf(gumbels).any()
             self.assertFalse(isinf)
 
@@ -2340,6 +2338,7 @@ class TestNN(NNTestCase):
         self._test_gumbel_softmax_straight_through(cuda=False, dtype=dtype)
         self._test_gumbel_softmax_grad(cuda=False, dtype=dtype)
         self._test_gumbel_softmax_isnan(cuda=False, shape=(100000, 0))
+        self._test_gumbel_isinf(cuda=False, shape=(100000, 0))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
@@ -2352,6 +2351,7 @@ class TestNN(NNTestCase):
         self._test_gumbel_softmax_straight_through(cuda=True, dtype=dtype)
         self._test_gumbel_softmax_grad(cuda=True, dtype=dtype)
         self._test_gumbel_softmax_isnan(cuda=True, shape=(100000, 0))
+        self._test_gumbel_isinf(cuda=True, shape=(100000, 0))
 
     def _test_EmbeddingBag_vs_Embedding(self, N, D, B, L, max_norm=None,
                                         mode='mean',
