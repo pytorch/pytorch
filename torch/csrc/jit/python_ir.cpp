@@ -214,17 +214,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "__repr__",
           [](Graph& g) {
-            std::stringstream ss;
-            ss << g;
-            return ss.str();
+            return g.toString();
           })
       .def(
           "str",
-          [](Graph& g, bool print_source_ranges) {
-            std::stringstream ss;
-            g.print(ss, print_source_ranges);
-            return ss.str();
-          },
+          &Graph::toString,
           py::arg("print_source_ranges") = true)
       .def(
           "dump_alias_db",
