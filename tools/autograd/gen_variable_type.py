@@ -144,17 +144,17 @@ WRAPPER_FORMAL = CodeTemplate("""\
 ${return_type} (*_op)(${type_method_formals})""")
 
 METHOD_DECLARATION = CodeTemplate("""\
-static ${return_type} ${api_name}_${id}(${variable_formals}) ;
+static ${return_type} ${api_name}(${variable_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${api_name}_${id}(${variable_formals}) {
+${return_type} VariableType::${api_name}(${variable_formals}) {
   ${type_definition_body}
 }
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-static auto register_${id} = register_variable_wrapper("${schema_string}", &VariableType::${api_name}_${id});
+.registerVariableWrapper<${return_type} (*)(${variable_formals})>("${schema_string}", &VariableType::${api_name})
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -461,7 +461,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body, variable_formals=variable_formals))
-        wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(declaration))
+        wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(declaration, variable_formals=variable_formals))
 
     env = {
         'type_derived_method_declarations': type_declarations,

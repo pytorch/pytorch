@@ -77,33 +77,43 @@ case ScalarType::${ScalarName}: {
 """)
 
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
-static ${return_type} ${api_name}_${id}(${type_method_formals});
+static ${return_type} ${api_name}(${type_method_formals});
 """)
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
-${return_type} TypeDefault::${api_name}_${id}(${type_method_formals}) {
+${return_type} TypeDefault::${api_name}(${type_method_formals}) {
     ${device_guard_declaration}
+    if (${inferred_is_variable}) {
+      auto variable_op = globalATenDispatch().getWrappedOp<${return_type} (*)(${formals_types})>(
+        &at::native::${native_type_method_dispatch}, ${id});
+      ${return_call} variable_op(${native_actuals});
+    }
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
 """)
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
-${return_type} ${Type}::${api_name}_${id}(${type_method_formals}) {
+${return_type} ${Type}::${api_name}(${type_method_formals}) {
     ${device_guard_declaration}
+    if (${inferred_is_variable}) {
+      auto variable_op = globalATenDispatch().getWrappedOp<${return_type} (*)(${formals_types})>(
+        &at::native::${native_type_method_dispatch}, ${id});
+      ${return_call} variable_op(${native_actuals});
+    }
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-static auto register_${id} = register_op(Backend::Undefined, "${schema_string}", &TypeDefault::${api_name}_${id});
+.registerOp<${return_type} (*)(${formals_types})>(Backend::Undefined, "${schema_string}", &TypeDefault::${api_name})
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-static auto register_${id} = register_op(Backend::${Backend}, "${schema_string}", &${Type}::${api_name}_${id});
+.registerOp<${return_type} (*)(${formals_types})>(Backend::${Backend}, "${schema_string}", &${Type}::${api_name})
 """)
 
 # Overrideable stubs to be used in user-extendable backends
 NATIVE_DISPATCH_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
-${return_type} ${Type}::${api_name}_${id}(${type_method_formals}) {
+${return_type} ${Type}::${api_name}(${type_method_formals}) {
     return ${Type}Dispatch::get_function<${return_type} (*)(${formals_types})>("${schema}")(${native_actuals});
 }
 """)
@@ -115,7 +125,7 @@ ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
-    return find_op<${dispatch_template_type}>(tensorTypeIdToBackend(type_id()), is_variable(), ${id})(${method_actuals});
+    return globalATenDispatch().getOp<${return_type} (*)(${formals_types})>(tensorTypeIdToBackend(type_id()), ${id})(${method_actuals});
 }
 """)
 # add a method declaration in Functions.h
@@ -129,7 +139,7 @@ C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults}
 # add method definition in Functions.h
 FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
-    return find_op<${dispatch_template_type}>(${inferred_backend}, ${inferred_is_variable}, ${id})(${native_actuals});
+    return globalATenDispatch().getOp<${return_type} (*)(${formals_types})>(${inferred_backend}, ${id})(${native_actuals});
 }
 """)
 # add a native declaration for a native function
@@ -984,7 +994,6 @@ def create_generic(top_env, declarations):
 
         option['formals_types'] = [f['type'] for f in option['formals_list']]
         option['native_actuals'] = [f['name'] for f in option['formals_list']]
-        dispatch_template_type = [option['return_type']] + option['formals_types']
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
@@ -1036,6 +1045,13 @@ def create_generic(top_env, declarations):
         top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(env))
         option['native_type_method_dispatch'] = type_method_dispatch
 
+        if dispatch_tensor:
+            option['inferred_is_variable'] = 'at::detail::infer_is_variable({})'.format(dispatch_tensor)
+        elif dispatch_options:
+            option['inferred_is_variable'] = '{}.is_variable()'.format(dispatch_options['name'])
+        else:
+            option['inferred_is_variable'] = 'false'
+
         # Note [Abstract ATen methods]
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # An abstract ATen method is one whose dispatch differs between
@@ -1047,8 +1063,6 @@ def create_generic(top_env, declarations):
         abstract = False
         if isinstance(type_method_dispatch, dict):
             abstract = True
-            top_env['type_method_definitions'].append(
-                NATIVE_DISPATCH_DECLARATION.substitute(env))
         else:
             top_env['type_method_definitions'].append(
                 NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(env))
@@ -1078,7 +1092,7 @@ def create_generic(top_env, declarations):
             top_env['tensor_method_declarations'].append(
                 TENSOR_METHOD_DECLARATION.substitute(env))
             top_env['tensor_method_definitions'].append(
-                TENSOR_METHOD_DEFINITION.substitute(env, dispatch_template_type=dispatch_template_type))
+                TENSOR_METHOD_DEFINITION.substitute(env))
             method_of.append('Tensor')
 
         if is_namespace_function:
@@ -1095,7 +1109,7 @@ def create_generic(top_env, declarations):
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             top_env['function_declarations'].append(declaration.substitute(env))
             top_env['function_definitions'].append(
-                FUNCTION_DEFINITION.substitute(env, dispatch_template_type=dispatch_template_type))
+                FUNCTION_DEFINITION.substitute(env))
             method_of.append('namespace')
 
         output_options.append(OutputDeclaration(

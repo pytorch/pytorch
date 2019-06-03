@@ -1,5 +1,7 @@
 #include <ATen/${Type}.h>
 
+#include <ATen/core/ATenDispatch.h>
+
 namespace at {
 
 std::unordered_map<std::string, void *>& ${Type}Dispatch::get_fn_table() {
@@ -36,5 +38,7 @@ TypeID ${Type}::ID() const {
 
 ${type_method_definitions}
 
-${function_registrations}
+static auto& registerer = globalATenDispatch()
+  ${function_registrations};
+
 } // namespace at

@@ -29,5 +29,6 @@ namespace torch { namespace autograd {
 
 ${type_derived_method_definitions}
 
-${wrapper_registrations}
+static auto& registerer = globalATenDispatch()
+  ${wrapper_registrations};
 }} // namespace torch::autograd

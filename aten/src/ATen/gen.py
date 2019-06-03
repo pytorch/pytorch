@@ -414,7 +414,7 @@ def generate_aten_dispatch(declarations):
                     '{{"{}", {}}},'.format(option['schema_string'], option['id']))
                 max_id = max(max_id, option['id'])
     env['function_count'] = max_id + 1
-    file_manager.write("ATenDispatch.cpp", ATEN_DISPATCH_CPP, env)
+    core_file_manager.write("ATenDispatch.cpp", ATEN_DISPATCH_CPP, env)
 
 
 # yields (backend, density, scalar_type) tuples
@@ -448,12 +448,12 @@ def iterate_types():
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['Type.h', 'Tensor.h', 'TensorMethods.h']
+    core_files = ['Type.h', 'Tensor.h', 'TensorMethods.h', 'ATenDispatch.cpp']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
              'LegacyTHDispatcher.h', 'LegacyTHDispatcher.cpp', 'Functions.h', 'NativeFunctions.h',
-             'RegisterCPU.cpp', 'RegisterCPU.h', 'ExtensionBackendRegistration.h', 'ATenDispatch.cpp']
+             'RegisterCPU.cpp', 'RegisterCPU.h', 'ExtensionBackendRegistration.h']
     for f in files:
         file_manager.will_write(f)
     cuda_files = ['RegisterCUDA.cpp', 'RegisterCUDA.h']
