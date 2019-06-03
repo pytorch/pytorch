@@ -1870,6 +1870,7 @@ def _get_builtin_table():
         _builtin_table[id(builtin)] = aten_op
     if not PY2:
         _builtin_table[id(math.gcd)] = "aten::gcd"
+    if PY37:
         _builtin_table[id(math.remainder)] = "aten::mathremainder"
 
     return _builtin_table
