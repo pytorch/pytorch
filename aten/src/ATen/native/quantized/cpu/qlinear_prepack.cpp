@@ -84,7 +84,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
-    AT_ASSERTM(
+    TORCH_CHECK(
         false, "This PyTorch installation was not built with FBGEMM operators");
   }
 #endif // USE_FBGEMM
