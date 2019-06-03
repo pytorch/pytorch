@@ -11,12 +11,14 @@ from torch.nn.functional import pad
 __all__ = [
     'AbsTransform',
     'AffineTransform',
+    'CatTransform',
     'ComposeTransform',
     'ExpTransform',
     'LowerCholeskyTransform',
     'PowerTransform',
     'SigmoidTransform',
     'SoftmaxTransform',
+    'StackTransform',
     'StickBreakingTransform',
     'Transform',
     'identity_transform',
@@ -534,9 +536,148 @@ class LowerCholeskyTransform(Transform):
         return y.tril(-1) + y.diag().log().diag()
 
     def _call(self, x):
-        flat_x = x.contiguous().view((-1,) + x.shape[-2:])
+        flat_x = x.reshape((-1,) + x.shape[-2:])
         return torch.stack([self._call_on_event(flat_x[i]) for i in range(flat_x.size(0))]).view(x.shape)
 
     def _inverse(self, y):
         flat_y = y.contiguous().view((-1,) + y.shape[-2:])
         return torch.stack([self._inverse_on_event(flat_y[i]) for i in range(flat_y.size(0))]).view(y.shape)
+
+
+class CatTransform(Transform):
+    """
+    Transform functor that applies a sequence of transforms `tseq`
+    component-wise to each submatrix at `dim`, of length `lengths[dim]`,
+    in a way compatible with :func:`torch.cat`.
+
+    Example::
+       x0 = torch.cat([torch.range(1, 10), torch.range(1, 10)], dim=0)
+       x = torch.cat([x0, x0], dim=0)
+       t0 = CatTransform([ExpTransform(), identity_transform], dim=0, lengths=[10, 10])
+       t = CatTransform([t0, t0], dim=0, lengths=[20, 20])
+       y = t(x)
+    """
+    def __init__(self, tseq, dim=0, lengths=None):
+        assert all(isinstance(t, Transform) for t in tseq)
+        super(CatTransform, self).__init__()
+        self.transforms = list(tseq)
+        if lengths is None:
+            lengths = [1] * len(self.transforms)
+        self.lengths = list(lengths)
+        assert len(self.lengths) == len(self.transforms)
+        self.dim = dim
+
+    @lazy_property
+    def length(self):
+        return sum(self.lengths)
+
+    def _call(self, x):
+        assert -x.dim() <= self.dim < x.dim()
+        assert x.size(self.dim) == self.length
+        yslices = []
+        start = 0
+        for trans, length in zip(self.transforms, self.lengths):
+            xslice = x.narrow(self.dim, start, length)
+            yslices.append(trans(xslice))
+            start = start + length  # avoid += for jit compat
+        return torch.cat(yslices, dim=self.dim)
+
+    def _inverse(self, y):
+        assert -y.dim() <= self.dim < y.dim()
+        assert y.size(self.dim) == self.length
+        xslices = []
+        start = 0
+        for trans, length in zip(self.transforms, self.lengths):
+            yslice = y.narrow(self.dim, start, length)
+            xslices.append(trans.inv(yslice))
+            start = start + length  # avoid += for jit compat
+        return torch.cat(xslices, dim=self.dim)
+
+    def log_abs_det_jacobian(self, x, y):
+        assert -x.dim() <= self.dim < x.dim()
+        assert x.size(self.dim) == self.length
+        assert -y.dim() <= self.dim < y.dim()
+        assert y.size(self.dim) == self.length
+        logdetjacs = []
+        start = 0
+        for trans, length in zip(self.transforms, self.lengths):
+            xslice = x.narrow(self.dim, start, length)
+            yslice = y.narrow(self.dim, start, length)
+            logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
+            start = start + length  # avoid += for jit compat
+        return torch.cat(logdetjacs, dim=self.dim)
+
+    @property
+    def bijective(self):
+        return all(t.bijective for t in self.transforms)
+
+    @constraints.dependent_property
+    def domain(self):
+        return constraints.cat([t.domain for t in self.transforms],
+                               self.dim, self.lengths)
+
+    @constraints.dependent_property
+    def codomain(self):
+        return constraints.cat([t.codomain for t in self.transforms],
+                               self.dim, self.lengths)
+
+
+class StackTransform(Transform):
+    """
+    Transform functor that applies a sequence of transforms `tseq`
+    component-wise to each submatrix at `dim`
+    in a way compatible with :func:`torch.stack`.
+
+    Example::
+       x = torch.stack([torch.range(1, 10), torch.range(1, 10)], dim=1)
+       t = StackTransform([ExpTransform(), identity_transform], dim=1)
+       y = t(x)
+    """
+    def __init__(self, tseq, dim=0):
+        assert all(isinstance(t, Transform) for t in tseq)
+        super(StackTransform, self).__init__()
+        self.transforms = list(tseq)
+        self.dim = dim
+
+    def _slice(self, z):
+        return [z.select(self.dim, i) for i in range(z.size(self.dim))]
+
+    def _call(self, x):
+        assert -x.dim() <= self.dim < x.dim()
+        assert x.size(self.dim) == len(self.transforms)
+        yslices = []
+        for xslice, trans in zip(self._slice(x), self.transforms):
+            yslices.append(trans(xslice))
+        return torch.stack(yslices, dim=self.dim)
+
+    def _inverse(self, y):
+        assert -y.dim() <= self.dim < y.dim()
+        assert y.size(self.dim) == len(self.transforms)
+        xslices = []
+        for yslice, trans in zip(self._slice(y), self.transforms):
+            xslices.append(trans.inv(yslice))
+        return torch.stack(xslices, dim=self.dim)
+
+    def log_abs_det_jacobian(self, x, y):
+        assert -x.dim() <= self.dim < x.dim()
+        assert x.size(self.dim) == len(self.transforms)
+        assert -y.dim() <= self.dim < y.dim()
+        assert y.size(self.dim) == len(self.transforms)
+        logdetjacs = []
+        yslices = self._slice(y)
+        xslices = self._slice(x)
+        for xslice, yslice, trans in zip(xslices, yslices, self.transforms):
+            logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
+        return torch.stack(logdetjacs, dim=self.dim)
+
+    @property
+    def bijective(self):
+        return all(t.bijective for t in self.transforms)
+
+    @constraints.dependent_property
+    def domain(self):
+        return constraints.stack([t.domain for t in self.transforms], self.dim)
+
+    @constraints.dependent_property
+    def codomain(self):
+        return constraints.stack([t.codomain for t in self.transforms], self.dim)

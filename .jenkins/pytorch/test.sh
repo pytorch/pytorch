@@ -94,9 +94,6 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
-  # ROCm CI is using Caffe2 docker images, which doesn't have several packages
-  # needed in testing. We install them here.
-  pip install -q psutil "librosa>=0.6.2" --user
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
@@ -203,6 +200,7 @@ test_xla() {
 }
 
 (cd test && python -c "import torch; print(torch.__config__.show())")
+(cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   test_torchvision

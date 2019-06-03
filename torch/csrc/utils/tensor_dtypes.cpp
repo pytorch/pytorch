@@ -4,6 +4,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/tensor_types.h>
 
 namespace torch {
@@ -42,6 +43,10 @@ static std::pair<std::string, std::string> getDtypeNames(
       return std::make_pair("bool", "");
     case at::ScalarType::QInt8:
       return std::make_pair("qint8", "");
+    case at::ScalarType::QUInt8:
+      return std::make_pair("quint8", "");
+    case at::ScalarType::QInt32:
+      return std::make_pair("qint32", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");
   }

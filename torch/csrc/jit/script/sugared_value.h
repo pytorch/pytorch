@@ -214,7 +214,6 @@ struct TORCH_API ClassValue : public SugaredValue {
   ClassTypePtr type_;
 };
 
-
 struct FunctionValue : public SugaredValue {
   FunctionValue(std::shared_ptr<Function> callee)
       : callee_(std::move(callee)) {}
@@ -232,6 +231,7 @@ struct FunctionValue : public SugaredValue {
     return std::make_shared<SimpleValue>(
         callee_->emit_call(*f.graph(), loc, inputs, attributes));
   }
+
  private:
   std::shared_ptr<Function> callee_;
 };
@@ -261,8 +261,6 @@ struct MethodValue : public SugaredValue {
   NamedValue self_;
   std::shared_ptr<Function> method_;
 };
-
-
 
 struct TORCH_API PrintValue : public SugaredValue {
   std::string kind() const override {
@@ -299,6 +297,48 @@ struct TORCH_API CastValue : public BuiltinFunction {
 
  private:
   TypePtr type_;
+};
+
+using SugaredValuePtr = std::shared_ptr<SugaredValue>;
+
+// builtins operators and functions that call a method if it exists
+// on a class type, like 'len(x)' and 'x + y'
+struct TORCH_API MagicMethod : public SugaredValue {
+  MagicMethod(std::string desugared_name, SugaredValuePtr base)
+      : base_value_(std::move(base)),
+        desugared_name_(std::move(desugared_name)) {}
+
+  std::string kind() const override {
+    return desugared_name_;
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    if (inputs.size() > 0 && attributes.size() == 0) {
+      auto class_ptr = inputs[0].value(*m.graph())->type()->cast<ClassType>();
+      if (class_ptr) {
+        if (auto method = class_ptr->getMethod(desugared_name_)) {
+          return std::make_shared<SimpleValue>(
+              method->emit_call(*m.graph(), loc, inputs, attributes));
+        } else {
+          ErrorReport e(loc);
+          e << "Cannot call " << desugared_name_ << " on "
+            << class_ptr->python_str() << " because it does not "
+            << " define a " << desugared_name_ << " method";
+          throw e;
+        }
+      }
+    }
+    return base_value_->call(loc, m, inputs, attributes, n_binders);
+  }
+
+ private:
+  SugaredValuePtr base_value_;
+  std::string desugared_name_;
 };
 
 // These SugaredValues have special handling in the compiler because they

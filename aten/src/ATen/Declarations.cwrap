@@ -149,6 +149,7 @@
 [[
   name: _th_nonzero
   cname: nonzero
+  cpu_half: True
   cpu_bool: True
   cuda_bool: True
   variants:
@@ -2363,22 +2364,6 @@
       default: S
 ]]
 [[
-  name: _th_getri_single
-  cname: getri
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* output
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_potri
   cname: potri
   types:
@@ -2624,7 +2609,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: uniform
   variants: function
   return: self

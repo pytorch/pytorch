@@ -57,6 +57,27 @@ namespace {
 // A resolver that will inspect the outer Python scope to find `name`.
 struct PythonResolver : public Resolver {
   explicit PythonResolver(ResolutionCallback rcb) : rcb_(std::move(rcb)) {}
+
+  /**
+   * While compiling classes, the class type we're compiling will not be
+   * available in Python, since we haven't finished defining the class yet. So
+   * in order to make the class type available to its own methods, we need to
+   * explicitly resolve it.
+   *
+   * @param rcb Python function to resolve a name to its Python object in the
+   *            enclosing scope
+   * @param classname The unqualified classname of the class currently being
+   *                  compiled.
+   * @param classType The class's type.
+   */
+  explicit PythonResolver(
+      ResolutionCallback rcb,
+      std::string classname,
+      ClassTypePtr classType)
+      : rcb_(std::move(rcb)),
+        classname_(std::move(classname)),
+        classType_(std::move(classType)) {}
+
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
@@ -70,6 +91,9 @@ struct PythonResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name) const override {
+    if (classType_ && name == classname_) {
+      return classType_;
+    }
     AutoGIL ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
@@ -83,15 +107,25 @@ struct PythonResolver : public Resolver {
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
 
-    return ClassType::get(c10::QualifiedName(qualifiedName));
+    return CompilationUnit::_get_python_cu().get_class(
+        c10::QualifiedName(qualifiedName));
   }
 
  private:
   ResolutionCallback rcb_;
+  std::string classname_;
+  ClassTypePtr classType_;
 };
 
 std::shared_ptr<PythonResolver> pythonResolver(ResolutionCallback rcb) {
   return std::make_shared<PythonResolver>(rcb);
+}
+std::shared_ptr<PythonResolver> pythonResolver(
+    ResolutionCallback rcb,
+    std::string classname,
+    ClassTypePtr classType) {
+  return std::make_shared<PythonResolver>(
+      rcb, std::move(classname), std::move(classType));
 }
 } // namespace
 
@@ -118,7 +152,7 @@ FunctionSchema getSchemaWithNameAndDefaults(
             arg.name(), arg.type(), arg.N(), value, arg.kwarg_only());
       } catch (py::cast_error& e) {
         throw ErrorReport(range)
-            << "Expected a default value of type " << arg.type()->str()
+            << "Expected a default value of type " << arg.type()->python_str()
             << " on parameter \"" << arg.name() << "\"";
       }
     } else {
@@ -197,6 +231,17 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_and_output_shapes(
     output_values[i]->setType(type);
   }
   return retval;
+}
+
+void addFunctionToModule(
+    Module& module,
+    const std::shared_ptr<Function>& func) {
+  // Make a graph with a fake self argument
+  auto graph = func->graph()->copy();
+  auto v = graph->insertInput(0, "self");
+  v->setType(module.module_object()->type());
+  module.module_object()->type()->compilation_unit().create_function(
+      "forward", graph);
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -278,6 +323,11 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::return_value_policy::reference_internal)
       .def("_register_parameter", &Module::register_parameter)
+      .def(
+          "_get_functions",
+          [](Module& self) {
+            return self.class_compilation_unit().get_functions();
+          })
       .def(
           "_register_attribute",
           [](Module& self, std::string name, TypePtr type, py::object value) {
@@ -442,6 +492,27 @@ void initJitScriptBindings(PyObject* module) {
             }
             return result;
           })
+      .def(
+          "save",
+          [](std::shared_ptr<Function> self,
+             const std::string& filename,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            Module module;
+            addFunctionToModule(module, self);
+            module.save(filename, _extra_files);
+          },
+          py::arg("filename"),
+          py::arg("_extra_files") = ExtraFilesMap())
+      .def(
+          "save_to_buffer",
+          [](std::shared_ptr<Function> self,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            std::ostringstream buf;
+            Module module;
+            addFunctionToModule(module, self);
+            return py::bytes(buf.str());
+          },
+          py::arg("_extra_files") = ExtraFilesMap())
       .def_property_readonly("graph", &Function::graph)
       .def_property_readonly("schema", &Function::getSchema)
       .def_property_readonly(
@@ -486,7 +557,9 @@ void initJitScriptBindings(PyObject* module) {
         PythonPrint(ss, self.function(), true, tensors, classes, false);
         return ss.str();
       });
-
+  m.def(
+      "_jit_recursive_script",
+      [](bool recurse) { getRecursiveScriptMode() = recurse; });
   m.def(
       "_jit_script_compile",
       [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
@@ -517,15 +590,19 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_jit_script_class_compile",
-      [](const ClassDef& classDef, ResolutionCallback rcb) {
+      [](const std::string& qualifiedName,
+         const ClassDef& classDef,
+         ResolutionCallback rcb) {
         auto cu = std::make_shared<CompilationUnit>();
         auto classType =
-            ClassType::create(c10::QualifiedName(classDef.name().name()), cu);
+            ClassType::create(c10::QualifiedName(qualifiedName), cu);
+        CompilationUnit::_get_python_cu().register_class(classType);
         std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
           methodDefs.push_back(def);
-          rcbs.push_back(pythonResolver(rcb));
+          rcbs.push_back(
+              pythonResolver(rcb, classDef.name().name(), classType));
         }
         cu->define(methodDefs, rcbs, simpleSelf(classType));
       });
@@ -572,11 +649,17 @@ void initJitScriptBindings(PyObject* module) {
          const std::string& src,
          const std::vector<at::Tensor>& constant_table,
          const Self& self) {
-        import_functions(cu, src, constant_table, self, nullptr);
+        import_functions(
+            CompilationUnit::_get_python_cu_const(),
+            cu,
+            src,
+            constant_table,
+            self,
+            nullptr);
       });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
-  m.def("_jit_clear_class_registry", ClassType::clearRegistry);
+  m.def("_jit_clear_class_registry", CompilationUnit::_clear_python_cu);
   m.def(
       "_debug_set_autodiff_subgraph_inlining",
       debugSetAutodiffSubgraphInlining);

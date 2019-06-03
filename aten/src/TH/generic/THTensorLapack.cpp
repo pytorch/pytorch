@@ -83,14 +83,14 @@ static THTensor *THTensor_(cloneColumnMajorNrows)(THTensor *self, THTensor *src,
   if (src->size(0) == nrows) {
     at::Tensor result_wrap = THTensor_wrap(result);
     at::Tensor src_wrap = THTensor_wrap(src);
-    at::_copy_same_type_(result_wrap, src_wrap);
+    at::native::copy_(result_wrap, src_wrap);
   }
   else
   {
     view = THTensor_(newNarrow)(result, 0, 0, src->size(0));
     at::Tensor view_wrap = THTensor_wrap(view);
     at::Tensor src_wrap = THTensor_wrap(src);
-    at::_copy_same_type_(view_wrap, src_wrap);
+    at::native::copy_(view_wrap, src_wrap);
     c10::raw::intrusive_ptr::decref(view);
   }
   return result;
@@ -118,7 +118,7 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   THArgCheck(b->dim() == 1 || b->dim() == 2, 1, "B should have 1 or 2 "
       "dimensions, but has %d", b->dim());
   THArgCheck(!b->is_empty(), 1, "B should not be empty");
-  AT_CHECK(a->size(0) == b->size(0), "Expected A and b to have same size "
+  TORCH_CHECK(a->size(0) == b->size(0), "Expected A and b to have same size "
       "at dim 0, but A has ", a->size(0), " rows and B has ", b->size(0), " rows");
 
   if (THTensor_nDimensionLegacyAll(b) == 1) {
@@ -432,56 +432,12 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
     THTensor_(resizeAs)(rv_, rvf_);
     at::Tensor rv__wrap = THTensor_wrap(rv_);
     at::Tensor rvf__wrap =  THTensor_wrap(rvf_);
-    at::_copy_same_type_(rv__wrap, rvf__wrap);
+    at::native::copy_(rv__wrap, rvf__wrap);
     c10::raw::intrusive_ptr::decref(rvf_);
   } else {
     THTensor_(zero)(ru_);
     THTensor_(zero)(rv_);
   }
-}
-
-void THTensor_(getri)(THTensor *ra_, THTensor *a)
-{
-  if (a == NULL) a = ra_;
-  THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
-
-  int m, n, lda, info, lwork;
-  scalar_t wkopt;
-  THIntTensor *ipiv;
-  THTensor *work;
-  THTensor *ra__ = NULL;
-
-  ra__ = THTensor_(cloneColumnMajor)(ra_, a);
-
-  m = ra__->size(0);
-  n = ra__->size(1);
-  lda = m;
-  ipiv = THIntTensor_newWithSize1d((int64_t)m);
-
-  /* Run LU */
-  THLapack_(getrf)(n, n, ra__->data<scalar_t>(), lda, THIntTensor_data(ipiv), &info);
-  THLapackCheckWithCleanup("Lapack Error %s : U(%d,%d) is 0, U is singular",
-                           THCleanup(
-                               c10::raw::intrusive_ptr::decref(ra__);
-                               THIntTensor_free(ipiv);),
-                           "getrf", info, info);
-
-  /* Run inverse */
-  THLapack_(getri)(n, ra__->data<scalar_t>(), lda, THIntTensor_data(ipiv), &wkopt, -1, &info);
-  lwork = (int)wkopt;
-  work = THTensor_(newWithSize1d)(lwork);
-  THLapack_(getri)(n, ra__->data<scalar_t>(), lda, THIntTensor_data(ipiv), work->data<scalar_t>(), lwork, &info);
-  THLapackCheckWithCleanup("Lapack Error %s : U(%d,%d) is 0, U is singular",
-                           THCleanup(
-                               c10::raw::intrusive_ptr::decref(ra__);
-                               c10::raw::intrusive_ptr::decref(work);
-                               THIntTensor_free(ipiv);),
-                           "getri", info, info);
-
-  THTensor_(freeCopyTo)(ra__, ra_);
-  c10::raw::intrusive_ptr::decref(work);
-  THIntTensor_free(ipiv);
 }
 
 void THTensor_(clearUpLoTriangle)(THTensor *a, const char *uplo)
@@ -831,9 +787,9 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
 
 void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor *pivots)
 {
-  AT_CHECK(!atf->is_empty() && THTensor_(nDimensionLegacyNoScalars)(atf) == 3, "expected non-empty 3D tensor, got size: ",
+  TORCH_CHECK(!atf->is_empty() && THTensor_(nDimensionLegacyNoScalars)(atf) == 3, "expected non-empty 3D tensor, got size: ",
            atf->sizes());
-  AT_CHECK(!b->is_empty() && (THTensor_(nDimensionLegacyNoScalars)(b) == 3 ||
+  TORCH_CHECK(!b->is_empty() && (THTensor_(nDimensionLegacyNoScalars)(b) == 3 ||
              THTensor_(nDimensionLegacyNoScalars)(b) == 2), "expected non-empty 2D or 3D tensor, got size: ", b->sizes());
   THArgCheck(THTensor_(size)(atf, 0) ==
              THTensor_(size)(b, 0), 3, "number of batches must be equal");
@@ -846,7 +802,7 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
     THTensor_(resizeAs)(rb_, b);
     at::Tensor rb__wrap = THTensor_wrap(rb_);
     at::Tensor b_wrap = THTensor_wrap(b);
-    at::_copy_same_type_(rb__wrap, b_wrap);
+    at::native::copy_(rb__wrap, b_wrap);
   }
 
   int64_t num_batches = atf->size(0);

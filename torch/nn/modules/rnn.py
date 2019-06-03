@@ -26,7 +26,7 @@ def apply_permutation(tensor, permutation, dim=1):
 
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
-                     'batch_first', 'dropout', 'bidirectional', '_flat_parameters']
+                     'batch_first', 'dropout', 'bidirectional']
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,

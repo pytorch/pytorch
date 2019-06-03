@@ -1,9 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/script/compiler.h>
-#include <torch/csrc/jit/script/module.h>
-#include <ATen/core/stack.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/script/module.h>
 
 #include <string>
 #include <memory>
