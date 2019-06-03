@@ -1459,9 +1459,9 @@ Value* Graph::insertConstant(
       *this, std::move(val), result_type, std::move(loc), std::move(scope));
 }
 
-std::string Graph::toString() const {
+std::string Graph::toString(bool print_source_locations) const {
   std::ostringstream oss;
-  oss << *this;
+  print(oss, print_source_locations);
   return oss.str();
 }
 
