@@ -358,7 +358,6 @@ class JitTestCase(TestCase):
                 # save the module to a buffer
                 buffer = io.BytesIO()
                 torch.jit.save(module, buffer)
-
                 # copy the data in the buffer so we can restore it later. This
                 # is because py2 and py3 have different semantics with zipfile
                 # and it's easier to just work with a fresh copy each time.
@@ -1315,11 +1314,11 @@ graph(%x : Tensor,
         # is last node. Constant nodes correspond to params for the
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear") \
+                   .check_next("_dequantize_linear") \
                    .check("conv2d").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check("relu").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check_next("return").run(str(scriptM.graph))
 
     def test_insert_quantdequant_consecutive_qnodes_trace(self):
@@ -1346,11 +1345,11 @@ graph(%x : Tensor,
         # is last node. Constant nodes correspond to params for the
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear") \
+                   .check_next("_dequantize_linear") \
                    .check("_convolution").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check("relu").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check_next("return").run(str(scriptM.graph))
 
     def test_insert_quantdequant_single_qnode(self):
@@ -1381,9 +1380,9 @@ graph(%x : Tensor,
         # both conv and no quant-dequant after add. Constant nodes correspond
         # to params for the quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear") \
+                   .check_next("_dequantize_linear") \
                    .check("conv2d").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check_next("add").check_next("return").run(str(scriptM.graph))
 
     def test_insert_quantdequant_alternate_qnode(self):
@@ -1415,11 +1414,11 @@ graph(%x : Tensor,
         # conv, relu and add. Constant nodes correspond to params for the
         # quantization nodes
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear").check("conv2d") \
+                   .check_next("_dequantize_linear").check("conv2d") \
                    .check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear").run(str(scriptM.graph))
+                   .check_next("_dequantize_linear").run(str(scriptM.graph))
         FileCheck().check("add").check("quantize_linear") \
-                   .check_next("int_repr").check("dequantize_linear") \
+                   .check_next("int_repr").check("_dequantize_linear") \
                    .run(str(scriptM.graph))
 
     def test_insert_quantdequant_for_weight(self):
@@ -1453,7 +1452,7 @@ graph(%x : Tensor,
 
         # We expect to see quant-dequant node before conv node for weight.
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear") \
+                   .check_next("_dequantize_linear") \
                    .check("conv2d").run(str(scriptModule.graph))
 
     def test_insert_quantdequant_for_bias(self):
@@ -1467,9 +1466,9 @@ graph(%x : Tensor,
 
             @torch.jit.script_method
             def forward(self, x):
-                x = x.quantize_linear(1.0, 0, torch.uint8)
+                x = x.quantize_linear(1.0, 0, torch.quint8)
                 x = x.int_repr()
-                x = x.dequantize_linear(1.0, 0, torch.uint8)
+                x = torch._dequantize_linear(x, 1.0, 0, torch.quint8)
                 x = self.conv1(x)
                 return x
 
@@ -1495,10 +1494,10 @@ graph(%x : Tensor,
         # We expect to see 3 pairs of quant-dequant nodes.
 
         FileCheck().check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear").check("quantize_linear") \
-                   .check_next("int_repr").check_next("dequantize_linear") \
+                   .check_next("_dequantize_linear").check("quantize_linear") \
+                   .check_next("int_repr").check_next("_dequantize_linear") \
                    .check("quantize_linear").check_next("int_repr") \
-                   .check_next("dequantize_linear").check("conv2d") \
+                   .check_next("_dequantize_linear").check("conv2d") \
                    .run(str(scriptModule.graph))
 
     def test_pattern_based_rewrite(self):
@@ -3373,6 +3372,28 @@ def foo(x):
         self.assertEqual(D()(v), v + v)
 
 
+    def test_invalid_prefix_annotation(self):
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation1(a):
+                    #type: (Int) -> Int # noqa
+                    return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation2(a):
+                    #type   : (Int) -> Int # noqa
+                    return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
+            with self.capture_stdout() as captured:
+                @torch.jit.script
+                def invalid_prefix_annotation3(a):
+                    #     type: (Int) -> Int
+                    return a + 2
+
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -3657,6 +3678,23 @@ def foo(x):
         def foo():
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
+
+    def test_file_line_error(self):
+        def foobar(xyz):
+            return torch.blargh(xyz)
+
+        _, lineno = inspect.getsourcelines(foobar)
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:20".format(lineno + 1)):
+            scripted = torch.jit.script(foobar)
+
+    def test_file_line_error_class_defn(self):
+        class FooBar(object):
+            def baz(self, xyz):
+                return torch.blargh(xyz)
+
+        _, lineno = inspect.getsourcelines(FooBar)
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
+            torch.jit.script(FooBar)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -5476,6 +5514,8 @@ a")
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
 
+
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_string_print(self):
         def func(a):
             print(a, "a" 'b' '''c''' """d""", 2, 1.5)
@@ -5947,6 +5987,10 @@ a")
             # type: (float) -> float
             return math.log(x)
 
+        def test_log_base_float(x, y):
+            # type: (float, float) -> float
+            return math.log(x, y)
+
         def test_log1p_int(x):
             # type: (int) -> float
             return math.log1p(x)
@@ -5983,6 +6027,7 @@ a")
             # type: (float, float) -> float
             return math.pow(x, y)
 
+
         def test_pow_int(x, y):
             # type: (float, int) -> float
             return math.pow(x, y)
@@ -5991,6 +6036,7 @@ a")
         self.checkScript(test_ceil, (1.5,))
         self.checkScript(test_log_int, (2,))
         self.checkScript(test_log_float, (2.0,))
+        self.checkScript(test_log_base_float, (2.0, 5.0))
         self.checkScript(test_log1p_int, (1,))
         self.checkScript(test_log1p_float, (1.0,))
         self.checkScript(test_log10_int, (2,))
@@ -6000,6 +6046,7 @@ a")
         self.checkScript(test_sqrt_int, (2,))
         self.checkScript(test_sqrt_float, (2.0,))
         self.checkScript(test_pow_float, (2.0, 2.0))
+        self.checkScript(test_pow_float, (2.0, 2.0))
         self.checkScript(test_pow_int, (2.0, 2))
 
     @unittest.skipIf(PY2, "Requires python 3")
@@ -6008,7 +6055,11 @@ a")
             # type: (int, int) -> int
             return math.gcd(x, y)
 
-        for inputs in [(2, 4), (-5, -15), (-5, 15), (10, 0), (0, 10), (-5, 0), (0, -5), (0, 0), (0, -0)]:
+        max_int = 2147483647
+        min_int = -2147483647 - 1
+        int_vals = list(range(-5, 5, 1)) + [max_int + 5, max_int * 2, min_int - 5, min_int * 2]
+        vals = [(i, j) for i in int_vals for j in int_vals]
+        for inputs in vals:
             self.checkScript(test_gcd, inputs)
 
     def test_math_ops1(self):
@@ -6116,6 +6167,41 @@ a")
 
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
 
+    def test_script_for_in_range_start_end(self):
+        def fn():
+            x = 0
+            for i in range(7, 100):
+                x += i
+            return x
+        self.checkScript(fn, (), outputs=4929, optimize=True)
+
+    def test_script_for_in_range_start_end_step(self):
+        def fn(start, end, step):
+            # type: (int, int, int) -> int
+            x = 0
+            for i in range(start, end, step):
+                x += i
+            return x
+
+        def check(inp):
+            self.checkScript(fn, inp, outputs=fn(*inp), optimize=True)
+        check((7, 100, 7))
+        check((7, 100, -7))
+        check((2, -11, -3))
+        check((2, -11, 3))
+        check((2, 10, 3))
+        check((-2, -10, -10))
+
+    def test_script_for_zero_step(self):
+        @torch.jit.script
+        def fn():
+            x = 0
+            for i in range(2, -11, 0):
+                x += i
+            return x
+        with self.assertRaisesRegex(torch.jit.Error, "must not be zero"):
+            fn()
+
     def test_script_optional_none(self):
         def none_stmt(x):
             output = None
@@ -6198,6 +6284,7 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -6370,6 +6457,16 @@ a")
         y = torch.tensor(3)
 
         self.checkScript(tensor_test, (x, y))
+
+    def test_number_all(self):
+        def int1():
+            return all(torch.tensor([1, 2, 3], dtype=torch.uint8))
+
+        def int2():
+            return all(torch.tensor([1, 0, 3], dtype=torch.uint8))
+
+        self.checkScript(int1, ())
+        self.checkScript(int2, ())
 
     def test_number_math(self):
         ops_template = dedent('''
@@ -6829,7 +6926,7 @@ a")
         for inp, typ, type_hint in zip(inputs, type_literals, type_annotations):
             test(inp, typ, type_hint)
 
-        # test optional isintance check
+        # test optional isinstance check
         with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
             @torch.jit.script
             def opt_func(x):
@@ -7603,6 +7700,33 @@ a")
                 return self.b
         with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
             M()
+
+    def test_script_module_fail_exist(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.whatisgoingon
+        with self.assertRaisesRegex(RuntimeError, "module has no attribute"):
+            M()
+
+    def test_script_module_none_exist_fail(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, my_optional):
+                super(M, self).__init__()
+                self.my_optional = my_optional
+
+            @torch.jit.script_method
+            def forward(self, x):
+                if self.my_optional is not None:
+                    return torch.neg(x) + self.my_optional
+                return torch.neg(x)
+        with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
+            x = torch.rand(3, 4)
+            fb = M(None)
+            fb(x)
 
     def test_script_module_valid_consts(self):
         tester = self
@@ -8637,8 +8761,8 @@ a")
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"expected a value of type Tensor for argument"
-                                                      r" '0' but found Tuple\[Tensor,"):
+            with self.assertRaisesRegex(RuntimeError, r"expected a value of type 'Tensor' for argument"
+                                                      r" '0' but instead found type 'Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -9571,12 +9695,12 @@ a")
             def f3(a):
                 torch.sum(dim=4)
 
-        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but found Tensor'):
+        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but instead found type \'Tensor'):
             @torch.jit.script
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but found List\[int\]'):
+        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but instead found type \'List\[int\]'):
             @torch.jit.script
             def f5(a):
                 torch.cat([3])
@@ -9586,7 +9710,7 @@ a")
             def f6(a):
                 a.expand(size=[3, [4]])
 
-        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type Tensor for argument \'self\''):
+        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type \'Tensor\' for argument \'self\''):
             @torch.jit.script
             def f7(a):
                 torch.sum([4])
@@ -9951,7 +10075,7 @@ a")
         self.checkScript(return_stmt, (torch.rand(1),))
 
     def test_for_range_no_arg(self):
-        with self.assertRaisesRegex(RuntimeError, r'range\(\) expects 1 argument but got 0'):
+        with self.assertRaisesRegex(RuntimeError, r'range expected 1 arguments, got 0'):
             @torch.jit.script
             def range_no_arg(x):
                 for _ in range():
@@ -10842,7 +10966,7 @@ a")
         def test_test():
             return torch.jit._unwrap_optional(1)
 
-        with self.assertRaisesRegex(RuntimeError, "cannot match an Optional\\[T\\] to None"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot match an Optional\\[T\\] to None"):
             @torch.jit.script
             def test_no_type():
                 # type: () -> int
@@ -11530,6 +11654,14 @@ a")
         x = torch.rand(2, 3, 4)
         traced = torch.jit.trace(foo, (x,))
         FileCheck().check("aten::contiguous").run(str(traced.graph))
+
+    def test_trace_inverse(self):
+        def foo(x):
+            return ~x
+
+        foo_traced = torch.jit.trace(foo, torch.zeros(3, 4, dtype=torch.uint8))
+        eg = torch.zeros(3, dtype=torch.uint8)
+        self.assertEqual(foo_traced(eg), foo(eg))
 
     def test_weak_module(self):
 
@@ -13131,6 +13263,18 @@ a")
             @torch.jit.script
             def fn():
                 return random.randint()
+
+    def test_inferred_error_msg(self):
+        """
+        Test that when we get a type mismatch on a function where we inferred
+        the type to be tensor, a good error message is given.
+        """
+        @torch.jit.script
+        def foo(a):
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
+            foo(1)
 
 
 class MnistNet(nn.Module):
@@ -14785,16 +14929,22 @@ def add_nn_module_test(*args, **kwargs):
                 def __init__(self):
                     super(TheModule, self).__init__()
                     self.submodule = nn_module(*constructor_args)
+
+            def make_module(script):
+                module = TheModule()
+                # check __repr__
+                str(module)
+                module.define(script)
+                return module
+
             # module cannot be imported / exported
             if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
                 with self.disableEmitHook():
-                    module = TheModule()
-                    module.define(script)
+                    module = make_module(script)
                     create_script_module.last_graph = module.graph
                     mod = module(*args)
             else:
-                module = TheModule()
-                module.define(script)
+                module = make_module(script)
                 self.assertExportImportModule(module, tensors)
                 create_script_module.last_graph = module.graph
                 mod = module(*args)
@@ -15465,7 +15615,7 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_type_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "expected a value of type bool"):
+        with self.assertRaisesRegex(RuntimeError, "expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
             class FooTest(object):
                 def __init__(self, x):
@@ -15537,6 +15687,39 @@ class TestClassType(JitTestCase):
             def forward(self, a):
                 foo = FooTest(a)
                 return foo.get_x()
+
+        m = MyMod()
+
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+
+        # classes are globally registered for now, so we need to clear the JIT
+        # registry to simulate loading a new model
+        torch._C._jit_clear_class_registry()
+
+        buffer.seek(0)
+        m_loaded = torch.jit.load(buffer)
+
+        input = torch.rand(2, 3)
+        output = m_loaded(input)
+        self.assertEqual(input, output)
+
+    def test_save_load_with_classes_returned(self):
+        @torch.jit.script
+        class FooTest(object):
+            def __init__(self, x):
+                self.x = x
+
+            def clone(self):
+                clone = FooTest(self.x)
+                return clone
+
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                foo = FooTest(a)
+                foo_clone = foo.clone()
+                return foo_clone.x
 
         m = MyMod()
 
@@ -15681,7 +15864,7 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(test_list_no_reverse(), 1)
 
-        with self.assertRaisesRegex(RuntimeError, "bool for argument \'reverse"):
+        with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
             @torch.jit.script
             def test():
                 li = [Foo(1)]
@@ -16069,3 +16252,7 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
+    if not PY2:
+        import test_jit_py3
+        suite = unittest.findTestCases(test_jit_py3)
+        unittest.TextTestRunner().run(suite)

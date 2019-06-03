@@ -1513,7 +1513,7 @@ if _enabled:
 
         def __getstate__(self):
             raise pickle.PickleError(
-                "ScriptModules cannot be saved using torch.save. " +
+                "ScriptModules cannot be deepcopied using copy.deepcopy or saved using torch.save. " +
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
 

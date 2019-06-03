@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
@@ -67,11 +68,9 @@ class AliasDb {
   // `Elements`.
   template <
       typename... Other1,
-      template <typename, typename...>
-      class T,
+      template <typename, typename...> class T,
       typename... Other2,
-      template <typename, typename...>
-      class U>
+      template <typename, typename...> class U>
   bool mayAlias(
       const T<const Value*, Other1...>& a,
       const U<const Value*, Other2...>& b) const {
@@ -173,7 +172,7 @@ class AliasDb {
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeTupleConstruct(Node* node);
-  void analyzeCustomOp(Node* node);
+  void analyzeConservative(Node* node);
   void analyzeContainerConstruct(Node* node);
   bool tryRegisteredAnalysis(Node* node);
 
@@ -200,7 +199,7 @@ class AliasDb {
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAG> memoryDAG_;
   // Mapping of values to MemoryDAG elements
-  std::unordered_map<const Value*, Element*> elementMap_;
+  ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
   std::map<TypeKind, Element*> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
@@ -211,9 +210,9 @@ class AliasDb {
    * State for tracking write info.
    */
   // Map of nodes to the values that they write to
-  std::unordered_map<Node*, ValueSet> writeIndex_;
+  ska::flat_hash_map<Node*, ValueSet> writeIndex_;
   // Set of all memory locations that may have been written to.
-  mutable std::unordered_set<const Element*> writeCache_;
+  mutable MemoryLocations writeCache_;
   mutable bool isWriteCacheStale_ = true;
   void rebuildWriteCache() const;
 };
