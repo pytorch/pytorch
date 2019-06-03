@@ -126,9 +126,6 @@ class BenchmarkRunner(object):
     def _launch_forward(self, test_case, iters):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
-        if test_case.framework == "PyTorch":
-            test_case.op_bench.generate_jit_forward_graph(iters)
-
         forward_time = timeit.timeit(functools.partial(test_case.run_forward, iters), number=1)
         return forward_time
 
@@ -136,12 +133,9 @@ class BenchmarkRunner(object):
         """ This function runs forward path of an op to get an output. Then the backward path is executed 
         and the execution time is reported
         """
+        test_case.run_forward(num_runs=1)
         if test_case.framework == "PyTorch":
-            # We only need to get the output for backward path, so there is no need to use JIT here 
-            test_case.run_forward_eager()
-            test_case.loss_func()
-        else:
-            test_case.run_forward(1)
+            test_case._output_mean()
         backward_time = timeit.timeit(functools.partial(test_case.run_backward, iters), number=1)
         return backward_time
 
