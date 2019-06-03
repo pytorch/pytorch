@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/script/module_python.h>
+#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <memory>
 #include <sstream>
@@ -445,6 +445,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
                            << " a submodule of the caller";
   }
 
+  std::cout << "Creating 448" << std::endl;
   py::object builtin_name =
       py::module::import("torch.jit").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {
@@ -466,6 +467,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
 
+  std::cout << "Creating 470" << std::endl;
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
@@ -475,6 +477,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return std::make_shared<ClassValue>(classType);
     }
   }
+  std::cout << "Creating 480" << std::endl;
 
   if (recurse_on_python_ops && py::isinstance<py::function>(obj)) {
     auto compiled_fn =

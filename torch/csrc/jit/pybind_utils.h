@@ -582,7 +582,6 @@ inline py::object invokeScriptMethodFromPython(
     callee.run(stack);
   }
 
-  std::cout << "Creating 584" << std::endl;
   return toPyObject(std::move(stack.back()));
 }
 
