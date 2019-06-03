@@ -83,14 +83,7 @@ bool AliasDb::hasWriters(const Value* v) const {
   if (isWriteCacheStale_) {
     rebuildWriteCache();
   }
-
-  for (const auto loc : elementMap_.at(v)->getMemoryLocations()) {
-    if (writeCache_.count(loc)) {
-      return true;
-    }
-  }
-
-  return false;
+  return writeCache_.intersects(elementMap_.at(v)->getMemoryLocations());
 }
 
 void AliasDb::getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks) const {
@@ -117,8 +110,54 @@ void AliasDb::getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
 // Does `n` write to an alias of one of the values in `vs`?
 bool AliasDb::writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks)
     const {
-  const auto writtenTo = getWrites(n, recurseBlocks);
-  return mayAlias(vs, writtenTo);
+  c10::SmallVector<Node*, 4> stack;
+  stack.push_back(n);
+
+  // Depth-first search to accumulate memory locations aliased
+  // by `n`.
+  MemoryLocations nMemLocs;
+  while (!stack.empty()) {
+    auto node = stack.back();
+    stack.pop_back();
+
+    // Accumulate memory locations
+    auto I = writeIndex_.find(node);
+    if (I != writeIndex_.end()) {
+      const auto& writes = I->second;
+      for (const auto write : writes) {
+        if (elementMap_.count(write)) {
+          auto element = elementMap_.at(write);
+          nMemLocs |= element->getMemoryLocations();
+        }
+      }
+    }
+
+    // Explore sub-blocks
+    if (recurseBlocks) {
+      for (auto block : n->blocks()) {
+        for (auto subnode : block->nodes()) {
+          stack.push_back(subnode);
+        }
+      }
+    }
+  }
+
+  // Bail if the intersection will be trivially false.
+  if (nMemLocs.empty()) {
+    return false;
+  }
+
+  // Test against each member of vs
+  for (auto value : vs) {
+    if (elementMap_.count(value)) {
+      auto element = elementMap_.at(value);
+      if (nMemLocs.intersects(element->getMemoryLocations())) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 std::unordered_set<const Value*> AliasDb::getWrites(Node* n, bool recurseBlocks)
@@ -166,17 +205,17 @@ void AliasDb::dump() const {
   std::cout << "\n===2. ALIAS DB===\n";
   for (const auto& ptrPair : elementMap_) {
     const auto element = ptrPair.second;
-    if (element->pointsTo.size() > 0) {
+    if (!element->pointsTo.empty()) {
       std::cout << getElementName(element) << " points to: ";
       for (const auto pointedTo : element->pointsTo) {
-        std::cout << getElementName(pointedTo) << ", ";
+        std::cout << getElementName(memoryDAG_->fromIndex(pointedTo)) << ", ";
       }
       std::cout << "\n";
     }
-    if (element->contained_elements.size() > 0) {
+    if (!element->contained_elements.empty()) {
       std::cout << getElementName(element) << " contains: ";
       for (const auto contained : element->contained_elements) {
-        std::cout << getElementName(contained) << ", ";
+        std::cout << getElementName(memoryDAG_->fromIndex(contained)) << ", ";
       }
       std::cout << "\n";
     }
@@ -217,7 +256,7 @@ void AliasDb::analyze(Node* node) {
 // the registered analyzer.
 bool AliasDb::tryRegisteredAnalysis(Node* node) {
   const Operator& op = getOperatorFor(node);
-  auto analysis = op.options().aliasAnalysis();
+  auto analysis = op.aliasAnalysisKind();
   switch (analysis) {
     case AliasAnalysisKind::PURE:
       analyzeCreator(node);
@@ -539,7 +578,7 @@ void AliasDb::analyzeWait(Node* node) {
     const auto el = pr.second;
     const auto& pointedFrom = el->pointedFrom;
     TORCH_INTERNAL_ASSERT(!pointedFrom.empty());
-    const auto wildcardValue = (*pointedFrom.begin())->value;
+    const auto wildcardValue = memoryDAG_->fromIndex(*pointedFrom.begin())->value;
     TORCH_INTERNAL_ASSERT(wildcardValue);
     registerWrite(wildcardValue, node);
   }
@@ -1144,9 +1183,7 @@ void AliasDb::rebuildWriteCache() const {
     const auto& writtenValues = pr.second;
 
     for (const auto value : writtenValues) {
-      for (const auto loc : elementMap_.at(value)->getMemoryLocations()) {
-        writeCache_.insert(loc);
-      }
+      writeCache_ |= elementMap_.at(value)->getMemoryLocations();
     }
   }
   isWriteCacheStale_ = false;
