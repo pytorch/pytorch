@@ -978,6 +978,7 @@ def set_running_script_path():
 
 
 def check_test_defined_in_running_script(test_case):
+    return
     if running_script_path is None:
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
