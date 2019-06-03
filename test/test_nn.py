@@ -4815,6 +4815,7 @@ class TestNN(NNTestCase):
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
     def test_Conv2d_groups_nobias_v2(self):
+        torch.manual_seed(123)
         dev_dtypes = [("cpu", torch.float)]
         if TEST_CUDA:
             dev_dtypes += [("cuda", torch.float), ("cuda", torch.half)]
