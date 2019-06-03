@@ -85,10 +85,15 @@ def overlay_windows_vcvars(env):
         from distutils._msvccompiler import _get_vc_env
         vc_arch = 'x64' if IS_64BIT else 'x86'
         vc_env = _get_vc_env(vc_arch)
+        # Keys in `_get_vc_env` are always lowercase.
+        # We turn them into uppercase before overlaying vcvars
+        # because OS environ keys are always uppercase on Windows.
+        # https://stackoverflow.com/a/7797329
+        vc_env = {k.upper(): v for k, v in vc_env.items()}
         for k, v in env.items():
-            lk = k.lower()
-            if lk not in vc_env:
-                vc_env[lk] = v
+            uk = k.upper()
+            if uk not in vc_env:
+                vc_env[uk] = v
         return vc_env
     else:
         return env
@@ -118,10 +123,8 @@ def create_build_env():
         # But it should be set to MSVC as the user's first choice.
         if USE_NINJA:
             my_env = overlay_windows_vcvars(my_env)
-            cc = my_env.get('CC', 'cl')
-            cxx = my_env.get('CXX', 'cl')
-            my_env['CC'] = cc
-            my_env['CXX'] = cxx
+            my_env.setdefault('CC', 'cl')
+            my_env.setdefault('CXX', 'cl')
     return my_env
 
 
@@ -143,11 +146,12 @@ def run_cmake(version,
             cmake_args.append('-Thost=x64')
     try:
         import numpy as np
-        NUMPY_INCLUDE_DIR = np.get_include()
-        USE_NUMPY = True
     except ImportError:
         USE_NUMPY = False
         NUMPY_INCLUDE_DIR = None
+    else:
+        NUMPY_INCLUDE_DIR = np.get_include()
+        USE_NUMPY = True
 
     cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
     ldflags = os.getenv('LDFLAGS', "")
@@ -166,7 +170,6 @@ def run_cmake(version,
         BUILDING_WITH_TORCH_LIBS=os.getenv("BUILDING_WITH_TORCH_LIBS", "ON"),
         TORCH_BUILD_VERSION=version,
         CMAKE_BUILD_TYPE=build_type,
-        CMAKE_VERBOSE_MAKEFILE="ON",
         BUILD_PYTHON=build_python,
         BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
         BUILD_BINARY=check_env_flag('BUILD_BINARY'),
@@ -219,8 +222,14 @@ def run_cmake(version,
     if os.getenv('USE_OPENMP'):
         cmake_defines(cmake_args, USE_OPENMP=check_env_flag('USE_OPENMP'))
 
+    if os.getenv('USE_TBB'):
+        cmake_defines(cmake_args, USE_TBB=check_env_flag('USE_TBB'))
+
     if os.getenv('MKL_SEQ'):
         cmake_defines(cmake_args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
+
+    if os.getenv('MKL_TBB'):
+        cmake_defines(cmake_args, INTEL_MKL_TBB=check_env_flag('MKL_TBB'))
 
     mkldnn_threading = os.getenv('MKLDNN_THREADING')
     if mkldnn_threading:
@@ -265,6 +274,7 @@ def build_caffe2(version,
                  cmake_python_library,
                  build_python,
                  rerun_cmake,
+                 cmake_only,
                  build_dir):
     my_env = create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
@@ -279,6 +289,8 @@ def build_caffe2(version,
                   build_test,
                   build_dir,
                   my_env)
+    if cmake_only:
+        return
     if IS_WINDOWS:
         build_cmd = ['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--']
         if USE_NINJA:

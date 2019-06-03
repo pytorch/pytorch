@@ -5,9 +5,6 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/quantized/Quantizer.h>
 
-#include <algorithm>
-#include <vector>
-
 namespace at {
 namespace native {
 namespace {
@@ -34,6 +31,8 @@ class QFCUnpackWeightInt8 final : public c10::OperatorKernel {
     int8_t* weight_ptr_int8 =
         reinterpret_cast<int8_t*>(weight_origin.data<c10::qint8>());
 
+    // packB->printPackedMatrix("packedB inside fbgemm_unpack
+    // (QFCUnpackWeightInt8): ");
     packB->unpack(weight_ptr_int8);
 
     return weight_origin;
@@ -44,7 +43,7 @@ class QFCUnpackWeightInt8 final : public c10::OperatorKernel {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT(
         false, "This PyTorch installation was not built with FBGEMM operators");
   }
 #endif // USE_FBGEMM
@@ -52,7 +51,7 @@ class QFCUnpackWeightInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_linear_unpack(Tensor W_prepack) -> Tensor W_origin",
-    c10::RegisterOperators::options().kernel<QFCUnpackWeightInt8>().dispatchKey(
+    c10::RegisterOperators::options().kernel<QFCUnpackWeightInt8>(
         CPUTensorId()));
 
 } // namespace

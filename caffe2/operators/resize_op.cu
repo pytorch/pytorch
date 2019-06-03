@@ -1,6 +1,6 @@
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/utils/math.h"
 #include "caffe2/operators/resize_op.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -18,7 +18,6 @@ __global__ void NearestNeighborKernel(
     const float* X,
     float* Y) {
   CUDA_1D_KERNEL_LOOP(index, size) {
-
     int indexTemp = index;
     const int w = indexTemp % output_width;
     indexTemp /= output_width;
@@ -74,7 +73,6 @@ template <>
 bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
   const auto& X = Input(0);
 
-
   const auto inputDims = X.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = X.dim32(0), num_channels = X.dim32(1),
@@ -90,7 +88,10 @@ bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
   }
   int output_width = input_width * width_scale_;
   int output_height = input_height * height_scale_;
-  auto* Y = Output(0, {batch_size, num_channels, output_height, output_width}, at::dtype<float>());
+  auto* Y = Output(
+      0,
+      {batch_size, num_channels, output_height, output_width},
+      at::dtype<float>());
 
   const auto size = Y->numel();
   NearestNeighborKernel<<<
@@ -117,7 +118,6 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto& dY = Input(0);
   const auto& X = Input(1);
 
-
   const auto inputDims = dY.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = dY.dim32(0), num_channels = dY.dim32(1),
@@ -133,7 +133,10 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
     height_scale_ = scales_data[0];
     width_scale_ = scales_data[1];
   }
-  auto* dX = Output(0, {batch_size, num_channels, output_height, output_width}, at::dtype<float>());
+  auto* dX = Output(
+      0,
+      {batch_size, num_channels, output_height, output_width},
+      at::dtype<float>());
   math::Set<float, CUDAContext>(
       dX->numel(), 0.0f, dX->template mutable_data<float>(), &context_);
 
@@ -162,3 +165,8 @@ REGISTER_CUDA_OPERATOR(
     ResizeNearestGradient,
     ResizeNearestGradientOp<float, CUDAContext>);
 } // namespace caffe2
+
+using ResizeNearestOpFloatCUDA =
+    caffe2::ResizeNearestOp<float, caffe2::CUDAContext>;
+
+C10_REGISTER_CAFFE2_OPERATOR_CUDA(ResizeNearest, ResizeNearestOpFloatCUDA);

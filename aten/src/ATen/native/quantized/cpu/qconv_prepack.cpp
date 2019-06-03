@@ -32,7 +32,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         weight_zero_point_int32 == 0,
         "Only symmetric quantization is supported for weights yet");
     const int8_t* weight_ptr_int8 =
-        reinterpret_cast<int8_t*>(weight_config.data<c10::quint8>());
+        reinterpret_cast<int8_t*>(weight_config.data<c10::qint8>());
 
     std::vector<int32_t> col_offsets(NDim * groups);
     std::vector<int32_t> kernel{static_cast<int>(weight.size(0)),
@@ -68,8 +68,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_conv_prepack",
-    c10::RegisterOperators::options().kernel<QConvPackWeightInt8>().dispatchKey(
-        QuantizedCPUTensorId()));
+    c10::RegisterOperators::options().kernel<QConvPackWeightInt8>(QuantizedCPUTensorId()));
 
 } // namespace
 } // namespace native

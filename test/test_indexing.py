@@ -199,6 +199,18 @@ class TestIndexing(TestCase):
                 with self.assertRaises(IndexError):
                     a[:] = neg_ones_expanded * 5
 
+    def test_index_scalar_with_bool_mask(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor(1, device=device)
+            uintMask = torch.tensor(True, dtype=torch.uint8, device=device)
+            boolMask = torch.tensor(True, dtype=torch.bool, device=device)
+            self.assertEqual(a[uintMask], a[boolMask])
+            self.assertEqual(a[uintMask].dtype, a[boolMask].dtype)
+
+            a = torch.tensor(True, dtype=torch.bool, device=device)
+            self.assertEqual(a[uintMask], a[boolMask])
+            self.assertEqual(a[uintMask].dtype, a[boolMask].dtype)
+
     def test_setitem_expansion_error(self):
         true = torch.tensor(True)
         a = torch.randn(2, 3)

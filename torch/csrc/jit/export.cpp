@@ -35,6 +35,13 @@ namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
+namespace {
+ExportModuleExtraFilesHook& GetExtraFilesHook() {
+  static ExportModuleExtraFilesHook func = nullptr;
+  return func;
+};
+}
+
 class ScriptModuleSerializer;
 
 std::string getNodeStackTraceString(const Node* n) {
@@ -600,10 +607,16 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 
   // Write out the files. We still have to do this in converted_classes_ order,
   // to maintain dependency order.
+  std::unordered_set<std::string> written_files;
   for (const auto& item : converted_classes_) {
     const ClassTypePtr& class_type = item.key();
     const std::string filename =
         ImportExportHelpers::qualifierToPath(class_type->qualifier());
+    if (written_files.count(filename)) {
+      continue;
+    }
+    written_files.insert(filename);
+
     const std::string& src = fileToSrc.at(filename).str();
 
     std::ostringstream lib_stream;
@@ -670,6 +683,14 @@ void ScriptModuleSerializer::convertModel(
   for (const auto& kv : extra_files) {
     const std::string key = "extra/" + kv.first;
     writer_.writeRecord(key, kv.second.data(), kv.second.size());
+  }
+  auto hook = GetExtraFilesHook();
+  if (hook) {
+    script::ExtraFilesMap hook_files = hook(module);
+    for (const auto& kv : hook_files) {
+      const std::string key = "extra/" + kv.first;
+      writer_.writeRecord(key, kv.second.data(), kv.second.size());
+    }
   }
 }
 
@@ -1071,6 +1092,10 @@ std::string prettyPrint(const onnx::ModelProto& model) {
 }
 
 } // namespace
+
+void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
+  GetExtraFilesHook() = hook;
+}
 
 std::string pretty_print_onnx(
     const std::shared_ptr<Graph>& graph,
