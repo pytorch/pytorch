@@ -9,12 +9,13 @@ namespace at {
 namespace native {
 namespace {
 
-class QFCUnpackWeightInt8 final : public c10::OperatorKernel {
+class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
   at::Tensor operator()(at::Tensor packed_weight) {
     // Pull out the PackBMatrix instance from the owning tensor.
-    auto& pack_ptr = cpp_custom_type_hack::cast<PackedFCWeight>(packed_weight);
+    auto& pack_ptr =
+        cpp_custom_type_hack::cast<PackedLinearWeight>(packed_weight);
     auto packB = pack_ptr.w.get();
 
     int64_t N = static_cast<int64_t>(packB->numCols());
@@ -32,7 +33,7 @@ class QFCUnpackWeightInt8 final : public c10::OperatorKernel {
         reinterpret_cast<int8_t*>(weight_origin.data<c10::qint8>());
 
     // packB->printPackedMatrix("packedB inside fbgemm_unpack
-    // (QFCUnpackWeightInt8): ");
+    // (QLinearUnpackWeightInt8): ");
     packB->unpack(weight_ptr_int8);
 
     return weight_origin;
@@ -43,7 +44,7 @@ class QFCUnpackWeightInt8 final : public c10::OperatorKernel {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
         false, "This PyTorch installation was not built with FBGEMM operators");
   }
 #endif // USE_FBGEMM
@@ -51,7 +52,7 @@ class QFCUnpackWeightInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_linear_unpack(Tensor W_prepack) -> Tensor W_origin",
-    c10::RegisterOperators::options().kernel<QFCUnpackWeightInt8>(
+    c10::RegisterOperators::options().kernel<QLinearUnpackWeightInt8>(
         CPUTensorId()));
 
 } // namespace

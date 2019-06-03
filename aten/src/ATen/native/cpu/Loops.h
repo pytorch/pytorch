@@ -2,62 +2,13 @@
 
 #include <stdint.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/cpu/vec256/vec256.h>
 
 namespace at { namespace native { namespace {
 
 using namespace vec256;
-
-// all three operands contiguous
-template <typename traits>
-static inline bool is_binary_contiguous(const int64_t* strides) {
-  return strides[0] == sizeof(typename traits::result_type) &&
-         strides[1] == sizeof(typename traits::arg1_t) &&
-         strides[2] == sizeof(typename traits::arg2_t);
-}
-
-// arg1 is a scalar, output and arg2 are contiguous
-template <typename traits>
-static inline bool is_binary_contiguous_s1(const int64_t* strides) {
-  return strides[0] == sizeof(typename traits::result_type) &&
-         strides[1] == 0 &&
-         strides[2] == sizeof(typename traits::arg2_t);
-}
-
-// arg2 is a scalar, output and arg1 are contiguous
-template <typename traits>
-static inline bool is_binary_contiguous_s2(const int64_t* strides) {
-  return strides[0] == sizeof(typename traits::result_type) &&
-         strides[1] == sizeof(typename traits::arg1_t) &&
-         strides[2] == 0;
-}
-
-// all two operands contiguous
-template <typename traits>
-static inline bool is_unary_contiguous(const int64_t* strides) {
-  return strides[0] == sizeof(typename traits::result_type) &&
-         strides[1] == sizeof(typename traits::arg1_t);
-}
-
-// output is contiguous, arg1 is scalar
-template <typename traits>
-static inline bool is_unary_contiguous_s1(const int64_t* strides) {
-  return strides[0] == sizeof(typename traits::result_type) &&
-         strides[1] == 0;
-}
-
-template <typename traits>
-static inline bool is_nullary_contiguous(const int64_t* strides) {
-  return strides[0] == sizeof(typename traits::result_type);
-}
-
-// result is
-static inline bool is_reduction(char** data, const int64_t* strides) {
-  return strides[0] == 0 &&
-         strides[1] == 0 &&
-         data[0] == data[1];
-}
 
 #define UNARY_LOOP_HEADER(func_t, data, strides) \
   using traits = unary_function_traits<func_t>; \
@@ -142,12 +93,12 @@ static inline void vectorized_nullary_loop(char** data, int64_t n, func_t op, ve
 
 template <typename func_t>
 void nullary_kernel(TensorIterator& iter, func_t op) {
-  AT_ASSERT(iter.ntensors() > 0)
-  using traits = nullary_function_traits<func_t>;
+  TORCH_INTERNAL_ASSERT(iter.ntensors() > 0);
+  using traits = function_traits<func_t>;
 
-   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
+  iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
     // Specializations to encourage auto-vectorization (trick from Numpy's loops.c.src)
-    if (is_nullary_contiguous<traits>(strides)) {
+    if (is_contiguous<traits>(strides)) {
       nullary_loop(data, strides, 0, n, op);
     } else {
       nullary_loop(data, strides, 0, n, op);
@@ -155,13 +106,13 @@ void nullary_kernel(TensorIterator& iter, func_t op) {
   });
 }
 
- template <typename func_t, typename vec_func_t>
+template <typename func_t, typename vec_func_t>
 void nullary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
-  AT_ASSERT(iter.ntensors() > 0)
-  using traits = nullary_function_traits<func_t>;
+  TORCH_INTERNAL_ASSERT(iter.ntensors() > 0);
+  using traits = function_traits<func_t>;
 
-   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
-    if (is_nullary_contiguous<traits>(strides)) {
+  iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
+    if (is_contiguous<traits>(strides)) {
       vectorized_nullary_loop(data, n, op, vop);
     } else {
       nullary_loop(data, strides, 0, n, op);
@@ -346,13 +297,13 @@ static inline void vectorized_outer_reduction(char** data, int64_t inner_stride,
 
 template <typename func_t>
 void unary_kernel(TensorIterator& iter, func_t op) {
-  using traits = unary_function_traits<func_t>;
+  using traits = function_traits<func_t>;
 
   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
     // Specializations to encourage auto-vectorization (trick from Numpy's loops.c.src)
-    if (is_unary_contiguous<traits>(strides)) {
+    if (is_contiguous<traits>(strides)) {
       unary_loop(data, strides, 0, n, op);
-    } else if (is_unary_contiguous_s1<traits>(strides)) {
+    } else if (is_contiguous_scalar<traits, 1>(strides)) {
       unary_loop(data, strides, 0, n, op);
     } else {
       unary_loop(data, strides, 0, n, op);
@@ -362,16 +313,17 @@ void unary_kernel(TensorIterator& iter, func_t op) {
 
 template <typename func_t, typename vec_func_t>
 void unary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
-  using traits = unary_function_traits<func_t>;
+  using traits = function_traits<func_t>;
   static_assert(
-    std::is_same<typename traits::result_type, typename traits::arg1_t>::value,
+    std::is_same<typename traits::result_type,
+                 typename traits::template arg<0>::type>::value,
     "all types must match");
 
   iter.for_each(
       [&](int ntensor, char** data, const int64_t* strides, int64_t n) {
-        if (is_unary_contiguous<traits>(strides)) {
+        if (is_contiguous<traits>(strides)) {
           vectorized_unary_loop(data, n, op, vop);
-        } else if (is_unary_contiguous_s1<traits>(strides)) {
+        } else if (is_contiguous_scalar<traits, 1>(strides)) {
           unary_loop(data, strides, 0, n, op);
         } else {
           unary_loop(data, strides, 0, n, op);
@@ -381,15 +333,15 @@ void unary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
 
 template <typename func_t>
 void binary_kernel(TensorIterator& iter, func_t op) {
-  using traits = binary_function_traits<func_t>;
+  using traits = function_traits<func_t>;
 
   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
     // Specializations to encourage auto-vectorization (trick from Numpy's loops.c.src)
-    if (is_binary_contiguous<traits>(strides)) {
+    if (is_contiguous<traits>(strides)) {
       binary_loop(data, strides, 0, n, op);
-    } else if (is_binary_contiguous_s1<traits>(strides)) {
+    } else if (is_contiguous_scalar<traits, 1>(strides)) {
       binary_loop(data, strides, 0, n, op);
-    } else if (is_binary_contiguous_s2<traits>(strides)) {
+    } else if (is_contiguous_scalar<traits, 2>(strides)) {
       binary_loop(data, strides, 0, n, op);
     } else {
       binary_loop(data, strides, 0, n, op);
@@ -399,20 +351,22 @@ void binary_kernel(TensorIterator& iter, func_t op) {
 
 template <typename func_t, typename vec_func_t>
 void binary_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
-  using traits = binary_function_traits<func_t>;
+  using traits = function_traits<func_t>;
   static_assert(
-    std::is_same<typename traits::result_type, typename traits::arg1_t>::value,
+    std::is_same<typename traits::result_type,
+                 typename traits::template arg<0>::type>::value,
     "all types must match");
   static_assert(
-    std::is_same<typename traits::result_type, typename traits::arg2_t>::value,
+    std::is_same<typename traits::result_type,
+                 typename traits::template arg<1>::type>::value,
     "all types must match");
 
   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
-    if (is_binary_contiguous<traits>(strides)) {
+    if (is_contiguous<traits>(strides)) {
       vectorized_binary_loop(data, n, op, vop);
-    } else if (is_binary_contiguous_s1<traits>(strides)) {
+    } else if (is_contiguous_scalar<traits, 1>(strides)) {
       vectorized_binary_loop_s1(data, n, op, vop);
-    } else if (is_binary_contiguous_s2<traits>(strides)) {
+    } else if (is_contiguous_scalar<traits, 2>(strides)) {
       vectorized_binary_loop_s2(data, n, op, vop);
     } else {
       binary_loop(data, strides, 0, n, op);
