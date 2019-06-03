@@ -118,13 +118,12 @@ def create_build_env():
     if USE_CUDA:
         my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
 
-    if IS_WINDOWS:
-        # When using Ninja under Windows, the gcc toolchain will be chosen as default.
-        # But it should be set to MSVC as the user's first choice.
-        if USE_NINJA:
-            my_env = overlay_windows_vcvars(my_env)
-            my_env.setdefault('CC', 'cl')
-            my_env.setdefault('CXX', 'cl')
+    if IS_WINDOWS and USE_NINJA:
+        # When using Ninja under Windows, the gcc toolchain will be chosen as
+        # default. But it should be set to MSVC as the user's first choice.
+        my_env = overlay_windows_vcvars(my_env)
+        my_env.setdefault('CC', 'cl')
+        my_env.setdefault('CXX', 'cl')
     return my_env
 
 
@@ -278,7 +277,7 @@ def build_caffe2(version,
                  build_dir):
     my_env = create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
-    max_jobs = os.getenv('MAX_JOBS', None)
+    max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
     cmake_cache_file = 'build/CMakeCache.txt'
     if rerun_cmake and os.path.isfile(cmake_cache_file):
         os.remove(cmake_cache_file)
@@ -291,28 +290,16 @@ def build_caffe2(version,
                   my_env)
     if cmake_only:
         return
-    if IS_WINDOWS:
-        build_cmd = ['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--']
-        if USE_NINJA:
-            # sccache will fail if all cores are used for compiling
-            j = max(1, multiprocessing.cpu_count() - 1)
-            if max_jobs is not None:
-                j = min(int(max_jobs), j)
-            build_cmd += ['-j', str(j)]
-            check_call(build_cmd, cwd=build_dir, env=my_env)
-        else:
-            j = max_jobs or str(multiprocessing.cpu_count())
-            build_cmd += ['/maxcpucount:{}'.format(j)]
-            check_call(build_cmd, cwd=build_dir, env=my_env)
+    build_cmd = [get_cmake_command(),
+                 '--build', '.', '--target', 'install', '--config', build_type]
+    # This ``if-else'' clause would be unnecessary when cmake 3.12 becomes
+    # minimum, which provides a '-j' option: build_cmd += ['-j', max_jobs]
+    # would be sufficient by then.
+    if IS_WINDOWS and not USE_NINJA:  # We are likely using msbuild here
+        build_cmd += ['--', '/maxcpucount:{}'.format(max_jobs)]
     else:
-        if USE_NINJA:
-            ninja_cmd = ['ninja', 'install']
-            if max_jobs is not None:
-                ninja_cmd += ['-j', max_jobs]
-            check_call(ninja_cmd, cwd=build_dir, env=my_env)
-        else:
-            max_jobs = max_jobs or str(multiprocessing.cpu_count())
-            check_call(['make', '-j', str(max_jobs), 'install'], cwd=build_dir, env=my_env)
+        build_cmd += ['--', '-j', max_jobs]
+    check_call(build_cmd, cwd=build_dir, env=my_env)
 
     # in cmake, .cu compilation involves generating certain intermediates
     # such as .cu.o and .cu.depend, and these intermediates finally get compiled
