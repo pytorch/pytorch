@@ -14,7 +14,7 @@ import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import _nested_map
 from torch.onnx import OperatorExportTypes
-from torch._six import inf, PY2, builtins, StringIO
+from torch._six import inf, PY2, PY37, builtins, StringIO
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
@@ -6027,7 +6027,7 @@ a")
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
                            "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan"]
-        binary_float_ops = ["atan2", "fmod", "remainder", "copysign"]
+        binary_float_ops = ["atan2", "fmod", "copysign"]
         for op in unary_float_ops:
             checkMathWrap(op)
         for op in binary_float_ops:
@@ -6040,8 +6040,8 @@ a")
             checkMathWrap("floor", ret_type="int")
             checkMathWrap("ceil", ret_type="int")
             checkMathWrap("gcd", 2, is_float=False, ret_type="int")
-
-
+        if PY37:
+            checkMathWrap("remainder", 2)
 
     @unittest.skipIf(PY2, "Requires python 3")
     def test_math_gcd(self):
