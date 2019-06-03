@@ -561,7 +561,7 @@ class TestOperators(TestCase):
 
     def test_gather(self):
         data = torch.randn(3, 4, 3, requires_grad=True)
-        index = torch.tensor([2, 0]).view(1, 2, 1).expand(3, 2 ,3)
+        index = torch.tensor([2, 0]).view(1, 2, 1).expand(3, 2, 3)
         self.assertONNX(lambda data, index: data.gather(1, index), (data, index))
 
     def test_master_opset(self):
