@@ -16,24 +16,14 @@ namespace onnx {
 class OnnxExporter;
 }
 
-struct OnnxifiTransformerOptions {
-  explicit OnnxifiTransformerOptions() : bound_shape_spec(0, 0) {}
-
-  // Dump onnx model for debugging
-  bool debug{false};
+struct OnnxifiTransformerOptions final : public BackendTransformOptions {
+  explicit OnnxifiTransformerOptions() : BackendTransformOptions() {}
 
   // Pass serialized onnx model if true, otherwise pass serialized c2 model
   bool use_onnx{false};
 
   // Whether to adjust batch at the ouptuts or not
   bool adjust_batch{true};
-
-  // Minimum number of ops to create an onnxifi op. If the subgraph is too
-  // small, it doesn't make sense to lower it to backend.
-  size_t min_ops{1};
-
-  // Bound shape spec
-  BoundShapeSpec bound_shape_spec;
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {

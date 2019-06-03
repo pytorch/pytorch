@@ -935,7 +935,7 @@ class TestDataLoader(TestCase):
                                 # handler. So we permit this as an allowed error as well.
                                 # After all, we are happy as long as it terminates.
                                 pass
-                            elif not Py3 and isinstance(loader_p.exception, OSError):
+                            elif not PY3 and isinstance(loader_p.exception, OSError):
                                 # Same reasoning as the above if-block for Py2,
                                 # where ConnectionRefusedError isn't a thing.
                                 if loader_p.exception.errno != errno.ECONNREFUSED:

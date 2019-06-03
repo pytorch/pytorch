@@ -127,7 +127,7 @@ void TensorIterator::compute_types() {
       } else if (compute_common_dtype_ &&
                  (op.device != common_device || op.dtype != common_dtype)) {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
-            op.device.is_cuda() && op.tensor.device().is_cpu()) {
+            common_device.is_cuda() && op.tensor.device().is_cpu()) {
           // don't cast CPU scalars in CUDA ops that directly support them
           op.device = op.tensor.device();
           op.dtype = op.tensor.scalar_type();
