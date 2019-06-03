@@ -22,21 +22,19 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
-    TORCH_CHECK(
-        fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
-    TORCH_CHECK(
-        act.ndimension() == 4,
-        "Activations are supposed to have 4 dimensions.");
-    TORCH_CHECK(stride.size() == 2, "2D convolution only");
-    TORCH_CHECK(padding.size() == 2, "2D convolution only");
-    TORCH_CHECK(dilation.size() == 2, "2D convolution only");
-    TORCH_CHECK(output_padding.size() == 2, "2D convolution only");
-    TORCH_CHECK(
-        (dilation[0] == 1 && dilation[1] == 1),
-        "Currently dilation should be 1");
-    TORCH_CHECK(
-        (output_padding[0] == 0 && output_padding[1] == 0),
-        "Currently output padding should be 0");
+    TORCH_CHECK(fbgemm::fbgemmSupportedCPU(),
+                "[QConv2dInt8] Your CPU does not support FBGEMM.");
+    TORCH_CHECK(act.ndimension() == 4,
+                "[QConv2dInt8] Activations are supposed to have 4 dimensions.");
+    TORCH_CHECK(stride.size() == 2, "[QConv2dInt8] 2D convolution only");
+    TORCH_CHECK(padding.size() == 2, "[QConv2dInt8] 2D convolution only");
+    TORCH_CHECK(dilation.size() == 2, "[QConv2dInt8] 2D convolution only");
+    TORCH_CHECK(output_padding.size() == 2,
+                "[QConv2dInt8] 2D convolution only");
+    TORCH_CHECK(dilation[0] == 1 && dilation[1] == 1,
+                "[QConv2dInt8] Currently dilation should be 1");
+    TORCH_CHECK(output_padding[0] == 0 && output_padding[1] == 0,
+                "[QConv2dInt8] Currently output padding should be 0");
 
     // inputs are in NHWC format
     int N = act.size(0);
@@ -142,8 +140,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       int64_t /* groups */,
       double /* output scale */,
       int64_t /* output_zero_point */) {
-    TORCH_CHECK(
-        false, "This PyTorch installation was not built with FBGEMM operators");
+    TORCH_CHECK(false, "[QConv2dInt8] This PyTorch installation was not built "
+                       "with FBGEMM operators");
   }
 #endif // USE_FBGEMM
 };
