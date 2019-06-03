@@ -431,8 +431,8 @@ def gen_pyi(declarations_path, out):
                  ' -> Union[str, Tensor]: ...'],
         'get_device': ['def get_device(self) -> _int: ...'],
         'is_contiguous': ['def is_contiguous(self) -> bool: ...'],
-        'is_cuda': ['def is_cuda(self) -> bool: ...'],
-        'is_leaf': ['def is_leaf(self) -> bool: ...'],
+        'is_cuda': ['is_cuda: bool'],
+        'is_leaf': ['is_leaf: bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: bool=False, copy: bool=False) -> Tensor: ...',
                'def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, '
