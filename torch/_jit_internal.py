@@ -183,7 +183,7 @@ def export(fn):
     return fn
 
 
-def ignore(maybe_fn=None, *, drop_on_export=False):
+def ignore(drop_on_export=False):
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and left as a Python function.
@@ -196,9 +196,15 @@ def ignore(maybe_fn=None, *, drop_on_export=False):
     code in your TorchScript model that is only ever run when the Python
     interpreter is present.
     """
-    if maybe_fn is None:
-        # No positional args passed, so the decorator as been used with a kwarg,
-        # like @torch.jit.ignore(drop_on_export=True)
+    if callable(drop_on_export):
+        # used without any args, so drop_on_export is actually a function
+        #   @torch.jit.ignore
+        #   def fn(...):
+        fn = drop_on_export
+        fn._torchscript_modifier = FunctionModifiers.IGNORE
+        return fn
+
+    if isinstance(drop_on_export, bool):
         def decorator(fn):
             if drop_on_export:
                 fn._torchscript_modifier = FunctionModifiers.IGNORE_AND_DROP
@@ -206,20 +212,8 @@ def ignore(maybe_fn=None, *, drop_on_export=False):
                 fn._torchscript_modifier = FunctionModifiers.IGNORE
             return fn
         return decorator
-
-    if callable(maybe_fn):
-        # used without any args, so drop_on_export is actually a function
-        #   @torch.jit.ignore
-        #   def fn(...):
-        maybe_fn._torchscript_modifier = FunctionModifiers.IGNORE
-        return maybe_fn
-    else:
-        if isinstance(maybe_fn, bool):
-            correct_usage = "@torch.jit.ignore(drop_on_export={})".format("True" if maybe_fn else "False")
-            raise RuntimeError("drop_on_export must be used as a kwarg, e.g. "
-                               "'{}' ".format(correct_usage))
-        raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
-                           "a function but got {}".format(maybe_fn))
+    raise RuntimeError("Argument to @torch.jit.ignore must be a bool or "
+                       "a function but got {}".format(drop_on_export))
 
 
 def should_drop_on_export(fn):
@@ -231,7 +225,7 @@ def should_drop_on_export(fn):
 
 def is_ignored_fn(fn):
     mod = get_torchscript_modifier(fn)
-    return  mod is FunctionModifiers.IGNORE_AND_DROP or mod is FunctionModifiers.IGNORE
+    return mod is FunctionModifiers.IGNORE_AND_DROP or mod is FunctionModifiers.IGNORE
 
 
 def get_torchscript_modifier(fn):

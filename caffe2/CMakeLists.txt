@@ -397,6 +397,7 @@ if (NOT INTERN_BUILD_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp

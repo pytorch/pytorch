@@ -178,8 +178,10 @@ class TestQuantizedOps(TestCase):
         B = torch.arange(-25, 25, dtype=torch.float)
         scale = 2.0
         zero_point = 127
-        qA = torch.quantize_linear(A, scale=scale, zero_point=zero_point, dtype=torch.quint8)
-        qB = torch.quantize_linear(A, scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        qA = torch.quantize_linear(A, scale=scale, zero_point=zero_point,
+                                   dtype=torch.quint8)
+        qB = torch.quantize_linear(B, scale=scale, zero_point=zero_point,
+                                   dtype=torch.quint8)
 
         # Add ReLU ground truth
         C = (qA.dequantize() + qB.dequantize()).numpy()
@@ -211,8 +213,10 @@ class TestQuantizedOps(TestCase):
         scale_C = 0.5
         zero_point_C = 5
 
-        qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A, dtype=torch.quint8)
-        qB = torch.quantize_linear(A, scale=scale_B, zero_point=zero_point_B, dtype=torch.quint8)
+        qA = torch.quantize_linear(A, scale=scale_A, zero_point=zero_point_A,
+                                   dtype=torch.quint8)
+        qB = torch.quantize_linear(B, scale=scale_B, zero_point=zero_point_B,
+                                   dtype=torch.quint8)
 
         # Add ground truth
         C = (qA.dequantize() + qB.dequantize()).numpy()
@@ -256,8 +260,8 @@ class TestQuantizedOps(TestCase):
         q_max_pool = torch.ops.quantized.max_pool2d
 
         a = torch.from_numpy(X)
-        qa = a.quantize_linear(scale=scale, zero_point=zero_point,
-                               dtype=torch_type)
+        qa = torch.quantize_linear(a, scale=scale, zero_point=zero_point,
+                                   dtype=torch_type)
 
         a_hat = qa.dequantize()
         a_pool = F.max_pool2d(a_hat, kernel_size=k, stride=s, padding=p,
@@ -476,7 +480,7 @@ class TestQuantizedConv(unittest.TestCase):
         dilation_h = dilation_w = 1
         groups = 1
 
-        W_value_min = 0
+        W_value_min = -5
         W_value_max = 5
         # We use small values to avoid overflow.
         # (the operator expects them in the format (output_channels, input_channels/groups, kernel_h, kernel_w))
@@ -532,9 +536,11 @@ class TestQuantizedConv(unittest.TestCase):
         W_zero_point = 0
         W = W_scale * (W_RSCK - W_zero_point).to(dtype=torch.float)
 
-        X_q = X.quantize_linear(scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
-        W_q = W.quantize_linear(scale=W_scale, zero_point=W_zero_point, dtype=torch.quint8)
-        b_q = b_init.to(dtype=torch.int32)
+        b = X_scale * W_scale * (b_init - 0).to(dtype=torch.float)
+
+        X_q = torch.quantize_linear(X, scale=X_scale, zero_point=X_zero_point, dtype=torch.quint8)
+        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zero_point, dtype=torch.qint8)
+        b_q = torch.quantize_linear(b, scale=X_scale * W_scale, zero_point=0, dtype=torch.qint32)
 
         W_prepack = qconv_prepack(W_q, groups)
         Y_scale = 7.3
