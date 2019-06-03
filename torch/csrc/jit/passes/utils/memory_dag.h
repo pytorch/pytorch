@@ -10,7 +10,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 // Uses a compressed index representation for faster comparisons
-typedef c10::SparseBitVector<128> MemoryLocations;
+typedef c10::SparseBitVector<256> MemoryLocations;
 namespace torch {
 namespace jit {
 
@@ -62,48 +62,19 @@ class TORCH_API MemoryDAG {
       const at::ArrayRef<Element*>& a,
       const at::ArrayRef<Element*>& b) const;
 
-  // Do any values in group `a` potentially share a memory location with any
-  // value in group `b`?
-  //
-  // This is written so that either of the inputs could be a multiset
-  template <typename T, typename U>
-  bool mayAlias(const T& a, const U& b) const {
-    if (a.empty() || b.empty()) {
-      return false;
-    }
-
-    // Record all memory locations from group `a`
-    MemoryLocations memoryLocations;
-    for (auto it = a.cbegin(); it != a.cend();) {
-      const auto element = *it;
-
-      memoryLocations |= element->getMemoryLocations();
-
-      const auto cnt = a.count(*it);
-      std::advance(it, cnt);
-    }
-
-    // If any of group `b`s memory locations overlap, return true.
-    for (auto it = b.cbegin(); it != b.cend();) {
-      const auto element = *it;
-      if (memoryLocations.intersects(element->getMemoryLocations())) {
-        return true;
-      }
-
-      const auto cnt = b.count(*it);
-      std::advance(it, cnt);
-    }
-    // No overlap, so group `a` and `b` do not share a memory location
-    return false;
-  }
+  // Converts from the compressed index representation
+  const Element* fromIndex(unsigned x) const;
 
  private:
   bool mayAliasImpl(const Element* a, const Element* b) const;
   bool mayContainAliasImpl(const Element* contained, const Element* container)
       const;
-  // Structure that owns all the element pointers. It's a map of
-  //  raw pointer -> unique_ptr to facilitate easy queries
-  std::unordered_map<Element*, std::unique_ptr<Element>> elements_;
+  void collectAllContainedMemoryLocations(
+    const Element* elem, MemoryLocations& cont) const;
+
+  std::vector<std::unique_ptr<Element>> indexToElementMap;
+
+  friend class AliasDB;
 };
 
 enum class BfsDirection {
@@ -115,6 +86,8 @@ enum class BfsDirection {
 // anything that could have an aliasing relationship, mostly IR `Value`s, but
 // also the "inside of a list", or wildcards.
 struct Element {
+  MemoryDAG& dag;
+
   // The value that this element corresponds to. May be null if this element
   // doesn't represent a first-class value.
   const Value* value = nullptr;
@@ -126,9 +99,8 @@ struct Element {
   MemoryLocations pointedFrom;
 
   MemoryLocations contained_elements;
-  static unsigned indexCount;
-  signed index;
-  Element(const Value* value_);
+  unsigned index;
+  Element(MemoryDAG& dag_, const Value* value_, unsigned index_);
 
   // Return the unique memory locations that `Element` might represent.
   TORCH_API const MemoryLocations& getMemoryLocations() const;
@@ -140,9 +112,6 @@ struct Element {
   // Do a breadth-first search over the graph, starting at `this` and
   // traversing in the direction `dir`.`fn` will be run on each element.
   void bfs(BfsDirection dir, MemoryLocations& res) const;
-
-  // Converts from the compressed index representation
-  static const Element* fromIndex(unsigned x);
 };
 } // namespace jit
 } // namespace torch

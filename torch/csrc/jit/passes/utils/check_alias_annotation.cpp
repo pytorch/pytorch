@@ -17,7 +17,7 @@ IValue deepCopy(const IValue& self) {
   }
   if (self.isTensorList()) {
     std::vector<at::Tensor> newList;
-    for (const auto& oldTensor : self.toTensorListRef()) {
+    for (const at::Tensor& oldTensor : self.toTensorListRef()) {
       newList.push_back(oldTensor.clone());
     }
     return newList;
@@ -26,7 +26,7 @@ IValue deepCopy(const IValue& self) {
   // Lists of ivalues should recursively deep copy their contents
   if (self.isGenericList()) {
     std::vector<IValue> newList;
-    for (const auto& value : self.toGenericListRef()) {
+    for (const IValue& value : self.toGenericListRef()) {
       newList.push_back(deepCopy(value));
     }
     return newList;
@@ -65,7 +65,7 @@ bool deepEquals(const IValue& lhs, const IValue& rhs) {
   } else if (lhs.isNone() && rhs.isNone()) {
     return true;
   } else if (lhs.isIntList() && rhs.isIntList()) {
-    return lhs.toIntList()->elements() == rhs.toIntList()->elements();
+    return list_is_equal(lhs.toIntList()->elements(), rhs.toIntList()->elements());
   } else if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
   }
