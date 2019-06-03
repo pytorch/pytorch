@@ -19,7 +19,7 @@ This module contains core functionalities for performance microbenchmark tests.
 """
 This is used to store configs of tests 
 An example input is: 
-TestConfig(test_name='M_8_N_2_K_1', input_config='M: 8, N: 2, K: 1', 
+TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1', 
     tag='long', run_backward=False)
 """
 TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
@@ -34,9 +34,9 @@ def _register_test(test_case):
     are the values for the members in test_case:
     op.module_name: add
     framework: PyTorch
-    test_config: TestConfig(test_name='M_8_N_2_K_1', input_config='M: 8, N: 2, K: 1', 
+    test_config: TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1', 
         tag='long', run_backward=False)
-    func_name: addPyTorchTestConfig(test_name='M8_N2_K1', input_config='M: 8, N: 2, K: 1',
+    func_name: addPyTorchTestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
                                     tag='long', run_backward=False)
     """
     test_config = test_case.test_config
@@ -68,6 +68,10 @@ class BenchmarkRunner(object):
         if self.args.iterations:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
+        # when a specific test is selected by a user, we don't need 
+        # to match the tag anymore 
+        if self.args.test_name is not None: 
+            self.args.tag_filter = None
 
     def _print_header(self):
         DASH_LINE = '-' * 40
@@ -75,7 +79,11 @@ class BenchmarkRunner(object):
               "# PyTorch/Caffe2 Operator Micro-benchmarks\n"
               "# {}\n"
               "# Tag : {}\n".format(DASH_LINE, DASH_LINE, self.args.tag_filter))
-        if self.args.list_ops:
+        if self.args.list_tests:
+            print("# List of tests:")
+            for _, test_case in BENCHMARK_TESTER.items():
+                print("# {}".format(test_case.test_config.test_name))
+        elif self.args.list_ops:
             print("# List of Operators to run:")
             if self.args.operator is None:
                 ops = set(test_case.op_bench.module_name()
@@ -193,7 +201,7 @@ class BenchmarkRunner(object):
     def run(self):
         self._print_header()
 
-        if self.args.list_ops:
+        if self.args.list_ops or self.args.list_tests:
             return
 
         for full_test_id, test_case in BENCHMARK_TESTER.items():

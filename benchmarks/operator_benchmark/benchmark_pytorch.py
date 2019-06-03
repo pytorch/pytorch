@@ -36,8 +36,7 @@ class TorchBenchmarkBase(object):
         self.user_given_name = name
 
     def test_name(self, **kargs):
-        """ FIXME(mingzhe0908):
-            this is a globally unique name which can be used to 
+        """ this is a globally unique name which can be used to 
             label a specific test 
         """
         test_name_str = []
@@ -45,7 +44,9 @@ class TorchBenchmarkBase(object):
             value = kargs[key]
             test_name_str.append(
                 key + str(value if type(value) != bool else int(value)))
-        return '_'.join(test_name_str)
+        name = (self.module_name() + '_' +
+                '_'.join(test_name_str)).replace(" ", "")
+        return name
 
 
 class PyTorchOperatorTestCase(object):
