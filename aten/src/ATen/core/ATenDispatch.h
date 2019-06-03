@@ -59,10 +59,6 @@ class CAFFE2_API ATenDispatch {
       function_table[id] = default_function_table[id];
     }
 
-    if (backend == Backend::CUDA) {
-      initCuda();
-    }
-
     if (is_variable) {
       if (wrapper_table[id] == nullptr) {
         AT_ERROR("No autograd wrapper is registered for ", name, ". Please report a bug to PyTorch.");
