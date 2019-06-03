@@ -12684,7 +12684,7 @@ a")
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__()
-                self.rnn = nn.LSTM(2, 3, 2)
+                self.rnn = nn.LSTM(2, 3, 2, dropout=0)
 
             @torch.jit.script_method
             def forward(self, x, lengths, h0, c0):
@@ -12693,7 +12693,7 @@ a")
         class Eager(torch.nn.Module):
             def __init__(self):
                 super(Eager, self).__init__()
-                self.rnn = nn.LSTM(2, 3, 2)
+                self.rnn = nn.LSTM(2, 3, 2, dropout=0)
 
             def forward(self, x, lengths, h0, c0):
                 return self.rnn(x, (h0, c0))[0]
