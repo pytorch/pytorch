@@ -121,25 +121,6 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
     return executor_;
   }
 
-  // returns nullptr and fills in failure_messages if the callee does not
-  // match the functions schema
-
-  // TODO: defined in module.cpp, move to compilation_unit.cpp
-  Value* try_emit_call(
-      Graph& graph,
-      const SourceRange& loc,
-      c10::optional<NamedValue> self,
-      ArrayRef<NamedValue> args,
-      ArrayRef<NamedValue> kwargs,
-      std::stringstream& failure_messages,
-      bool conv_tensors_to_nums);
-
-  Value* emit_call(
-      Graph& graph,
-      const SourceRange& loc,
-      ArrayRef<NamedValue> args,
-      ArrayRef<NamedValue> kwargs);
-
  private:
   static FunctionSchema defaultSchemaFor(const Function& function) {
     std::vector<Argument> args;
