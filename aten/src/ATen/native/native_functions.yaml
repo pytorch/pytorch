@@ -3205,7 +3205,7 @@
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_normal_
-    CUDA: legacy::cuda::_th_normal_
+    CUDA: normal_cuda_
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
@@ -3947,32 +3947,32 @@
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_normal_out
-    CUDA: legacy::cuda::_th_normal_out
+    CUDA: normal_out_cuda
 
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
   dispatch:
     CPU: legacy::cpu::_th_normal
-    CUDA: legacy::cuda::_th_normal
+    CUDA: normal_cuda
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_normal_out
-    CUDA: legacy::cuda::_th_normal_out
+    CUDA: normal_out_cuda
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
     CPU: legacy::cpu::_th_normal
-    CUDA: legacy::cuda::_th_normal
+    CUDA: normal_cuda
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_normal_out
-    CUDA: legacy::cuda::_th_normal_out
+    CUDA: normal_out_cuda
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
     CPU: legacy::cpu::_th_normal
-    CUDA: legacy::cuda::_th_normal
+    CUDA: normal_cuda
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
