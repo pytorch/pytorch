@@ -6,7 +6,7 @@ from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
-from torch._six import PY2, with_metaclass, get_function_from_type, \
+from torch._six import PY2, PY37, with_metaclass, get_function_from_type, \
     string_classes, builtins
 from torch._jit_internal import ignore  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
