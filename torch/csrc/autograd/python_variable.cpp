@@ -159,11 +159,11 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
 typedef PyObject *(*getter)(PyObject *, void *);
 typedef int (*setter)(PyObject *, PyObject *, void *);
 
-PyObject *THPVariable_get_T(THPVariable *self)
+PyObject *THPVariable_get_asdf(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  return THPVariable_Wrap(var.T());
+  return THPVariable_Wrap(var.asdf());
   END_HANDLE_TH_ERRORS
 }
 
@@ -429,7 +429,7 @@ static PyObject * THPVariable_device(THPVariable* self) {
 }
 
 static struct PyGetSetDef THPVariable_properties[] = {
-  {"T", (getter)THPVariable_get_T, nullptr, nullptr, nullptr},
+  {"asdf", (getter)THPVariable_get_asdf, nullptr, nullptr, nullptr},
   {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
   {"_version", (getter)THPVariable_get_version, nullptr, nullptr, nullptr},
   {"grad_fn", (getter)THPVariable_get_grad_fn, nullptr, nullptr, nullptr},

@@ -11648,15 +11648,15 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         c = torch.randn(1, 0)
         self.assertEqual(2, c.ndim)
 
-    def test_T(self):
+    def test_asdf(self):
         a = torch.randn(2, 3, 4)
-        t1 = a.T
+        t1 = a.asdf
         t2 = a.permute(2, 1, 0)
         self.assertEqual(t2, t1)
         b = torch.randn(10)
-        self.assertEqual(b, b.T)
+        self.assertEqual(b, b.asdf)
         scalar = torch.tensor(5)
-        self.assertEqual(scalar, scalar.T)
+        self.assertEqual(scalar, scalar.asdf)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
