@@ -1255,6 +1255,8 @@ def _create_methods_from_stubs(self, stubs):
 # has run. This has to occur after the user-defined __init__ so that
 # submodules and parameters are initialized _before_ the script compiler
 # resolve references to `self.param` or `self.module`.
+
+
 class ScriptMeta(type):
     # this has to inherit from pybind11's metaclass otherwise we get
     # issues because ScriptModule inherits from torch._C.ScriptModule,
