@@ -159,7 +159,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// returned `Tensor`'s tensor metadata (e.g. sizes / strides / storage / storage_offset)
   /// will not update the original `Variable`, due to the fact that this function
   /// shallow-copies the `Variable`'s underlying TensorImpl.
-  at::Tensor tensor_data() const noexcept;
+  at::Tensor _tensor_data_deprecated() const noexcept;
 
   /// NOTE: `var.variable_data()` in C++ has the same semantics as `tensor.data`
   /// in Python, which create a new `Variable` that shares the same storage and
@@ -533,7 +533,7 @@ inline Variable make_variable(
     bool allow_tensor_metadata_change = true) {
   TORCH_CHECK(
       !data.is_variable(),
-      "Must not create a new variable from a variable, use its .tensor_data()");
+      "Must not create a new variable from a variable, use its ._tensor_data_deprecated()");
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
@@ -551,7 +551,7 @@ inline Variable make_variable_consuming(
     bool allow_tensor_metadata_change = true) {
   TORCH_CHECK(
       !data.is_variable(),
-      "Must not create a new variable from a variable, use its .tensor_data()");
+      "Must not create a new variable from a variable, use its ._tensor_data_deprecated()");
   if (data.defined()) {
     AT_ASSERT(data.getIntrusivePtr().use_count() == 1);
     auto data_impl = data.getIntrusivePtr();
@@ -568,7 +568,7 @@ inline Variable make_variable(
     bool allow_tensor_metadata_change = true) {
   TORCH_CHECK(
       !data.is_variable(),
-      "Must not create a new variable from a variable, use its .tensor_data()");
+      "Must not create a new variable from a variable, use its ._tensor_data_deprecated()");
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
@@ -602,7 +602,7 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
   return static_cast<const Variable&>(tensor);
 }
 
-inline at::Tensor Variable::tensor_data() const noexcept {
+inline at::Tensor Variable::_tensor_data_deprecated() const noexcept {
   auto self_impl_copy = get()->shallow_copy_and_detach(
     /*version_counter=*/get()->version_counter(),
     /*allow_tensor_metadata_change=*/get()->allow_tensor_metadata_change());
