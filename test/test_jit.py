@@ -5967,13 +5967,6 @@ a")
                       [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
         int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2]
 
-        def checkMathWrap(func_name, num_args=1, is_float=True, **args):
-            if is_float:
-                checkMath(func_name, num_args, True, **args)
-                checkMath(func_name, num_args, False, **args)
-            else:
-                checkMath(func_name, num_args, is_float, **args)
-
         def checkMath(func_name, num_args, is_float=True, ret_type="float", debug=False, vals=None, args_type=None):
             funcs_template = dedent('''
             def func(a, b):
