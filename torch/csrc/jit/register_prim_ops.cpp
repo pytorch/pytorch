@@ -2164,6 +2164,20 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::expm1, std::expm1(a), float, float),
     DEFINE_UNARY_OP(aten::fabs, std::fabs(a), float, float),
     DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
+    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
+    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
+    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
+    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
+    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
+
+    Operator(
+    "aten::isnan(float a) -> bool",
+    [](Stack& stack) {
+      double a;
+      pop(stack, a);
+      push(stack, std::isnan(a));
+      return 0;
+    }),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),

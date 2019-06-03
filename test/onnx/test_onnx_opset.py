@@ -40,10 +40,13 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
                     assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
 
 
-def check_onnx_opsets_operator(module, x, ops, opset_versions, example_outputs=None):
+def check_onnx_opsets_operator(module, x, ops, opset_versions, training=False, example_outputs=None):
     for opset_version in opset_versions:
         f = io.BytesIO()
-        torch.onnx.export(module, x, f, opset_version=opset_version, example_outputs=example_outputs)
+        torch.onnx.export(module, x, f,
+                          opset_version=opset_version,
+                          training=training,
+                          example_outputs=example_outputs)
         model = onnx.load(io.BytesIO(f.getvalue()))
         check_onnx_opset_operator(model, ops[opset_version], opset_version)
 
@@ -179,6 +182,29 @@ class TestONNXOpset(TestCase):
         import numpy
         x = torch.tensor(numpy.arange(6.0).reshape(2, 3))
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[10])
+
+    def test_dropout(self):
+        class MyModule(Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        x = torch.randn(1, 2, 3)
+
+        # we should only export the onnx Dropout op in training mode; test both modes
+
+        # test training mode
+        ops = [{"op_name" : "Dropout", "attributes" : [{"name" : "ratio", "f" : 0.5, "type" : 1}]}]
+        ops = {9 : ops, 10 : ops}
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=True)
+
+        # test eval mode
+        ops = []
+        ops = {9 : ops, 10 : ops}
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=False)
 
 
 if __name__ == '__main__':
