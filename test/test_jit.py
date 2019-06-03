@@ -3733,6 +3733,16 @@ def foo(xyz):
 
         FileCheck().check('<string>:2:12').run(scripted.foo.graph)
 
+    def test_file_line_trace(self):
+        def foobar(xyz):
+            return torch.neg(xyz)
+
+        scripted = torch.jit.trace(foobar, (torch.rand(3, 4)))
+
+        _, lineno = inspect.getsourcelines(foobar)
+        FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))\
+                   .run(scripted.graph)
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
