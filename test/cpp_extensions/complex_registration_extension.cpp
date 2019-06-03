@@ -81,10 +81,8 @@ TypeID ComplexCPUType::ID() const {
   return TypeID::ComplexCPU;
 }
 
-static auto complex_empty_registration = register_op(
-  Backend::ComplexCPU,
-  "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
-  &ComplexCPUType::empty);
+static auto complex_empty_registration = globalATenDispatch()
+  .registerOp(Backend::ComplexCPU, "${schema_string}", &ComplexCPUType::empty);
 
 REGISTER_COMPLEX_HOOKS(ComplexHooks);
 

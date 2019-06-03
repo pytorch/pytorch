@@ -33,28 +33,28 @@ class CAFFE2_API ATenOp<Return (Params...)> {
 class CAFFE2_API ATenDispatch {
  public:
   template<class FuncType>
-  CAFFE2_API ATenDispatch& registerOp(Backend backend, const char* schema, FuncType* fn) {
+  ATenDispatch& registerOp(Backend backend, const char* schema, FuncType* fn) {
    auto id = getSchemaId(schema);
    getFunctionTable(backend)[id] = reinterpret_cast<void*>(fn);
    return *this;
   }
 
   template <typename WrapperFuncType>
-  CAFFE2_API ATenDispatch& registerVariableWrapper(const char* schema, WrapperFuncType* fn) {
+  ATenDispatch& registerVariableWrapper(const char* schema, WrapperFuncType* fn) {
     auto id = getSchemaId(schema);
     getWrapperTable()[id] = reinterpret_cast<void*>(fn);
     return *this;
   }
 
   template<class FuncType>
-  ATenOp<FuncType> getOp(Backend backend, bool is_variable, int64_t id) {
+  ATenOp<FuncType> getOp(Backend backend, bool is_variable, int64_t id, const std::string& name) {
     void** function_table = getFunctionTable(backend);
     void** default_function_table = getFunctionTable(Backend::Undefined);
     void** wrapper_table = getWrapperTable();
 
     if (function_table[id] == nullptr) {
       if (default_function_table[id] == nullptr) {
-        AT_ERROR("asdf");
+        AT_ERROR("No function is registered for ", name, " on backend ", toString(backend));
       }
       function_table[id] = default_function_table[id];
     }
@@ -65,7 +65,7 @@ class CAFFE2_API ATenDispatch {
 
     if (is_variable) {
       if (wrapper_table[id] == nullptr) {
-        AT_ERROR("asdf");
+        AT_ERROR("No autograd wrapper is registered for ", name, ". Please report a bug to PyTorch.");
       }
       return ATenOp<FuncType>(function_table[id], wrapper_table[id]);
     }

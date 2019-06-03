@@ -116,7 +116,7 @@ ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
     return globalATenDispatch().getOp<${return_type} (${formals_types})>(
-        tensorTypeIdToBackend(type_id()), is_variable(), ${id})(${method_actuals});
+        tensorTypeIdToBackend(type_id()), is_variable(), ${id}, "${api_name}")(${method_actuals});
 }
 """)
 # add a method declaration in Functions.h
@@ -131,7 +131,7 @@ C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults}
 FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
     return globalATenDispatch().getOp<${return_type} (${formals_types})>(
-        ${inferred_backend}, ${inferred_is_variable}, ${id})(${native_actuals});
+        ${inferred_backend}, ${inferred_is_variable}, ${id}, "${api_name}")(${native_actuals});
 }
 """)
 # add a native declaration for a native function
