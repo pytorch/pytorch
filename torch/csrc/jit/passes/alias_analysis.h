@@ -78,21 +78,37 @@ class AliasDb {
       return false;
     }
 
-    T<Element*> aElements;
-    for (const Value* v : a) {
-      if (elementMap_.count(v)) {
-        aElements.insert(elementMap_.at(v));
+    // Record all memory locations from group `a`
+    MemoryLocations memoryLocations;
+    for (auto it = a.cbegin(); it != a.cend();) {
+      const auto value = *it;
+      if (elementMap_.count(value)) {
+        auto element = elementMap_.at(value);
+        memoryLocations |= element->getMemoryLocations();
       }
+
+      do {
+        ++it;
+      } while (it != a.cend() && *it == value);
     }
 
-    U<Element*> bElements;
-    for (const Value* v : b) {
-      if (elementMap_.count(v)) {
-        bElements.insert(elementMap_.at(v));
-      }
-    }
+    // If any of group `b`s memory locations overlap, return true.
+    for (auto it = b.cbegin(); it != b.cend();) {
+      const auto value = *it;
+      if (elementMap_.count(value)) {
+        auto element = elementMap_.at(value);
 
-    return memoryDAG_->mayAlias(aElements, bElements);
+        if (memoryLocations.intersects(element->getMemoryLocations())) {
+          return true;
+        }
+      }
+
+      do {
+        ++it;
+      } while (it != b.cend() && *it == value);
+    }
+    // No overlap, so group `a` and `b` do not share a memory location
+    return false;
   }
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
