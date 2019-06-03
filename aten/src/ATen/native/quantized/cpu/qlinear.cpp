@@ -12,7 +12,7 @@ namespace native {
 namespace {
 
 template <bool ReluFused>
-class QFCInt8 final : public c10::OperatorKernel {
+class QLinearInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
   at::Tensor operator()(
@@ -45,7 +45,7 @@ class QFCInt8 final : public c10::OperatorKernel {
     // Pull out the PackBMatrix and col_offsets instance from the owning tensor.
     auto& pack_ptr = cpp_custom_type_hack::cast<PackedFCWeight>(packed_weight);
     auto packB = pack_ptr.w.get();
-    // packB->printPackedMatrix("packedB inside fbgemm_linear (QFCInt8): ");
+    // packB->printPackedMatrix("packedB inside fbgemm_linear (QLinearInt8): ");
     auto& col_offsets = pack_ptr.col_offsets;
 
     int64_t N = static_cast<int64_t>(packB->numCols());
@@ -155,10 +155,10 @@ static auto registry =
     c10::RegisterOperators()
         .op("quantized::fbgemm_linear(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             c10::RegisterOperators::options()
-              .kernel<QFCInt8<false>>(QuantizedCPUTensorId()))
+              .kernel<QLinearInt8<false>>(QuantizedCPUTensorId()))
         .op("quantized::fbgemm_linear_relu(Tensor X, Tensor W_prepack, Tensor b, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             c10::RegisterOperators::options()
-              .kernel<QFCInt8<true>>(QuantizedCPUTensorId()));
+              .kernel<QLinearInt8<true>>(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at
