@@ -2330,7 +2330,6 @@ graph(%Ra, %Rb):
             a = ["hello", "world"]
             return func4(x, a)
 
-        # self.checkTrace(invalid_constant_baking, (inp,))
         with self.assertRaisesRegex(RuntimeError,
                                     "Tracer cannot get value trace for type"):
             self.checkTrace(invalid_constant_baking, (inp,))
