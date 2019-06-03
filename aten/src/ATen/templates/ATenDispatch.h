@@ -2,7 +2,6 @@
 
 #include <c10/core/Backend.h>
 #include <unordered_map>
-#include <c10/core/LegacyTypeDispatch.h>
 
 namespace at {
 
