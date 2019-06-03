@@ -41,7 +41,6 @@ def set_rng_state(new_state, device=device('cuda')):
         device (torch.device or int, optional): The device to set the RNG state.
             Default: ``torch.device('cuda')`` (i.e., the current CUDA device).
     """
-    new_state_copy = new_state.clone()
 
     # NB: What if device=-1?  You might be afraid that the "current"
     # device would change by the time we actually get around to invoking
@@ -51,7 +50,7 @@ def set_rng_state(new_state, device=device('cuda')):
     # immediately.
     def cb():
         with device_ctx_manager(device):
-            _C._cuda_setRNGState(new_state_copy)
+            _C._cuda_setRNGState(new_state)
 
     _lazy_call(cb)
 
