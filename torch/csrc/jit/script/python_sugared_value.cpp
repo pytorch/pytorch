@@ -461,11 +461,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  auto weak_obj =
-      py::module::import("torch.jit").attr("_try_get_weak_module")(obj);
-  if (!weak_obj.is_none()) {
-    obj = weak_obj;
-  }
   if (auto callee = as_function(obj)) {
     return std::make_shared<FunctionValue>(callee);
   } else if (py::isinstance<py::module>(obj)) {

@@ -14,9 +14,6 @@ compiled_weak_fns = weakref.WeakKeyDictionary()  # noqa: T484
 # Tracks which methods should be converted to strong methods
 weak_script_methods = weakref.WeakKeyDictionary()  # noqa: T484
 
-# Converted modules and their corresponding WeakScriptModuleProxy objects
-weak_modules = weakref.WeakKeyDictionary()  # noqa: T484
-
 # Types that have been declared as weak modules
 weak_types = weakref.WeakKeyDictionary()  # noqa: T484
 

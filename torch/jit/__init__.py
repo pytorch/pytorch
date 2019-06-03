@@ -1077,15 +1077,6 @@ def script_method(fn, _rcb=None):
     return ScriptMethodStub(_rcb, ast, fn)
 
 
-def _try_get_weak_module(mod):
-    """
-    Get the WeakScriptModuleProxy corresponding to mod if it exists
-    """
-    if not isinstance(mod, Module):
-        return None
-    return _jit_internal.weak_modules.get(mod)
-
-
 def _is_weak_type(cls):
     """
     Check if a type has been annotated with `weak_module`
@@ -1674,9 +1665,6 @@ def _make_strong(mod):
     Converts a weak module into a subclass of ScriptModule. If `_methods` is
     provided, only these methods are treated as @script_methods.
     """
-    if mod in _jit_internal.weak_modules:
-        return _jit_internal.weak_modules[mod]
-
     cls = type(mod)
     # Explicitly annotated weak script
     stubs = _jit_internal.weak_types.get(cls)["method_stubs"]
@@ -1686,11 +1674,7 @@ def _make_strong(mod):
         stubs = _get_weak_stubs(cls)
         _jit_internal.weak_types[cls]["method_stubs"] = stubs
 
-    proxy = WeakScriptModuleProxy(mod, stubs)
-
-    _jit_internal.weak_modules[mod] = proxy
-
-    return proxy
+    return WeakScriptModuleProxy(mod, stubs)
 
 
 def _get_methods(cls):

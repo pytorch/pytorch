@@ -12012,9 +12012,8 @@ a")
         other_strong_mod = OtherStrong()
 
         self.assertIsNot(other_strong_mod.weak, other_strong_mod.weak2)
-
-        with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
-            strong_mod = Strong()
+        strong_mod = Strong()
+        FileCheck().check("python_value").run(strong_mod.graph)
 
     def test_weak_module_copying(self):
         class Submodule(torch.nn.Module):
