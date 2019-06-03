@@ -24,9 +24,7 @@ import torch.onnx.symbolic_opset9
 # TODO : add support for the blacklisted operators in black_listed_operators
 black_listed_operators = ["flip",
                           "slice",
-                          "upsample_nearest2d", "upsample_bilinear2d",
-                          "dropout", "feature_dropout", "alpha_dropout", "feature_alpha_dropout",
-                          "dropout_", "feature_dropout_", "alpha_dropout_", "feature_alpha_dropout_"]
+                          "upsample_nearest2d", "upsample_bilinear2d"]
 
 for black_listed_op in black_listed_operators:
     vars()[black_listed_op] = _black_list_in_opset(black_listed_op)

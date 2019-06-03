@@ -1208,6 +1208,28 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_tensor_factories_script(self):
+        class TensorFactory(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.zeros(x.shape, dtype=torch.float) + torch.ones(x.shape, dtype=torch.float)
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),))
+
+    def test_tensor_like_factories_script(self):
+        class TensorFactory(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                zeros = torch.zeros_like(x, dtype=torch.float, layout=torch.strided, device=torch.device('cpu'))
+                ones = torch.ones_like(x, dtype=torch.float, layout=torch.strided, device=torch.device('cpu'))
+                return zeros + ones
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),))
+
     def test_where_functional(self):
         class WhereFunctional(torch.nn.Module):
             def forward(self, x):
@@ -1712,6 +1734,18 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randint(0, 1, (3, 5))
         y = torch.randint(0, 1, (3, 5))
         self.run_model_test(OrModel(), train=False, input=(x, y), batch_size=BATCH_SIZE)
+
+    def test_dropout(self):
+        class DropoutModel(torch.nn.Module):
+            def __init__(self):
+                super(DropoutModel, self).__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        x = torch.randn(1, 2, 3)
+        self.run_model_test(DropoutModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 
