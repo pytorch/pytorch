@@ -691,11 +691,16 @@ class MultiheadAttention(Module):
     Args:
         embed_dim: total dimension of the model.
         num_heads: parallel attention heads.
+        kdim: total number of features in key. Default: None.
+        vdim: total number of features in key. Default: None.
         dropout: a Dropout layer on attn_output_weights. Default: 0.0.
         bias: add bias as module parameter. Default: True.
         add_bias_kv: add bias to the key and value sequences at dim=0.
         add_zero_attn: add a new batch of zeros to the key and
                        value sequences at dim=1.
+
+        Note: if kdim and vdim are None, they will be set to embed_dim such that
+        query, key, and value have the same number of features.
 
     Examples::
 
