@@ -694,13 +694,6 @@ ENDIF()
   set_property(TARGET caffe2 PROPERTY CXX_STANDARD 11)
 
 
-  # Prevent the unused functions being optimized away
-  # Otherwise torch.dll will be linked without caffe2_gpu.dll
-  if (MSVC)
-    # TODO What to do with this line?
-    set_target_properties(caffe2 PROPERTIES LINK_FLAGS "/OPT:NOREF")
-  endif()
-
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
