@@ -44,6 +44,10 @@ FIND_PACKAGE(MPI)
 
 INCLUDE_DIRECTORIES(${CAFFE2_INCLUDE_DIR})
 
+if (USE_TBB)
+  include_directories(${TBB_ROOT_DIR}/include)
+endif()
+
 IF(USE_CUDA)
   FIND_PACKAGE(CUDA 7.5)
   IF(CUDA_FOUND)
@@ -117,7 +121,7 @@ ADD_LIBRARY(THD STATIC ${all_cpp})
 
 TARGET_COMPILE_DEFINITIONS(THD PRIVATE "_THD_CORE=1")
 
-ADD_DEPENDENCIES(THD caffe2)
+target_link_libraries(THD caffe2)
 
 target_include_directories(THD PRIVATE
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h

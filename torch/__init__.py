@@ -53,7 +53,7 @@ if platform.system() == 'Windows':
         else:
             return ''
 
-    py_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(sys.executable), 'Library', 'bin')
+    py_dll_path = _dl_flags.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(__file__), 'lib')
 
     dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), _dl_flags.environ['PATH']]
@@ -222,9 +222,20 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
 class BoolStorage(_C.BoolStorageBase, _StorageBase):
     pass
 
+class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
+    pass
+
+class QInt8Storage(_C.QInt8StorageBase, _StorageBase):
+    pass
+
+class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
+    pass
+
+
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage, HalfStorage, BoolStorage
+    CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
+    QInt32Storage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -274,6 +285,7 @@ del ShortStorageBase
 del CharStorageBase
 del ByteStorageBase
 del BoolStorageBase
+del QUInt8StorageBase
 
 ################################################################################
 # Import most common subpackages

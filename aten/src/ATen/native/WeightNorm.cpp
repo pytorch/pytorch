@@ -7,10 +7,6 @@
 #include <sstream>
 #include <vector>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
 namespace at {
 namespace native {
 
@@ -42,7 +38,7 @@ Tensor _weight_norm
    int64_t dim)
 {
 
-  AT_CHECK(
+  TORCH_CHECK(
     v_in.device() == g_in.device(),
     "weight_norm: expected v_in and g_in to be on the same device, but v_in is "
     "on ", v_in.device(), " and g_in is on ", g_in.device());
@@ -77,17 +73,17 @@ std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
   // In Functions.cpp, the HardshrinkBackward object supplies "grad.contiguous()"
   // as the first argument, so grad_w should be contiguous here.
   // All these checks should succeed:
-  AT_CHECK(grad_w.is_contiguous(), "grad_w must be contiguous");
-  AT_CHECK(saved_v.is_contiguous(), "saved_v must be contiguous");
-  AT_CHECK(saved_g.is_contiguous(), "saved_g must be contiguous");
-  AT_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
+  TORCH_CHECK(grad_w.is_contiguous(), "grad_w must be contiguous");
+  TORCH_CHECK(saved_v.is_contiguous(), "saved_v must be contiguous");
+  TORCH_CHECK(saved_g.is_contiguous(), "saved_g must be contiguous");
+  TORCH_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
 
   int64_t last_dim = saved_v.dim() - 1;
   int64_t last_size = saved_v.size(last_dim);
 
   // Like weight_norm_fused_backward, weight_norm_differentiable_backward should only ever be called
   // through a WeightNormFusedBackward object, so we expect that dim == 0 || dim == saved_v.size(-1)
-  AT_CHECK(dim == 0 || dim == last_dim, "Expected dim to be the first or last dimension");
+  TORCH_CHECK(dim == 0 || dim == last_dim, "Expected dim to be the first or last dimension");
 
   // saved_g and saved_norms are already shaped to broadcast over the correct dimensions
 

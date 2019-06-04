@@ -57,3 +57,11 @@ inline PyObject* THPUtils_packString(const std::string& str) {
   return PyUnicode_FromStringAndSize(str.c_str(), str.size());
 #endif
 }
+
+inline PyObject* THPUtils_internString(const std::string& str) {
+#if PY_MAJOR_VERSION == 2
+  return PyString_InternFromString(str.c_str());
+#else
+  return PyUnicode_InternFromString(str.c_str());
+#endif
+}

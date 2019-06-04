@@ -93,7 +93,7 @@ includes = [
 for new_dir in args.extra_include_dir:
     abs_new_dir = os.path.join(proj_dir, new_dir)
     if os.path.exists(abs_new_dir):
-        new_dir = os.path.join(new_dir, '*')
+        new_dir = os.path.join(new_dir, '**/*')
         includes.append(new_dir)
 
 ignores = [

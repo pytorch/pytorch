@@ -7,6 +7,9 @@ REGISTER_CUDA_OPERATOR(GivenTensorFill, GivenTensorFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     GivenTensorDoubleFill,
     GivenTensorFillOp<double, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    GivenTensorInt16Fill,
+    GivenTensorFillOp<int16_t, CUDAContext>);
 REGISTER_CUDA_OPERATOR(GivenTensorIntFill, GivenTensorFillOp<int, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     GivenTensorInt64Fill,
