@@ -2306,15 +2306,34 @@ graph(%Ra, %Rb):
         a = torch.randn(5)
         b = torch.randn(5)
 
-        expected = func1((a, b))
-        traced = torch.jit.trace(func1, ((a, b),))
-        result = traced((a, b))
-        self.assertEqual(expected, result)
+        self.checkTrace(func1, ((a, b),))
+        self.checkTrace(func2, ((a, b),))
 
-        expected = func2((a, b))
-        traced = torch.jit.trace(func2, ((a, b),))
-        result = traced((a, b))
-        self.assertEqual(expected, result)
+        @torch.jit.script
+        def func3(x, method='bilinear', align_corners=True):
+            # type: (Tensor, str, bool) -> Tensor
+            hw = x.shape[2:4]
+            return F.interpolate(x, hw, mode=method, align_corners=align_corners)
+
+        inp = torch.rand(1, 3, 6, 6)
+        self.checkTrace(func3, (inp,))
+
+        @torch.jit.script
+        def func4(x, a):
+            # type: (Tensor, List[str]) -> Tensor
+            if len(a) == 2:
+                return x + 2
+            else:
+                return x
+
+        def invalid_constant_baking(x):
+            a = ["hello", "world"]
+            return func4(x, a)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Tracer cannot get value trace for type"):
+            self.checkTrace(invalid_constant_baking, (inp,))
+
 
     def test_einsum(self):
         def outer(x, y):
