@@ -406,7 +406,7 @@ public:
   // TODO Test use_count
   size_t use_count() const;
 
-protected:
+private:
   explicit ListPtr(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
   friend class IValue;
   template<class T_> friend ListPtr<T_> impl::toTypedList(ListPtr<IValue>);
