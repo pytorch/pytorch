@@ -515,18 +515,19 @@ def emit_body(declaration):
     if declaration['output_differentiability'] is not None:
         differentiable_outputs = []
         output_differentiability = declaration['output_differentiability']
+        if False in output_differentiability and inplace:
+            raise RuntimeError("output_differentiability=False for inplace operation (version_counter won't get updated)")
         for differentiable, output in zip(output_differentiability, returns):
             if differentiable:
                 differentiable_outputs.append(output)
     elif uses_single_grad(func):
-        candidate_differentiable_outputs = candidate_differentiable_outputs[:1]
-        differentiable_outputs = candidate_differentiable_outputs
+        differentiable_outputs = candidate_differentiable_outputs[:1]
     else:
         differentiable_outputs = candidate_differentiable_outputs
 
     requires_derivative = (
         base_name not in DONT_REQUIRE_DERIVATIVE and name not in DONT_REQUIRE_DERIVATIVE and
-        len(differentiable_inputs) > 0 and len(candidate_differentiable_outputs) > 0 and
+        len(differentiable_inputs) > 0 and len(differentiable_outputs) > 0 and
         strategy == 'use_derived')
 
     if func is not None and not requires_derivative:
