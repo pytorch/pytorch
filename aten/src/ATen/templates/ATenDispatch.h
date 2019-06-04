@@ -35,37 +35,33 @@ class CAFFE2_API ATenDispatch {
   template<class FuncType>
   ATenDispatch& registerOp(Backend backend, const char* schema, FuncType* fn) {
    auto id = getSchemaId(schema);
-   getFunctionTable(backend)[id] = reinterpret_cast<void*>(fn);
+   function_table[static_cast<int64_t>(backend)][id] = reinterpret_cast<void*>(fn);
    return *this;
   }
 
   template <typename WrapperFuncType>
   ATenDispatch& registerVariableWrapper(const char* schema, WrapperFuncType* fn) {
     auto id = getSchemaId(schema);
-    getWrapperTable()[id] = reinterpret_cast<void*>(fn);
+    wrapper_table[id] = reinterpret_cast<void*>(fn);
     return *this;
   }
 
   template<class FuncType>
   ATenOp<FuncType> getOp(Backend backend, bool is_variable, int64_t id, const std::string& name) {
-    void** function_table = getFunctionTable(backend);
-    void** default_function_table = getFunctionTable(Backend::Undefined);
-    void** wrapper_table = getWrapperTable();
-
-    if (function_table[id] == nullptr) {
-      if (default_function_table[id] == nullptr) {
+    if (function_table[static_cast<int64_t>(backend)][id] == nullptr) {
+      if (function_table[static_cast<int64_t>(Backend::Undefined)][id] == nullptr) {
         AT_ERROR("No function is registered for ", name, " on backend ", toString(backend));
       }
-      function_table[id] = default_function_table[id];
+      function_table[static_cast<int64_t>(backend)][id] = function_table[static_cast<int64_t>(Backend::Undefined)][id];
     }
 
     if (is_variable) {
       if (wrapper_table[id] == nullptr) {
         AT_ERROR("No autograd wrapper is registered for ", name, ". Please report a bug to PyTorch.");
       }
-      return ATenOp<FuncType>(function_table[id], wrapper_table[id]);
+      return ATenOp<FuncType>(function_table[static_cast<int64_t>(backend)][id], wrapper_table[id]);
     }
-    return ATenOp<FuncType>(function_table[id]);
+    return ATenOp<FuncType>(function_table[static_cast<int64_t>(backend)][id]);
   }
 
  private:
@@ -73,17 +69,11 @@ class CAFFE2_API ATenDispatch {
     static std::unordered_map<std::string, int64_t> schema_to_id = {
       ${schema_to_id_pairs}
     };
-    return schema_to_id[schema];
+    return schema_to_id.at(schema);
   }
 
-  void** getFunctionTable(Backend backend) {
-    static void* function_table[static_cast<int64_t>(Backend::NumOptions)][${function_count}];
-    return function_table[static_cast<int64_t>(backend)];
-  }
-  void** getWrapperTable() {
-    static void* wrapper_table[${function_count}];
-    return wrapper_table;
-  }
+  void* function_table[static_cast<int64_t>(Backend::NumOptions)][${function_count}];
+  void* wrapper_table[${function_count}];
 };
 
 CAFFE2_API ATenDispatch& globalATenDispatch();
