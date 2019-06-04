@@ -157,8 +157,8 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
                                     const scalar_t stddev)
 {
   THAssert(size >= 16 && "Size must be >= 16 for normal fill");
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Thread-safety and Generators]
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
   
   for (int64_t i = 0; i < size; ++i) {

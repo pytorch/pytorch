@@ -14,8 +14,8 @@
 
 void THTensor_(random)(THTensor *self, at::Generator *_generator)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Thread-safety and Generators]
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 #if defined(TH_REAL_IS_BYTE)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint8_t)(gen->random() % (UINT8_MAX + 1)););
@@ -42,8 +42,8 @@ void THTensor_(random)(THTensor *self, at::Generator *_generator)
 void THTensor_(clampedRandom)(THTensor *self, at::Generator *_generator, int64_t min, int64_t max) {
   THArgCheck(max > min, 2, "max must be greater than min, but got: min = %lld, max = %lld", min, max);
   uint64_t range = max - min;
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Thread-safety and Generators]
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 #if defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     if (range >= 1ULL << 32) {
@@ -61,8 +61,8 @@ void THTensor_(cappedRandom)(THTensor *self, at::Generator *_generator, int64_t 
 
 void THTensor_(geometric)(THTensor *self, at::Generator *_generator, double p)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Thread-safety and Generators]
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
   at::geometric_distribution<double> geometric(p);
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)geometric(gen););
@@ -78,8 +78,8 @@ void THTensor_(geometric)(THTensor *self, at::Generator *_generator, double p)
 
 void THTensor_(uniform)(THTensor *self, at::Generator *_generator, double a, double b)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Thread-safety and Generators]
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
   #if defined(TH_REAL_IS_FLOAT)
@@ -97,8 +97,8 @@ void THTensor_(normal)(THTensor *self, at::Generator *_generator, double mean, d
   if (size >= 16 && THTensor_(isContiguous)(self)) {
     THVector_(normal_fill)(THStorage_(data)(THTensor_getStoragePtr(self)) + self->storage_offset(), size, _generator, mean, stddev);
   } else {
-    auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-    // See Note [Thread-safety and Generators]
+    auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
+    // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
 
     at::normal_distribution<double> normal(mean, stddev);
@@ -131,8 +131,8 @@ void THTensor_(normal_means_stddevs)(THTensor *self, at::Generator *gen, THTenso
 
 void THTensor_(exponential)(THTensor *self, at::Generator *_generator, double lambda)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Thread-safety and Generators]
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
   at::exponential_distribution<double> exponential(lambda);
@@ -143,8 +143,8 @@ void THTensor_(exponential)(THTensor *self, at::Generator *_generator, double la
 
 void THTensor_(cauchy)(THTensor *self, at::Generator *_generator, double median, double sigma)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Thread-safety and Generators]
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
   at::cauchy_distribution<double> cauchy(median, sigma);
@@ -154,8 +154,8 @@ void THTensor_(cauchy)(THTensor *self, at::Generator *_generator, double median,
 
 void THTensor_(logNormal)(THTensor *self, at::Generator *_generator, double mean, double stdv)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Thread-safety and Generators]
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
   
   at::lognormal_distribution<double> logNormal(mean, stdv);
@@ -266,8 +266,8 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, at::Generator *_generat
   scalar_t _q;
   THLongTensor_resize1d(self, n_sample);
   int64_t rand_ind, sample_idx, J_sample;
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Thread-safety and Generators]
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
   for (i=0; i < n_sample; i++)
@@ -293,8 +293,8 @@ void THTensor_(multinomial)(THLongTensor *self, at::Generator *_generator, THTen
   int64_t n_categories;
   THDoubleTensor* cum_dist;
   int64_t i,j,k;
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Thread-safety and Generators]
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
   if (start_dim == 1)
@@ -485,7 +485,7 @@ void THTensor_(multinomial)(THLongTensor *self, at::Generator *_generator, THTen
 #if defined(TH_REAL_IS_BYTE)
 void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
 {
-  // See Note [Thread-safety and Generators]
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(_generator->mutex_);
   static const size_t size = sizeof(THGeneratorStateNew);
   THTensor_(resize1d)(self, size);
@@ -525,7 +525,7 @@ void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
 
 void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
 {
-  // See Note [Thread-safety and Generators]
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(_generator->mutex_);
   auto cast_generator = at::check_generator<at::CPUGenerator>(_generator);
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");

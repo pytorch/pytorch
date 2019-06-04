@@ -12,7 +12,7 @@ using namespace at;
 
 TEST(CPUGenerator, TestGeneratorDynamicCast) {
   // Test Description: Check dynamic cast for CPU
-  std::unique_ptr<Generator> foo = at::detail::createCPUGenerator();
+  std::shared_ptr<Generator> foo = at::detail::createCPUGenerator();
   auto result = dynamic_cast<CPUGenerator*>(foo.get());
   ASSERT_EQ(typeid(CPUGenerator*).hash_code(), typeid(result).hash_code());
 }
@@ -49,7 +49,7 @@ TEST(CPUGenerator, TestMultithreadingGetEngineOperator) {
   // Check CPUGenerator is reentrant and the engine state
   // is not corrupted when multiple threads request for 
   // random samples.
-  // See Note [Thread-safety and Generators]
+  // See Note [Acquire lock when using random generators]
   auto gen1 = at::detail::createCPUGenerator();
   auto gen2 = at::detail::createCPUGenerator();
   {
@@ -72,7 +72,7 @@ TEST(CPUGenerator, TestMultithreadingGetEngineOperator) {
 TEST(CPUGenerator, TestGetSetCurrentSeed) {
   // Test Description: 
   // Test current seed getter and setter
-  // See Note [Thread-safety and Generators]
+  // See Note [Acquire lock when using random generators]
   auto foo = at::detail::getDefaultCPUGenerator();
   std::lock_guard<std::mutex> lock(foo->mutex_);
   foo->set_current_seed(123);
@@ -90,7 +90,7 @@ void thread_func_get_set_current_seed(CPUGenerator* generator) {
 TEST(CPUGenerator, TestMultithreadingGetSetCurrentSeed) {
   // Test Description: 
   // Test current seed getter and setter are thread safe
-  // See Note [Thread-safety and Generators]
+  // See Note [Acquire lock when using random generators]
   auto gen1 = at::detail::getDefaultCPUGenerator();
   auto initial_seed = gen1->current_seed();
   std::thread t0{thread_func_get_set_current_seed, gen1};
@@ -106,7 +106,7 @@ TEST(CPUGenerator, TestRNGForking) {
   // Test Description: 
   // Test that state of a generator can be frozen and
   // restored
-  // See Note [Thread-safety and Generators]
+  // See Note [Acquire lock when using random generators]
   auto default_gen = at::detail::getDefaultCPUGenerator();
   auto current_gen = at::detail::createCPUGenerator();
   {

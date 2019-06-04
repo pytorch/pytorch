@@ -1,6 +1,7 @@
 #include <ATen/CPUGenerator.h>
 #include <c10/util/C++17.h>
 #include <algorithm>
+#include <chrono>
 
 #ifndef _WIN32
 #include <fcntl.h>
@@ -12,10 +13,10 @@ namespace at {
 namespace detail {
 
 // Ensures default_gen_cpu is initialized once.
-static std::once_flag cpu_device_flag;
+static std::once_flag cpu_gen_init_flag;
 
 // Default, global CPU generator.
-static std::unique_ptr<CPUGenerator> default_gen_cpu;
+static std::shared_ptr<CPUGenerator> default_gen_cpu;
 
 /**
  * PyTorch maintains a collection of default generators that get
@@ -26,8 +27,8 @@ static std::unique_ptr<CPUGenerator> default_gen_cpu;
  * device.
  */
 CPUGenerator* getDefaultCPUGenerator() {
-  std::call_once(cpu_device_flag, [&] {
-    default_gen_cpu = c10::guts::make_unique<CPUGenerator>(getNonDeterministicRandom());
+  std::call_once(cpu_gen_init_flag, [&] {
+    default_gen_cpu = std::make_shared<CPUGenerator>(getNonDeterministicRandom());
   });
   return default_gen_cpu.get();
 }
@@ -35,8 +36,8 @@ CPUGenerator* getDefaultCPUGenerator() {
 /**
  * Utility to create a CPUGenerator. Returns a unique_ptr
  */
-std::unique_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
-  return c10::guts::make_unique<CPUGenerator>(seed_val);
+std::shared_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
+  return std::make_shared<CPUGenerator>(seed_val);
 }
 
 /**
@@ -69,12 +70,14 @@ static uint64_t readURandomLong()
  * /dev/urandom or the current time
  * FIXME: The behavior in this function is from legacy code (THRandom_seed)
  * and is probably not the right thing to do, even though our tests pass.
- * Figure out if tests get perturbed when using C++11 std objects, such as
- * std::random_device and chrono.
+ * Figure out if tests get perturbed
+ * - when using C++11 std objects, such as std::random_device
+ * - when constructing a 64 bit seed properly, rather than static casting
+ *   a 32 bit number to 64 bit.
  */
 uint64_t getNonDeterministicRandom() {
 #ifdef _WIN32
-  uint64_t s = (uint64_t)time(0);
+  uint64_t s = (uint64_t)std::chrono::high_resolution_clock::now().time_since_epoch().count();
 #else
   uint64_t s = readURandomLong();
 #endif
@@ -87,14 +90,14 @@ uint64_t getNonDeterministicRandom() {
  * CPUGenerator class implementation
  */
 CPUGenerator::CPUGenerator(uint64_t seed_in)
-  : CloneableGenerator(Device(DeviceType::CPU)),
-    engine_(seed_in),
-    next_float_normal_sample_(c10::optional<float>()),
-    next_double_normal_sample_(c10::optional<double>()) { }
+  : Generator{Device(DeviceType::CPU)},
+    engine_{seed_in},
+    next_float_normal_sample_{c10::optional<float>()},
+    next_double_normal_sample_{c10::optional<double>()} { }
 
 /**
  * Manually seeds the engine with the seed input
- * See Note [Thread-safety and Generators]
+ * See Note [Acquire lock when using random generators]
  */
 void CPUGenerator::set_current_seed(uint64_t seed) {
   next_float_normal_sample_.reset();
@@ -120,7 +123,7 @@ DeviceType CPUGenerator::device_type() {
 /**
  * Gets a random 32 bit unsigned integer from the engine
  * 
- * See Note [Thread-safety and Generators]
+ * See Note [Acquire lock when using random generators]
  */
 uint32_t CPUGenerator::random() {
   return engine_();
@@ -129,7 +132,7 @@ uint32_t CPUGenerator::random() {
 /**
  * Gets a random 64 bit unsigned integer from the engine
  * 
- * See Note [Thread-safety and Generators]
+ * See Note [Acquire lock when using random generators]
  */
 uint64_t CPUGenerator::random64() {
   uint32_t random1 = engine_();
@@ -154,7 +157,7 @@ c10::optional<double> CPUGenerator::next_double_normal_sample() {
 /**
  * Cache normal random in float
  * 
- * See Note [Thread-safety and Generators]
+ * See Note [Acquire lock when using random generators]
  */
 void CPUGenerator::set_next_float_normal_sample(c10::optional<float> randn) {
   next_float_normal_sample_ = randn;
@@ -163,7 +166,7 @@ void CPUGenerator::set_next_float_normal_sample(c10::optional<float> randn) {
 /**
  * Cache normal random in double
  * 
- * See Note [Thread-safety and Generators]
+ * See Note [Acquire lock when using random generators]
  */
 void CPUGenerator::set_next_double_normal_sample(c10::optional<double> randn) {
   next_double_normal_sample_ = randn;
@@ -179,18 +182,27 @@ at::mt19937 CPUGenerator::engine() {
 /**
  * Set the engine of the CPUGenerator
  * 
- * See Note [Thread-safety and Generators]
+ * See Note [Acquire lock when using random generators]
  */
 void CPUGenerator::set_engine(at::mt19937 engine) {
   engine_ = engine;
 }
 
 /**
+ * Public clone method implementation
+ * 
+ * See Note [Acquire lock when using random generators]
+ */
+std::shared_ptr<CPUGenerator> CPUGenerator::clone() const {
+  return std::shared_ptr<CPUGenerator>(this->clone_impl());
+}
+
+/**
  * Private clone method implementation
  * 
- * See Note [Thread-safety and Generators]
+ * See Note [Acquire lock when using random generators]
  */
-CloneableGenerator<CPUGenerator, Generator>* CPUGenerator::clone_impl() const {
+CPUGenerator* CPUGenerator::clone_impl() const {
   auto gen = new CPUGenerator();
   gen->set_engine(engine_);
   gen->set_next_float_normal_sample(next_float_normal_sample_);

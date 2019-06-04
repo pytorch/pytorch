@@ -14,7 +14,7 @@ THCGenerator* THCRandom_getGenerator(THCState* state);
 namespace at {
 
 CUDAGenerator::CUDAGenerator(Context * context_)
-  : CloneableGenerator(Device(DeviceType::CUDA)), context(context_)
+  : Generator(Device(DeviceType::CUDA)), context(context_)
 {
 }
 
@@ -60,7 +60,11 @@ void * CUDAGenerator::unsafeGetTH() {
   return (void*)THCRandom_getGenerator(context->getTHCState());
 }
 
-CloneableGenerator<CUDAGenerator, Generator>* CUDAGenerator::clone_impl() const {
+std::shared_ptr<CUDAGenerator> CUDAGenerator::clone() const {
+  return std::shared_ptr<CUDAGenerator>(this->clone_impl());
+}
+
+CUDAGenerator* CUDAGenerator::clone_impl() const {
   return new CUDAGenerator(context);
 }
 

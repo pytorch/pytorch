@@ -32,7 +32,7 @@
  */
 
 /**
- * Note [Thread-safety and Generators]
+ * Note [Acquire lock when using random generators]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  * Generator and its derived classes are NOT thread-safe. Please note that most of the
  * places where we have inserted locking for generators are historically based, and we
@@ -47,25 +47,6 @@
  */
 
 namespace at {
-
-/**
- * CloneableGenerator class based on CRTP pattern. It is a
- * helper class used for cloning Generator subclasses while 
- * preserving covariance in clone() method.
- */
-template <typename Derived, typename Base>
-struct CloneableGenerator : public Base {
-
-  CloneableGenerator(Device device_in) : Base(device_in) {}
-  virtual ~CloneableGenerator() = default;
-
-  std::unique_ptr<Derived> clone() const {
-    return std::unique_ptr<Derived>(static_cast<Derived*>(this->clone_impl()));
-  }
-
-private:
-  virtual CloneableGenerator* clone_impl() const = 0;
-};
 
 // The default seed is selected to be a large number
 // with good distribution of 0s and 1s in bit representation
@@ -82,7 +63,7 @@ struct CAFFE2_API Generator {
   Generator& operator=(const Generator& other) = delete;
 
   virtual ~Generator() = default;
-  std::unique_ptr<Generator> clone() const;
+  std::shared_ptr<Generator> clone() const;
 
   // Common methods for all generators
   virtual void set_current_seed(uint64_t seed) = 0;
@@ -92,7 +73,7 @@ struct CAFFE2_API Generator {
   // stubbed. will be removed
   virtual Generator& manualSeedAll(uint64_t seed);
   
-  // See Note [Thread-safety and Generators]
+  // See Note [Acquire lock when using random generators]
   std::mutex mutex_;
 
   private:

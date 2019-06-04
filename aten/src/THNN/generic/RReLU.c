@@ -15,8 +15,8 @@ void THNN_(RReLU_updateOutput)(
           bool inplace,
           at::Generator *generator)
 {
-  auto gen = at::check_generator_with_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator());
-  // See Note [Thread-safety and Generators]
+  auto gen = at::get_generator_or_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
   scalar_t lower = TH_CONVERT_ACCREAL_TO_REAL(lower_);

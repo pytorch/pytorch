@@ -61,7 +61,7 @@ TEST(TestScalar, TestScalar) {
        << bar.toDouble() << " " << what.isIntegral() << "\n";
   auto gen = at::detail::getDefaultCPUGenerator();
   {
-    // See Note [Thread-safety and Generators]
+    // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     ASSERT_NO_THROW(gen->set_current_seed(std::random_device()()));
   }

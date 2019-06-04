@@ -247,7 +247,7 @@ static inline bool hasMKLDNN() {
 static inline void manual_seed(uint64_t seed) {
   auto gen = detail::getDefaultCPUGenerator();
   {
-    // See Note [Thread-safety and Generators]
+    // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     gen->set_current_seed(seed);
   }
