@@ -3725,8 +3725,9 @@ def foo(x):
         scripted = torch.jit.script(foobar)
 
         _, lineno = inspect.getsourcelines(foobar)
-        FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))\
-                   .run(scripted.graph)
+        fc = FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))
+        fc.run(scripted.graph)
+        fc.run(str(scripted.graph))
 
     def test_file_line_save_load(self):
         class Scripted(torch.jit.ScriptModule):
@@ -3743,7 +3744,9 @@ def foo(x):
         bytesio = io.BytesIO(buffer)
         scripted = torch.jit.load(bytesio)
 
-        FileCheck().check('code/archive.py:4:10').run(scripted.graph)
+        fc = FileCheck().check('code/archive.py:4:10')
+        fc.run(scripted.graph)
+        fc.run(str(scripted.graph))
 
     def test_file_line_string(self):
         scripted = torch.jit.CompilationUnit('''
@@ -3751,7 +3754,9 @@ def foo(xyz):
     return torch.neg(xyz)
         ''')
 
-        FileCheck().check('<string>:2:12').run(scripted.foo.graph)
+        fc = FileCheck().check('<string>:2:12')
+        fc.run(scripted.foo.graph)
+        fc.run(str(scripted.foo.graph))
 
     def test_file_line_trace(self):
         def foobar(xyz):
@@ -3760,8 +3765,9 @@ def foo(xyz):
         scripted = torch.jit.trace(foobar, (torch.rand(3, 4)))
 
         _, lineno = inspect.getsourcelines(foobar)
-        FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))\
-                   .run(scripted.graph)
+        fc = FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))
+        fc.run(scripted.graph)
+        fc.run(str(scripted.graph))
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)

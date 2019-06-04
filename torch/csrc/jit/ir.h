@@ -1188,7 +1188,7 @@ struct Graph {
 
   TORCH_API ~Graph();
 
-  TORCH_API std::string toString(bool print_source_locations=false) const;
+  TORCH_API std::string toString(bool print_source_locations = true) const;
 
   TORCH_API std::ostream& print(
       std::ostream& out,
