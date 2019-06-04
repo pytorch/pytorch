@@ -346,7 +346,7 @@ using ResizeNearestOpFloatCPU =
     caffe2::ResizeNearestOp<float, caffe2::CPUContext>;
 
 // clang-format off
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     ResizeNearest,
     "_caffe2::ResizeNearest("
       "Tensor X, "

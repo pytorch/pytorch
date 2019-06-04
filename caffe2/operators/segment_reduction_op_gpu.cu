@@ -1840,6 +1840,6 @@ using LengthsMeanCUDAOp =
 using LengthsMaxCUDAOp =
     caffe2::CUDASparseLengthsMaxOp<float, caffe2::CUDAContext, false>;
 
-C10_REGISTER_CAFFE2_OPERATOR_CUDA(LengthsSum, LengthsSumCUDAOp);
-C10_REGISTER_CAFFE2_OPERATOR_CUDA(LengthsMean, LengthsMeanCUDAOp);
-C10_REGISTER_CAFFE2_OPERATOR_CUDA(LengthsMax, LengthsMaxCUDAOp);
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(LengthsSum, LengthsSumCUDAOp);
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(LengthsMean, LengthsMeanCUDAOp);
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(LengthsMax, LengthsMaxCUDAOp);

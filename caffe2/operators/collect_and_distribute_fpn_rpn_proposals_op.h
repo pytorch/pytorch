@@ -1,15 +1,15 @@
 #ifndef CAFFE2_OPERATORS_COLLECT_AND_DISTRIBUTE_FPN_RPN_PROPOSALS_OP_H_
 #define CAFFE2_OPERATORS_COLLECT_AND_DISTRIBUTE_FPN_RPN_PROPOSALS_OP_H_
 
-#include "caffe2/core/c10_operator.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
-C10_DECLARE_CAFFE2_OPERATOR(CollectAndDistributeFpnRpnProposals);
-C10_DECLARE_CAFFE2_OPERATOR(CollectRpnProposals);
-C10_DECLARE_CAFFE2_OPERATOR(DistributeFpnProposals);
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(CollectAndDistributeFpnRpnProposals);
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(CollectRpnProposals);
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(DistributeFpnProposals);
 
 namespace caffe2 {
 

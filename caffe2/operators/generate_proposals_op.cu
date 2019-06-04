@@ -672,6 +672,6 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
 REGISTER_CUDA_OPERATOR(GenerateProposals, GenerateProposalsOp<CUDAContext>);
 } // namespace caffe2
 
-C10_REGISTER_CAFFE2_OPERATOR_CUDA(
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(
     GenerateProposals,
     caffe2::GenerateProposalsOp<caffe2::CUDAContext>);

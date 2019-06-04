@@ -169,4 +169,4 @@ REGISTER_CUDA_OPERATOR(
 using ResizeNearestOpFloatCUDA =
     caffe2::ResizeNearestOp<float, caffe2::CUDAContext>;
 
-C10_REGISTER_CAFFE2_OPERATOR_CUDA(ResizeNearest, ResizeNearestOpFloatCUDA);
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(ResizeNearest, ResizeNearestOpFloatCUDA);

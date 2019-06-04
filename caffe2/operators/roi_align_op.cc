@@ -376,7 +376,7 @@ Region of Interest (RoI) align operation as used in Mask R-CNN.
 
 using RoIAlignOpFloatCPU = caffe2::RoIAlignOp<float, caffe2::CPUContext>;
 
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     RoIAlign,
     "_caffe2::RoIAlign("
       "Tensor features, "

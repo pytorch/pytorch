@@ -15,7 +15,7 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 
 C10_DEFINE_int(
     caffe2_operator_max_engine_name_length,

@@ -6,9 +6,9 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/c10_operator.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 
-C10_DECLARE_CAFFE2_OPERATOR(RoIAlign)
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(RoIAlign)
 
 namespace caffe2 {
 
