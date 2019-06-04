@@ -228,7 +228,7 @@ endif()
 
 
 
-if (NOT INTERN_BUILD_MOBILE)
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -557,7 +557,7 @@ target_link_libraries(torch caffe2)
 # formerly-libtorch flags
 # ==========================================================
 
-if (NOT INTERN_BUILD_MOBILE)
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   # Forces caffe2.pb.h to be generated before its dependents are compiled.
   # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
