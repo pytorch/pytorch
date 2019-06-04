@@ -156,6 +156,8 @@ def arg_to_type_hint(arg):
                 default = '(' + default[1:-1] + ')'
             else:
                 raise Exception("Unexpected default constructor argument of type {}".format(arg['dynamic_type']))
+        elif default == 'QScheme::PER_TENSOR_AFFINE':
+            default = 'per_tensor_affine'
         default = '={}'.format(default)
     else:
         default = ''
