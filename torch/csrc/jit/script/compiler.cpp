@@ -2636,12 +2636,11 @@ struct to_ir {
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
     if (input->type()->cast<TupleType>()) {
-
       auto has_step = slice.step().present();
-      // TODO: add support for slicing tuples
       if (has_step)
       {
-        throw ErrorReport(loc) << "Unsupported operation: slicing tuples isn't supported";
+        // TODO: add support for slicing tuples with a step
+        throw ErrorReport(loc) << "Unsupported operation: slicing tuples with a step isn't supported";
       }
 
       if (has_end) {
@@ -2651,11 +2650,11 @@ struct to_ir {
       }
     }
 
-    auto stride = emitExpr(Expr(slice.stepOr(1)));
-    NamedValue step =
-        NamedValue(loc, "step", stride);
+    auto step = emitExpr(Expr(slice.stepOr(1)));
+    NamedValue step_nv =
+        NamedValue(loc, "step", step);
     return emitBuiltinCall(
-        loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
+        loc, *graph, aten::slice, c10::nullopt, args, {step_nv}, true);
   }
 
   Value* emitUnsqueeze(const SourceRange& loc, Value* input, int64_t dim) {
