@@ -662,7 +662,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     const auto& state = tracer::getTracingState();
     auto inputs = last(stack, num_inputs);
     auto input_values = fmap(
-        inputs, [](const IValue& v) { return tracer::getNestedValueTrace(v); });
+        inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
 
     ArgumentSpec spec =
         arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
