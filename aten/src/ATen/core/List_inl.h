@@ -51,23 +51,14 @@ namespace detail {
   T list_element_to(IValue&& element) {
     return std::move(element).template to<T>();
   }
-  template<class T, class Enable = void> struct list_element_from final {};
-  template<class T> struct list_element_from<T, guts::enable_if_t<std::is_same<IValue, typename ListPtr<T>::StorageT>::value>> final {
-    static IValue call(const T& element) {
-      return element;
-    }
-    static IValue call(T&& element) {
-      return std::move(element);
-    }
-  };
-  template<class T> struct list_element_from<T, guts::enable_if_t<!std::is_same<IValue, typename ListPtr<T>::StorageT>::value>> final {
-    static T call(const T& element) {
-      return element;
-    }
-    static T call(T&& element) {
-      return std::move(element);
-    }
-  };
+  template<class T, class StorageT>
+  StorageT list_element_from(const T& element) {
+    return element;
+  }
+  template<class T, class StorageT>
+  StorageT list_element_from(T&& element) {
+    return std::move(element);
+  }
 }
 
 namespace impl {
@@ -78,13 +69,13 @@ ListElementReference<T, Iterator, StorageT>::operator T() && {
 
 template<class T, class Iterator, class StorageT>
 ListElementReference<T, Iterator, StorageT>& ListElementReference<T, Iterator, StorageT>::operator=(T&& new_value) && {
-  *iterator_ = detail::list_element_from<T>::call(std::move(new_value));
+  *iterator_ = detail::list_element_from<T, StorageT>(std::move(new_value));
   return *this;
 }
 
 template<class T, class Iterator, class StorageT>
 ListElementReference<T, Iterator, StorageT>& ListElementReference<T, Iterator, StorageT>::operator=(const T& new_value) && {
-  *iterator_ = detail::list_element_from<T>::call(std::move(new_value));
+  *iterator_ = detail::list_element_from<T, StorageT>(std::move(new_value));
   return *this;
 }
 
@@ -102,12 +93,12 @@ void swap(ListElementReference<T, Iterator, StorageT>&& lhs, ListElementReferenc
 
 template<class T>
 void ListPtr<T>::set(size_type pos, const value_type& value) const {
-  impl_->list.at(pos) = detail::list_element_from<T>::call(value);
+  impl_->list.at(pos) = detail::list_element_from<T, StorageT>(value);
 }
 
 template<class T>
 void ListPtr<T>::set(size_type pos, value_type&& value) const {
-  impl_->list.at(pos) = detail::list_element_from<T>::call(std::move(value));
+  impl_->list.at(pos) = detail::list_element_from<T, StorageT>(std::move(value));
 }
 
 template<class T>
@@ -126,7 +117,7 @@ template<class T>
 typename ListPtr<T>::value_type ListPtr<T>::extract(size_type pos) const {
   auto& elem = impl_->list.at(pos);
   auto result = detail::list_element_to<T>(std::move(elem));
-  elem = detail::list_element_from<T>::call(T{});
+  elem = detail::list_element_from<T, StorageT>(T{});
   return result;
 }
 
@@ -162,12 +153,12 @@ void ListPtr<T>::clear() const {
 
 template<class T>
 typename ListPtr<T>::iterator ListPtr<T>::insert(iterator pos, const T& value) const {
-  return iterator { impl_->list.insert(pos.iterator_, detail::list_element_from<T>::call(value)) };
+  return iterator { impl_->list.insert(pos.iterator_, detail::list_element_from<T, StorageT>(value)) };
 }
 
 template<class T>
 typename ListPtr<T>::iterator ListPtr<T>::insert(iterator pos, T&& value) const {
-  return iterator { impl_->list.insert(pos.iterator_, detail::list_element_from<T>::call(std::move(value))) };
+  return iterator { impl_->list.insert(pos.iterator_, detail::list_element_from<T, StorageT>(std::move(value))) };
 }
 
 template<class T>
@@ -179,12 +170,12 @@ typename ListPtr<T>::iterator ListPtr<T>::emplace(iterator pos, Args&&... value)
 
 template<class T>
 void ListPtr<T>::push_back(const T& value) const {
-  impl_->list.push_back(detail::list_element_from<T>::call(value));
+  impl_->list.push_back(detail::list_element_from<T, StorageT>(value));
 }
 
 template<class T>
 void ListPtr<T>::push_back(T&& value) const {
-  impl_->list.push_back(detail::list_element_from<T>::call(std::move(value)));
+  impl_->list.push_back(detail::list_element_from<T, StorageT>(std::move(value)));
 }
 
 template<class T>
