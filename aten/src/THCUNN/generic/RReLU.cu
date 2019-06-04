@@ -23,7 +23,6 @@ void THNN_(RReLU_updateOutput)(
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
   THCGenerator* gen = THCRandom_getGenerator(state);
-  curandStateMtgp32* gen_states = THCRandom_generatorStates(state);
 
   if (train)
   {
