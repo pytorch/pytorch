@@ -215,7 +215,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
     {
       // sometimes an large index isn't added to J.
       // fix it by making the probability 1 so that J isn't indexed.
-      if(J_data[i] <= 0)
+      if(J_data[i] < 0)
         q_data[i] = 1.0;
     }
   THLongTensor_free(smaller);
