@@ -422,6 +422,37 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   }
   return value->call(loc, caller, inputs, attributes, n_binders);
 }
+
+
+std::shared_ptr<SugaredValue> NamedTupleValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+
+    auto fields = named_tuple_.attr("_fields");
+    std::vector<std::string> field_names;
+    std::vector<Value*> values;
+    field_names.reserve(inputs.size());
+
+    for (auto field : fields) {
+      std::string field_name = py::str(field);
+      field_names.emplace_back(field_name);
+    }
+
+    for (auto in : inputs) {
+      values.emplace_back(in.value(*caller.graph().get()));
+    }
+
+    AT_CHECK(field_names.size() == inputs.size(), "Mismatched inputs to namedtuple");
+
+    auto tuple = caller.graph()->createTuple(values, field_names);
+    caller.graph()->insertNode(tuple);
+    return std::make_shared<SimpleValue>(tuple->output());
+}
+
+
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
@@ -517,6 +548,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(callee);
     }
+  }
+
+  if (py::module::import("torch.jit").attr("_is_named_tuple")(obj)) {
+    return std::make_shared<NamedTupleValue>(obj);
   }
 
   return std::make_shared<PythonValue>(obj);

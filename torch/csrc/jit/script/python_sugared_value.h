@@ -192,6 +192,25 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
   py::dict dispatched_fn_;
 };
 
+struct VISIBILITY_HIDDEN NamedTupleValue : public SugaredValue {
+  NamedTupleValue(py::object named_tuple)
+      : named_tuple_(std::move(named_tuple)) {}
+
+  std::string kind() const override {
+    return "named tuple";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+ private:
+  py::object named_tuple_;
+};
+
 TORCH_API bool& getRecursiveScriptMode();
 
 } // namespace script

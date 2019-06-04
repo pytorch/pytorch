@@ -13148,6 +13148,20 @@ a")
         t = torch.ones(2, 2)
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
 
+    def test_named_tuple(self):
+        import collections
+        Point = collections.namedtuple("Point", ['x', 'y'])
+
+        with self.disableEmitHook():
+            with torch.jit._enable_recursive_script():
+                @torch.jit.script
+                def fn():
+                    return Point(2, 3)
+                # return Point(x=2, y=3)
+
+            print(fn.graph)
+            print(fn())
+
     def test_module_recursive(self):
         class Other(torch.nn.Module):
             __constants__ = ['x']

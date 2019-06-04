@@ -953,6 +953,9 @@ def _try_compile_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
 
+    if not hasattr(fn, '__code__'):
+        return None
+
     # We don't have the actual scope where the function was defined, but we can
     # extract the necessary info from the closed over variables on the function
     # object
@@ -972,6 +975,10 @@ def _create_method_from_fn(module, fn):
 def _is_new_style_class(cls):
     if hasattr(cls, '__class__'):
         return ('__dict__' in dir(cls) or hasattr(cls, '__slots__'))
+
+
+def _is_named_tuple(obj):
+    return issubclass(obj, tuple) and hasattr(obj, '_fields')
 
 
 def whichmodule(obj):
