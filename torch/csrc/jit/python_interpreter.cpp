@@ -12,7 +12,6 @@
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_ir.h>
 
-#include <iostream>
 #include <typeinfo>
 
 #include <torch/csrc/Exceptions.h>
@@ -54,11 +53,8 @@ Operation createPythonOperation(const Node* op_) {
       if (arg_type == 'c') {
         py_inputs[i] = py::reinterpret_borrow<const py::object>(
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-            const_cast<ConcretePythonOp*>(op)
-                ->scalar_args[next_scalar++]
-                .get());
+            const_cast<ConcretePythonOp*>(op)->scalar_args[next_scalar++].get());
       } else if (arg_type == 'd') {
-        std::cout << "Creating 58" << std::endl;
         py_inputs[i] =
             toPyObject(std::move(peek(stack, next_tensor, num_inputs)));
         next_tensor++;

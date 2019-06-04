@@ -41,7 +41,6 @@
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/init.h>
 #include <torch/csrc/jit/python_ir.h>
-#include <torch/csrc/jit/custom_class.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 
@@ -618,7 +617,6 @@ PyObject* initModule() {
   };
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
 #endif
-  // torch::jit::object = module;
   ASSERT_TRUE(THPWrapper_init(module));
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));

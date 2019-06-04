@@ -95,7 +95,6 @@ struct PythonResolver : public Resolver {
       return classType_;
     }
     AutoGIL ag;
-
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
       return nullptr;
@@ -374,7 +373,6 @@ void initJitScriptBindings(PyObject* module) {
               auto& buffer = attributes[i];
               py::tuple r(3);
               IValue v = buffer.value();
-              std::cout << "Creating 377" << std::endl;
               result[i] = std::make_tuple(
                   buffer.name(), buffer.type(), toPyObject(std::move(v)));
             }
@@ -559,9 +557,12 @@ void initJitScriptBindings(PyObject* module) {
         PythonPrint(ss, self.function(), true, tensors, classes, false);
         return ss.str();
       });
-  m.def("_jit_recursive_script", [](bool recurse) {
-    getRecursiveScriptMode() = recurse;
-  });
+  m.def(
+      "_jit_recursive_script",
+      []() { return getRecursiveScriptMode(); });
+  m.def(
+      "_jit_recursive_script",
+      [](bool recurse) { getRecursiveScriptMode() = recurse; });
   m.def(
       "_jit_script_compile",
       [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
@@ -612,7 +613,7 @@ void initJitScriptBindings(PyObject* module) {
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {
-    Parser p(comment);
+    Parser p(std::make_shared<Source>(comment));
     return Decl(p.parseTypeComment());
   });
 
@@ -656,7 +657,7 @@ void initJitScriptBindings(PyObject* module) {
         import_functions(
             CompilationUnit::_get_python_cu_const(),
             cu,
-            src,
+            std::make_shared<Source>(src),
             constant_table,
             self,
             nullptr);

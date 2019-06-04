@@ -2,11 +2,11 @@
 
 #include <torch/csrc/python_headers.h>
 
-#include <ATen/core/interned_strings.h>
-#include <ATen/core/ivalue.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/variable.h>
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/pybind.h>
@@ -38,9 +38,7 @@ struct type_caster<torch::jit::IValue> {
       torch::jit::IValue src,
       return_value_policy /* policy */,
       handle /* parent */) {
-    std::cout << (src.tagKind()) << std::endl;
-    auto res = torch::jit::toPyObject(std::move(src)).release();
-    return res;
+    return torch::jit::toPyObject(std::move(src)).release();
   }
 };
 
