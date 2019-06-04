@@ -26,6 +26,9 @@ set -- "${UNKNOWN[@]}" # leave UNKNOWN
 pip install pytest scipy hypothesis
 # JIT C++ extensions require ninja.
 pip install ninja --user
+# ninja is installed in /var/lib/jenkins/.local/bin
+export PATH="/var/lib/jenkins/.local/bin:$PATH"
+
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi
