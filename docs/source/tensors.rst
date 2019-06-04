@@ -148,7 +148,7 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: device
    .. autoattribute:: grad
    .. autoattribute:: ndim
-   .. autoattribute:: asdf 
+   .. autoattribute:: T 
 
    .. automethod:: abs
    .. automethod:: abs_

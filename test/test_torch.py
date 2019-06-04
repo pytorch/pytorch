@@ -11648,7 +11648,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         c = torch.randn(1, 0)
         self.assertEqual(2, c.ndim)
 
-    def test_asdf(self):
+    def test_T(self):
         a = torch.randn(2, 3, 4)
         t1 = a.asdf
         t2 = a.permute(2, 1, 0)

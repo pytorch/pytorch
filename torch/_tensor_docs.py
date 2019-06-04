@@ -3188,10 +3188,10 @@ add_docstr_all('ndim',
 Alias for :meth:`~Tensor.dim()`
 """)
 
-add_docstr_all('asdf',
+add_docstr_all('T',
                r"""
 Is this Tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
-``x.asdf`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
+``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 """)
