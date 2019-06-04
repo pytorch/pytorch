@@ -38,7 +38,7 @@ class RNNBase(Module):
         self.num_layers = num_layers
         self.bias = bias
         self.batch_first = batch_first
-        self.dropout = dropout
+        self.dropout = float(dropout)
         self.bidirectional = bidirectional
         num_directions = 2 if bidirectional else 1
 

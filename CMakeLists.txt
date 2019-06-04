@@ -194,7 +194,6 @@ endif()
 # TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
 if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(BUILD_PYTHON OFF)
-  set(BUILD_TORCH ON)
   set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
   set(FEATURE_TORCH_MOBILE ON)

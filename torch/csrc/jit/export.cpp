@@ -181,6 +181,8 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
       return onnx::TensorProto_DataType_INT32;
     case at::kLong:
       return onnx::TensorProto_DataType_INT64;
+    case at::kBool:
+      return onnx::TensorProto_DataType_BOOL;
     default:
       AT_ERROR("unexpected tensor scalar type");
   }
@@ -206,19 +208,20 @@ void EncoderBase::EncodeValueInfo(
     onnx::ValueInfoProto* v,
     const Value* n) {
   v->set_name(n->uniqueName());
-  onnx::TypeProto* t = v->mutable_type();
-  onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
-
-  onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
   if (CompleteTensorTypePtr node_type = n->type()->cast<CompleteTensorType>()) {
+    onnx::TypeProto* t = v->mutable_type();
+    onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
+    onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
     const std::vector<std::int64_t>& sizes = node_type->sizes();
     for (size_t i = 0; i < sizes.size(); i++) {
       shape->add_dim();
       shape->mutable_dim(i)->set_dim_value(sizes[i]);
     }
     tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
-  } else {
-    tensor_type->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
+  } else if (BoolTypePtr node_type = n->type()->cast<BoolType>()) {
+    onnx::TypeProto* t = v->mutable_type();
+    onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
+    tensor_type->set_elem_type(ATenTypeToOnnxType(at::kBool));
   }
 }
 
