@@ -16250,7 +16250,7 @@ class TestClassType(JitTestCase):
                      _or, _xor]:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegex(RuntimeError, "because it does not  define a __add__"):
+        with self.assertRaisesRegex(RuntimeError, "__add__ method"):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
