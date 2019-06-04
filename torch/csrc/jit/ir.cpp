@@ -201,11 +201,11 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
 }
 
 SourceRange Node::sourceRange() const {
- if(source_range_) {
-   return *source_range_;
- }
- std::stringstream ss;
- return SourceRange(ss.str());
+  if (source_range_) {
+    return *source_range_;
+  }
+  std::stringstream ss;
+  return SourceRange(ss.str());
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
@@ -236,7 +236,6 @@ std::ostream& Node::print(
 
       groups->push_back(this);
     } else {
-
       out << kind().toQualString();
       if (hasAttributes()) {
         printAttributes(out);
@@ -1426,6 +1425,19 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
 
   const auto outputType = classType->getAttribute(field);
   n->output()->setType(outputType);
+  return n;
+}
+
+Node* Graph::createStore(const std::string& name, Value* v) {
+  auto n = create(prim::Store, {v}, /*num_outputs*/ 0);
+  n->s_(attr::name, name);
+  return n;
+}
+
+Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
+  auto n = create(prim::Load, {}, /*num_outputs*/ 1);
+  n->s_(attr::name, name);
+  n->output()->setType(type)->setUniqueName(name);
   return n;
 }
 

@@ -18,6 +18,8 @@ namespace {
 std::unordered_set<Symbol> skip_list = {
     prim::If,
     prim::Loop,
+    prim::Function,
+    prim::forkClosure,
     prim::Constant,
     prim::AutogradZero,
     prim::unchecked_unwrap_optional, // TODO remove
@@ -63,7 +65,6 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-
     auto new_output = tryInsertConstant(*graph, outputs[i]);
     if (new_output) {
       if (outputs[i].isNone()) {

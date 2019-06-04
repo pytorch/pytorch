@@ -1092,6 +1092,8 @@ struct Graph {
   TORCH_API Value* insertGetAttr(Value* obj, const std::string& field) {
     return insertNode(createGetAttr(obj, field))->output();
   }
+  TORCH_API Node* createStore(const std::string& name, Value* v);
+  TORCH_API Node* createLoad(const std::string& name, const TypePtr& type);
 
   // Note: defined in python_ir.cpp and can be used only in python extension
   Node* createPythonOp(
@@ -1176,7 +1178,7 @@ struct Graph {
 
   TORCH_API ~Graph();
 
-  TORCH_API std::string toString(bool print_source_locations=false) const;
+  TORCH_API std::string toString(bool print_source_locations = false) const;
 
   TORCH_API std::ostream& print(
       std::ostream& out,
