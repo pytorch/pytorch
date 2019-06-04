@@ -1241,7 +1241,7 @@ class CAFFE2_API ATenDispatch {
       {"aten::thnn_im2col(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor", 1171},
       {"aten::thnn_im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor", 1172},
     };
-    return schema_to_id[schema];
+    return schema_to_id.at(schema);
   }
 
   void* function_table[static_cast<int64_t>(Backend::NumOptions)][1173];
