@@ -4,6 +4,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/CheckGenerator.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 #include <ATen/${Generator}.h>
 #include <ATen/ExpandUtils.h>
 ${th_headers}
