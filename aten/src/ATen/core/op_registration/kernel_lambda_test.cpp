@@ -159,10 +159,10 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithTensorListOutput
 
   auto result = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), dummyTensor(TensorType1()));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(3, result[0].toTensorList().size());
-  EXPECT_EQ(TensorType1(), result[0].toTensorList().get(0).type_id());
-  EXPECT_EQ(TensorType2(), result[0].toTensorList().get(1).type_id());
-  EXPECT_EQ(TensorType1(), result[0].toTensorList().get(2).type_id());
+  EXPECT_EQ(3, result[0].toTensorListRef().size());
+  EXPECT_EQ(TensorType1(), result[0].toTensorList()[0].type_id());
+  EXPECT_EQ(TensorType2(), result[0].toTensorList()[1].type_id());
+  EXPECT_EQ(TensorType1(), result[0].toTensorList()[2].type_id());
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListOutput_whenRegistered_thenCanBeCalled) {
@@ -175,10 +175,10 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithIntListOutput_wh
 
   auto result = callOp(*op, dummyTensor(TensorType1()), 2, 4, 6);
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(3, result[0].toIntList().size());
-  EXPECT_EQ(2, result[0].toIntList().get(0));
-  EXPECT_EQ(4, result[0].toIntList().get(1));
-  EXPECT_EQ(6, result[0].toIntList().get(2));
+  EXPECT_EQ(3, result[0].toIntListRef().size());
+  EXPECT_EQ(2, result[0].toIntList()[0]);
+  EXPECT_EQ(4, result[0].toIntList()[1]);
+  EXPECT_EQ(6, result[0].toIntList()[2]);
 }
 
 TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
@@ -204,9 +204,9 @@ TEST(OperatorRegistrationTest_LambdaBasedKernel, givenKernelWithMultipleOutputs_
   EXPECT_EQ(5, result.size());
   EXPECT_EQ(TensorType2(), result[0].toTensor().type_id());
   EXPECT_EQ(5, result[1].toInt());
-  EXPECT_EQ(2, result[2].toTensorList().size());
-  EXPECT_EQ(TensorType1(), result[2].toTensorList().get(0).type_id());
-  EXPECT_EQ(TensorType2(), result[2].toTensorList().get(1).type_id());
+  EXPECT_EQ(2, result[2].toTensorListRef().size());
+  EXPECT_EQ(TensorType1(), result[2].toTensorList()[0].type_id());
+  EXPECT_EQ(TensorType2(), result[2].toTensorList()[1].type_id());
   EXPECT_EQ(0, result[3].toInt());
   auto result_dict = c10::impl::toTypedDict<string, Tensor>(result[4].toGenericDict());
   EXPECT_EQ(2, result_dict.size());

@@ -766,8 +766,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (num_outputs == 1) {
         push(stack, future->value());
       } else {
-        auto tuple = future->value().toTuple();
-        for (const IValue& value : tuple.elements()) {
+        auto tuple = future->value().toTupleRef();
+        for (const IValue& value : tuple) {
           push(stack, value);
         }
       }

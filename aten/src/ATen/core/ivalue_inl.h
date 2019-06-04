@@ -414,7 +414,7 @@ std::vector<Elem> generic_to(
   // We need to do a deep copy of the vector because there might be other
   // references to this same IValue that also use the list. We can't just
   // move the elements out.
-  return fmap(std::move(ivalue).to<ListPtr<Elem>>(), [](IValue item_ivalue) { return std::move(item_ivalue).to<Elem>(); });
+  return fmap(ivalue.toGenericListRef(), [](IValue item_ivalue) { return std::move(item_ivalue).to<Elem>(); });
 }
 
 template <typename Elem>

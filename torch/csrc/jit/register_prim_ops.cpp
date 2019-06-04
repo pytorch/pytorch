@@ -516,8 +516,7 @@ RegisterOperators reg(
            int64_t raw_dim = node->i(attr::dim);
            int64_t chunks = node->i(attr::chunks);
            return [raw_dim, chunks](Stack& stack) {
-             c10::ListPtr<int64_t> shape = c10::make_list<int64_t>();
-             pop(stack, shape);
+             c10::ListPtr<int64_t> shape = pop(stack).toIntList();
              c10::ListPtr<int64_t> regular_shape = shape.copy();
              c10::ListPtr<int64_t> last_shape = shape.copy();
              int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
@@ -685,16 +684,15 @@ RegisterOperators reg(
          [](const Node* node) {
            size_t num_elems = node->outputs().size();
            return [=](Stack& stack) {
-             auto tuple = pop(stack).toTuple();
-             auto& elems = tuple.elements();
-             if (elems.size() != num_elems) {
+             auto tuple = pop(stack).toTupleRef();
+             if (tuple.size() != num_elems) {
                AT_ERROR(
                    "Expected a tuple of ",
                    num_elems,
                    " elements, but got ",
-                   elems.size());
+                   tuple.size());
              }
-             stack.insert(stack.end(), elems.begin(), elems.end());
+             stack.insert(stack.end(), tuple.begin(), tuple.end());
              return 0;
            };
          }),
@@ -704,11 +702,10 @@ RegisterOperators reg(
            int64_t beg_ind = node->i(attr::beg);
            int64_t end_ind = node->i(attr::end);
            return [=](Stack& stack) {
-             auto tuple = pop(stack).toTuple();
-             auto& elems = tuple.elements();
+             auto tuple = pop(stack).toTupleRef();
              c10::impl::GenericListPtr output_elems = c10::impl::make_generic_list();
              for (int64_t i = beg_ind; i < end_ind; ++i) {
-               output_elems.emplace_back(elems.get(i));
+               output_elems.emplace_back(tuple[i]);
              }
              push(stack, c10::ivalue::TuplePtr::create(std::move(output_elems)));
              return 0;
@@ -719,14 +716,13 @@ RegisterOperators reg(
          [](const Node* node) {
            return [](Stack& stack) {
              int64_t index = pop(stack).toInt();
-             auto tuple = pop(stack).toTuple();
-             auto& elems = tuple.elements();
-             auto norm_index = normalizeIndex(index, elems.size());
+             auto tuple = pop(stack).toTupleRef();
+             auto norm_index = normalizeIndex(index, tuple.size());
              if (norm_index < 0 ||
-                 norm_index > static_cast<int64_t>(elems.size())) {
+                 norm_index > static_cast<int64_t>(tuple.size())) {
                throw std::out_of_range("Tuple list index out of range");
              }
-             stack.emplace_back(elems.get(norm_index));
+             stack.emplace_back(tuple[norm_index]);
              return 0;
            };
          }),
@@ -1547,8 +1543,7 @@ int listSort(Stack& stack) {
 // Specialization for at::Tensor
 template <>
 int listSort<at::Tensor>(Stack& stack) {
-  c10::ListPtr<at::Tensor> list = c10::make_list<at::Tensor>();
-  pop(stack, list);
+  c10::ListPtr<at::Tensor> list = pop(stack).toTensorList();
   std::sort(
       list.begin(),
       list.end(),
@@ -2145,8 +2140,7 @@ RegisterOperators reg2({
     Operator(
         "aten::_list_to_tensor(int[] self) -> Tensor",
         [](Stack& stack) {
-          c10::ListPtr<int64_t> l = c10::make_list<int64_t>();
-          pop(stack, l);
+          c10::ListPtr<int64_t> l = pop(stack).toIntList();
           auto t = torch::empty(
               {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
           for (size_t i = 0; i < l.size(); i++) {

@@ -156,7 +156,7 @@ Value* getNestedValueTrace(const IValue& v) {
   } else if (v.isTuple()) {
     return state->graph
         ->insertNode(state->graph->createTuple(fmap(
-            v.toTuple().elements(),
+            v.toTupleRef(),
             [](const IValue& val) { return getNestedValueTrace(val); })))
         ->output();
   }
@@ -189,9 +189,9 @@ Value* getNestedOutputTrace(
   if (iv.isTensor()) {
     return getOutputTrace(state, iv.toTensor());
   } else if (iv.isTuple()) {
-    const auto& tuple = iv.toTuple();
+    auto tuple = iv.toTupleRef();
     auto tuple_node =
-        state->graph->createTuple(fmap(tuple.elements(), [&state](const IValue& ival) {
+        state->graph->createTuple(fmap(tuple, [&state](const IValue& ival) {
           return getNestedOutputTrace(state, ival);
         }));
     state->graph->insertNode(tuple_node);
@@ -256,7 +256,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
     if (input.isTensorList()) {
       auto elems = input.toTensorList();
       for (size_t i = 0; i < num_elems; i++) {
-        elems.set(i, addInput(state, elems.get(i), list_type->getElementType(), unpack_outputs[i]).toTensor());
+        elems[i] = addInput(state, elems.get(i), list_type->getElementType(), unpack_outputs[i]).toTensor();
       }
       return elems;
     } else {
@@ -351,12 +351,11 @@ void setValueTrace(const IValue& v, Value* value) {
       setValueTrace(outputs.get(i), unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
-    auto outputs = v.toTuple();
-    auto& elems = outputs.elements();
+    auto outputs = v.toTupleRef();
     auto graph = getTracingState()->graph;
     Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
-    for (size_t i = 0; i < elems.size(); ++i) {
-      setValueTrace(elems.get(i), unpack_node->outputs()[i]);
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      setValueTrace(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isGenericList()) {
     auto elements = v.toGenericListRef();

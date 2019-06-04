@@ -734,7 +734,7 @@ inline vector<float> OperatorBase::GetVectorFromIValueList<float>(
   const auto& vs = value.toDoubleListRef();
   vector<float> out;
   out.reserve(vs.size());
-  for (const double& v : vs) {
+  for (double v : vs) {
     out.emplace_back(v);
   }
   return out;

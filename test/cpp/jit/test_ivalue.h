@@ -46,7 +46,7 @@ void testIValue() {
   IValue the_list(ivalue::TuplePtr::create({IValue(3.4), IValue(4), IValue(foo)}));
   ASSERT_EQ(foo.use_count(), 3);
   ASSERT_TRUE(the_list.isTuple());
-  auto first = std::move(the_list).toTuple().elements().get(1);
+  auto first = std::move(the_list).toTupleRef()[1];
   ASSERT_EQ(first.toInt(), 4);
   at::Tensor tv = at::rand({3, 4});
   IValue ten(tv);

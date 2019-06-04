@@ -481,9 +481,9 @@ void Pickler::pushGenericList(const IValue& ivalue) {
 void Pickler::pushTuple(const IValue& ivalue) {
   // TODO: Small tuple unrolling (e.g. TUPLE3)
   push<OpCode>(OpCode::MARK);
-  auto tuple = ivalue.toTuple();
+  auto tuple = ivalue.toTupleRef();
 
-  for (const IValue& item : tuple.elements()) {
+  for (const IValue& item : tuple) {
     addIValue(item);
   }
 
@@ -503,7 +503,7 @@ std::vector<IValue> Unpickler::parse_ivalue_list() {
     // TODO [unpickler refactor]
     return value.toGenericListRef().vec();
   }
-  return c10::impl::toVector(value.toTuple().elements());
+  return value.toTupleRef().vec();
 }
 
 double Unpickler::readFloat() {

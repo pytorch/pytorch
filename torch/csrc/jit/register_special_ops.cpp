@@ -182,8 +182,8 @@ RegisterOperators reg({
         [](Stack& stack) {
           RECORD_FUNCTION("sizes", last(stack, 2));
 
-          auto list = peek(stack, 0, 2).toIntList();
-          auto defaults = peek(stack, 1, 2).toIntList();
+          auto list = peek(stack, 0, 2).toIntList().copy();
+          auto defaults = peek(stack, 1, 2).toIntListRef();
           drop(stack, 2);
 
           AT_ASSERT(defaults.size() > list.size());

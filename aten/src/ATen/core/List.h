@@ -409,7 +409,6 @@ private:
   template<class T_> friend ListPtr<IValue> impl::toGenericList(ListPtr<T_>);
   friend const IValue* impl::ptr_to_first_element(const ListPtr<IValue>& list);
   template<class T_> friend ListPtr<T_> impl::toList(std::vector<T_> list);
-
   template<class T_> friend std::vector<T_> impl::toVector(const ListPtr<T_>& list);
 };
 

@@ -23,7 +23,6 @@ namespace jit {
 
 namespace script {
 namespace {
-
 struct SchemaParser {
   SchemaParser(const std::string& str)
       : L(std::make_shared<Source>(str)),

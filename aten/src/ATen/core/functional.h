@@ -33,24 +33,6 @@ inline auto fmap(T& inputs, const F& fn) -> std::vector<decltype(fn(*inputs.begi
   return r;
 }
 
-template<typename F, typename T>
-inline auto fmap(const c10::ListPtr<T>& inputs, const F& fn) -> std::vector<decltype(fn(inputs.get(0)))> {
-  std::vector<decltype(fn(inputs.get(0)))> r;
-  r.reserve(inputs.size());
-  for(T input : inputs)
-    r.push_back(fn(std::move(input)));
-  return r;
-}
-
-template<typename F, typename T>
-inline auto fmap(c10::ListPtr<T>& inputs, const F& fn) -> std::vector<decltype(fn(inputs.get(0)))> {
-  std::vector<decltype(fn(inputs.get(0)))> r;
-  r.reserve(inputs.size());
-  for(T input : inputs)
-    r.push_back(fn(std::move(input)));
-  return r;
-}
-
 // C++ forbids taking an address of a constructor, so here's a workaround...
 // Overload for constructor (R) application
 template<typename R, typename T>

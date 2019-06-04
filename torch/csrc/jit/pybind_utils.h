@@ -179,13 +179,13 @@ inline IValue toIValue(py::handle input) {
 }
 
 inline Stack toStack(const py::tuple& inputs) {
-  return c10::impl::toVector(toIValue(inputs).toTuple());
+  return toIValue(inputs).toTupleRef().vec();
 }
 
 inline TypedStack toTypedStack(const py::tuple& inputs) {
   auto info = toTypedIValue(inputs);
   return TypedStack(
-      c10::impl::toVector(info.ivalue().toTuple()), info.type()->expect<TupleType>());
+      info.ivalue().toTupleRef().vec(), info.type()->expect<TupleType>());
 }
 
 inline IValue toIValue(
