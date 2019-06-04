@@ -6001,29 +6001,34 @@ a")
                 except Exception as e:
                     resfs = e
                 if resf != resfs:
-                    try:
-                        if math.isnan(resf) and math.isnan(resfs):
-                            continue
-                    except Exception:
-                        pass
                     if isinstance(resf, Exception):
                         continue
-                    if abs(resf - resfs) < 1e-4:
+                    assert (type(resf) is type(resfs))
+                    if isinstance(resf, tuple) and (math.isnan(resf[0]) == math.isnan(resfs[0])):
                         continue
+                    if isinstance(resf, float) and math.isnan(resf) and math.isnan(resfs):
+                        continue
+                    if isinstance(resf, float) and abs(resf - resfs) < 1e-4:
+                        continue
+                    # if (isinstance(resf, tuple) )
                     raise AssertionError("Failed on {func_name} with inputs {a} {b}. Python: {resf}, Script: {resfs}".format(func_name=func_name, a=a, b=b, resf=resf, resfs=resfs))
 
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan"]
+        binary_float_ops = ["atan2", "fmod", "remainder", "copysign"]
         for op in unary_float_ops:
             checkMathWrap(op)
+        for op in binary_float_ops:
+            checkMathWrap(op, 2)
 
+        checkMath("modf", 1, ret_type="Tuple[float, float]")
         checkMathWrap("floor", ret_type="int")
         checkMathWrap("ceil", ret_type="int")
-        checkMathWrap("copysign", 2)
         checkMath("pow", 2, is_float=False, ret_type="int")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
             checkMathWrap("gcd", 2, is_float=False, ret_type="int")
+
 
 
     @unittest.skipIf(PY2, "Requires python 3")
