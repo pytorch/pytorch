@@ -45,7 +45,7 @@ class TestMkldnn(TestCase):
             with self.assertRaises(RuntimeError) as context:
                 torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cuda')).to_mkldnn()
         # some factory functions
-        for creator in [torch.empty, torch.ones, torch.zeros, torch.randn, torch.rand]:
+        for creator in [torch.ones, torch.zeros, torch.randn, torch.rand]:
             with self.assertRaises(RuntimeError) as context:
                 creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
 
@@ -289,6 +289,11 @@ class TestMkldnn(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
             x.data = x_mkldnn
 
+    def test_empty(self):
+        x1 = torch.empty(4, 5, 2, 3, dtype=torch.float32)
+        x2 = torch.empty(4, 5, 2, 3, dtype=torch.float32, layout=torch._mkldnn)
+        self.assertEqual(x1.size(), x2.to_dense().size())
+        self.assertEqual(x1.dtype, x2.to_dense().dtype)
 
 if __name__ == '__main__':
     run_tests()
