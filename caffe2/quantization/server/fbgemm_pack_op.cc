@@ -1,5 +1,6 @@
 #include "fbgemm_pack_op.h"
 
+#include "caffe2/core/tensor.h"
 #include "caffe2/core/tensor_int8.h"
 
 #include "caffe2_dnnlowp_utils.h"
@@ -570,9 +571,114 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
   return true;
 }
 
+bool Int8DNNLowpPackedWeightBlobShapeFunctions::IsSameMetaType(
+    TypeIdentifier id) {
+  return id == TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>() ||
+      id == TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>();
+}
+
+TypeIdentifier Int8DNNLowpPackedWeightBlobShapeFunctions::GetTypeMetaId(
+    const string& name) {
+  if (name == "FC") {
+    return TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>();
+  } else if (name == "Conv") {
+    return TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>();
+  } else {
+    CAFFE_THROW("Class type is not supported: ", name);
+    return TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>();
+  }
+}
+
+TypeMeta Int8DNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
+    const void* c) {
+  // There might be some problem if type if FC.
+  // We should use a different function.
+  const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
+  return (int8_tensor->original_tensor).dtype();
+}
+
+vector<int64_t>
+Int8DNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorInfo(
+    const void* c,
+    size_t* capacity,
+    DeviceOption* device) {
+  const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
+  return GetTensorInfo(&(int8_tensor->original_tensor), capacity, device);
+}
+
+void Int8DNNLowpPackedWeightBlobShapeFunctions::LoadInfoOfBlob(
+    const Blob* blob,
+    std::vector<float>* scale,
+    std::vector<float>* offset,
+    uint32_t* axis) {
+  scale->clear();
+  offset->clear();
+  const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
+      reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(blob->GetRaw());
+  const auto& qparams = int8_tensor->qparams;
+  for (const auto& qparam : qparams) {
+    scale->emplace_back(qparam.scale);
+    offset->emplace_back(static_cast<float>(qparam.zero_point));
+  }
+  *axis = 1;
+}
+
+void Int8DNNLowpPackedWeightBlobShapeFunctions::SetupExternalTensorDescriptor(
+    const Blob* blob,
+    std::vector<std::vector<uint64_t>>* shapes,
+    std::vector<std::vector<float>>* all_scales,
+    std::vector<std::vector<float>>* all_offsets,
+    ExternalTensorDescriptor* desc) {
+  const auto& dnntensor = blob->template Get<Int8ConvDNNLowPPackedWeightBlob>();
+  const Tensor& cpu_tensor = dnntensor.original_tensor;
+
+  if (cpu_tensor.template IsType<uint8_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_UINT8;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<uint8_t>());
+  } else if (cpu_tensor.template IsType<int32_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_INT32;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<int32_t>());
+  } else if (cpu_tensor.template IsType<int8_t>()) {
+    desc->dataType = kONNXIFI_DATATYPE_INT8;
+    desc->buffer = reinterpret_cast<uint64_t>(cpu_tensor.data<int8_t>());
+  } else {
+    CAFFE_THROW(
+        "Unsupported Int8ConvDNNLowPPackedWeightBlob type in ONNXIFI: ",
+        cpu_tensor.dtype().name());
+  }
+
+  desc->quantizationParams = dnntensor.qparams.size();
+  desc->quantizationAxis = 1;
+  std::vector<float> scales, offsets;
+  for (const auto v : dnntensor.qparams) {
+    scales.emplace_back(v.scale);
+    offsets.emplace_back(v.zero_point);
+  }
+  all_scales->push_back(scales);
+  all_offsets->push_back(offsets);
+  desc->scales = all_scales->back().data();
+  desc->biases = reinterpret_cast<int32_t*>(all_offsets->back().data());
+
+  // Set up dim and shape
+  const auto shape = cpu_tensor.sizes();
+  desc->dimensions = shape.size();
+  shapes->emplace_back(shape.cbegin(), shape.cend());
+  desc->shape = shapes->back().data();
+}
+
 // Explicitly register TypeMeta
 CAFFE_KNOWN_TYPE(Int8FCDNNLowPPackedWeightBlob);
 CAFFE_KNOWN_TYPE(Int8ConvDNNLowPPackedWeightBlob);
+
+// Register DNNLOWP Type in caffe2 core
+REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
+    (TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>()),
+    Int8DNNLowpPackedWeightBlobShapeFunctions);
+REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
+    (TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>()),
+    Int8DNNLowpPackedWeightBlobShapeFunctions);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCPackWeight,
