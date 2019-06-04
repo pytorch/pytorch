@@ -6085,7 +6085,6 @@ a")
             f_script = cu.func
             f = scope['func']
 
-
             if vals is None:
                 vals = float_vals if is_float else int_vals
                 vals = [(i, j) for i in vals for j in vals]
