@@ -147,17 +147,21 @@ class AliasDb {
   // NOTE: this only returns values directly written to, not aliases thereof
   //
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
-  ValueSet getWrites(Node* n, bool recurseBlocks = false) const;
-  void getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks = false) const;
-  void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
+  MemoryLocations getWrites(Node* n, bool recurseBlocks = false) const;
+  void getWritesImpl(Block* b, MemoryLocations& ret, bool recurseBlocks = false)
+      const;
+  void getWritesImpl(Node* n, MemoryLocations& ret, bool recurseBlocks = false)
+      const;
   // Do any nodes write to `v`s memory location?
   TORCH_API bool hasWriters(const Value* v) const;
   // Register the fact that `n` writes to `v`.
   void registerWrite(const Value* v, Node* n);
+  void registerWrite(const Element* e, Node* n);
   // Get all the values that `n` reads from.
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
-  ValueSet getReads(Node* n, bool recurseBlocks = false) const;
-  void getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
+  MemoryLocations getReads(Node* n, bool recurseBlocks = false) const;
+  void getReadsImpl(Node* n, MemoryLocations& ret, bool recurseBlocks = false)
+      const;
 
   /**
    * Wildcard methods
@@ -225,8 +229,8 @@ class AliasDb {
   /**
    * State for tracking write info.
    */
-  // Map of nodes to the values that they write to
-  ska::flat_hash_map<Node*, ValueSet> writeIndex_;
+  // Map of nodes to the memory locations that they write to
+  ska::flat_hash_map<Node*, MemoryLocations> writeIndex_;
   // Set of all memory locations that may have been written to.
   mutable MemoryLocations writeCache_;
   mutable bool isWriteCacheStale_ = true;
