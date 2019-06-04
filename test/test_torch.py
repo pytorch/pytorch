@@ -9034,6 +9034,11 @@ class _TestTorchMixin(object):
                     dst2 = tensor.nonzero()
                     dst3 = torch.LongTensor().to(device)
                     torch.nonzero(tensor, out=dst3)
+
+                    self.assertRaisesRegex(
+                        TypeError,
+                        "received an invalid combination of arguments",
+                        lambda: torch.nonzero(tensor, as_tuple=True, out=dst3))
                     if len(shape) == 1:
                         dst = []
                         for i in range(num_src):
