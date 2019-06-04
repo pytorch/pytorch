@@ -1,5 +1,5 @@
 # from newjit import *
-import newjit
+# import .newjit
 from newjit.test_jit import *
 import unittest
 # from common_utils import run_tests
