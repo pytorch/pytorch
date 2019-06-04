@@ -34,9 +34,23 @@ thread_local bool in_parallel_region_ = false;
 // thread number (task_id) set by parallel primitive
 thread_local size_t thread_num_ = 0;
 
+int _default_num_pool_threads() {
+  try {
+    if (auto* value = std::getenv("MKL_NUM_THREADS")) {
+      return std::stoi(value);
+    }
+    if (auto* value = std::getenv("OMP_NUM_THREADS")) {
+      return std::stoi(value);
+    }
+  } catch (const std::exception& e) {
+    TORCH_WARN("Invalid MKL/OMP environment variable value, " + std::string(e.what()));
+  }
+  return TaskThreadPoolBase::defaultNumThreads();
+}
+
 int _num_pool_threads(int nthreads) {
   if (nthreads == NOT_SET) {
-    nthreads = TaskThreadPoolBase::defaultNumThreads();
+    nthreads = _default_num_pool_threads();
   } else {
     TORCH_INTERNAL_ASSERT(nthreads > 0);
   }
@@ -97,7 +111,7 @@ int get_num_threads() {
   if (nthreads > 0) {
     return nthreads;
   } else if (nthreads == NOT_SET) {
-    return TaskThreadPoolBase::defaultNumThreads();
+    return _default_num_pool_threads();
   } else {
     TORCH_INTERNAL_ASSERT(nthreads == CONSUMED);
     return internal::_get_intraop_pool().size() + 1;
@@ -116,7 +130,7 @@ bool in_parallel_region() {
 }
 
 void intraop_launch(std::function<void()> func) {
-  if (!in_parallel_region()) {
+  if (!in_parallel_region() && get_num_threads() > 1) {
     internal::_get_intraop_pool().run([func](){
       func();
     });
