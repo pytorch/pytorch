@@ -106,7 +106,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
     if (auto method = classType->getMethod(field)) {
-      return std::make_shared<MethodValue>(getValue(), method);
+      return std::make_shared<MethodValue>(getValue(), field);
     }
     if (!classType->hasAttribute(field)) {
       throw ErrorReport(loc)
@@ -229,8 +229,9 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
             ->insertNode(m.graph()->createTuple(context->node()->inputs()))
             ->output();
     auto fn = CompilationUnit().create_function("anon", graph);
-    return MethodValue(close_context, fn)
-        .call(loc, m, inputs, attributes, n_binders);
+    std::vector<NamedValue> ctx_inputs = {close_context};
+    ctx_inputs.insert(ctx_inputs.end(), inputs.begin(), inputs.end());
+    return FunctionValue(fn).call(loc, m, ctx_inputs, attributes, n_binders);
   }
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }
@@ -248,11 +249,8 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
 
-  auto initMethod = type_->getMethod("__init__");
-  AT_ASSERT(initMethod);
-
   // Call the init function
-  MethodValue(self, initMethod).call(loc, m, inputs, attributes, n_binders);
+  MethodValue(self, "__init__").call(loc, m, inputs, attributes, n_binders);
 
   return std::make_shared<SimpleValue>(self);
 }
