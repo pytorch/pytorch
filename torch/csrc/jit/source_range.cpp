@@ -5,14 +5,14 @@ namespace jit {
 
 // a range of a shared string 'file_' with
 C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
-  if (size() == file_->size()) {
+  const std::string& str = source_->text();
+  if (size() == str.size()) {
     // this is just the entire file, not a subset, so print it out.
     // primarily used to print out python stack traces
-    out << *file_;
+    out << str;
     return;
   }
 
-  const std::string& str = file();
   size_t begin_line = start(); // beginning of line to highlight
   size_t end_line = start(); // end of line to highlight
   while (begin_line > 0 && str[begin_line - 1] != '\n')
@@ -42,6 +42,14 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
   }
   AT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
 
+  if (source_->filename()) {
+    auto lineno = source_->lineno_for_offset(start());
+    auto col_offset = (int)start() -
+        (int)source_->offset_for_line(lineno);
+    out << "at " << *source_->filename() << ":"
+        << source_->lineno_to_source_lineno(lineno) << ":" << col_offset
+        << "\n";
+  }
   out << str.substr(begin_highlight, end_line - begin_highlight) << "\n";
   out << std::string(start() - begin_line, ' ');
   size_t len = std::min(size(), end_line - start());
