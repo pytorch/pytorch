@@ -1784,7 +1784,7 @@ class TestDistributions(TestCase):
     def test_multivariate_normal_stable_with_precision_matrix(self):
         x = torch.randn(10)
         P = torch.exp(-(x - x.unsqueeze(-1)) ** 2)  # RBF kernel
-        MultivariateNormal(mean, precision_matrix=P)
+        MultivariateNormal(x.new_zeros(10), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):
