@@ -52,6 +52,7 @@ struct Object;
   _(GenericDict) \
   _(Future) \
   _(Device) \
+  _(Uninitialized) \
   _(Object)
 
 struct CAFFE2_API IValue final {
@@ -280,6 +281,13 @@ struct CAFFE2_API IValue final {
     AT_ASSERT(isNone());
     return "None";
   }
+
+  static IValue uninitialized() {
+    auto i = IValue();
+    i.tag = Tag::Uninitialized;
+    return i;
+  }
+
   // Scalar, which gets encoded as either an Int or a Double
   IValue(at::Scalar s)
   : IValue() {

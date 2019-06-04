@@ -201,11 +201,11 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
 }
 
 SourceRange Node::sourceRange() const {
- if(source_range_) {
-   return *source_range_;
- }
- std::stringstream ss;
- return SourceRange(ss.str());
+  if (source_range_) {
+    return *source_range_;
+  }
+  std::stringstream ss;
+  return SourceRange(ss.str());
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
@@ -236,7 +236,6 @@ std::ostream& Node::print(
 
       groups->push_back(this);
     } else {
-
       out << kind().toQualString();
       if (hasAttributes()) {
         printAttributes(out);
@@ -1294,6 +1293,12 @@ Node* Graph::createAutogradZero() {
 Node* Graph::createNone(TypePtr typ) {
   Node* n = create(prim::Constant);
   n->output()->setType(OptionalType::create(std::move(typ)));
+  return n;
+}
+
+Node* Graph::createUninitialized(TypePtr typ) {
+  Node* n = create(prim::Uninitialized);
+  n->output()->setType(std::move(typ));
   return n;
 }
 

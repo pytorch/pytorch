@@ -1,9 +1,9 @@
 #include "import_source.h"
 
 #include <ATen/core/qualified_name.h>
+#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/resolver.h>
-#include <torch/csrc/jit/export.h>
 
 namespace torch {
 namespace jit {
@@ -114,6 +114,7 @@ struct SourceResolver : public Resolver {
         {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
         {"fork", std::make_shared<ForkValue>()},
         {"annotate", std::make_shared<AnnotateValue>()},
+        {"uninitialized", std::make_shared<UninitializedValue>()},
         {"inf",
          std::make_shared<ConstantValue>(
              std::numeric_limits<double>::infinity())},
@@ -169,8 +170,8 @@ struct SourceImporter {
     if (version_ > CURRENT_OP_VERSION_SET) {
       throw ErrorReport(p_.lexer().cur().range)
           << "Attempting to load a script generated from a newer version of PyTorch. Maximum supported TorchScript version is "
-          << CURRENT_OP_VERSION_SET << " but the script being loaded is version "
-          << version_ << ".";
+          << CURRENT_OP_VERSION_SET
+          << " but the script being loaded is version " << version_ << ".";
     }
   }
 

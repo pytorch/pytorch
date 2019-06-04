@@ -20,6 +20,7 @@ std::unordered_set<Symbol> skip_list = {
     prim::Loop,
     prim::Constant,
     prim::AutogradZero,
+    prim::Uninitialized,
     prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
@@ -63,7 +64,6 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-
     auto new_output = tryInsertConstant(*graph, outputs[i]);
     if (new_output) {
       if (outputs[i].isNone()) {
