@@ -198,9 +198,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       // if the first input is a tensor list, we get input tensors by indexing into that list.
       // currently, this means that only tensors from that list are accessible as inputs.
       // any hypothetical input tensors that come after the list are not accessible.
-      const auto& tensorList = newstyle_inputs_[0].toTensorListRef();
+      auto tensorList = newstyle_inputs_[0].toTensorListRef();
       DCHECK_LT(idx, tensorList.size());
-      ival = tensorList.get(idx);
+      ival = tensorList[idx];
     } else {
       // if the first input is not a tensor list, we get input tensors by indexing into the inputs.
       DCHECK_LT(idx, newstyle_inputs_.size());
@@ -719,10 +719,10 @@ inline NetDef OperatorBase::GetSingleArgument<NetDef>(
 template <>
 inline vector<int> OperatorBase::GetVectorFromIValueList<int>(
     const c10::IValue& value) const {
-  const auto& vs = value.toIntListRef();
+  auto vs = value.toIntListRef();
   vector<int> out;
   out.reserve(vs.size());
-  for (const int64_t& v : vs) {
+  for (int64_t v : vs) {
     out.emplace_back(v);
   }
   return out;

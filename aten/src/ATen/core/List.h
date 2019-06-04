@@ -172,7 +172,6 @@ template<class T> ListPtr<T> toTypedList(ListPtr<IValue> list);
 template<class T> ListPtr<IValue> toGenericList(ListPtr<T> list);
 const IValue* ptr_to_first_element(const ListPtr<IValue>& list);
 template<class T> ListPtr<T> toList(std::vector<T> list);
-template<class T> ArrayRef<T> toArrayRef(const ListPtr<T>& list);
 template<class T> std::vector<T> toVector(const ListPtr<T>& list);
 }
 template<class T> bool list_is_equal(const ListPtr<T>& lhs, const ListPtr<T>& rhs);
@@ -389,15 +388,28 @@ public:
    */
   void resize(size_type count, const T& value) const;
 
+  /**
+   * Compares two lists for equality. Two lists are equal if they have the
+   * same number of elements and for each list position the elements at
+   * that position are equal.
+   */
   friend bool list_is_equal<T>(const ListPtr& lhs, const ListPtr& rhs);
 
-protected:
+  /**
+   * Returns the number of ListPtrs currently pointing to this same list.
+   * If this is the only instance pointing to this list, returns 1.
+   */
+  // TODO Test use_count
+  size_t use_count() const;
+
+private:
   explicit ListPtr(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
+  friend class IValue;
   template<class T_> friend ListPtr<T_> impl::toTypedList(ListPtr<IValue>);
   template<class T_> friend ListPtr<IValue> impl::toGenericList(ListPtr<T_>);
   friend const IValue* impl::ptr_to_first_element(const ListPtr<IValue>& list);
   template<class T_> friend ListPtr<T_> impl::toList(std::vector<T_> list);
-  template<class T_> friend ArrayRef<T_> impl::toArrayRef(const ListPtr<T_>& list);
+
   template<class T_> friend std::vector<T_> impl::toVector(const ListPtr<T_>& list);
 };
 
@@ -429,12 +441,6 @@ GenericListPtr toGenericList(ListPtr<T> list) {
 
 inline const IValue* ptr_to_first_element(const GenericListPtr& list) {
   return &list.impl_->list[0];
-}
-
-template<class T>
-ArrayRef<T> toArrayRef(const ListPtr<T>& list) {
-  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename ListPtr<T>::StorageT>::value, "toArrayRef only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-  return list.impl_->list;
 }
 
 template<class T>

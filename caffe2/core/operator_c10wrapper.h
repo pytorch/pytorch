@@ -105,7 +105,7 @@ class C10OperatorWrapper final : public Operator<Context> {
         AT_ASSERTM(
             input_tensor_index == 0,
             "Error in caffe2->c10 wrapper: Schema can only have either one or more Tensor inputs or one TensorList input.");
-        stack_.emplace_back(ivalue::TensorList::create(array_inputs_()));
+        stack_.emplace_back(array_inputs_());
         input_tensor_index = InputSize();
 
       } else {

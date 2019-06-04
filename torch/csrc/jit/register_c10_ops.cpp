@@ -23,19 +23,19 @@ IValue unwrap(IValue&& ivalue) {
   if (ivalue.isTensor() && ivalue.toTensor().defined()) {
     return unwrap_tensor(std::move(ivalue).toTensor());
   } else if (ivalue.isTensorList()) {
-    c10::ListPtr<at::Tensor> list = ivalue.toTensorList()->elements();
+    c10::ListPtr<at::Tensor> list = std::move(ivalue).toTensorList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = unwrap_tensor(list.extract(i));
     }
-    return std::move(ivalue);
+    return std::move(list);
   } else if (ivalue.isGenericList()) {
-    c10::impl::GenericListPtr list = ivalue.toGenericList()->elements();
+    c10::impl::GenericListPtr list = std::move(ivalue).toGenericList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = unwrap(list.extract(i));
     }
-    return std::move(ivalue);
+    return std::move(list);
   } else if (ivalue.isGenericDict()) {
-    for (auto& item : ivalue.toGenericDict()->elements()) {
+    for (auto& item : ivalue.toGenericDict()) {
       item.setValue(unwrap(item.value()));
     }
     return std::move(ivalue);
@@ -56,19 +56,19 @@ IValue wrap(IValue&& ivalue) {
   if (ivalue.isTensor()) {
     return wrap_tensor(std::move(ivalue).toTensor());
   } else if (ivalue.isTensorList()) {
-    c10::ListPtr<at::Tensor> list = ivalue.toTensorList()->elements();
+    c10::ListPtr<at::Tensor> list = std::move(ivalue).toTensorList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = wrap_tensor(list.extract(i));
     }
-    return std::move(ivalue);
+    return std::move(list);
   } else if (ivalue.isGenericList()) {
-    c10::impl::GenericListPtr list = ivalue.toGenericList()->elements();
+    c10::impl::GenericListPtr list = std::move(ivalue).toGenericList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = wrap(list.extract(i));
     }
-    return std::move(ivalue);
+    return std::move(list);
   } else if (ivalue.isGenericDict()) {
-    for (auto& item : ivalue.toGenericDict()->elements()) {
+    for (auto& item : ivalue.toGenericDict()) {
       item.setValue(wrap(item.value()));
     }
     return std::move(ivalue);
@@ -139,17 +139,17 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
                 reinterpret_cast<ListType*>(type.get())->getElementType();
             if (elem_type->isSubclass(TypeKind::TensorType)) {
               AT_ASSERT(iter->isTensorList());
-              const auto& list = iter->toTensorListRef();
-              tracer::addInputs(node, args[i].name().c_str(), c10::impl::toArrayRef(list));
+              auto list = iter->toTensorListRef();
+              tracer::addInputs(node, args[i].name().c_str(), list);
             } else if (elem_type->kind() == TypeKind::FloatType) {
               AT_ASSERT(iter->isDoubleList());
               // NB: now, tracer doesn't support tracing double list. We add special
               // handling here, since in our case, we assume that all the doubles
               // in the list are constants
-              const auto& value = iter->toDoubleListRef();
+              auto value = iter->toDoubleListRef();
               std::vector<Value*> info(value.size());
               for (size_t value_index = 0; value_index < value.size(); ++value_index) {
-                info[value_index] = graph->insertConstant(value.get(value_index));
+                info[value_index] = graph->insertConstant(value[value_index]);
                 tracer::recordSourceLocation(info[value_index]->node());
               }
               node->addInput(
@@ -157,11 +157,11 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             } else if (elem_type->kind() == TypeKind::IntType) {
               AT_ASSERT(iter->isIntList());
               tracer::addInputs(
-                  node, args[i].name().c_str(), c10::impl::toArrayRef(iter->toIntListRef()));
+                  node, args[i].name().c_str(), iter->toIntListRef());
             } else if (elem_type->kind() == TypeKind::BoolType) {
               AT_ASSERT(iter->isBoolList());
               tracer::addInputs(
-                  node, args[i].name().c_str(), c10::impl::toVector(iter->toBoolListRef()));
+                  node, args[i].name().c_str(), c10::impl::toVector(iter->toBoolList()));
             } else {
               throw std::runtime_error(
                   "unsupported input list type: " + elem_type->str());
@@ -198,7 +198,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
                 reinterpret_cast<ListType*>(type.get())->getElementType();
             if (elem_type->isSubclass(TypeKind::TensorType)) {
               AT_ASSERT(iter->isTensorList());
-              tracer::addOutput(node, iter->toTensorList()->elements());
+              tracer::addOutput(node, iter->toTensorList());
             } else {
               throw std::runtime_error(
                   "unsupported ouptut list type: " + elem_type->str());

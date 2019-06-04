@@ -64,7 +64,7 @@ RegisterOperators reg_ln_view({Operator(
     [](const Node* node) {
       return [](Stack& stack) {
         const int64_t normalized_ndim = pop(stack).toInt();
-        auto input_shape = pop(stack).toIntListRef();
+        auto input_shape = pop(stack).toIntList();
         auto self = pop(stack).toTensor();
         const int64_t input_ndim = input_shape.size();
         c10::SmallVector<int64_t, 8> sizes(input_ndim, 1);

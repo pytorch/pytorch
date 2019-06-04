@@ -48,7 +48,7 @@ int64_t list_size(const IValue& list) {
   } else if (list.isDoubleList()) {
     return list.toDoubleListRef().size();
   } else if (list.isBoolList()) {
-    return list.toBoolListRef().size();
+    return list.toBoolList().size();
   }
   AT_ASSERTM(0, "Unexpected list type", list);
 }
@@ -82,14 +82,14 @@ void checkSequenceSize(int64_t n, int64_t dim, int64_t seq_size) {
   }
 }
 
-template <typename DTYPE>
+template <typename DTYPE, typename List>
 void storeLastDimension(
     char* data,
     const std::vector<int64_t>& sizes,
     const c10::ArrayRef<int64_t>& strides,
     int64_t dim,
     int elementSize,
-    const c10::ListPtr<DTYPE>& obj) {
+    List obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
@@ -146,7 +146,7 @@ void recursiveStore(
           data, sizes, strides, dim, elementSize, obj.toDoubleListRef());
     } else {
       storeLastDimension<bool>(
-          data, sizes, strides, dim, elementSize, obj.toBoolListRef());
+          data, sizes, strides, dim, elementSize, obj.toBoolList());
     }
   }
 }
@@ -159,7 +159,7 @@ RegisterOperators reg({
 
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
-              c10::impl::toArrayRef((std::move(peek(stack, 1, 3))).toIntList()->elements()),
+              (std::move(peek(stack, 1, 3))).toIntListRef(),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
           pack(stack, c10::impl::toList(std::move(result)));
@@ -182,8 +182,8 @@ RegisterOperators reg({
         [](Stack& stack) {
           RECORD_FUNCTION("sizes", last(stack, 2));
 
-          auto list = peek(stack, 0, 2).toIntListRef();
-          auto defaults = peek(stack, 1, 2).toIntListRef();
+          auto list = peek(stack, 0, 2).toIntList();
+          auto defaults = peek(stack, 1, 2).toIntList();
           drop(stack, 2);
 
           AT_ASSERT(defaults.size() > list.size());
@@ -198,9 +198,9 @@ RegisterOperators reg({
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
           return [](Stack& stack) {
-            auto a = pop(stack).toIntList()->elements();
-            auto b = pop(stack).toIntList()->elements();
-            push(stack, at::infer_size(c10::impl::toArrayRef(a), c10::impl::toArrayRef(b)));
+            auto a = pop(stack);
+            auto b = pop(stack);
+            push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
             return 0;
           };
         }),
@@ -299,9 +299,9 @@ RegisterOperators reg({
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
           return [](Stack& stack) {
-            auto a = pop(stack).toIntList()->elements();
-            auto b = pop(stack).toIntList()->elements();
-            push(stack, at::infer_size(c10::impl::toArrayRef(a), c10::impl::toArrayRef(b)));
+            auto a = pop(stack);
+            auto b = pop(stack);
+            push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
             return 0;
           };
         }),

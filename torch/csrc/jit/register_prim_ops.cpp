@@ -51,18 +51,6 @@ Operation noop(const Node* n) {
   return [](Stack& stack) { return 0; };
 }
 
-template<class T> bool is_equal(const c10::ListPtr<T>& lhs, const c10::ListPtr<T>& rhs) {
-  if (lhs.size() != rhs.size()) {
-    return false;
-  }
-  for (size_t i = 0; i < lhs.size(); ++i) {
-    if (lhs.get(i) != rhs.get(i)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 // using the rules from python_arg_parser FunctionParameter::check
 // tensor cannot have grad set, tensor must be 0 dim,
 // and if the dest is an int the source must be integral type
@@ -188,7 +176,7 @@ RegisterOperators reg(
            for (int i = 0; i < n; i++) {
              elems.push_back(i);
            }
-           push(stack, jit::IntList::create(std::move(elems)));
+           push(stack, std::move(elems));
            return 0;
          }),
      Operator(
@@ -515,7 +503,7 @@ RegisterOperators reg(
              size.reserve(8);
              for (size_t i = 0; i < num_inputs; ++i) {
                size = at::infer_size(
-                   size, c10::impl::toArrayRef(peek(stack, i, num_inputs).toIntList()->elements()));
+                   size, peek(stack, i, num_inputs).toIntListRef());
              }
              drop(stack, num_inputs);
              push(stack, std::move(size));
@@ -528,9 +516,8 @@ RegisterOperators reg(
            int64_t raw_dim = node->i(attr::dim);
            int64_t chunks = node->i(attr::chunks);
            return [raw_dim, chunks](Stack& stack) {
-             Shared<IntList> sizes_l;
-             pop(stack, sizes_l);
-             const auto& shape = sizes_l->elements();
+             c10::ListPtr<int64_t> shape = c10::make_list<int64_t>();
+             pop(stack, shape);
              c10::ListPtr<int64_t> regular_shape = shape.copy();
              c10::ListPtr<int64_t> last_shape = shape.copy();
              int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
@@ -676,7 +663,7 @@ RegisterOperators reg(
            } else {
              push(
                  stack,
-                 at::sum_to(self.toTensor(), c10::impl::toArrayRef(size.toIntList()->elements())));
+                 at::sum_to(self.toTensor(), size.toIntListRef()));
            }
            return 0;
          }),
@@ -685,8 +672,8 @@ RegisterOperators reg(
          [](Stack& stack) {
            IValue self_size, other_size;
            pop(stack, self_size, other_size);
-           const auto s = self_size.toIntList()->elements();
-           if (is_equal(s, other_size.toIntList()->elements())) {
+           auto s = self_size.toIntListRef();
+           if (s.equals(other_size.toIntListRef())) {
              push(stack, IValue());
            } else {
              push(stack, s);
@@ -698,8 +685,8 @@ RegisterOperators reg(
          [](const Node* node) {
            size_t num_elems = node->outputs().size();
            return [=](Stack& stack) {
-             auto t = pop(stack).toTuple();
-             const auto& elems = t->elements();
+             auto tuple = pop(stack).toTuple();
+             auto& elems = tuple.elements();
              if (elems.size() != num_elems) {
                AT_ERROR(
                    "Expected a tuple of ",
@@ -717,13 +704,13 @@ RegisterOperators reg(
            int64_t beg_ind = node->i(attr::beg);
            int64_t end_ind = node->i(attr::end);
            return [=](Stack& stack) {
-             auto t = pop(stack).toTuple();
-             const auto& elems = t->elements();
+             auto tuple = pop(stack).toTuple();
+             auto& elems = tuple.elements();
              c10::impl::GenericListPtr output_elems = c10::impl::make_generic_list();
              for (int64_t i = beg_ind; i < end_ind; ++i) {
                output_elems.emplace_back(elems.get(i));
              }
-             push(stack, Tuple::create(std::move(output_elems)));
+             push(stack, c10::ivalue::TuplePtr::create(std::move(output_elems)));
              return 0;
            };
          }),
@@ -732,8 +719,8 @@ RegisterOperators reg(
          [](const Node* node) {
            return [](Stack& stack) {
              int64_t index = pop(stack).toInt();
-             auto tup = pop(stack).toTuple();
-             const auto& elems = tup->elements();
+             auto tuple = pop(stack).toTuple();
+             auto& elems = tuple.elements();
              auto norm_index = normalizeIndex(index, elems.size());
              if (norm_index < 0 ||
                  norm_index > static_cast<int64_t>(elems.size())) {
@@ -752,7 +739,7 @@ RegisterOperators reg(
                  std::make_move_iterator(stack.end() - num_inputs),
                  std::make_move_iterator(stack.end())};
              drop(stack, num_inputs);
-             push(stack, Tuple::create(c10::impl::toList(std::move(elems))));
+             push(stack, c10::ivalue::TuplePtr::create(c10::impl::toList(std::move(elems))));
              return 0;
            };
          }),
@@ -807,8 +794,7 @@ RegisterOperators reg(
            ListTypePtr lt = node->input()->type()->expect<ListType>();
            if (lt->getElementType() == IntType::get()) {
              return [=](Stack& stack) {
-               auto ilist = pop(stack);
-               const auto& list = ilist.toIntList()->elements();
+               auto list = pop(stack).toIntList();
                TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
@@ -820,8 +806,7 @@ RegisterOperators reg(
              };
            } else if (lt->getElementType() == FloatType::get()) {
              return [=](Stack& stack) {
-               auto ilist = pop(stack);
-               const auto& list = ilist.toDoubleList()->elements();
+               auto list = pop(stack).toDoubleList();
                TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
@@ -833,8 +818,7 @@ RegisterOperators reg(
              };
            } else if (lt->getElementType() == TensorType::get()) {
              return [=](Stack& stack) {
-               auto ilist = pop(stack);
-               const auto& list = ilist.toTensorList()->elements();
+               auto list = pop(stack).toTensorList();
                TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
@@ -846,8 +830,7 @@ RegisterOperators reg(
              };
            } else {
              return [=](Stack& stack) {
-               auto glist = pop(stack);
-               const auto& list = glist.toGenericList()->elements();
+               auto list = pop(stack).toGenericList();
                TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
@@ -1149,67 +1132,55 @@ int stringSlice(Stack& stack) {
 }
 
 // Equivalent to list.at(idx)
-template <typename TList> // something like Shared<IntList>
-typename TList::element_type::ElemType getItem(TList& list, int64_t idx) {
-  const int64_t list_size = list->elements().size();
-  const int64_t normalized_idx = normalizeIndex(idx, list_size);
-  if (normalized_idx < 0 || normalized_idx >= list_size) {
-    throw std::out_of_range("list index out of range");
-  }
-  return list->elements().get(normalized_idx);
-}
-
-template <typename TList> // something like Shared<IntList>
-void setItem(TList& list, int64_t idx, typename TList::element_type::ElemType&& value) {
-  const int64_t list_size = list->elements().size();
-  const int64_t normalized_idx = normalizeIndex(idx, list_size);
-  if (normalized_idx < 0 || normalized_idx >= list_size) {
-    throw std::out_of_range("list index out of range");
-  }
-  list->elements().set(normalized_idx, std::move(value));
-}
-
-// cannot return a reference to an element in a bool vector
-bool getBoolItem(const c10::ListPtr<bool>& list, int64_t idx) {
+template <typename T>
+T getItem(const c10::ListPtr<T>& list, int64_t idx) {
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     throw std::out_of_range("list index out of range");
   }
-  return list[normalized_idx];
+  return list.get(normalized_idx);
 }
 
-template <typename TList, typename TElement>
+template <typename T>
+void setItem(const c10::ListPtr<T>& list, int64_t idx, T&& value) {
+  const int64_t list_size = list.size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+  if (normalized_idx < 0 || normalized_idx >= list_size) {
+    throw std::out_of_range("list index out of range");
+  }
+  list.set(normalized_idx, std::move(value));
+}
+
+template <typename T>
 int listAppend(Stack& stack) {
-  TList a;
-  TElement el;
-  pop(stack, a, el);
+  c10::ListPtr<T> list = c10::make_list<T>();
+  T el;
+  pop(stack, list, el);
 
-  a->elements().push_back(el);
-  push(stack, a);
+  list.push_back(std::move(el));
+  push(stack, std::move(list));
 
   return 0;
 }
 
-template <typename TList>
+template <typename T>
 int listReverse(Stack& stack) {
-  TList a;
-  pop(stack, a);
+  c10::ListPtr<T> list = c10::make_list<T>();
+  pop(stack, list);
 
-  auto& elements = a->elements();
-  std::reverse(elements.begin(), elements.end());
+  std::reverse(list.begin(), list.end());
 
   return 0;
 }
 
-template <typename TList>
+template <typename T>
 int listPop(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t idx;
   pop(stack, list, idx);
 
-  auto& elements = list->elements();
-  const int64_t list_size = elements.size();
+  const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
 
   if (list_size == 0) {
@@ -1217,75 +1188,53 @@ int listPop(Stack& stack) {
   }
 
   push(stack, getItem(list, idx));
-  elements.erase(elements.begin() + normalized_idx);
+  list.erase(list.begin() + normalized_idx);
 
   return 0;
 }
 
-template <>
-int listPop<Shared<BoolList>>(Stack& stack) {
-  Shared<BoolList> list;
-  int64_t idx;
-  pop(stack, list, idx);
-
-  auto& elements = list->elements();
-  const int64_t list_size = elements.size();
-  const int64_t normalized_idx = normalizeIndex(idx, list_size);
-
-  if (list_size == 0) {
-    AT_ERROR("pop from empty list");
-  }
-
-  push(stack, getBoolItem(elements, idx));
-  elements.erase(elements.begin() + normalized_idx);
-
-  return 0;
-}
-
-template <typename TList>
+template <typename T>
 int listClear(Stack& stack) {
-  TList a;
-  pop(stack, a);
+  c10::ListPtr<T> list = c10::make_list<T>();
+  pop(stack, list);
 
-  a->elements().clear();
+  list.clear();
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listInsert(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t idx;
-  TElement elem;
+  T elem;
   pop(stack, list, idx, elem);
 
-  auto& elements = list->elements();
-  const int64_t list_size = elements.size();
+  const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
 
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     if (normalized_idx < 0) {
-      elements.insert(elements.begin(), elem);
+      list.insert(list.begin(), elem);
     } else {
-      elements.push_back(elem);
+      list.push_back(elem);
     }
   } else {
-    elements.insert(elements.begin() + normalized_idx, elem);
+    list.insert(list.begin() + normalized_idx, elem);
   }
 
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listRemove(Stack& stack) {
-  TList list;
-  TElement elem;
+  c10::ListPtr<T> list = c10::make_list<T>();
+  T elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
-  auto pos = std::find(elements.begin(), elements.end(), elem);
+  auto pos = std::find(list.begin(), list.end(), elem);
 
-  if (pos != elements.end()) {
-    elements.erase(pos);
+  if (pos != list.end()) {
+    list.erase(pos);
   } else {
     AT_ERROR("list.remove(x): x not in list");
   }
@@ -1294,20 +1243,19 @@ int listRemove(Stack& stack) {
 }
 
 template <>
-int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
-  Shared<TensorList> list;
+int listRemove<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> list = c10::make_list<at::Tensor>();
   at::Tensor elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
   auto pos = std::find_if(
-      elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+      list.begin(), list.end(), [&](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
         return cmp_result.is_nonzero();
       });
 
-  if (pos != elements.end()) {
-    elements.erase(pos);
+  if (pos != list.end()) {
+    list.erase(pos);
   } else {
     AT_ERROR("list.remove(x): x not in list");
   }
@@ -1315,17 +1263,16 @@ int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listIndex(Stack& stack) {
-  TList list;
-  TElement elem;
+  c10::ListPtr<T> list = c10::make_list<T>();
+  T elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
-  auto pos = std::find(elements.begin(), elements.end(), elem);
+  auto pos = std::find(list.begin(), list.end(), elem);
 
-  if (pos != elements.end()) {
-    push(stack, static_cast<int64_t>(std::distance(elements.begin(), pos)));
+  if (pos != list.end()) {
+    push(stack, static_cast<int64_t>(std::distance(list.begin(), pos)));
   } else {
     AT_ERROR("'", elem, "' is not in list");
   }
@@ -1334,20 +1281,19 @@ int listIndex(Stack& stack) {
 }
 
 template <>
-int listIndex<Shared<TensorList>, at::Tensor>(Stack& stack) {
-  Shared<TensorList> list;
+int listIndex<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> list = c10::make_list<at::Tensor>();
   at::Tensor elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
   auto pos = std::find_if(
-      elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+      list.begin(), list.end(), [elem](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
         return cmp_result.is_nonzero();
       });
 
-  if (pos != elements.end()) {
-    push(stack, static_cast<int64_t>(std::distance(elements.begin(), pos)));
+  if (pos != list.end()) {
+    push(stack, static_cast<int64_t>(std::distance(list.begin(), pos)));
   } else {
     AT_ERROR("'", elem, "' is not in list");
   }
@@ -1355,28 +1301,26 @@ int listIndex<Shared<TensorList>, at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listCount(Stack& stack) {
-  TList list;
-  TElement elem;
+  c10::ListPtr<T> list = c10::make_list<T>();
+  T elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
-  const int64_t count = std::count(elements.begin(), elements.end(), elem);
+  const int64_t count = std::count(list.begin(), list.end(), elem);
   push(stack, count);
 
   return 0;
 }
 
 template <>
-int listCount<Shared<TensorList>, at::Tensor>(Stack& stack) {
-  Shared<TensorList> list;
+int listCount<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> list = c10::make_list<at::Tensor>();
   at::Tensor elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
   const int64_t count = std::count_if(
-      elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+      list.begin(), list.end(), [&](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
         return cmp_result.is_nonzero();
       });
@@ -1385,39 +1329,34 @@ int listCount<Shared<TensorList>, at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template <typename TList>
+template <typename T>
 Operation listExtend(const Node* node) {
   return [](Stack& stack) {
-    TList a;
-    TList b;
+    c10::ListPtr<T> a = c10::make_list<T>();
+    c10::ListPtr<T> b = c10::make_list<T>();
     pop(stack, a, b);
 
-    auto& vec_a = a->elements();
-    const auto& vec_b = b->elements();
-    vec_a.reserve(vec_a.size() + vec_b.size());
-    for (size_t i = 0; i < vec_b.size(); ++i) {
-      vec_a.push_back(vec_b.get(i));
+    a.reserve(a.size() + b.size());
+    for (size_t i = 0; i < b.size(); ++i) {
+      a.push_back(b.get(i));
     }
     return 0;
   };
 }
 
-template <typename TList>
+template <typename T>
 Operation listCopy(const Node* node) {
   return [](Stack& stack) {
-    TList list;
+    c10::ListPtr<T> list = c10::make_list<T>();
     pop(stack, list);
-
-    const auto& vec = list->elements();
-    auto out = vec.copy();
-    push(stack, out);
+    push(stack, list.copy());
     return 0;
   };
 }
 
 template <typename T>
 int listSelect(Stack& stack) {
-  T list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t idx;
   pop(stack, list, idx);
 
@@ -1426,54 +1365,42 @@ int listSelect(Stack& stack) {
   return 0;
 }
 
-// needs specialization because cannot return a pointer to a bool in an array
-template <>
-int listSelect<Shared<BoolList>>(Stack& stack) {
-  Shared<BoolList> list;
-  int64_t idx;
-  pop(stack, list, idx);
-
-  auto element = getBoolItem(list->elements(), idx);
-  push(stack, element);
-  return 0;
-}
-
 template <typename T>
 int listLen(Stack& stack) {
-  T a;
+  c10::ListPtr<T> a = c10::make_list<T>();
   pop(stack, a);
 
-  const int64_t size = a->elements().size();
+  const int64_t size = a.size();
   push(stack, size);
   return 0;
 }
 
 template <typename T>
 int listEq(Stack& stack) {
-  T a;
-  T b;
+  c10::ListPtr<T> a = c10::make_list<T>();
+  c10::ListPtr<T> b = c10::make_list<T>();
   pop(stack, a, b);
-  push(stack, list_is_equal(a->elements(), b->elements()));
+  push(stack, list_is_equal(a, b));
   return 0;
 }
 
 template <typename T>
 int listNe(Stack& stack) {
-  T a;
-  T b;
+  c10::ListPtr<T> a = c10::make_list<T>();
+  c10::ListPtr<T> b = c10::make_list<T>();
   pop(stack, a, b);
-  push(stack, !list_is_equal(a->elements(), b->elements()));
+  push(stack, !list_is_equal(a, b));
   return 0;
 }
 
-inline bool tensor_list_equal(Shared<TensorList> a, Shared<TensorList> b) {
-  if (a->elements().size() != b->elements().size()) {
+inline bool tensor_list_equal(const c10::ListPtr<at::Tensor>& a, const c10::ListPtr<at::Tensor>& b) {
+  if (a.size() != b.size()) {
     return false;
   }
 
-  for (size_t i = 0; i < a->elements().size(); ++i) {
-    at::Tensor a_element = a->elements()[i];
-    at::Tensor b_element = b->elements()[i];
+  for (size_t i = 0; i < a.size(); ++i) {
+    at::Tensor a_element = a[i];
+    at::Tensor b_element = b[i];
     // This preserves Python's semantics, which uses eq() to compare two
     // elements, then passes the result to bool().
     // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
@@ -1488,9 +1415,9 @@ inline bool tensor_list_equal(Shared<TensorList> a, Shared<TensorList> b) {
 
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
-int listEq<Shared<TensorList>>(Stack& stack) {
-  Shared<TensorList> a;
-  Shared<TensorList> b;
+int listEq<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> a = c10::make_list<at::Tensor>();
+  c10::ListPtr<at::Tensor> b = c10::make_list<at::Tensor>();
   pop(stack, a, b);
   push(stack, tensor_list_equal(a, b));
   return 0;
@@ -1498,9 +1425,9 @@ int listEq<Shared<TensorList>>(Stack& stack) {
 
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
-int listNe<Shared<TensorList>>(Stack& stack) {
-  Shared<TensorList> a;
-  Shared<TensorList> b;
+int listNe<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> a = c10::make_list<at::Tensor>();
+  c10::ListPtr<at::Tensor> b = c10::make_list<at::Tensor>();
   pop(stack, a, b);
   push(stack, !tensor_list_equal(a, b));
   return 0;
@@ -1514,75 +1441,75 @@ Operation listList(const Node* node) {
   };
 }
 
-template <class TList, class TElement>
+template <class T>
 int listAdd(Stack& stack) {
-  TList a;
-  TList b;
+  c10::ListPtr<T> a = c10::make_list<T>();
+  c10::ListPtr<T> b = c10::make_list<T>();
   pop(stack, a, b);
 
-  c10::ListPtr<TElement> ret = c10::make_list<TElement>();
-  const auto total_size = a->elements().size() + b->elements().size();
+  c10::ListPtr<T> ret = c10::make_list<T>();
+  const auto total_size = a.size() + b.size();
   ret.reserve(total_size);
-  for (const TElement& a_element : a->elements()) {
+  for (const T& a_element : a) {
     ret.push_back(a_element);
   }
-  for (const TElement& b_element : b->elements()) {
+  for (const T& b_element : b) {
     ret.push_back(b_element);
   }
 
-  push(stack, ret);
+  push(stack, std::move(ret));
   return 0;
 }
 
-template <class TList, class TElement>
+template <class T>
 int listMulIntLeft(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t n;
   pop(stack, list, n);
 
-  c10::ListPtr<TElement> ret = c10::make_list<TElement>();
-  const auto size = list->elements().size() * n;
+  c10::ListPtr<T> ret = c10::make_list<T>();
+  const auto size = list.size() * n;
   ret.reserve(size);
 
   for (auto i = 0; i < n; i++) {
-    for (const TElement& e : list->elements()) {
-      ret.push_back(e);
+    for (T e : list) {
+      ret.push_back(std::move(e));
     }
   }
 
-  push(stack, ret);
+  push(stack, std::move(ret));
   return 0;
 }
 
-template <class TList, class TElement>
+template <class T>
 int listMulIntRight(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t n;
   pop(stack, n, list);
 
-  c10::ListPtr<TElement> ret = c10::make_list<TElement>();
-  const auto size = list->elements().size() * n;
+  c10::ListPtr<T> ret = c10::make_list<T>();
+  const auto size = list.size() * n;
   ret.reserve(size);
 
   for (auto i = 0; i < n; i++) {
-    for (const TElement& e : list->elements()) {
-      ret.push_back(e);
+    for (T e : list) {
+      ret.push_back(std::move(e));
     }
   }
 
-  push(stack, ret);
+  push(stack, std::move(ret));
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listSlice(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t start;
   int64_t end;
   int64_t step;
 
   pop(stack, list, start, end, step);
-  const int64_t list_size = list->elements().size();
+  const int64_t list_size = list.size();
 
   // clamp start and end to the bounds of the list
   const auto normalized_start =
@@ -1590,74 +1517,55 @@ int listSlice(Stack& stack) {
   const auto normalized_end =
       std::min(list_size, normalizeIndex(end, list_size));
 
-  c10::ListPtr<TElement> sliced_list = c10::make_list<TElement>();
+  c10::ListPtr<T> sliced_list = c10::make_list<T>();
   if (normalized_end <= normalized_start) {
     // early exit if the slice is trivially empty
-    push(stack, sliced_list);
+    push(stack, std::move(sliced_list));
     return 0;
   }
 
   sliced_list.reserve(normalized_end - normalized_start);
 
   for (auto i = normalized_start; i < normalized_end;) {
-    sliced_list.push_back(list->elements()[i]);
+    sliced_list.push_back(list.get(i));
     i += step;
   }
 
-  push(stack, sliced_list);
+  push(stack, std::move(sliced_list));
   return 0;
 }
 
-template <typename TList>
+template <typename T>
 int listSort(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
 
   pop(stack, list);
-  std::sort(list->elements().begin(), list->elements().end());
+  std::sort(list.begin(), list.end());
   return 0;
 }
 
 // Specialization for at::Tensor
 template <>
-int listSort<Shared<TensorList>>(Stack& stack) {
-  Shared<TensorList> list;
+int listSort<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> list = c10::make_list<at::Tensor>();
   pop(stack, list);
   std::sort(
-      list->elements().begin(),
-      list->elements().end(),
+      list.begin(),
+      list.end(),
       [](const at::Tensor& a, const at::Tensor& b) {
         return a.lt(b).is_nonzero();
       });
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listSetItem(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t idx;
-  TElement value;
+  T value;
 
   pop(stack, list, idx, value);
   setItem(list, idx, std::move(value));
-
-  push(stack, list);
-  return 0;
-}
-
-template <>
-int listSetItem<Shared<BoolList>, bool>(Stack& stack) {
-  Shared<BoolList> list;
-  int64_t idx;
-  bool value;
-
-  pop(stack, list, idx, value);
-
-  int64_t list_size = list->elements().size();
-  auto normalized_idx = normalizeIndex(idx, list_size);
-  if (normalized_idx < 0 || normalized_idx >= list_size) {
-    throw std::out_of_range("list index out of range");
-  }
-  list->elements()[normalized_idx] = value;
 
   push(stack, list);
   return 0;
@@ -1667,22 +1575,22 @@ int dictSetItem(Stack& stack) {
   auto value = pop(stack);
   auto idx = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  dict->elements().insert_or_assign(std::move(idx), std::move(value));
+  dict.insert_or_assign(std::move(idx), std::move(value));
   push(stack, std::move(dict));
   return 0;
 }
 
 int dictLen(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  push(stack, int64_t(dict->elements().size()));
+  push(stack, int64_t(dict.size()));
   return 0;
 }
 
 int dictKeys(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   c10::impl::GenericListPtr keys = c10::impl::make_generic_list();
-  keys.reserve(dict->elements().size());
-  for (auto item : dict->elements()) {
+  keys.reserve(dict.size());
+  for (auto& item : dict) {
     keys.push_back(item.key());
   }
   push(stack, IValue(keys));
@@ -1691,7 +1599,7 @@ int dictKeys(Stack& stack) {
 
 template <typename Elem>
 c10::impl::GenericListPtr makeListForDictValues(
-    const c10::ivalue::GenericDict::IterationOrder& order) {
+    const std::vector<std::pair<IValue, IValue>>& order) {
   c10::impl::GenericListPtr values = c10::impl::make_generic_list();
   values.reserve(order.size());
   for (auto item : order) {
@@ -1703,7 +1611,7 @@ c10::impl::GenericListPtr makeListForDictValues(
 Operation dictValues(const Node* n) {
   auto outputType = n->output()->type()->expect<ListType>();
   return [=](Stack& stack) -> int {
-    const auto& order = pop(stack).toGenericDict()->iterationOrder();
+    const auto& order = iterationOrder(pop(stack).toGenericDict());
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
       push(stack, makeListForDictValues<at::Tensor>(order));
     } else if (outputType->getElementType() == IntType::get()) {
@@ -1722,9 +1630,8 @@ Operation dictValues(const Node* n) {
 int dictIndex(Stack& stack) {
   auto index = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  const auto& elems = dict->elements();
-  auto value = elems.find(index);
-  if (value == elems.end()) {
+  auto value = dict.find(index);
+  if (value == dict.end()) {
     AT_ERROR("KeyError: '", index, "'");
   }
   push(stack, value->value());
@@ -1734,9 +1641,8 @@ int dictIndex(Stack& stack) {
 int dictGet(Stack& stack) {
   auto index = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  const auto& elems = dict->elements();
-  auto value = elems.find(index);
-  if (value == elems.end()) {
+  auto value = dict.find(index);
+  if (value == dict.end()) {
     push(stack, IValue());
   } else {
     push(stack, value->value());
@@ -1748,9 +1654,8 @@ int dictGetDefault(Stack& stack) {
   auto default_value = pop(stack);
   auto index = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  const auto& elems = dict->elements();
-  auto value = elems.find(index);
-  if (value == elems.end()) {
+  auto value = dict.find(index);
+  if (value == dict.end()) {
     push(stack, default_value);
   } else {
     push(stack, value->value());
@@ -1811,170 +1716,170 @@ RegisterOperators reg2({
           return 0;
         }),
 // Mutable ops for lists containing mutable types.
-#define CREATE_MUTABLE_LIST_OPS(decl_type, c_type)                          \
+#define CREATE_MUTABLE_LIST_OPS(decl_type, value_type)                      \
   Operator(                                                                 \
       "aten::select(" decl_type "[](a) list, int idx) -> " decl_type "(*)", \
-      listSelect<Shared<c_type>>),                                          \
+      listSelect<value_type>),                                              \
       Operator(                                                             \
           "aten::append( " decl_type "[](a!) self, " decl_type              \
           "(c -> *) el) -> " decl_type "[](a!)",                            \
-          listAppend<Shared<c_type>, c_type::ElemType>),                    \
+          listAppend<value_type>),                                          \
       Operator(                                                             \
           "aten::reverse( " decl_type "[](a!) self) -> ()",                 \
-          listReverse<Shared<c_type>>),                                     \
+          listReverse<value_type>),                                         \
       Operator(                                                             \
           "aten::extend(" decl_type "[](a!) self, " decl_type               \
           " [] other) -> ()",                                               \
-          listExtend<Shared<c_type>>),                                      \
+          listExtend<value_type>),                                          \
       Operator(                                                             \
           "aten::copy(" decl_type                                           \
           "[](a) self)"                                                     \
           " -> " decl_type "[]",                                            \
-          listCopy<Shared<c_type>>),                                        \
+          listCopy<value_type>),                                            \
       Operator(                                                             \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type      \
           "(b -> *) el) -> " decl_type "[](a!)",                            \
-          listSetItem<Shared<c_type>, c_type::ElemType>),                   \
+          listSetItem<value_type>),                                         \
       Operator(                                                             \
           "aten::clear( " decl_type "[](a!) self) -> ()",                   \
-          listClear<Shared<c_type>>),                                       \
+          listClear<value_type>),                                           \
       Operator(                                                             \
           "aten::insert( " decl_type                                        \
-          "[](a!) self, int idx,                 \
+          "[](a!) self, int idx,                                            \
           " decl_type "(b -> *) el) -> ()",                                 \
-          listInsert<Shared<c_type>, c_type::ElemType>),                    \
+          listInsert<value_type>),                                          \
       Operator(                                                             \
           "aten::pop(" decl_type                                            \
-          "[](a!) self, int idx=-1)                    \
+          "[](a!) self, int idx=-1)                                         \
         -> " decl_type "(*)",                                               \
-          listPop<Shared<c_type>>)
+          listPop<value_type>)
 
-    CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
+    CREATE_MUTABLE_LIST_OPS("Tensor", at::Tensor),
 
     Operator(
         "aten::remove(Tensor[](a!) self, Tensor el) -> ()",
-        listRemove<Shared<TensorList>, at::Tensor>),
+        listRemove<at::Tensor>),
     Operator(
         "aten::index(Tensor[] self, Tensor el) -> int",
-        listIndex<Shared<TensorList>, at::Tensor>),
+        listIndex<at::Tensor>),
     Operator(
         "aten::count(Tensor[] self, Tensor el) -> int",
-        listCount<Shared<TensorList>, at::Tensor>),
+        listCount<at::Tensor>),
 
 // Mutable ops for lists containing immutable types.
-#define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type)                   \
+#define CREATE_IMMUTABLE_LIST_OPS(decl_type, value_type)               \
   Operator(                                                            \
       "aten::select(" decl_type "[] a, int b) -> " decl_type,          \
-      listSelect<Shared<c_type>>),                                     \
+      listSelect<value_type>),                                         \
       Operator(                                                        \
           "aten::append(" decl_type "[](a!) self, " decl_type          \
           " el) -> " decl_type "[](a!)",                               \
-          listAppend<Shared<c_type>, c_type::ElemType>),               \
+          listAppend<value_type>),                                     \
       Operator(                                                        \
           "aten::reverse(" decl_type "[](a!) self) -> ()",             \
-          listReverse<Shared<c_type>>),                                \
+          listReverse<value_type>),                                    \
       Operator(                                                        \
           "aten::extend(" decl_type "[](a!) self, " decl_type          \
           " [] other) -> ()",                                          \
-          listExtend<Shared<c_type>>),                                 \
+          listExtend<value_type>),                                     \
       Operator(                                                        \
           "aten::copy(" decl_type                                      \
           "[](a) self)"                                                \
           " -> " decl_type "[]",                                       \
-          listCopy<Shared<c_type>>),                                   \
+          listCopy<value_type>),                                       \
       Operator(                                                        \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type \
           " el) -> " decl_type "[](a!)",                               \
-          listSetItem<Shared<c_type>, c_type::ElemType>),              \
+          listSetItem<value_type>),                                    \
       Operator(                                                        \
           "aten::clear( " decl_type "[](a!) self) -> ()",              \
-          listClear<Shared<c_type>>),                                  \
+          listClear<value_type>),                                      \
       Operator(                                                        \
           "aten::insert( " decl_type                                   \
-          "[](a!) self, int idx,            \
+          "[](a!) self, int idx,                                       \
           " decl_type " el) -> ()",                                    \
-          listInsert<Shared<c_type>, c_type::ElemType>),               \
+          listInsert<value_type>),                                     \
       Operator(                                                        \
           "aten::remove(" decl_type                                    \
-          "[](a!) self,                      \
+          "[](a!) self,                                                \
           " decl_type " el) -> ()",                                    \
-          listRemove<Shared<c_type>, c_type::ElemType>),               \
+          listRemove<value_type>),                                     \
       Operator(                                                        \
           "aten::index(" decl_type                                     \
-          "[] self,                           \
+          "[] self,                                                    \
           " decl_type " el) -> int",                                   \
-          listIndex<Shared<c_type>, c_type::ElemType>),                \
+          listIndex<value_type>),                                      \
       Operator(                                                        \
           "aten::count(" decl_type                                     \
-          "[] self,                           \
+          "[] self,                                                    \
           " decl_type " el) -> int",                                   \
-          listCount<Shared<c_type>, c_type::ElemType>),                \
+          listCount<value_type>),                                      \
       Operator(                                                        \
           "aten::pop(" decl_type                                       \
-          "[](a!) self, int idx=-1)             \
+          "[](a!) self, int idx=-1)                                    \
           -> " decl_type,                                              \
-          listPop<Shared<c_type>>)
+          listPop<value_type>)
 
-    CREATE_IMMUTABLE_LIST_OPS("int", IntList),
-    CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
-    CREATE_IMMUTABLE_LIST_OPS("bool", BoolList),
+    CREATE_IMMUTABLE_LIST_OPS("int", int64_t),
+    CREATE_IMMUTABLE_LIST_OPS("float", double),
+    CREATE_IMMUTABLE_LIST_OPS("bool", bool),
 
     // NOTE: this must be after the other list specializations so that operator
     // resolution doesn't pick this up first
-    CREATE_MUTABLE_LIST_OPS("t", GenericList),
+    CREATE_MUTABLE_LIST_OPS("t", IValue),
 #undef CREATE_IMMUTABLE_LIST_OPS
 #undef CREATE_MUTABLE_LIST_OPS
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
-  Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
+  Operator("aten::len(" decl_type "[] a) -> int", listLen<c_type::value_type>),     \
       Operator(                                                                     \
           "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
           "[]",                                                                     \
-          listAdd<Shared<c_type>, c_type::ElemType>),                               \
+          listAdd<c_type::value_type>),                                             \
       Operator(                                                                     \
           "aten::slice(" decl_type                                                  \
           "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
           "[]",                                                                     \
-          listSlice<Shared<c_type>, c_type::ElemType>),                             \
+          listSlice<c_type::value_type>),                                           \
       Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList),       \
       Operator(                                                                     \
           "aten::mul(" decl_type "[] l, int n) -> " decl_type "[]",                 \
-          listMulIntLeft<Shared<c_type>, c_type::ElemType>),                        \
+          listMulIntLeft<c_type::value_type>),                                      \
       Operator(                                                                     \
           "aten::mul(int n, " decl_type "[] l) -> " decl_type "[]",                 \
-          listMulIntRight<Shared<c_type>, c_type::ElemType>)
+          listMulIntRight<c_type::value_type>)
 
-    CREATE_LIST_OPS("int", IntList),
-    CREATE_LIST_OPS("float", DoubleList),
-    CREATE_LIST_OPS("bool", BoolList),
-    CREATE_LIST_OPS("Tensor", TensorList),
-    CREATE_LIST_OPS("t", GenericList),
+    CREATE_LIST_OPS("int", c10::ListPtr<int64_t>),
+    CREATE_LIST_OPS("float", c10::ListPtr<double>),
+    CREATE_LIST_OPS("bool", c10::ListPtr<bool>),
+    CREATE_LIST_OPS("Tensor", c10::ListPtr<at::Tensor>),
+    CREATE_LIST_OPS("t", c10::ListPtr<IValue>),
 #undef CREATE_LIST_OPS
-    Operator("aten::sort(int[](a!) self) -> ()", listSort<Shared<IntList>>),
+    Operator("aten::sort(int[](a!) self) -> ()", listSort<int64_t>),
     Operator(
         "aten::sort(float[](a!) self) -> ()",
-        listSort<Shared<DoubleList>>),
+        listSort<double>),
     Operator(
         "aten::sort(Tensor[](a!) self) -> ()",
-        listSort<Shared<TensorList>>),
-    Operator("aten::sort(bool[](a!) self) -> ()", listSort<Shared<BoolList>>),
+        listSort<at::Tensor>),
+    Operator("aten::sort(bool[](a!) self) -> ()", listSort<bool>),
 
-    Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
+    Operator("aten::eq(int[] a, int[] b) -> bool", listEq<int64_t>),
     Operator(
         "aten::eq(float[] a, float[] b) -> bool",
-        listEq<Shared<DoubleList>>),
+        listEq<double>),
     Operator(
         "aten::eq(Tensor[] a, Tensor[] b) -> bool",
-        listEq<Shared<TensorList>>),
-    Operator("aten::eq(bool[] a, bool[] b) -> bool", listEq<Shared<BoolList>>),
-    Operator("aten::ne(int[] a, int[] b) -> bool", listNe<Shared<IntList>>),
+        listEq<at::Tensor>),
+    Operator("aten::eq(bool[] a, bool[] b) -> bool", listEq<bool>),
+    Operator("aten::ne(int[] a, int[] b) -> bool", listNe<int64_t>),
     Operator(
         "aten::ne(float[] a, float[] b) -> bool",
-        listNe<Shared<DoubleList>>),
+        listNe<double>),
     Operator(
         "aten::ne(Tensor[] a, Tensor[] b) -> bool",
-        listNe<Shared<TensorList>>),
-    Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<Shared<BoolList>>),
+        listNe<at::Tensor>),
+    Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<bool>),
     Operator(
         "aten::slice(str string, int start, int end=9223372036854775807, int step=1) -> str",
         stringSlice),
@@ -2234,7 +2139,7 @@ RegisterOperators reg2({
           for (int i = 0; i < t.size(0); i++) {
             elems.push_back(*t[i].data<int32_t>());
           }
-          push(stack, jit::IntList::create(std::move(elems)));
+          push(stack, std::move(elems));
           return 0;
         }),
     Operator(
@@ -2335,8 +2240,8 @@ RegisterOperators regSort({
             auto g_list = pop(stack).toGenericList();
             Stack sort_stack;
             std::sort(
-                g_list->elements().begin(),
-                g_list->elements().end(),
+                g_list.begin(),
+                g_list.end(),
                 [func, reverse, &sort_stack](
                     const IValue& a, const IValue& b) -> bool {
                   // FBCode errors without this check - "strict weak ordering"
@@ -2368,14 +2273,14 @@ std::vector<int64_t> _output_size(
       std::vector<int64_t> repeated(dim, size.toInt());
       return repeated;
     } else {
-      return c10::impl::toVector(size.toIntListRef());
+      return size.toIntListRef().vec();
     }
   }
   std::vector<double> scale_repeated;
   if (scale_factors.isDouble()) {
     scale_repeated = std::vector<double>(dim, scale_factors.toDouble());
   } else {
-    scale_repeated = c10::impl::toVector(scale_factors.toDoubleListRef());
+    scale_repeated = scale_factors.toDoubleListRef().vec();
   }
   std::vector<int64_t> ret;
   for (size_t i = 0; i < dim; ++i) {
