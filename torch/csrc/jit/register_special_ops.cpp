@@ -290,7 +290,7 @@ RegisterOperators reg({
             DEFINE_TORCH_TENSOR_OP(
                 bool,
                 bool,
-                at::empty({}, at::CPU(at::kByte).options()).fill_(scalar_val))
+                at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
 
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp
