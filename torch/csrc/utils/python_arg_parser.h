@@ -344,7 +344,11 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   if (obj == (PyObject*)&PyBool_Type) {
     return at::ScalarType::Bool;
   }
-  if (obj == (PyObject*)&PyLong_Type) {
+  if (obj == (PyObject*)&PyLong_Type
+#if PY_MAJOR_VERSION == 2
+      || obj == (PyObject*)&PyInt_Type
+#endif
+  ) {
     return at::ScalarType::Long;
   }
   return reinterpret_cast<THPDtype*>(obj)->scalar_type;
