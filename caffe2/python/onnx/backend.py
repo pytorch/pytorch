@@ -172,6 +172,7 @@ class Caffe2Backend(Backend):
         'Loop':                  'ONNXWhile',
         'Tile':                  'NumpyTile',
         'RandomNormal':          'GaussianFill',
+        'RandomUniform':         'UniformFill',
     }
 
     _global_renamed_attrs = {'kernel_shape': 'kernels'}
@@ -184,7 +185,9 @@ class Caffe2Backend(Backend):
         'ConvTranspose':        {'output_padding': 'adjs'},
         'Selu':                 {'gamma': 'scale'},
         'If':                   {'then_branch': 'then_net',
-                                 'else_branch': 'else_net'}
+                                 'else_branch': 'else_net'},
+        'RandomUniform':        {'low': 'min',
+                                 'high': 'max'}
     }
 
     # operators whose behavior is different beyond renaming
