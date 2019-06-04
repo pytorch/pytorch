@@ -1,6 +1,7 @@
 from collections import OrderedDict, namedtuple
 import functools
 import itertools
+import sys
 
 import torch
 from ..backends.thnn import backend as thnn_backend
@@ -201,6 +202,7 @@ class Module(object):
                     # want to create copy nodes, so we have to unpack the data.
                     #
                     # yf225 TODO: check refcount of param, and give deprecation notice / throw error if refcount > 1
+                    print("param refcount: ", sys.getrefcount(param))
                     param.data = param_applied
                 else:
                     with torch.no_grad():
