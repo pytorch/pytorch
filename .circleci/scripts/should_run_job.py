@@ -4,6 +4,9 @@ import sys
 
 # Modify this variable if you want to change the set of default jobs
 # which are run on all pull requests.
+#
+# WARNING: Actually, this is a lie; we're currently also controlling
+# the set of jobs to run via the Workflows filters in CircleCI config.
 
 default_set = [
     # PyTorch CPU
