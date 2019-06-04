@@ -4,6 +4,8 @@
 
 #include "ATen/cuda/CUDAContext.h"
 
+#define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
+
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
 void THCTensor_(cauchy)(THCState* state, THCTensor *self_, double median, double sigma)
@@ -314,4 +316,7 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
 }
 
 #endif
+
+#undef NUM_BLOCKS
+
 #endif

@@ -19,7 +19,7 @@ namespace at {
 namespace native {
 namespace {
 
-class QFCPackWeightInt8 final : public c10::OperatorKernel {
+class QLinearPackWeightInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
   // Calculate the column offsets.
@@ -84,7 +84,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
-    AT_ASSERTM(
+    TORCH_CHECK(
         false, "This PyTorch installation was not built with FBGEMM operators");
   }
 #endif // USE_FBGEMM
@@ -93,7 +93,7 @@ class QFCPackWeightInt8 final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_linear_prepack(Tensor W) -> Tensor W_prepack",
     c10::RegisterOperators::options()
-      .kernel<QFCPackWeightInt8>(QuantizedCPUTensorId()));
+      .kernel<QLinearPackWeightInt8>(QuantizedCPUTensorId()));
 } // namespace
 } // namespace native
 } // namespace at

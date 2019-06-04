@@ -470,17 +470,20 @@ void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generat
 
 void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* gen_) {
   auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
+  // Note that HIP doesn't support std::nextafter in device code.
+  auto nextafter_1_0_float = std::nextafter(1.0f, 0.0f);
+  auto nextafter_1_0_double = std::nextafter(1.0, 0.0);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "exponential_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto lambda = static_cast<accscalar_t>(lambda_);
     if (std::is_same<scalar_t, double>::value) {
       // define lambda for exponential transformation
-      auto exponential_func = [lambda] __device__ (accscalar_t rand) {
+      auto exponential_func = [lambda, nextafter_1_0_double] __device__ (accscalar_t rand) {
         accscalar_t sample;
         // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
         // Hence, squash the 1 to just below 1.
         if(rand == static_cast<accscalar_t>(1.0)) {
-          sample = ::log(std::nextafter(1.0, 0.0));
+          sample = ::log(nextafter_1_0_double);
         } else {
           sample = ::log(rand);
         }
@@ -492,10 +495,10 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
         exponential_func);
     } else {
       // use __logf fast approximation for peak bandwidth
-      auto exponential_func = [lambda] __device__ (accscalar_t rand) {
+      auto exponential_func = [lambda, nextafter_1_0_float] __device__ (accscalar_t rand) {
         accscalar_t sample;
         if(rand == static_cast<accscalar_t>(1.0)) {
-          sample = __logf(std::nextafter(1.0f, 0.0f));
+          sample = __logf(nextafter_1_0_float);
         } else {
           sample = __logf(rand);
         }

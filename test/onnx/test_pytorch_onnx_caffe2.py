@@ -1747,6 +1747,94 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(1, 2, 3)
         self.run_model_test(DropoutModel(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_while(self):
+        class WhileModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                a = 0
+                while a < 4:
+                    a += 1
+                return x + a
+
+        model = WhileModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_while_cond(self):
+        class WhileModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, a):
+                b = (a < 4)
+                while b:
+                    a += b.to(torch.long)
+                    b = (a < 4)
+                return x + a
+
+        model = WhileModel()
+        x = torch.zeros(1, 2, 3, dtype=torch.long)
+        a = torch.tensor([0], dtype=torch.long)
+        outputs = model(x, a)
+        self.run_model_test(model, train=False, input=(x, a), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_loop(self):
+        class LoopModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(5):
+                    x = x + i
+                return x
+
+        model = LoopModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_dynamic_loop(self):
+        class LoopModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(x.size(2)):
+                    x = x + i
+                return x
+
+        model = LoopModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_nested_loops(self):
+        class NestedLoopsModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(5):
+                    a = 0
+                    while a < 4:
+                        a += 1
+                        for j in range(a):
+                            x = x + j
+                    x = x + a
+                return x
+
+        model = NestedLoopsModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_select(self):
+        class SelectModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.select(x, 0, 1)
+
+        model = SelectModel()
+        inputs = torch.randn(3, 2, 1)
+        self.run_model_test(model, train=False, input=(inputs, ), batch_size=BATCH_SIZE)
+
 # a bit of metaprogramming to set up all the rnn tests
 
 
