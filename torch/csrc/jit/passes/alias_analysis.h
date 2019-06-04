@@ -178,7 +178,6 @@ class AliasDb {
   Element* getWildcard(const TypePtr& type) const;
   Element* getOrCreateWildcard(const TypePtr& type);
   bool mayAliasWildcard(const Value* v) const;
-  void registerWildcardWrite(Element* wildcardElement, Node* node);
 
   /**
    * State for tracking write info.
