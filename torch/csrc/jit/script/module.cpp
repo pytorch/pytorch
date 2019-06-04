@@ -39,7 +39,7 @@ Value* Function::try_emit_call(
     c10::optional<NamedValue> self,
     ArrayRef<NamedValue> args,
     ArrayRef<NamedValue> kwargs,
-    std::stringstream& failure_messages,
+    std::ostream* failure_messages,
     bool conv_tensors_to_nums) {
   ensure_defined();
   auto fn = this->graph();
@@ -57,7 +57,16 @@ Value* Function::try_emit_call(
     return nullptr;
 
   check_single_output();
-  return inlineCallTo(graph, *fn, matched_schema->inputs).at(0);
+  Value* fn_constant = graph.insertNode(graph.create(prim::Constant))
+                           ->output()
+                           ->setType(FunctionType::create(shared_from_this()));
+  matched_schema->inputs.insert(matched_schema->inputs.begin(), fn_constant);
+  Value* result =
+      graph
+          .insertNode(graph.create(prim::CallFunction, matched_schema->inputs))
+          ->output()
+          ->setType(matched_schema->return_types.at(0));
+  return result;
 }
 
 Value* Function::emit_call(
@@ -72,7 +81,7 @@ Value* Function::emit_call(
           c10::nullopt,
           args,
           kwargs,
-          failure_messages,
+          &failure_messages,
           /*conv_tensors_to_nums=*/true)) {
     return result;
   }

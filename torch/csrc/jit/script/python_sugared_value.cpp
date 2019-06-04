@@ -347,10 +347,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   if (py::isinstance(attr, py::module::import("torch").attr("Tensor"))) {
     hint = "Tensors must be added to a module as a buffer or parameter";
   }
-  throw ErrorReport(loc) << "attribute '" << field << "' of type '"
-                         << typeString(attr)
-                         << "' is not usable in a script method (" << hint
-                         << ")";
+  throw ErrorReport(loc)
+      << "attribute '" << field << "' of type '" << typeString(attr)
+      << "' is not usable in a script method (" << hint << ")";
 }
 
 std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(

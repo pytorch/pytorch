@@ -545,7 +545,7 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
   AT_ASSERT(sparse_.is_sparse());
   auto sparse = sparse_.coalesce();
   Tensor grad_sparse = maybe_multiply(grad.mm(dense.t()), alpha);
-  return grad_sparse.sparse_mask(at::SparseTensorRef(sparse));
+  return grad_sparse.sparse_mask(sparse);
 }
 
 Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
@@ -2133,6 +2133,12 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
 
   return gg_weight.view(size);
 }
+
+Tensor index_backward(const Tensor & self, TensorList indices, const Tensor& grad) {
+   auto zeros = at::zeros_like(self);
+   return at::_index_put_impl_(zeros, indices, grad, true, true);
+}
+
 
 } // anonymous namespace
 

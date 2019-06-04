@@ -386,6 +386,11 @@ void THPStorage_(postInit)(PyObject *module)
 #ifdef THC_GENERIC_FILE
   backend = at::Backend::CUDA;
 #endif
+
+#ifdef THQUANTIZED
+  backend = at::Backend::QuantizedCPU;
+#endif
+
   torch::registerStoragePyTypeObject((PyTypeObject*)THPStorageClass, backend, TH_CONCAT_2(at::k, Real));
 }
 
