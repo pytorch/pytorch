@@ -67,6 +67,7 @@ def _batch_mahalanobis(bL, bx):
 
 
 def _precision_to_scale_tril(P):
+    # Ref: https://nbviewer.jupyter.org/gist/fehiepsi/5ef8e09e61604f10607380467eb82006#Precision-to-scale_tril
     Lf = torch.cholesky(torch.flip(P, (-2, -1)))
     L = torch.inverse(torch.transpose(torch.flip(Lf, (-2, -1)), -2, -1))
     return L.tril()  # torch.inverse of a triangular is not a triangular due to precision
