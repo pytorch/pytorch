@@ -300,15 +300,15 @@ static void threshold_kernel(TensorIterator& iter, Scalar threshold, Scalar valu
 namespace {
 
 template <typename T>
-void GeluCUDAKernelImplInternal(const Tensor& X, Tensor* Y) {
-  at::cuda::CUDA_tensor_apply2<T, T>(X, *Y, [] __device__(const T& x, T& y) {
-    y = x * c10::cuda::compat::normcdf(x);
+void GeluCUDAKernelImplInternal(TensorIterator* it) {
+  gpu_unary_kernel(*it, []GPU_LAMBDA(T x) {
+    return x * c10::cuda::compat::normcdf(x);
   });
 }
 
-void GeluCUDAKernelImpl(const Tensor& X, Tensor* Y) {
-  AT_DISPATCH_FLOATING_TYPES(X.scalar_type(), "GeluCUDAKernelImpl", [&]() {
-    GeluCUDAKernelImplInternal<scalar_t>(X, Y);
+void GeluCUDAKernelImpl(TensorIterator* it) {
+  AT_DISPATCH_FLOATING_TYPES(it->dtype(), "GeluCUDAKernelImpl", [&]() {
+    GeluCUDAKernelImplInternal<scalar_t>(it);
   });
 }
 

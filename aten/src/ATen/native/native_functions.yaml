@@ -1604,9 +1604,6 @@
 
 - func: gelu(Tensor self) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: gelu_cpu
-    CUDA: gelu_cuda
 
 - func: gelu_backward(Tensor grad, Tensor self) -> Tensor
   python_module: nn

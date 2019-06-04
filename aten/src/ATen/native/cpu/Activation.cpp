@@ -40,57 +40,83 @@ static void threshold_kernel(
 
 #if AT_MKL_ENABLED()
 
-// TODO(yangxm): Consider to use TensorIterator here.
 template <typename T>
-void GeluKernelMKLImpl(const Tensor& X, Tensor* Y);
+void MKLCdfNorm(int N, const T* X, T* Y);
 
-#define DELEGATE_GELU_KERNEL_MKL_IMPL(T, CdfNormFunc, MulFunc) \
-  template <>                                                  \
-  void GeluKernelMKLImpl<T>(const Tensor& X, Tensor* Y) {      \
-    const int64_t N = X.numel();                               \
-    const T* X_data = X.data<T>();                             \
-    T* Y_data = Y->data<T>();                                  \
-    CdfNormFunc(N, X_data, Y_data);                            \
-    MulFunc(N, X_data, Y_data, Y_data);                        \
+template <>
+void MKLCdfNorm<float>(int N, const float* X, float* Y) {
+  vsCdfNorm(N, X, Y);
+}
+
+template <>
+void MKLCdfNorm<double>(int N, const double* X, double* Y) {
+  vdCdfNorm(N, X, Y);
+}
+
+template <typename T>
+void MKLMul(int N, const T* A, const T* B, T* Y);
+
+template <>
+void MKLMul<float>(int N, const float* A, const float* B, float* Y) {
+  vsMul(N, A, B, Y);
+}
+
+template <>
+void MKLMul<double>(int N, const double* A, const double* B, double* Y) {
+  vdMul(N, A, B, Y);
+}
+
+template <typename T>
+void GeluKernelMKLImpl(TensorIterator* it) {
+  if (!it->can_use_32bit_indexing()) {
+    for (auto& sub_it : it->with_32bit_indexing()) {
+      GeluKernelMKLImpl<T>(&sub_it);
+    }
+    return;
   }
-DELEGATE_GELU_KERNEL_MKL_IMPL(float, vsCdfNorm, vsMul)
-DELEGATE_GELU_KERNEL_MKL_IMPL(double, vdCdfNorm, vdMul)
-#undef DELEGATE_GELU_KERNEL_MKL_IMPL
+  const int N = it->numel();
+  const T* X_data = static_cast<T*>(it->data_ptr(1));
+  T* Y_data = static_cast<T*>(it->data_ptr(0));
+  MKLCdfNorm<T>(N, X_data, Y_data);
+  MKLMul<T>(N, X_data, Y_data, Y_data);
+}
 
 #else // AT_MKL_ENABLED()
 
 template <typename T>
-void GeluKernelMKLImpl(const Tensor& X, Tensor* Y) {
+void GeluKernelMKLImpl(TensorIterator* /* it */) {
   AT_ASSERTM(false, "ATen not compiled with MKL");
 }
 
 #endif // AT_MKL_ENABLED()
 
 template <typename T>
-void GeluKernelImplInternal(const Tensor& X, Tensor* Y) {
-  const int64_t N = X.numel();
-  const T* X_data = X.data<T>();
-  T* Y_data = Y->data<T>();
-  for (int64_t i = 0; i < N; ++i) {
-    Y_data[i] = X_data[i] * M_SQRT1_2;
-  }
-  Y->erf_();
-  for (int64_t i = 0; i < N; ++i) {
-    Y_data[i] = (Y_data[i] + T(1)) * X_data[i] * T(0.5);
-  }
+void GeluKernelImplInternal(TensorIterator* it) {
+  using Vec = Vec256<T>;
+  const Vec kOne = Vec(1.0);
+  const Vec kPointFive = Vec(0.5);
+  const Vec kSqrtPointFive = Vec(M_SQRT1_2);
+  unary_kernel_vec(
+      *it,
+      [](T x) {
+        return T(0.5) * x * (T(1) + std::erf(x * static_cast<T>(M_SQRT1_2)));
+      },
+      [&](const Vec& x) {
+        return kPointFive * x * (kOne + (x * kSqrtPointFive).erf());
+      });
 }
 
 // TODO(yangxm): Add another fast kernel using formula
 // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
 // and the fast tanh impl from Eigen.
-void GeluKernelImpl(const Tensor& X, Tensor* Y) {
-  if (at::hasMKL()) {
-    AT_DISPATCH_FLOATING_TYPES(X.scalar_type(), "GeluKernelImpl", [&]() {
-      GeluKernelMKLImpl<scalar_t>(X, Y);
+void GeluKernelImpl(TensorIterator* it) {
+  if (at::hasMKL() && it->is_contiguous()) {
+    AT_DISPATCH_FLOATING_TYPES(it->dtype(), "GeluKernelImpl", [&]() {
+      GeluKernelMKLImpl<scalar_t>(it);
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES(X.scalar_type(), "GeluKernelImpl", [&]() {
-      GeluKernelImplInternal<scalar_t>(X, Y);
+    AT_DISPATCH_FLOATING_TYPES(it->dtype(), "GeluKernelImpl", [&]() {
+      GeluKernelImplInternal<scalar_t>(it);
     });
   }
 }
