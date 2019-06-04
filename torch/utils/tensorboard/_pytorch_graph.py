@@ -1,4 +1,3 @@
-import logging
 from collections import OrderedDict
 
 from tensorboard.compat.proto.config_pb2 import RunMetadata
@@ -8,8 +7,6 @@ from tensorboard.compat.proto.versions_pb2 import VersionDef
 
 import torch
 from ._proto_graph import node_proto
-from torch.onnx.utils import OperatorExportTypes
-from torch.onnx import _optimize_trace
 
 methods_OP = ['attributeNames', 'hasMultipleOutputs', 'hasUses', 'inputs',
               'kind', 'outputs', 'outputsSize', 'scopeName']
