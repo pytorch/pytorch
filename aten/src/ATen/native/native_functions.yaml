@@ -688,6 +688,7 @@
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
+    MkldnnCPU: empty_mkldnn
     SparseCPU: empty_sparse
     SparseCUDA: empty_sparse
 
