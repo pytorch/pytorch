@@ -555,7 +555,7 @@ RegisterOperators reg(
              return [=](Stack& stack) {
                drop(stack, 1);
                c10::SourceLocation location{
-                   "", range->filename()->c_str(), line};
+                   "", range->filename()->c_str(), uint32_t(line)};
                c10::Warning::warn(location,
                    pop(stack).toStringRef());
                return 0;
