@@ -96,6 +96,23 @@ static int64_t floordiv(int64_t a, int64_t b) {
     return (r.rem) ? r.quot - 1 : r.quot;
   }
 }
+void checkDoubleInRange(double a) {
+  if (std::isnan(a) || std::isinf(a) ||
+      a > double(std::numeric_limits<int64_t>::max()) ||
+      a < double(std::numeric_limits<int64_t>::min())) {
+    throw c10::Error(
+        "Cannot convert float " + std::to_string(a) + " to integer", "");
+    return;
+  }
+}
+static int64_t floor(double a) {
+  checkDoubleInRange(a);
+  return std::floor(a);
+}
+static int64_t ceil(double a) {
+  checkDoubleInRange(a);
+  return std::ceil(a);
+}
 
 static int64_t gcd(int64_t a, int64_t b) {
   while (b != 0) {
@@ -2128,8 +2145,8 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
 
-    DEFINE_UNARY_OP(aten::floor, std::floor(a), float, float),
-    DEFINE_UNARY_OP(aten::ceil, std::ceil(a), float, float),
+    DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
+    DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::log, std::log(a) / std::log(b)),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
