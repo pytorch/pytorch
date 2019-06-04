@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/script/module_python.h>
+#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <memory>
 #include <sstream>
@@ -234,7 +234,7 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
         &err,
         true);
     if (match) {
-      return MethodValue(module_, fn)
+      return MethodValue(module_, method_name)
           .call(loc, caller, inputs, attributes, n_binders);
     }
   }
