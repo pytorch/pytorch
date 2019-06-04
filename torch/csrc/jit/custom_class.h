@@ -26,12 +26,10 @@ struct class_ {
     auto obj = py::module::import(parentModule.c_str());
     pyClass = std::make_shared<py::class_<CurClass>>(obj, className.c_str());
     pyClass->def(py::init<>());
-    auto cu = std::make_shared<torch::jit::script::CompilationUnit>();
+    auto cu = std::make_shared<script::CompilationUnit>();
     auto classType = ClassType::create(
         c10::QualifiedName("__torch__." + parentModule + "." + className), cu);
-    torch::jit::script::CompilationUnit::_get_python_cu().register_class(
-        classType);
-    auto func = []() { return new CurClass; };
+    script::CompilationUnit::_get_python_cu().register_class(classType);
     auto graph = std::make_shared<Graph>();
     auto input = graph->addInput()->setType(classType);
     graph->registerOutput(input);
