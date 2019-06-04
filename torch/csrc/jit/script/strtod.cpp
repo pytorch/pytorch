@@ -15,6 +15,8 @@ namespace torch {
 namespace jit {
 namespace script {
 
+#if !defined(C10_MOBILE)
+
 #ifdef _WIN32
   C10_EXPORT double strtod_c(const char* str, char** end) {
     /// NOLINTNEXTLINE(hicpp-signed-bitwise)
@@ -34,6 +36,8 @@ C10_EXPORT float strtof_c(const char *nptr, char **endptr)
 {
     return (float) strtod_c(nptr, endptr);
 }
+
+#endif
 
 }
 }
