@@ -13,7 +13,7 @@
 // of the A rows. The column offsets are needed for the asymmetric quantization
 // (affine quantization) of input matrix.
 // Note that in JIT mode we can think of a way to fuse col_offsets with bias.
-struct FBGEMM_API PackedFCWeight {
+struct FBGEMM_API PackedLinearWeight {
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
   std::vector<int32_t> col_offsets;
   float w_scale;
@@ -28,17 +28,24 @@ struct FBGEMM_API PackedConvWeight {
   int32_t w_zp;
 };
 
-// Convert the weight from uint8 to int8.
+// PackWeight: Convert the weight from uint8 to int8.
 static void convert_uint8_int8(
-    int K,
-    int N,
+    int len,
     const uint8_t* src_uint8,
     int8_t* dst_int8) {
-  for (size_t i = 0; i < N; ++i) {
-    for (size_t j = 0; j < K; ++j) {
-      dst_int8[i * K + j] =
-          static_cast<int8_t>(static_cast<int32_t>(src_uint8[i * K + j]) - 128);
-    }
+  for (int i = 0; i < len; ++i) {
+    dst_int8[i] = static_cast<int8_t>(static_cast<int32_t>(src_uint8[i]) - 128);
+  }
+}
+
+// UnpackWeight: Convert the weight from int8 to uint8.
+static void convert_int8_uint8(
+    int len,
+    const int8_t* src_int8,
+    uint8_t* dst_uint8) {
+  for (int i = 0; i < len; ++i) {
+    dst_uint8[i] =
+        static_cast<uint8_t>(static_cast<int32_t>(src_int8[i]) + 128);
   }
 }
 

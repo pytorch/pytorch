@@ -32,7 +32,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         weight_zero_point_int32 == 0,
         "Only symmetric quantization is supported for weights yet");
     const int8_t* weight_ptr_int8 =
-        reinterpret_cast<int8_t*>(weight_config.data<c10::quint8>());
+        reinterpret_cast<int8_t*>(weight_config.data<c10::qint8>());
 
     std::vector<int32_t> col_offsets(NDim * groups);
     std::vector<int32_t> kernel{static_cast<int>(weight.size(0)),
