@@ -3365,9 +3365,10 @@ class TestNN(NNTestCase):
                 decoder_state_tensor = torch.from_numpy(decoder_state).double()
                 source_hid_tensor = torch.from_numpy(K).double().transpose(0, 1)
 
-                multihead_attn_module = MultiheadAttention(d_model, nheads, kdim=kv_dim, vdim=kv_dim, 
+                multihead_attn_module = MultiheadAttention(d_model, nheads, 
                                                            add_bias_kv=add_bias_kv,
-                                                           add_zero_attn=add_zero_attn)
+                                                           add_zero_attn=add_zero_attn,
+                                                           kdim=kv_dim, vdim=kv_dim)
 
                 if add_bias_kv:
                     bias_k = multihead_attn_module.bias_k.detach().numpy()
