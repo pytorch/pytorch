@@ -587,11 +587,21 @@ struct Assign : public Stmt {
       const Expr& rhs) {
     return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs}));
   }
+  static Assign create(
+      const SourceRange& range,
+      const Expr& lhs,
+      const Expr& rhs,
+      const Expr& type) {
+    return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs, type}));
+  }
   Expr lhs() const {
     return Expr(subtree(0));
   }
   Expr rhs() const {
     return Expr(subtree(1));
+  }
+  Expr type() const {
+    return Expr(subtree(2));
   }
 };
 

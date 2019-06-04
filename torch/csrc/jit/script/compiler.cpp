@@ -2041,8 +2041,15 @@ struct to_ir {
     switch (stmt.lhs().kind()) {
       case TK_VAR: {
         auto v = Var(stmt.lhs());
-        environment_stack->setSugaredVar(
-            v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1));
+        if (stmt.get()->trees().size() == 3) {
+          // TODO: add a flag
+          TypePtr type = typeParser_.parseTypeFromExpr(stmt.type());
+          environment_stack->setSugaredVar(
+              v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1, type));
+        } else {
+          environment_stack->setSugaredVar(
+              v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1));
+        }
       } break;
       case TK_TUPLE_LITERAL:
         emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());

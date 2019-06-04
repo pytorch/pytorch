@@ -3556,6 +3556,15 @@ def foo(x):
         self.checkScript(annotate_none, ())
         self.checkScript(annotate_none_no_optional, ())
 
+        def annotated_assignment():
+            a : List[int] = []
+            b : torch.Tensor = torch.ones(2, 2)
+            for _ in range(10):
+                a.append(4)
+            return a, b
+
+        self.checkScript(annotated_assignment, ())
+
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
 

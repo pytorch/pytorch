@@ -8,8 +8,8 @@ from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 
-# Borrowed from cPython implementation 
-# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411# 
+# Borrowed from cPython implementation
+# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
 
 _reserved_prefix = '__jit'
 _reserved_names = {'print'}
@@ -281,6 +281,13 @@ class StmtBuilder(Builder):
                                     "Performing multiple assignments in a single line isn't supported")
         lhs = build_expr(ctx, stmt.targets[0])
         return Assign(lhs, rhs)
+
+    @staticmethod
+    def build_AnnAssign(ctx, stmt):
+        rhs = build_expr(ctx, stmt.value)
+        lhs = build_expr(ctx, stmt.target)
+        the_type = build_expr(ctx, stmt.annotation)
+        return Assign(lhs, rhs, the_type)
 
     @staticmethod
     def build_Return(ctx, stmt):
