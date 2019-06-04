@@ -7839,8 +7839,8 @@ class TestNN(NNTestCase):
         self.assertEqual(m.fc1.weight._grad.type(), sparse_tensor.type())
         self.assertTrue(m.fc1.weight._grad._is_same_impl_type(sparse_tensor))
 
-        self.assertEqual(id(param_ref), id(m.fc1.weight))
-        # TODO: Figure out a way to preserve previous references to `m.fc1.weight._grad`.
+        # yf225 TODO: better comment here!
+        self.assertNotEqual(id(param_ref), id(m.fc1.weight))
         self.assertNotEqual(id(param_grad_ref), id(m.fc1.weight._grad))
 
 

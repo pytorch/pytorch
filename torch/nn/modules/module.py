@@ -193,27 +193,33 @@ class Module(object):
         for module in self.children():
             module._apply(fn)
 
-        for param in self._parameters.values():
+        for key, param in self._parameters.items():
             if param is not None:
-                # Tensors stored in modules are graph leaves, and we don't
-                # want to create copy nodes, so we have to unpack the data.
-                param_applied = fn(param.data)
+                param_applied = fn(param)
                 if param._is_same_impl_type(param_applied):
+                    # Tensors stored in modules are graph leaves, and we don't
+                    # want to create copy nodes, so we have to unpack the data.
+                    #
+                    # yf225 TODO: check refcount of param, and give deprecation notice / throw error if refcount > 1
                     param.data = param_applied
                 else:
-                    param._set_data_change_impl(param_applied)
+                    with torch.no_grad():
+                        # yf225 TODO: improve comment here
+                        #
+                        # We use `requires_grad_()` here, to make sure the new `param` still
+                        # has the same `requires_grad` value as the old `param`. An alternative is
+                        # to not use `with torch.no_grad():`, but that would cause the following operation
+                        # to create a `CopyBackwards` gradient function which is not what we wanted.
+                        #
+                        # yf225 TODO: in a separate PR, we should enforce that `param.requires_grad == True`
+                        self._parameters[key] = param_applied.requires_grad_(param.requires_grad)
                 if param._grad is not None:
-                    grad_applied = fn(param._grad.data)
+                    grad_applied = fn(param._grad)
                     if param._grad._is_same_impl_type(grad_applied):
+                        # yf225 TODO: check refcount of param, and give deprecation notice / throw error if refcount > 1
                         param._grad.data = grad_applied
                     else:
-                        # NOTE: This breaks previous references to `param._grad`.
-                        #
-                        # TODO: Ideally, we should use something like
-                        # `param._grad._set_data_change_impl(grad_applied)`
-                        # instead to preserve previous references to `param._grad`,
-                        # but we haven't figured out a way to do so at the moment.
-                        param._grad = grad_applied
+                        self._parameters[key]._grad = grad_applied
 
         for key, buf in self._buffers.items():
             if buf is not None:

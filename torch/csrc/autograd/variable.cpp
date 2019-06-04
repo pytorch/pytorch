@@ -87,19 +87,6 @@ bool Variable::is_same_impl_type(const at::Tensor &tensor) {
   return typeid(*unsafeGetTensorImpl()) == typeid(*(tensor.unsafeGetTensorImpl()));
 }
 
-void Variable::reset_grad_accumulator(
-    const c10::Device& new_device, const at::DeprecatedTypeProperties& new_type) {
-  Variable::AutogradMeta* autograd_meta = get_autograd_meta();
-  std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
-  auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
-  if (prior_accumulator) {
-    const auto prior_device = prior_accumulator->input_metadata(0).device();
-    if (new_type != type() || prior_device != new_device) {
-      autograd_meta->grad_accumulator_.reset();
-    }
-  }
-}
-
 void Variable::set_data(const at::Tensor &new_data) {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` has the same derived
@@ -109,7 +96,17 @@ void Variable::set_data(const at::Tensor &new_data) {
     "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have different types of TensorImpl.");
 
   // Resets gradient accumulator if metadata is out of date
-  reset_grad_accumulator(new_data.device(), new_data.type());
+  Variable::AutogradMeta* autograd_meta = get_autograd_meta();
+  std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
+  auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
+  if (prior_accumulator) {
+    const auto prior_device = prior_accumulator->input_metadata(0).device();
+    const auto new_device = new_data.device();
+
+    if (new_data.type() != type() || prior_device != new_device) {
+      autograd_meta->grad_accumulator_.reset();
+    }
+  }
 
   // Version counter is not shared when we replace a `Variable`'s tensor data
   // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
@@ -120,20 +117,6 @@ void Variable::set_data(const at::Tensor &new_data) {
   // `allow_tensor_metadata_change_` value, and the users are responsible for ensuring this is
   // the behavior they want.
   get()->shallow_copy_from(new_data.getIntrusivePtr());
-}
-
-void Variable::_set_data_change_impl(const at::Tensor &new_data) {
-  // Resets gradient accumulator if metadata is out of date
-  reset_grad_accumulator(new_data.device(), new_data.type());
-
-  // We change this `Variable`'s TensorImpl, but preserves its `pyobj_` pointer,
-  // so that previous references to this `Variable` in Python are still valid.
-  auto new_impl = new_data.unsafeGetTensorImpl()->shallow_copy_and_detach(
-    /*version_counter=*/get()->version_counter(),
-    /*allow_tensor_metadata_change=*/get()->allow_tensor_metadata_change());
-  new_impl->set_autograd_meta(std::move(get()->detach_autograd_meta()));
-  new_impl->set_pyobj(get()->pyobj());
-  impl_ = std::move(new_impl);
 }
 
 Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
