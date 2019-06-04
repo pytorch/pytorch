@@ -95,13 +95,14 @@ export dry_run=false  # yf225 TODO: remove this when ready to merge
 
 if [ "$dry_run" = false ]; then
   echo "Pushing to pytorch.github.io:site"
+  echo "GITHUB_PYTORCHBOT_TOKEN: " $GITHUB_PYTORCHBOT_TOKEN  # yf225 TODO: remove this when ready to merge
   set +x
 /usr/bin/expect <<DONE
   spawn git push origin willfeng_test
   expect "Username*"
   send "pytorchbot\n"
   expect "Password*"
-  send "$::env(GITHUB_PYTORCHBOT_TOKEN)\n"
+  send "$env(GITHUB_PYTORCHBOT_TOKEN)\n"
   expect eof
 DONE
   set -x
