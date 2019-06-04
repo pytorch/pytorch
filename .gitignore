@@ -240,3 +240,6 @@ TAGS
 # Files generated when a patch is rejected
 *.orig
 *.rej
+
+# Chilli
+test/custom_class/t/pybind11 
