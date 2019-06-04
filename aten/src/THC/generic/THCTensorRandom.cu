@@ -42,6 +42,22 @@ void THCTensor_(exponential)(THCState* state, THCTensor *self_, double lambda)
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
+void THCTensor_(cauchy)(THCState* state, THCTensor *self_, double median, double sigma)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
+  ptrdiff_t size = THCTensor_(nElement)(state, self_);
+  if (size == 0) return;
+  THCGenerator* gen = THCRandom_getGenerator(state);
+
+  THCTensor *self = THCTensor_(newContiguous)(state, self_);
+  scalar_t *data = THCTensor_(data)(state, self);
+
+  generate_cauchy<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->state.gen_states, size, data, median, sigma);
+
+  THCTensor_(freeCopyTo)(state, self, self_);
+};
+
 void THCTensor_(renormRows)(struct THCState* state,
                              THCTensor* t) {
   THAssert(THCTensor_(nDimensionLegacyAll)(state, t) == 2);

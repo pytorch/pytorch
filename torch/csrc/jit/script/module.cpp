@@ -39,7 +39,7 @@ Value* Function::try_emit_call(
     c10::optional<NamedValue> self,
     ArrayRef<NamedValue> args,
     ArrayRef<NamedValue> kwargs,
-    std::stringstream& failure_messages,
+    std::ostream* failure_messages,
     bool conv_tensors_to_nums) {
   ensure_defined();
   auto fn = this->graph();
@@ -81,7 +81,7 @@ Value* Function::emit_call(
           c10::nullopt,
           args,
           kwargs,
-          failure_messages,
+          &failure_messages,
           /*conv_tensors_to_nums=*/true)) {
     return result;
   }
