@@ -24,6 +24,9 @@ struct GuardElimination {
         // grab the next node before we move this one all the way back
         it++;
         auto guardee = n->inputs().at(0)->node();
+        if (guardee->owningBlock() != n->owningBlock()) {
+          guardee = *n->owningBlock()->nodes().begin();
+        }
         aliasDb_->moveAfterTopologicallyValid(n, guardee);
       } else {
         it++;
