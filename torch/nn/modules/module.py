@@ -202,6 +202,10 @@ class Module(object):
                     # want to create copy nodes, so we have to unpack the data.
                     #
                     # yf225 TODO: check refcount of param, and give deprecation notice / throw error if refcount > 1
+                    #
+                    # yf225 TODO: also, post in the following threads about this behavior change:
+                    # 1. https://discuss.pytorch.org/t/effect-of-calling-model-cuda-after-constructing-an-optimizer/15165
+                    # 2. https://github.com/pytorch/pytorch/issues/7844
                     print("param refcount: ", sys.getrefcount(param))
                     param.data = param_applied
                 else:
