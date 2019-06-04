@@ -3,9 +3,13 @@
 from collections import OrderedDict
 
 import cimodel.lib.conf_tree as conf_tree
+from cimodel.lib.conf_tree import Ver
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.visualization as visualization
 from cimodel.data.caffe2_build_data import CONFIG_TREE_DATA, TopLevelNode
+
+
+from dataclasses import dataclass
 
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
@@ -13,14 +17,13 @@ DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 DOCKER_IMAGE_VERSION = 276
 
 
-class Conf(object):
-    def __init__(self, language, distro, compiler, phase, build_only):
-
-        self.language = language
-        self.distro = distro
-        self.compiler = compiler
-        self.phase = phase
-        self.build_only = build_only
+@dataclass
+class Conf:
+    language: str
+    distro: Ver
+    compiler: Ver
+    phase: str
+    build_only: bool
 
     # TODO: Eventually we can probably just remove the cudnn7 everywhere.
     def get_cudnn_insertion(self):

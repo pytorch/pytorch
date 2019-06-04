@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 
+from dataclasses import dataclass
+
+
 def X(val):
     """
     Compact way to write a leaf node
@@ -8,13 +11,13 @@ def X(val):
     return val, []
 
 
-class Ver(object):
+@dataclass
+class Ver:
     """
     Represents a product with a version number
     """
-    def __init__(self, name, version=""):
-        self.name = name
-        self.version = version
+    name: str
+    version: str = ""
 
     def __str__(self):
         return self.name + self.version

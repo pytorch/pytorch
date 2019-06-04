@@ -8,42 +8,31 @@ import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.visualization as visualization
 
+from dataclasses import dataclass, field
+from typing import List, Optional
+
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
 DOCKER_IMAGE_VERSION = 300
 
 
-class Conf(object):
-    def __init__(self,
-                 distro,
-                 parms,
-                 pyver=None,
-                 cuda_version=None,
-                 is_xla=False,
-                 restrict_phases=None,
-                 gpu_resource=None,
-                 dependent_tests=None,
-                 parent_build=None,
-                 is_namedtensor=False,
-                 is_important=False):
-
-        self.distro = distro
-        self.pyver = pyver
-        self.parms = parms
-        self.cuda_version = cuda_version
-
-        # TODO expand this to cover all the USE_* that we want to test for
-        #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
-        # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
-        self.is_xla = is_xla
-        self.is_namedtensor = is_namedtensor
-        self.is_important = is_important
-
-        self.restrict_phases = restrict_phases
-        self.gpu_resource = gpu_resource
-        self.dependent_tests = dependent_tests or []
-        self.parent_build = parent_build
+@dataclass
+class Conf:
+    distro: str
+    parms: List[str]
+    pyver: Optional[str] = None
+    cuda_version: Optional[str] = None
+    # TODO expand this to cover all the USE_* that we want to test for
+    #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
+    # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
+    is_xla: bool = False
+    restrict_phases: Optional[List[str]] = None
+    gpu_resource: Optional[str] = None
+    dependent_tests: List = field(default_factory=list)
+    parent_build: Optional['Conf'] = None
+    is_namedtensor: bool = False
+    is_important: bool = False
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
