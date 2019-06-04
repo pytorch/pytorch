@@ -1602,12 +1602,13 @@ if _enabled:
                             continue
                     ScriptModule.__setattr__(self, name, item)
 
+            # Copy annotations, pull types from `__annotations__` or try to infer
+            # the type if possible
             class_annotations = getattr(original, '__annotations__', {})
-            # Try to make class items into attributes
-            for name in original.__dict__:
-                if name == "training":
+            for name in dir(original):
+                if name in ("training", "__dict__"):
                     # TODO: removing this skip should let us remove the code to add training as an
-                    # attribute
+                    # attribute in python_sugared_value.cpp
                     continue
                 if hasattr(self, name):
                     # Don't re-copy properties

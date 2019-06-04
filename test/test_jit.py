@@ -13537,12 +13537,14 @@ class TestRecursiveScript(JitTestCase):
             my_empty_list : List[int]
             my_empty_dict : Dict[str, int]
             my_none : Optional[int]
+            my_out_of_line_attribute: List[int] = [1, 2, 3]
 
             def __init__(self):
                 super(M, self).__init__()
 
             def forward(self, x):
                 return (
+                    self.my_out_of_line_attribute,
                     self.my_dict,
                     self.my_float,
                     self.my_int,
