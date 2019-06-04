@@ -47,8 +47,8 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
 
   //For batch calculation we expand all dimensions(except the last two) to one, with size that equals to product of them.
   //The last two dimensions will stay the same
-  IntArrayRef batch_tensor1(x1.sizes().data(), std::max<int64_t>(dim1 - 2, 0));
-  IntArrayRef batch_tensor2(x2.sizes().data(), std::max<int64_t>(dim2 - 2, 0));
+  IntArrayRef batch_tensor1(x1.sizes().data(), dim1 - 2);
+  IntArrayRef batch_tensor2(x2.sizes().data(), dim2 - 2);
   std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
   std::vector<int64_t> tensor1_expand_size(expand_batch_portion);
   tensor1_expand_size.insert(tensor1_expand_size.end(), {r1, c1});
