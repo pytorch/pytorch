@@ -2056,10 +2056,22 @@ RegisterOperators reg2({
           auto string = pop(stack).toStringRef();
           TORCH_CHECK(
               string.size() == 1,
-              "String for ord() must be 1 character, found",
+              "String for ord() must be 1 character, found ",
               string.size());
           uint8_t ord = string.at(0);
           push(stack, int64_t(ord));
+          return 0;
+        }),
+    Operator(
+        "aten::chr(int i) -> str",
+        [](Stack& stack) {
+          auto i = pop(stack).toInt();
+          TORCH_CHECK(
+              i >= 0 && i < 1114111,
+              "chr() arg not in range(0x110000), found ",
+              i);
+          char c = i;
+          push(stack, std::string(c, 1));
           return 0;
         }),
 #define CREATE_COPY_OP(other_type, c_type)                                 \
@@ -2188,13 +2200,13 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
 
     Operator(
-    "aten::isnan(float a) -> bool",
-    [](Stack& stack) {
-      double a;
-      pop(stack, a);
-      push(stack, std::isnan(a));
-      return 0;
-    }),
+        "aten::isnan(float a) -> bool",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::isnan(a));
+          return 0;
+        }),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),

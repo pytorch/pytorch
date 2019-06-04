@@ -12489,6 +12489,17 @@ a")
         s = u'\u00a3'.encode('utf8')[:1]
         self.checkScript(index_str_to_tensor, (s,))
 
+    @unittest.skipIf(PY2, "chr() range has changed from PY2 to PY3")
+    def test_chr(self):
+        def fn(x):
+            # type: (int) -> str
+            return chr(x)
+
+        self.checkScript(fn, (1,))
+        self.checkScript(fn, (257,))
+
+        self.checkScriptRaisesRegex(fn, (1114112,), Exception, 'not in range(0x110000)')
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_get_set_state(self):
         class M(torch.jit.ScriptModule):
