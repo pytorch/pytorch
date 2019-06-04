@@ -33,7 +33,8 @@ namespace detail {
     bool,
     std::string,
     at::Tensor,
-    at::Scalar
+    at::Scalar,
+    caffe2::Blob
   >;
 
   // ivalue_to_arg_type<T>: Take an IValue that is an argument to a kernel and
