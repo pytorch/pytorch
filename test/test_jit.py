@@ -6085,7 +6085,6 @@ int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int *
             f_script = cu.func
             f = scope['func']
 
-
             if vals is None:
                 vals = float_vals if is_float else int_vals
                 vals = [(i, j) for i in vals for j in vals]
