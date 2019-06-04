@@ -290,14 +290,9 @@ def transpose(g, self, dim0, dim1):
         return self
 
     # NB: Transpose in ONNX is actually a Permute
-    if self.type().kind() == "CompleteTensorType":
-        axes = list(range(self.type().dim()))
-        axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
-        return g.op("Transpose", self, perm_i=axes)
-    else:
-        # if we don't have dim information we cannot
-        # output a permute so use ATen instead
-        return g.op("ATen", self, operator_s="transpose", dim0_i=dim0, dim1_i=dim1)
+    axes = list(range(self.type().dim()))
+    axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
+    return g.op("Transpose", self, perm_i=axes)
 
 
 @parse_args('v', 'is')
@@ -677,7 +672,7 @@ def upsample_nearest2d(g, input, output_size):
         divisor = g.op(
             "Slice",
             g.op("Shape", input),
-            axes_i=[0],
+            axes_i=[0], 
             ends_i=[input_length],
             starts_i=[offset]
         )
@@ -706,7 +701,7 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
         divisor = g.op(
             "Slice",
             g.op("Shape", input),
-            axes_i=[0],
+            axes_i=[0], 
             ends_i=[input_length],
             starts_i=[offset]
         )
