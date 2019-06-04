@@ -252,12 +252,15 @@ def enable_profiling_mode():
     yield
     torch._C._jit_set_profiling_mode(False)
 
+_in_first_class_mode = False
 @contextmanager
 def enable_first_class_mode():
+    global _in_first_class_mode
     torch._C._jit_set_first_class_mode(True)
+    _in_first_class_mode = True
     yield
     torch._C._jit_set_first_class_mode(False)
-
+    _in_first_class_mode = False
 
 # note: not re-entrant, use unnested only
 @contextmanager
@@ -325,9 +328,18 @@ class JitTestCase(TestCase):
         yield None
         self.setHooks()
 
+    def _isHookExceptionOk(self, e):
+        se = str(e)
+        allowed = ("Could not export Python function",
+                   "closures are not exportable")
+        for a in allowed:
+            if a in se:
+                return True
+        return False
+
     def emitFunctionHook(self, func):
         # func has invalid names for export, skip the jitter check
-        if func.name == "<lambda>" or "aten::" in func.name:
+        if func.name == "<lambda>" or "aten::" in func.name or _in_first_class_mode:
             return
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with self.disableEmitHook():
@@ -338,9 +350,7 @@ class JitTestCase(TestCase):
                 src2, constants2 = _jit_python_print(func2)
                 self.assertMultiLineEqual(src, src2)
             except RuntimeError as e:
-                se = str(e)
-                if "Could not export Python function" not in se and \
-                   "closures are not exportable" not in se:
+                if not self._isHookExceptionOk(e):
                     raise
 
     def emitModuleHook(self, module):
@@ -379,9 +389,7 @@ class JitTestCase(TestCase):
                 for line in main_module:
                     main_module_code += line.decode()
             except RuntimeError as e:
-                se = str(e)
-                if "Could not export Python function" not in se and \
-                   "closures are not exportable" not in se:
+                if not self._isHookExceptionOk(e):
                     raise
                 else:
                     return
@@ -3395,6 +3403,27 @@ def foo(x):
             input = torch.rand(3, 4)
             foo.forward(input)
             self.assertEqual(input, foo.foo)
+
+    def test_first_class_calls(self):
+        with enable_first_class_mode():
+            @torch.jit.script
+            class Foo(object):
+                def __init__(self, x):
+                    self.bar = x
+
+                def stuff(self, x):
+                    return self.bar + x
+
+            @torch.jit.script
+            def foo(x):
+                return x * x + Foo(x).stuff(2 * x)
+
+            @torch.jit.script
+            def bar(x):
+                return foo(x) * foo(x)
+
+            x = torch.rand(3, 4)
+            self.assertEqual(bar(x), (x * x + 3 * x) * (x * x + 3 * x))
 
     def test_invalid_prefix_annotation(self):
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):

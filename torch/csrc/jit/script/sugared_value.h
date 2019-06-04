@@ -232,8 +232,9 @@ struct FunctionValue : public SugaredValue {
     callee_->ensure_defined();
     MatchedSchema match =
         matchSchema(callee_->getSchema(), loc, *f.graph(), inputs, attributes);
-    return std::make_shared<SimpleValue>(
-        f.graph()->insertFunctionCall(callee_, match));
+    Value* output = f.graph()->insertFunctionCall(callee_, match);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
   }
 
  private:
@@ -262,8 +263,9 @@ struct MethodValue : public SugaredValue {
     method->ensure_defined();
     MatchedSchema match = matchSchema(
         method->getSchema(), loc, *f.graph(), inputsWithSelf, attributes);
-    return std::make_shared<SimpleValue>(
-        f.graph()->insertMethodCall(method_name_, match));
+    Value* output = f.graph()->insertMethodCall(method_name_, match);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
   }
 
  private:

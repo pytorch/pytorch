@@ -162,8 +162,8 @@ static Value* tryMatchArgument(
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
     if (failure_messages) {
-      auto& ostream =
-          err() << arg.formatTypeMismatchMsg(value->type()->python_str());
+      auto& ostream = err()
+          << arg.formatTypeMismatchMsg(value->type()->python_str());
 
       if (auto v = value->type()->cast<ListType>()) {
         if (v->getElementType()->isSubtypeOf(TensorType::get())) {
@@ -343,8 +343,14 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
     // Make sure the actual_named_value found matches the type of arg
     Value* positional = tryMatchArgument(
-        arg, graph, loc, *actual_named_value,
-        failure_messages, err, allow_conversions, type_env);
+        arg,
+        graph,
+        loc,
+        *actual_named_value,
+        failure_messages,
+        err,
+        allow_conversions,
+        type_env);
     if (!positional) {
       return c10::nullopt;
     }
@@ -520,7 +526,9 @@ Value* emitBuiltinCall(
               attributes,
               render_errors ? &failure_messages : nullptr,
               allow_conversions)) {
-        return graph.insertFunctionCall(method, *result);
+        // we inline builtin calls because they are normally very small
+        // wrappers and are not useful for keeping around to debug
+        return inlineCallTo(graph, *method->graph(), result->inputs).at(0);
       }
     }
   }
@@ -533,8 +541,15 @@ Value* emitBuiltinCall(
   // If errors were required, but we didn't eagerly render error strings,
   // then replay schema matching with error strings eagerly rendered.
   if (!render_errors) {
-    return emitBuiltinCall(loc, graph, name, self, inputs,
-                           attributes, required, /*render_errors=*/true);
+    return emitBuiltinCall(
+        loc,
+        graph,
+        name,
+        self,
+        inputs,
+        attributes,
+        required,
+        /*render_errors=*/true);
   }
 
   // no operators found with the same name, print out similarly named operators

@@ -91,5 +91,6 @@ struct InterpreterContinuation {
   bool grad_mode_enabled;
 };
 
+TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 } // namespace jit
 } // namespace torch
