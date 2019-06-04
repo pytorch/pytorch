@@ -5,6 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from caffe2.python.optimizer import FP16_ENGINES, Optimizer
 from caffe2.python.helpers.arg_scope import get_current_scope
 from caffe2.python import schema
 from caffe2.python.layers.layers import (
@@ -17,9 +18,27 @@ from caffe2.python.layers.layers import (
 )
 import collections
 import functools
+import logging
 import math
 import numpy as np
 import operator
+
+logger = logging.getLogger(__name__)
+
+
+def get_trainer_version_based_on_optim(optim_def):
+    if isinstance(optim_def, Optimizer) and hasattr(optim_def, "engine"):
+        logger.info(
+            "Attempting to set trainer version for engine {}".format(optim_def.engine)
+        )
+        if optim_def.engine in FP16_ENGINES:
+            logger.info("Setting FP16 trainer for engine {}".format(optim_def.engine))
+            return "fp16"
+        else:
+            logger.info("Setting FP32 trainer for engine {}".format(optim_def.engine))
+            return "fp32"
+    else:
+        return "fp32"
 
 
 def get_sparse_lookup_predictor_version(version):
@@ -96,12 +115,9 @@ class SparseLookup(ModelLayer):
         self.input_dim = input_dim
         self.shape = [input_dim] + inner_shape
 
-        cur_scope = get_current_scope()
-        trainer_version = get_sparse_lookup_trainer_version(
-            **cur_scope.get(get_sparse_lookup_trainer_version.__name__,
-                            {'version': 'fp32'}))
-
-        self.trainer_version = trainer_version
+        self.trainer_version = get_trainer_version_based_on_optim(
+            weight_optim
+        )
 
         default_init_op = self._get_default_init_op()
 
