@@ -114,6 +114,7 @@ std::vector<Value*> insertQuantParamNodes(
   // All params inserted before quant node which is
   // beginning of the quant-dequant pattern
   WithInsertPoint ins(quant);
+  std::cout<<"qparams are:"<<scale<<","<<zero_point<<std::endl;
   Value* scale_v = quant->owningGraph()->insertConstant(scale);
   qparam_vals.emplace_back(scale_v);
   Value* zeropoint_v = quant->owningGraph()->insertConstant(zero_point);
@@ -182,6 +183,12 @@ Node* addQuantDeQuantNodesFor(
   auto qparam_values = insertQuantParamNodes(quant, qparam);
   for (Value* qparam_value : qparam_values) {
     quant->addInput(qparam_value);
+    //dequant->addInput(qparam_value);
+  }
+  const auto tqparam = std::make_tuple("g", 1.0, 0);
+  auto qparam_values1 = insertQuantParamNodes(dequant, tqparam);
+  for (Value* qparam_value : qparam_values1) {
+    //quant->addInput(qparam_value);
     dequant->addInput(qparam_value);
   }
   // Add ScalarType Node for q-dq
@@ -466,6 +473,17 @@ void InsertQuantDequantNodes(
       param_info.n->replaceInputWith(param_info.v, dq->output());
     }
   }
+}
+
+std::shared_ptr<Graph> InsertQuantDequantNodes(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
+        qparam_dict) {
+  auto& method = moduleObj->get_method(method_name);
+  auto g = method.get_executor().graph();
+  InsertQuantDequantNodes(g, qparam_dict);
+  return g;
 }
 
 void QuantLinting(std::shared_ptr<Graph>& graph) {

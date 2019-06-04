@@ -534,7 +534,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     {
       std::lock_guard<std::mutex> lock(compile_mutex);
       auto it = plan_cache.find(spec);
-      if (it != plan_cache.end()) {
+      if (false && it != plan_cache.end()) {
         logging::getLogger()->addStatValue(
             logging::runtime_counters::EXECUTION_PLAN_CACHE_HIT, 1.0);
         return it->second;
@@ -548,6 +548,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   }
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
+    graph->dump();
     auto opt_graph = graph->copy();
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
 

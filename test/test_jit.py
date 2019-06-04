@@ -1309,8 +1309,9 @@ graph(%x : Tensor,
         torch._C._jit_pass_constant_propagation(scriptM.graph)
         # TODO: Build the qparam_dict from parse_ir directly for this pass
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
-
+        g = torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward", qparam_dict)
+        print(g)
+        return
         # We expect to see quant-dequant node before and after
         # both conv and relu nodes and at external output since relu
         # is last node. Constant nodes correspond to params for the
@@ -1321,7 +1322,7 @@ graph(%x : Tensor,
                    .check_next("int_repr").check_next("_dequantize_linear") \
                    .check("relu").check("quantize_linear") \
                    .check_next("int_repr").check_next("_dequantize_linear") \
-                   .check_next("return").run(str(scriptM.graph))
+                   .check_next("return").run(str(g))
 
     def test_insert_quantdequant_consecutive_qnodes_trace(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -1340,8 +1341,9 @@ graph(%x : Tensor,
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
         if not len(qparam_dict):
             return
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
-
+        g = torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
+        print(g)
+        return
         # We expect to see quant-dequant node before and after
         # both conv and relu nodes and at external output since relu
         # is last node. Constant nodes correspond to params for the
@@ -1352,7 +1354,7 @@ graph(%x : Tensor,
                    .check_next("int_repr").check_next("_dequantize_linear") \
                    .check("relu").check("quantize_linear") \
                    .check_next("int_repr").check_next("_dequantize_linear") \
-                   .check_next("return").run(str(scriptM.graph))
+                   .check_next("return").run(str(g))
 
     def test_insert_quantdequant_single_qnode(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -1376,8 +1378,9 @@ graph(%x : Tensor,
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
-
+        g = torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward", qparam_dict)
+        print(g)
+        return
         # We expect to see quant-dequant node before and after
         # both conv and no quant-dequant after add. Constant nodes correspond
         # to params for the quantization nodes
@@ -1385,7 +1388,7 @@ graph(%x : Tensor,
                    .check_next("_dequantize_linear") \
                    .check("conv2d").check("quantize_linear") \
                    .check_next("int_repr").check_next("_dequantize_linear") \
-                   .check_next("add").check_next("return").run(str(scriptM.graph))
+                   .check_next("add").check_next("return").run(str(g))
 
     def test_insert_quantdequant_alternate_qnode(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -1410,8 +1413,9 @@ graph(%x : Tensor,
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
-
+        g = torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward", qparam_dict)
+        print(g)
+        return
         # We expect to see quant-dequant node before and after
         # conv, relu and add. Constant nodes correspond to params for the
         # quantization nodes
@@ -1421,7 +1425,7 @@ graph(%x : Tensor,
                    .check_next("_dequantize_linear").run(str(scriptM.graph))
         FileCheck().check("add").check("quantize_linear") \
                    .check_next("int_repr").check("_dequantize_linear") \
-                   .run(str(scriptM.graph))
+                   .run(str(g))
 
     def test_insert_quantdequant_for_weight(self):
         input_data = torch.ones([1, 1, 1, 1])

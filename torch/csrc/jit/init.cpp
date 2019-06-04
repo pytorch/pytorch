@@ -159,7 +159,22 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quantdequant",
-          [](std::shared_ptr<Graph>& g, py::dict& pyQParamDict) {
+          [](std::shared_ptr<script::Module>& moduleObj,
+             const std::string& methodName, py::dict& pyQParamDict) -> std::shared_ptr<Graph> {
+            std::shared_ptr<Graph> g;
+            if (!pyQParamDict.size()) {
+              return g;
+            }
+
+            auto qparam_dict = py::cast<std::unordered_map<
+                std::string,
+                std::tuple<std::string, float, int>>>(pyQParamDict);
+            return InsertQuantDequantNodes(moduleObj, methodName, qparam_dict);
+          })
+      .def(
+          "_jit_pass_insert_quantdequant",
+          [](std::shared_ptr<Graph>& g,
+             const std::string& methodName, py::dict& pyQParamDict) {
             if (!pyQParamDict.size()) {
               return;
             }
