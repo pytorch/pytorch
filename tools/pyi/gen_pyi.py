@@ -430,6 +430,7 @@ def gen_pyi(declarations_path, out):
         'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: bool=False)'
                  ' -> Union[str, Tensor]: ...'],
         'get_device': ['def get_device(self) -> _int: ...'],
+        'contiguous': ['def contiguous(self) -> Tensor: ...'],
         'is_contiguous': ['def is_contiguous(self) -> bool: ...'],
         'is_cuda': ['is_cuda: bool'],
         'is_leaf': ['is_leaf: bool'],
