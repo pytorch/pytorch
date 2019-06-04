@@ -707,7 +707,6 @@ class MultiheadAttention(Module):
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
     """
-    _version = 2
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
         super(MultiheadAttention, self).__init__()
@@ -756,21 +755,20 @@ class MultiheadAttention(Module):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        version = local_metadata.get('version', None)
+        in_proj_weight_key = prefix + 'in_proj_weight'
+
+        if in_proj_weight_key in state_dict.keys():
+            # In the early version of torch.nn.MultiheadAttention, q_proj_weight, k_proj_weight,
+            # and v_proj_weight are saved as in_proj_weight. If so, this call will split and delete
+            #  in_proj_weight.
+            in_proj_weight_val = state_dict[in_proj_weight_key]
+            assert in_proj_weight_val.dim() == 2
+            assert in_proj_weight_val.size() == (self.embed_dim * 3, self.embed_dim)
+            state_dict[prefix + 'q_proj_weight'] = in_proj_weight_val[:self.embed_dim, :]
+            state_dict[prefix + 'k_proj_weight'] = in_proj_weight_val[self.embed_dim:(self.embed_dim * 2), :]
+            state_dict[prefix + 'v_proj_weight'] = in_proj_weight_val[(self.embed_dim * 2):, :]
+            del state_dict[in_proj_weight_key]
         
-        if (version is None or version < 2):
-            # at version 2: self.in_proj_weight is split into three weights 
-            # (q_proj_weight, k_proj_weight, v_proj_weight). 
-            in_proj_weight_key = prefix + 'in_proj_weight'
-            try:
-                in_proj_weight_val = state_dict[in_proj_weight_key]
-                assert in_proj_weight_val.dim() == 2
-                assert in_proj_weight_val.size() == (self.embed_dim * 3, self.embed_dim)
-                state_dict[prefix + 'q_proj_weight'] = in_proj_weight_val[:self.embed_dim, :]
-                state_dict[prefix + 'k_proj_weight'] = in_proj_weight_val[self.embed_dim:(self.embed_dim * 2), :]
-                state_dict[prefix + 'v_proj_weight'] = in_proj_weight_val[(self.embed_dim * 2):, :]
-            except:
-                print("in_proj_weight cannot be split properly!")
         super(MultiheadAttention, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
