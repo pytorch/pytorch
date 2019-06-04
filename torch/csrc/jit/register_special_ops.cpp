@@ -40,18 +40,6 @@ void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
   }
 }
 
-at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
-  if (type == FloatType::get()) {
-    return at::ScalarType::Double;
-  } else if (type == IntType::get()) {
-    return at::ScalarType::Long;
-  } else if (type == BoolType::get()) {
-    return at::ScalarType::Bool;
-  }
-  AT_ASSERTM(0, "Add new condition, expected Float, Int, or Bool but got",
-      type->str());
-}
-
 int64_t list_size(const IValue& list) {
   if (list.isGenericList()) {
     return list.toGenericListRef().size();
