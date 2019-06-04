@@ -82,6 +82,7 @@ struct CompareFunctionTaskTime {
 struct ReadyQueue {
   std::priority_queue<FunctionTask, std::vector<FunctionTask>, CompareFunctionTaskTime> heap_;
   std::condition_variable not_empty_;
+  // For not_empty and to protect access to heap_
   std::mutex mutex_;
 
   void push(FunctionTask item);
@@ -135,6 +136,8 @@ struct GraphTask {
   bool keep_graph_;
   bool grad_mode_;
 
+ //  Protects access to captured_vars_, and for use by not_done_
+ //  The only writes to exec_info are in init_to_execute()
   std::mutex mutex_;
   // Notified when a task finishes executing.  Check outstanding_tasks_ to see
   // if all tasks are done.
@@ -184,6 +187,7 @@ struct GraphTask {
 
 auto ReadyQueue::push(FunctionTask item) -> void {
   {
+    // For access to heap_
     std::lock_guard<std::mutex> lock(mutex_);
     ++item.base_->outstanding_tasks_;
     heap_.push(std::move(item));
@@ -192,6 +196,7 @@ auto ReadyQueue::push(FunctionTask item) -> void {
 }
 
 auto ReadyQueue::pop() -> FunctionTask {
+  // Lock for condition variable non_empty_
   std::unique_lock<std::mutex> lock(mutex_);
   not_empty_.wait(lock, [this]{ return !heap_.empty(); });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -286,6 +291,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
     // Task from a non-worker thread. Easy case.
     if (base_owner == NO_DEVICE) {
       if (--task.base_->outstanding_tasks_ == 0) {
+        // Acquire lock for task.base->not_done_
         std::lock_guard<std::mutex> lock(task.base_->mutex_);
         task.base_->not_done_.notify_all();
       }
@@ -310,6 +316,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
 }
 
 auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void {
+  // Lock for all the GraphTask members accessed below
   std::lock_guard<std::mutex> lock(task.base_->mutex_);
   if (!task.base_->has_error_.load()) {
     if (AnomalyMode::is_enabled()) {
@@ -440,6 +447,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
   if (!exec_info_.empty()) {
     auto & fn_info = exec_info_.at(task.fn_.get());
     if (auto *capture_vec = fn_info.captures_.get()) {
+      // Acquire lock for task.base_->captured_vars_
       std::lock_guard<std::mutex> lock(task.base_->mutex_);
       for (auto capture : *capture_vec) {
         task.base_->captured_vars_[capture.output_idx_] = task.inputs_[capture.input_idx_];
@@ -471,6 +479,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     }
   }
 
+  // For the accesses to the GraphTask dependencies_ and not_ready_ below
   std::lock_guard<std::mutex> lock(task.base_->mutex_);
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
@@ -572,9 +581,11 @@ auto Engine::execute(const edge_list& roots,
   });
 
   // Callbacks are only valid for the duration of this run and should always be cleared
+  // Lock post_callbacks_lock_ before clearing final_callbacks_
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
   GraphTask graph_task(keep_graph, create_graph);
+  // For condition variable graph_task.not_done_
   std::unique_lock<std::mutex> lock(graph_task.mutex_);
 
   // Now compute the dependencies for all executable functions and queue the root
@@ -612,6 +623,7 @@ auto Engine::execute(const edge_list& roots,
   // Unlocking is necessary, because the callback can register
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
+  // Lock during each step for accessing final_callbacks_.size()
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock_);
   // WARNING: Don't use a range-for loop here because more callbacks may be
   // added in between callback calls, so iterators may become invalidated.
