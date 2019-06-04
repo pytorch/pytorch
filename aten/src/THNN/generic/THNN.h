@@ -16,6 +16,33 @@ TH_API void THNN_(SpatialConvolutionMM_updateOutput)(
           int dW, int dH,
           int padW, int padH);
 
+TH_API void THNN_(SpatialDilatedConvolution_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,         // [OPTIONAL]
+          THTensor *columns,
+          THTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int dilationW, int dilationH);
+
+TH_API void THNN_(SpatialFullDilatedConvolution_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,         // [OPTIONAL]
+          THTensor *columns,
+          THTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int dilationW, int dilationH,
+          int adjW, int adjH);
+
 #if !defined(TH_REAL_IS_LONG)
 
 TH_API void THNN_(AbsCriterion_updateOutput)(
@@ -478,19 +505,6 @@ TH_API void THNN_(SpatialAveragePooling_updateGradInput)(
           bool ceil_mode,
           bool count_include_pad);
 
-TH_API void THNN_(SpatialDilatedConvolution_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,         // [OPTIONAL]
-          THTensor *columns,
-          THTensor *ones,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int dilationW, int dilationH);
-
 TH_API void THNN_(SpatialDilatedConvolution_updateGradInput)(
           THNNState *state,
           THTensor *input,
@@ -516,20 +530,6 @@ TH_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
           int padW, int padH,
           int dilationW, int dilationH,
           accreal scale);
-
-TH_API void THNN_(SpatialFullDilatedConvolution_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,         // [OPTIONAL]
-          THTensor *columns,
-          THTensor *ones,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int dilationW, int dilationH,
-          int adjW, int adjH);
 
 TH_API void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
           THNNState *state,

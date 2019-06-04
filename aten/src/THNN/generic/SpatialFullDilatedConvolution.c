@@ -204,6 +204,8 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
   if (bias) c10::raw::intrusive_ptr::decref(bias);
 }
 
+#if !defined(TH_REAL_IS_LONG)
+
 void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
     THNNState *state,
     THTensor *input,
@@ -451,4 +453,5 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
   c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
+#endif
 #endif
