@@ -76,28 +76,34 @@ bool AliasDb::hasWriters(const Node* n) const {
 }
 
 bool AliasDb::hasWriters(const Value* v) const {
-  if (!elementMap_.count(v) || v->mustBeNone()) {
+  if (v->mustBeNone()) {
+    return false;
+  }
+
+  auto it = elementMap_.find(v);
+  if (it == elementMap_.end()) {
     return false;
   }
 
   if (isWriteCacheStale_) {
     rebuildWriteCache();
   }
-  return writeCache_.intersects(elementMap_.at(v)->getMemoryLocations());
+  const auto& el = it->second;
+  return writeCache_.intersects(el->getMemoryLocations());
 }
 
-void AliasDb::getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks) const {
+void AliasDb::getWritesImpl(Block* b, MemoryLocations& ret, bool recurseBlocks)
+    const {
   for (auto node : b->nodes()) {
     getWritesImpl(node, ret, recurseBlocks);
   }
 }
 
-void AliasDb::getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
+void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret, bool recurseBlocks)
+    const {
   if (writeIndex_.count(n)) {
     const auto& writes = writeIndex_.at(n);
-    for (const auto write : writes) {
-      ret.insert(write);
-    }
+    ret |= writes;
   }
 
   if (recurseBlocks) {
@@ -110,69 +116,37 @@ void AliasDb::getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
 // Does `n` write to an alias of one of the values in `vs`?
 bool AliasDb::writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks)
     const {
-  c10::SmallVector<Node*, 4> stack;
-  stack.push_back(n);
-
-  // Depth-first search to accumulate memory locations aliased
-  // by `n`.
-  MemoryLocations nMemLocs;
-  while (!stack.empty()) {
-    auto node = stack.back();
-    stack.pop_back();
-
-    // Accumulate memory locations
-    auto I = writeIndex_.find(node);
-    if (I != writeIndex_.end()) {
-      const auto& writes = I->second;
-      for (const auto write : writes) {
-        if (elementMap_.count(write)) {
-          auto element = elementMap_.at(write);
-          nMemLocs |= element->getMemoryLocations();
-        }
-      }
-    }
-
-    // Explore sub-blocks
-    if (recurseBlocks) {
-      for (auto block : n->blocks()) {
-        for (auto subnode : block->nodes()) {
-          stack.push_back(subnode);
-        }
-      }
+  MemoryLocations locs;
+  for (const auto v : vs) {
+    auto it = elementMap_.find(v);
+    if (it != elementMap_.end()) {
+      locs |= it->second->getMemoryLocations();
     }
   }
 
-  // Bail if the intersection will be trivially false.
-  if (nMemLocs.empty()) {
-    return false;
-  }
-
-  // Test against each member of vs
-  for (auto value : vs) {
-    if (elementMap_.count(value)) {
-      auto element = elementMap_.at(value);
-      if (nMemLocs.intersects(element->getMemoryLocations())) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+  const auto writtenTo = getWrites(n, recurseBlocks);
+  return writtenTo.intersects(locs);
 }
 
-std::unordered_set<const Value*> AliasDb::getWrites(Node* n, bool recurseBlocks)
-    const {
-  ValueSet writes;
+MemoryLocations AliasDb::getWrites(Node* n, bool recurseBlocks) const {
+  MemoryLocations writes;
   getWritesImpl(n, writes, recurseBlocks);
   return writes;
 }
 
-void AliasDb::getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
+void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret, bool recurseBlocks)
+    const {
   for (const auto input : n->inputs()) {
-    ret.insert(input);
+    auto it = elementMap_.find(input);
+    if (it != elementMap_.end()) {
+      ret |= it->second->getMemoryLocations();
+    }
   }
   for (const auto output : n->outputs()) {
-    ret.insert(output);
+    auto it = elementMap_.find(output);
+    if (it != elementMap_.end()) {
+      ret |= it->second->getMemoryLocations();
+    }
   }
 
   if (recurseBlocks) {
@@ -184,8 +158,8 @@ void AliasDb::getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks) const {
   }
 }
 
-ValueSet AliasDb::getReads(Node* n, bool recurseBlocks) const {
-  ValueSet reads;
+MemoryLocations AliasDb::getReads(Node* n, bool recurseBlocks) const {
+  MemoryLocations reads;
   getReadsImpl(n, reads, recurseBlocks);
   return reads;
 }
@@ -221,17 +195,17 @@ void AliasDb::dump() const {
     }
   }
 
-  std::cout << "\n===3. Writes===\n";
-  for (const auto& pr : writeIndex_) {
-    const auto node = pr.first;
-    const auto& values = pr.second;
-    std::cout << *node;
-    std::cout << "  ";
-    for (const auto value : values) {
-      std::cout << value->uniqueName() << ", ";
-    }
-    std::cout << "\n";
-  }
+  // std::cout << "\n===3. Writes===\n";
+  // for (const auto& pr : writeIndex_) {
+  //   const auto node = pr.first;
+  //   const auto& values = pr.second;
+  //   std::cout << *node;
+  //   std::cout << "  ";
+  //   for (const auto value : values) {
+  //     std::cout << value->uniqueName() << ", ";
+  //   }
+  //   std::cout << "\n";
+  // }
   std::cout << "\n";
 }
 
@@ -456,14 +430,25 @@ void AliasDb::analyzeImpl(Node* node) {
     }
   }
 }
+
 // Register the fact that `n` writes to `v`.
 void AliasDb::registerWrite(const Value* v, Node* n) {
   if (!shouldAnnotate(v)) {
     // don't need to register a write if the value isn't mutable
     return;
   }
-  TORCH_INTERNAL_ASSERT(elementMap_.count(v));
-  writeIndex_[n].insert(v);
+  auto it = elementMap_.find(v);
+  TORCH_INTERNAL_ASSERT(
+      it != elementMap_.end(), "Tried to write to value not in MemoryDAG");
+  const auto& writtenMemoryLocations = it->second->getMemoryLocations();
+  writeIndex_[n] |= writtenMemoryLocations;
+}
+
+void AliasDb::registerWrite(const Element* e, Node* n) {
+  TORCH_INTERNAL_ASSERT(
+      e->pointsTo.empty(),
+      "Can only register writes to memory location elements");
+  writeIndex_[n].set(e->index);
 }
 
 void AliasDb::analyzeIf(Node* node) {
@@ -570,15 +555,7 @@ void AliasDb::analyzeWait(Node* node) {
   // inputs. We don't have a reliable way of recovering the fork inputs, so
   // for safety we just register a write to every wildcard.
   for (const auto& pr : wildcardIndex_) {
-    // TODO: Given the way the write query API is written, we can't regiser a
-    // write directly against the wildcard element. So find a wildcard value in
-    // the graph to write to.
-    const auto el = pr.second;
-    const auto& pointedFrom = el->pointedFrom;
-    TORCH_INTERNAL_ASSERT(!pointedFrom.empty());
-    const auto wildcardValue = memoryDAG_->fromIndex(*pointedFrom.begin())->value;
-    TORCH_INTERNAL_ASSERT(wildcardValue);
-    registerWrite(wildcardValue, node);
+    registerWrite(pr.second, node);
   }
 }
 
@@ -811,14 +788,8 @@ class AliasDb::WorkingSet {
     for (const auto user : getUsersSameBlock(mover_)) {
       moverUsers_.insert(user);
     }
-
-    for (const auto& write :
-         aliasDb_.getWrites(mover_, /*recurseBlocks=*/true)) {
-      moverWrites_.insert(write);
-    }
-    for (const auto& read : aliasDb_.getReads(mover_, /*recurseBlocks=*/true)) {
-      moverReads_.insert(read);
-    }
+    moverWrites_ |= aliasDb_.getWrites(mover_, /*recurseBlocks=*/true);
+    moverReads_ |= aliasDb_.getReads(mover_, /*recurseBlocks=*/true);
   }
 
   // Add `n` to the working set
@@ -828,12 +799,8 @@ class AliasDb::WorkingSet {
       users_.insert(user);
     }
 
-    for (const auto& write : aliasDb_.getWrites(n, /*recurseBlocks=*/true)) {
-      writes_.insert(write);
-    }
-    for (const auto& read : aliasDb_.getReads(n, /*recurseBlocks=*/true)) {
-      reads_.insert(read);
-    }
+    writes_ |= aliasDb_.getWrites(n, /*recurseBlocks=*/true);
+    reads_ |= aliasDb_.getReads(n, /*recurseBlocks=*/true);
   }
 
   void eraseMover() {
@@ -868,20 +835,20 @@ class AliasDb::WorkingSet {
 
   bool hasMutabilityDependency(Node* n) const {
     // Check that `n` does not write to anything used by the working set
-    const auto nWrites = aliasDb_.getWrites(n, /*recurseBlocks=*/true);
-    if (aliasDb_.mayAlias(nWrites, reads_)) {
+    const auto& nWrites = aliasDb_.getWrites(n, /*recurseBlocks=*/true);
+    if (reads_.intersects(nWrites)) {
       return true;
     }
-    if (mover_ && aliasDb_.mayAlias(nWrites, moverReads_)) {
+    if (mover_ && moverReads_.intersects(nWrites)) {
       return true;
     }
 
     // Check that the working set doesn't write to anything that `n` uses.
-    const auto nReads = aliasDb_.getReads(n, /*recurseBlocks=*/true);
-    if (aliasDb_.mayAlias(writes_, nReads)) {
+    const auto& nReads = aliasDb_.getReads(n, /*recurseBlocks=*/true);
+    if (writes_.intersects(nReads)) {
       return true;
     }
-    if (mover_ && aliasDb_.mayAlias(moverWrites_, nReads)) {
+    if (mover_ && moverWrites_.intersects(nReads)) {
       return true;
     }
     return false;
@@ -954,15 +921,15 @@ class AliasDb::WorkingSet {
   // Mover dependencies. We track these separately since we may erase the mover
   // from the working set.
   Node* mover_;
-  std::unordered_set<const Value*> moverWrites_;
-  std::unordered_set<const Value*> moverReads_;
+  MemoryLocations moverWrites_;
+  MemoryLocations moverReads_;
   std::unordered_set<Node*> moverUsers_;
 
   // users => # of working set nodes it uses
   std::unordered_set<Node*> users_;
   // Values written to by the working set => number of nodes writing to value
-  std::unordered_set<const Value*> writes_;
-  std::unordered_set<const Value*> reads_;
+  MemoryLocations writes_;
+  MemoryLocations reads_;
 };
 
 // Try to move `toMove` before/after `movePoint` while preserving value
@@ -1086,10 +1053,14 @@ bool AliasDb::writesToWildcard(Node* n) const {
   }
   const auto& writes = writeIndex_.at(n);
 
-  // For all writes, check if the written value is a wildcard
-  return std::any_of(writes.cbegin(), writes.cend(), [&](const Value* v) {
-    return mayAliasWildcard(v);
-  });
+  // Are any of these memoryLocs a wildcard element?
+  for (const auto& pr : wildcardIndex_) {
+    const auto wildcardElement = pr.second;
+    if (writes.test(wildcardElement->index)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
@@ -1193,12 +1164,9 @@ void AliasDb::setWildcard(const Value* v) {
 
 void AliasDb::rebuildWriteCache() const {
   for (const auto& pr : writeIndex_) {
-    const auto& writtenValues = pr.second;
-
-    for (const auto value : writtenValues) {
-      writeCache_ |= elementMap_.at(value)->getMemoryLocations();
+    const auto& writtenLocs = pr.second;
+      writeCache_ |= writtenLocs;
     }
-  }
   isWriteCacheStale_ = false;
 }
 } // namespace jit
