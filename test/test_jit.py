@@ -2306,15 +2306,34 @@ graph(%Ra, %Rb):
         a = torch.randn(5)
         b = torch.randn(5)
 
-        expected = func1((a, b))
-        traced = torch.jit.trace(func1, ((a, b),))
-        result = traced((a, b))
-        self.assertEqual(expected, result)
+        self.checkTrace(func1, ((a, b),))
+        self.checkTrace(func2, ((a, b),))
 
-        expected = func2((a, b))
-        traced = torch.jit.trace(func2, ((a, b),))
-        result = traced((a, b))
-        self.assertEqual(expected, result)
+        @torch.jit.script
+        def func3(x, method='bilinear', align_corners=True):
+            # type: (Tensor, str, bool) -> Tensor
+            hw = x.shape[2:4]
+            return F.interpolate(x, hw, mode=method, align_corners=align_corners)
+
+        inp = torch.rand(1, 3, 6, 6)
+        self.checkTrace(func3, (inp,))
+
+        @torch.jit.script
+        def func4(x, a):
+            # type: (Tensor, List[str]) -> Tensor
+            if len(a) == 2:
+                return x + 2
+            else:
+                return x
+
+        def invalid_constant_baking(x):
+            a = ["hello", "world"]
+            return func4(x, a)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Tracer cannot get value trace for type"):
+            self.checkTrace(invalid_constant_baking, (inp,))
+
 
     def test_einsum(self):
         def outer(x, y):
@@ -5607,6 +5626,19 @@ a")
 
         inputs = self._make_scalar_vars([10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
+
+    def test_fibb_totally_better(self):
+        def fib(x):
+            # type: (int) -> int
+            prev = 1
+            v = 1
+            for i in range(0, x):
+                save = v
+                v = v + prev
+                prev = save
+            return v
+
+        self.checkScript(fib, (10,))
 
     def test_if(self):
         def func(a, b):
@@ -12684,7 +12716,7 @@ a")
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__()
-                self.rnn = nn.LSTM(2, 3, 2)
+                self.rnn = nn.LSTM(2, 3, 2, dropout=0)
 
             @torch.jit.script_method
             def forward(self, x, lengths, h0, c0):
@@ -12693,7 +12725,7 @@ a")
         class Eager(torch.nn.Module):
             def __init__(self):
                 super(Eager, self).__init__()
-                self.rnn = nn.LSTM(2, 3, 2)
+                self.rnn = nn.LSTM(2, 3, 2, dropout=0)
 
             def forward(self, x, lengths, h0, c0):
                 return self.rnn(x, (h0, c0))[0]
@@ -16250,7 +16282,7 @@ class TestClassType(JitTestCase):
                      _or, _xor]:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegex(RuntimeError, "because it does not  define a __add__"):
+        with self.assertRaisesRegex(RuntimeError, "__add__ method"):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))

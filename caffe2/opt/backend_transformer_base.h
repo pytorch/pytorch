@@ -56,6 +56,9 @@ class BackendTransformerBase {
   // Get model ID from the NetDef
   std::string getModelId(const NetDef& net);
 
+  // add shape info to the net
+  void addShapeToNet(NetDef& shape_net, const ShapeInfoMap& shape_hints) const;
+
   // Dump the net with shape info
   void dumpNet(
       const NetDef& pred_net,

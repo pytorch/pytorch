@@ -1,3 +1,5 @@
+#pragma once
+
 #include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <torch/csrc/autograd/variable.h>
