@@ -66,6 +66,12 @@ def _batch_mahalanobis(bL, bx):
     return reshaped_M.reshape(bx_batch_shape)
 
 
+def _precision_to_scale_tril(P):
+    Lf = torch.cholesky(torch.flip(P, (-2, -1)))
+    L = torch.inverse(torch.transpose(torch.flip(Lf, (-2, -1)), -2, -1))
+    return L.tril()  # torch.inverse of a triangular is not a triangular due to precision
+
+
 class MultivariateNormal(Distribution):
     r"""
     Creates a multivariate normal (also called Gaussian) distribution
@@ -136,10 +142,10 @@ class MultivariateNormal(Distribution):
 
         if scale_tril is not None:
             self._unbroadcasted_scale_tril = scale_tril
-        else:
-            if precision_matrix is not None:
-                self.covariance_matrix = torch.inverse(precision_matrix).expand_as(loc_)
-            self._unbroadcasted_scale_tril = torch.cholesky(self.covariance_matrix)
+        elif covariance_matrix is not None:
+            self._unbroadcasted_scale_tril = torch.cholesky(covariance_matrix)
+        else:  # precision_matrix is not None
+            self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(MultivariateNormal, _instance)
