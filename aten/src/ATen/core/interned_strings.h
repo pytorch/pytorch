@@ -63,6 +63,7 @@ namespace c10 {
   _(prim, DictIndex)               \
   _(prim, StringIndex)             \
   _(prim, NumToTensor)             \
+  _(prim, Uninitialized)           \
   _(prim, ImplicitTensorToNum)     \
   _(prim, Bool)                    \
   _(prim, Int)                     \
