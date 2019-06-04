@@ -140,14 +140,24 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 }
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
+WRAPPER_FORMAL = CodeTemplate("""\
+${return_type} (*_op)(${formal_types})""")
+
+WRAPPER_FORMAL_TYPE = CodeTemplate("""\
+${return_type} (*)(${formal_types})""")
+
 METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
+static ${return_type} ${api_name}(${variable_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${method_prefix_derived}${api_name}(${type_method_formals}) const {
+${return_type} VariableType::${api_name}(${variable_formals}) {
   ${type_definition_body}
 }
+""")
+
+WRAPPER_REGISTRATION = CodeTemplate("""\
+.registerVariableWrapper<${return_type} (${variable_formal_types})>("${schema_string}", &VariableType::${api_name})
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -172,10 +182,10 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_VIA_TYPE = CodeTemplate("""\
-TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
+(*_op)(${type_method_args})""")
 
 CALL_VIA_DERIVED = CodeTemplate("""\
-baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
+(*_op)(${unpacked_args})""")
 
 # If the `baseType` operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
@@ -439,6 +449,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
     type_declarations = []
     type_definitions = []
+    wrapper_registrations = []
 
     for declaration in aten_declarations:
         # Factory methods usually do not appear in `VariableType` at all, since they
@@ -446,23 +457,29 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         # in which case they do!
         if declaration['is_factory_method']:
             continue
-        type_declarations.append(METHOD_DECLARATION.substitute(declaration))
+        formal_types = [arg['type'] for arg in declaration['arguments']]
+        wrapper_formal = WRAPPER_FORMAL.substitute(declaration, formal_types=formal_types)
+        variable_formals = [wrapper_formal] + declaration['type_method_formals']
+        variable_formal_types = [WRAPPER_FORMAL_TYPE.substitute(
+            declaration, formal_types=formal_types
+        )] + formal_types
+        type_declarations.append(METHOD_DECLARATION.substitute(declaration, variable_formals=variable_formals))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
-            type_definitions.append(emit_method_definition(declaration))
+            body = emit_body(declaration)
+            type_definitions.append(METHOD_DEFINITION.substitute(
+                declaration, type_definition_body=body, variable_formals=variable_formals))
+        wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+            declaration, variable_formal_types=variable_formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
+        'wrapper_registrations': wrapper_registrations,
     }
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     else:
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
-
-
-def emit_method_definition(declaration):
-    body = emit_body(declaration)
-    return METHOD_DEFINITION.substitute(declaration, type_definition_body=body)
 
 
 def emit_body(declaration):

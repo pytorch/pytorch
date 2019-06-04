@@ -12,6 +12,7 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/core/ATenDispatch.h>
 
 namespace at {
 
@@ -50,4 +51,6 @@ Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
 
 ${type_method_definitions}
 
+static auto& registerer = globalATenDispatch()
+  ${function_registrations};
 }

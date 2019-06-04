@@ -125,6 +125,8 @@ TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 TYPE_EXTENSION_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.h")
 TYPE_EXTENSION_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.cpp")
 
+ATEN_DISPATCH_H = CodeTemplate.from_file(TEMPLATE_PATH + "/ATenDispatch.h")
+
 LEGACY_TH_DISPATCHER_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.h")
 LEGACY_TH_DISPATCHER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.cpp")
 LEGACY_TH_DISPATCHER_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcherDerived.cpp")
@@ -202,8 +204,7 @@ top_env = {
     'cpu_type_headers': [],
     'cuda_type_registrations': [],
     'cuda_type_headers': [],
-    'pure_virtual_type_method_declarations': [],
-    'pure_virtual_extended_type_method_declarations': [],
+    'function_registrations': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
@@ -323,10 +324,11 @@ def generate_storage_type_and_tensor(backend, density, declarations):
         env['Generator'] = 'CPUGenerator'
         env['allocator'] = 'getCPUAllocator()'
 
-    declarations, definitions, th_declarations, th_definitions = function_wrapper.create_derived(
+    declarations, definitions, registrations, th_declarations, th_definitions = function_wrapper.create_derived(
         env, declarations)
     env['type_derived_method_declarations'] = declarations
     env['type_derived_method_definitions'] = definitions
+    env['function_registrations'] = registrations
     env['legacy_th_declarations'] = th_declarations
     env['legacy_th_definitions'] = th_definitions
 
@@ -366,10 +368,11 @@ def generate_type_extension_backend(backend, declarations):
     env['TypeID'] = 'TypeID::' + backend
     top_env['type_ids'].append(backend + ',')
 
-    declarations, definitions = function_wrapper.create_extension_backend(
+    declarations, definitions, registrations = function_wrapper.create_extension_backend(
         env, declarations)
     env['type_method_declarations'] = declarations
     env['type_method_definitions'] = definitions
+    env['function_registrations'] = registrations
 
     type_register = TYPE_REGISTER.substitute(backend=env['Backend'], type_name=env['Type'])
     top_env['cpu_type_headers'].append('#include "ATen/{}.h"'.format(env['Type']))
@@ -398,6 +401,20 @@ def generate_legacy_th_dispatcher(backend, density, scalar_type, declarations):
     fm.write(env['Dispatcher'] + ".h", LEGACY_TH_DISPATCHER_DERIVED_H, env)
 
     return env
+
+
+def generate_aten_dispatch(declarations):
+    env = {}
+    env['schema_to_id_pairs'] = []
+    max_id = 0
+    for declaration in declarations:
+        for option in declaration['options']:
+            if option['schema_string'] != '':
+                env['schema_to_id_pairs'].append(
+                    '{{"{}", {}}},'.format(option['schema_string'], option['id']))
+                max_id = max(max_id, option['id'])
+    env['function_count'] = max_id + 1
+    core_file_manager.write("ATenDispatch.h", ATEN_DISPATCH_H, env)
 
 
 # yields (backend, density, scalar_type) tuples
@@ -431,7 +448,7 @@ def iterate_types():
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['Type.h', 'Tensor.h', 'TensorMethods.h']
+    core_files = ['Type.h', 'Tensor.h', 'TensorMethods.h', 'ATenDispatch.h']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
@@ -535,6 +552,8 @@ def generate_outputs():
     for backend, density, scalar_type in legacy_iterate_types():
         if density == 'Dense':
             generate_legacy_th_dispatcher(backend, density, scalar_type, [])
+
+    generate_aten_dispatch(declarations)
 
     core_files = {
         'Type.h': TYPE_H,
