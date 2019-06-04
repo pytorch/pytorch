@@ -2153,6 +2153,13 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
     DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
     DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
+    DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
+    DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
+    DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
+    DEFINE_BINARY_FLOAT_OP(aten::atan2, std::atan2(a, b)),
+    DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
+    DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
+    DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
 
     // TODO: move abs to aten namespace because it's schematized!
     DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),
