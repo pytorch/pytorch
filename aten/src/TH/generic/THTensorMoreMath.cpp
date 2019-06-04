@@ -1024,7 +1024,6 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
   }
 }
 
-<<<<<<< HEAD
 #define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, THRESHOLD) \
   void THTensor_(NAME)(THTensor *r_, THTensor *t) \
   { \
@@ -1033,23 +1032,6 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
     int r_Contig = THTensor_(isContiguous)(r_); \
     int tContig = THTensor_(isContiguous)(t); \
     TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, THRESHOLD); \
-=======
-#ifdef _OPENMP
-
-#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, OMP_THRESHOLD)             \
-  void THTensor_(NAME)(THTensor *r_, THTensor *t)             \
-  {                                                           \
-    THTensor_(resizeAs)(r_, t);                               \
-    ptrdiff_t r_Size = THTensor_(nElement)(r_);               \
-    int r_Contig = THTensor_(isContiguous)(r_);               \
-    int tContig = THTensor_(isContiguous)(t);                 \
-    int inOMP = omp_in_parallel();                            \
-    if( !inOMP ){   \
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data);, OMP_THRESHOLD);        \
-    } else {                                                                                                   \
-      TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t, *r__data = CFUNC(*t_data););                                       \
-    }                                                                                                        \
->>>>>>> test
   }
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC) \

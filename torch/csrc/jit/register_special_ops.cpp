@@ -111,8 +111,6 @@ void storeLastDimension(
   }
 }
 
-<<<<<<< HEAD
-// bool vector needs to be cast to uint8_t
 template <>
 void storeLastDimension<bool>(
     char* data,
@@ -121,12 +119,6 @@ void storeLastDimension<bool>(
     int64_t dim,
     int elementSize,
     const std::vector<bool>& obj) {
-=======
-// bool vector needs to be cast to uint8_t - nope
-template<>
-void storeLastDimension<bool>(char* data, const std::vector<int64_t>& sizes, const c10::ArrayRef<int64_t>& strides, int64_t dim,
-    int elementSize, const std::vector<bool>& obj) {
->>>>>>> test
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
@@ -277,7 +269,6 @@ RegisterOperators reg({
           };
         }),
 
-<<<<<<< HEAD
 #define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)     \
   Operator(                                                                   \
       "aten::tensor(" #operator_type                                          \
@@ -315,37 +306,6 @@ RegisterOperators reg({
 
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp
-=======
-#define DEFINE_TORCH_TENSOR_OP(operator_type, c_type, tensor_creation_op)             \
-Operator(                                                                             \
-  "aten::tensor(" #operator_type " t, *, ScalarType? dtype=None, Device? device=None"\
-      ") -> Tensor",                                                                  \
-  [](const Node* node) {                                                              \
-    auto initial_scalar_type = scalarTypeFromJitType(node->inputs().at(0)->type());   \
-    return [initial_scalar_type](Stack& stack) {                                      \
-      c_type scalar_val;                                                              \
-      IValue dtype;                                                                   \
-      IValue device;                                                                  \
-      pop(stack, scalar_val, dtype, device);                                          \
-      auto tensor = autograd::make_variable(tensor_creation_op);                      \
-      at::ScalarType scalar_type = dtype.isNone() ?                                   \
-        tensor.scalar_type() : dtype.toScalarType();                                  \
-      c10::Device dev = device.isNone() ? tensor.device() : device.toDevice();        \
-      if (scalar_type != initial_scalar_type || dev != tensor.device()) {             \
-        tensor = tensor.to(dev, scalar_type);                                         \
-      }                                                                               \
-      push(stack, tensor);                                                            \
-      return 0;                                                                       \
-    };                                                                                \
-  }),
-
-DEFINE_TORCH_TENSOR_OP(float, double, at::scalar_to_tensor(scalar_val))
-DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
-DEFINE_TORCH_TENSOR_OP(bool, bool, at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
-
-
-    // reference python implementation: internal_new_from_data in tensor_new.cpp
->>>>>>> test
     Operator(
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
