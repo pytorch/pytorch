@@ -13,7 +13,7 @@ matrix:
     fast_finish: true
     include:
       - name: "Ensure consistent CircleCI YAML"
-        python: "3.6"
+        python: "3.7"
         dist: xenial
         script: cd .circleci && ./ensure-consistency.py
       - name: "Shellcheck Jenkins scripts"
@@ -27,7 +27,10 @@ matrix:
       - name: "Python 2.7 Lint"
         python: "2.7"
         install: pip install flake8
-        script: flake8
+        script:
+          # NB: Exclude .circleci as it is Python 3 only
+          - rm -rf .circleci
+          - flake8
       - name: "Python 3.7 Lint"
         python: "3.7"
         dist: xenial    # required for Python 3.7 (travis-ci/travis-ci#9069)
