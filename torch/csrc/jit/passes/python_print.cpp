@@ -787,19 +787,19 @@ struct PythonPrintPass {
     } else if (v.isTensorList()) {
       stmt << "[";
       const char* delim = "";
-      for (const at::Tensor& t : v.toTensorListRef()) {
+      for (const at::Tensor& t : v.toTensorList()) {
         stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
         delim = ", ";
       }
       stmt << "]";
     } else if (v.isBoolList()) {
       printMaybeAnnotatedConstantList(
-          stmt, "bool", v.toBoolListRef().size(), v);
+          stmt, "bool", v.toBoolList().size(), v);
     } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
+      printMaybeAnnotatedConstantList(stmt, "int", v.toIntList().size(), v);
     } else if (v.isDoubleList()) {
       printMaybeAnnotatedConstantList(
-          stmt, "float", v.toDoubleListRef().size(), v);
+          stmt, "float", v.toDoubleList().size(), v);
     } else {
       stmt << v;
     }

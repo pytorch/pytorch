@@ -62,8 +62,7 @@ inline void _call_caffe2_op_from_c10(
     outputs.resize(num_outputs);
   } else {
     AT_ASSERT(preallocated_outputs.isTensorList());
-    outputs =
-        std::move(*std::move(preallocated_outputs).toTensorList()).elements();
+    outputs = std::move(preallocated_outputs).toTensorList();
   }
 
   // TODO Avoid vector allocation. One idea would be to keep the std::vector

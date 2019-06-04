@@ -190,6 +190,7 @@ private:
   c10::intrusive_ptr<detail::DictImpl> impl_;
 
   explicit DictPtr(c10::intrusive_ptr<detail::DictImpl>&& impl);
+  friend struct IValue;
   template<class K, class V> friend DictPtr<K, V> impl::toTypedDict(DictPtr<IValue, IValue>);
   template<class K, class V> friend DictPtr<IValue, IValue> impl::toGenericDict(DictPtr<K, V>);
 

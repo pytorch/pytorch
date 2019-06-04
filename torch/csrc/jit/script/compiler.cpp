@@ -655,7 +655,7 @@ struct to_ir {
     cu.define({def}, {resolver}, nullptr);
     Stack stack;
     cu.get_function("defaults").run(stack);
-    return c10::impl::toVector(std::move(std::move(stack.at(0)).toTuple()->elements()));
+    return c10::impl::toVector(std::move(stack.at(0)).toTuple().elements());
   }
 
   std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {

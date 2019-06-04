@@ -42,13 +42,13 @@ void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
 
 int64_t list_size(const IValue& list) {
   if (list.isGenericList()) {
-    return list.toGenericListRef().size();
+    return list.toGenericList().size();
   } else if (list.isIntList()) {
-    return list.toIntListRef().size();
+    return list.toIntList().size();
   } else if (list.isDoubleList()) {
-    return list.toDoubleListRef().size();
+    return list.toDoubleList().size();
   } else if (list.isBoolList()) {
-    return list.toBoolListRef().size();
+    return list.toBoolList().size();
   }
   AT_ASSERTM(0, "Unexpected list type", list);
 }
@@ -59,7 +59,7 @@ std::vector<int64_t> compute_sizes(const IValue& seq) {
   // will not be generic list
   auto seq_recur = seq;
   while (seq_recur.isGenericList()) {
-    auto seq_list = seq_recur.toGenericListRef();
+    auto seq_list = seq_recur.toGenericList();
     auto length = seq_list.size();
     AT_ASSERT(length != 0);
     sizes.push_back(length);
@@ -131,7 +131,7 @@ void recursiveStore(
   auto seq_size = list_size(obj);
   checkSequenceSize(n, dim, seq_size);
   if (dim + 1 < static_cast<long>(ndim)) {
-    auto items = obj.toGenericListRef();
+    auto items = obj.toGenericList();
     for (int64_t i = 0; i < n; i++) {
       recursiveStore(data, sizes, strides, dim + 1, elementSize, items[i]);
       data += strides[dim] * elementSize;
@@ -140,13 +140,13 @@ void recursiveStore(
     AT_ASSERT(obj.isIntList() || obj.isDoubleList() || obj.isBoolList());
     if (obj.isIntList()) {
       storeLastDimension<int64_t>(
-          data, sizes, strides, dim, elementSize, obj.toIntListRef());
+          data, sizes, strides, dim, elementSize, obj.toIntList());
     } else if (obj.isDoubleList()) {
       storeLastDimension<double>(
-          data, sizes, strides, dim, elementSize, obj.toDoubleListRef());
+          data, sizes, strides, dim, elementSize, obj.toDoubleList());
     } else {
       storeLastDimension<bool>(
-          data, sizes, strides, dim, elementSize, obj.toBoolListRef());
+          data, sizes, strides, dim, elementSize, obj.toBoolList());
     }
   }
 }
@@ -159,7 +159,7 @@ RegisterOperators reg({
 
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
-              c10::impl::toArrayRef((std::move(peek(stack, 1, 3))).toIntList()->elements()),
+              c10::impl::toArrayRef((std::move(peek(stack, 1, 3))).toIntList()),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
           pack(stack, c10::impl::toList(std::move(result)));
@@ -182,8 +182,8 @@ RegisterOperators reg({
         [](Stack& stack) {
           RECORD_FUNCTION("sizes", last(stack, 2));
 
-          auto list = peek(stack, 0, 2).toIntListRef();
-          auto defaults = peek(stack, 1, 2).toIntListRef();
+          auto list = peek(stack, 0, 2).toIntList();
+          auto defaults = peek(stack, 1, 2).toIntList();
           drop(stack, 2);
 
           AT_ASSERT(defaults.size() > list.size());
@@ -198,8 +198,8 @@ RegisterOperators reg({
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
           return [](Stack& stack) {
-            auto a = pop(stack).toIntList()->elements();
-            auto b = pop(stack).toIntList()->elements();
+            auto a = pop(stack).toIntList();
+            auto b = pop(stack).toIntList();
             push(stack, at::infer_size(c10::impl::toArrayRef(a), c10::impl::toArrayRef(b)));
             return 0;
           };
@@ -299,8 +299,8 @@ RegisterOperators reg({
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
           return [](Stack& stack) {
-            auto a = pop(stack).toIntList()->elements();
-            auto b = pop(stack).toIntList()->elements();
+            auto a = pop(stack).toIntList();
+            auto b = pop(stack).toIntList();
             push(stack, at::infer_size(c10::impl::toArrayRef(a), c10::impl::toArrayRef(b)));
             return 0;
           };

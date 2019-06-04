@@ -111,7 +111,7 @@ inline TypedIValue toTypedIValue(py::handle input) {
       s.push_back(info.first);
       t.push_back(info.second);
     }
-    return TypedIValue(Tuple::create(s), TupleType::create(t));
+    return TypedIValue(TuplePtr::create(s), TupleType::create(t));
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
@@ -179,13 +179,13 @@ inline IValue toIValue(py::handle input) {
 }
 
 inline Stack toStack(const py::tuple& inputs) {
-  return toIValue(inputs).toTuple()->elements();
+  return toIValue(inputs).toTuple();
 }
 
 inline TypedStack toTypedStack(const py::tuple& inputs) {
   auto info = toTypedIValue(inputs);
   return TypedStack(
-      info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
+      info.ivalue().toTuple(), info.type()->expect<TupleType>());
 }
 
 inline IValue toIValue(
@@ -256,7 +256,7 @@ inline IValue toIValue(
       for (size_t i = 0; i < tuple_size; ++i) {
         values.push_back(toIValue(tuple[i], elem_types[i]));
       }
-      return Tuple::create(std::move(values));
+      return TuplePtr::create(std::move(values));
     }
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
@@ -376,31 +376,30 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
-    return py::cast(ivalue.toDouble());
+    return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isInt()) {
-    return py::cast(ivalue.toInt());
+    return py::cast(std::move(ivalue).toInt());
   } else if (ivalue.isBool()) {
-    return py::cast(ivalue.toBool());
+    return py::cast(std::move(ivalue).toBool());
   } else if (ivalue.isString()) {
-    return py::cast(ivalue.toStringRef());
+    return py::cast(std::move(ivalue).toStringRef());
   } else if (ivalue.isIntList()) {
-    return py::cast(ivalue.toIntListRef());
+    return py::cast(std::move(ivalue).toIntList());
   } else if (ivalue.isDoubleList()) {
-    return py::cast(ivalue.toDoubleListRef());
+    return py::cast(std::move(ivalue).toDoubleList());
   } else if (ivalue.isBoolList()) {
-    return py::cast(ivalue.toBoolListRef());
+    return py::cast(std::move(ivalue).toBoolList());
   } else if (ivalue.isTensorList()) {
-    return py::cast(ivalue.toTensorListRef());
+    return py::cast(std::move(ivalue).toTensorList());
   } else if (ivalue.isGenericList()) {
-    auto list = ivalue.toGenericList();
-    const auto& elements = list->elements();
-    py::list t{elements.size()};
-    for (size_t i = 0; i < elements.size(); ++i) {
-      t[i] = toPyObject(IValue{elements[i]});
+    auto list = std::move(ivalue).toGenericList();
+    py::list t{list.size()};
+    for (size_t i = 0; i < list.size(); ++i) {
+      t[i] = toPyObject(IValue{list[i]});
     }
     return std::move(t);
   } else if (ivalue.isTuple()) {
-    auto tuple = ivalue.toTuple();
+    auto tuple = std::move(ivalue).toTuple();
     const auto& elements = tuple->elements();
     py::tuple t{elements.size()};
     for (size_t i = 0; i < elements.size(); ++i) {
@@ -408,9 +407,9 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     return std::move(t);
   } else if (ivalue.isDevice()) {
-    return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
+    return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
   } else if (ivalue.isGenericDict()) {
-    auto dict = ivalue.toGenericDict();
+    auto dict = std::move(ivalue).toGenericDict();
     const auto& elements = dict->elements();
     py::dict py_dict;
     for (auto pair : elements) {
@@ -418,7 +417,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
-    const auto obj = ivalue.toObject();
+    const auto obj = std::move(ivalue).toObject();
     auto& pyCu = script::CompilationUnit::_get_python_cu();
     const auto classType = pyCu.get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);

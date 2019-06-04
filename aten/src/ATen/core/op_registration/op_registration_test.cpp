@@ -762,7 +762,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(bool[] a) -> bool[]");
   testArgTypes<c10::ListPtr<std::string>>::test(
     c10::make_list<std::string>(), [] (const c10::ListPtr<std::string>& v) {EXPECT_EQ(0, v.size());},
-    c10::make_list<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
+    c10::make_list<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericList().size());},
     "(str[] a) -> str[]");
   testArgTypes<c10::ListPtr<Tensor>>::test(
     c10::make_list<Tensor>({}), [] (const c10::ListPtr<Tensor>& v) {EXPECT_EQ(0, v.size());},
@@ -786,9 +786,9 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<c10::ListPtr<std::string>>::test(
     c10::make_list<std::string>({"first", "second"}), [] (const c10::ListPtr<std::string>& v) {expectListEquals({"first", "second"}, v);},
     c10::make_list<std::string>({"first", "second"}), [] (const IValue& v) {
-      EXPECT_EQ(2, v.toGenericListRef().size());
-      EXPECT_EQ("first", v.toGenericListRef().get(0).toStringRef());
-      EXPECT_EQ("second", v.toGenericListRef().get(1).toStringRef());
+      EXPECT_EQ(2, v.toGenericList().size());
+      EXPECT_EQ("first", v.toGenericList().get(0).toStringRef());
+      EXPECT_EQ("second", v.toGenericList().get(1).toStringRef());
     },
     "(str[] a) -> str[]");
   testArgTypes<c10::ListPtr<Tensor>>::test(
@@ -816,7 +816,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   //Note: vector<bool> is not supported, use ListPtr<bool> instead.
   testArgTypes<std::vector<std::string>>::test<TestLegacyAPI>(
     std::vector<std::string>(), [] (const std::vector<std::string>& v) {EXPECT_EQ(0, v.size());},
-    std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
+    std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericList().size());},
     "(str[] a) -> str[]");
   testArgTypes<std::vector<Tensor>>::test<TestLegacyAPI>(
     std::vector<Tensor>({}), [] (const std::vector<Tensor>& v) {EXPECT_EQ(0, v.size());},
@@ -837,9 +837,9 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<std::vector<std::string>>::test<TestLegacyAPI>(
     std::vector<std::string>({"first", "second"}), [] (const std::vector<std::string>& v) {expectListEquals({"first", "second"}, v);},
     std::vector<std::string>({"first", "second"}), [] (const IValue& v) {
-      EXPECT_EQ(2, v.toGenericListRef().size());
-      EXPECT_EQ("first", v.toGenericListRef().get(0).toStringRef());
-      EXPECT_EQ("second", v.toGenericListRef().get(1).toStringRef());
+      EXPECT_EQ(2, v.toGenericList().size());
+      EXPECT_EQ("first", v.toGenericList().get(0).toStringRef());
+      EXPECT_EQ("second", v.toGenericList().get(1).toStringRef());
     },
     "(str[] a) -> str[]");
   testArgTypes<std::vector<Tensor>>::test<TestLegacyAPI>(
@@ -896,7 +896,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
       EXPECT_EQ("value2", v.at("key2"));
     },
     str_dict, [] (const IValue& v) {
-      c10::DictPtr<std::string, std::string> dict = c10::impl::toTypedDict<std::string, std::string>(std::move(v.toGenericDict()->elements()));
+      c10::DictPtr<std::string, std::string> dict = c10::impl::toTypedDict<std::string, std::string>(v.toGenericDict());
       EXPECT_EQ(2, dict.size());
       EXPECT_EQ("value1", dict.at("key1"));
       EXPECT_EQ("value2", dict.at("key2"));
@@ -912,7 +912,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
       EXPECT_EQ(TensorType2(), v.at(2).type_id());
     },
     tensor_dict, [] (const IValue& v) {
-      c10::DictPtr<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(std::move(v.toGenericDict()->elements()));
+      c10::DictPtr<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(v.toGenericDict());
       EXPECT_EQ(2, dict.size());
       EXPECT_EQ(TensorType1(), dict.at(1).type_id());
       EXPECT_EQ(TensorType2(), dict.at(2).type_id());
@@ -930,7 +930,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
       EXPECT_EQ("value2", v.at("key2"));
     },
     str_map, [] (const IValue& v) {
-      c10::DictPtr<std::string, std::string> dict = c10::impl::toTypedDict<std::string, std::string>(std::move(v.toGenericDict()->elements()));
+      c10::DictPtr<std::string, std::string> dict = c10::impl::toTypedDict<std::string, std::string>(v.toGenericDict());
       EXPECT_EQ(2, dict.size());
       EXPECT_EQ("value1", dict.at("key1"));
       EXPECT_EQ("value2", dict.at("key2"));
@@ -946,7 +946,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
       EXPECT_EQ(TensorType2(), v.at(2).type_id());
     },
     tensor_map, [] (const IValue& v) {
-      c10::DictPtr<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(std::move(v.toGenericDict()->elements()));
+      c10::DictPtr<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(v.toGenericDict());
       EXPECT_EQ(2, dict.size());
       EXPECT_EQ(TensorType1(), dict.at(1).type_id());
       EXPECT_EQ(TensorType2(), dict.at(2).type_id());

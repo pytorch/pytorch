@@ -232,4 +232,9 @@ bool list_is_equal(const ListPtr<T>& lhs, const ListPtr<T>& rhs) {
   return true;
 }
 
+template<class T>
+size_t ListPtr<T>::use_count() const {
+  return impl_.use_count();
+}
+
 }

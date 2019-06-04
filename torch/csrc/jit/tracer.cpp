@@ -150,13 +150,13 @@ Value* getNestedValueTrace(const IValue& v) {
         ->insertNode(state->graph->createList(
             TensorType::get(),
             fmap(
-                v.toTensorListRef(),
+                v.toTensorList(),
                 [](const IValue& val) { return getNestedValueTrace(val); })))
         ->output();
   } else if (v.isTuple()) {
     return state->graph
         ->insertNode(state->graph->createTuple(fmap(
-            v.toTuple()->elements(),
+            v.toTuple().elements(),
             [](const IValue& val) { return getNestedValueTrace(val); })))
         ->output();
   }
@@ -189,9 +189,9 @@ Value* getNestedOutputTrace(
   if (iv.isTensor()) {
     return getOutputTrace(state, iv.toTensor());
   } else if (iv.isTuple()) {
-    const auto& elems = iv.toTuple()->elements();
+    const auto& tuple = iv.toTuple();
     auto tuple_node =
-        state->graph->createTuple(fmap(elems, [&state](const IValue& ival) {
+        state->graph->createTuple(fmap(tuple.elements(), [&state](const IValue& ival) {
           return getNestedOutputTrace(state, ival);
         }));
     state->graph->insertNode(tuple_node);
@@ -220,46 +220,47 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
         state->graph->insertNode(state->graph->createTupleUnpack(value));
     auto elem_values = unpack_node->outputs();
     auto elem_types = tuple_type->elements();
-    c10::impl::GenericListPtr elems = input.toTuple()->elements();
+    c10::ivalue::TuplePtr tuple = input.toTuple();
+    c10::ListPtr<IValue>& elems = tuple.elements();
     size_t num_elems = elems.size();
     AT_ASSERT(
         elem_values.size() == num_elems && elem_types.size() == num_elems);
     for (size_t i = 0; i < num_elems; ++i) {
       elems[i] = addInput(state, elems.get(i), elem_types[i], elem_values[i]);
     }
-    return Tuple::create(std::move(elems));
+    return std::move(tuple);
   } else if (auto dict_type = type->cast<DictType>()) {
     auto dict = input.toGenericDict();
 
-    auto dict_size = dict->elements().size();
+    auto dict_size = dict.size();
     auto unpack_to_list = state->graph->insert(aten::values, {value});
     auto list_unpack = state->graph->createListUnpack(unpack_to_list, dict_size);
     auto unpack_node = state->graph->insertNode(list_unpack);
     auto elem_values = unpack_node->outputs();
 
-    const auto order = dict->iterationOrder();
+    const auto order = iterationOrder(dict);
     AT_ASSERT(order.size() == elem_values.size());
 
     size_t i = 0;
     for (const auto &pair : order) {
-      dict->elements().insert_or_assign(pair.first, addInput(state, pair.second, dict_type->getValueType(), elem_values[i++]));
+      dict.insert_or_assign(pair.first, addInput(state, pair.second, dict_type->getValueType(), elem_values[i++]));
     }
 
-    return c10::ivalue::GenericDict::create(std::move(dict->elements()));
+    return std::move(dict);
   } else if (auto list_type = type->cast<ListType>()) {
-    size_t num_elems = input.isGenericList() ? input.toGenericListRef().size()
-                                             : input.toTensorListRef().size();
+    size_t num_elems = input.isGenericList() ? input.toGenericList().size()
+                                             : input.toTensorList().size();
     auto list_unpack = state->graph->insertNode(state->graph->createListUnpack(value, num_elems));
     auto unpack_outputs = list_unpack->outputs();
 
     if (input.isTensorList()) {
-      auto elems = input.toTensorListRef();
+      auto elems = input.toTensorList();
       for (size_t i = 0; i < num_elems; i++) {
         elems.set(i, addInput(state, elems.get(i), list_type->getElementType(), unpack_outputs[i]).toTensor());
       }
       return elems;
     } else {
-      auto elems = input.toGenericListRef();
+      auto elems = input.toGenericList();
       for (size_t i = 0; i < num_elems; i++) {
         elems[i] = addInput(state, elems.get(i), list_type->getElementType(), unpack_outputs[i]);
       }
@@ -342,7 +343,7 @@ void setValueTrace(const IValue& v, Value* value) {
     AT_ASSERT(var.defined());
     getTracingState()->env_stack.back().value_map[var] = value;
   } else if (v.isTensorList()) {
-    auto& outputs = v.toTensorList()->elements();
+    auto outputs = v.toTensorList();
     auto graph = getTracingState()->graph;
     Node* unpack_node =
         graph->insertNode(graph->createListUnpack(value, outputs.size()));
@@ -350,14 +351,15 @@ void setValueTrace(const IValue& v, Value* value) {
       setValueTrace(outputs.get(i), unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
-    auto& outputs = v.toTuple()->elements();
+    auto outputs = v.toTuple();
+    auto& elems = outputs.elements();
     auto graph = getTracingState()->graph;
     Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      setValueTrace(outputs.get(i), unpack_node->outputs()[i]);
+    for (size_t i = 0; i < elems.size(); ++i) {
+      setValueTrace(elems.get(i), unpack_node->outputs()[i]);
     }
   } else if (v.isGenericList()) {
-    auto elements = v.toGenericListRef();
+    auto elements = v.toGenericList();
     auto graph = getTracingState()->graph;
     Node* unpack_node =
         graph->insertNode(graph->createListUnpack(value, elements.size()));

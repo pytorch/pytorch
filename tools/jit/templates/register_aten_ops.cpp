@@ -60,9 +60,9 @@ at::Tensor toOptionalTensor(const IValue& v) {
 
 // XXX: This function is to specialize IValue for list of optional
 // tensor type in interpreter, it should only be used in this file
-std::vector<Tensor> toListOfOptionalTensor(const IValue& v) {
+std::vector<Tensor> toListOfOptionalTensor(IValue v) {
   // v is a list of optional tensor, loop over as generic list
-  auto vlist = v.toGenericListRef();
+  auto vlist = std::move(v).toGenericList();
   std::vector<Tensor> res;
 
   for (const IValue &v: vlist) {

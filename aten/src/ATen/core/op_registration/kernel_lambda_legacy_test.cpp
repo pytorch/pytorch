@@ -21,8 +21,6 @@ using c10::TensorTypeId;
 using c10::KernelCache;
 using c10::Stack;
 using c10::guts::make_unique;
-using c10::ivalue::TensorList;
-using c10::ivalue::IntList;
 using c10::intrusive_ptr;
 using c10::DictPtr;
 using c10::make_dict;
@@ -168,10 +166,10 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorList
 
   auto result = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), dummyTensor(TensorType1()));
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(3, result[0].toTensorListRef().size());
-  EXPECT_EQ(TensorType1(), result[0].toTensorListRef().get(0).type_id());
-  EXPECT_EQ(TensorType2(), result[0].toTensorListRef().get(1).type_id());
-  EXPECT_EQ(TensorType1(), result[0].toTensorListRef().get(2).type_id());
+  EXPECT_EQ(3, result[0].toTensorList().size());
+  EXPECT_EQ(TensorType1(), result[0].toTensorList().get(0).type_id());
+  EXPECT_EQ(TensorType2(), result[0].toTensorList().get(1).type_id());
+  EXPECT_EQ(TensorType1(), result[0].toTensorList().get(2).type_id());
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListOutput_whenRegistered_thenCanBeCalled) {
@@ -185,10 +183,10 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListOut
 
   auto result = callOp(*op, dummyTensor(TensorType1()), 2, 4, 6);
   EXPECT_EQ(1, result.size());
-  EXPECT_EQ(3, result[0].toIntListRef().size());
-  EXPECT_EQ(2, result[0].toIntListRef().get(0));
-  EXPECT_EQ(4, result[0].toIntListRef().get(1));
-  EXPECT_EQ(6, result[0].toIntListRef().get(2));
+  EXPECT_EQ(3, result[0].toIntList().size());
+  EXPECT_EQ(2, result[0].toIntList().get(0));
+  EXPECT_EQ(4, result[0].toIntList().get(1));
+  EXPECT_EQ(6, result[0].toIntList().get(2));
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
@@ -213,11 +211,11 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMultipleOu
   EXPECT_EQ(5, result.size());
   EXPECT_EQ(TensorType2(), result[0].toTensor().type_id());
   EXPECT_EQ(5, result[1].toInt());
-  EXPECT_EQ(2, result[2].toTensorListRef().size());
-  EXPECT_EQ(TensorType1(), result[2].toTensorListRef().get(0).type_id());
-  EXPECT_EQ(TensorType2(), result[2].toTensorListRef().get(1).type_id());
+  EXPECT_EQ(2, result[2].toTensorList().size());
+  EXPECT_EQ(TensorType1(), result[2].toTensorList().get(0).type_id());
+  EXPECT_EQ(TensorType2(), result[2].toTensorList().get(1).type_id());
   EXPECT_EQ(0, result[3].toInt());
-  auto result_dict = c10::impl::toTypedDict<string, Tensor>(std::move(result[4].toGenericDict()->elements()));
+  auto result_dict = c10::impl::toTypedDict<string, Tensor>(result[4].toGenericDict());
   EXPECT_EQ(2, result_dict.size());
   EXPECT_EQ(TensorType1(), result_dict.at("first").type_id());
   EXPECT_EQ(TensorType2(), result_dict.at("second").type_id());
@@ -340,7 +338,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListInp
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), IntList::create(c10::make_list<int64_t>({2, 4, 6})));
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::make_list<int64_t>({2, 4, 6}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_input_list_size);
 }
@@ -354,7 +352,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListInp
   auto op = c10::Dispatcher::singleton().findSchema("_test::int_list_input", "");
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), IntList::create(c10::make_list<int64_t>({2, 4, 6})));
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::make_list<int64_t>({2, 4, 6}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(3, outputs[0].toInt());
 }
@@ -369,7 +367,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorList
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, TensorList::create(c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())})));
+  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
@@ -383,7 +381,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorList
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, TensorList::create(c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())})));
+  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -398,7 +396,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTens
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, TensorList::create(c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())})));
+  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
@@ -412,7 +410,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTens
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, TensorList::create(c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())})));
+  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -427,7 +425,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTens
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, TensorList::create(c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())})));
+  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
@@ -441,7 +439,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTens
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, TensorList::create(c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())})));
+  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
@@ -458,7 +456,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithStringList
   c10::ListPtr<std::string> list = c10::make_list<std::string>({"value1", "value2"});
   auto outputs = callOp(*op, list);
   EXPECT_EQ(1, outputs.size());
-  auto output = std::move(outputs[0].toGenericList()->elements());
+  auto output = std::move(outputs[0]).toGenericList();
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ("value1", output.get(0).toString()->string());
@@ -516,7 +514,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictOutput
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  auto output = c10::impl::toTypedDict<string, string>(std::move(outputs[0].toGenericDict()->elements()));
+  auto output = c10::impl::toTypedDict<string, string>(outputs[0].toGenericDict());
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ("value1", output.at("key1"));
@@ -574,7 +572,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedM
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  auto output = c10::impl::toTypedDict<string, string>(std::move(outputs[0].toGenericDict()->elements()));
+  auto output = c10::impl::toTypedDict<string, string>(outputs[0].toGenericDict());
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ("value1", output.at("key1"));
@@ -595,7 +593,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMapOfList_
   dict.insert("key2", c10::make_list<int64_t>({30, 40}));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  auto output = c10::impl::toTypedDict<string, c10::ListPtr<int64_t>>(std::move(outputs[0].toGenericDict()->elements()));
+  auto output = c10::impl::toTypedDict<string, c10::ListPtr<int64_t>>(outputs[0].toGenericDict());
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ(2, output.at("key1").size());
@@ -627,7 +625,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMapOfListO
   dict.insert("key2", c10::make_list<c10::DictPtr<int64_t, string>>({dict2}));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  auto output = c10::impl::toTypedDict<string, c10::ListPtr<std::unordered_map<int64_t, string>>>(std::move(outputs[0].toGenericDict()->elements()));
+  auto output = c10::impl::toTypedDict<string, c10::ListPtr<std::unordered_map<int64_t, string>>>(outputs[0].toGenericDict());
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ(1, output.at("key1").size());
@@ -657,15 +655,15 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithListOfMap_
   c10::ListPtr<c10::DictPtr<string, int64_t>> list = c10::make_list<c10::DictPtr<string, int64_t>>({dict1, dict2});
   auto outputs = callOp(*op, list);
   EXPECT_EQ(1, outputs.size());
-  c10::impl::GenericListPtr output = std::move(outputs[0].toGenericList()->elements());
+  c10::impl::GenericListPtr output = std::move(outputs[0]).toGenericList();
 
   EXPECT_EQ(2, output.size());
-  EXPECT_EQ(2, output.get(0).toGenericDictRef().size());
-  EXPECT_EQ(1, output.get(0).toGenericDictRef().at("1").toInt());
-  EXPECT_EQ(2, output.get(0).toGenericDictRef().at("2").toInt());
-  EXPECT_EQ(2, output.get(1).toGenericDictRef().size());
-  EXPECT_EQ(3, output.get(1).toGenericDictRef().at("3").toInt());
-  EXPECT_EQ(4, output.get(1).toGenericDictRef().at("4").toInt());
+  EXPECT_EQ(2, output.get(0).toGenericDict().size());
+  EXPECT_EQ(1, output.get(0).toGenericDict().at("1").toInt());
+  EXPECT_EQ(2, output.get(0).toGenericDict().at("2").toInt());
+  EXPECT_EQ(2, output.get(1).toGenericDict().size());
+  EXPECT_EQ(3, output.get(1).toGenericDict().at("3").toInt());
+  EXPECT_EQ(4, output.get(1).toGenericDict().at("4").toInt());
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithListOfMapOfIntList_whenRegistered_thenCanBeCalled) {
@@ -687,22 +685,22 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithListOfMapO
       c10::make_list<c10::DictPtr<string, c10::ListPtr<int64_t>>>({ dict1, dict2 });
   auto outputs = callOp(*op, list);
   EXPECT_EQ(1, outputs.size());
-  c10::impl::GenericListPtr output = std::move(outputs[0].toGenericList()->elements());
+  c10::impl::GenericListPtr output = std::move(outputs[0]).toGenericList();
 
   EXPECT_EQ(2, output.size());
-  EXPECT_EQ(2, output.get(0).toGenericDictRef().size());
-  EXPECT_EQ(2, output.get(0).toGenericDictRef().at("1").toIntListRef().size());
-  EXPECT_EQ(1, output.get(0).toGenericDictRef().at("1").toIntListRef().get(0));
-  EXPECT_EQ(2, output.get(0).toGenericDictRef().at("1").toIntListRef().get(1));
-  EXPECT_EQ(2, output.get(0).toGenericDictRef().at("3").toIntListRef().size());
-  EXPECT_EQ(3, output.get(0).toGenericDictRef().at("3").toIntListRef().get(0));
-  EXPECT_EQ(4, output.get(0).toGenericDictRef().at("3").toIntListRef().get(1));
-  EXPECT_EQ(2, output.get(1).toGenericDictRef().at("5").toIntListRef().size());
-  EXPECT_EQ(5, output.get(1).toGenericDictRef().at("5").toIntListRef().get(0));
-  EXPECT_EQ(6, output.get(1).toGenericDictRef().at("5").toIntListRef().get(1));
-  EXPECT_EQ(2, output.get(1).toGenericDictRef().at("7").toIntListRef().size());
-  EXPECT_EQ(7, output.get(1).toGenericDictRef().at("7").toIntListRef().get(0));
-  EXPECT_EQ(8, output.get(1).toGenericDictRef().at("7").toIntListRef().get(1));
+  EXPECT_EQ(2, output.get(0).toGenericDict().size());
+  EXPECT_EQ(2, output.get(0).toGenericDict().at("1").toIntList().size());
+  EXPECT_EQ(1, output.get(0).toGenericDict().at("1").toIntList().get(0));
+  EXPECT_EQ(2, output.get(0).toGenericDict().at("1").toIntList().get(1));
+  EXPECT_EQ(2, output.get(0).toGenericDict().at("3").toIntList().size());
+  EXPECT_EQ(3, output.get(0).toGenericDict().at("3").toIntList().get(0));
+  EXPECT_EQ(4, output.get(0).toGenericDict().at("3").toIntList().get(1));
+  EXPECT_EQ(2, output.get(1).toGenericDict().at("5").toIntList().size());
+  EXPECT_EQ(5, output.get(1).toGenericDict().at("5").toIntList().get(0));
+  EXPECT_EQ(6, output.get(1).toGenericDict().at("5").toIntList().get(1));
+  EXPECT_EQ(2, output.get(1).toGenericDict().at("7").toIntList().size());
+  EXPECT_EQ(7, output.get(1).toGenericDict().at("7").toIntList().get(0));
+  EXPECT_EQ(8, output.get(1).toGenericDict().at("7").toIntList().get(1));
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {

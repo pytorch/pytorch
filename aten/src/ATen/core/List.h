@@ -392,10 +392,23 @@ public:
    */
   void resize(size_type count, const T& value) const;
 
+  /**
+   * Compares two lists for equality. Two lists are equal if they have the
+   * same number of elements and for each list position the elements at
+   * that position are equal.
+   */
   friend bool list_is_equal<T>(const ListPtr& lhs, const ListPtr& rhs);
+
+  /**
+   * Returns the number of ListPtrs currently pointing to this same list.
+   * If this is the only instance pointing to this list, returns 1.
+   */
+  // TODO Test use_count
+  size_t use_count() const;
 
 protected:
   explicit ListPtr(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
+  friend class IValue;
   template<class T_> friend ListPtr<T_> impl::toTypedList(ListPtr<IValue>);
   template<class T_> friend ListPtr<IValue> impl::toGenericList(ListPtr<T_>);
   friend const IValue* impl::ptr_to_first_element(const ListPtr<IValue>& list);
