@@ -10,6 +10,7 @@
 
 using namespace std;
 
+namespace py = pybind11;
 torch::Tensor warp_perspective(torch::Tensor image) { return image; }
 struct Foo {
   int x, y;
@@ -22,4 +23,5 @@ struct Foo {
 
 static auto registry = torch::jit::RegisterOperators("my_ops::warp_perspective",
                                                      &warp_perspective);
-static auto test = torch::jit::class_<Foo>("Foo");
+static auto test = torch::jit::class_<Foo>("Foo")
+                    .def("display", &Foo::display);

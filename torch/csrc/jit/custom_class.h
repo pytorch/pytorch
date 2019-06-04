@@ -16,28 +16,19 @@
 
 namespace py = pybind11;
 using namespace std;
-struct Pet {
-  Pet(const std::string& name) : name(name) {}
-  void setName(const std::string& name_) {
-    name = name_;
-  }
-  const std::string& getName() const {
-    return name;
-  }
-
-  std::string name;
-};
 namespace torch {
 namespace jit {
 template <class CurClass>
 struct class_ {
+  std::shared_ptr<py::class_<CurClass>> pyClass = nullptr;
+  const std::string parentModule = "torch._C";
   class_(string className) {
-    // std::cout<<"40: "<<object<<std::endl;
-    auto obj = py::module::import("torch._C");
-    py::class_<CurClass>(obj, className.c_str()).def(py::init<>());
+    auto obj = py::module::import(parentModule.c_str());
+    pyClass = std::make_shared<py::class_<CurClass>>(obj, className.c_str());
+    pyClass->def(py::init<>());
     auto cu = std::make_shared<torch::jit::script::CompilationUnit>();
     auto classType = ClassType::create(
-        c10::QualifiedName("__torch__.torch._C." + className), cu);
+        c10::QualifiedName("__torch__." + parentModule + "." + className), cu);
     torch::jit::script::CompilationUnit::_get_python_cu().register_class(
         classType);
     auto func = []() { return new CurClass; };
@@ -46,12 +37,11 @@ struct class_ {
     graph->registerOutput(input);
     cu->create_function("__init__", graph);
   }
-  // todo: Doesn't work yet
-  // template<typename Func>
-  // class_& def(string name, Func f) {
-  //   auto graph = std::make_shared<Graph>();
-  //   cu->create_function(name, make_shared<Graph>());
-  // }
+  template <typename Func>
+  class_& def(string name, Func f) {
+    pyClass->def(name.c_str(), f);
+    return *this;
+  }
 };
 
 } // namespace jit

@@ -8,9 +8,9 @@ class Bar:
         self.y = 2
 
 
-@torch.jit.script
+# @torch.jit.script
 def f():
-    print(torch._C.Foo())
+    print(torch._C.Foo().display())
 
 f()
 # print(f.graph)
