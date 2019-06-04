@@ -130,7 +130,7 @@ bool in_parallel_region() {
 }
 
 void intraop_launch(std::function<void()> func) {
-  if (!in_parallel_region()) {
+  if (!in_parallel_region() && get_num_threads() > 1) {
     internal::_get_intraop_pool().run([func](){
       func();
     });
