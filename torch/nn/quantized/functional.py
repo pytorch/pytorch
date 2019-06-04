@@ -75,9 +75,11 @@ def conv2d(input, weight, bias,
     dilation = _extend_to_list(dilation, spatial_dim_len)
     _output_padding = _extend_to_list(0, spatial_dim_len)
 
+    print("TEST 2-1")
     if not prepacked:
+        print("TEST 2-2")
         weight = ops.quantized.fbgemm_conv_prepack(weight, groups)
-
+    print("TEST 2-3")
     return ops.quantized.fbgemm_conv2d(input, weight, bias,
                                        stride, padding, dilation,
                                        _output_padding, groups,
