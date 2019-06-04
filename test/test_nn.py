@@ -2070,24 +2070,61 @@ class TestNN(NNTestCase):
     def test_embedding_dense_grad_cuda(self):
         self._test_embedding_dense_grad("cuda")
 
-    def test_embedding_sparse_backward(self):
+    def test_move_sparse_half_embedding(self):
         embedding = nn.Embedding(10, 3, sparse=True)
-        embedding.zero_grad()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3]]))
-        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(3, 3))
+        self.assertEqual(embedding.weight.device.type, 'cpu')
+        self.assertEqual(embedding.weight.dtype, torch.float64)
+        embedding.to(torch.float16)
+        self.assertEqual(embedding.weight.dtype, torch.float16)
+        self.assertEqual(embedding.embedding_dim, 3)
+        self.assertEqual(embedding.num_embeddings, 10)
+
+        if torch.cuda.is_available():
+            embedding.to('cuda')
+            self.assertEqual(embedding.weight.device.type, 'cuda')
+            embedding.to('cpu')
+            self.assertEqual(embedding.weight.device.type, 'cpu')
+
+    def test_embedding_sparse_backward(self):
+        self._test_embedding_backward()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_embedding_sparse_half_backward(self):
+        # same as test_embedding_sparse_backward above but testing half types in
+        # cuda. cpu sum not supported for half types.
+        self._test_embedding_backward('cuda', torch.float16)
+
+    def _test_embedding_backward(self, device='cpu', dtype=torch.float64):
+        embedding = nn.Embedding(10, 3, sparse=True)
+        tensor = torch.tensor([[7, 1, 3]])
+        ones = torch.tensor(1.).expand(3, 3)
+        tensorTwice = tensor.repeat(1, 2)
+        onesTwice = torch.cat((ones, ones))
+
+        embedding = embedding.to(dtype=dtype).to(device)
+        tensor = tensor.to(device)
+        ones = ones.to(device)
+        tensorTwice = tensorTwice.to(device)
+        onesTwice = onesTwice.to(device)
 
         embedding.zero_grad()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3, 7, 1, 3]]))
-        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(6, 3))
+        embedding(tensor[0]).sum().backward()
+        self.assertEqual(embedding.weight.grad._indices(), tensor)
+        self.assertEqual(embedding.weight.grad._values(), ones)
 
         embedding.zero_grad()
-        embedding(torch.LongTensor([7, 1, 3])).sum().backward()
-        embedding(torch.LongTensor([8, 1, 3])).sum().backward()
-        self.assertEqual(embedding.weight.grad._indices(), torch.LongTensor([[7, 1, 3, 8, 1, 3]]))
-        self.assertEqual(embedding.weight.grad._values(), torch.tensor(1.).expand(6, 3))
+        embedding(tensor[0]).sum().backward()
+        embedding(tensor[0]).sum().backward()
+        self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
+        self.assertEqual(embedding.weight.grad._values(), onesTwice)
+
+        embedding.zero_grad()
+        embedding(tensor[0]).sum().backward()
+        tensor[0, 0] = 8
+        embedding(tensor[0]).sum().backward()
+        tensorTwice[0, 3] = 8
+        self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
+        self.assertEqual(embedding.weight.grad._values(), onesTwice)
 
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
@@ -2377,6 +2414,7 @@ class TestNN(NNTestCase):
             needed_prec = dtype2prec[dtype] * 2
         else:
             needed_prec = backward_prec
+
         self.assertEqual(es_weight_grad, e.weight.grad, needed_prec)
 
         if test_per_sample_weights and trainable_per_sample_weights:
@@ -2564,12 +2602,13 @@ class TestNN(NNTestCase):
 
     def test_embedding_bag(self):
         for dtype in [torch.double, torch.float]:
-            # TODO: figure out why backward on float breaks
-            test_backward = dtype is not torch.float
-            self._test_EmbeddingBag(False, 'sum', False, test_backward=test_backward, dtype=dtype)
-            self._test_EmbeddingBag(False, 'mean', False, test_backward=test_backward, dtype=dtype)
-            self._test_EmbeddingBag(False, 'max', False, test_backward=test_backward, dtype=dtype)
+            self._test_EmbeddingBag(False, 'sum', False, dtype=dtype)
+            self._test_EmbeddingBag(False, 'mean', False, dtype=dtype)
+            self._test_EmbeddingBag(False, 'max', False, dtype=dtype)
 
+            # TODO: figure out why precision on sparse embeddings isn't the
+            # same as for dense.
+            test_backward = dtype is not torch.float
             self._test_EmbeddingBag(False, 'sum', True, test_backward=test_backward, dtype=dtype)
             self._test_EmbeddingBag(False, 'mean', True, test_backward=test_backward, dtype=dtype)
 
@@ -2733,10 +2772,11 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag(True, 'sum', False, dtype)
         self._test_EmbeddingBag(True, 'mean', False, dtype)
         self._test_EmbeddingBag(True, 'max', False, dtype)
-        if dtype != torch.half:
-            # torch.cuda.sparse.HalfTensor is not enabled.
-            self._test_EmbeddingBag(True, 'sum', True, dtype)
-            self._test_EmbeddingBag(True, 'mean', True, dtype)
+
+        # see 'todo' in test_embedding_bag.
+        test_backward = dtype is not torch.float16
+        self._test_EmbeddingBag(True, 'sum', True, dtype, test_backward=test_backward)
+        self._test_EmbeddingBag(True, 'mean', True, dtype, test_backward=test_backward)
 
     def test_fractional_max_pool2d(self):
         x = torch.randn(1, 2, 7, 7, requires_grad=True)
@@ -3197,29 +3237,36 @@ class TestNN(NNTestCase):
                         output = m(sigmoid(input), target)
                         verify_reduction_scalars(input, reduction, output)
 
+    @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
+                     "Scipy v1.0 and/or numpy not found")
     def test_multihead_attention(self):
-        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=False, src_lengths=None):
+        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, src_lengths=None,
+                                 attn_mask=None, add_zero_attn=False):
             """ Numpy-based reference implementation of scaled dot attention
             for testing"""
+
             QKT = _batchmatmul(
                 Q,
                 np.transpose(K, axes=[0, 1, 3, 2])
                 / np.sqrt(dims[3], dtype=np.float32),  # divide by sqrt(d_head)
             )
-            if unseen_mask or src_lengths is not None:
-                b1, b2, s1, s2 = QKT.shape
+            b1, b2, s1, s2 = QKT.shape
+            if unseen_mask is not None or src_lengths is not None:
                 # assert s1 == s2
                 for i in range(b1):
                     for j in range(b2):
                         for m in range(s1):
                             for n in range(s2):
-                                if unseen_mask and n > m:
+                                if unseen_mask[m][n] == 0:
                                     QKT[i, j, m, n] = -np.inf
                                 if src_lengths is not None and n >= src_lengths[i]:
                                     QKT[i, j, m, n] = -np.inf
+
             reference = _softmax(QKT)
+            ref_attn_weight = reference
+            ref_attn_weight = np.sum(ref_attn_weight, axis=1) / b2
             reference = _batchmatmul(reference, V)
-            return reference
+            return reference, ref_attn_weight
 
         def _batchmatmul(a, b):  # batchmatmul over 4 dim matrix
             """ Numpy-based batch matrix multiply over 4 dim matrix"""
@@ -3235,7 +3282,8 @@ class TestNN(NNTestCase):
 
         def _softmax(x):  # softmax over 4 dim matrix
             """ Numpy-based reference softmax over 4 dim matrix"""
-            output = np.zeros(x.shape, dtype=np.float32)
+            np.seterr(invalid='ignore')
+            output = np.zeros(x.shape, dtype=np.float64)
             for i in range(x.shape[0]):
                 for j in range(x.shape[1]):
                     for k in range(x.shape[2]):
@@ -3298,7 +3346,7 @@ class TestNN(NNTestCase):
             # returns [batch_size, max_seq_len]
             return (src_indices < src_lengths).int().detach()
 
-        def _multihead_attn_test_helper(use_src_lengths):
+        def _multihead_attn_test_helper(add_key_padding_mask, add_bias_kv=False, add_zero_attn=False):
             for _ in range(100):
                 batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
                 d_head = random.randint(3, 10)
@@ -3308,7 +3356,7 @@ class TestNN(NNTestCase):
 
                 src_lengths = None
                 src_lengths_tensor = None
-                if use_src_lengths:
+                if add_key_padding_mask:
                     src_lengths, src_lengths_tensor = _generate_src_lengths(
                         batch_size=batch_sz, seq_len=seq_len
                     )
@@ -3317,28 +3365,48 @@ class TestNN(NNTestCase):
                 K = np.random.rand(*dims).astype(np.float64)
                 V = K
                 Q = np.expand_dims(decoder_state, 1)
+                attn_mask = np.random.randint(0 , 2, size=(1, seq_len))
+                attn_mask_tensor = torch.from_numpy(attn_mask).float()
+                attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
+                attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
+                attn_mask_tensor = attn_mask_tensor.double()
 
                 decoder_state_tensor = torch.from_numpy(decoder_state).double()
                 source_hid_tensor = torch.from_numpy(K).double().transpose(0, 1)
 
-                multihead_attn_module = MultiheadAttention(d_model, nheads)
+                multihead_attn_module = MultiheadAttention(d_model, nheads,
+                                                           add_bias_kv=add_bias_kv,
+                                                           add_zero_attn=add_zero_attn)
+
+                if add_bias_kv:
+                    bias_k = multihead_attn_module.bias_k.detach().numpy()
+                    bias_v = multihead_attn_module.bias_v.detach().numpy()
+                else:
+                    bias_k = None
+                    bias_v = None
 
                 _batch_size = decoder_state_tensor.shape[0]
                 _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1)
                 _V = source_hid_tensor
                 _K = source_hid_tensor
                 src_len_mask = None
-                if src_lengths is not None and use_src_lengths:
+                if src_lengths is not None and add_key_padding_mask:
                     # [batch_size, 1, seq_len]
                     src_len_mask_int = _create_src_lengths_mask(
                         batch_size=_batch_size, src_lengths=src_lengths_tensor
                     )
                     src_len_mask = src_len_mask_int != 1
 
-                result = multihead_attn_module(
+                result, result_weight = torch.nn.functional.multi_head_attention_forward(
                     _Q, _K, _V,
-                    key_padding_mask=src_len_mask,
-                    need_weights=True)[0].squeeze(0).detach().numpy()
+                    d_model, nheads,
+                    multihead_attn_module.in_proj_weight, multihead_attn_module.in_proj_bias,
+                    multihead_attn_module.bias_k, multihead_attn_module.bias_v,
+                    multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
+                    multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
+                    multihead_attn_module.training, src_len_mask, True, attn_mask_tensor)
+
+                result = result.squeeze(0).detach().numpy()
 
                 Q_fc = _fc(Q, "in_proj_", multihead_attn_module, end=d_model)
                 K_fc = _fc(
@@ -3346,20 +3414,31 @@ class TestNN(NNTestCase):
                 )
                 V_fc = _fc(V, "in_proj_", multihead_attn_module, start=2 * d_model)
 
+                if add_bias_kv:
+                    K_fc = np.concatenate((K_fc, np.repeat(bias_k, K_fc.shape[0], axis=0)), axis=1)
+                    V_fc = np.concatenate((V_fc, np.repeat(bias_v, V_fc.shape[0], axis=0)), axis=1)
+                    attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
+                    dims[1] += 1
                 Q_split = _split_heads_ref(
                     Q_fc, [batch_sz, 1, d_model], nheads, d_head
                 )
                 K_split = _split_heads_ref(K_fc, dims, nheads, d_head)
                 V_split = _split_heads_ref(V_fc, dims, nheads, d_head)
 
-                attn_heads = _scaled_dot_attn_ref(
+                if add_zero_attn:
+                    dims[1] += 1
+                    K_split = np.concatenate((K_split, np.zeros([K_split.shape[0], K_split.shape[1], 1, K_split.shape[3]])), axis=2)
+                    V_split = np.concatenate((V_split, np.zeros([V_split.shape[0], V_split.shape[1], 1, V_split.shape[3]])), axis=2)
+                    attn_mask = np.concatenate((attn_mask, np.ones([1, 1])), axis=1)
+
+                attn_heads, ref_attn_weight = _scaled_dot_attn_ref(
                     Q=Q_split,
                     K=K_split,
                     V=V_split,
                     dims=Q_split.shape,
-                    src_lengths=src_lengths,
+                    unseen_mask=attn_mask,
+                    src_lengths=src_lengths
                 )
-
                 combined_attn_heads = _combine_heads_ref(
                     X=attn_heads, dims=[batch_sz, 1], nheads=nheads, d_head=d_head
                 )
@@ -3373,14 +3452,27 @@ class TestNN(NNTestCase):
                 self.assertEqual(tuple(result.shape), (batch_sz, d_model))
                 np.testing.assert_allclose(result, reference, atol=1e-5)
 
+                # result_weight = ref_attn_weight
+                result_weight = result_weight.detach().numpy()
+                self.assertEqual(tuple(result_weight.shape), tuple(ref_attn_weight.shape))
+                np.testing.assert_allclose(result_weight, ref_attn_weight, atol=1e-5)
+
+        def test_multihead_attn_add_bias_kv():
+            _multihead_attn_test_helper(add_key_padding_mask=None, add_bias_kv=True)
+
+        def test_multihead_attn_add_zero_attn():
+            _multihead_attn_test_helper(add_key_padding_mask=None, add_zero_attn=True)
+
         def test_multihead_attn_no_masking():
-            _multihead_attn_test_helper(use_src_lengths=None)
+            _multihead_attn_test_helper(add_key_padding_mask=None)
 
-        def test_multihead_attn_with_src_lengths():
-            _multihead_attn_test_helper(use_src_lengths=True)
+        def test_multihead_attn_key_padding_mask():
+            _multihead_attn_test_helper(add_key_padding_mask=True)
 
+        test_multihead_attn_add_zero_attn()  # Test MultiheadAttention with add_zero_attn
+        test_multihead_attn_add_bias_kv()  # Test MultiheadAttention with add_bias_kv
         test_multihead_attn_no_masking()   # Test MultiheadAttention without masking
-        test_multihead_attn_with_src_lengths()  # Test MultiheadAttention with src lengths
+        test_multihead_attn_key_padding_mask()  # Test MultiheadAttention with src lengths
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
@@ -3753,6 +3845,42 @@ class TestNN(NNTestCase):
             return dpm(inp)
 
         torch.autograd.gradcheck(fn, (m.t_rg,))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_data_parallel_rnn(self):
+
+        class TestModule(torch.nn.Module):
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.rnn = torch.nn.LSTM(300, 1024, 1, batch_first=True, bidirectional=True)
+
+            def forward(self, x):
+                self.rnn.flatten_parameters()
+                return self.rnn(x)
+
+        def step(model):
+            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+            input = torch.ones(4, 4, 300).to(0)
+            output = model(input)
+            loss = F.mse_loss(output[0], torch.zeros_like(output[0]))
+            loss.backward()
+            opt.step()
+
+        with torch.no_grad():
+            model = TestModule().to(0)
+            model_dp = torch.nn.DataParallel(deepcopy(model))
+
+            # make sure DP does not crash when grad is disabled.
+            # See #21108
+            model_dp(torch.rand(2, 4, 300).to(0))
+
+        step(model)
+        step(model_dp)
+
+        for p1, p2 in zip(model.parameters(), model_dp.parameters()):
+            p1.allclose(p2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
@@ -4308,6 +4436,19 @@ class TestNN(NNTestCase):
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
+    @unittest.skipIf(not PY3, 'Python 2.7 generates cyclic trash')
+    def test_load_state_dict_ref_cycle(self):
+        # load_state_dict shouldn't cause a reference cycle involving Tensors
+        import gc
+
+        m = torch.nn.LSTM(16, 16, bidirectional=True)
+
+        gc.collect()
+        m.load_state_dict(deepcopy(m).state_dict())
+        refcycles = gc.collect()
+
+        self.assertEqual(refcycles, 0)
+
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
 
@@ -4669,6 +4810,42 @@ class TestNN(NNTestCase):
                              torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
                              1e-1 if dtype == torch.half else dtype2prec[dtype])
 
+    # Almost identical to the above `test_Conv2d_naive_groups`
+    # Covering special case when group > 1, input-channel / group < 16 and output-channel is multiple of 16
+    # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
+    # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
+    def test_Conv2d_groups_nobias_v2(self):
+        torch.manual_seed(123)
+        dev_dtypes = [("cpu", torch.float)]
+        if TEST_CUDA:
+            dev_dtypes += [("cuda", torch.float), ("cuda", torch.half)]
+        for device, dtype in dev_dtypes:
+            m = nn.Conv2d(4, 16, kernel_size=3, groups=2, bias=False).to(device, dtype)
+            i = torch.randn(2, 4, 6, 6, device=device, dtype=dtype, requires_grad=True)
+            output = m(i)
+            grad_output = torch.randn(2, 16, 4, 4, device=device, dtype=dtype)
+            output.backward(grad_output)
+
+            m1 = nn.Conv2d(2, 8, kernel_size=3, bias=False).to(device, dtype)
+            m1.weight.data.copy_(m.weight.data[:8])
+            i1 = Variable(i.data[:, :2].contiguous(), requires_grad=True)
+            output1 = m1(i1)
+            output1.backward(grad_output[:, :8].contiguous())
+
+            m2 = nn.Conv2d(2, 8, kernel_size=3, bias=False).to(device, dtype)
+            m2.weight.data.copy_(m.weight.data[8:])
+            i2 = Variable(i.data[:, 2:].contiguous(), requires_grad=True)
+            output2 = m2(i2)
+            output2.backward(grad_output[:, 8:].contiguous())
+
+            self.assertEqual(output, torch.cat([output1, output2], 1))
+            self.assertEqual(i.grad.data,
+                             torch.cat([i1.grad.data, i2.grad.data], 1),
+                             dtype2prec[dtype])
+            self.assertEqual(m.weight.grad.data,
+                             torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
+                             1e-1 if dtype == torch.half else dtype2prec[dtype])
+
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -4938,6 +5115,17 @@ class TestNN(NNTestCase):
         self.assertRaises(ValueError, lambda: nn.Dropout3d(1.1))
         self.assertRaises(ValueError, lambda: F.dropout(v, -0.1))
         self.assertRaises(ValueError, lambda: F.dropout(v, 1.1))
+
+    def test_empty_dropout(self):
+        x = torch.Tensor([])
+        out = torch.nn.functional.dropout(x)
+        self.assertEqual(out.size(), x.size())
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_empty_dropout_cuda(self):
+        x = torch.Tensor([]).to('cuda')
+        out = torch.nn.functional.dropout(x)
+        self.assertEqual(out.size(), x.size())
 
     def test_pad_sequence(self):
         def pad(tensor, length):
@@ -5907,6 +6095,36 @@ class TestNN(NNTestCase):
         y = m(x)
         y.mean().backward()
         self.assertEqual(x.grad, None)
+
+    @unittest.skipIf(
+        not TEST_NUMPY or not TEST_SCIPY, "Numpy or Scipy not found")
+    def test_gelu(self):
+        def _test_gelu(n, m, dtype, contiguous):
+            def _gelu_ref(X):
+                return X * stats.norm.cdf(X)
+
+            if contiguous:
+                X = torch.rand(n, m, dtype=dtype, requires_grad=True)
+            else:
+                X = torch.rand(n, m, dtype=dtype, requires_grad=True)[:, ::2]
+            res = F.gelu(X)
+            ref = _gelu_ref(X.detach().numpy())
+            self.assertEqual(res, ref)
+            gradcheck(F.gelu, [X], eps=1e-4)
+
+            if TEST_CUDA:
+                X_cuda = X.cuda()
+                res_cuda = F.gelu(X_cuda)
+                self.assertEqual(res_cuda.cpu(), ref)
+                gradcheck(F.gelu, [X_cuda], eps=1e-4)
+
+        for n in range(1, 10):
+            for m in range(1, 10):
+                _test_gelu(n, m, torch.float32, True)
+                _test_gelu(n, m, torch.float32, False)
+                _test_gelu(n, m, torch.float64, True)
+                _test_gelu(n, m, torch.float64, False)
+
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)

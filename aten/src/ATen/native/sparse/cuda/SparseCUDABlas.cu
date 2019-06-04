@@ -9,8 +9,8 @@
 
 namespace at { namespace native { namespace sparse { namespace cuda {
 
-
-std::string getCusparseErrorString(cusparseStatus_t status) {
+#if (!((CUSPARSE_VER_MAJOR >= 10) && (CUSPARSE_VER_MINOR >= 2)))
+std::string cusparseGetErrorString(cusparseStatus_t status) {
   switch(status)
   {
     case CUSPARSE_STATUS_SUCCESS:
@@ -51,11 +51,12 @@ std::string getCusparseErrorString(cusparseStatus_t status) {
       }
   }
 }
+#endif
 
 inline void CUSPARSE_CHECK(cusparseStatus_t status)
 {
   if (status != CUSPARSE_STATUS_SUCCESS) {
-    AT_ERROR("cusparse runtime error: ", getCusparseErrorString(status));
+    AT_ERROR("cusparse runtime error: ", cusparseGetErrorString(status));
   }
 }
 
@@ -66,7 +67,7 @@ inline cusparseHandle_t setCUDASparseStream() {
 }
 
 void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
-  AT_CHECK((m <= INT_MAX) && (nnz <= INT_MAX),
+  TORCH_CHECK((m <= INT_MAX) && (nnz <= INT_MAX),
     "cusparseXcoo2csr only supports m, nnz with the bound [val] <= ",
     INT_MAX);
 
@@ -117,7 +118,7 @@ void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
   cusparseOperation_t opb = convertTransToCusparseOperation(transb);
 
-  AT_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
     "cusparseScsrmm2 only supports m, n, k, nnz, ldb, ldc with the bound [val] <= ", INT_MAX);
   int i_m = (int)m;
   int i_n = (int)n;
@@ -144,7 +145,7 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   cusparseOperation_t opa = convertTransToCusparseOperation(transa);
   cusparseOperation_t opb = convertTransToCusparseOperation(transb);
 
-  AT_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (nnz <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX),
     "cusparseDcsrmm2 only supports m, n, k, nnz, ldb, ldc with the bound [val] <= ", INT_MAX);
   int i_m = (int)m;
   int i_n = (int)n;
@@ -169,7 +170,7 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
 
 /* format conversion */
 void CreateIdentityPermutation(int64_t nnz, int *P) {
-  AT_CHECK((nnz <= INT_MAX),
+  TORCH_CHECK((nnz <= INT_MAX),
     "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <= ",
     INT_MAX);
   int i_nnz = (int)nnz;
@@ -180,7 +181,7 @@ void CreateIdentityPermutation(int64_t nnz, int *P) {
 
 void Xcsrsort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, const int *csrColInd, size_t *pBufferSizeInBytes)
 {
-  AT_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <=",
     INT_MAX);
   int i_m = (int)m;
@@ -193,7 +194,7 @@ void Xcsrsort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *csrRow
 
 void Xcsrsort(int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, int *csrColInd, int *P, void *pBuffer)
 {
-  AT_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcsrsort only supports m, n, nnz with the bound [val] <= ",
     INT_MAX);
   int i_m = (int)m;
@@ -209,7 +210,7 @@ void Xcsrsort(int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, int *csrC
 
 void Xcoosort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *cooRows, const int *cooCols, size_t *pBufferSizeInBytes)
 {
-  AT_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcoosort_bufferSizeExt only supports m, n, nnz with the bound [val] <= ",
     INT_MAX);
   int i_m = (int)m;
@@ -222,7 +223,7 @@ void Xcoosort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *cooRow
 
 void XcoosortByRow(int64_t m, int64_t n, int64_t nnz, int *cooRows, int *cooCols, int *P, void *pBuffer)
 {
-  AT_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
+  TORCH_CHECK((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "XcoosortByRow only supports m, n, nnz with the bound [val] <= ",
     INT_MAX);
   int i_m = (int)m;

@@ -50,11 +50,7 @@ Tensor kl_div_backward_override(
   return get_dtype_tensor(self.dtype());
 }
 
-// numel and ones_like are needed for autograd backwards
-int64_t numel_override(const Tensor & self) {
-  return 1;
-}
-
+// ones_like is needed for autograd backwards
 Tensor ones_like_override(const Tensor & self, const TensorOptions & options) {
   return get_dtype_tensor(options.dtype());
 }
@@ -81,9 +77,6 @@ void init_msnpu_extension() {
     Backend::MSNPU,
     "kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) -> Tensor",
     &kl_div_backward_override);
-  register_extension_backend_op(
-    Backend::MSNPU,
-    "numel(Tensor self) -> int64_t", &numel_override);
   register_extension_backend_op(
     Backend::MSNPU,
     "ones_like(Tensor self, TensorOptions options) -> Tensor",

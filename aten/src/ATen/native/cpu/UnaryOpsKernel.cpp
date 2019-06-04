@@ -54,6 +54,25 @@ static void abs_kernel(TensorIterator& iter) {
   });
 }
 
+static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
+  if( iter.dtype() == ScalarType::Half ) {
+    auto value = value_scalar.to<at::Half>().x;
+    using H = decltype(value);
+    nullary_kernel_vec(
+        iter,
+        [=]() -> H { return value; },
+        [=]() { return Vec256<H>(value); });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "fill_cpu", [&]() {
+      scalar_t value = value_scalar.to<scalar_t>();
+      nullary_kernel_vec(
+          iter,
+          [=]() -> scalar_t { return value; },
+          [=]() { return Vec256<scalar_t>(value); });
+    });
+  }
+}
+
 static void frac_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "frac_cpu", [&]() {
     unary_kernel_vec(
@@ -78,6 +97,22 @@ static void neg_kernel(TensorIterator& iter) {
         iter,
         [=](scalar_t a) -> scalar_t { return -a; },
         [=](Vec256<scalar_t> a) { return a.neg(); });
+  });
+}
+
+static void sinh_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinh_cpu", [&]() {
+    unary_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::sinh(a); });
+  });
+}
+
+static void cosh_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cosh_cpu", [&]() {
+    unary_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::cosh(a); });
   });
 }
 
@@ -192,6 +227,9 @@ REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
+REGISTER_DISPATCH(fill_stub, &fill_kernel);
+REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
+REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)

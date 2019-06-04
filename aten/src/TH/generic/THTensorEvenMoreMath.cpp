@@ -11,7 +11,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
   int64_t *subscript_data;
   int64_t i = 0;
 #ifdef TH_REAL_IS_HALF
-#define IS_NONZERO(val) ((val.x & 0x7fff) != 0)
+#define IS_NONZERO(val) (c10::Half(0)!=val)
 #else
 #define IS_NONZERO(val) ((val)!=0)
 #endif
@@ -65,7 +65,11 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                 );
   delete [] sizes;
   delete [] idx;
+
+#undef IS_NONZERO
 }
+
+#if !defined(TH_REAL_IS_HALF) /* non half only part */
 
 accreal THTensor_(sumall)(THTensor *tensor)
 {
@@ -75,7 +79,112 @@ accreal THTensor_(sumall)(THTensor *tensor)
   return sum;
 }
 
-#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
+{
+  ptrdiff_t numel = THByteTensor_sumall(mask);
+  scalar_t *tensor_data;
+
+#ifdef DEBUG
+  THAssert(numel <= LONG_MAX);
+#endif
+  THTensor_(resize1d)(tensor,numel);
+  tensor_data = tensor->data<scalar_t>();
+  TH_TENSOR_APPLY2(scalar_t, src, unsigned char, mask,
+                   if (*mask_data > 1)
+                   {
+                     THFree(mask_counter);
+                     THFree(src_counter);
+                     THError("Mask tensor can take 0 and 1 values only");
+                   }
+                   else if (*mask_data == 1)
+                   {
+                     *tensor_data = *src_data;
+                     tensor_data++;
+                   });
+}
+
+void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *mask)
+{
+  ptrdiff_t numel = THBoolTensor_sumall(mask);
+  scalar_t *tensor_data;
+
+#ifdef DEBUG
+  THAssert(numel <= LONG_MAX);
+#endif
+  THTensor_(resize1d)(tensor,numel);
+  tensor_data = tensor->data<scalar_t>();
+  TH_TENSOR_APPLY2(scalar_t, src, bool, mask,
+                   if (*mask_data)
+                   {
+                     *tensor_data = *src_data;
+                     tensor_data++;
+                   });
+}
+
+void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value)
+{
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+  (void)r_;
+  (void)t;
+  (void)value;
+  return THError("bitand is only supported for integer type tensors");
+#else
+  THTensor_(resizeAs)(r_, t);
+  int64_t r_Size = THTensor_(nElement)(r_);
+  int r_Contig = THTensor_(isContiguous)(r_);
+  int tContig = THTensor_(isContiguous)(t);
+  if (r_Contig && tContig) {
+    scalar_t *tp = t->data<scalar_t>();
+    scalar_t *rp = r_->data<scalar_t>();
+    at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD * 100,
+        [&](int64_t start, int64_t end) {
+      for (auto i = start; i < end; i++) {
+        rp[i] = tp[i] & value;
+      }
+    });
+  } else {
+    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data & value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+  }
+#endif
+}
+
+scalar_t THTensor_(minall)(THTensor *tensor)
+{
+  scalar_t theMin;
+  scalar_t value;
+
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
+  theMin = tensor->data<scalar_t>()[0];
+  TH_TENSOR_APPLY(scalar_t, tensor,
+                  value = *tensor_data;
+                  /* This is not the same as value<theMin in the case of NaNs */
+                  if(!(value >= theMin))
+                  {
+                    theMin = value;
+                    th_isnan_break(value)
+                  });
+  return theMin;
+}
+
+scalar_t THTensor_(maxall)(THTensor *tensor)
+{
+  scalar_t theMax;
+  scalar_t value;
+
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
+  theMax = tensor->data<scalar_t>()[0];
+  TH_TENSOR_APPLY(scalar_t, tensor,
+                  value = *tensor_data;
+                  /* This is not the same as value>theMax in the case of NaNs */
+                  if(!(value <= theMax))
+                  {
+                    theMax = value;
+                    th_isnan_break(value)
+                  });
+  return theMax;
+}
+
+#if !defined(TH_REAL_IS_BOOL)
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 {
@@ -186,48 +295,6 @@ void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* s
   c10::raw::intrusive_ptr::decref(srct);
 }
 
-void THTensor_(maskedSelect)(THTensor *tensor, THTensor *src, THByteTensor *mask)
-{
-  ptrdiff_t numel = THByteTensor_sumall(mask);
-  scalar_t *tensor_data;
-
-#ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
-#endif
-  THTensor_(resize1d)(tensor,numel);
-  tensor_data = tensor->data<scalar_t>();
-  TH_TENSOR_APPLY2(scalar_t, src, unsigned char, mask,
-                   if (*mask_data > 1)
-                   {
-                     THFree(mask_counter);
-                     THFree(src_counter);
-                     THError("Mask tensor can take 0 and 1 values only");
-                   }
-                   else if (*mask_data == 1)
-                   {
-                     *tensor_data = *src_data;
-                     tensor_data++;
-                   });
-}
-
-void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *mask)
-{
-  ptrdiff_t numel = THBoolTensor_sumall(mask);
-  scalar_t *tensor_data;
-
-#ifdef DEBUG
-  THAssert(numel <= LONG_MAX);
-#endif
-  THTensor_(resize1d)(tensor,numel);
-  tensor_data = tensor->data<scalar_t>();
-  TH_TENSOR_APPLY2(scalar_t, src, bool, mask,
-                   if (*mask_data)
-                   {
-                     *tensor_data = *src_data;
-                     tensor_data++;
-                   });
-}
-
 void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
 {
   ptrdiff_t i, numel;
@@ -304,7 +371,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       THTensor_(select)(sSlice, src, dim, index_data[i]);
       at::Tensor tSlice_wrap = THTensor_wrap(tSlice);
       at::Tensor sSlice_wrap = THTensor_wrap(sSlice);
-      at::_copy_same_type_(tSlice_wrap, sSlice_wrap);
+      at::native::copy_(tSlice_wrap, sSlice_wrap);
       c10::raw::intrusive_ptr::decref(tSlice);
       c10::raw::intrusive_ptr::decref(sSlice);
     }
@@ -337,7 +404,7 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
       THTensor_(select)(sSlice, src, dim, i);
       at::Tensor tSlice_wrap = THTensor_wrap(tSlice);
       at::Tensor sSlice_wrap = THTensor_wrap(sSlice);
-      at::_copy_same_type_(tSlice_wrap, sSlice_wrap);
+      at::native::copy_(tSlice_wrap, sSlice_wrap);
     }
 
     c10::raw::intrusive_ptr::decref(tSlice);
@@ -635,6 +702,10 @@ void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scal
 
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 {
+  if ( (THTensor_nDimension(tensor) != 1) || (THTensor_nDimension(src) != 1) ) {
+    THError("1D tensors expected, got %dD, %dD tensors",
+       THTensor_nDimension(tensor), THTensor_nDimension(src));
+  }
   accreal sum = 0;
   /* we use a trick here. careful with that. */
   TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
@@ -646,42 +717,6 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
                    src_data += sz*src_stride;
                    break;);
   return sum;
-}
-
-scalar_t THTensor_(minall)(THTensor *tensor)
-{
-  scalar_t theMin;
-  scalar_t value;
-
-  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
-  theMin = tensor->data<scalar_t>()[0];
-  TH_TENSOR_APPLY(scalar_t, tensor,
-                  value = *tensor_data;
-                  /* This is not the same as value<theMin in the case of NaNs */
-                  if(!(value >= theMin))
-                  {
-                    theMin = value;
-                    th_isnan_break(value)
-                  });
-  return theMin;
-}
-
-scalar_t THTensor_(maxall)(THTensor *tensor)
-{
-  scalar_t theMax;
-  scalar_t value;
-
-  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
-  theMax = tensor->data<scalar_t>()[0];
-  TH_TENSOR_APPLY(scalar_t, tensor,
-                  value = *tensor_data;
-                  /* This is not the same as value>theMax in the case of NaNs */
-                  if(!(value <= theMax))
-                  {
-                    theMax = value;
-                    th_isnan_break(value)
-                  });
-  return theMax;
 }
 
 void THTensor_(add)(THTensor *r_, THTensor *t, scalar_t value)
@@ -877,32 +912,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, scalar_t value)
   }
 }
 
-void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value)
-{
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
-  (void)r_;
-  (void)t;
-  (void)value;
-  return THError("bitand is only supported for integer type tensors");
-#else
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    scalar_t *tp = t->data<scalar_t>();
-    scalar_t *rp = r_->data<scalar_t>();
-    at::parallel_for(0, r_Size, TH_OMP_OVERHEAD_THRESHOLD * 100,
-        [&](int64_t start, int64_t end) {
-      for (auto i = start; i < end; i++) {
-        rp[i] = tp[i] & value;
-      }
-    });
-  } else {
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data & value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  }
 #endif
-}
 
 #endif
 

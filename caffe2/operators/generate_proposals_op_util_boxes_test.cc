@@ -31,7 +31,8 @@ TEST(UtilsBoxesTest, TestBboxTransformRandom) {
       bbox.array(),
       deltas.array(),
       std::vector<float>{1.0, 1.0, 1.0, 1.0},
-      BBOX_XFORM_CLIP);
+      BBOX_XFORM_CLIP,
+      true /* legacy_plus_one */);
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-4);
 }
 
@@ -64,6 +65,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRotated) {
       deltas.array(),
       std::vector<float>{1.0, 1.0, 1.0, 1.0},
       BBOX_XFORM_CLIP,
+      true, /* legacy_plus_one */
       false /* angle_bound_on */);
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-2);
 }
@@ -96,6 +98,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
       deltas.array(),
       std::vector<float>{1.0, 1.0, 1.0, 1.0},
       BBOX_XFORM_CLIP,
+      true, /* legacy_plus_one */
       true, /* angle_bound_on */
       -90, /* angle_bound_lo */
       90 /* angle_bound_hi */);
@@ -117,7 +120,8 @@ TEST(UtilsBoxesTest, ClipRotatedBoxes) {
 
   // Test with no clipping
   float angle_thresh = -1.0;
-  auto result = utils::clip_boxes(bbox.array(), height, width, angle_thresh);
+  auto result = utils::clip_boxes(
+      bbox.array(), height, width, angle_thresh, true /* legacy_plus_one */);
   EXPECT_NEAR((result.matrix() - bbox).norm(), 0.0, 1e-4);
 
   EMatXf result_gt(5, 5);
@@ -127,7 +131,8 @@ TEST(UtilsBoxesTest, ClipRotatedBoxes) {
 
   // Test clipping with tolerance
   angle_thresh = 1.0;
-  result = utils::clip_boxes(bbox.array(), height, width, angle_thresh);
+  result = utils::clip_boxes(
+      bbox.array(), height, width, angle_thresh, true /* legacy_plus_one */);
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-4);
 }
 

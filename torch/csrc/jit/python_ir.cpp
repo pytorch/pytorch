@@ -214,10 +214,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "__repr__",
           [](Graph& g) {
-            std::stringstream ss;
-            ss << g;
-            return ss.str();
+            return g.toString();
           })
+      .def(
+          "str",
+          &Graph::toString,
+          py::arg("print_source_ranges") = true)
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
@@ -439,15 +441,9 @@ void initPythonIRBindings(PyObject* module_) {
             return ss.str();
           })
       .def(
-          "getSourceLocation",
-          [](Node& n) -> py::object {
-            std::stringstream ss;
-            if (auto sl = n.getSourceLocation()) {
-              sl->highlight(ss);
-              return py::str(ss.str());
-            } else {
-              return py::none();
-            }
+          "sourceRange",
+          [](Node& n) {
+            return n.sourceRange().str();
           })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
@@ -687,7 +683,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
         return DictType::create(key, value);
-      }));
+      }))
+      .def("getKeyType", &DictType::getKeyType)
+      .def("getValueType", &DictType::getValueType);
   py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
       m, "OptionalType")
       .def(py::init([](TypePtr a) { return OptionalType::create(a); }))

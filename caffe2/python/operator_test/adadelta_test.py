@@ -55,6 +55,8 @@ class TestAdadelta(serial.SerializedTestCase):
            **hu.gcs)
     def test_adadelta(self, inputs, lr, epsilon, decay, gc, dc):
         param, moment, moment_delta, grad = inputs
+        moment = np.abs(moment)
+        moment_delta = np.abs(moment_delta)
         lr = np.array([lr], dtype=np.float32)
 
         op = core.CreateOperator(
@@ -85,6 +87,7 @@ class TestAdadelta(serial.SerializedTestCase):
     def test_sparse_adadelta(self, inputs, lr, epsilon, decay, gc, dc):
         param, moment, moment_delta, grad = inputs
         moment = np.abs(moment)
+        moment_delta = np.abs(moment_delta)
         lr = np.array([lr], dtype=np.float32)
 
         # Create an indexing array containing values that are lists of indices,

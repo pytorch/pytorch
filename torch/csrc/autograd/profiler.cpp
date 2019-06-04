@@ -27,6 +27,8 @@ std::list<std::shared_ptr<RangeEventList>> all_event_lists;
 thread_local std::shared_ptr<RangeEventList> event_list;
 thread_local uint16_t thread_id;
 
+ProfilerConfig::~ProfilerConfig() = default;
+
 RangeEventList& getEventList() {
   if (!event_list) {
     std::lock_guard<std::mutex> guard(all_event_lists_mutex);
@@ -246,7 +248,7 @@ RecordProfile::~RecordProfile() {
 }
 
 void RecordProfile::processEvents(const std::vector<Event*>& events) {
-  AT_CHECK(out_, "could not open file");
+  TORCH_CHECK(out_, "could not open file");
   Event* start = nullptr;
   for (Event* e : events) {
     if(0 == strcmp(e->name(), "__start_profile")) {
@@ -254,7 +256,7 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
       break;
     }
   }
-  AT_CHECK(start, "could not find start?");
+  TORCH_CHECK(start, "could not find start?");
   std::vector<Event*> stack;
   out_ << "[\n";
   bool first = true;
