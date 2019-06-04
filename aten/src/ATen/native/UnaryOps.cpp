@@ -8,7 +8,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
+#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/WrapDimUtils.h>
 
@@ -58,11 +58,11 @@ Tensor& _clamp_out_cpu(
     optional<Scalar> min,
     optional<Scalar> max) {
   if (min && max) {
-    legacy::th::_th_clamp_out(result, self, *min, *max);
+    legacy::cpu::_th_clamp_out(result, self, *min, *max);
   } else if (max) {
-    legacy::th::_th_clamp_max_out(result, self, *max);
+    legacy::cpu::_th_clamp_max_out(result, self, *max);
   } else if (min) {
-    legacy::th::_th_clamp_min_out(result, self, *min);
+    legacy::cpu::_th_clamp_min_out(result, self, *min);
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
@@ -70,27 +70,34 @@ Tensor& _clamp_out_cpu(
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
-  return legacy::th::_th_clamp_max_out(self, self, max);
+  return legacy::cpu::_th_clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  return legacy::th::_th_clamp_max_out(result, self, max);
+  return legacy::cpu::_th_clamp_max_out(result, self, max);
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
-  return legacy::th::_th_clamp_min_out(self, self, min);
+  return legacy::cpu::_th_clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  return legacy::th::_th_clamp_min_out(result, self, min);
+  return legacy::cpu::_th_clamp_min_out(result, self, min);
+}
+
+Tensor& fill_out(Tensor& self, const Scalar value) {
+  auto iter = TensorIterator::nullary_op(self);
+  fill_stub(iter->device_type(), *iter, value);
+  return self;
 }
 
 Tensor& fill_(Tensor& self, Scalar value) {
-  return at::legacy::th::_th_fill_(self, value);
+  return fill_out(self, value);
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
-  return at::legacy::th::_th_fill_(self, value);
+  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
+  return fill_out(self, value.item());
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
@@ -150,22 +157,6 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     return result;                                              \
   }
 
-#define IMPLEMENT_UNARY_OP_TH(op)                               \
-  Tensor op(const Tensor& self) {                               \
-    Tensor result = at::empty({0}, self.options());             \
-    at::op##_out(result, self);                                 \
-    return result;                                              \
-  }                                                             \
-  Tensor& _##op##__cpu(Tensor& self) {                          \
-    return at::op##_out(self, self);                            \
-  }                                                             \
-  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
-    checkBackend(#op, {result}, Backend::CPU);                  \
-    assert_no_internal_overlap(result, #op);                    \
-    result.resize_(self.sizes());                               \
-    return at::legacy::th::_th_##op##_out(result, self);        \
-  }
-
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple
 
 IMPLEMENT_UNARY_OP_VEC(abs)
@@ -174,7 +165,7 @@ IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
 IMPLEMENT_UNARY_OP_VEC(ceil)
 IMPLEMENT_UNARY_OP_VEC(cos)
-IMPLEMENT_UNARY_OP_TH(cosh)
+IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC(exp)
@@ -190,7 +181,7 @@ IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(round)
 IMPLEMENT_UNARY_OP_VEC(rsqrt)
 IMPLEMENT_UNARY_OP_VEC(sin)
-IMPLEMENT_UNARY_OP_TH(sinh)
+IMPLEMENT_UNARY_OP_VEC(sinh)
 IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
@@ -202,6 +193,7 @@ DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
 DEFINE_DISPATCH(ceil_stub);
 DEFINE_DISPATCH(cos_stub);
+DEFINE_DISPATCH(cosh_stub);
 DEFINE_DISPATCH(erf_stub);
 DEFINE_DISPATCH(erfc_stub);
 DEFINE_DISPATCH(exp_stub);
@@ -218,10 +210,11 @@ DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);
 DEFINE_DISPATCH(sigmoid_stub);
 DEFINE_DISPATCH(sin_stub);
+DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trunc_stub);
-
+DEFINE_DISPATCH(fill_stub);
 }
 } // namespace at

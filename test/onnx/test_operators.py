@@ -8,7 +8,6 @@ import torch.nn as nn
 
 import itertools
 import io
-import unittest
 import inspect
 import glob
 import os
@@ -477,8 +476,11 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
-    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
-    def test_upsample(self):
+    def test_upsample_nearest(self):
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
+
+    def test_upsample_bilinear(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
 
@@ -507,6 +509,10 @@ class TestOperators(TestCase):
     def test_randn(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(lambda x: torch.randn(1, 2, 3, 4) + x, x)
+
+    def test_rand(self):
+        x = torch.rand(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.rand(1, 2, 3, 4) + x, x)
 
     def test_rrelu(self):
         x = torch.randn(1, 2, 3, 4)

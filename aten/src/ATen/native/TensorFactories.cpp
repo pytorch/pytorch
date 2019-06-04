@@ -9,7 +9,6 @@
 #include <ATen/CheckGenerator.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 #include <ATen/LegacyTHDispatcher.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
@@ -162,6 +161,15 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
     auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
+  }
+  if (self.is_quantized()) {
+    // TODO: uncomment when qscheme diff is landed
+    // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
+    //                       "empty_like for quantized Tensor only works for
+    //                        PerTensorAffine scheme right now");
+    return at::_empty_affine_quantized(self.sizes(), self.options(),
+                                       self.q_scale().toDouble(),
+                                       self.q_zero_point().toLong());
   }
   return at::empty(self.sizes(), options);
 }

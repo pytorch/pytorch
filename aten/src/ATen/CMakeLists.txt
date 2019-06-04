@@ -116,6 +116,12 @@ IF(NOT AT_LINK_STYLE)
   SET(AT_LINK_STYLE SHARED)
 ENDIF()
 
+IF (USE_TBB)
+  message("ATen is compiled with TBB (${TBB_ROOT_DIR})")
+  list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb)
+ENDIF()
+
 IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")

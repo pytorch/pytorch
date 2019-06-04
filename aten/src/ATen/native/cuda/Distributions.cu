@@ -3,6 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
+#include <ATen/CUDAGenerator.h>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -13,6 +14,7 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/LegacyTHFunctionsCUDA.h>
 
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorRandom.h>
@@ -119,6 +121,22 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
   }
 }
 
+/**
+ * distribution_nullary_kernel is analogous to gpu_nullary_kernel in
+ * ATen/native/cuda/Loops.cuh. Like gpu_nullary_kernel, it uses
+ * TensorIterator to launch a kernel. However, the differences are
+ *   - it launches a grid-stride loop based kernel. The kernel is not
+ *     generic like elementwise_kernel in Loops.cuh and is specialized
+ *     for the distribution kernels here.
+ *   - For big size tensors, we can launch multiple kernels recursively
+ *     (i.e. if (!iter.can_use_32bit_indexing())) and hence, the philox
+ *     offset calculation is done in this function.
+ *
+ * FIXME: Can we specialize elementwise_kernel and launch_kernel in Loops.cuh
+ * to have grid-stride loop kernel and then use that to launch our distribution
+ * kernels? Note that we need a grid-stride loop kernel because, we found by testing
+ * that it achieves peak effective bandwidth.
+ */
 template<typename scalar_t, 
          typename accscalar_t,
          int unroll_factor,
@@ -403,7 +421,8 @@ Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
   return self;
 }
 
-void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generator* gen) {
+void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generator* gen_) {
+  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "uniform_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
@@ -441,11 +460,175 @@ void uniform_kernel_cuda(TensorIterator& iter, double from_, double to_, Generat
    });
 }
 
+void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
+  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, iter.dtype(), "random_cuda", [&] {
+    if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
+      // define lambda to mod with range and add base
+      auto random_func = [range, base] __device__ (uint64_t rand) {
+        return static_cast<int64_t>(rand % range + base);
+      };
+      distribution_nullary_kernel<scalar_t, uint64_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) -> ulonglong2 {
+          ulonglong2 ret;
+          uint4 rand_val = curand4(state);
+          ret.x = (static_cast<uint64_t>(rand_val.x) << 32) | rand_val.y;
+          ret.y = (static_cast<uint64_t>(rand_val.z) << 32) | rand_val.w;
+          return ret;
+        },
+        random_func);
+    } else {
+      auto random_func = [range, base] __device__ (uint32_t rand) {
+        return static_cast<int32_t>(rand % static_cast<uint32_t>(range) + static_cast<int32_t>(base));
+      };
+      distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) {
+          return curand4(state);
+        },
+        random_func);
+    }
+   });
+}
+
+void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
+  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "normal_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto mean = static_cast<accscalar_t>(mean_);
+    auto std = static_cast<accscalar_t>(std_);
+    // define lambda to multiply std and add mean
+    auto normal_func = [mean, std] __device__ (accscalar_t rand) {
+      return static_cast<scalar_t>(rand * std + mean);
+    };
+    if (std::is_same<scalar_t, double>::value) {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal2_double(state); },
+        normal_func);
+    } else {
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_normal4(state); },
+        normal_func);
+    }
+   });
+}
+
+void cauchy_kernel_cuda(TensorIterator& iter, double median_, double sigma_, Generator* gen_) {
+  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "cauchy_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    auto median = static_cast<accscalar_t>(median_);
+    auto sigma = static_cast<accscalar_t>(sigma_);
+    if (std::is_same<scalar_t, double>::value) {
+      // define lambda for cauchy transformation
+      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(median + sigma * 
+                ::tan(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
+      };
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+        cauchy_func);
+    } else {
+      // use __tanf fast approximation for peak bandwidth
+      auto cauchy_func = [median, sigma] __device__ (accscalar_t rand) {
+        return static_cast<scalar_t>(median + sigma * 
+                __tanf(static_cast<accscalar_t>(M_PI) * (rand-static_cast<accscalar_t>(0.5))));
+      };
+      distribution_nullary_kernel<scalar_t, accscalar_t, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+        cauchy_func);
+    }
+   });
+}
+
 Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   uniform_kernel_cuda(*iter, from, to, gen);
   return self;
 }
 
+Tensor& random_cuda_(Tensor& self, Generator* gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  uint64_t range;
+  auto iter_scalar_type = iter->dtype();
+  if (isFloatingType(iter_scalar_type)) {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter_scalar_type, "random_cuda_range_calc", [&] {
+      range = static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(iter_scalar_type, "random_cuda_range_calc", [&] {
+      range = static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1;
+    });
+  }
+  random_kernel_cuda(*iter, range, 0, gen);
+  return self;
+}
+
+Tensor& clamped_random_cuda_(Tensor& self, int64_t from, int64_t to, Generator* gen) {
+  TORCH_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
+  auto iter = TensorIterator::nullary_op(self);
+  uint64_t range = to - from;
+  random_kernel_cuda(*iter, range, from, gen);
+  return self;
+}
+
+Tensor& capped_random_cuda_(Tensor& self, int64_t to, Generator* gen) {
+  return clamped_random_cuda_(self, 0, to, gen);
+}
+
+Tensor& normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
+  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
+  auto iter = TensorIterator::nullary_op(self);
+  normal_kernel_cuda(*iter, mean, std, gen);
+  return self;
+}
+
+Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, double std, Generator* gen) {
+  normal_cuda_(output, 0, std, gen);
+  output.add_(mean);
+  return output;
+}
+
+Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generator* gen) {
+  normal_cuda_(output, 0, 1, gen);
+  auto mean_tensor = at::full({1}, mean, output.options());
+  at::native::legacy::cuda::_th_addcmul_out(output, mean_tensor, output, std, 1);
+  return output;
+}
+
+Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
+  normal_cuda_(output, 0, 1, gen);
+  at::native::legacy::cuda::_th_addcmul_out(output, mean, output, std, 1);
+  return output; 
+}
+
+Tensor normal_cuda(const Tensor& mean, double std, Generator* gen) {
+  Tensor ret = at::empty(mean.sizes(), mean.options());
+  normal_out_cuda(ret, mean, std, gen);
+  return ret;
+}
+
+Tensor normal_cuda(double mean, const Tensor& std, Generator* gen) {
+  Tensor ret = at::empty(std.sizes(), std.options());
+  normal_out_cuda(ret, mean, std, gen);
+  return ret;
+}
+
+Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
+  Tensor ret = at::empty(mean.sizes(), mean.options());
+  normal_out_cuda(ret, mean, std, gen);
+  return ret;
+}
+
+Tensor& cauchy_cuda_(Tensor& self, double median, double sigma, Generator* gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  cauchy_kernel_cuda(*iter, median, sigma, gen);
+  return self;
+}
 
 }} // namespace at::native

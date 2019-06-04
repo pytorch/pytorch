@@ -488,6 +488,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         " inputs, but got only ",
         stack.size());
 
+    C10_LOG_API_USAGE_ONCE("torch.graph_executor.run");
     logging::getLogger()->addStatValue(
         logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
@@ -661,7 +662,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     const auto& state = tracer::getTracingState();
     auto inputs = last(stack, num_inputs);
     auto input_values = fmap(
-        inputs, [](const IValue& v) { return tracer::getNestedValueTrace(v); });
+        inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
 
     ArgumentSpec spec =
         arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);

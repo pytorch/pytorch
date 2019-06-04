@@ -23,6 +23,7 @@
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
+#include "torch/csrc/jit/passes/guard_elimination.h"
 #include "torch/csrc/jit/passes/insert_guards.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
@@ -805,8 +806,8 @@ void testModuleConversion() {
 
     m->to(at::kCUDA);
     m->to(at::kCPU);
-    AT_ASSERT(m->get_parameter("foo").data().device().is_cpu());
-    AT_ASSERT(m->get_buffer("bar").data().device().is_cpu());
+    AT_ASSERT(m->get_parameter("foo").device().is_cpu());
+    AT_ASSERT(m->get_buffer("bar").device().is_cpu());
   }
   {
     // test cpu to cuda for params and buffers
@@ -814,8 +815,8 @@ void testModuleConversion() {
     m->register_buffer("bar", torch::ones({}));
 
     m->to(at::kCUDA);
-    AT_ASSERT(m->get_parameter("foo").data().device().is_cuda());
-    AT_ASSERT(m->get_buffer("bar").data().device().is_cuda());
+    AT_ASSERT(m->get_parameter("foo").device().is_cuda());
+    AT_ASSERT(m->get_buffer("bar").device().is_cuda());
   }
 }
 
@@ -855,7 +856,7 @@ static void checkShape(
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
-void testInsertGuards() {
+void testInsertAndEliminateGuards() {
   static const auto basic_example = R"JIT(
   def basic(x, y):
     a = x + y
@@ -886,10 +887,14 @@ void testInsertGuards() {
   ASSERT_NE(guard, nodes.end());
   ASSERT_EQ(guard->input()->type()->cast<ProfiledTensorType>(), nullptr);
   checkShape(*guard, {2, 3}, false);
-  int num_guards = std::count_if(nodes.begin(), nodes.end(), [](Node* n) {
-    return n->kind() == prim::Guard;
-  });
+  auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
+  int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
   ASSERT_EQ(num_guards, 11);
+  // now eliminate as many guards as possible
+  // we should be left with two guards on x and y's defs
+  EliminateGuards(copy);
+  num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 2);
 }
 
 void testProfiler() {

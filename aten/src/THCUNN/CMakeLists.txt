@@ -33,10 +33,8 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SpatialConvolutionMM.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialCrossMapLRN.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDepthwiseConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialDilatedMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxUnpooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialSubSampling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Sqrt.cu
@@ -48,10 +46,8 @@ ${CMAKE_CURRENT_SOURCE_DIR}/TemporalRowConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxUnpooling.cu
 PARENT_SCOPE)
 
