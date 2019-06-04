@@ -6056,13 +6056,13 @@ a")
             else:
                 checkMath(func_name, num_args, is_float, **args)
 
-inf = float("inf")
-NaN = float("nan")
-mx_int = 2**31 - 1
-mn_int = -2**31
-float_vals = ([inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2] +
-                [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
-int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2]
+        inf = float("inf")
+        NaN = float("nan")
+        mx_int = 2**31 - 1
+        mn_int = -2**31
+        float_vals = ([inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2] +
+                        [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
+        int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2]
 
         def checkMath(func_name, num_args, is_float=True, ret_type="float", debug=False, vals=None, args_type=None):
             funcs_template = dedent('''
