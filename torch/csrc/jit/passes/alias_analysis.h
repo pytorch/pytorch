@@ -62,54 +62,7 @@ class AliasDb {
   TORCH_API bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`? i.e. may they overlap?
-  //
-  // NOTE: Bit of ugly templating, but this is just to make sure we can
-  // transform an arbitrary container of `Values` to the same container of
-  // `Elements`.
-  template <
-      typename... Other1,
-      template <typename, typename...> class T,
-      typename... Other2,
-      template <typename, typename...> class U>
-  bool mayAlias(
-      const T<const Value*, Other1...>& a,
-      const U<const Value*, Other2...>& b) const {
-    if (a.empty() || b.empty()) {
-      return false;
-    }
-
-    // Record all memory locations from group `a`
-    MemoryLocations memoryLocations;
-    for (auto it = a.cbegin(); it != a.cend();) {
-      const auto value = *it;
-      if (elementMap_.count(value)) {
-        auto element = elementMap_.at(value);
-        memoryLocations |= element->getMemoryLocations();
-      }
-
-      do {
-        ++it;
-      } while (it != a.cend() && *it == value);
-    }
-
-    // If any of group `b`s memory locations overlap, return true.
-    for (auto it = b.cbegin(); it != b.cend();) {
-      const auto value = *it;
-      if (elementMap_.count(value)) {
-        auto element = elementMap_.at(value);
-
-        if (memoryLocations.intersects(element->getMemoryLocations())) {
-          return true;
-        }
-      }
-
-      do {
-        ++it;
-      } while (it != b.cend() && *it == value);
-    }
-    // No overlap, so group `a` and `b` do not share a memory location
-    return false;
-  }
+  TORCH_API bool mayAlias(const ValueSet& a, const ValueSet& b) const;
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
   TORCH_API bool hasWriters(const Node* n) const;
