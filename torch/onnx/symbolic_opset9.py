@@ -290,9 +290,14 @@ def transpose(g, self, dim0, dim1):
         return self
 
     # NB: Transpose in ONNX is actually a Permute
-    axes = list(range(self.type().dim()))
-    axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
-    return g.op("Transpose", self, perm_i=axes)
+    if self.type().kind() == "CompleteTensorType":
+        axes = list(range(self.type().dim()))
+        axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
+        return g.op("Transpose", self, perm_i=axes)
+    else:
+        # if we don't have dim information we cannot
+        # output a permute so use ATen instead
+        return g.op("ATen", self, operator_s="transpose", dim0_i=dim0, dim1_i=dim1)
 
 
 @parse_args('v', 'is')
@@ -672,7 +677,7 @@ def upsample_nearest2d(g, input, output_size):
         divisor = g.op(
             "Slice",
             g.op("Shape", input),
-            axes_i=[0], 
+            axes_i=[0],
             ends_i=[input_length],
             starts_i=[offset]
         )
@@ -701,7 +706,7 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
         divisor = g.op(
             "Slice",
             g.op("Shape", input),
-            axes_i=[0], 
+            axes_i=[0],
             ends_i=[input_length],
             starts_i=[offset]
         )
@@ -1036,6 +1041,8 @@ def exp(g, self):
 def dropout(g, input, p, train):
     if not train:  # in eval mode, dropout is non-op
         return input
+    warnings.warn("Dropout is a training op and should not be exported in inference mode. "
+                  "Make sure to call eval() on the model, and to export it with param training=False.")
     r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
     return r
 
@@ -1477,6 +1484,12 @@ def randn(g, *shapes):
     shapes_list = list(shapes)
     shape = sym_help._maybe_get_const(shapes_list[0], "is")
     return g.op('RandomNormal', shape_i=shape)
+
+
+def rand(g, *shapes):
+    shapes_list = list(shapes)
+    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    return g.op('RandomUniform', shape_i=shape)
 
 
 def randn_like(g, self, *others):
