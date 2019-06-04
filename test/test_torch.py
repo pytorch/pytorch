@@ -7178,6 +7178,16 @@ class _TestTorchMixin(object):
                 numt = conv_fn(torch.Tensor(set_numpy(numt, indexer, val)))
                 self.assertEqual(pyt, numt)
 
+            def assert_backward_eq(tensor, indexer):
+                cpu = tensor.float().clone().detach().requires_grad_(True)
+                outcpu = cpu[indexer]
+                gOcpu = torch.rand_like(outcpu)
+                outcpu.backward(gOcpu)
+                gpu = cpu.cuda().detach().requires_grad_(True)
+                outgpu = gpu[indexer]
+                outgpu.backward(gOcpu.cuda())
+                self.assertEqual(cpu.grad, gpu.grad)
+
             def get_set_tensor(indexed, indexer):
                 set_size = indexed[indexer].size()
                 set_count = indexed[indexer].numel()
@@ -7211,6 +7221,8 @@ class _TestTorchMixin(object):
 
             for indexer in get_indices_to_test:
                 assert_get_eq(reference, indexer)
+                if torch.cuda.is_available():
+                    assert_backward_eq(reference, indexer)
 
             for indexer in indices_to_test:
                 assert_set_eq(reference, indexer, 44)
@@ -7238,6 +7250,8 @@ class _TestTorchMixin(object):
                 [[[0, 1], [2, 3]], [[0]], slice(None)],
                 [[[2, 1]], [[0, 3], [4, 4]], slice(None)],
                 [[[2]], [[0, 3], [4, 1]], slice(None)],
+                # non-contiguous indexing subspace
+                [[0, 2, 3], slice(None), [1, 3, 4]],
 
                 # less dim, ellipsis
                 [[0, 2], ],
@@ -7268,6 +7282,8 @@ class _TestTorchMixin(object):
                 assert_set_eq(reference,
                               indexer,
                               get_set_tensor(reference, indexer))
+                if torch.cuda.is_available():
+                    assert_backward_eq(reference, indexer)
 
             reference = conv_fn(torch.arange(0., 1296).view(3, 9, 8, 6))
 
@@ -7347,6 +7363,8 @@ class _TestTorchMixin(object):
             for indexer in indices_to_test:
                 assert_get_eq(reference, indexer)
                 assert_set_eq(reference, indexer, 1333)
+                if torch.cuda.is_available():
+                    assert_backward_eq(reference, indexer)
 
     def test_advancedindex(self):
         self._test_advancedindex(self, lambda x: x)

@@ -131,7 +131,7 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
       c10::optional<NamedValue> self,
       ArrayRef<NamedValue> args,
       ArrayRef<NamedValue> kwargs,
-      std::stringstream& failure_messages,
+      std::ostream* failure_messages,
       bool conv_tensors_to_nums);
 
   Value* emit_call(
