@@ -196,12 +196,12 @@ def try_real_annotations(fn):
     return_type = ann_to_type(as_ann(sig.return_annotation))
     return arg_types, return_type
 
-
 def try_to_infer_type(value):
     if type(value) is float:
         return FloatType.get()
     elif type(value) is int:
-        return IntType.get()
+        a = IntType.get()
+        return a
     elif type(value) is str:
         return StringType.get()
     elif type(value) is bool:
@@ -219,7 +219,7 @@ def try_to_infer_type(value):
         if len(value) == 0:
             return None
         types = [try_to_infer_type(item) for item in value]
-        if None in types:
+        if any(elem is None for elem in types):
             return None
         return TupleType(types)
     elif type(value) is dict:
