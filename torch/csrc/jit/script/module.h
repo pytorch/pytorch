@@ -143,7 +143,7 @@ struct TORCH_API Module {
   ~Module() {
     // ClassType own the compilation unit of their Functions, but each
     // Function has a self argument which owns the ClassType, created a
-    // referernce cycle. By dropping all the methods of the module's class
+    // reference cycle. By dropping all the methods of the module's class
     // here we break the cycle.
     class_compilation_unit().drop_all_functions();
   }
@@ -441,6 +441,14 @@ struct TORCH_API Module {
 
   // so that C++ users can easily add methods
   void define(const std::string& src, const ResolverPtr& resolver = nullptr);
+
+  template <typename... Types>
+  IValue create_class(const c10::QualifiedName& name, Types&&... args)
+      const {
+    return create_class(name, {IValue(std::forward<Types>(args))...});
+  }
+
+  IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
  private:
   std::pair<std::shared_ptr<Function>, std::vector<Slot>>

@@ -276,7 +276,6 @@ def _save(obj, f, pickle_module, pickle_protocol):
                     location,
                     obj.size(),
                     view_metadata)
-
         return None
 
     sys_info = dict(
@@ -579,6 +578,7 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
     for key in deserialized_storage_keys:
         assert key in deserialized_objects
         deserialized_objects[key]._set_from_file(f, offset, f_should_read_directly)
-        offset = None
+        if offset is not None:
+            offset = f.tell()
 
     return result

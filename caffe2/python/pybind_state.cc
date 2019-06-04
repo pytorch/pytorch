@@ -422,7 +422,15 @@ void addObjectMethods(py::module& m) {
       .def("_wrap_tensor_impl", [](Blob* blob, void* ptr) {
         auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
             unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
-        AT_CHECK(p.defined(), "Can't wrap undefined tensor");
+        // TODO: In the near future, a PyTorch tensor without AutogradMeta will be
+        // a valid tensor. At that point, we will only accept non-requires-grad
+        // tensor into Caffe2 workspace, and don't need to perform shallow-copying
+        // here anymore.
+        p = p->shallow_copy_and_detach(
+            /*version_counter=*/p->version_counter(),
+            /*allow_tensor_metadata_change=*/p->allow_tensor_metadata_change());
+        TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
+        TORCH_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
         auto at_tensor = at::Tensor::wrap_tensor_impl(std::move(p));
         BlobSetTensor(blob, Tensor(std::move(at_tensor)));
       });
@@ -1263,6 +1271,14 @@ void addGlobalMethods(py::module& m) {
             net->TEST_Benchmark(warmup_runs, main_runs, run_individual);
         return stat;
       });
+  m.def("benchmark_net_once", [](const std::string& name) {
+    CAFFE_ENFORCE(gWorkspace);
+    auto* net = gWorkspace->GetNet(name);
+    CAFFE_ENFORCE(net, "Didn't find net: ", name);
+    py::gil_scoped_release g;
+    float stat = net->TEST_Benchmark_One_Run();
+    return stat;
+  });
 
   m.def("delete_net", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
@@ -1810,6 +1826,8 @@ void addGlobalMethods(py::module& m) {
 
 PYBIND11_MODULE(caffe2_pybind11_state, m) {
   m.doc() = "pybind11 stateful interface to Caffe2 workspaces";
+
+  C10_LOG_API_USAGE_ONCE("caffe2.python.import");
 
   addGlobalMethods(m);
   addObjectMethods(m);

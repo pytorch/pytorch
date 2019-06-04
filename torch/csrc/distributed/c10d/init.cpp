@@ -18,6 +18,7 @@
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/distributed/c10d/ddp.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -35,6 +36,7 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* c10d_init(PyObject* _unused) {
+  C10_LOG_API_USAGE_ONCE("c10d.python.import");
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
@@ -532,6 +534,21 @@ They are used in specifying strategies for reduction collectives, e.g.,
       &::c10d::compute_bucket_assignment_by_size,
       py::arg("tensors"),
       py::arg("bucket_size"),
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_broadcast_coalesced",
+      // Define a lambda such that the pybind11 prototype can take a std::vector
+      // for the tensor list argument, but still pass it to the underlying
+      // function as a c10::ArrayRef.
+      [](std::shared_ptr<::c10d::ProcessGroup> process_group,
+         std::vector<at::Tensor> tensors,
+         size_t buffer_size) {
+        broadcast_coalesced(process_group, tensors, buffer_size);
+      },
+      py::arg("process_group"),
+      py::arg("tensors"),
+      py::arg("buffer_size"),
       py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -ex
+set -eux -o pipefail
 
 # Set up CircleCI GPG keys for apt, if needed
 curl -L https://packagecloud.io/circleci/trusty/gpgkey | sudo apt-key add -
@@ -32,6 +32,9 @@ systemctl list-units --all | cat
 sudo apt-get purge -y unattended-upgrades
 
 cat /etc/apt/sources.list
+
+# For good luck, try even harder to kill apt-get
+pkill apt-get || true
 
 # Bail out early if we detect apt/dpkg is stuck
 ps auxfww | (! grep '[a]pt')
