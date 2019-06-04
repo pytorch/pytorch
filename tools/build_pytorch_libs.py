@@ -113,10 +113,10 @@ def create_build_env():
     # have cmake read the environment
     my_env = os.environ.copy()
     if USE_CUDNN:
-        my_env['CUDNN_LIBRARY'] = escape_path(CUDNN_LIBRARY)
-        my_env['CUDNN_INCLUDE_DIR'] = escape_path(CUDNN_INCLUDE_DIR)
+        my_env['CUDNN_LIBRARY'] = _escape_path(CUDNN_LIBRARY)
+        my_env['CUDNN_INCLUDE_DIR'] = _escape_path(CUDNN_INCLUDE_DIR)
     if USE_CUDA:
-        my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
+        my_env['CUDA_BIN_PATH'] = _escape_path(CUDA_HOME)
 
     if IS_WINDOWS and USE_NINJA:
         # When using Ninja under Windows, the gcc toolchain will be chosen as
@@ -163,9 +163,9 @@ def run_cmake(version,
 
     cmake_defines(
         cmake_args,
-        PYTHON_EXECUTABLE=escape_path(sys.executable),
-        PYTHON_LIBRARY=escape_path(cmake_python_library),
-        PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
+        PYTHON_EXECUTABLE=_escape_path(sys.executable),
+        PYTHON_LIBRARY=_escape_path(cmake_python_library),
+        PYTHON_INCLUDE_DIR=_escape_path(distutils.sysconfig.get_python_inc()),
         BUILDING_WITH_TORCH_LIBS=os.getenv("BUILDING_WITH_TORCH_LIBS", "ON"),
         TORCH_BUILD_VERSION=version,
         CMAKE_BUILD_TYPE=build_type,
@@ -182,7 +182,7 @@ def run_cmake(version,
         USE_FBGEMM=not (check_env_flag('NO_FBGEMM') or check_negative_env_flag('USE_FBGEMM')),
         NAMEDTENSOR_ENABLED=(check_env_flag('USE_NAMEDTENSOR') or check_negative_env_flag('NO_NAMEDTENSOR')),
         USE_NUMPY=USE_NUMPY,
-        NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
+        NUMPY_INCLUDE_DIR=_escape_path(NUMPY_INCLUDE_DIR),
         USE_SYSTEM_NCCL=USE_SYSTEM_NCCL,
         NCCL_INCLUDE_DIR=NCCL_INCLUDE_DIR,
         NCCL_ROOT_DIR=NCCL_ROOT_DIR,
@@ -208,7 +208,7 @@ def run_cmake(version,
         THD_SO_VERSION="1",
         CMAKE_PREFIX_PATH=os.getenv('CMAKE_PREFIX_PATH') or distutils.sysconfig.get_python_lib(),
         BLAS=os.getenv('BLAS'),
-        CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
+        CUDA_NVCC_EXECUTABLE=_escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
         USE_REDIS=os.getenv('USE_REDIS'),
         USE_GLOG=os.getenv('USE_GLOG'),
         USE_GFLAGS=os.getenv('USE_GFLAGS'),
@@ -278,10 +278,12 @@ def build_caffe2(version,
     my_env = create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
     max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
-    cmake_cache_file = 'build/CMakeCache.txt'
+    cmake_cache_file = os.path.join(build_dir, 'CMakeCache.txt')
+    ninja_build_file = os.path.join(build_dir, 'build.ninja')
     if rerun_cmake and os.path.isfile(cmake_cache_file):
         os.remove(cmake_cache_file)
-    if not os.path.exists(cmake_cache_file) or (USE_NINJA and not os.path.exists('build/build.ninja')):
+    if not os.path.exists(cmake_cache_file) or (
+            USE_NINJA and not os.path.exists(ninja_build_file)):
         run_cmake(version,
                   cmake_python_library,
                   build_python,
@@ -313,18 +315,17 @@ def build_caffe2(version,
     # build detector.
     # This line works around that bug by manually updating the build.ninja timestamp
     # after the entire build is finished.
-    if os.path.exists('build/build.ninja'):
-        os.utime('build/build.ninja', None)
+    if os.path.exists(ninja_build_file):
+        os.utime(ninja_build_file, None)
 
     if build_python:
-        for proto_file in glob('build/caffe2/proto/*.py'):
-            if os.path.sep != '/':
-                proto_file = proto_file.replace(os.path.sep, '/')
-            if proto_file != 'build/caffe2/proto/__init__.py':
-                shutil.copyfile(proto_file, "caffe2/proto/" + os.path.basename(proto_file))
+        caffe2_proto_dir = os.path.join(build_dir, 'caffe2', 'proto')
+        for proto_file in glob(os.path.join(caffe2_proto_dir, '*.py')):
+            if proto_file != os.path.join(caffe2_proto_dir, '__init__.py'):
+                shutil.copy(proto_file, os.path.join('caffe2', 'proto'))
 
 
-def escape_path(path):
+def _escape_path(path):
     if os.path.sep != '/' and path is not None:
         return path.replace(os.path.sep, '/')
     return path

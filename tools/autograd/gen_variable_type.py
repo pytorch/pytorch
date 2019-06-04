@@ -143,9 +143,6 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 WRAPPER_FORMAL = CodeTemplate("""\
 ${return_type} (*_op)(${formal_types})""")
 
-WRAPPER_FORMAL_TYPE = CodeTemplate("""\
-${return_type} (*)(${formal_types})""")
-
 METHOD_DECLARATION = CodeTemplate("""\
 static ${return_type} ${api_name}(${variable_formals}) ;
 """)
@@ -157,7 +154,7 @@ ${return_type} VariableType::${api_name}(${variable_formals}) {
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-.registerVariableWrapper<${return_type} (${variable_formal_types})>("${schema_string}", &VariableType::${api_name})
+.registerVariableWrapper<${registration_template_types}>("${schema_string}", &VariableType::${api_name})
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -460,16 +457,14 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         formal_types = [arg['type'] for arg in declaration['arguments']]
         wrapper_formal = WRAPPER_FORMAL.substitute(declaration, formal_types=formal_types)
         variable_formals = [wrapper_formal] + declaration['type_method_formals']
-        variable_formal_types = [WRAPPER_FORMAL_TYPE.substitute(
-            declaration, formal_types=formal_types
-        )] + formal_types
+        registration_template_types = [declaration['return_type']] + formal_types
         type_declarations.append(METHOD_DECLARATION.substitute(declaration, variable_formals=variable_formals))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body, variable_formals=variable_formals))
         wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-            declaration, variable_formal_types=variable_formal_types))
+            declaration, registration_template_types=registration_template_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
