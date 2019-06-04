@@ -20,7 +20,6 @@ using at::IntArrayRef;
 using at::Type;
 using at::TensorGeometry;
 using at::ScalarType;
-using at::SparseTensorRef;
 using c10::optional;
 using c10::fmap;
 
