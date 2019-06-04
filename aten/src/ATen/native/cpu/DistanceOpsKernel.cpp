@@ -197,25 +197,29 @@ struct Dist {
   static void run_parallel_cdist(Tensor& result, const Tensor& t1, const Tensor& t2, const scalar_t p) {
     const scalar_t * const t1_start = t1.data<scalar_t>();
     const scalar_t * const t2_start = t2.data<scalar_t>();
+    int64_t d = t1.size(0);
     int64_t r1 = t1.size(-2);
     int64_t r2 = t2.size(-2);
     int64_t m = t1.size(-1);
 
     scalar_t * const res_start = result.data<scalar_t>();
-    int64_t total = r1 * r2;
+    int64_t combs = r1 * r2;
+    int64_t size1 = r1 * m;
+    int64_t size2 = r2 * m;
 
-    parallel_for(0, total, internal::GRAIN_SIZE / (16 * m), [=](int64_t start, int64_t end) {
+    parallel_for(0, combs * d, internal::GRAIN_SIZE / (16 * m), [=](int64_t start, int64_t end) {
       scalar_t * res = res_start + start;
       const scalar_t * const res_end = res_start + end;
-
-      int64_t i = start / r2;
-      int64_t j = start % r2;
+      int64_t l = start / combs;
+      int64_t k = start % combs;
+      int64_t i = k / r2;
+      int64_t j = k % r2;
       i = i * m;
       j = j * m;
-      int64_t size = r2 * m;
+
       while (res != res_end) {
-        const scalar_t * self_i = t1_start + i;
-        const scalar_t * self_j = t2_start + j;
+        const scalar_t * self_i = t1_start + size1 * l + i;
+        const scalar_t * self_j = t2_start + size2 * l + j;
 
         scalar_t agg = 0;
         for (int x = 0; x < m; x++) {
@@ -227,9 +231,13 @@ struct Dist {
 
         res += 1;
         j += m;
-        if (j == size) {
+        if (j == size2) {
           j = 0;
           i += m;
+          if (i == size1) {
+            i = 0;
+            l += 1;
+          }
         }
       }
     });
@@ -343,7 +351,10 @@ struct Dist {
     const int64_t r1 = t1.size(-2);
     const int64_t r2 = t2.size(-2);
     const int64_t m = t1.size(-1);
-    const int64_t gs = grad.stride(1);
+    const int64_t d = result.size(0);
+    const int64_t l1_size = r1 * m;
+    const int64_t l2_size = r2 * m;
+    const int64_t gs = grad.stride(-1);
 
     const scalar_t * const grad_start = grad.data<scalar_t>();
     const scalar_t * const dist_start = dist.data<scalar_t>();
@@ -359,31 +370,36 @@ struct Dist {
       scalar_t * res_l = res_start + l * Vec::size();
 
       for (const scalar_t * const res_end = res_start + end * Vec::size(); res_l != res_end; i += Vec::size(), j += Vec::size(), res_l += Vec::size()) {
-        backward_down_column_cdist<F>(i, j, res_l, grad_start, dist_start, pvec, r1, r2, m, gs);
+        backward_down_column_cdist<F>(i, j, res_l, grad_start, dist_start, pvec, r1, r2, m, d, gs, l1_size, l2_size);
       }
     });
     const int64_t remainder = m % Vec::size();
     if (remainder) {
-      backward_down_column_cdist<F>(t1_start + (m - remainder), t2_start + (m - remainder), res_start + (m - remainder), grad_start, dist_start, Vec(p), r1, r2, m, gs, remainder);
+      backward_down_column_cdist<F>(t1_start + (m - remainder), t2_start + (m - remainder), res_start + (m - remainder), grad_start, dist_start, Vec(p), r1, r2, m, d, gs, l1_size, l2_size, remainder);
     }
   }
 
   template <typename F>
-  inline static void backward_down_column_cdist(const scalar_t * t1, const scalar_t * t2, scalar_t * res, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t r1, int64_t r2, int64_t m, int64_t gs, int64_t count = Vec::size()) {
-    const scalar_t * const t1_end = t1 + m * r1;
-    const scalar_t * const t2_end = t2 + m * r2;
+  inline static void backward_down_column_cdist(const scalar_t * t1, const scalar_t * t2, scalar_t * res, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t r1, int64_t r2, int64_t m, int64_t d, int64_t gs, int64_t l1_size, int64_t l2_size, int64_t count = Vec::size()) {
+    const scalar_t * t1_end = t1 + l1_size;
+    const scalar_t * t2_end = t2 + l2_size;
 
-    for (; t1 != t1_end; t1 += m, res += m) {
-      const Vec vec_t1 = Vec::loadu(t1, count);
-      Vec res_vec = Vec::loadu(res, count);
+    for (int64_t l = 0; l < d; l++) {
+      for (; t1 != t1_end; t1 += m, res += m) {
+        const Vec vec_t1 = Vec::loadu(t1, count);
+        Vec res_vec = Vec::loadu(res, count);
 
-      for (const scalar_t * t2_curr = t2; t2_curr != t2_end; t2_curr += m, grad_k += gs, dist_k += 1) {
-        const Vec vec_t2 = Vec::loadu(t2_curr, count);
-        Vec res = F::backward(vec_t1 - vec_t2, *grad_k, *dist_k, pvec);
-        res_vec = res_vec + res;
+        for (const scalar_t * t2_curr = t2; t2_curr != t2_end; t2_curr += m, grad_k += gs, dist_k += 1) {
+          const Vec vec_t2 = Vec::loadu(t2_curr, count);
+          Vec res = F::backward(vec_t1 - vec_t2, *grad_k, *dist_k, pvec);
+          res_vec = res_vec + res;
+        }
+
+        res_vec.store(res, count);
       }
-
-      res_vec.store(res, count);
+      t1_end += l1_size;
+      t2_end += l2_size;
+      t2 += l2_size;
     }
   }
 
