@@ -2681,7 +2681,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: cauchy
   variants: function
   return: self
