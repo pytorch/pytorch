@@ -6051,11 +6051,11 @@ a")
     def test_math_ops(self):
 
         def test_floor(x):
-            # type: (float) -> float
+            # type: (float) -> int
             return math.floor(x)
 
         def test_ceil(x):
-            # type: (float) -> float
+            # type: (float) -> int
             return math.ceil(x)
 
         def test_log_int(x):
