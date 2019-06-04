@@ -678,6 +678,33 @@ bool AliasDb::mayAlias(const Value* a, const Value* b) const {
   return memoryDAG_->mayAlias(elementMap_.at(a), elementMap_.at(b));
 }
 
+bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
+  if (a.empty() || b.empty()) {
+    return false;
+  }
+
+  // Record all memory locations from group `a`
+  MemoryLocations aMemLocs;
+  for (const auto value : a) {
+    auto it = elementMap_.find(value);
+    if (it != elementMap_.end()) {
+      aMemLocs |= it->second->getMemoryLocations();
+    }
+  }
+
+  // If any of group `b`s memory locations overlap, return true.
+  for (const auto value : b) {
+    auto it = elementMap_.find(value);
+    if (it != elementMap_.end()) {
+      if (aMemLocs.intersects(it->second->getMemoryLocations())) {
+        return true;
+      }
+    }
+  }
+  // No overlap, so group `a` and `b` do not share a memory location
+  return false;
+}
+
 bool AliasDb::cannotCheckAliasContainment(const Value* elem) const {
   if (isContainerType(elem->type())) {
     if (elem->node()->kind() != prim::TupleConstruct) {
