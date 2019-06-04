@@ -2,6 +2,7 @@
 
 from collections import OrderedDict
 
+import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 from cimodel.lib.conf_tree import Ver
 import cimodel.lib.miniutils as miniutils
@@ -22,8 +23,8 @@ class Conf:
     language: str
     distro: Ver
     compiler: Ver
-    phase: str
     build_only: bool
+    is_important: bool
 
     # TODO: Eventually we can probably just remove the cudnn7 everywhere.
     def get_cudnn_insertion(self):
@@ -47,9 +48,6 @@ class Conf:
         root_parts = self.get_build_name_root_parts()
         return "_".join(root_parts + [phase]).replace(".", "_")
 
-    def get_name(self):
-        return self.construct_phase_name(self.phase)
-
     def get_platform(self):
         platform = self.distro.name
         if self.distro.name != "macos":
@@ -67,7 +65,7 @@ class Conf:
         parts = [lang] + self.get_build_name_middle_parts()
         return miniutils.quote(DOCKER_IMAGE_PATH_BASE + "-".join(parts) + ":" + str(DOCKER_IMAGE_VERSION))
 
-    def gen_yaml_tree(self):
+    def gen_yaml_tree(self, phase):
 
         tuples = []
 
@@ -80,7 +78,7 @@ class Conf:
         parts = [
             "caffe2",
             lang,
-        ] + self.get_build_name_middle_parts() + [self.phase]
+        ] + self.get_build_name_middle_parts() + [phase]
 
         build_env = "-".join(parts)
         if not self.distro.name == "macos":
@@ -91,7 +89,7 @@ class Conf:
         if self.compiler.name == "ios":
             tuples.append(("BUILD_IOS", miniutils.quote("1")))
 
-        if self.phase == "test":
+        if phase == "test":
             # TODO cuda should not be considered a compiler
             if self.compiler.name == "cuda":
                 tuples.append(("USE_CUDA_DOCKER_RUNTIME", miniutils.quote("1")))
@@ -106,11 +104,11 @@ class Conf:
 
         d = OrderedDict({"environment": OrderedDict(tuples)})
 
-        if self.phase == "test":
+        if phase == "test":
             resource_class = "large" if self.compiler.name != "cuda" else "gpu.medium"
             d["resource_class"] = resource_class
 
-        d["<<"] = "*" + "_".join(["caffe2", self.get_platform(), self.phase, "defaults"])
+        d["<<"] = "*" + "_".join(["caffe2", self.get_platform(), phase, "defaults"])
 
         return d
 
@@ -128,11 +126,11 @@ def instantiate_configs():
     for fc in found_configs:
 
         c = Conf(
-            fc.find_prop("language_version"),
-            fc.find_prop("distro_version"),
-            fc.find_prop("compiler_version"),
-            fc.find_prop("phase_name"),
-            fc.find_prop("build_only"),
+            language=fc.find_prop("language_version"),
+            distro=fc.find_prop("distro_version"),
+            compiler=fc.find_prop("compiler_version"),
+            build_only=fc.find_prop("build_only"),
+            is_important=fc.find_prop("important"),
         )
 
         config_list.append(c)
@@ -141,10 +139,13 @@ def instantiate_configs():
 
 
 def add_caffe2_builds(jobs_dict):
-
     configs = instantiate_configs()
     for conf_options in configs:
-        jobs_dict[conf_options.get_name()] = conf_options.gen_yaml_tree()
+        phases = ["build"]
+        if not conf_options.build_only:
+            phases = dimensions.PHASES
+        for phase in phases:
+            jobs_dict[conf_options.construct_phase_name(phase)] = conf_options.gen_yaml_tree(phase)
 
     graph = visualization.generate_graph(get_root())
     graph.draw("caffe2-config-dimensions.png", prog="twopi")
@@ -161,11 +162,21 @@ def get_caffe2_workflows():
     x = []
     for conf_options in filtered_configs:
 
-        requires = ["setup"]
+        phases = ["build"]
+        if not conf_options.build_only:
+            phases = dimensions.PHASES
 
-        if conf_options.phase == "test":
-            requires.append(conf_options.construct_phase_name("build"))
+        for phase in phases:
 
-        x.append({conf_options.get_name(): {"requires": requires}})
+            requires = ["setup"]
+            sub_d = {"requires": requires}
+
+            if phase == "test":
+                requires.append(conf_options.construct_phase_name("build"))
+
+            if not conf_options.is_important:
+                sub_d["filters"] = {"branches": {"only": "master"}}
+
+            x.append({conf_options.construct_phase_name(phase): sub_d})
 
     return x
