@@ -43,7 +43,8 @@ class QLinearInt8 final : public c10::OperatorKernel {
     }
 
     // Pull out the PackBMatrix and col_offsets instance from the owning tensor.
-    auto& pack_ptr = cpp_custom_type_hack::cast<PackedFCWeight>(packed_weight);
+    auto& pack_ptr =
+        cpp_custom_type_hack::cast<PackedLinearWeight>(packed_weight);
     auto packB = pack_ptr.w.get();
     // packB->printPackedMatrix("packedB inside fbgemm_linear (QLinearInt8): ");
     auto& col_offsets = pack_ptr.col_offsets;
