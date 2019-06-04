@@ -797,9 +797,6 @@ inline Tensor Tensor::to_sparse() const {
 inline Tensor Tensor::to_mkldnn() const {
     return dispatch_type().to_mkldnn(*this);
 }
-inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const {
-    return dispatch_type().quantize_linear(*this, scale, zero_point, dtype);
-}
 inline Tensor Tensor::dequantize() const {
     return dispatch_type().dequantize(*this);
 }
@@ -826,9 +823,6 @@ inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) con
 }
 inline Scalar Tensor::item() const {
     return dispatch_type().item(*this);
-}
-inline void* Tensor::data_ptr() const {
-    return dispatch_type().data_ptr(*this);
 }
 inline Tensor & Tensor::set_(Storage source) {
     return dispatch_type().set_(*this, source);

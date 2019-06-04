@@ -1413,11 +1413,23 @@ class _TestTorchMixin(object):
             self.assertTrue(x.all())
             self.assertTrue(x.any())
 
+            x = torch.ones(*size).bool()
+            self.assertTrue(x.all())
+            self.assertTrue(x.any())
+
+            x[3] = False
+            self.assertFalse(x.all())
+            self.assertTrue(x.any())
+
         test((10,))
         test((5, 5))
 
     def test_all_any_empty(self):
         x = torch.ByteTensor()
+        self.assertTrue(x.all())
+        self.assertFalse(x.any())
+
+        x = torch.BoolTensor()
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
@@ -1441,6 +1453,10 @@ class _TestTorchMixin(object):
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_all_any_empty_cuda(self):
         x = torch.cuda.ByteTensor()
+        self.assertTrue(x.all())
+        self.assertFalse(x.any())
+
+        x = torch.cuda.BoolTensor()
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
@@ -1529,6 +1545,11 @@ class _TestTorchMixin(object):
         m2 = torch.tensor([], dtype=torch.float)
         self.assertEqual(m1 + m2, [])
 
+        # bool
+        m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool)
+        m2 = torch.tensor([True, True, False, False, False, True], dtype=torch.bool)
+        self.assertEqual(m1 + m2, torch.tensor([True, True, False, True, False, True], dtype=torch.bool))
+
         # [res] torch.add([res,] tensor1, value, tensor2)
 
     def test_csub(self):
@@ -1606,6 +1627,10 @@ class _TestTorchMixin(object):
         for i in range(res1.size(0)):
             res2[i, 3] = res2[i, 3] * 2
         self.assertEqual(res1, res2)
+
+        a1 = torch.tensor([True, False, False, True], dtype=torch.bool)
+        a2 = torch.tensor([True, False, True, False], dtype=torch.bool)
+        self.assertEqual(a1 * a2, torch.tensor([True, False, False, False], dtype=torch.bool))
 
     def test_div(self):
         m1 = torch.randn(10, 10)
@@ -2753,7 +2778,7 @@ class _TestTorchMixin(object):
         r = torch.ones(num_elements, dtype=torch.float)
         scale = 1.0
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point, torch.quint8)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         self.assertEqual(qr.q_scale(), scale)
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
@@ -2771,7 +2796,7 @@ class _TestTorchMixin(object):
         # Scalar Tensor
         # item
         r = torch.ones(1, dtype=torch.float)
-        qr = r.quantize_linear(scale, zero_point, torch.quint8)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         self.assertEqual(qr.item(), 1)
         self.assertEqual(qr[0].item(), 1)
         # assignment
@@ -2787,7 +2812,7 @@ class _TestTorchMixin(object):
                          "tensor([15.], size=(1,), dtype=torch.quint8, " +
                          "scale=1.0, zero_point=2)")
         empty_r = torch.ones((0, 1), dtype=torch.float)
-        empty_qr = empty_r.quantize_linear(scale, zero_point, torch.quint8)
+        empty_qr = torch.quantize_linear(empty_r, scale, zero_point, torch.quint8)
         self.assertEqual(str(empty_qr),
                          "tensor([], size=(0, 1), dtype=torch.quint8, " +
                          "scale=1.0, zero_point=2)")
@@ -2797,7 +2822,7 @@ class _TestTorchMixin(object):
         r = torch.from_numpy(r).float()
         scale = 2
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point, torch.quint8)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
@@ -2822,13 +2847,13 @@ class _TestTorchMixin(object):
         r = torch.from_numpy(r).float()
         scale = 2
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point, torch.qint8)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = r.quantize_linear(scale, zero_point, torch.quint8)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
-        qr = r.quantize_linear(scale, zero_point, torch.qint32)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.qint32)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / scale))
 
@@ -2864,13 +2889,13 @@ class _TestTorchMixin(object):
         r = torch.from_numpy(r).float()
         scale = 2
         zero_point = 2
-        qr = r.quantize_linear(scale, zero_point, torch.qint8)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
         qr = qr.transpose(0, 1)
         rqr = qr.dequantize()
         # compare transpose + dequantized result with orignal transposed result
         self.assertTrue(np.allclose(r.numpy().T, rqr.numpy(), atol=2 / scale))
 
-        qr = r.quantize_linear(scale, zero_point, torch.qint8)
+        qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
         qr1 = qr.permute([1, 0])
         qr2 = qr.transpose(0, 1)
         # compare int representation after transformations
@@ -2883,6 +2908,21 @@ class _TestTorchMixin(object):
         self.assertTrue(np.allclose(qr2.dequantize().numpy(), r.numpy().T, atol=2 / scale))
         # make permuted result contiguous
         self.assertTrue(torch.equal(qr2.contiguous().int_repr(), qr2.int_repr()))
+
+    def test_qtensor_load_save(self):
+        scale = 2.0
+        zero_point = 10
+        r = torch.ones(15, dtype=torch.float) * 2
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
+            qr = torch.quantize_linear(r, scale, zero_point, dtype)
+            with tempfile.NamedTemporaryFile() as f:
+                # Serializing and Deserializing Tensor
+                torch.save(qr, f)
+                f.seek(0)
+                qr2 = torch.load(f)
+                self.assertEqual(qr.int_repr(), qr2.int_repr())
+                self.assertEqual(qr.q_scale(), qr2.q_scale())
+                self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
@@ -7138,6 +7178,16 @@ class _TestTorchMixin(object):
                 numt = conv_fn(torch.Tensor(set_numpy(numt, indexer, val)))
                 self.assertEqual(pyt, numt)
 
+            def assert_backward_eq(tensor, indexer):
+                cpu = tensor.float().clone().detach().requires_grad_(True)
+                outcpu = cpu[indexer]
+                gOcpu = torch.rand_like(outcpu)
+                outcpu.backward(gOcpu)
+                gpu = cpu.cuda().detach().requires_grad_(True)
+                outgpu = gpu[indexer]
+                outgpu.backward(gOcpu.cuda())
+                self.assertEqual(cpu.grad, gpu.grad)
+
             def get_set_tensor(indexed, indexer):
                 set_size = indexed[indexer].size()
                 set_count = indexed[indexer].numel()
@@ -7171,6 +7221,8 @@ class _TestTorchMixin(object):
 
             for indexer in get_indices_to_test:
                 assert_get_eq(reference, indexer)
+                if torch.cuda.is_available():
+                    assert_backward_eq(reference, indexer)
 
             for indexer in indices_to_test:
                 assert_set_eq(reference, indexer, 44)
@@ -7198,6 +7250,8 @@ class _TestTorchMixin(object):
                 [[[0, 1], [2, 3]], [[0]], slice(None)],
                 [[[2, 1]], [[0, 3], [4, 4]], slice(None)],
                 [[[2]], [[0, 3], [4, 1]], slice(None)],
+                # non-contiguous indexing subspace
+                [[0, 2, 3], slice(None), [1, 3, 4]],
 
                 # less dim, ellipsis
                 [[0, 2], ],
@@ -7228,6 +7282,8 @@ class _TestTorchMixin(object):
                 assert_set_eq(reference,
                               indexer,
                               get_set_tensor(reference, indexer))
+                if torch.cuda.is_available():
+                    assert_backward_eq(reference, indexer)
 
             reference = conv_fn(torch.arange(0., 1296).view(3, 9, 8, 6))
 
@@ -7307,6 +7363,8 @@ class _TestTorchMixin(object):
             for indexer in indices_to_test:
                 assert_get_eq(reference, indexer)
                 assert_set_eq(reference, indexer, 1333)
+                if torch.cuda.is_available():
+                    assert_backward_eq(reference, indexer)
 
     def test_advancedindex(self):
         self._test_advancedindex(self, lambda x: x)
