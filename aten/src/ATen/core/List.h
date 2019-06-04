@@ -17,9 +17,6 @@ template<class T> ListPtr<T> make_list();
 template<class T> ListPtr<T> make_list(ArrayRef<T> values);
 
 namespace detail {
-template<class T> T list_element_to(const T& element);
-template<class T> T list_element_to(const IValue& element);
-template<class T, class Enable> struct list_element_from;
 
 template<class StorageT>
 struct ListImpl final : public c10::intrusive_ptr_target {
@@ -399,7 +396,6 @@ protected:
   template<class T_> friend ListPtr<T_> impl::toTypedList(ListPtr<IValue>);
   template<class T_> friend ListPtr<IValue> impl::toGenericList(ListPtr<T_>);
   friend const IValue* impl::ptr_to_first_element(const ListPtr<IValue>& list);
-  template<class T_, class Enable> friend struct detail::list_element_from;
   template<class T_> friend ListPtr<T_> impl::toList(std::vector<T_> list);
   template<class T_> friend ArrayRef<T_> impl::toArrayRef(const ListPtr<T_>& list);
   template<class T_> friend std::vector<T_> impl::toVector(const ListPtr<T_>& list);
