@@ -23,18 +23,30 @@ namespace tracer {
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
-std::string getPythonInterpreterStackTrace() {
+SourceRange getPythonInterpreterSourceRange() {
+  c10::optional<std::string> source_filename;
+  size_t source_line = 0;
   std::stringstream stack_trace;
+
   AutoGIL gil;
   PyFrameObject* frame = PyEval_GetFrame();
+
   while (nullptr != frame) {
     int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
     std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
     std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
     stack_trace << filename << "(" << line << "): " << funcname << "\n";
+    if (!source_filename) {
+      source_filename = filename;
+      source_line = line;
+    }
     frame = frame->f_back;
   }
-  return stack_trace.str();
+
+  auto stack_trace_text = stack_trace.str();
+  auto source =
+      std::make_shared<Source>(stack_trace_text, source_filename, source_line);
+  return SourceRange(source, 0, stack_trace_text.size());
 }
 
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
@@ -104,7 +116,7 @@ Node* preRecordPythonTrace(
 }
 
 void pythonRecordSourceLocation(Node* n) {
-  n->setSourceRange(SourceRange(getPythonInterpreterStackTrace()));
+  n->setSourceRange(getPythonInterpreterSourceRange());
 }
 
 void pythonWarn(const std::string& reason) {
