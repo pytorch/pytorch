@@ -220,7 +220,7 @@ const void* Pickler::getPointer(const IValue& ivalue) {
   if (ivalue.isGenericDict() || ivalue.isGenericList() || ivalue.isTuple()
     || ivalue.isString() || ivalue.isTensorList() || ivalue.isDoubleList()
     || ivalue.isBoolList()) {
-      return ivalue.toPointer();
+      return ivalue.internalToPointer();
   }
 
   return nullptr;

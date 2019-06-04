@@ -368,8 +368,8 @@ struct CAFFE2_API IValue final {
     return is_intrusive_ptr;
   }
 
-  const void* toPointer() const {
-    TORCH_INTERNAL_ASSERT(isPtrType(), "Can only call toPointer() for pointer types");
+  const void* internalToPointer() const {
+    TORCH_INTERNAL_ASSERT(isPtrType(), "Can only call internalToPointer() for pointer types");
     return payload.as_intrusive_ptr;
   }
 
