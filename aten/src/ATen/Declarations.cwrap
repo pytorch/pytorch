@@ -1201,7 +1201,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants: function
   return: argument 0
@@ -1244,7 +1243,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants: function
   return: argument 0
@@ -2625,7 +2623,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   return: argument 0
   variants:
     - function
@@ -2665,7 +2662,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: normal
   variants: function
   return: self
@@ -2685,7 +2681,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: cauchy
   variants: function
   return: self
