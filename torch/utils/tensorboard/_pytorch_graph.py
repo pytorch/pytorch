@@ -236,37 +236,16 @@ def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_
     operator_export_type = getattr(OperatorExportTypes, operator_export_type)
 
 
-    with torch.onnx.set_training(model, False):
+    with torch.onnx.set_training(model, False):  # TODO: move outside of torch.onnx?
         try:
-            trace, _ = torch.jit.get_trace_graph(model, args)
-        except RuntimeError:
+            trace = torch.jit.trace(model, args)
+            graph = trace.graph
+        except RuntimeError as e:
+            print(e)
             print('Error occurs, No graph saved')
-            _ = model(*args)  # don't catch, just print the error message
-            print("Checking if it's onnx problem...")
-            try:
-                import tempfile
-                torch.onnx.export(
-                    model, args, tempfile.TemporaryFile(), verbose=True)
-            except RuntimeError:
-                print("Your model cannot be exported by onnx, please report to onnx team")
-            # Create an object matching
-            # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/graph.proto
-            # The producer version has been reverse engineered from standard
-            # TensorBoard logged data.
-            return GraphDef(versions=VersionDef(producer=22))
+            raise e
 
-    try:
-        # An optimized graph helps debug at a higher level. Users can focus
-        # on connections between big modules such as Linear instead of W, x,
-        # bias, matmul, etc. Honestly, most users don't care about those
-        # detailed nodes information.
-        _optimize_trace(trace, operator_export_type)
-    except RuntimeError as e:
-        # Optimize trace might fail (due to bad scopes in some cases we've seen)
-        # and we don't want graph visualization to fail in this case. In this
-        # case we'll log the warning and display the non-optimized graph.
-        logging.warn(ImportError(e))
-    graph = trace.graph()
+
     if verbose:
         print(graph)
     list_of_nodes = parse(graph, args, omit_useless_nodes)
@@ -282,3 +261,5 @@ def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_
     # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/step_stats.proto
     stepstats = RunMetadata(step_stats=StepStats(dev_stats=[DeviceStepStats(device="/device:CPU:0")]))
     return GraphDef(node=list_of_nodes, versions=VersionDef(producer=22)), stepstats
+    # The producer version has been reverse engineered from standard
+    # TensorBoard logged data.
