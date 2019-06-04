@@ -38,8 +38,10 @@ class Conf:
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
     def get_parms(self, for_docker):
         leading = []
-        if self.is_important and not for_docker:
-            leading.append("AAA")
+        # We just don't run non-important jobs on pull requests;
+        # previously we also named them in a way to make it obvious
+        # if self.is_important and not for_docker:
+        #    leading.append("AAA")
         leading.append("pytorch")
         if self.is_xla and not for_docker:
             leading.append("xla")
@@ -116,6 +118,9 @@ class Conf:
             dependency_build = self.parent_build or self
             parameters["requires"].append(dependency_build.gen_build_name("build"))
 
+        if not self.is_important:
+            parameters["filters"] = {"branches": {"only": "master"}}
+
         return {self.gen_build_name(phase): parameters}
 
 
@@ -155,6 +160,7 @@ def gen_dependent_configs(xenial_parent_config):
             restrict_phases=["test"],
             gpu_resource=gpu,
             parent_build=xenial_parent_config,
+            is_important=xenial_parent_config.is_important,
         )
 
         configs.append(c)
@@ -210,6 +216,7 @@ def instantiate_configs():
             gcc_version = compiler_name + (fc.find_prop("compiler_version") or "")
             parms_list.append(gcc_version)
 
+            # TODO: This is a nasty special case
             if compiler_name == "clang":
                 parms_list.append("asan")
 
