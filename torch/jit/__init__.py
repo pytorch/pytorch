@@ -945,6 +945,8 @@ def _create_constant_iterable_module(module):
         if isinstance(submodule, (ModuleList, Sequential)):
             # Make each item in the module a constant
             module[i] = _create_constant_iterable_module(submodule)
+        else:
+            module[i] = _convert_to_script_module(submodule)
 
     if isinstance(module, Sequential):
         return _ConstSequential(module)
@@ -1278,7 +1280,6 @@ class ScriptMeta(type):
                 cls._methods[v.original_method.__name__] = v
 
         original_init = getattr(cls, '__init__', lambda self: None)
-        print("set overloads", cls, name)
         cls._overloads = dict(getattr(cls, '__overloads__', {}))
 
         # after the user's __init__ register all the script methods
