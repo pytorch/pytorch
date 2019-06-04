@@ -143,6 +143,9 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 WRAPPER_FORMAL = CodeTemplate("""\
 ${return_type} (*_op)(${formal_types})""")
 
+WRAPPER_FORMAL_TYPE = CodeTemplate("""\
+${return_type} (${formal_types})""")
+
 METHOD_DECLARATION = CodeTemplate("""\
 static ${return_type} ${api_name}(${variable_formals}) ;
 """)
@@ -457,7 +460,10 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         formal_types = [arg['type'] for arg in declaration['arguments']]
         wrapper_formal = WRAPPER_FORMAL.substitute(declaration, formal_types=formal_types)
         variable_formals = [wrapper_formal] + declaration['type_method_formals']
-        registration_template_types = [declaration['return_type']] + formal_types
+        registration_template_types = [
+            WRAPPER_FORMAL_TYPE.substitute(declaration, formal_types=formal_types),
+            declaration['return_type']
+        ] + formal_types
         type_declarations.append(METHOD_DECLARATION.substitute(declaration, variable_formals=variable_formals))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
             body = emit_body(declaration)

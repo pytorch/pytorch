@@ -39,8 +39,8 @@ class CAFFE2_API ATenDispatch {
    return *this;
   }
 
-  template <class Return, class... Parameters>
-  ATenDispatch& registerVariableWrapper(const char* schema, Return (*fn)(Return (*)(Parameters...), Parameters...)) {
+  template <class FuncType, class Return, class... Parameters>
+  ATenDispatch& registerVariableWrapper(const char* schema, Return (*fn)(FuncType*, Parameters...)) {
     auto id = getSchemaId(schema);
     wrapper_table[id] = reinterpret_cast<void*>(fn);
     return *this;
