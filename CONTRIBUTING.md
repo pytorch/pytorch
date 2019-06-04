@@ -354,6 +354,12 @@ If you are editing a single file and rebuilding in a tight loop, the time spent
 linking will dominate. The system linker available in most Linux distributions 
 (GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
 
+The easiest way to use `lld` this is download the 
+[latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
+```
+ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
+```
+
 ## CUDA Development tips
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
