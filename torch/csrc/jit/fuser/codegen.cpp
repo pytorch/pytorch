@@ -410,6 +410,7 @@ std::string generateKernel(
             format("__half2float(t${formal}.data[t${formal}_offset])", env));
         has_half_tensor = true;
       } else if (use_cuda) {
+        // No __ldg overload for bool
         if (is_bool) {
           env.s("access", format("t${formal}.data[t${formal}_offset]", env));
         } else {

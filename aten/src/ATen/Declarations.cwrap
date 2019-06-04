@@ -364,9 +364,8 @@
 [[
   name: _th_equal
   cpu_bool: True
-  cname: equal
-  cpu_bool: True
   cuda_bool: True
+  cname: equal
   variants:
     - function
   return: bool
