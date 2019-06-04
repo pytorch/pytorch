@@ -144,7 +144,8 @@ Tensor & embedding_renorm_cpu_(
   auto sorted_indices = std::vector<int64_t>(data_ptr, data_ptr + num_indices);
   std::sort(sorted_indices.begin(), sorted_indices.end(), std::less<int64_t>());
 
-  at::parallel_for(0, num_indices, 1000, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, num_indices, internal::GRAIN_SIZE,
+                   [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
       if (i > 0 && sorted_indices[i] == sorted_indices[i - 1]) {
         continue;

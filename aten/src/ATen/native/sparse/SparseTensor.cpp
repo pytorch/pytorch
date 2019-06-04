@@ -440,7 +440,8 @@ void inline sparse_mask_out_cpu_kernel(
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
   scalar_t* t_ptr = t.data<scalar_t>();
 
-  at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, r_nnz, internal::GRAIN_SIZE,
+                   [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
       int64_t idx = 0;
       for (int64_t d = 0; d < sparse_dim; d++) {

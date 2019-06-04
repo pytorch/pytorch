@@ -95,7 +95,8 @@ void inline prelu_cpu_kernel_share_weights(
   auto input_data = input.data<scalar_t>();
   auto weight_val = weight.data<scalar_t>()[0];
 
-  at::parallel_for(0, input_numel, 1000, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, input_numel, internal::GRAIN_SIZE,
+                   [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
       scalar_t input_data_val = input_data[i];
       // to allow for compiler optimization, here splitting into two lines:
@@ -209,7 +210,8 @@ void inline prelu_cpu_backward_kernel_share_weights(
   auto input_grad_data = input_grad.data<scalar_t>();
   auto weight_grad_data = weight_grad.data<scalar_t>();
 
-  scalar_t sum = at::parallel_reduce(0, input_numel, 1000, scalar_t(0),
+  scalar_t sum = at::parallel_reduce(0, input_numel,
+                                     internal::GRAIN_SIZE, scalar_t(0),
       [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
     scalar_t partial_sum = ident;
     for (auto i = start; i < end; i++) {

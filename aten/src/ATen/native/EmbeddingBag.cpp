@@ -672,8 +672,8 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
   auto output_data = output.data<scalar_t>();
   auto offset2bag_data = offset2bag_.data<int64_t>();
 
-  // XXX: 64 was arbitrarily chosen. There is probably a sweet spot for this number.
-  parallel_for(0, num_samples, 64, [&](int64_t begin, int64_t end) {
+  parallel_for(0, num_samples, internal::GRAIN_SIZE,
+               [&](int64_t begin, int64_t end) {
     for (int64_t sample_idx = begin; sample_idx < end; sample_idx++) {
       auto bag_idx = offset2bag_data[sample_idx];
       auto embedding_idx = indices_data[sample_idx];

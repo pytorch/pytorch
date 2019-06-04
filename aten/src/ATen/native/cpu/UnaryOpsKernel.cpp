@@ -164,7 +164,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
       }
     };
 
-    parallel_for(0, n, /* grain_size= */ 800, sample);
+    parallel_for(0, n, internal::GRAIN_SIZE, sample);
 
     // copy_ if using buffer and non contiguous
     if (!contig) {

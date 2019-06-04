@@ -136,7 +136,8 @@ static inline void _fft_fill_with_conjugate_symmetry_(Tensor& input,
     num *= input.size(d);
   }
 
-  at::parallel_for(0, num, 500, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, num, internal::GRAIN_SIZE,
+                   [&](int64_t start, int64_t end) {
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "_fft_fill_with_conjugate_symmetry", [&] {
       _fft_fill_with_conjugate_symmetry_slice<scalar_t>(input, signal_ndim, size_last_dim,
           last_dim_start_slice, start, (end - start));

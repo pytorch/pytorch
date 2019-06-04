@@ -38,7 +38,8 @@ begin: index at which to start applying user function
 
 end: index at which to stop applying user function
 
-grain_size: number of elements per chunk. impacts the degree of parallelization
+grain_size: number of elements per chunk. impacts the degree of parallelization.
+  Normally should be set to internal::GRAIN_SIZE
 
 f: user function applied in parallel to the chunks, signature:
   void f(int64_t begin, int64_t end)
@@ -58,7 +59,8 @@ begin: index at which to start applying reduction
 end: index at which to stop applying reduction
 
 grain_size: number of elements per chunk. impacts number of elements in
-intermediate results tensor and degree of parallelization.
+  intermediate results tensor and degree of parallelization. Normally should be
+  set to internal::GRAIN_SIZE
 
 ident: identity for binary combination function sf. sf(ident, x) needs to return
 x.

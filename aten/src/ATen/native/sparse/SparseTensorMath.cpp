@@ -24,7 +24,8 @@ namespace {
     if (nnz > 0) {
       auto csr_accessor = csr.accessor<int64_t, 1>();
       // Convert the sparse matrix to CSR format
-      at::parallel_for(0, nnz, 10000, [&](int64_t start, int64_t end) {
+      at::parallel_for(0, nnz, internal::GRAIN_SIZE,
+                       [&](int64_t start, int64_t end) {
         int64_t h, hp0, hp1;
         for (auto i = start; i < end; i++) {
           hp0 = indices[i];

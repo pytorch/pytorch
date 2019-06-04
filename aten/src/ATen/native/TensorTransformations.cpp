@@ -27,7 +27,8 @@ void inline flip_cpu_kernel(
   auto sizes_v = in_tensor.sizes().vec();
   auto strides_v = in_tensor.strides().vec();
 
-  at::parallel_for(0, numel, 1000, [&](int64_t start, int64_t end) {
+  at::parallel_for(0, numel, internal::GRAIN_SIZE,
+                   [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
       int64_t cur_indices = i;
       int64_t rem = 0;

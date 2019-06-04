@@ -55,7 +55,8 @@ using namespace vec256;
 
 template <typename scalar_t>
 inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
-  parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
+  parallel_for(0, size, internal::GRAIN_SIZE,
+               [out, in](int64_t begin, int64_t end) {
     map(
         [](const Vec256<scalar_t>& x) {
           return Vec256<scalar_t>((scalar_t)(1)) / x.sqrt();
@@ -78,7 +79,8 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   template <typename scalar_t>                                          \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
     DL_RUNTIME_BUG(op, scalar_t)                                        \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
+    parallel_for(0, size, internal::GRAIN_SIZE,                         \
+                 [out, in](int64_t begin, int64_t end) {                \
       map([](const Vec256<scalar_t>& x) { return x.op(); },             \
           out + begin,                                                  \
           in + begin,                                                   \
@@ -89,7 +91,8 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
 #define IMPLEMENT_VML(op)                                              \
   template <typename scalar_t>                                          \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
+    parallel_for(0, size, internal::GRAIN_SIZE,                         \
+                 [out, in](int64_t begin, int64_t end) {                \
       map([](const Vec256<scalar_t>& x) { return x.op(); },             \
           out + begin,                                                  \
           in + begin,                                                   \
