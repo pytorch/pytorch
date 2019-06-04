@@ -6049,12 +6049,14 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_math_ops(self):
-        def checkMathWrap(func_name, num_args=1, is_float=True, ret_type="float"):
+        def checkMathWrap(func_name, num_args=1, is_float=True, ret_type="float", debug=False, vals=None):
             if is_float:
-                checkMath(func_name, num_args, True, ret_type)
-                checkMath(func_name, num_args, False, ret_type)
+                checkMath(func_name, num_args, True, ret_type, debug, vals)
+                checkMath(func_name, num_args, False, ret_type, debug, vals)
+            else:
+                checkMath(func_name, num_args, is_float, ret_type, debug, vals)
 
-        def checkMath(func_name, num_args=1, is_float=True, ret_type="float"):
+        def checkMath(func_name, num_args, is_float=True, ret_type="float", debug=False, vals=None):
             funcs_template = dedent('''
             def func(a, b):
                 # type: {args_type} -> {ret_type}
@@ -6083,7 +6085,8 @@ a")
 
             float_vals = [inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
             int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2]
-            vals = float_vals if is_float else int_vals
+            if vals is None:
+                vals = float_vals if is_float else int_vals
             inps = [(i, j) for i in vals for j in vals]
 
             for a, b in inps:
@@ -6097,6 +6100,9 @@ a")
                     resfs = fs(a, b)
                 except Exception as e:
                     resfs = e
+                if debug:
+                    print("in: ", a, b)
+                    print("out: ", resf, resfs)
                 if resf != resfs:
                     if isinstance(resf, Exception):
                         continue
@@ -6114,17 +6120,19 @@ a")
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan", "asinh", "atanh", "acosh", "sinh", "cosh", "tanh"]
         binary_float_ops = ["atan2", "fmod", "remainder", "copysign"]
         for op in unary_float_ops:
-            checkMathWrap(op)
+            checkMathWrap(op, 1)
         for op in binary_float_ops:
             checkMathWrap(op, 2)
 
         checkMath("modf", 1, ret_type="Tuple[float, float]")
-        checkMathWrap("floor", ret_type="int")
-        checkMathWrap("ceil", ret_type="int")
+        checkMathWrap("floor", 1, ret_type="int")
+        checkMathWrap("ceil", 1, ret_type="int")
         checkMath("pow", 2, is_float=False, ret_type="int")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
             checkMathWrap("gcd", 2, is_float=False, ret_type="int")
+        checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=list(range(-2, 10)))
+
 
     @unittest.skipIf(PY2, "Requires python 3")
     def test_math_gcd(self):

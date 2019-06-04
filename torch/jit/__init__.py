@@ -1903,6 +1903,7 @@ def _get_builtin_table():
         (math.fmod, "aten::fmod"),
         (math.modf, "aten::modf"),
         (math.remainder, "aten::mathremainder"),
+        (math.factorial, "aten::factorial"),
         (torch._C._infer_size, "aten::_infer_size"),
         (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
         (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
