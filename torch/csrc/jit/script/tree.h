@@ -6,7 +6,7 @@
 #include <vector>
 
 #include <torch/csrc/jit/script/lexer.h>
-#include <c10/util/intrusive_ptr.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
 
 namespace torch {
@@ -27,15 +27,16 @@ namespace script {
 // Compound objects are also always associated with a SourceRange for
 // reporting error message.
 
-// Memory management of trees is done using intrusive_ptr.
+// Memory management of trees is done by arena allocation.
+// Make sure to call Tree::freeArena when trees are no longer needed.
 
 struct Tree;
-using TreeRef = c10::intrusive_ptr<Tree>;
-using TreeList = at::SmallVector<TreeRef, 4>;
+using TreeRef = Tree*;
+using TreeList = at::ArrayRef<TreeRef>;
 
 static const TreeList empty_trees = {};
 
-struct Tree : c10::intrusive_ptr_target {
+struct Tree {
   Tree(int kind_) : kind_(kind_) {}
   int kind() const {
     return kind_;
@@ -57,11 +58,7 @@ struct Tree : c10::intrusive_ptr_target {
   }
   virtual TreeRef map(const std::function<TreeRef(TreeRef)>& fn) {
     (void)fn;
-    c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
-                                           // from a raw `this` pointer
-                                           // so we need to bump the refcount
-                                           // to account for this ownership
-    return TreeRef::reclaim(this);
+    return this;
   }
   template <typename... Args>
   void match(int k, Args&... args) const {
@@ -102,10 +99,36 @@ struct Tree : c10::intrusive_ptr_target {
       throw std::runtime_error(ss.str());
     }
   }
-  virtual ~Tree() = default;
+
+  void *operator new(size_t, void* p_) { return p_; }
+  void *operator new(size_t size) {
+    if (freelist_.empty() || size + slaboffset_ > ALLOC_SIZE) {
+      auto slab = malloc(std::max(size, ALLOC_SIZE));
+      slaboffset_ = size;
+      freelist_.push_back(slab);
+      return slab;
+    }
+
+    auto p = (char*)freelist_.back() + slaboffset_;
+    slaboffset_ += size;
+    return p;
+  }
+
+  void operator delete(void * p)  {}
+
+  static void freeArena() {
+    for (void* p : freelist_) {
+      free(p);
+    }
+    freelist_.clear();
+  }
 
  private:
   int kind_;
+
+  static const size_t ALLOC_SIZE = 4096;
+  TORCH_API static size_t slaboffset_;
+  TORCH_API static std::vector<void*> freelist_;
 };
 
 struct String : public Tree {
@@ -115,7 +138,7 @@ struct String : public Tree {
   }
   template <typename... Args>
   static TreeRef create(Args&&... args) {
-    return c10::make_intrusive<String>(std::forward<Args>(args)...);
+    return new String(std::forward<Args>(args)...);
   }
 
  private:
@@ -147,17 +170,29 @@ struct Compound : public Tree {
       int kind,
       const SourceRange& range_,
       TreeList&& trees_) {
-    return c10::make_intrusive<Compound>(kind, range_, std::move(trees_));
+
+    char* ptr = (char*)Tree::operator new(
+      sizeof(Compound) + trees_.size() * sizeof(TreeRef));
+
+    TreeRef* tree_ptr = (TreeRef*)(ptr + sizeof(Compound));
+    for (size_t i = 0; i < trees_.size(); ++i) {
+      tree_ptr[i] = trees_[i];
+    }
+
+    char* compound_ptr = ptr;
+    new (compound_ptr) Compound(kind, range_, { tree_ptr, trees_.size() });
+
+    return (Compound*)compound_ptr;
   }
   bool isAtom() const override {
     return false;
   }
   TreeRef map(const std::function<TreeRef(TreeRef)>& fn) override {
-    TreeList trees_;
+    at::SmallVector<TreeRef, 4> trees_;
     for (auto& t : trees()) {
       trees_.push_back(fn(t));
     }
-    return Compound::create(kind(), range(), std::move(trees_));
+    return Compound::create(kind(), range(), trees_);
   }
 
   const SourceRange& range() const override {

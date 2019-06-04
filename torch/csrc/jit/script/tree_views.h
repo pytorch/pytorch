@@ -180,8 +180,9 @@ struct List : public TreeView {
     return tree_->map([&](TreeRef v) { return fn(T(v)); });
   }
   static List create(const SourceRange& range, const std::vector<T>& subtrees) {
-    TreeList type_erased_sub{subtrees.begin(), subtrees.end()};
-    return List(Compound::create(TK_LIST, range, std::move(type_erased_sub)));
+    c10::SmallVector<TreeRef, 4> type_erased_sub{subtrees.begin(), subtrees.end()};
+    TreeList treelist{type_erased_sub};
+    return List(Compound::create(TK_LIST, range, std::move(treelist)));
   }
   static List unsafeCreate(const SourceRange& range, TreeList&& subtrees) {
     return List(Compound::create(TK_LIST, range, std::move(subtrees)));

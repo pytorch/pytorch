@@ -56,9 +56,9 @@ struct ParserImpl {
     return Ident::create(t.range, t.text());
   }
   TreeRef createApply(const Expr& expr) {
-    TreeList attributes;
+    c10::SmallVector<TreeRef, 4> attributes;
     auto range = L.cur().range;
-    TreeList inputs;
+    c10::SmallVector<TreeRef, 4> inputs;
     parseArguments(inputs, attributes);
     return Apply::create(
         range,
@@ -316,7 +316,8 @@ struct ParserImpl {
     return parseExp();
   }
 
-  void parseArguments(TreeList& inputs, TreeList& attributes) {
+  void parseArguments(c10::SmallVector<TreeRef, 4>& inputs,
+                      c10::SmallVector<TreeRef, 4>& attributes) {
     parseSequence('(', ',', ')', [&] {
       if (L.cur().kind == TK_IDENT && L.lookahead().kind == '=') {
         auto ident = parseIdent();
@@ -522,7 +523,7 @@ struct ParserImpl {
     if (expect_indent) {
       L.expect(TK_INDENT);
     }
-    TreeList stmts;
+    c10::SmallVector<TreeRef, 4> stmts;
     do {
       stmts.push_back(parseStmt());
     } while (!L.nextIf(TK_DEDENT));
@@ -638,6 +639,9 @@ Decl Parser::parseTypeComment() {
 Expr Parser::parseExp() {
   return pImpl->parseExp();
 }
+
+size_t Tree::slaboffset_ = 0;
+std::vector<void*> Tree::freelist_;
 
 } // namespace script
 } // namespace jit
