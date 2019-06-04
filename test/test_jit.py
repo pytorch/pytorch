@@ -5608,6 +5608,19 @@ a")
         inputs = self._make_scalar_vars([10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+    def test_fibb_totally_better(self):
+        def fib(x):
+            # type: (int) -> int
+            prev = 1
+            v = 1
+            for i in range(0, x):
+                save = v
+                v = v + prev
+                prev = save
+            return v
+
+        self.checkScript(fib, (10,))
+
     def test_if(self):
         def func(a, b):
             # type: (int, int) -> int
