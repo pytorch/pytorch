@@ -6049,145 +6049,89 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_math_ops(self):
+        def checkMathWrap(func_name, num_args=1, is_float=True, **args):
+            if is_float:
+                checkMath(func_name, num_args, True, **args)
+                checkMath(func_name, num_args, False, **args)
+            else:
+                checkMath(func_name, num_args, is_float, **args)
 
-        def test_floor(x):
-            # type: (float) -> int
-            return math.floor(x)
+        inf = float("inf")
+        NaN = float("nan")
+        mx_int = 2**31 - 1
+        mn_int = -2**31
+        float_vals = ([inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2] +
+                      [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
+        int_vals = list(range(-5, 5, 1)) + [mx_int + 5, mx_int * 2, mn_int - 5, mn_int * 2]
 
-        def test_ceil(x):
-            # type: (float) -> int
-            return math.ceil(x)
+        def checkMath(func_name, num_args, is_float=True, ret_type="float", debug=False, vals=None, args_type=None):
+            funcs_template = dedent('''
+            def func(a, b):
+                # type: {args_type} -> {ret_type}
+                return math.{func}({args})
+            ''')
+            if num_args == 1:
+                args = "a"
+            elif num_args == 2:
+                args = "a, b"
+            else:
+                raise RuntimeError("Test doesn't support more than 2 arguments")
+            if args_type is None:
+                args_type = "(float, float)" if is_float else "(int, int)"
+            funcs_str = funcs_template.format(func=func_name, args=args, args_type=args_type, ret_type=ret_type)
+            scope = {}
+            execWrapper(funcs_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(funcs_str)
+            f_script = cu.func
+            f = scope['func']
 
-        def test_log_int(x):
-            # type: (int) -> float
-            return math.log(x)
+            if vals is None:
+                vals = float_vals if is_float else int_vals
+                vals = [(i, j) for i in vals for j in vals]
 
-        def test_log_float(x):
-            # type: (float) -> float
-            return math.log(x)
+            for a, b in vals:
+                res_python = None
+                res_script = None
+                try:
+                    res_python = f(a, b)
+                except Exception as e:
+                    res_python = e
+                try:
+                    res_script = f_script(a, b)
+                except Exception as e:
+                    res_script = e
+                if debug:
+                    print("in: ", a, b)
+                    print("out: ", res_python, res_script)
+                # We can't use assertEqual because of a couple of differences:
+                # 1. nan == nan should return true
+                # 2. When python functions throw an exception, we usually want to silently ignore them.
+                # (ie: We want to return `nan` for math.sqrt(-5))
+                if res_python != res_script:
+                    if isinstance(res_python, Exception):
+                        continue
 
-        def test_log_base_float(x, y):
-            # type: (float, float) -> float
-            return math.log(x, y)
-
-        def test_log1p_int(x):
-            # type: (int) -> float
-            return math.log1p(x)
-
-        def test_log1p_float(x):
-            # type: (float) -> float
-            return math.log1p(x)
-
-        def test_log10_int(x):
-            # type: (int) -> float
-            return math.log10(x)
-
-        def test_log10_float(x):
-            # type: (float) -> float
-            return math.log10(x)
-
-        def test_exp_int(x):
-            # type: (int) -> float
-            return math.exp(x)
-
-        def test_exp_float(x):
-            # type: (float) -> float
-            return math.exp(x)
-
-        def test_sqrt_int(x):
-            # type: (int) -> float
-            return math.sqrt(x)
-
-        def test_sqrt_float(x):
-            # type: (float) -> float
-            return math.sqrt(x)
-
-        def test_pow_float(x, y):
-            # type: (float, float) -> float
-            return math.pow(x, y)
+                    if type(res_python) == type(res_script):
+                        if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
+                            continue
+                        if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
+                            continue
+                    msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
+                           .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
+                    self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
 
 
-        def test_pow_int(x, y):
-            # type: (float, int) -> float
-            return math.pow(x, y)
+        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc", "expm1", "fabs"]
+        for op in unary_float_ops:
+            checkMathWrap(op)
 
-        def test_isnan(x):
-            # type: (float) -> bool
-            return math.isnan(x)
-
-        def test_asinh_int(x):
-            # type: (int) -> float
-            return math.asinh(x)
-
-        def test_asinh_float(x):
-            # type: (float) -> float
-            return math.asinh(x)
-
-        def test_atanh_int(x):
-            # type: (int) -> float
-            return math.atanh(x)
-
-        def test_atanh_float(x):
-            # type: (float) -> float
-            return math.atanh(x)
-
-        def test_cosh_float(x):
-            # type: (float) -> float
-            return math.cosh(x)
-
-        def test_cosh_int(x):
-            # type: (int) -> float
-            return math.cosh(x)
-
-        def test_sinh_int(x):
-            # type: (int) -> float
-            return math.sinh(x)
-
-        def test_sinh_float(x):
-            # type: (float) -> float
-            return math.sinh(x)
-
-        def test_tanh_int(x):
-            # type: (int) -> float
-            return math.tanh(x)
-
-        def test_tanh_float(x):
-            # type: (float) -> float
-            return math.tanh(x)
-
-        self.checkScript(test_floor, (1.5,))
-        self.checkScript(test_ceil, (1.5,))
-        self.checkScript(test_log_int, (2,))
-        self.checkScript(test_log_float, (2.0,))
-        self.checkScript(test_log1p_int, (1,))
-        self.checkScript(test_log1p_float, (1.0,))
-        self.checkScript(test_log10_int, (2,))
-        self.checkScript(test_log10_float, (2.0,))
-        self.checkScript(test_log_base_float, (2.0, 5.0))
-        self.checkScript(test_exp_int, (2,))
-        self.checkScript(test_exp_float, (2.0,))
-        self.checkScript(test_sqrt_int, (2,))
-        self.checkScript(test_sqrt_float, (2.0,))
-        self.checkScript(test_pow_float, (2.0, 2.0))
-        self.checkScript(test_pow_int, (2.0, 2))
-        self.checkScript(test_atanh_int, (0,))
-        self.checkScript(test_atanh_float, (.2,))
-
-        num_list_int = [-50, -10, -2, 0, 1, 3, 10, 50]
-        num_list_float = [-50.0, -10.0, -2.0, -0.5, 0.0, .5, 1.0, 3.0, 10.0, 50.0]
-        for i in num_list_int:
-            self.checkScript(test_asinh_int, (i,))
-            self.checkScript(test_cosh_int, (i,))
-            self.checkScript(test_sinh_int, (i,))
-            self.checkScript(test_tanh_int, (i,))
-
-        for i in num_list_float:
-            self.checkScript(test_isnan, (i,))
-            self.checkScript(test_asinh_float, (i,))
-            self.checkScript(test_cosh_float, (i,))
-            self.checkScript(test_sinh_float, (i,))
-            self.checkScript(test_tanh_float, (i,))
-
+        checkMathWrap("copysign", 2)
+        checkMath("pow", 2, is_float=False, ret_type="int")
+        checkMath("pow", 2, is_float=True, ret_type="float")
+        if not PY2:
+            checkMathWrap("floor", ret_type="int")
+            checkMathWrap("ceil", ret_type="int")
+            checkMathWrap("gcd", 2, is_float=False, ret_type="int")
 
     @unittest.skipIf(PY2, "Requires python 3")
     def test_math_gcd(self):
@@ -6201,52 +6145,6 @@ a")
         vals = [(i, j) for i in int_vals for j in int_vals]
         for inputs in vals:
             self.checkScript(test_gcd, inputs)
-
-    def test_math_ops1(self):
-        funcs_template = dedent('''
-        def func():
-            return math.{func}({scalar})
-        ''')
-
-        def run_test(code):
-            scope = {}
-            execWrapper(code, globals(), scope)
-            cu = torch.jit.CompilationUnit(code)
-            self.assertEqual(cu.func(), scope['func']())
-
-        special_domain = ['gamma', 'lgamma']
-
-        for func in ['erf', 'erfc', 'expm1', 'fabs', 'gamma', 'lgamma']:
-            for scalar in [1, 10, 0, -1, -1.5, 5.0, 1.5]:
-                if func in special_domain and scalar in [0, -1]:
-                    continue
-                code = funcs_template.format(func=func, scalar=scalar)
-                run_test(code)
-
-    def test_math_copysign(self):
-
-        def func1(x, y):
-            # type: (int, int) -> float
-            return math.copysign(x, y)
-
-        def func2(x, y):
-            # type: (int, float) -> float
-            return math.copysign(x, y)
-
-        def func3(x, y):
-            # type: (float, int) -> float
-            return math.copysign(x, y)
-
-        def func4(x, y):
-            # type: (float, float) -> float
-            return math.copysign(x, y)
-
-        inputs = [(3.3, 5.5), (3.3, -5.5), (-3.3, 5.5), (-3.3, -5.5), (3.3, 0.0), (0.0, 3.3)]
-        for a, b in inputs:
-            self.checkScript(func1, (int(a), int(b)))
-            self.checkScript(func2, (int(a), b))
-            self.checkScript(func3, (a, int(b)))
-            self.checkScript(func4, (a, b))
 
     def test_if_nest_while(self):
         def func(a, b):
