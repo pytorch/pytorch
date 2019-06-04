@@ -3772,6 +3772,14 @@ class _TestTorchMixin(object):
                 a_t, p_t = torch._multinomial_alias_setup(probs)
                 torch._multinomial_alias_draw(p_t.view(2, 2), a_t.view(2, 2))
 
+        # Check how different the alias distribution and the original distribution are
+        n_samples = 20000
+        probs = get_probs(4, True)
+        alias_table, prob_table = torch._multinomial_alias_setup(probs)
+        alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, n_samples)
+        alias_dist = torch.unique(alias_samples, return_counts=True)[1].to(dtype=probs.dtype) / n_samples
+        self.assertTrue(torch.allclose(alias_dist, probs, rtol=0.02, atol=0.0))
+
     def test_multinomial_alias(self):
         self._test_multinomial_alias(self, lambda t: t)
 
