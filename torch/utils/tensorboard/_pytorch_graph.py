@@ -218,7 +218,7 @@ def parse(graph, args=None, omit_useless_nodes=True):
     return nodes_py.to_proto()
 
 
-def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_nodes=True):
+def graph(model, args, verbose=False):
     """
     This method processes a PyTorch model and produces a `GraphDef` proto
     that can be logged to TensorBoard.
@@ -228,12 +228,7 @@ def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_
       args (tuple): input tensor[s] for the model.
       verbose (bool): Whether to print out verbose information while
         processing.
-      operator_export_type (str): One of 'ONNX', 'ONNX_ATEN', or 'RAW'.
-        Defaults to 'ONNX' format  because it outputs the most visually
-        understandable format.
-      omit_useless_nodes (boolean): Whether to remove nodes from the graph.
     """
-    operator_export_type = getattr(OperatorExportTypes, operator_export_type)
 
 
     with torch.onnx.set_training(model, False):  # TODO: move outside of torch.onnx?
@@ -244,7 +239,6 @@ def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_
             print(e)
             print('Error occurs, No graph saved')
             raise e
-
 
     if verbose:
         print(graph)
