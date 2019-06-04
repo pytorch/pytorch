@@ -9,6 +9,7 @@ import torch.optim as optim
 import torch.cuda
 import torch.jit.quantized
 from contextlib import contextmanager
+from collections import namedtuple
 from itertools import product, chain
 import torch.jit.frontend
 from torch.autograd import Variable, Function
@@ -13295,6 +13296,15 @@ a")
 
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
+
+    def test_named_tuple_error(self):
+        _GoogLeNetOutputs = namedtuple('GoogLeNetOuputs', ['logits', 'aux_logits2', 'aux_logits1'])
+
+        with self.assertRaisesRegex(RuntimeError, 'NamedTuple is currently not supported'):
+            @torch.jit.script
+            def foo(x):
+                return _GoogLeNetOutputs(x, x, x)
+
 
     def _test_pickle_checkpoint(self, device):
         with TemporaryFileName() as fname:
