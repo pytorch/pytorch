@@ -518,7 +518,7 @@ void initJITBindings(PyObject* module) {
         // information of this IValue is used both to record the correct type in
         // the trace.
         output_ivalue = toIValue(py_func_output);
-        Value* out_val = jit::tracer::getNestedValueTrace(output_ivalue);
+        Value* out_val = jit::tracer::getValueTrace(output_ivalue);
         body_block->registerOutput(out_val);
         node_output =
             fork_node->output()->setType(FutureType::create(out_val->type()));

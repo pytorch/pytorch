@@ -138,7 +138,7 @@ def MiLSTMCell(x, hx, cx, w_ih, w_hh, alpha, beta_i, beta_h, bias):
 
 
 def canonical(graph):
-    return str(torch._C._jit_pass_canonicalize(graph))
+    return torch._C._jit_pass_canonicalize(graph).str(False)
 
 
 def get_lstm_inputs(device, training=False, seq_length=None):
@@ -332,7 +332,7 @@ class JitTestCase(TestCase):
                 self.assertMultiLineEqual(src, src2)
             except RuntimeError as e:
                 se = str(e)
-                if "could not export python function" not in se and \
+                if "Could not export Python function" not in se and \
                    "closures are not exportable" not in se:
                     raise
 
@@ -358,7 +358,6 @@ class JitTestCase(TestCase):
                 # save the module to a buffer
                 buffer = io.BytesIO()
                 torch.jit.save(module, buffer)
-
                 # copy the data in the buffer so we can restore it later. This
                 # is because py2 and py3 have different semantics with zipfile
                 # and it's easier to just work with a fresh copy each time.
@@ -366,13 +365,15 @@ class JitTestCase(TestCase):
 
                 # crack open the zip format to get at the main module code
                 archive = zipfile.ZipFile(buffer)
+                # check that we have no duplicate names
+                self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
                 main_module = archive.open('archive/code/archive.py')
                 main_module_code = ""
                 for line in main_module:
                     main_module_code += line.decode()
             except RuntimeError as e:
                 se = str(e)
-                if "could not export python function" not in se and \
+                if "Could not export Python function" not in se and \
                    "closures are not exportable" not in se:
                     raise
                 else:
@@ -2305,15 +2306,34 @@ graph(%Ra, %Rb):
         a = torch.randn(5)
         b = torch.randn(5)
 
-        expected = func1((a, b))
-        traced = torch.jit.trace(func1, ((a, b),))
-        result = traced((a, b))
-        self.assertEqual(expected, result)
+        self.checkTrace(func1, ((a, b),))
+        self.checkTrace(func2, ((a, b),))
 
-        expected = func2((a, b))
-        traced = torch.jit.trace(func2, ((a, b),))
-        result = traced((a, b))
-        self.assertEqual(expected, result)
+        @torch.jit.script
+        def func3(x, method='bilinear', align_corners=True):
+            # type: (Tensor, str, bool) -> Tensor
+            hw = x.shape[2:4]
+            return F.interpolate(x, hw, mode=method, align_corners=align_corners)
+
+        inp = torch.rand(1, 3, 6, 6)
+        self.checkTrace(func3, (inp,))
+
+        @torch.jit.script
+        def func4(x, a):
+            # type: (Tensor, List[str]) -> Tensor
+            if len(a) == 2:
+                return x + 2
+            else:
+                return x
+
+        def invalid_constant_baking(x):
+            a = ["hello", "world"]
+            return func4(x, a)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Tracer cannot get value trace for type"):
+            self.checkTrace(invalid_constant_baking, (inp,))
+
 
     def test_einsum(self):
         def outer(x, y):
@@ -2765,8 +2785,8 @@ graph(%Ra, %Rb):
                 return torch.matmul(x, w).detach()
 
         f = io.BytesIO()
-        self.assertExpected(torch.onnx.export_to_pretty_string(
-            Mod(), (torch.rand(3, 4), torch.rand(4, 5)), f))
+        torch.onnx.export_to_pretty_string(
+            Mod(), (torch.rand(3, 4), torch.rand(4, 5)), f)
 
     def test_trace_slice_full_dim(self):
         def foo(x):
@@ -2962,8 +2982,8 @@ graph(%Ra, %Rb):
         example_outputs = traced(torch.rand([2]))
 
         f = io.BytesIO()
-        self.assertExpected(torch.onnx._export_to_pretty_string(traced, (torch.rand([2]),), f,
-                                                                example_outputs=example_outputs))
+        torch.onnx._export_to_pretty_string(traced, (torch.rand([2]),), f,
+                                            example_outputs=example_outputs)
 
     def test_pretty_printer(self):
         @torch.jit.script
@@ -3679,6 +3699,68 @@ def foo(x):
         def foo():
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
+
+    def test_file_line_error(self):
+        def foobar(xyz):
+            return torch.blargh(xyz)
+
+        _, lineno = inspect.getsourcelines(foobar)
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:20".format(lineno + 1)):
+            scripted = torch.jit.script(foobar)
+
+    def test_file_line_error_class_defn(self):
+        class FooBar(object):
+            def baz(self, xyz):
+                return torch.blargh(xyz)
+
+        _, lineno = inspect.getsourcelines(FooBar)
+        with self.assertRaisesRegex(RuntimeError, "test_jit.py:{}:24".format(lineno + 2)):
+            torch.jit.script(FooBar)
+
+    def test_file_line_graph(self):
+        def foobar(xyz):
+            return torch.neg(xyz)
+
+        scripted = torch.jit.script(foobar)
+
+        _, lineno = inspect.getsourcelines(foobar)
+        FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))\
+                   .run(scripted.graph)
+
+    def test_file_line_save_load(self):
+        class Scripted(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, xyz):
+                return torch.neg(xyz)
+
+        scripted = Scripted()
+
+        # NB: not using getExportImportCopy because that takes a different
+        # code path that calls CompilationUnit._import rather than
+        # going through the full save/load pathway
+        buffer = scripted.save_to_buffer()
+        bytesio = io.BytesIO(buffer)
+        scripted = torch.jit.load(bytesio)
+
+        FileCheck().check('code/archive.py:4:10').run(scripted.graph)
+
+    def test_file_line_string(self):
+        scripted = torch.jit.CompilationUnit('''
+def foo(xyz):
+    return torch.neg(xyz)
+        ''')
+
+        FileCheck().check('<string>:2:12').run(scripted.foo.graph)
+
+    def test_file_line_trace(self):
+        def foobar(xyz):
+            return torch.neg(xyz)
+
+        scripted = torch.jit.trace(foobar, (torch.rand(3, 4)))
+
+        _, lineno = inspect.getsourcelines(foobar)
+        FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))\
+                   .run(scripted.graph)
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -5498,6 +5580,8 @@ a")
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
 
+
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_string_print(self):
         def func(a):
             print(a, "a" 'b' '''c''' """d""", 2, 1.5)
@@ -5542,6 +5626,19 @@ a")
 
         inputs = self._make_scalar_vars([10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
+
+    def test_fibb_totally_better(self):
+        def fib(x):
+            # type: (int) -> int
+            prev = 1
+            v = 1
+            for i in range(0, x):
+                save = v
+                v = v + prev
+                prev = save
+            return v
+
+        self.checkScript(fib, (10,))
 
     def test_if(self):
         def func(a, b):
@@ -6037,7 +6134,6 @@ a")
             checkMathWrap("ceil", ret_type="int")
             checkMathWrap("gcd", 2, is_float=False, ret_type="int")
 
-
     @unittest.skipIf(PY2, "Requires python 3")
     def test_math_gcd(self):
         def test_gcd(x, y):
@@ -6227,6 +6323,7 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
+    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -8493,6 +8590,22 @@ a")
                 print(c0)
             return 1
 
+    def test_if_not_defined_error(self):
+        with self.assertRaisesRegex(RuntimeError, "c0 is not defined in the false branch"):
+            @torch.jit.script
+            def test():
+                if True:
+                    c0 = 1
+                return c0
+        with self.assertRaisesRegex(RuntimeError, "c0 is not defined in the true branch"):
+            @torch.jit.script
+            def test2():
+                if True:
+                    pass
+                else:
+                    c0 = 1
+                return c0
+
     def test_if_list_cat(self):
         # testing that different length lists don't throw error on cat in shape prop
         @torch.jit.script
@@ -8703,8 +8816,8 @@ a")
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"Expected a value of type Tensor for argument"
-                                                      r" '0' but found Tuple\[Tensor,"):
+            with self.assertRaisesRegex(RuntimeError, r"expected a value of type 'Tensor' for argument"
+                                                      r" '0' but instead found type 'Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
                     x, y = fn((x, x), x, x)
@@ -9165,9 +9278,9 @@ a")
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
-            example_outputs=outputs))
+            example_outputs=outputs)
 
     def test_interpolate_trace(self):
         class test(nn.Module):
@@ -9264,9 +9377,9 @@ a")
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
-            example_outputs=outputs))
+            example_outputs=outputs)
 
     def test_onnx_export_script_inline_script(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -9289,9 +9402,9 @@ a")
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
-            example_outputs=outputs))
+            example_outputs=outputs)
 
     def test_onnx_export_script_module_loop(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -9309,9 +9422,9 @@ a")
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
-            example_outputs=outputs))
+            example_outputs=outputs)
 
     def test_onnx_export_script_truediv(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -9325,9 +9438,9 @@ a")
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
-            example_outputs=outputs))
+            example_outputs=outputs)
 
     def test_onnx_raw_export_script_truediv(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -9341,9 +9454,9 @@ a")
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
-            example_outputs=outputs, export_raw_ir=True))
+            example_outputs=outputs, export_raw_ir=True)
 
     def test_onnx_export_script_non_alpha_add_sub(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -9357,9 +9470,9 @@ a")
 
         mte = ModuleToExport()
         outputs = torch.LongTensor([mte(torch.rand(3, 4))])
-        self.assertExpected(torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             mte, (torch.rand(3, 4),), None, verbose=False,
-            example_outputs=outputs))
+            example_outputs=outputs)
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -9374,9 +9487,9 @@ a")
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3, dtype=torch.long))
-        self.assertExpected(torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
-            example_outputs=outputs))
+            example_outputs=outputs)
 
     def test_onnx_export_script_inline_params(self):
         class ModuleToInline(torch.jit.ScriptModule):
@@ -9404,9 +9517,9 @@ a")
         result = mte(torch.zeros(2, 3))
         reference = torch.mm(torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4))
         self.assertEqual(result, reference)
-        self.assertExpected(torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             mte, (torch.ones(2, 3),), None, verbose=False,
-            example_outputs=result, propagate=True))
+            example_outputs=result, propagate=True)
 
     def test_trace_with_size(self):
         @_trace(torch.zeros(1, 1))
@@ -9544,16 +9657,14 @@ a")
         f2 = Foo(linear)
         outputs_f2 = f2(torch.ones(1, 10, dtype=torch.float))
 
-        onnx_ish = torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             f1,
             (torch.ones(1, 10, dtype=torch.float), ),
             None, verbose=False, example_outputs=outputs_f1)
-        self.assertExpected(onnx_ish, subname='f1')
-        onnx_ish = torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             f2,
             (torch.ones(1, 10, dtype=torch.float), ),
             None, verbose=False, example_outputs=outputs_f2)
-        self.assertExpected(onnx_ish, subname='f2')
 
     def test_onnx_export_shape_reshape(self):
         class Foo(torch.nn.Module):
@@ -9567,9 +9678,8 @@ a")
         foo = torch.jit.trace(Foo(), torch.zeros(1, 2, 3))
         outputs = foo(torch.zeros(1, 2, 3))
         f = io.BytesIO()
-        s = torch.onnx.export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
-                                               example_outputs=outputs)
-        self.assertExpected(s)
+        torch.onnx.export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
+                                           example_outputs=outputs)
 
     def test_shape_analysis_loop(self):
         def foo(a, b, x):
@@ -9637,12 +9747,12 @@ a")
             def f3(a):
                 torch.sum(dim=4)
 
-        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but found Tensor'):
+        with self.assertRaisesRegex(RuntimeError, 'for argument \'tensors\' but instead found type \'Tensor'):
             @torch.jit.script
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but found List\[int\]'):
+        with self.assertRaisesRegex(RuntimeError, r'argument \'tensors\' but instead found type \'List\[int\]'):
             @torch.jit.script
             def f5(a):
                 torch.cat([3])
@@ -9652,7 +9762,7 @@ a")
             def f6(a):
                 a.expand(size=[3, [4]])
 
-        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type Tensor for argument \'self\''):
+        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type \'Tensor\' for argument \'self\''):
             @torch.jit.script
             def f7(a):
                 torch.sum([4])
@@ -11253,9 +11363,9 @@ a")
 
         import io
         f = io.BytesIO()
-        self.assertExpected(torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             FooMod(), (torch.rand(3, 4),), f,
-            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK))
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_trace_checker_arange_as_constant(self):
         with self.assertRaisesRegex(torch.jit.TracingCheckError, r'Graphs differed across invocations!'):
@@ -11406,9 +11516,8 @@ a")
         example_outs = mod(input)
 
         f = io.BytesIO()
-        exported = torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             DynamicSliceExportMod(), (input,), f, example_outputs=example_outs)
-        self.assertExpected(exported)
 
     def test_string_frontend_elif(self):
         code = '''
@@ -11497,7 +11606,7 @@ a")
             raise 3 + 4
 
         # no control flow analysis yet
-        with self.assertRaisesRegex(RuntimeError, "undefined value a"):
+        with self.assertRaisesRegex(RuntimeError, "a is not defined in the false"):
             @torch.jit.script
             def foo():
                 if True:
@@ -11891,6 +12000,8 @@ a")
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
+    @unittest.skipIf(hasattr(torch.jit, 'WeakScriptModuleProxy'), "# TODO: re-enable"
+                                                                  "this when WeakScriptModuleProxy has been deleted")
     def test_weak_module_isinstance(self):
         tester = self
 
@@ -12504,7 +12615,7 @@ a")
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__()
-                self.rnn = nn.LSTM(2, 3, 2)
+                self.rnn = nn.LSTM(2, 3, 2, dropout=0)
 
             @torch.jit.script_method
             def forward(self, x, lengths, h0, c0):
@@ -12513,7 +12624,7 @@ a")
         class Eager(torch.nn.Module):
             def __init__(self):
                 super(Eager, self).__init__()
-                self.rnn = nn.LSTM(2, 3, 2)
+                self.rnn = nn.LSTM(2, 3, 2, dropout=0)
 
             def forward(self, x, lengths, h0, c0):
                 return self.rnn(x, (h0, c0))[0]
@@ -12657,6 +12768,24 @@ a")
 
         self.checkScript(fn, ([torch.ones(2) + 2, torch.ones(2)],))
 
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_weak_cuda(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.lstm = torch.nn.LSTM(5, 5)
+                self.lstm.cuda()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.lstm(x)
+
+        m = M()
+        m.cuda()
+        out = m(torch.ones(5, 5, 5).cuda())
+        self.assertTrue(out[0].is_cuda)
+
+
     def test_ignore_decorator(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -12669,7 +12798,7 @@ a")
                 self.ignored_code(x)
                 return x
 
-            @torch.jit.ignore
+            @torch.jit.ignore(drop_on_export=True)
             def ignored_code(self, x):
                 self.some_state = torch.tensor((100,))
 
@@ -12950,6 +13079,71 @@ a")
         t = torch.ones(2, 2)
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
 
+    def test_module_recursive(self):
+        class Other(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self, x):
+                super(Other, self).__init__()
+                self.x = x
+                self.param = torch.nn.Parameter(torch.ones(2, 2))
+
+            def some_unscriptable_method(self):
+                a = 2
+                a = [2]
+                return a
+
+            def forward(self, t):
+                return t + self.x + self.param
+
+
+        class M(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.other = Other(200)
+
+            def forward(self, t):
+                return self.other(t) * 2
+
+        with torch.jit._enable_recursive_script():
+            sm = torch.jit.script(M())
+
+        self.assertExportImportModule(sm, (torch.ones(2, 2),))
+
+    def test_module_function_export(self):
+        class Other(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self, x):
+                super(Other, self).__init__()
+                self.x = x
+                self.param = torch.nn.Parameter(torch.ones(2, 2))
+
+            @torch.jit.export
+            def some_entry_point(self, y):
+                return y + 20
+
+            def forward(self, t):
+                return t + self.x + self.param
+
+
+        class M(torch.nn.Module):
+            __constants__ = ['x']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.other = Other(200)
+
+            def forward(self, t):
+                return self.other(t) * 2
+
+        with torch.jit._enable_recursive_script():
+            sm = torch.jit.script(M())
+
+        self.assertExportImportModule(sm, (torch.ones(2, 2),))
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_old_models_bc(self):
         model = {
@@ -13198,6 +13392,18 @@ a")
             @torch.jit.script
             def fn():
                 return random.randint()
+
+    def test_inferred_error_msg(self):
+        """
+        Test that when we get a type mismatch on a function where we inferred
+        the type to be tensor, a good error message is given.
+        """
+        @torch.jit.script
+        def foo(a):
+            return a
+
+        with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
+            foo(1)
 
 
 class MnistNet(nn.Module):
@@ -13783,10 +13989,9 @@ class TestPytorchExportModes(JitTestCase):
         x = torch.rand(3, 4)
         y = torch.rand(3, 4)
         f = io.BytesIO()
-        exported = torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             ModelWithAtenNotONNXOp(), (x, y), f,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        self.assertExpected(exported)
 
     # torch.fmod is using to test ONNX_ATEN.
     # If you plan to remove fmod from aten, or found this test failed.
@@ -13799,10 +14004,9 @@ class TestPytorchExportModes(JitTestCase):
         f = io.BytesIO()
         x = torch.randn(3, 4, dtype=torch.float32)
         y = torch.randn(3, 4, dtype=torch.float32)
-        exported = torch.onnx.export_to_pretty_string(
+        torch.onnx.export_to_pretty_string(
             ModelWithAtenFmod(), (x, y), f,
             operator_export_type=OperatorExportTypes.ONNX_ATEN)
-        self.assertExpected(exported)
 
 
 # known to be failing in tracer
@@ -15538,7 +15742,7 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_type_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value of type bool"):
+        with self.assertRaisesRegex(RuntimeError, "expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
             class FooTest(object):
                 def __init__(self, x):
@@ -15610,6 +15814,39 @@ class TestClassType(JitTestCase):
             def forward(self, a):
                 foo = FooTest(a)
                 return foo.get_x()
+
+        m = MyMod()
+
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+
+        # classes are globally registered for now, so we need to clear the JIT
+        # registry to simulate loading a new model
+        torch._C._jit_clear_class_registry()
+
+        buffer.seek(0)
+        m_loaded = torch.jit.load(buffer)
+
+        input = torch.rand(2, 3)
+        output = m_loaded(input)
+        self.assertEqual(input, output)
+
+    def test_save_load_with_classes_returned(self):
+        @torch.jit.script
+        class FooTest(object):
+            def __init__(self, x):
+                self.x = x
+
+            def clone(self):
+                clone = FooTest(self.x)
+                return clone
+
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                foo = FooTest(a)
+                foo_clone = foo.clone()
+                return foo_clone.x
 
         m = MyMod()
 
@@ -15754,7 +15991,7 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(test_list_no_reverse(), 1)
 
-        with self.assertRaisesRegex(RuntimeError, "bool for argument \'reverse"):
+        with self.assertRaisesRegex(RuntimeError, "bool\' for argument \'reverse"):
             @torch.jit.script
             def test():
                 li = [Foo(1)]
@@ -15944,7 +16181,7 @@ class TestClassType(JitTestCase):
                      _or, _xor]:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegex(RuntimeError, "because it does not  define a __add__"):
+        with self.assertRaisesRegex(RuntimeError, "__add__ method"):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
@@ -16142,3 +16379,7 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
+    if not PY2:
+        import test_jit_py3
+        suite = unittest.findTestCases(test_jit_py3)
+        unittest.TextTestRunner().run(suite)

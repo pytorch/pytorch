@@ -103,6 +103,17 @@
 #define THPByteUtils_checkReal(object)        THPUtils_checkReal_INT(object)
 #define THPByteUtils_unpackReal(object)       (unsigned char)THPUtils_unpackReal_INT(object)
 #define THPByteUtils_newReal(value)           THPUtils_newReal_INT(value)
+// quantized types
+#define THPQUInt8Utils_checkReal(object)         THPUtils_checkReal_INT(object)
+#define THPQUInt8Utils_unpackReal(object)        (int)THPUtils_unpackReal_INT(object)
+#define THPQUInt8Utils_newReal(value)           THPUtils_newReal_INT(value)
+#define THPQInt8Utils_checkReal(object)         THPUtils_checkReal_INT(object)
+#define THPQInt8Utils_unpackReal(object)        (int)THPUtils_unpackReal_INT(object)
+#define THPQInt8Utils_newReal(value)           THPUtils_newReal_INT(value)
+#define THPQInt32Utils_checkReal(object)         THPUtils_checkReal_INT(object)
+#define THPQInt32Utils_unpackReal(object)        (int)THPUtils_unpackReal_INT(object)
+#define THPQInt32Utils_newReal(value)           THPUtils_newReal_INT(value)
+
 
 #define THPUtils_assert(cond, ...) THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
 #define THPUtils_assertRet(value, cond, ...)                                   \
@@ -140,6 +151,9 @@ struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateBoolType.h>
+
+#include <torch/csrc/generic/utils.h>
+#include <TH/THGenerateQTypes.h>
 
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
