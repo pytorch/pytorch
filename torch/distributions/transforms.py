@@ -364,6 +364,8 @@ class SigmoidTransform(Transform):
         return _clipped_sigmoid(x)
 
     def _inverse(self, y):
+        finfo = torch.finfo(y.dtype)
+        y = y.clamp(min=finfo.tiny, max=1. - finfo.eps)
         return y.log() - (-y).log1p()
 
     def log_abs_det_jacobian(self, x, y):
@@ -502,7 +504,7 @@ class StickBreakingTransform(Transform):
         return isinstance(other, StickBreakingTransform)
 
     def _call(self, x):
-        offset = x.shape[-1] - torch.arange(x.shape[-1], dtype=x.dtype, device=x.device)
+        offset = x.shape[-1] + 1 - x.new_ones(x.shape[-1]).cumsum(-1)
         z = _clipped_sigmoid(x - offset.log())
         z_cumprod = (1 - z).cumprod(-1)
         y = pad(z, (0, 1), value=1) * pad(z_cumprod, (1, 0), value=1)
@@ -510,7 +512,7 @@ class StickBreakingTransform(Transform):
 
     def _inverse(self, y):
         y_crop = y[..., :-1]
-        offset = y_crop.shape[-1] - torch.arange(y_crop.shape[-1], dtype=y.dtype, device=y.device)
+        offset = y.shape[-1] - y.new_ones(y_crop.shape[-1]).cumsum(-1)
         sf = 1 - y_crop.cumsum(-1)
         # we clamp to make sure that sf is positive which sometimes does not
         # happen when y[-1] ~ 0 or y[:-1].sum() ~ 1
@@ -519,7 +521,7 @@ class StickBreakingTransform(Transform):
         return x
 
     def log_abs_det_jacobian(self, x, y):
-        offset = x.shape[-1] - torch.arange(x.shape[-1], dtype=x.dtype, device=x.device)
+        offset = x.shape[-1] + 1 - x.new_ones(x.shape[-1]).cumsum(-1)
         x = x - offset.log()
         z = torch.sigmoid(x)
         z = torch.clamp(z, min=torch.finfo(x.dtype).tiny)
