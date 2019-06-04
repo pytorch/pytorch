@@ -163,11 +163,6 @@ file_manager = FileManager()
 cuda_file_manager = FileManager()
 
 generators = {
-    'CPUGenerator.h': {
-        'name': 'CPU',
-        'th_generator': 'THGenerator * generator;',
-        'header': 'TH/TH.h',
-    },
     'CUDAGenerator.h': {
         'name': 'CUDA',
         'th_generator': '',

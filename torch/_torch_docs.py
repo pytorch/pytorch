@@ -6571,3 +6571,122 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
 `1` appears `n2` times, `2` appears `n3` times, etc.
 """)
+
+
+add_docstr(torch._C.Generator,
+           r"""
+Generator(device='cpu') -> Generator
+
+Creates and returns a generator object which manages the state of the algorithm that
+produces pseudo random numbers. Used as a keyword argument in many :ref:`inplace-random-sampling`
+functions. Currently only creation of CPU Generator is supported through
+this API.
+
+Arguments:
+    device (:class:`torch.device`, optional): the desired device for the generator.
+
+Returns:
+    Generator: An torch.Generator object.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+""")
+
+
+add_docstr(torch._C.Generator.set_state,
+           r"""
+Generator.set_state(new_state) -> void
+
+Sets the Generator state.
+
+Arguments:
+    new_state (torch.ByteTensor): The desired state.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu_other = torch.Generator()
+    >>> g_cpu.set_state(g_cpu_other.get_state())
+""")
+
+
+add_docstr(torch._C.Generator.get_state,
+           r"""
+Generator.get_state() -> Tensor
+
+Returns the Generator state as a ``torch.ByteTensor``.
+
+Returns:
+    Tensor: A ``torch.ByteTensor`` which contains all the necessary bits
+    to restore a Generator to a specific point in time.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.get_state()
+""")
+
+
+add_docstr(torch._C.Generator.manual_seed,
+           r"""
+Generator.manual_seed(seed) -> Generator
+
+Sets the seed for generating random numbers. Returns a `torch.Generator` object.
+It is recommended to set a large seed, i.e. a number that has a good balance of 0
+and 1 bits. Avoid having many 0 bits in the seed.
+
+Arguments:
+    seed (int): The desired seed.
+
+Returns:
+    Generator: An torch.Generator object.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.manual_seed(2147483647)
+""")
+
+
+add_docstr(torch._C.Generator.initial_seed,
+           r"""
+Generator.initial_seed() -> int
+
+Returns the initial seed for generating random numbers.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.initial_seed()
+    2147483647
+""")
+
+
+add_docstr(torch._C.Generator.seed,
+           r"""
+Generator.seed() -> int
+
+Gets a non-deterministic random number from std::random_device or the current
+time and uses it to seed a Generator.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.seed()
+    1516516984916
+""")
+
+
+add_docstr(torch._C.Generator.device,
+           r"""
+Generator.device -> device
+
+Gets the current device of the generator.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.device
+    device(type='cpu')
+""")

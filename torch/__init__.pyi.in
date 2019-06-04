@@ -16,7 +16,7 @@ import builtins
 # 'from ... import ... as ...' syntax to cause an identifier to be
 # exposed (or use a wildcard); regular syntax is not exposed.
 from .random import set_rng_state as set_rng_state, get_rng_state as get_rng_state, \
-    manual_seed as manual_seed, initial_seed as initial_seed
+    manual_seed as manual_seed, initial_seed as initial_seed, seed as seed
 from ._tensor_str import set_printoptions as set_printoptions
 from .functional import *
 from .serialization import save as save, load as load
@@ -46,8 +46,6 @@ class device:
     @overload
     def __init__(self, type: str, index: _int) -> None: ...
 
-class Generator: ...
-
 class Size(tuple): ...
 
 class Storage: ...
@@ -60,6 +58,15 @@ _size = Union[Size, List[_int], Tuple[_int, ...]]
 
 # Meta-type for "numeric" things; matches our docs
 Number = Union[builtins.int, builtins.float]
+
+class Generator:
+    device: _device = ...
+
+    @overload
+    def __init__(self, device: Optional[_device]=None) -> None: ...
+
+    @overload
+    def __init__(self, device: Union[_int, str]) -> None: ...
 
 # TODO: One downside of doing it this way, is direct use of
 # torch.tensor.Tensor doesn't get type annotations.  Nobody

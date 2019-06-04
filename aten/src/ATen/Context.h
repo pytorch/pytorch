@@ -8,6 +8,7 @@
 #include <ATen/LegacyTHDispatcher.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
+#include <ATen/CPUGenerator.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -56,15 +57,7 @@ class CAFFE2_API Context {
     globalLegacyTHDispatch().registerDispatcher(b, s,
       LegacyTHDispatch::LegacyTHDispatcherUniquePtr{t, LegacyTHDispatcherDeleter([](LegacyTHDispatcher* p) { delete p; }) });
   }
-
-  Generator & defaultGenerator(DeviceType device_type) {
-    initCUDAIfNeeded(device_type);
-    initHIPIfNeeded(device_type);
-    auto & generator = generator_registry[static_cast<int>(device_type)];
-    if(!generator)
-      AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
-    return *generator;
-  }
+  
   bool hasOpenMP() const;
   bool hasMKL() const;
   bool hasLAPACK() const;
@@ -252,11 +245,19 @@ static inline bool hasMKLDNN() {
 }
 
 static inline void manual_seed(uint64_t seed) {
-  globalContext().defaultGenerator(DeviceType::CPU).manualSeed(seed);
+  auto gen = detail::getDefaultCPUGenerator();
+  {
+    // See Note [Thread-safety and Generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    gen->set_current_seed(seed);
+  }
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
   if (hasCUDA() && detail::getCUDAHooks().getNumGPUs() > 0) {
-    globalContext().defaultGenerator(DeviceType::CUDA).manualSeedAll(seed);
+    globalContext().lazyInitCUDA();
+    auto& generator = globalContext().generator_registry[static_cast<int>(DeviceType::CUDA)];
+    TORCH_CHECK(generator);
+    generator->manualSeedAll(seed);
   }
 }
 

@@ -18,7 +18,7 @@ from ._six import string_classes as _string_classes
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
-    'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed',
+    'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
@@ -175,7 +175,7 @@ def set_default_dtype(d):
     _C._set_default_dtype(d)
 
 # If you edit these imports, please update torch/__init__.py.in as well
-from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
+from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
 from ._tensor_str import set_printoptions
 

@@ -23,9 +23,6 @@ Storage UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeTensorFromTH not defined for UndefinedType");
 }
-std::unique_ptr<Generator> UndefinedType::generator() const {
-  AT_ERROR("generator not defined for UndefinedType");
-}
 
 const char * UndefinedType::toString() const {
   return "UndefinedType";

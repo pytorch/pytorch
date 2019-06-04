@@ -2,13 +2,16 @@
 
 #include <structmember.h>
 #include <ATen/ATen.h>
+#include <ATen/CPUGenerator.h>
 
 #include <TH/TH.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/tensor_types.h>
+#include "torch/csrc/utils/python_arg_parser.h"
 #include <torch/csrc/autograd/generated/variable_factories.h>
 
 using namespace at;
@@ -16,26 +19,14 @@ using namespace torch;
 
 PyObject *THPGeneratorClass = nullptr;
 
-PyObject * THPGenerator_New()
-{
-  PyObject *args = PyTuple_New(0);
-  if (!args) {
-    PyErr_SetString(PyExc_RuntimeError, "Could not create a new generator object - "
-        "failed to allocate argument tuple");
-    return nullptr;
-  }
-  PyObject *result = PyObject_Call((PyObject*)THPGeneratorClass, args, nullptr);
-  Py_DECREF(args);
-  return result;
-}
-
-PyObject * THPGenerator_NewWithGenerator(at::Generator& cdata)
+PyObject * THPGenerator_initDefaultGenerator(at::Generator* cdata)
 {
   auto type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
-  self_->cdata = &cdata;
+  self_->cdata = cdata;
+  self_->owner = false;
   return self.release();
 }
 
@@ -50,16 +41,21 @@ static void THPGenerator_dealloc(THPGenerator* self)
 static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  if ((args && PyTuple_Size(args) != 0) || kwargs) {
-    THPUtils_setError("torch.Generator constructor doesn't accept any arguments");
-    return nullptr;
+  static torch::PythonArgParser parser({
+    "Generator(Device device=None)"
+  });
+  torch::ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
+
+  if (device.type() == at::kCPU) {
+    THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
+    self->cdata = new CPUGenerator();
+    self->owner = true;
+    return (PyObject*)self.release();
+  } else {
+    throw TypeError("We currently don't have cuda support for torch.Generator() api.");
   }
-  THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
-  // having to pick a specific type rather than just a backend here is strange,
-  // but we don't really have fully fledged backend objects.
-  self->cdata = at::CPU(at::kFloat).generator().release();
-  self->owner = true;
-  return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
 }
 
@@ -67,9 +63,8 @@ static PyObject * THPGenerator_getState(THPGenerator *self)
 {
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
-  THGenerator *generator = THPGenerator_TH_CData(self);
   Variable var = torch::empty({0}, at::device(at::kCPU).dtype(at::kByte));
-  THByteTensor_getRNGState(generator, (THByteTensor*)(var.unsafeGetTensorImpl()));
+  THByteTensor_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
   return THPVariable_Wrap(std::move(var));
   END_HANDLE_TH_ERRORS
 }
@@ -86,8 +81,7 @@ static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state
     auto type_name = torch::utils::type_to_string(tensor.dispatch_type(), tensor.scalar_type());
     throw TypeError("expected a torch.ByteTensor, but got %s", type_name.c_str());
   }
-  THGenerator *generator = THPGenerator_TH_CData(self);
-  THByteTensor_setRNGState(generator, (THByteTensor*)tensor.unsafeGetTensorImpl());
+  THByteTensor_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -99,7 +93,9 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
   auto generator = self->cdata;
   THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected a long, "
           "but got %s", THPUtils_typename(seed));
-  generator->manualSeed(THPUtils_unpackLong(seed));
+  // See Note [Thread-safety and Generators]
+  std::lock_guard<std::mutex> lock(generator->mutex_);
+  generator->set_current_seed(THPUtils_unpackLong(seed));
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -108,16 +104,31 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
 static PyObject * THPGenerator_seed(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
-  return THPUtils_packUInt64(self->cdata->seed());
+  uint64_t seed_val = at::detail::getNonDeterministicRandom();
+  // See Note [Thread-safety and Generators]
+  std::lock_guard<std::mutex> lock(self->cdata->mutex_);
+  self->cdata->set_current_seed(seed_val);
+  return THPUtils_packUInt64(seed_val);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPGenerator_initialSeed(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
-  return THPUtils_packUInt64(self->cdata->initialSeed());
+  return THPUtils_packUInt64(self->cdata->current_seed());
   END_HANDLE_TH_ERRORS
 }
+
+static PyObject * THPGenerator_get_device(THPGenerator *self) {
+  HANDLE_TH_ERRORS
+  return THPDevice_New(self->cdata->device());
+  END_HANDLE_TH_ERRORS
+}
+
+static struct PyGetSetDef THPGenerator_properties[] = {
+  {"device", (getter)THPGenerator_get_device, nullptr, nullptr, nullptr},
+  {nullptr}
+};
 
 static PyMethodDef THPGenerator_methods[] = {
   {"get_state",       (PyCFunction)THPGenerator_getState,       METH_NOARGS,  nullptr},
@@ -135,10 +146,10 @@ static struct PyMemberDef THPGenerator_members[] = {
 
 PyTypeObject THPGeneratorType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C.Generator",                  /* tp_name */
-  sizeof(THPGenerator),                  /* tp_basicsize */
-  0,                                     /* tp_itemsize */
-  (destructor)THPGenerator_dealloc,      /* tp_dealloc */
+  "torch._C.Generator",                   /* tp_name */
+  sizeof(THPGenerator),                        /* tp_basicsize */
+  0,                                           /* tp_itemsize */
+  (destructor)THPGenerator_dealloc,            /* tp_dealloc */
   nullptr,                                     /* tp_print */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
@@ -153,25 +164,25 @@ PyTypeObject THPGeneratorType = {
   nullptr,                                     /* tp_getattro */
   nullptr,                                     /* tp_setattro */
   nullptr,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  nullptr,                                  /* tp_doc */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,    /* tp_flags */
+  nullptr,                                     /* tp_doc */
   nullptr,                                     /* tp_traverse */
   nullptr,                                     /* tp_clear */
   nullptr,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
+  0,                                           /* tp_weaklistoffset */
   nullptr,                                     /* tp_iter */
   nullptr,                                     /* tp_iternext */
-  THPGenerator_methods,                  /* tp_methods */
-  THPGenerator_members,                  /* tp_members */
-  nullptr,                                     /* tp_getset */
+  THPGenerator_methods,                        /* tp_methods */
+  THPGenerator_members,                        /* tp_members */
+  THPGenerator_properties,                     /* tp_getset */
   nullptr,                                     /* tp_base */
   nullptr,                                     /* tp_dict */
   nullptr,                                     /* tp_descr_get */
   nullptr,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
+  0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPGenerator_pynew,                    /* tp_new */
+  THPGenerator_pynew,                          /* tp_new */
 };
 
 bool THPGenerator_init(PyObject *module)

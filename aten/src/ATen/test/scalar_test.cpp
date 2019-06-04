@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <iostream>
+#include <random>
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
 #define _USE_MATH_DEFINES
@@ -58,8 +59,12 @@ TEST(TestScalar, TestScalar) {
   Scalar h2 = h;
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " "
        << bar.toDouble() << " " << what.isIntegral() << "\n";
-  Generator& gen = at::globalContext().defaultGenerator(at::kCPU);
-  ASSERT_NO_THROW(gen.seed());
+  auto gen = at::detail::getDefaultCPUGenerator();
+  {
+    // See Note [Thread-safety and Generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    ASSERT_NO_THROW(gen->set_current_seed(std::random_device()()));
+  }
   auto&& C = at::globalContext();
   if (at::hasCUDA()) {
     auto t2 = zeros({4, 4}, at::kCUDA);

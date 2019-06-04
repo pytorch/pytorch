@@ -3,7 +3,7 @@
 // ${generated_comment}
 
 #include <ATen/ATen.h>
-#include <ATen/CheckGenerator.h>
+#include <ATen/Utils.h>
 #include <ATen/${Generator}.h>
 #include <ATen/ExpandUtils.h>
 ${th_headers}

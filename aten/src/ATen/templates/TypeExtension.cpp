@@ -18,10 +18,6 @@ Device ${Type}::getDeviceFromPtr(void * data) const {
   return DeviceType::${DeviceType};
 }
 
-std::unique_ptr<Generator> ${Type}::generator() const {
-  AT_ERROR("generator is not implemented for ${Type}");
-}
-
 Backend ${Type}::backend() const {
   return Backend::${Backend};
 }

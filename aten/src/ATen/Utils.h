@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ATenGeneral.h>
+#include <ATen/core/Generator.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 
@@ -13,6 +14,7 @@
 #include <sstream>
 #include <typeinfo>
 #include <numeric>
+#include <memory>
 
 #if defined(__clang__)
 #define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
@@ -125,6 +127,35 @@ inline int64_t sum_intlist(ArrayRef<int64_t> list) {
 
 inline int64_t prod_intlist(ArrayRef<int64_t> list) {
   return std::accumulate(list.begin(), list.end(), 1ll, std::multiplies<int64_t>());
+}
+
+/**
+ * Utility function used in tensor implementations, which
+ * supplies the default generator to tensors, if an input generator
+ * is not supplied. The input Generator* is also static casted to
+ * the backend generator type (CPU/CUDAGenerator etc.)
+ */
+template <typename T>
+static inline T * check_generator_with_default(Generator * expr, Generator * defaultValue) {
+  if (!expr) {
+    expr = defaultValue;
+  }
+  if (T::device_type() == expr->device().type()) {
+    return static_cast<T*>(expr);
+  }
+  AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found '", expr->device().type(), "'");
+}
+
+/**
+ * Utility function to static cast input Generator* to
+ * the backend generator type (CPU/CUDAGenerator etc.)
+ */
+template <typename T>
+static inline T * check_generator(Generator * expr) {
+  if (T::device_type() == expr->device().type()) {
+    return static_cast<T*>(expr);
+  }
+  AT_ERROR("Expected a '", T::device_type(), "' device type for generator but found '", expr->device().type(), "'");
 }
 
 } // at

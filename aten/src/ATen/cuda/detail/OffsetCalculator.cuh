@@ -3,7 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <c10/macros/Macros.h>
-#include <ATen/cuda/Array.h>
+#include <ATen/core/Array.h>
 #include <THC/THCIntegerDivider.cuh>
 
 /// OffsetCalculator calculates the offset in bytes of a linear index for NARGS
@@ -14,7 +14,7 @@ struct OffsetCalculator {
   static constexpr int MAX_DIMS = 25;
 
   // The offset for each argument (in bytes). Wrapper around fixed-size array.
-  using offset_type = at::cuda::Array<index_t, NARGS>;
+  using offset_type = at::detail::Array<index_t, NARGS>;
 
   OffsetCalculator(int dims, const int64_t* sizes, const int64_t* const* strides) : dims(dims) {
     TORCH_CHECK(dims <= MAX_DIMS, "tensor has too many (>25) dims");

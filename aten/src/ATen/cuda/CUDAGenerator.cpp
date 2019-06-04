@@ -14,7 +14,7 @@ THCGenerator* THCRandom_getGenerator(THCState* state);
 namespace at {
 
 CUDAGenerator::CUDAGenerator(Context * context_)
-  : context(context_)
+  : CloneableGenerator(Device(DeviceType::CUDA)), context(context_)
 {
 }
 
@@ -35,13 +35,20 @@ uint64_t CUDAGenerator::seed() {
   return THCRandom_initialSeed(context->getTHCState());
 }
 
-uint64_t CUDAGenerator::initialSeed() {
+uint64_t CUDAGenerator::current_seed() const {
   return THCRandom_initialSeed(context->getTHCState());
 }
 
-CUDAGenerator& CUDAGenerator::manualSeed(uint64_t seed) {
+void CUDAGenerator::set_current_seed(uint64_t seed) {
   THCRandom_manualSeed(context->getTHCState(), seed);
-  return *this;
+}
+
+/*
+ * Gets the DeviceType of CUDAGenerator.
+ * Used for type checking during run time.
+ */
+DeviceType CUDAGenerator::device_type() {
+  return DeviceType::CUDA;
 }
 
 CUDAGenerator& CUDAGenerator::manualSeedAll(uint64_t seed) {
@@ -51,6 +58,10 @@ CUDAGenerator& CUDAGenerator::manualSeedAll(uint64_t seed) {
 
 void * CUDAGenerator::unsafeGetTH() {
   return (void*)THCRandom_getGenerator(context->getTHCState());
+}
+
+CloneableGenerator<CUDAGenerator, Generator>* CUDAGenerator::clone_impl() const {
+  return new CUDAGenerator(context);
 }
 
 } // namespace at

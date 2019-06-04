@@ -3,6 +3,8 @@
 #else
 
 #include <ATen/core/Reduction.h>
+#include <ATen/core/Generator.h>
+#include <ATen/core/DistributionsHelper.h>
 
 TH_API void THNN_(AbsCriterion_updateOutput)(
           THNNState *state,            // library's state
@@ -238,7 +240,7 @@ TH_API void THNN_(RReLU_updateOutput)(
           accreal upper,
           bool train,
           bool inplace,
-          THGenerator *generator);
+          at::Generator *generator);
 TH_API void THNN_(RReLU_updateGradInput)(
           THNNState *state,
           THTensor *input,

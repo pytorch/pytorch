@@ -131,7 +131,6 @@ class CAFFE2_API DeprecatedTypeProperties {
   Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const;
   Storage unsafeStorageFromTH(void * th_pointer, bool retain) const;
   Tensor copy(const Tensor & src, bool non_blocking=false, c10::optional<Device> to_device={}) const;
-  std::unique_ptr<Generator> generator() const;
 
  private:
   Type & getDispatchType() const;

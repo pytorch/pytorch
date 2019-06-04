@@ -8,7 +8,7 @@
 #include <THC/THCGenerator.hpp>
 #include <utility>
 
- THCGenerator* THCRandom_getGenerator(THCState* state);
+THCGenerator* THCRandom_getGenerator(THCState* state);
 
 void THNN_(RReLU_updateOutput)(
            THCState *state,

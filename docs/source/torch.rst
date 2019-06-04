@@ -71,15 +71,24 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: unsqueeze
 .. autofunction:: where
 
+.. _generators:
+
+Generators
+----------------------------------
+.. autoclass:: torch._C.Generator
+   :members:
+
 .. _random-sampling:
 
 Random sampling
 ----------------------------------
+.. autofunction:: seed
 .. autofunction:: manual_seed
 .. autofunction:: initial_seed
 .. autofunction:: get_rng_state
 .. autofunction:: set_rng_state
-.. autodata:: default_generator
+.. autoattribute:: torch.default_generator
+   :annotation:  Returns the default CPU torch.Generator
 .. autofunction:: bernoulli
 .. autofunction:: multinomial
 .. autofunction:: normal

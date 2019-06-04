@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "THNN/generic/RReLU.c"
 #else
 
+#include <ATen/Utils.h>
+
 void THNN_(RReLU_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -11,8 +13,12 @@ void THNN_(RReLU_updateOutput)(
           accreal upper_,
           bool train,
           bool inplace,
-          THGenerator *generator)
+          at::Generator *generator)
 {
+  auto gen = at::check_generator_with_default<at::CPUGenerator>(generator, at::detail::getDefaultCPUGenerator());
+  // See Note [Thread-safety and Generators]
+  std::lock_guard<std::mutex> lock(gen->mutex_);
+
   scalar_t lower = TH_CONVERT_ACCREAL_TO_REAL(lower_);
   scalar_t upper = TH_CONVERT_ACCREAL_TO_REAL(upper_);
   if (train)
@@ -24,7 +30,8 @@ void THNN_(RReLU_updateOutput)(
       TH_TENSOR_APPLY2(scalar_t, input, scalar_t, noise,
         if (*input_data <= 0)
         {
-          const scalar_t r = (scalar_t)THRandom_uniform(generator, lower, upper);
+          at::uniform_real_distribution<double> uniform(lower, upper);
+          const scalar_t r = (scalar_t)uniform(gen);
           *input_data = (*input_data) * r;
           *noise_data = r;
         }
@@ -41,7 +48,8 @@ void THNN_(RReLU_updateOutput)(
       TH_TENSOR_APPLY3(scalar_t, input, scalar_t, output, scalar_t, noise,
         if (*input_data <= 0)
         {
-          const scalar_t r = (scalar_t)THRandom_uniform(generator, lower, upper);
+          at::uniform_real_distribution<double> uniform(lower, upper);
+          const scalar_t r = (scalar_t)uniform(gen);
           *output_data = (*input_data) * r;
           *noise_data = r;
         }

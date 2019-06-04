@@ -8,7 +8,6 @@ struct CAFFE2_API CPUTypeDefault : public TypeDefault {
       : TypeDefault(type_id, is_variable, is_undefined) {}
   Allocator* allocator() const override;
   Device getDeviceFromPtr(void * data) const override;
-  std::unique_ptr<Generator> generator() const override;
 };
 
 } // namespace at
