@@ -197,6 +197,44 @@ def try_real_annotations(fn):
     return arg_types, return_type
 
 
+def try_to_infer_type(value):
+    if type(value) is float:
+        return FloatType.get()
+    elif type(value) is int:
+        return IntType.get()
+    elif type(value) is str:
+        return StringType.get()
+    elif type(value) is bool:
+        return BoolType.get()
+    elif type(value) is torch.Tensor:
+        return TensorType.get()
+    elif type(value) is list:
+        if len(value) == 0:
+            return None
+        element_type = try_to_infer_type(value[0])
+        if element_type is None:
+            return None
+        return ListType(element_type)
+    elif type(value) is tuple:
+        if len(value) == 0:
+            return None
+        types = [try_to_infer_type(item) for item in value]
+        if None in types:
+            return None
+        return TupleType(types)
+    elif type(value) is dict:
+        if len(value) == 0:
+            return None
+        an_entry = next(iter(value.items()))
+        # TODO: use value.itervalues().next() for PY2 so it's lazily evaluated
+        key = try_to_infer_type(an_entry[0])
+        value = try_to_infer_type(an_entry[1])
+        if key is None or value is None:
+            return None
+        return DictType(key, value)
+    return None
+
+
 def ann_to_type(ann):
     if ann is None:
         return TensorType.get()

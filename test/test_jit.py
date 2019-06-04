@@ -13513,6 +13513,57 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(M(), (torch.randn(5, 5),))
 
+    def test_attributes(self):
+        untyped_values = (
+            ('my_dict', {"I": "am", "a test": "test"}),
+            ('my_float', 2.3),
+            ('my_int', 99),
+            ('my_bool', False),
+            # ('my_tuple', (1, 2, 3, 4)),
+            # ('my_list', [(1, 2), (3, 4)]),
+            ('my_tensor', torch.randn(2, 2)),
+            ('my_int_list', [1, 2, 3, 4]),
+            ('my_tensor_list', [torch.ones(2, 2) + i for i in range(4)]),
+            ('my_bool_list', [True, True, False, True]),
+            ('my_float_list', [1., 2., 3., 4.]),
+            ('my_str_list', ['hello', 'bye']),
+        )
+        typed_values = (
+            ('my_empty_list', []),
+            ('my_empty_dict', {}),
+            ('my_none', None),
+        )
+        class M(torch.nn.Module):
+            my_empty_list : List[int]
+            my_empty_dict : Dict[str, int]
+            my_none : Optional[int]
+
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x):
+                return (
+                    self.my_dict,
+                    self.my_float,
+                    self.my_int,
+                    self.my_bool,
+                    self.my_tensor,
+                    self.my_int_list,
+                    self.my_tensor_list,
+                    self.my_bool_list,
+                    self.my_float_list,
+                    self.my_str_list,
+                    self.my_empty_list,
+                    self.my_empty_dict,
+                    self.my_none,
+                )
+
+        m = M()
+        for name, value in untyped_values + typed_values:
+            setattr(m, name, value)
+
+        self.checkModule(m, (torch.randn(5, 5),))
+
 
 class MnistNet(nn.Module):
     def __init__(self):

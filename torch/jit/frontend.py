@@ -8,8 +8,8 @@ from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 
-# Borrowed from cPython implementation 
-# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411# 
+# Borrowed from cPython implementation
+# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
 
 _reserved_prefix = '__jit'
 _reserved_names = {'print'}
@@ -215,9 +215,9 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
 
 def build_param_list(ctx, py_args, self_name):
     if py_args.vararg is not None or py_args.kwarg is not None:
-        raise ValueError(_vararg_kwarg_err)
+        raise ValueError("{}\n{}".format(_vararg_kwarg_err, ctx.source))
     if not PY2 and py_args.kw_defaults:
-        raise ValueError(_vararg_kwarg_err)
+        raise ValueError("{}\n{}".format(_vararg_kwarg_err, ctx.source))
     result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
     if not PY2:
         result += [build_params(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
