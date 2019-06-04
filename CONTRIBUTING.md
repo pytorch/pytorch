@@ -349,6 +349,10 @@ ccache -F 0
 # deploy (and add to ~/.bashrc for later)
 export PATH="/usr/lib/ccache:$PATH"
 ```
+#### Use a faster linker
+If you are editing a single file and rebuilding in a tight loop, the time spent 
+linking will dominate. The system linker available in most Linux distributions 
+(GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
 
 ## CUDA Development tips
 
