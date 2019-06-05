@@ -194,10 +194,15 @@ class Module(object):
         for module in self.children():
             module._apply(fn)
 
-        for key, param in self._parameters.items():
-            if param is not None:
-                param_applied = fn(param)
-                if param._is_same_impl_type(param_applied):
+        for key in list(self._parameters.keys()):
+            if self._parameters[key] is not None:
+                param_applied = fn(self._parameters[key])
+                grad_applied = fn(self._parameters[key]._grad) if self._parameters[key]._grad is not None else None
+                param_is_same_impl_type = self._parameters[key]._is_same_impl_type(param_applied)
+                if grad_applied:
+                    grad_is_same_impl_type = self._parameters[key]._grad._is_same_impl_type(grad_applied)
+
+                if param_is_same_impl_type:
                     # Tensors stored in modules are graph leaves, and we don't
                     # want to create copy nodes, so we have to unpack the data.
                     #
@@ -206,8 +211,11 @@ class Module(object):
                     # yf225 TODO: also, post in the following threads about this behavior change:
                     # 1. https://discuss.pytorch.org/t/effect-of-calling-model-cuda-after-constructing-an-optimizer/15165
                     # 2. https://github.com/pytorch/pytorch/issues/7844
-                    print("param refcount: ", sys.getrefcount(param))
-                    param.data = param_applied
+                    if self._parameters[key].device != param_applied.device:
+                        if sys.getrefcount(self._parameters[key]) > 2:  # this is at least 2, see https://docs.python.org/3/library/sys.html#sys.getrefcount for reasons
+                            # yf225 TODO: use something like "warnings.warn(..., stacklevel=2)"
+                            raise RuntimeError("Attempted to change device of `{}`, but there are existing references to that tensor which would be broken by the device change. Current count: {}".format(key, sys.getrefcount(self._parameters[key])))
+                    self._parameters[key].data = param_applied
                 else:
                     with torch.no_grad():
                         # yf225 TODO: improve comment here
@@ -217,13 +225,12 @@ class Module(object):
                         # to not use `with torch.no_grad():`, but that would cause the following operation
                         # to create a `CopyBackwards` gradient function which is not what we wanted.
                         #
-                        # yf225 TODO: in a separate PR, we should enforce that `param.requires_grad == True`
-                        self._parameters[key] = param_applied.requires_grad_(param.requires_grad)
-                if param._grad is not None:
-                    grad_applied = fn(param._grad)
-                    if param._grad._is_same_impl_type(grad_applied):
-                        # yf225 TODO: check refcount of param, and give deprecation notice / throw error if refcount > 1
-                        param._grad.data = grad_applied
+                        # yf225 TODO: in a separate PR, we should enforce that `self._parameters[key].requires_grad == True`
+                        self._parameters[key] = param_applied.requires_grad_(self._parameters[key].requires_grad)
+
+                if grad_applied:
+                    if grad_is_same_impl_type:
+                        self._parameters[key]._grad.data = grad_applied
                     else:
                         self._parameters[key]._grad = grad_applied
 

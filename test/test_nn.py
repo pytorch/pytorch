@@ -264,6 +264,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             params = tuple(x for x in module.parameters())
             _assertGradAndGradgradChecks(test_case,
                                          lambda x, *args, **kw: test_case._forward(module, x), (input,) + params)
+            del params
 
         # check if module can be printed
         module.__repr__()
@@ -318,16 +319,18 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 input = input.float()
             module.float()
             module(input)
-            for p in module.parameters():
+            for p in module.parameters():  # yf225 TODO: problem: module.parameters() creates another reference to param
                 test_case.assertIsInstance(p, torch.FloatTensor)
+                del p
 
             # and back to double
             if not isinstance(input, torch.LongTensor):
                 input = input.double()
             module.double()
             module(input)
-            for p in module.parameters():
+            for p in module.parameters():  # yf225 TODO: problem: module.parameters() creates another reference to param
                 test_case.assertIsInstance(p, torch.DoubleTensor)
+                del p
 
             if TEST_CUDA and self.should_test_cuda:
                 # check that cuda() moves module parameters to correct GPU device,
@@ -340,6 +343,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 for p in module.parameters():
                     test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 0)
+                    del p
 
                 # to CPU
                 input = input.cpu()
@@ -347,6 +351,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 module(input)
                 for p in module.parameters():
                     test_case.assertIsInstance(p, torch.FloatTensor)
+                    del p
 
                 # back to GPU0
                 input = input.cuda()
@@ -355,6 +360,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 for p in module.parameters():
                     test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 0)
+                    del p
 
                 # test that forwards of module runs correctly without cuDNN
                 if self.cudnn:
@@ -363,6 +369,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                         for p in module.parameters():
                             test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                             test_case.assertEqual(p.get_device(), 0)
+                            del p
 
                 if torch.cuda.device_count() >= 2:
                     # test cross-GPU transfer works
@@ -374,6 +381,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                     for p in module.parameters():
                         test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                         test_case.assertEqual(p.get_device(), 1)
+                        del p
 
                 if not self.skip_double:
                     # test double()
@@ -383,6 +391,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                     for p in module.parameters():
                         test_case.assertIsInstance(p, torch.cuda.DoubleTensor)
                         test_case.assertEqual(p.get_device(), 0)
+                        del p
 
                 # test half()
                 input = input.half().cuda()
@@ -391,6 +400,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 for p in module.parameters():
                     test_case.assertIsInstance(p, torch.cuda.HalfTensor)
                     test_case.assertEqual(p.get_device(), 0)
+                    del p
 
     def _get_target(self):
         return self._get_arg('target', False)
@@ -4056,6 +4066,7 @@ class TestNN(NNTestCase):
         expected_grads = []
         for param in l.parameters():
             expected_grads.append(param.grad.clone())
+            del param
         dev_ids_list = [(0, 1), (1, 0)]
         for dev_id in dev_ids_list:
             with torch.cuda.device(dev_id[0]):
@@ -4068,6 +4079,8 @@ class TestNN(NNTestCase):
                 self.assertEqual(out.data, expected_out.data)
                 for expected, param in zip(expected_grads, l.parameters()):
                     self.assertEqual(param.grad.data, expected.data)
+                    del expected
+                    del param
 
         # Check for None device_ids
         l = l.cuda()
@@ -4083,6 +4096,7 @@ class TestNN(NNTestCase):
         expected_grads = []
         for param in l.parameters():
             expected_grads.append(param.grad.clone())
+            del param
         dev_ids_list = [(0, 1), (1, 0)]
         for dev_id in dev_ids_list:
             with torch.cuda.device(dev_id[0]):
@@ -4095,6 +4109,8 @@ class TestNN(NNTestCase):
                 self.assertEqual(out.data, expected_out.data)
                 for expected, param in zip(expected_grads, l.parameters()):
                     self.assertEqual(param.grad.data, expected.data)
+                    del expected
+                    del param
 
         # Check for None device_ids
         l = l.cuda()
@@ -5407,8 +5423,9 @@ class TestNN(NNTestCase):
             nn.RNN(10, 20, batch_first=True, bidirectional=True)
         ]
         for rnn in rnns:
-            rnn.bias_ih_l0_reverse = rnn.bias_ih_l0
+            rnn_cpu = deepcopy(rnn).cpu()
             rnn.cuda()
+            rnn.bias_ih_l0_reverse = rnn.bias_ih_l0
             input = Variable(torch.randn(5, 4, 10).cuda(), requires_grad=True)
             hx = Variable(torch.randn(2, 5, 20).cuda(), requires_grad=True)
             all_vars = [input, hx] + list(rnn.parameters())
@@ -5418,6 +5435,7 @@ class TestNN(NNTestCase):
                 cx = Variable(torch.randn(2, 5, 20).cuda(), requires_grad=True)
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
+            del all_vars
 
             with warnings.catch_warnings(record=True) as w:
                 output = rnn(input, hx)
@@ -5426,9 +5444,19 @@ class TestNN(NNTestCase):
             opt.step()
             with warnings.catch_warnings(record=True) as w:
                 output_cuda = rnn(input, hx)
-            rnn.cpu()
-            hx = (hx[0].cpu(), hx[1].cpu()) if isinstance(rnn, nn.LSTM) else hx.cpu()
-            output_cpu = rnn(input.cpu(), hx)
+            del opt
+
+            # yf225 TODO: put this into a standalone method, and call from all needed sites
+            for x_layer, y_layer in zip(rnn_cpu.all_weights, rnn.all_weights):
+                for x, y in zip(x_layer, y_layer):
+                    x.data.copy_(y.data)
+                    del x
+                    del y
+                del x_layer
+                del y_layer
+            rnn_cpu.bias_ih_l0_reverse = rnn_cpu.bias_ih_l0
+            hx = (hx[0].cpu(), hx[1].cpu()) if isinstance(rnn_cpu, nn.LSTM) else hx.cpu()
+            output_cpu = rnn_cpu(input.cpu(), hx)
             self.assertEqual(output_cuda, output_cpu)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -5641,12 +5669,8 @@ class TestNN(NNTestCase):
 
     def _test_RNN_cpu_vs_cudnn(self, dropout):
 
-        def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy, weights_val):
+        def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy):
             is_lstm = isinstance(rnn, nn.LSTM)
-
-            for x_layer, y_layer in zip(rnn.all_weights, weights_val):
-                for x, y in zip(x_layer, y_layer):
-                    x.data.copy_(y.data)
 
             if isinstance(input_val, rnn_utils.PackedSequence):
                 input = rnn_utils.PackedSequence(
@@ -5748,7 +5772,7 @@ class TestNN(NNTestCase):
                              batch_first=batch_first)
 
                 outputs_cpu = forward_backward(
-                    False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+                    False, rnn, input_val, hx_val, grad_output, grad_hy)
 
                 rnn_gpu = module(input_size,
                                  hidden_size,
@@ -5758,8 +5782,16 @@ class TestNN(NNTestCase):
                                  bidirectional=bidirectional,
                                  batch_first=batch_first)
 
+                for x_layer, y_layer in zip(rnn_gpu.all_weights, rnn.all_weights):
+                    for x, y in zip(x_layer, y_layer):
+                        x.data.copy_(y.data)
+                        del x
+                        del y
+                    del x_layer
+                    del y_layer
+
                 outputs_gpu = forward_backward(
-                    True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+                    True, rnn_gpu, input_val, hx_val, grad_output, grad_hy)
 
                 compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
@@ -5772,10 +5804,17 @@ class TestNN(NNTestCase):
                 num_layers * num_directions, batch, hidden_size)
 
             rnn = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
-            outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+            outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy)
 
             rnn_gpu = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
-            outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+            for x_layer, y_layer in zip(rnn_gpu.all_weights, rnn.all_weights):
+                for x, y in zip(x_layer, y_layer):
+                    x.data.copy_(y.data)
+                    del x
+                    del y
+                del x_layer
+                del y_layer
+            outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, grad_output, grad_hy)
 
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
