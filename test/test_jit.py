@@ -12500,6 +12500,18 @@ a")
 
         self.checkScriptRaisesRegex(fn, (1114112,), Exception, 'not in range(0x110000)')
 
+    def test_round(self):
+        def round_float(x):
+            # type: (float) -> float
+            return round(x)
+
+        def round_int(x):
+            # type: (int) -> float
+            return round(x)
+
+        self.checkScript(round_float, (1.5,))
+        self.checkScript(round_int, (2,))
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_get_set_state(self):
         class M(torch.jit.ScriptModule):

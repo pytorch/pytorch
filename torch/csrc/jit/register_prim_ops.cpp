@@ -2159,6 +2159,7 @@ RegisterOperators reg2({
 
     DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
     DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
+    DEFINE_UNARY_OP(aten::round, std::round(a), float, float),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::log, std::log(a) / std::log(b)),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
