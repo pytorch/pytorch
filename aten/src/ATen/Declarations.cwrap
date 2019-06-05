@@ -2735,7 +2735,6 @@
   name: _th_geometric_
   backends:
     - CPU
-    - CUDA
   cname: geometric
   variants: function
   return: self
