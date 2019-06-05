@@ -2286,6 +2286,7 @@ class _TestTorchMixin(object):
         check_sum_all(torch.tensor([1, 2, 3, 4, 5]))
         check_sum_all(torch.randn(200000))
         check_sum_all(torch.randn(2000, 2)[:, 0])
+        check_sum_all(torch.tensor([True, False, True], dtype=torch.bool))
 
     def _assert_matches_numpy(self, t, n):
         self.assertEqual(n.shape, t.shape)
