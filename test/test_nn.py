@@ -5641,12 +5641,8 @@ class TestNN(NNTestCase):
 
     def _test_RNN_cpu_vs_cudnn(self, dropout):
 
-        def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy, weights_val):
+        def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy):
             is_lstm = isinstance(rnn, nn.LSTM)
-
-            for x_layer, y_layer in zip(rnn.all_weights, weights_val):
-                for x, y in zip(x_layer, y_layer):
-                    x.data.copy_(y.data)
 
             if isinstance(input_val, rnn_utils.PackedSequence):
                 input = rnn_utils.PackedSequence(
@@ -5709,6 +5705,10 @@ class TestNN(NNTestCase):
             # check grad weights separately, as nested dict
             for cpu_layer_weight, gpu_layer_weight in zip(outputs_cpu['weights'], outputs_gpu['weights']):
                 for (cpu_weight, gpu_weight) in zip(cpu_layer_weight, gpu_layer_weight):
+                    if cpu_weight.grad is not None:
+                        print("has cpu_weight.grad")
+                    if gpu_weight.grad is not None:
+                        print("has gpu_weight.grad")
                     self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
@@ -5748,7 +5748,7 @@ class TestNN(NNTestCase):
                              batch_first=batch_first)
 
                 outputs_cpu = forward_backward(
-                    False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+                    False, rnn, input_val, hx_val, grad_output, grad_hy)
 
                 rnn_gpu = module(input_size,
                                  hidden_size,
@@ -5758,8 +5758,12 @@ class TestNN(NNTestCase):
                                  bidirectional=bidirectional,
                                  batch_first=batch_first)
 
+                for x_layer, y_layer in zip(rnn_gpu.all_weights, rnn.all_weights):
+                    for x, y in zip(x_layer, y_layer):
+                        x.data.copy_(y.data)
+
                 outputs_gpu = forward_backward(
-                    True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+                    True, rnn_gpu, input_val, hx_val, grad_output, grad_hy)
 
                 compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
@@ -5772,10 +5776,13 @@ class TestNN(NNTestCase):
                 num_layers * num_directions, batch, hidden_size)
 
             rnn = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
-            outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+            outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy)
 
             rnn_gpu = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
-            outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
+            for x_layer, y_layer in zip(rnn_gpu.all_weights, rnn.all_weights):
+                for x, y in zip(x_layer, y_layer):
+                    x.data.copy_(y.data)
+            outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, grad_output, grad_hy)
 
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
