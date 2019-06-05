@@ -385,7 +385,7 @@ public:
     *
     * > static auto registry = c10::RegisterOperators()
     * >     .op("my_op", c10::RegisterOperators::options()
-    * >         .kernel([] (Tensor a, Tensor b) {...}));
+    * >         .catchAllKernel([] (Tensor a, Tensor b) {...}));
     *
     */
     template<class FuncType>
