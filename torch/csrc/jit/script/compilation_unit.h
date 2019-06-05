@@ -269,9 +269,7 @@ struct TORCH_API CompilationUnit {
   };
 
   ClassTypePtr get_class(const c10::QualifiedName& name) const {
-    std::cout << "classes: ";
     for (const auto& cls : classes_) {
-      std::cout << cls->qualname() << std::endl;
       if (cls->qualname() == name.qualifiedName()) {
         return cls;
       }

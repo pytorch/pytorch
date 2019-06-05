@@ -560,5 +560,4 @@ ClassType::ClassType()
     : Type(TypeKind::ClassType),
       name_(c10::QualifiedName("Foo")),
       compilation_unit_(nullptr) {}
-
 } // namespace c10

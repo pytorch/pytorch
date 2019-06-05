@@ -45,16 +45,19 @@ struct class_ {
   class_& def(string name, Func f) {
     pyClass->def(name.c_str(), f);
     auto qualFuncName = className + "::" + name;
-    static auto classRegistry =
-        c10::RegisterOperators().op(qualFuncName, [f](CurClass cur) {
-          return std::invoke(f, cur);
-        });
+    static auto classRegistry = c10::RegisterOperators().op(
+        qualFuncName,
+        torch::RegisterOperators::options().kernel(
+            [f](CurClass* cur) { return std::invoke(f, *cur); }));
     auto graph = std::make_shared<Graph>();
     auto input = graph->addInput()->setType(classType);
     auto& ops = getAllOperatorsFor(Symbol::fromQualString(qualFuncName));
     std::cout << ops.size() << std::endl;
 
-    auto res = graph->insertNode(graph->create(Symbol::fromQualString(qualFuncName), {input}))->output();
+    auto res = graph
+                   ->insertNode(graph->create(
+                       Symbol::fromQualString(qualFuncName), {input}))
+                   ->output();
     graph->registerOutput(res);
     classCu->create_function(name, graph);
     return *this;

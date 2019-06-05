@@ -19,6 +19,11 @@ namespace torch {
 namespace jit {
 namespace script {
 struct CompilationUnit;
+// static CompilationUnit& CompilationUnit::_get_python_cu();
+// std::shared_ptr<ClassType> CompilationUnit::get_class(const c10::QualifiedName& name) const;
+// struct CompilationUnit {
+// };
+
 struct Function;
 }
 } // namespace jit
@@ -1299,76 +1304,6 @@ CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2);
 
-namespace detail {
-template <typename T> struct getTypePtr_ final {
-  static_assert(guts::false_t<T>::value, "Type could not be converted to any of the known types.");
-};
-
-template<> struct getTypePtr_<at::Tensor> final {
-  static TypePtr call() { return TensorType::get(); }
-};
-template<> struct getTypePtr_<double> final {
-  static TypePtr call() { return FloatType::get(); }
-};
-template<> struct getTypePtr_<int64_t> final {
-  static TypePtr call() { return IntType::get(); }
-};
-template<> struct getTypePtr_<bool> final {
-  static TypePtr call() { return BoolType::get(); }
-};
-template<> struct getTypePtr_<at::Scalar> final {
-  static TypePtr call() { return NumberType::get(); }
-};
-template<> struct getTypePtr_<std::string> final {
-  static TypePtr call() { return StringType::get(); }
-};
-template<class T> struct getTypePtr_<std::vector<T>> final {
-  static TypePtr call() {
-    static auto type = ListType::create(getTypePtr_<T>::call());
-    return type;
-  }
-};
-template<class T> struct getTypePtr_<ArrayRef<T>> final {
-  static TypePtr call() {
-    static auto type = ListType::create(getTypePtr_<T>::call());
-    return type;
-  }
-};
-template <class K, class V>
-struct getTypePtr_<std::unordered_map<K, V>> final {
-  static TypePtr call() {
-    static auto type =
-        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
-    return type;
-  }
-};
-template <class K, class V>
-struct getTypePtr_<c10::DictPtr<K, V>> final {
-  static TypePtr call() {
-    static auto type =
-        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
-    return type;
-  }
-};
-template <class T>
-struct getTypePtr_<at::optional<T>> final {
-  static TypePtr call() {
-    static auto type = OptionalType::create(getTypePtr_<T>::call());
-    return type;
-  }
-};
-template <>
-struct getTypePtr_<caffe2::Blob> final {
-  static TypePtr call() {
-    return BlobType::get();
-  }
-};
-}
-template<class T> inline TypePtr getTypePtr() {
-  // TODO: static_assert that a templated function exists, and throw a friendy
-  // error message if not
-  return detail::getTypePtr_<T>::call();
-}
 
 CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
 CAFFE2_API TypePtr attemptToRecoverType(const IValue& input_ivalue);
@@ -1546,12 +1481,77 @@ struct CAFFE2_API ClassType : public Type {
 };
 
 namespace detail {
-template <>
-struct getTypePtr_<ivalue::Object> final {
+template <typename T> struct getTypePtr_ final {
+  // static TypePtr call() {
+  //   // return getClassPtr();
+  //   return std::dynamic_pointer_cast<Type>(torch::jit::script::CompilationUnit::_get_python_cu().get_class(c10::QualifiedName("Foo")));
+  // }
+  static_assert(guts::false_t<T>::value, "Type could not be converted to any of the known types.");
+};
+
+template<> struct getTypePtr_<at::Tensor> final {
+  static TypePtr call() { return TensorType::get(); }
+};
+template<> struct getTypePtr_<double> final {
+  static TypePtr call() { return FloatType::get(); }
+};
+template<> struct getTypePtr_<int64_t> final {
+  static TypePtr call() { return IntType::get(); }
+};
+template<> struct getTypePtr_<bool> final {
+  static TypePtr call() { return BoolType::get(); }
+};
+template<> struct getTypePtr_<at::Scalar> final {
+  static TypePtr call() { return NumberType::get(); }
+};
+template<> struct getTypePtr_<std::string> final {
+  static TypePtr call() { return StringType::get(); }
+};
+template<class T> struct getTypePtr_<std::vector<T>> final {
   static TypePtr call() {
-    static auto type = ClassType::create();
+    static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
   }
 };
+template<class T> struct getTypePtr_<ArrayRef<T>> final {
+  static TypePtr call() {
+    static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template <class K, class V>
+struct getTypePtr_<std::unordered_map<K, V>> final {
+  static TypePtr call() {
+    static auto type =
+        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
+    return type;
+  }
+};
+template <class K, class V>
+struct getTypePtr_<c10::DictPtr<K, V>> final {
+  static TypePtr call() {
+    static auto type =
+        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
+    return type;
+  }
+};
+template <class T>
+struct getTypePtr_<at::optional<T>> final {
+  static TypePtr call() {
+    static auto type = OptionalType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template <>
+struct getTypePtr_<caffe2::Blob> final {
+  static TypePtr call() {
+    return BlobType::get();
+  }
+};
+}
+template<class T> inline TypePtr getTypePtr() {
+  // TODO: static_assert that a templated function exists, and throw a friendy
+  // error message if not
+  return detail::getTypePtr_<T>::call();
 }
 } // namespace c10

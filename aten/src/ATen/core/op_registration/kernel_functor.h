@@ -42,18 +42,15 @@ namespace detail {
   //           If the IValue contains an IntList, return it as ArrayRef<int>.
   template<class T, class Enable = void> struct ivalue_to_arg_type {
     // This base case is hit whenever a type does not have a specialisation below.
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
+    static T call(IValue&& v) {
+      return reinterpret_cast<T>(&v);
+    }
+    // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
   };
   template<class T>
   struct ivalue_to_arg_type<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static T call(IValue&& v) {
       return std::move(v).to<T>();
-    }
-  };
-  template <class T>
-  struct ivalue_to_arg_type<ivalue::Object> {
-    static ivalue::Object call(IValue&& v) {
-      return *v.toObject();
     }
   };
   template<class T>
