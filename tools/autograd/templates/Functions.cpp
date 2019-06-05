@@ -2134,6 +2134,12 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
   return gg_weight.view(size);
 }
 
+Tensor index_backward(const Tensor & self, TensorList indices, const Tensor& grad) {
+   auto zeros = at::zeros_like(self);
+   return at::_index_put_impl_(zeros, indices, grad, true, true);
+}
+
+
 } // anonymous namespace
 
 ${autograd_function_definitions}
