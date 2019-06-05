@@ -581,6 +581,15 @@ class TestNN(NNTestCase):
 
         return l, n, s
 
+    def _copy_rnn(rnn_src, rnn_dst):
+        for x_layer, y_layer in zip(rnn_dst.all_weights, rnn_src.all_weights):
+            for x, y in zip(x_layer, y_layer):
+                x.data.copy_(y.data)
+                del x
+                del y
+            del x_layer
+            del y_layer
+
     def test_module_backcompat(self):
         from torch.serialization import SourceChangeWarning
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
@@ -5448,14 +5457,7 @@ class TestNN(NNTestCase):
                 output_cuda = rnn(input, hx)
             del opt
 
-            # yf225 TODO: put this into a standalone method, and call from all needed sites
-            for x_layer, y_layer in zip(rnn_cpu.all_weights, rnn.all_weights):
-                for x, y in zip(x_layer, y_layer):
-                    x.data.copy_(y.data)
-                    del x
-                    del y
-                del x_layer
-                del y_layer
+            _copy_rnn(rnn, rnn_cpu)
             rnn_cpu.bias_ih_l0_reverse = rnn_cpu.bias_ih_l0
             hx = (hx[0].cpu(), hx[1].cpu()) if isinstance(rnn_cpu, nn.LSTM) else hx.cpu()
             output_cpu = rnn_cpu(input.cpu(), hx)
@@ -5464,11 +5466,6 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
     def test_cuda_rnn_fused(self, dtype=torch.float):
-
-        def copy_rnn(rnn1, rnn2):
-            for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
-                for x, y in zip(x_layer, y_layer):
-                    x.data.copy_(y.data)
 
         def check_rnn_grads(rnn1, rnn2):
             for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
@@ -5489,7 +5486,7 @@ class TestNN(NNTestCase):
                 for bias in (True, False):
                     rnn = module(input_size, hidden_size, num_layers, bias=bias).to(dtype)
                     rnn_cuda = module(input_size, hidden_size, num_layers, bias=bias).to("cuda", dtype)
-                    copy_rnn(rnn, rnn_cuda)
+                    _copy_rnn(rnn_cuda, rnn)
 
                     is_lstm = isinstance(rnn, nn.LSTM)
                     if is_lstm:
@@ -5784,13 +5781,7 @@ class TestNN(NNTestCase):
                                  bidirectional=bidirectional,
                                  batch_first=batch_first)
 
-                for x_layer, y_layer in zip(rnn_gpu.all_weights, rnn.all_weights):
-                    for x, y in zip(x_layer, y_layer):
-                        x.data.copy_(y.data)
-                        del x
-                        del y
-                    del x_layer
-                    del y_layer
+                _copy_rnn(rnn, rnn_gpu)
 
                 outputs_gpu = forward_backward(
                     True, rnn_gpu, input_val, hx_val, grad_output, grad_hy)
@@ -5809,13 +5800,7 @@ class TestNN(NNTestCase):
             outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy)
 
             rnn_gpu = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
-            for x_layer, y_layer in zip(rnn_gpu.all_weights, rnn.all_weights):
-                for x, y in zip(x_layer, y_layer):
-                    x.data.copy_(y.data)
-                    del x
-                    del y
-                del x_layer
-                del y_layer
+            _copy_rnn(rnn, rnn_gpu)
             outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, grad_output, grad_hy)
 
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
