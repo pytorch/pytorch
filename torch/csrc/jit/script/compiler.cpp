@@ -760,6 +760,12 @@ struct to_ir {
     environment_stack->setVar(def.name().range(), def.name().name(), tup);
   }
 
+  void emitBreak(const Break& stmt) {
+    auto break_node = graph->create(prim::BreakStmt, {}, 0)
+      ->setSourceRange(stmt.range());
+    graph->insertNode(break_node);
+  }
+
   void emitReturn(const Return& stmt) {
     Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
@@ -842,6 +848,9 @@ struct to_ir {
           break;
         case TK_RETURN: {
           emitReturn(Return(stmt));
+        } break;
+        case TK_BREAK: {
+          emitBreak(Break(stmt));
         } break;
         case TK_PASS:
           // Emit nothing for pass

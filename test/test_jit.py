@@ -5311,6 +5311,17 @@ a")
         with self.assertRaisesRegex(RuntimeError, "isInt"):
             m()
 
+    def test_break(self):
+        cu = torch.jit.CompilationUnit('''
+        def test_view_shape_prop(a):
+            break
+        ''')
+
+        # @torch.jit.script
+        # def test():
+        #     break
+        #     return 1
+
     def test_requires_grad_loop(self):
         @torch.jit.script
         def test(x, y, z):

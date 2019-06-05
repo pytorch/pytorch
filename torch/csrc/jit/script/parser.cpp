@@ -460,6 +460,14 @@ struct ParserImpl {
         L.expect(TK_NEWLINE);
         return Assert::create(range, cond, maybe_first);
       }
+      case TK_BREAK : {
+        auto range = L.next().range;
+        if (!in_loop) {
+          throw ErrorReport(range) << "SyntaxError: 'break' outside loop";
+        }
+        L.expect(TK_NEWLINE);
+        return Break::create(range);
+      }
       case TK_PASS: {
         auto range = L.next().range;
         L.expect(TK_NEWLINE);
@@ -505,7 +513,9 @@ struct ParserImpl {
     L.expect(TK_WHILE);
     auto cond = parseExp();
     L.expect(':');
+    in_loop = true;
     auto body = parseStatements();
+    in_loop = false;
     return While::create(r, Expr(cond), List<Stmt>(body));
   }
   TreeRef parseFor() {
@@ -513,7 +523,9 @@ struct ParserImpl {
     L.expect(TK_FOR);
     auto targets = parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseExp);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
+    in_loop = true;
     auto body = parseStatements();
+    in_loop = false;
     return For::create(r, targets, itrs, body);
   }
 
@@ -614,6 +626,7 @@ struct ParserImpl {
   TreeRef makeList(const SourceRange& range, TreeList&& trees) {
     return c(TK_LIST, range, std::move(trees));
   }
+  bool in_loop;
   Lexer L;
   SharedParserData& shared;
 };

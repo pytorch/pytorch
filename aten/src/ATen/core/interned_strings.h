@@ -49,6 +49,7 @@ namespace c10 {
   _(prim, IgnoredPythonOp)         \
   _(prim, Reverse)                 \
   _(prim, Return)                  \
+  _(prim, BreakStmt)               \
   _(prim, Store)                   \
   _(prim, AutogradZero)            \
   _(prim, AutogradAnyNonZero)      \
