@@ -971,6 +971,8 @@ def _try_compile_fn(fn):
         return None
 
     if isinstance(fn, torch.nn.Module):
+        # Since modules are callable pybind recognizes them as functions, but
+        # don't do anything for them
         return None
 
     # We don't have the actual scope where the function was defined, but we can
