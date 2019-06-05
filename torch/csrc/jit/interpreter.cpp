@@ -194,6 +194,34 @@ void insertLastUses(Graph& g) {
 }
 } // namespace
 
+/*
+This is an optimization that reduces the number of store/load/move nodes needed
+by recognizing that parts of the graph are simple trees like a*x + b*y. When
+this happens it is possible to work directly off of the stack by emitting the
+tree in a depth-first left-to-right manner:
+  load a
+  load x
+  mul # stack now is a*x
+  load b
+  load y
+  mul # stack now is a*x, b*y
+  add
+
+can_emit_inline_[node] == true means that this node participates as a non-root
+member of one of these trees. The code emitter will not emit this node when
+it is encountered in the node. Instead the node is emitted in a depth first
+traversal from where it is used in a tree.
+
+To participate in a tree a node must have a single use (otherwise it is not
+tree-like) and output a single value (for simplicity.) If our IR was functional,
+these would be the only constraints. However, many nodes have side effects, so
+we must ensure that emitting the nodes in depth first order from the tree's root
+_does not reorder the emission of the nodes_. To ensure this, we work backward
+from the root of a potential tree, visiting its inputs in reverse depth first
+order, while scanning the node list backward (with the block_point node). When
+these traversal line up we know it is safe to emit the tree in this way. We
+ignore constant nodes, which do not have side effects.
+*/
 struct CanEmitInline {
   CanEmitInline(const std::shared_ptr<Graph>& graph) {
     scanBlock(graph->block());
@@ -211,10 +239,18 @@ struct CanEmitInline {
   }
 
   Node* scanValue(Node* block_point, Value* v) {
+    // this node is a candidate for inline, if our reverse scan of the
+    // node list lines up with the use of v, we know it will be emitted in
+    // tree order, and we can inlining. Scan continutes for further nodes.
     if (v->node() == block_point && canInline(v)) {
+      // since we inlined this node, we may be able to recursively inline
+      // its inputs, so we continue scanning it
       block_point = scanNode(v->node());
       can_emit_inline_[v->node()] = true;
     }
+    // if it does not line up, we can't inline 'v', and will just generate
+    // a load/move for it. However, other inputs may still appear in tree
+    // order so we continue the scan of the inputs.
     return block_point;
   }
 
@@ -383,6 +419,7 @@ struct CodeImpl {
 
   Node* current_node_; // used in creation of code to keep track
                        // of node being emitted
+  Node* last_inserted_op_ = nullptr;
 
   CodeImpl(const std::shared_ptr<Graph>& graph)
       : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
@@ -397,6 +434,19 @@ struct CodeImpl {
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
     instructions_.emplace_back(op, X, N);
     instructions_source_.emplace_back(current_node_);
+
+    // check that we didn't accidentally emit nodes out of topological order
+    if (op == OP) {
+      if (last_inserted_op_ != nullptr && current_node_ != last_inserted_op_ &&
+          current_node_->owningBlock() == last_inserted_op_->owningBlock()) {
+        TORCH_INTERNAL_ASSERT(
+            current_node_->isAfter(last_inserted_op_),
+            *current_node_,
+            " is not after ",
+            *last_inserted_op_);
+      }
+      last_inserted_op_ = current_node_;
+    }
   }
 
   int allocRegs(at::ArrayRef<Value*> vs) {
