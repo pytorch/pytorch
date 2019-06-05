@@ -62,9 +62,9 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   } catch (const c10::Error& error) {
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("Expected value of type Tensor[][] for argument 'a' in "
-                  "position 0, but instead got value of type t[][][]") == 0);
-
+            .find("nested_loop() expected a value of type 'List[List[Tensor]]'"
+                  " for argument 'a' but instead found type "
+                  "'List[List[List[t]]]'") == 0);
   };
 
   std::vector<torch::jit::IValue> gen_list;
@@ -81,9 +81,9 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
     //so the error message is not helpful here.
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("Expected value of type Tensor[][] for argument 'a' in "
-                  "position 0, but instead got value of type Tensor[][]") == 0);
-
+            .find("nested_loop() expected a value of type "
+                  "'List[List[Tensor]]' for argument 'a' but "
+                  "instead found type 'List[List[Tensor]]'") == 0);
   };
 }
 
@@ -93,7 +93,7 @@ TEST(TorchScriptTest, TestDictArgMatching) {
       def dict_op(a: Dict[str, Tensor], b: str):
         return a[b]
     )JIT");
-  c10::impl::GenericDict dict;
+  c10::impl::GenericDictPtr dict = c10::impl::make_generic_dict();
   dict.insert("hello", torch::ones({2}));
   auto output = module->run_method("dict_op", dict, std::string("hello"));
   ASSERT_EQ(1, output.toTensor()[0].item<int64_t>());

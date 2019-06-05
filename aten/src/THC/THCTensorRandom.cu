@@ -101,20 +101,6 @@ THC_API __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_s
   }
 }
 
-#define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)      \
-__global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)    \
-{                                                                              \
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                             \
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                \
-  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {      \
-    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                              \
-    if (i < size) {                                                            \
-      T y = TRANSFORM;                                                         \
-      result[i] = y;                                                           \
-    }                                                                          \
-  }                                                                            \
-}
-
 #define GENERATE_KERNEL2(NAME, T, ARG1, ARG2, CURAND_T, CURAND_FUNC, TRANSFORM)      \
 __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2)    \
 {                                                                                    \
@@ -129,24 +115,10 @@ __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2) 
   }                                                                                  \
 }
 
-GENERATE_KERNEL2(generate_normal, float, double mean, double stdv, float, curand_normal, (x * stdv) + mean)
-GENERATE_KERNEL2(generate_normal, double, double mean, double stdv, double, curand_normal_double, (x * stdv) + mean)
-
-GENERATE_KERNEL1(generate_exponential, float, double lambda, float, curand_uniform, (float)(-1. / lambda * log(x)))
-GENERATE_KERNEL1(generate_exponential, double, double lambda, double, curand_uniform_double, (double)(-1. / lambda * log(x)))
-
-GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, curand_uniform, (float)(median + sigma * tan(M_PI*(x-0.5))))
-GENERATE_KERNEL2(generate_cauchy, double, double median, double sigma, double, curand_uniform_double, (double)(median + sigma * tan(M_PI*(x-0.5))))
-
-GENERATE_KERNEL2(generate_normal, at::Half, double mean, double stdv, float, curand_normal, (ScalarConvert<float, at::Half>::to((x * stdv) + mean)))
-GENERATE_KERNEL1(generate_exponential, at::Half, double lambda, float, curand_uniform, (ScalarConvert<float, at::Half>::to((float)(-1. / lambda * log(x)))))
-GENERATE_KERNEL2(generate_cauchy, at::Half, double median, double sigma, float, curand_uniform, (ScalarConvert<float, at::Half>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
-
 #include <THC/generic/THCTensorRandom.cu>
 #include <THC/THCGenerateAllTypes.h>
 
 #include <THC/generic/THCTensorRandom.cu>
 #include <THC/THCGenerateBoolType.h>
 
-#undef GENERATE_KERNEL1
 #undef GENERATE_KERNEL2

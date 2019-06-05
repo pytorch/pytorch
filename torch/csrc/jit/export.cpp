@@ -35,6 +35,13 @@ namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
+namespace {
+ExportModuleExtraFilesHook& GetExtraFilesHook() {
+  static ExportModuleExtraFilesHook func = nullptr;
+  return func;
+};
+}
+
 class ScriptModuleSerializer;
 
 std::string getNodeStackTraceString(const Node* n) {
@@ -174,6 +181,8 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
       return onnx::TensorProto_DataType_INT32;
     case at::kLong:
       return onnx::TensorProto_DataType_INT64;
+    case at::kBool:
+      return onnx::TensorProto_DataType_BOOL;
     default:
       AT_ERROR("unexpected tensor scalar type");
   }
@@ -199,19 +208,20 @@ void EncoderBase::EncodeValueInfo(
     onnx::ValueInfoProto* v,
     const Value* n) {
   v->set_name(n->uniqueName());
-  onnx::TypeProto* t = v->mutable_type();
-  onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
-
-  onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
   if (CompleteTensorTypePtr node_type = n->type()->cast<CompleteTensorType>()) {
+    onnx::TypeProto* t = v->mutable_type();
+    onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
+    onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
     const std::vector<std::int64_t>& sizes = node_type->sizes();
     for (size_t i = 0; i < sizes.size(); i++) {
       shape->add_dim();
       shape->mutable_dim(i)->set_dim_value(sizes[i]);
     }
     tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
-  } else {
-    tensor_type->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
+  } else if (BoolTypePtr node_type = n->type()->cast<BoolType>()) {
+    onnx::TypeProto* t = v->mutable_type();
+    onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
+    tensor_type->set_elem_type(ATenTypeToOnnxType(at::kBool));
   }
 }
 
@@ -504,7 +514,10 @@ class ScriptModuleSerializer final {
   // to dump the content of a tensor
   void writeTensorTable(torch::ModelDef* model_def);
 
-  void writeAttributeTable();
+  // Write the list of ivalues to a file as a pickle program
+  void writePickleArchive(
+      const std::string& name,
+      const std::vector<IValue>& ivalues);
   void writeLibs(torch::ModelDef* model_def);
 
   void convertModule(
@@ -513,10 +526,8 @@ class ScriptModuleSerializer final {
       const std::string& name,
       torch::ModuleDef* module_def);
 
-  void convertParameter(
-      const script::Slot& param,
-      torch::ParameterDef* param_def,
-      bool is_parameter);
+  IValue moduleGetState(const script::Module& module);
+  bool moduleHasValidGetSetState(const script::Module& module);
 
   void convertClass(const ClassTypePtr& type, torch::ModelDef* model_def);
 
@@ -526,7 +537,9 @@ class ScriptModuleSerializer final {
   // all tensors that will be stored
   std::vector<at::Tensor> tensor_table_;
 
-  std::vector<IValue> attribute_table_;
+  // A list of attributes (indexed by attr_def->id()) and module state (indexed
+  // by module_def->id())
+  std::vector<IValue> pickled_ivalues_;
 
   // all classes used by this module hierarchy
   std::vector<ClassTypePtr> class_table_;
@@ -547,6 +560,7 @@ ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
 void ScriptModuleSerializer::serialize(
     const script::Module& module,
     const script::ExtraFilesMap& extra_files) {
+  C10_LOG_API_USAGE_ONCE("torch.script.save");
   torch::ModelDef model_def;
   convertModel(module, &model_def, extra_files);
   std::string output;
@@ -596,10 +610,16 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 
   // Write out the files. We still have to do this in converted_classes_ order,
   // to maintain dependency order.
+  std::unordered_set<std::string> written_files;
   for (const auto& item : converted_classes_) {
     const ClassTypePtr& class_type = item.key();
     const std::string filename =
         ImportExportHelpers::qualifierToPath(class_type->qualifier());
+    if (written_files.count(filename)) {
+      continue;
+    }
+    written_files.insert(filename);
+
     const std::string& src = fileToSrc.at(filename).str();
 
     std::ostringstream lib_stream;
@@ -656,8 +676,8 @@ void ScriptModuleSerializer::convertModel(
   convertModule(
       module, "", writer_.archiveName(), model_def->mutable_main_module());
 
-  // This may write some attributes to the tensor_table_
-  writeAttributeTable();
+
+  writePickleArchive("attributes.pkl", pickled_ivalues_);
 
   writeTensorTable(model_def);
   writeLibs(model_def);
@@ -667,6 +687,90 @@ void ScriptModuleSerializer::convertModel(
     const std::string key = "extra/" + kv.first;
     writer_.writeRecord(key, kv.second.data(), kv.second.size());
   }
+  auto hook = GetExtraFilesHook();
+  if (hook) {
+    script::ExtraFilesMap hook_files = hook(module);
+    for (const auto& kv : hook_files) {
+      const std::string key = "extra/" + kv.first;
+      writer_.writeRecord(key, kv.second.data(), kv.second.size());
+    }
+  }
+}
+
+bool ScriptModuleSerializer::moduleHasValidGetSetState(
+    const script::Module& module) {
+  // Check that the schemas for __getstate__ and __setstate__ are correct
+  auto getstate = module.module_object()->type()->getMethod("__getstate__");
+  if (getstate == nullptr) {
+    return false;
+  }
+  auto get_schema =
+      module.module_object()->type()->getMethod("__getstate__")->getSchema();
+
+  // Check __getstate__
+  //   __getstate__ is expected to be (self) -> T
+  AT_CHECK(
+      get_schema.arguments().size() == 1,
+      "'__getstate__' must have 'self' as its only argument, but found ",
+      get_schema.arguments().size(),
+      " arguments");
+  AT_CHECK(
+      get_schema.returns().size() == 1,
+      "'__getstate__' must return 1 value, but found ",
+      get_schema.returns().size());
+
+  // Check __setstate__ if the method exists
+  //   __setstate__ is expected to be (self, T) -> None
+  // TODO: use getMethod("__getstate__") once methods are not lowered
+  auto setstate = module.class_compilation_unit().find_function("__setstate__");
+  if (setstate == nullptr) {
+    return false;
+  }
+  auto set_schema = setstate->getSchema();
+
+  AT_CHECK(
+      set_schema.arguments().size() == 2,
+      "'__setstate__' must have 'self' and the state as its "
+      "only arguments, but found ",
+      set_schema.arguments().size(),
+      " arguments");
+  AT_CHECK(
+      set_schema.returns().size() == 1,
+      "'__setstate__' must return None, but found ",
+      set_schema.returns().size(),
+      " return values");
+  AT_CHECK(
+      set_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
+      "'__setstate__' must return None, but found value of type",
+      set_schema.returns().at(0).type()->python_str());
+
+  // Check that the return type of __getstate__ matches the input to
+  // __setstate__
+  auto get_type = get_schema.returns().at(0).type();
+  auto set_type = set_schema.arguments().at(1).type();
+
+  AT_CHECK(
+      set_type->isSubtypeOf(get_type),
+      "'__getstate__'s return type (",
+      get_type->python_str(),
+      " does not match '__setstate__'s argument type (",
+      set_type->python_str(),
+      "))");
+
+  return true;
+}
+
+/// Run module.__getstate__() and return the result
+IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
+  auto getstate = module.find_method("__getstate__");
+  AT_CHECK(
+      getstate != nullptr,
+      "Cannot call '__getstate__' method because"
+      " it does not exist");
+
+  Stack stack;
+  getstate->run(stack);
+  return stack.at(0);
 }
 
 size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
@@ -720,17 +824,18 @@ void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
   }
 }
 
-void ScriptModuleSerializer::writeAttributeTable() {
+void ScriptModuleSerializer::writePickleArchive(
+    const std::string& name,
+    const std::vector<IValue>& ivalues) {
   Pickler pickler(&tensor_table_);
   pickler.start();
   pickler.startTuple();
-  for (const IValue& ivalue : attribute_table_) {
+  for (const IValue& ivalue : ivalues) {
     pickler.addIValue(ivalue);
   }
   pickler.endTuple();
   pickler.finish();
-  writer_.writeRecord(
-      "attributes.pkl", pickler.stack().data(), pickler.stack().size());
+  writer_.writeRecord(name, pickler.stack().data(), pickler.stack().size());
 }
 
 void ScriptModuleSerializer::convertModule(
@@ -740,19 +845,47 @@ void ScriptModuleSerializer::convertModule(
     torch::ModuleDef* module_def) {
   module_def->set_name(name);
   module_def->set_optimize(module.is_optimized());
-  for (const auto& elem : module.get_parameters()) {
-    torch::ParameterDef* param_def = module_def->add_parameters();
-    convertParameter(elem, param_def, /*is_buffer=*/false);
+
+  // If __getstate__ and __setstate__ methods are provided, use those for
+  // serializing instead of serializing the attributes directly
+  bool user_provided_serialization = moduleHasValidGetSetState(module);
+  if (user_provided_serialization) {
+    // Run the '__getstate__' method on the module and store the result
+    pickled_ivalues_.emplace_back(moduleGetState(module));
+    module_def->set_get_state_attribute_id(pickled_ivalues_.size() - 1);
   }
 
+  // Add all the parameters
+  for (const auto& param : module.get_parameters()) {
+    torch::ParameterDef* param_def = module_def->add_parameters();
+    param_def->set_name(param.name());
+    param_def->set_is_buffer(false);
+    if (user_provided_serialization) {
+      // If a __getstate__ was used, don't write the actual tensor
+      param_def->set_tensor_id(-1);
+    } else {
+      param_def->set_tensor_id(addTensor(param.value().toTensor()));
+    }
+  }
+
+  // Add all the attributes
   for (const auto& attribute : module.get_attributes()) {
     // Add attribute to ModuleDef
     torch::AttributeDef* attribute_def = module_def->add_attributes();
     attribute_def->set_name(attribute.name());
     attribute_def->set_type(attribute.type()->python_str());
 
-    attribute_table_.push_back(attribute.value());
-    attribute_def->set_id(attribute_table_.size() - 1);
+    if (!user_provided_serialization) {
+      // Write the attribute's index if it's actually saved, -1 if it needs to
+      // come from __getstate__
+      pickled_ivalues_.push_back(attribute.value());
+      attribute_def->set_id(pickled_ivalues_.size() - 1);
+    } else {
+      // The module had a __setstate__, so write the attribute name/type so
+      // it can be correctly imported, but it has no entry in the
+      // pickled_ivalues_ table
+      attribute_def->set_id(-1);
+    }
   }
 
   std::stringstream module_name;
@@ -760,7 +893,7 @@ void ScriptModuleSerializer::convertModule(
     module_name << prefix << "_";
   module_name << name;
 
-  if (module.get_methods().size() > 0) {
+  if (module.class_compilation_unit().get_functions().size() > 0) {
     std::ostringstream methods;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
@@ -784,15 +917,6 @@ void ScriptModuleSerializer::convertModule(
     torch::ModuleDef* sub_def = module_def->add_submodules();
     convertModule(*elem, module_name.str(), elem->name(), sub_def);
   }
-}
-
-void ScriptModuleSerializer::convertParameter(
-    const script::Slot& param,
-    torch::ParameterDef* param_def,
-    bool is_parameter) {
-  param_def->set_name(param.name());
-  param_def->set_is_buffer(is_parameter);
-  param_def->set_tensor_id(addTensor(param.value().toTensor()));
 }
 
 // Pretty printing for ONNX
@@ -971,6 +1095,10 @@ std::string prettyPrint(const onnx::ModelProto& model) {
 }
 
 } // namespace
+
+void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
+  GetExtraFilesHook() = hook;
+}
 
 std::string pretty_print_onnx(
     const std::shared_ptr<Graph>& graph,

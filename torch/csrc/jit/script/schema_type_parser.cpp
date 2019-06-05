@@ -1,31 +1,31 @@
-#include <torch/csrc/jit/script/schema_type_parser.h>
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/alias_info.h>
+#include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
-#include <c10/util/string_utils.h>
+#include <torch/csrc/jit/script/schema_type_parser.h>
 #include <string>
 
-using c10::Symbol;
+using c10::AliasInfo;
+using c10::BoolType;
+using c10::CompleteTensorType;
+using c10::DeviceObjType;
+using c10::DictType;
+using c10::DimensionedTensorType;
+using c10::FloatType;
+using c10::FutureType;
 using c10::GeneratorType;
 using c10::IntType;
-using c10::DeviceObjType;
-using c10::NumberType;
-using c10::StringType;
-using c10::BoolType;
-using c10::NoneType;
-using c10::FloatType;
-using c10::OptionalType;
-using c10::TupleType;
-using c10::TensorType;
-using c10::DimensionedTensorType;
-using c10::CompleteTensorType;
-using c10::FutureType;
-using c10::DictType;
 using c10::ListType;
+using c10::NoneType;
+using c10::NumberType;
+using c10::OptionalType;
+using c10::StringType;
+using c10::Symbol;
+using c10::TensorType;
+using c10::TupleType;
 using c10::VarType;
-using c10::AliasInfo;
 
 namespace torch {
 namespace jit {
@@ -76,10 +76,10 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
     // optional 'alias set annotation'
     parseList(TK_NOTHING, '|', TK_NOTHING, [&] {
       if (L.nextIf('*')) {
-        alias_info = AliasInfo::createWildcard();
+        alias_info.addBeforeSet(AliasInfo::wildcardSet());
 
         // If we found a wildcard, ignore all subsequent annotations
-      } else if (!alias_info.isWildcard()) {
+      } else if (!alias_info.isWildcardBefore()) {
         alias_info.addBeforeSet(
             Symbol::fromQualString("alias::" + L.expect(TK_IDENT).text()));
       }
@@ -90,11 +90,14 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
     if (L.nextIf(TK_ARROW)) {
       // optional 'alias set annotation'
       parseList(TK_NOTHING, '|', TK_NOTHING, [&] {
-        if (L.cur().kind == '*') {
-          L.reportError("Wildcard not allowed as part of the output set");
+        if (L.nextIf('*')) {
+          alias_info.addAfterSet(AliasInfo::wildcardSet());
+
+          // If we found a wildcard, ignore all subsequent annotations
+        } else if (!alias_info.isWildcardAfter()) {
+          alias_info.addAfterSet(
+              Symbol::fromQualString("alias::" + L.expect(TK_IDENT).text()));
         }
-        alias_info.addAfterSet(
-            Symbol::fromQualString("alias::" + L.expect(TK_IDENT).text()));
       });
     } else {
       // We didn't encounter an ->, so assume the "after set" is identical
