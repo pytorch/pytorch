@@ -6240,6 +6240,17 @@ a")
         with self.assertRaisesRegex(torch.jit.Error, "must not be zero"):
             fn()
 
+    def test_script_for_in_list(self):
+        def fn(int_list):
+            # type: (List[int]) -> int
+            x = 0
+            for i in int_list:
+                x += i
+            return x
+
+        self.checkScript(fn, ([1, 3, 5],), optimize=True)
+        self.checkScript(fn, ([],), optimize=True)
+
     def test_script_optional_none(self):
         def none_stmt(x):
             output = None

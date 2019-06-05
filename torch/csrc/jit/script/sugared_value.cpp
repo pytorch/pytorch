@@ -236,6 +236,54 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }
 
+std::vector<TypePtr> SimpleValue::getItersTypeInfo(
+  const SourceRange& loc,
+  Function& m) {
+    TypePtr val_type = getValue()->type();
+    if (auto list_type = val_type->cast<ListType>()) {
+      return {list_type->getElementType()};
+    } else {
+      throw ErrorReport(loc)
+          << "Value type " << val_type->str() << "cannot be used as a iterator";
+    }
+}
+
+void SimpleValue::fillInLoopInfo(
+  const SourceRange& loc,
+  Function& m,
+  Node* n,
+  size_t iters_size) {
+  TORCH_INTERNAL_ASSERT(n->kind() == prim::Loop);
+  // List, Tuple, Tensor, fill in missing information desugaring
+  Value* val = getValue();
+  TypePtr val_type = val->type();
+  Graph& g = *m.graph();
+  if (auto list_type = val_type->cast<ListType>()) {
+    // fill in max_trip_count_val
+    WithInsertPoint guard(n);
+    Value* max_trip_count_val = g.insert(aten::len, {val}, {}, loc);
+    n->insertInput(0, max_trip_count_val);
+
+    // fill in the target element assignment value in the beginning of the FOR loop
+    {
+      TORCH_CHECK(iters_size == 1, "more than one iterable for in list");
+      Block* body_block = n->blocks()[0];
+      // replace the first Placeholder node in the block with the correct assignment
+      auto it = body_block->nodes().begin();
+      Value* trip_count = body_block->inputs()[0]; // Iteration num
+      TORCH_INTERNAL_ASSERT(it->kind() == prim::Placeholder);
+
+      WithInsertPoint it_guard(*it);
+      Value* cur_elem = g.insert(aten::select, {val, trip_count}, {}, loc);
+      it->output()->replaceAllUsesWith(cur_elem);
+      it.destroyCurrent();
+    }
+  } else {
+      throw ErrorReport(loc)
+          << "Value type " << val_type->str() << "does not have loop information to fill";
+    }
+}
+
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
     Function& m,

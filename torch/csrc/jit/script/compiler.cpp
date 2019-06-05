@@ -32,6 +32,7 @@ using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 using TypeAndRange = std::pair<TypePtr, const SourceRange*>;
+using IterType = std::pair<std::string, TypePtr>;
 
 // Holds mappings from a variable name to a refined type for that variable
 // E.g if x is not None is true than we can refine x from type t? to t.
@@ -422,6 +423,11 @@ struct Environment {
            makeMagic(
                "__len__",
                std::make_shared<BuiltinFunction>(aten::len, at::nullopt))},
+          // {"iter",
+          //  makeMagic(
+          //      "__iter__",
+          //      std::make_shared<BuiltinFunction>(aten::iter, at::nullopt))},
+          {"range", std::make_shared<BuiltinFunction>(aten::range, at::nullopt)},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
@@ -1308,7 +1314,7 @@ struct to_ir {
 
   // *********************** Loop Operators ************************************
   // Emits a loop operators conforming to the semantics specified at
-  // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
+  // https://github.com/onnx/onnx/blob/master/docs/Operators.md#Loop
   // TODO: implement scan_outputs
 
   // the format of the Loop instruction is:
@@ -1321,6 +1327,74 @@ struct to_ir {
   // all loop_carried_... lists are the same length and represent the value of
   // loop-carried variables whose definitions are updated as the loop executes
   // in a way that ensure single static assignment.
+
+  // TODO: This loop common is different from the emitLoopCommon to implement the new
+  // Iterable interface, and it is here for gradually moving all looping cases, will
+  // delete the old emitLoopCommon after all cases been moved to the new Iterable interface.
+  Node* emitNewLoopCommon(
+      SourceRange range,
+      const List<Stmt>& body,
+      at::ArrayRef<IterType> iters_info,
+      c10::optional<Expr> cond) {
+    Node* n = graph->insertNode(create(prim::Loop, range, 0));
+    WithInsertPoint guard(n);
+    // emit the start_condition and add it as input (we only emit condition on
+    // WHILE loop, and for the FOR loop, the condition on TorchScript class will
+    // substitute this constant node with the condition graph on its SugaredValue)
+    Value* cond_val = (cond) ? emitCond(cond.value())
+                      : graph->insertConstant(true, nullptr, range);
+    n->addInput(cond_val);
+    
+    auto* body_block = n->addBlock();
+    body_block->addInput()->setType(IntType::get()); // Iteration num
+
+    {
+      pushFrame(body_block);
+      WithInsertPoint guard(body_block);
+
+      // Insert a placeholder for each iterator target to allow the loop body to
+      // refer to them in the value table, and emit the rest of the FOR loop.
+      // These placeholders will be fixed up by each SugaredValue fillLoopInfo call.
+      for(auto iter: iters_info) {
+        Node *assigner = graph->insertNode(create(prim::Placeholder, range, 1));
+        assigner->output()->setType(iter.second);
+        environment_stack->setVar(range, iter.first, assigner->output());
+      }
+
+      // emit the body statements
+      emitStatements(body);
+
+      // Also emit the continue conditional for WHILE loop or insert constant node
+      // for FOR loop
+      cond_val = (cond) ? emitCond(cond.value())
+                        : graph->insertConstant(true, nullptr, range);
+      body_block->registerOutput(cond_val);
+      auto body_frame = popFrame();
+      auto outer_frame = environment_stack;
+
+      // Add block outputs to correspond to each captured input
+      // some of these will be removed.
+      for (const auto& x : body_frame->captured_inputs) {
+        auto fv = body_frame->getValueInThisFrame(range, x);
+        body_block->registerOutput(fv);
+      }
+
+      // Remove inputs for values that did not mutate within the
+      // block
+      body_frame->deleteExtraInputs(range);
+
+      // register node inputs/outputs for the true loop carried deps,
+      for (size_t i = 0; i < body_frame->captured_inputs.size(); ++i) {
+        auto x = body_frame->captured_inputs[i];
+        n->addInput(outer_frame->getVar(x, range));
+        // body_block->inputs(): loop_counter, lcd0, lcd1, ...
+        // captured_inputs: lcd0, lcd1, ...
+        auto typ = body_block->inputs()[i + 1]->type();
+        outer_frame->setVar(range, x, n->addOutput()->setType(typ));
+      }
+    }
+    return n;
+  }
 
   void emitLoopCommon(
       SourceRange range,
@@ -1338,6 +1412,7 @@ struct to_ir {
           *graph, std::numeric_limits<int64_t>::max(), nullptr, range);
     }
 
+    // emit the start_condition and add it as input
     cond_val = (cond) ? emitCond(cond.value())
                       : graph->insertConstant(true, nullptr, range);
     n->addInput(max_trip_count_val);
@@ -1358,7 +1433,7 @@ struct to_ir {
 
       emitStatements(body);
 
-      // Also emit the conditional
+      // Also emit the continue conditional
       cond_val = (cond) ? emitCond(cond.value())
                         : graph->insertConstant(true, nullptr, range);
       body_block->registerOutput(cond_val);
@@ -1475,40 +1550,6 @@ struct to_ir {
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
-  void emitForInListLoop(
-      const For& stmt,
-      const std::shared_ptr<torch::jit::script::SimpleValue>& siv) {
-    auto targets = stmt.targets();
-    auto itrs = stmt.itrs();
-    auto body = stmt.body();
-    auto& range = stmt.range();
-    auto target = Var(targets[0]).name();
-
-    auto listArg = siv->asValue(range, method);
-    auto max_trip_count_val = emitBuiltinCall(
-        range,
-        *graph,
-        aten::len,
-        c10::nullopt,
-        {listArg},
-        {},
-        /*required=*/true);
-    const auto& ident_name = target.name();
-    auto assigner = [ident_name, range, listArg, this](
-                        Value* index, std::shared_ptr<Environment> env) {
-      auto cur_elm = emitBuiltinCall(
-          range,
-          *this->graph,
-          aten::select,
-          c10::nullopt,
-          {listArg, index},
-          {},
-          /*required=*/true);
-      env->setVar(range, ident_name, cur_elm);
-    };
-    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
-  }
-
   void emitForInTensorLoop(const For& stmt, Value* tensorArg) {
     auto targets = stmt.targets();
     auto target = Var(targets[0]).name();
@@ -1576,8 +1617,6 @@ struct to_ir {
   }
 
   void emitFor(const For& stmt) {
-    // For now, we only support range loops. e.g. for i in range(3): ...
-
     auto targets = stmt.targets();
     auto itrs = stmt.itrs();
     auto body = stmt.body();
@@ -1613,11 +1652,23 @@ struct to_ir {
     // be unrolled
     auto sv = emitSugaredExpr(itrs[0], 1);
 
+    // builtinFunction value(range, zip, tuple(), list(), enumerate
+    // or SimpleValue List, Tuple, Dict
+
     auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
 
     // for-in lists
     if (siv && siv->getValue()->type()->kind() == TypeKind::ListType) {
-      emitForInListLoop(stmt, siv);
+      std::vector<IterType> iters_info;
+      std::vector<TypePtr> types_info = siv->getItersTypeInfo(stmt.range(), method);
+      TORCH_INTERNAL_ASSERT(targets.size() == types_info.size());
+      for(size_t i = 0; i < targets.size(); ++ i) {
+        std::string iter_name = Var(targets[i]).name().name();
+        iters_info.emplace_back(IterType(iter_name, types_info[i]));
+      }
+
+      Node* loop_node = emitNewLoopCommon(stmt.range(), stmt.body(), iters_info, {});
+      siv->fillInLoopInfo(stmt.range(), method, loop_node, iters_info.size());
       return;
     }
 

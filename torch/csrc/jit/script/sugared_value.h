@@ -94,6 +94,32 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
+  // If it is a iterable sugared value, use this interface to get the type information
+  // for all the iterables inside for loop, and prepare for loop information filling
+  virtual std::vector<TypePtr> getItersTypeInfo(
+    const SourceRange& loc,
+    Function& m) {
+   throw ErrorReport(loc) << kind() << " does not have the iterables type information";
+  }
+
+  // Fill in loop information, specifically:
+  // * max_trip_count_val: calculate the max trip count and fill it in
+  // * iterator element assignment: iterator assignment inside the beginning of the FOR loop
+  //   is being temporarily placed by prim::PlaceHolder, fillInLoopInfo will need to replace
+  //   them with the correct element assignment logic/subgraph.
+  // * condition variable: the condition that will terminate the FOR loop. WHILE loop does not
+  //   need to fill this in because it will be emitted by the compiler. TorchScript classes
+  //   iterator will need to fill the condition variable in, and it requires the classes to
+  //   define a protocol __next__ and __hasnext__, the __hasnext__ magic method graph will
+  //   substitute the condition value with the corresponding subgraph
+  virtual void fillInLoopInfo(
+    const SourceRange& loc,
+    Function& m,
+    Node* n,
+    size_t iters_size) {
+    throw ErrorReport(loc) << kind() << " does not have loop information to fill in";
+  }
+
   virtual ~SugaredValue() = default;
 };
 
@@ -141,6 +167,15 @@ struct TORCH_API SimpleValue : public SugaredValue {
   Value* getValue() const {
     return value_;
   }
+  std::vector<TypePtr> getItersTypeInfo(
+    const SourceRange& loc,
+    Function& m) override;
+
+  void fillInLoopInfo(
+    const SourceRange& loc,
+    Function& m,
+    Node* n,
+    size_t iters_size) override;
 
  private:
   Value* value_;
@@ -381,6 +416,14 @@ struct TORCH_API IsInstanceValue : SugaredValue {
     return "isinstance";
   }
 };
+
+// matched against for special handling of isinstance expressions
+// struct TORCH_API IterableValue : SugaredValue {
+//   IterableValue() = default;
+//   std::string kind() const override {
+//     return "Iterable";
+//   }
+// };
 
 // This represents the "__new__" method on classes, which can't be a MethodValue
 // because it takes a ClassValue as input.
