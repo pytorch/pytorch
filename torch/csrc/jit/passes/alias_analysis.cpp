@@ -969,17 +969,7 @@ bool AliasDb::tryMove(
     Node* movePoint,
     MoveSide moveSide,
     bool dryRun) {
-  if (toMove->owningBlock() != movePoint->owningBlock()) {
-    std::cout << "toMove = " << *toMove << std::endl;
-    std::cout << "movePoint = " << *movePoint << std::endl;
-    if (movePoint->prev()) {
-      std::cout << "movePoint->prev() = " << *(movePoint->prev()) << std::endl;
-    }
-    std::cout << "graph = \n";
-    toMove->owningGraph()->dump();
-  }
-
-  AT_ASSERT(toMove->owningBlock() == movePoint->owningBlock());
+ AT_ASSERT(toMove->owningBlock() == movePoint->owningBlock());
 
   if (toMove == movePoint) {
     return true;
