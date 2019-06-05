@@ -33,6 +33,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_NUMPY=0
+#     disables the NumPy build
+#
 #   BUILD_TEST=0
 #     disables the test build
 #
