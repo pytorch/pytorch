@@ -2744,24 +2744,6 @@
       kwarg_only: True
     - double p
 ]]
-[[
-  name: _th_dirichlet_grad
-  types:
-    - floating_point
-  backends:
-    - CPU
-  return: argument 0
-  variants:
-    - function
-  options:
-    - cname: dirichlet_grad
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - THTensor* x
-        - THTensor* alpha
-        - THTensor* total
-]]
 
 # In theory, this could be a part of the above declaration. But in
 # practice this leads to all sorts of problems with ambiguous overloads.
