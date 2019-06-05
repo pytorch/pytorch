@@ -126,13 +126,14 @@ void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
   for (const auto input : n->inputs()) {
     auto it = elementMap_.find(input);
     if (it != elementMap_.end()) {
-      ret |= it->second->getMemoryLocations();
-    }
-  }
-  for (const auto output : n->outputs()) {
-    auto it = elementMap_.find(output);
-    if (it != elementMap_.end()) {
-      ret |= it->second->getMemoryLocations();
+      auto el = it->second;
+      // Add all memory locations this element may alias.
+      ret |= el->getMemoryLocations();
+
+      // We also consider memory locations of contained values to be "read".
+      for (auto contained : el->containedElements) {
+        ret |= memoryDAG_->fromIndex(contained)->getMemoryLocations();
+      }
     }
   }
 
@@ -599,8 +600,18 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
   for (auto input : node->inputs()) {
     setWildcard(input);
   }
-  for (auto output : node->outputs()) {
-    giveFreshAlias(output);
+
+  TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+  auto container = node->output();
+  giveFreshAlias(container);
+
+  // Register contained types
+  auto el = getOrCreateElement(container);
+  for (const auto& type : container->type()->containedTypes()) {
+    if (shouldAnnotate(type)) {
+      auto wildcard = getOrCreateWildcard(type);
+      memoryDAG_->addToContainedElements(wildcard, el);
+    }
   }
 }
 

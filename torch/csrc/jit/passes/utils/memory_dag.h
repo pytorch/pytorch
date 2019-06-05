@@ -42,6 +42,8 @@ class TORCH_API MemoryDAG {
   MemoryDAG& operator=(const MemoryDAG&) = delete;
 
   // Make `from` point at `to`.
+  // For contained elements: fresh elements will be created and pointed at
+  // `to`'s contained elements.
   void makePointerTo(Element* from, Element* to);
 
   void addToContainedElements(Element* contained, Element* container);
@@ -63,7 +65,7 @@ class TORCH_API MemoryDAG {
       const at::ArrayRef<Element*>& b) const;
 
   // Converts from the compressed index representation
-  const Element* fromIndex(unsigned x) const;
+  Element* fromIndex(unsigned x) const;
 
  private:
   bool mayAliasImpl(const Element* a, const Element* b) const;
