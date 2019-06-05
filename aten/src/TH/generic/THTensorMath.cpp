@@ -441,7 +441,7 @@ void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src)
 #elif defined(TH_REAL_IS_BYTE)
           rp[i] = ((scalar_t) tp[i]) >> sp[i];
 #else
-          rp[i] = ((ureal) tp[i]) >> sp[i];
+          rp[i] = ((accreal) tp[i]) >> sp[i];
 #endif
         }
       });
@@ -453,7 +453,7 @@ void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src)
 #elif defined(TH_REAL_IS_BYTE)
       TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((scalar_t)*t_data) >> *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((ureal)*t_data) >> *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((accreal)*t_data) >> *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
     }
   } else {
@@ -464,7 +464,7 @@ void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src)
 #elif defined(TH_REAL_IS_BYTE)
       TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((scalar_t)*t_data) >> *src_data;);
 #else
-      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((ureal)*t_data) >> *src_data;);
+      TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = ((accreal)*t_data) >> *src_data;);
 #endif
   }
 }

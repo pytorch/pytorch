@@ -831,7 +831,7 @@ void THTensor_(rshift)(THTensor *r_, THTensor *t, scalar_t value)
 #if defined(TH_REAL_IS_BYTE)
         rp[i] = ((scalar_t) tp[i]) >> value;
 #else
-        rp[i] = ((ureal) tp[i]) >> value;
+        rp[i] = ((accreal) tp[i]) >> value;
 #endif
       }
     });
@@ -839,7 +839,7 @@ void THTensor_(rshift)(THTensor *r_, THTensor *t, scalar_t value)
 #if defined(TH_REAL_IS_BYTE)
     TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (((scalar_t) *t_data) >> value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (((ureal) *t_data) >> value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (((accreal) *t_data) >> value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
   }
 #endif
