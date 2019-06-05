@@ -1041,6 +1041,8 @@ def exp(g, self):
 def dropout(g, input, p, train):
     if not train:  # in eval mode, dropout is non-op
         return input
+    warnings.warn("Dropout is a training op and should not be exported in inference mode. "
+                  "Make sure to call eval() on the model, and to export it with param training=False.")
     r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
     return r
 
@@ -1482,6 +1484,12 @@ def randn(g, *shapes):
     shapes_list = list(shapes)
     shape = sym_help._maybe_get_const(shapes_list[0], "is")
     return g.op('RandomNormal', shape_i=shape)
+
+
+def rand(g, *shapes):
+    shapes_list = list(shapes)
+    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    return g.op('RandomUniform', shape_i=shape)
 
 
 def randn_like(g, self, *others):

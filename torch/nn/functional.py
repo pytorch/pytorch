@@ -1155,9 +1155,9 @@ def gelu(input):
     Applies element-wise the function
     :math:`\text{GeLU}(x) = x * \Phi(x)`
 
-    where `\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
+    where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
-    See :`Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`.
+    See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
     """
     return torch._C._nn.gelu(input)
 

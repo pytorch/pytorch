@@ -96,6 +96,23 @@ static int64_t floordiv(int64_t a, int64_t b) {
     return (r.rem) ? r.quot - 1 : r.quot;
   }
 }
+void checkDoubleInRange(double a) {
+  if (std::isnan(a) || std::isinf(a) ||
+      a > double(std::numeric_limits<int64_t>::max()) ||
+      a < double(std::numeric_limits<int64_t>::min())) {
+    throw c10::Error(
+        "Cannot convert float " + std::to_string(a) + " to integer", "");
+    return;
+  }
+}
+static int64_t floor(double a) {
+  checkDoubleInRange(a);
+  return std::floor(a);
+}
+static int64_t ceil(double a) {
+  checkDoubleInRange(a);
+  return std::ceil(a);
+}
 
 static int64_t gcd(int64_t a, int64_t b) {
   while (b != 0) {
@@ -2128,14 +2145,39 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__or__, a | b),
     DEFINE_INT_OP(aten::__xor__, a ^ b),
 
-    DEFINE_UNARY_OP(aten::floor, std::floor(a), float, float),
-    DEFINE_UNARY_OP(aten::ceil, std::ceil(a), float, float),
+    DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
+    DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::log, std::log(a) / std::log(b)),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
     DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
     DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
     DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
+    DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
+    DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
+    DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
+    DEFINE_BINARY_FLOAT_OP(aten::atan2, std::atan2(a, b)),
+    DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
+    DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
+    DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
+    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
+    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
+    DEFINE_UNARY_OP(aten::acosh, std::acosh(a), float, float),
+    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
+    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
+    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
+    DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
+    Operator(
+        "aten::modf(float a) -> (float, float)",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          double b, c;
+          b = modf(a, &c);
+          push(stack, b, c);
+          return 0;
+        }),
+    DEFINE_BINARY_FLOAT_OP(aten::mathremainder, std::remainder(a, b)),
 
     // TODO: move abs to aten namespace because it's schematized!
     DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),
@@ -2164,6 +2206,20 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::expm1, std::expm1(a), float, float),
     DEFINE_UNARY_OP(aten::fabs, std::fabs(a), float, float),
     DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
+    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
+    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
+    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
+    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
+    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
+
+    Operator(
+    "aten::isnan(float a) -> bool",
+    [](Stack& stack) {
+      double a;
+      pop(stack, a);
+      push(stack, std::isnan(a));
+      return 0;
+    }),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),

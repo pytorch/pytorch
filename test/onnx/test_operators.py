@@ -510,6 +510,10 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(lambda x: torch.randn(1, 2, 3, 4) + x, x)
 
+    def test_rand(self):
+        x = torch.rand(1, 2, 3, 4)
+        self.assertONNX(lambda x: torch.rand(1, 2, 3, 4) + x, x)
+
     def test_rrelu(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(torch.nn.RReLU(), x)

@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 
-from cimodel.lib.conf_tree import ConfigNode, X
+from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 
 CONFIG_TREE_DATA = [
     ("trusty", [
         (None, [
-            X("2.7.9"),
+            XImportant("2.7.9"),
             X("2.7"),
-            ("3.5", [("important", [X(True)])]),
+            X("3.5"),
             X("nightly"),
         ]),
         ("gcc", [
             ("4.8", [X("3.6")]),
             ("5.4", [
-                X("3.6"),
+                XImportant("3.6"),
                 ("3.6", [
                     ("xla", [X(True)]),
                     ("namedtensor", [X(True)]),
@@ -25,7 +25,7 @@ CONFIG_TREE_DATA = [
     ]),
     ("xenial", [
         ("clang", [
-            ("5", [X("3.6")]),
+            ("5", [XImportant("3.6")]),  # This is actually the ASAN build
         ]),
         ("cuda", [
             ("9", [
@@ -36,14 +36,14 @@ CONFIG_TREE_DATA = [
                 # and
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
-                ("2.7", [("important", [X(True)])]),
-                X("3.6"),
+                X("2.7"),
+                XImportant("3.6"),
             ]),
             ("9.2", [X("3.6")]),
             ("10", [X("3.6")]),
         ]),
         ("android", [
-            ("r19c", [X("3.6")]),
+            ("r19c", [XImportant("3.6")]),
         ]),
     ]),
 ]
