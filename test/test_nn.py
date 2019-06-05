@@ -302,6 +302,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             for p in module.parameters():
                 test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                 test_case.assertEqual(p.get_device(), 0)
+                del p
 
             if torch.cuda.device_count() > 1:
                 input = input.cuda(1)
@@ -311,6 +312,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 for p in module.parameters():
                     test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 1)
+                    del p
         else:
             # check that float()/double() casters work correctly
 
