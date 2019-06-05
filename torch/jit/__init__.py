@@ -1582,55 +1582,11 @@ if _enabled:
             # __init__ can run correctly
             self.__dict__['_initialized'] = False
             super(WeakScriptModuleProxy, self).__init__()
+
             # Store a weak reference to the original module
-            self.__dict__["_original"] = weakref.ref(original)
 
-            constants_set = set(getattr(original, "__constants__", []))
-            self.__dict__["_constants_set"] = {}
-
-            if not hasattr(original, '_parameters'):
-                raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
-                                   .format(type(original).__name__))
-
-            # Copy Parameters and Modules
-            for name in dir(original):
-                item = getattr(original, name)
-                if item is None and name in original._parameters:
-                    # XXX: treat None value simply as module attributes instead of adding them to the parameter list
-                    # TODO: need to handle this more generally when non-tensor attributes added to module
-                    object.__setattr__(self, name, item)
-                elif item is self:
-                    continue
-                elif isinstance(item, (Parameter, Module, Attribute)):
-                    if isinstance(item, (ModuleList, Sequential)):
-                        # These are in __constants__, so ignore them here
-
-                        if not torch._C._jit_recursive_script():
-                            # For recursive script, these are constantified after
-                            # they are used, so they don't need to be in constants.
-                            # The `continue` here should be deleted along with
-                            # [weak script refactor]
-                            continue
-                    ScriptModule.__setattr__(self, name, item)
-
-            # Copy buffers
-            for name in original._buffers:
-                if original._buffers[name] is None:
-                    object.__setattr__(self, name, None)
-                else:
-                    self.register_buffer(name, original._buffers[name])
-
-            # Copy constants
-            self.__dict__["_constants_set"] = constants_set
-            for name in self.__dict__["_constants_set"]:
-                if hasattr(original, name):
-                    if (name in original._parameters or name in original._buffers) and item is not None:
-                        # for 'None' parameters/buffers, don't actually add their values if it exists
-                        continue
-                    ScriptModule.__setattr__(self, name, getattr(original, name))
-
-            # Copy overloads
-            self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
+            self.__dict__['_original'] = weakref.ref(original)
+            _copy_module_to_script_module(original, script_module=self)
 
             self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, stubs)
@@ -1670,6 +1626,79 @@ else:
         def __init__(self, optimize=True):
             super(ScriptModule, self).__init__()
 
+
+def _copy_module_to_script_module(module, script_module=None):
+    """
+    This copies Parameters, buffers, submodules, attributes, and constants from
+    an nn.Module into a fresh ScriptModule
+    """
+    if script_module is None:
+        # TODO: Delete this parameter (a new ScriptModule should always be made)
+        # when WeakScriptModuleProxy is deleted
+        script_module = ScriptModule()
+
+    # A quick check that the module's super() is called so everything is set up
+    # for this method to do the copying it needs to
+    if not hasattr(module, '_parameters'):
+        raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
+                           .format(type(module).__name__))
+
+
+    # HACK: To support None nn.Parameters and buffers, don't copying them if they
+    # are both in __constants__ and are of a None value. If they are not none,
+    # copy them as usual. For this reason we need to know the constants here
+    # but not actually set it on the script_module until after the Parameters
+    # and buffers are copied.
+    constants_set = set(getattr(module, "__constants__", []))
+
+    # Copy attributes
+    for name in dir(module):
+        value = getattr(module, name)
+        if isinstance(value, Attribute):
+            setattr(script_module, name, item)
+
+
+    def copy_tensors(the_list, setter):
+        for name in the_list:
+            value = getattr(module, name)
+            if value is None:
+                # For None buffers/parameters, don't register it (this path treats it as a
+                # Optional[Tensor] constant where the value is None)
+                object.__setattr__(module, name, None)
+            else:
+                setter(name, value)
+
+    # Copy buffers
+    copy_tensors(
+        module._buffers,
+        lambda name, value: script_module.register_buffer(name, module._buffers[name])
+    )
+
+    # Copy parameters
+    copy_tensors(
+        module._parameters,
+        lambda name, value: setattr(script_module, name, value)
+    )
+
+    # Copy submodules
+    for name in module._modules:
+        value = getattr(module, name)
+        setattr(script_module, name, value)
+
+    # Copy constants
+    script_module.__dict__["_constants_set"] = constants_set
+    for name in constants_set:
+        if hasattr(module, name):
+            value = getattr(module, name)
+            if (name in module._parameters or name in module._buffers) and value is not None:
+                # for 'None' parameters/buffers, don't actually add their values if it exists
+                continue
+            ScriptModule.__setattr__(script_module, name, getattr(module, name))
+
+    # Copy overloads
+    script_module.__dict__["_overloads"] = dict(getattr(module, "__overloads__", {}))
+
+    return script_module
 
 def _get_weak_stubs(cls):
     """
@@ -1712,7 +1741,11 @@ def _convert_to_script_module(mod, methods=None):
         return script_method(func, createResolutionCallbackFromClosure(func))
 
     stubs = list(map(make_stub, methods))
-    return WeakScriptModuleProxy(mod, stubs)
+
+    script_module = _copy_module_to_script_module(mod)
+
+    _create_methods_from_stubs(script_module, stubs)
+    return script_module
 
 
 def _make_strong(mod):

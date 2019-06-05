@@ -7753,7 +7753,7 @@ a")
         input = torch.randn(1, 5, 5)
         o = m(input)
         self.assertEqual(o, m.sub(input))
-        with self.assertRaisesRegex(RuntimeError, "cannot re-assign"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot re-assign"):
             m.sub = nn.Linear(5, 5)
 
     def test_script_inline_trace_multiple_args(self):
