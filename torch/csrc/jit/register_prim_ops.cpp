@@ -564,8 +564,22 @@ RegisterOperators reg(
              {Argument("message", StringType::get()),
               Argument("stacklevel", IntType::get(), c10::nullopt, 2, true)},
              {}),
-         [](const Node* node) {
-           return [](Stack& stack) {
+         [](const Node* node) -> std::function<int(Stack&)> {
+           auto range = node->sourceRange().source();
+           if (range->filename()) {
+             auto line = range->starting_line_no() +
+                 range->lineno_for_offset(node->sourceRange().start());
+             return [=](Stack& stack) {
+               drop(stack, 1);
+               c10::SourceLocation location{
+                   "", range->filename()->c_str(), uint32_t(line)};
+               c10::Warning::warn(location,
+                   pop(stack).toStringRef());
+               return 0;
+             };
+           }
+
+           return [=](Stack& stack) {
              drop(stack, 1);
              AT_WARN(pop(stack).toStringRef());
              return 0;
