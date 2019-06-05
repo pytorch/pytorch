@@ -56,7 +56,7 @@ def set_training(model, mode):
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=False, strip_doc_string=True):
+           do_constant_folding=False, example_outputs=None, strip_doc_string=True):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -112,6 +112,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             optimization is applied to the model during export. Constant-folding
             optimization will replace some of the ops that have all constant
             inputs, with pre-computed constant nodes.
+        example_outputs (tuple of Tensors, default None): example_outputs must be provided
+            when exporting a ScriptModule or TorchScript Function.
         strip_doc_string (bool, default True): if True, strips the field
             "doc_string" from the exported model, which information about the stack
             trace.
@@ -128,7 +130,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
-            strip_doc_string=strip_doc_string)
+            example_outputs=example_outputs, strip_doc_string=strip_doc_string)
 
 
 # ONNX can't handle constants that are lists of tensors, which can

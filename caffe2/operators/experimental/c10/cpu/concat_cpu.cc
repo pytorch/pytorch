@@ -109,8 +109,7 @@ static auto registry = c10::RegisterOperators().op(
     c10::RegisterOperators::options()
       .kernel<
         decltype(concat_op_cpu_impl<float, CPUContext>),
-        &concat_op_cpu_impl<float, CPUContext>>()
-      .dispatchKey(CPUTensorId()));
+        &concat_op_cpu_impl<float, CPUContext>>(CPUTensorId()));
 
 } // namespace
 

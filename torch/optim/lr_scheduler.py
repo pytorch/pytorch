@@ -2,7 +2,8 @@ import types
 import math
 from torch._six import inf
 from collections import Counter
-from functools import partial
+from functools import partial, wraps
+import warnings
 
 from .optimizer import Optimizer
 
@@ -24,6 +25,19 @@ class _LRScheduler(object):
                                    "in param_groups[{}] when resuming an optimizer".format(i))
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
         self.last_epoch = last_epoch
+
+        # Following https://github.com/pytorch/pytorch/issues/20124
+        # We would like to ensure that `lr_scheduler.step()` is called after
+        # `optimizer.step()`
+        def with_counter(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                wrapper.called += 1
+                return func(*args, **kwargs)
+            wrapper.called = 0
+            return wrapper
+
+        self.optimizer.step = with_counter(self.optimizer.step)
         self.step(last_epoch)
 
     def state_dict(self):
@@ -47,6 +61,15 @@ class _LRScheduler(object):
         raise NotImplementedError
 
     def step(self, epoch=None):
+        # Raise a warning if old pattern is detected
+        # https://github.com/pytorch/pytorch/issues/20124
+        if self.optimizer.step.called < 1:
+            warnings.warn("Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
+                          "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
+                          "`optimizer.step()` before `lr_scheduler.step()`.  Failure to do this "
+                          "will result in PyTorch skipping the first value of the learning rate schedule."
+                          "See more details at "
+                          "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         if epoch is None:
             epoch = self.last_epoch + 1
         self.last_epoch = epoch
@@ -498,8 +521,10 @@ class CyclicLR(_LRScheduler):
         cycle_momentum (bool): If ``True``, momentum is cycled inversely
             to learning rate between 'base_momentum' and 'max_momentum'.
             Default: True
-        base_momentum (float or list): Initial momentum which is the
-            lower boundary in the cycle for each parameter group.
+        base_momentum (float or list): Lower momentum boundaries in the cycle
+            for each parameter group. Note that momentum is cycled inversely
+            to learning rate; at the peak of a cycle, momentum is
+            'base_momentum' and learning rate is 'max_lr'.
             Default: 0.8
         max_momentum (float or list): Upper momentum boundaries in the cycle
             for each parameter group. Functionally,
@@ -507,7 +532,10 @@ class CyclicLR(_LRScheduler):
             The momentum at any cycle is the difference of max_momentum
             and some scaling of the amplitude; therefore
             base_momentum may not actually be reached depending on
-            scaling function. Default: 0.9
+            scaling function. Note that momentum is cycled inversely
+            to learning rate; at the start of a cycle, momentum is 'max_momentum'
+            and learning rate is 'base_lr'
+            Default: 0.9
         last_epoch (int): The index of the last batch. This parameter is used when
             resuming a training job. Since `step()` should be invoked after each
             batch instead of after each epoch, this number represents the total
@@ -517,7 +545,7 @@ class CyclicLR(_LRScheduler):
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = torch.optim.CyclicLR(optimizer)
+        >>> scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.01, max_lr=0.1)
         >>> data_loader = torch.utils.data.DataLoader(...)
         >>> for epoch in range(10):
         >>>     for batch in data_loader:

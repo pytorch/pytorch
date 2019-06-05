@@ -133,7 +133,7 @@ public:
     return map(std::cos);
   }
   Vec256<double> cosh() const {
-    return map(std::cos);
+    return map(std::cosh);
   }
   Vec256<double> ceil() const {
     return _mm256_ceil_pd(values);

@@ -127,6 +127,14 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self = reinterpret_cast<THPVariable*>(self_)->cdata;
+  return wrap(self.data_ptr());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -395,7 +403,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
         "Can't call numpy() on Variable that requires grad. "
         "Use var.detach().numpy() instead.");
   }
-  return torch::utils::tensor_to_numpy(self_.data());
+  return torch::utils::tensor_to_numpy(self_.tensor_data());
   END_HANDLE_TH_ERRORS
 }
 
@@ -614,7 +622,7 @@ static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
   HANDLE_TH_ERRORS
   jit::tracer::warn("Converting a tensor to a Python list", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return torch::utils::tensor_to_list(self_.data());
+  return torch::utils::tensor_to_list(self_);
   END_HANDLE_TH_ERRORS
 }
 
@@ -704,6 +712,7 @@ PyMethodDef variable_methods[] = {
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
   {"cuda", (PyCFunction)THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"data_ptr", (PyCFunction)THPVariable_data_ptr, METH_NOARGS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},

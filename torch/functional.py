@@ -226,7 +226,7 @@ def isfinite(tensor):
         tensor([ 1,  0,  1,  0,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor", str(tensor))
+        raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
 
     # Support int input, nan and inf are concepts in floating point numbers.
     # Numpy uses type 'Object' when the int overflows long, but we don't
@@ -252,7 +252,7 @@ def isinf(tensor):
         tensor([ 0,  1,  0,  1,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor", str(tensor))
+        raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
     if tensor.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
         return torch.zeros_like(tensor, dtype=torch.uint8)
     return tensor.abs() == inf

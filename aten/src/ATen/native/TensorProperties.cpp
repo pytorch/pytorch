@@ -60,7 +60,7 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   if (self.is_contiguous(memory_format)) {
     return self;
   }
-  auto result = at::empty_like(self);
+  auto  result = at::empty_like(self);
   switch (memory_format) {
     case MemoryFormat::Any: // Back compatibility with old defaults
     case MemoryFormat::Contiguous: {

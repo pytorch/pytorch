@@ -180,11 +180,11 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators::options()                                \
               .kernel(                                                       \
+                  ::c10::CPUTensorId(),                                      \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
                       OperatorClass>,                                        \
-                  &::caffe2::detail::noCache)                                \
-              .dispatchKey(::c10::CPUTensorId()));
+                  &::caffe2::detail::noCache));
 
 #define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)       \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
@@ -193,11 +193,11 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators::options()                                \
               .kernel(                                                       \
+                  ::c10::CUDATensorId(),                                     \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
                       OperatorClass>,                                        \
-                  &::caffe2::detail::noCache)                                \
-              .dispatchKey(::c10::CUDATensorId()));
+                  &::caffe2::detail::noCache));
 
 // You should never manually call the C10_REGISTER_CAFFE2_OPERATOR_HIP macro.
 // The C10_REGISTER_CAFFE2_OPERATOR_CUDA macro from above will be automatically
@@ -209,11 +209,11 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
           ::caffe2::_c10_ops::schema_##OperatorName(),                       \
           ::c10::RegisterOperators().options()                               \
               .kernel(                                                       \
+                  ::c10::HIPTensorId(),                                      \
                   &::caffe2::detail::call_caffe2_op_from_c10<                \
                       ::caffe2::_c10_ops::schema_##OperatorName,             \
                       OperatorClass>,                                        \
-                  &::caffe2::detail::noCache)                                \
-              .dispatchKey(::c10::HIPTensorId()));
+                  &::caffe2::detail::noCache));
 
 #else
 // Don't use c10 dispatcher on mobile because of binary size

@@ -60,10 +60,10 @@ namespace detail {
     }
   };
   template<class Key, class Value>
-  struct ivalue_to_arg_type<Dict<Key, Value>> {
-    static Dict<Key, Value> call(IValue&& v) {
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported argument type: c10::Dict<Key, Value> and Key is not one of the supported primitive types.");
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported argument type: c10::Dict<Key, Value> and Value is not one of the supported primitive types.");
+  struct ivalue_to_arg_type<DictPtr<Key, Value>> {
+    static DictPtr<Key, Value> call(IValue&& v) {
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported argument type: c10::DictPtr<Key, Value> and Key is not one of the supported primitive types.");
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported argument type: c10::DictPtr<Key, Value> and Value is not one of the supported primitive types.");
 
       auto dict_ptr = std::move(v).toGenericDict();
       return impl::toTypedDict<Key, Value>(std::move(dict_ptr->elements()));
@@ -169,17 +169,17 @@ namespace detail {
     }
   };
   template<class Key, class Value>
-  struct return_type_to_ivalue<c10::Dict<Key, Value>> {
-    static IValue call(c10::Dict<Key, Value>&& v) {
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported return type: Dict<Key, Value> and Key is not one of the supported primitive types.");
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported return type: Dict<Key, Value> and Value is not one of the supported primitive types.");
+  struct return_type_to_ivalue<c10::DictPtr<Key, Value>> {
+    static IValue call(c10::DictPtr<Key, Value>&& v) {
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported return type: DictPtr<Key, Value> and Key is not one of the supported primitive types.");
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported return type: DictPtr<Key, Value> and Value is not one of the supported primitive types.");
       return IValue(impl::toGenericDict(std::move(v)));
     }
   };
   template<class Key, class Value>
   struct return_type_to_ivalue<std::unordered_map<Key, Value>> final {
     static IValue call(std::unordered_map<Key, Value>&& v) {
-      c10::impl::GenericDict dict;
+      c10::impl::GenericDictPtr dict = c10::impl::make_generic_dict();
       dict.reserve(v.size());
       for (auto& element : v) {
         dict.insert(return_type_to_ivalue<Key>::call(Key{element.first}), return_type_to_ivalue<Value>::call(std::move(element.second)));

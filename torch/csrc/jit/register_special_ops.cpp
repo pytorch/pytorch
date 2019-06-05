@@ -405,7 +405,7 @@ RegisterOperators reg({
           double a;
           double b;
           pop(stack, tensor, a, b);
-          push(stack, at::_th_uniform_(tensor, a, b));
+          push(stack, tensor.uniform_(a, b));
           return 0;
         }),
     Operator(
@@ -418,7 +418,7 @@ RegisterOperators reg({
           double mean;
           double std;
           pop(stack, tensor, mean, std);
-          push(stack, at::_th_normal_(tensor, mean, std));
+          push(stack, tensor.normal_(mean, std));
           return 0;
         }),
     Operator(

@@ -67,8 +67,7 @@ void batch_gather_op_cpu(const at::Tensor& data,
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::BatchGather",
     c10::RegisterOperators::options()
-      .kernel<decltype(batch_gather_op_cpu), &batch_gather_op_cpu>()
-      .dispatchKey(CPUTensorId()));
+      .kernel<decltype(batch_gather_op_cpu), &batch_gather_op_cpu>(CPUTensorId()));
 
 } // namespace
 

@@ -508,9 +508,9 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   return r;
 }
 
-SparseTensor sparse_mask_cpu(const Tensor& t, SparseTensorRef mask) {
+SparseTensor sparse_mask_cpu(const Tensor& t, const SparseTensor& mask) {
   SparseTensor r = at::empty({0}, t.options().layout(kSparse));
-  sparse_mask_out_cpu(r, t, mask.tref);
+  sparse_mask_out_cpu(r, t, mask);
   return r;
 }
 

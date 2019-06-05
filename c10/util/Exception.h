@@ -171,7 +171,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 //
 #ifdef C10_MOBILE
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
-  if (!(cond)) {                              \
+  if (C10_UNLIKELY(!(cond))) {                \
     C10_THROW_ERROR(Error,                    \
         #cond " INTERNAL ASSERT FAILED at"    \
         __FILE__                              \
@@ -179,7 +179,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   }
 #else
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
-  if (!(cond)) {                              \
+  if (C10_UNLIKELY(!(cond))) {                \
     C10_THROW_ERROR(Error, ::c10::str(        \
         #cond " INTERNAL ASSERT FAILED at ",  \
         __FILE__,                             \
@@ -213,7 +213,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 //
 #ifdef C10_MOBILE
 #define TORCH_CHECK(cond, ...)                \
-  if (!(cond)) {                              \
+  if (C10_UNLIKELY(!(cond))) {                \
     C10_THROW_ERROR(Error,                    \
         #cond " CHECK FAILED at "             \
         __FILE__                              \
@@ -221,15 +221,15 @@ inline std::string if_empty_then(std::string x, std::string y) {
   }
 #else
 #define TORCH_CHECK(cond, ...)                              \
-  if (!(cond)) {                                            \
+  if (C10_UNLIKELY(!(cond))) {                              \
     C10_THROW_ERROR(Error,                                  \
       ::c10::detail::if_empty_then(                         \
         ::c10::str(__VA_ARGS__),                            \
         "Expected " #cond " to be true, but got false.  "   \
         "(Could this error message be improved?  If so, "   \
         "please report an enhancement request to PyTorch.)" \
-      ) \
-    ); \
+      )                                                     \
+    );                                                      \
   }
 #endif
 // TODO: We're going to get a lot of similar looking string literals
@@ -238,7 +238,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
 #ifdef C10_MOBILE
 #define TORCH_CHECK_INDEX(cond, ...)          \
-  if (!(cond)) {                              \
+  if (C10_UNLIKELY(!(cond))) {                \
     C10_THROW_ERROR(Error,                    \
         #cond " INDEX CHECK FAILED at "       \
         __FILE__                              \
@@ -246,7 +246,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   }
 #else
 #define TORCH_CHECK_INDEX(cond, ...)                        \
-  if (!(cond)) {                                            \
+  if (C10_UNLIKELY(!(cond))) {                              \
     C10_THROW_ERROR(IndexError,                             \
       ::c10::detail::if_empty_then(                         \
         ::c10::str(__VA_ARGS__),                            \

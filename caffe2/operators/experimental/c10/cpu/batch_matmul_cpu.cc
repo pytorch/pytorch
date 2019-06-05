@@ -271,8 +271,7 @@ class batch_matmul_cpu final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::BatchMatmul",
     c10::RegisterOperators::options()
-      .kernel<batch_matmul_cpu<float, CPUContext>>()
-      .dispatchKey(CPUTensorId()));
+      .kernel<batch_matmul_cpu<float, CPUContext>>(CPUTensorId()));
 
 } // namespace
 

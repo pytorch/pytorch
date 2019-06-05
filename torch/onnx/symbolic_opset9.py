@@ -290,9 +290,14 @@ def transpose(g, self, dim0, dim1):
         return self
 
     # NB: Transpose in ONNX is actually a Permute
-    axes = list(range(self.type().dim()))
-    axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
-    return g.op("Transpose", self, perm_i=axes)
+    if self.type().kind() == "CompleteTensorType":
+        axes = list(range(self.type().dim()))
+        axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
+        return g.op("Transpose", self, perm_i=axes)
+    else:
+        # if we don't have dim information we cannot
+        # output a permute so use ATen instead
+        return g.op("ATen", self, operator_s="transpose", dim0_i=dim0, dim1_i=dim1)
 
 
 @parse_args('v', 'is')
@@ -662,25 +667,57 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
-@parse_args('v', 'is')
 def upsample_nearest2d(g, input, output_size):
-    height_scale = float(output_size[-2]) / input.type().sizes()[-2]
-    width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-    scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
-                                                    width_scale]))
+    output_size = sym_help._maybe_get_const(output_size, 'is')
+    if sym_help._is_value(output_size):
+        offset = 2
+        input_length = len(input.type().sizes())
+        offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
+        dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        divisor = g.op(
+            "Slice",
+            g.op("Shape", input),
+            axes_i=[0],
+            ends_i=[input_length],
+            starts_i=[offset]
+        )
+        divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        scale_dims = g.op("Div", dividend, divisor)
+        scales = g.op("Concat", offsets, scale_dims, axis_i=0)
+    else:
+        height_scale = float(output_size[-2]) / input.type().sizes()[-2]
+        width_scale = float(output_size[-1]) / input.type().sizes()[-1]
+        scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale, width_scale]))
 
-    return g.op("Upsample", input, scales,
-                mode_s="nearest")
+    return g.op("Upsample", input, scales, mode_s="nearest")
 
 
-@parse_args('v', 'is', 'i')
 def upsample_bilinear2d(g, input, output_size, align_corners):
+    align_corners = sym_help._maybe_get_scalar(align_corners)
     if align_corners:
         return _unimplemented("upsample_bilinear2d", "align_corners == True")
-    height_scale = float(output_size[-2]) / input.type().sizes()[-2]
-    width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-    scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
-                                                    width_scale]))
+
+    output_size = sym_help._maybe_get_const(output_size, 'is')
+    if sym_help._is_value(output_size):
+        offset = 2
+        input_length = len(input.type().sizes())
+        offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
+        dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        divisor = g.op(
+            "Slice",
+            g.op("Shape", input),
+            axes_i=[0],
+            ends_i=[input_length],
+            starts_i=[offset]
+        )
+        divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        scale_dims = g.op("Div", dividend, divisor)
+        scales = g.op("Concat", offsets, scale_dims, axis_i=0)
+    else:
+        height_scale = float(output_size[-2]) / input.type().sizes()[-2]
+        width_scale = float(output_size[-1]) / input.type().sizes()[-1]
+        scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
+                                                        width_scale]))
     return g.op("Upsample", input, scales,
                 mode_s="linear")
 
@@ -1004,6 +1041,8 @@ def exp(g, self):
 def dropout(g, input, p, train):
     if not train:  # in eval mode, dropout is non-op
         return input
+    warnings.warn("Dropout is a training op and should not be exported in inference mode. "
+                  "Make sure to call eval() on the model, and to export it with param training=False.")
     r, _ = g.op("Dropout", input, ratio_f=p, outputs=2)
     return r
 
@@ -1063,44 +1102,34 @@ for k, v in sym_help.cast_pytorch_to_onnx.items():
     globals()[name] = parse_args('v', 'i')(partial(sym_help._cast_func_template, v))
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
+@parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
-    if pin_memory:
-        raise RuntimeError("onnx pin_memory support is not implemented")
-    # NOTE: no way to set device and layout in ONNX, so we ignore it
+    # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
+@parse_args('v', 'i', 'v', 'v', 'v')
 def zeros_like(g, input, dtype, layout, device, pin_memory=False):
-    if pin_memory:
-        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
+@parse_args('v', 'i', 'v', 'v', 'v')
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
-    if pin_memory:
-        raise RuntimeError("onnx pin_memory support is not implemented")
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'b')
+@parse_args('v', 'i', 'v', 'v', 'v')
 def ones_like(g, input, dtype, layout, device, pin_memory=False):
-    if pin_memory:
-        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
-    if pin_memory and _parse_arg(pin_memory, 'b'):
-        raise RuntimeError("onnx pin_memory support is not implemented")
     const_value = sym_help._maybe_get_const(value, 't')
     if sym_help._is_value(const_value):
         tmp = zeros(sizes, dtype, layout, device)
@@ -1111,10 +1140,8 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
                     value_t=torch.tensor([const_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v', 'b')
+@parse_args('v', 'f', 'i', 'v', 'v', 'v')
 def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
-    if pin_memory:
-        raise RuntimeError("onnx pin_memory support is not implemented")
     shape = g.op("Shape", input)
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
@@ -1459,6 +1486,12 @@ def randn(g, *shapes):
     return g.op('RandomNormal', shape_i=shape)
 
 
+def rand(g, *shapes):
+    shapes_list = list(shapes)
+    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    return g.op('RandomUniform', shape_i=shape)
+
+
 def randn_like(g, self, *others):
     return g.op('RandomNormalLike', self)
 
@@ -1540,6 +1573,24 @@ def argmin(g, input, dim, keepdim):
         dim = _parse_arg(dim, 'i')
         keepdim = _parse_arg(keepdim, 'i')
         return g.op('ArgMin', input, axis_i=dim, keepdims_i=keepdim)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def scatter(g, self, dim, index, src):
+    return g.op("Scatter", self, index, src, axis_i=dim)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def scatter_add(g, self, dim, index, src):
+    if self.type().kind() != "CompleteTensorType":
+        return _unimplemented("scatter_add", "input size not accesible")
+    dtype = self.type().scalarType()
+    dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    dims = self.type().sizes()
+    to_add = torch.zeros(dims)
+    to_add = g.op("Constant", value_t=to_add)
+    to_add = scatter(g, to_add, dim, index, src)
+    return add(g, self, to_add)
 
 
 def log2(g, self):
