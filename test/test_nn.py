@@ -274,7 +274,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             params = tuple(x for x in module.parameters())
             _assertGradAndGradgradChecks(test_case,
                                          lambda x, *args, **kw: test_case._forward(module, x), (input,) + params)
-            del params
 
         # check if module can be printed
         module.__repr__()
@@ -312,7 +311,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             for p in module.parameters():
                 test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                 test_case.assertEqual(p.get_device(), 0)
-                del p
 
             if torch.cuda.device_count() > 1:
                 input = input.cuda(1)
@@ -322,7 +320,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 for p in module.parameters():
                     test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 1)
-                    del p
         else:
             # check that float()/double() casters work correctly
 
@@ -333,7 +330,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             module(input)
             for p in module.parameters():
                 test_case.assertIsInstance(p, torch.FloatTensor)
-                del p
 
             # and back to double
             if not isinstance(input, torch.LongTensor):
@@ -342,7 +338,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             module(input)
             for p in module.parameters():
                 test_case.assertIsInstance(p, torch.DoubleTensor)
-                del p
 
             if TEST_CUDA and self.should_test_cuda:
                 # check that cuda() moves module parameters to correct GPU device,
@@ -355,7 +350,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 for p in module.parameters():
                     test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 0)
-                    del p
 
                 # to CPU
                 input = input.cpu()
@@ -363,7 +357,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 module(input)
                 for p in module.parameters():
                     test_case.assertIsInstance(p, torch.FloatTensor)
-                    del p
 
                 # back to GPU0
                 input = input.cuda()
@@ -372,7 +365,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 for p in module.parameters():
                     test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 0)
-                    del p
 
                 # test that forwards of module runs correctly without cuDNN
                 if self.cudnn:
@@ -381,7 +373,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                         for p in module.parameters():
                             test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                             test_case.assertEqual(p.get_device(), 0)
-                            del p
 
                 if torch.cuda.device_count() >= 2:
                     # test cross-GPU transfer works
@@ -393,7 +384,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                     for p in module.parameters():
                         test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                         test_case.assertEqual(p.get_device(), 1)
-                        del p
 
                 if not self.skip_double:
                     # test double()
@@ -403,7 +393,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                     for p in module.parameters():
                         test_case.assertIsInstance(p, torch.cuda.DoubleTensor)
                         test_case.assertEqual(p.get_device(), 0)
-                        del p
 
                 # test half()
                 input = input.half().cuda()
@@ -412,7 +401,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 for p in module.parameters():
                     test_case.assertIsInstance(p, torch.cuda.HalfTensor)
                     test_case.assertEqual(p.get_device(), 0)
-                    del p
 
     def _get_target(self):
         return self._get_arg('target', False)
@@ -4078,7 +4066,6 @@ class TestNN(NNTestCase):
         expected_grads = []
         for param in l.parameters():
             expected_grads.append(param.grad.clone())
-            del param
         dev_ids_list = [(0, 1), (1, 0)]
         for dev_id in dev_ids_list:
             with torch.cuda.device(dev_id[0]):
@@ -4091,8 +4078,6 @@ class TestNN(NNTestCase):
                 self.assertEqual(out.data, expected_out.data)
                 for expected, param in zip(expected_grads, l.parameters()):
                     self.assertEqual(param.grad.data, expected.data)
-                    del expected
-                    del param
 
         # Check for None device_ids
         l = l.cuda()
@@ -4108,7 +4093,6 @@ class TestNN(NNTestCase):
         expected_grads = []
         for param in l.parameters():
             expected_grads.append(param.grad.clone())
-            del param
         dev_ids_list = [(0, 1), (1, 0)]
         for dev_id in dev_ids_list:
             with torch.cuda.device(dev_id[0]):
@@ -4121,8 +4105,6 @@ class TestNN(NNTestCase):
                 self.assertEqual(out.data, expected_out.data)
                 for expected, param in zip(expected_grads, l.parameters()):
                     self.assertEqual(param.grad.data, expected.data)
-                    del expected
-                    del param
 
         # Check for None device_ids
         l = l.cuda()
@@ -5447,7 +5429,6 @@ class TestNN(NNTestCase):
                 cx = Variable(torch.randn(2, 5, 20).cuda(), requires_grad=True)
                 all_vars[2:2] = [cx]
                 hx = (hx, cx)
-            del all_vars
 
             with warnings.catch_warnings(record=True) as w:
                 output = rnn(input, hx)
@@ -5456,7 +5437,6 @@ class TestNN(NNTestCase):
             opt.step()
             with warnings.catch_warnings(record=True) as w:
                 output_cuda = rnn(input, hx)
-            del opt
 
             _copy_rnn(rnn, rnn_cpu)
             rnn_cpu.bias_ih_l0_reverse = rnn_cpu.bias_ih_l0
