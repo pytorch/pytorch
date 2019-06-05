@@ -9,8 +9,20 @@ namespace jit {
 
 struct BailOutGraphBuilderForNode {
   BailOutGraphBuilderForNode(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)) {}
+      : graph_(std::move(graph)) {
+    copy_graph_ = std::make_shared<Graph>();
+  }
 
+  // addNewInputForValue works similarly to the way Block::cloneFrom works
+  // it maintains a map from the original values to the cloned ones.
+  // `new_value` is used when we need to map a value that has no direct
+  // counterpart in the original graph. for example, if we are building a
+  // bailout graph for a node in a loop we will need a new value for upper limit
+  // (old_upper_limit - current_iteration) so the original upper limit value
+  // maps to this new value if a value used in a bailout graph is a constant we
+  // create the same constant in a new graph. this reduces the number of inputs
+  // to the bailout graph significantly finally, we keep track of the values we
+  // haven't seen before (i.e. `new_value = nullptr`)
   Value* addNewInputForValue(Value* old_value, Value* new_value = nullptr) {
     auto node = old_value->node();
     // this reduces the number of inputs to a bailout graph significantly
@@ -30,6 +42,20 @@ struct BailOutGraphBuilderForNode {
     return new_value;
   }
 
+  // buildBailOutBlockFrom builds a bailout graph recursively
+  // unwinding control-flow structure for a given node
+  // it works as follows
+  // * if the node is in a true or false arm of an `prim::If` node
+  // the rest of the arm gets inlined in the bailout graph
+  // and we continue building the rest of the bailout graph
+  // from the node *following* the owning `prim::If`.
+  // * if the node is in a loop, the rest of the loop gets inlined
+  // we remember the loop outputs needed to execute the
+  // we adjust the upper limit (old_upper_limit - current_iteration)
+  // note the stop condition is already mapped (remembered)
+  // then, we continue building the rest of the bailout graph
+  // starting from the owning `prim::Loop` note
+  // Note, the `prim::Loop` node *does* get cloned.
   void buildBailOutBlockFrom(Node* n) {
     auto outer_node = n->owningBlock()->owningNode();
     auto* block = copy_graph_->block();
@@ -73,6 +99,10 @@ struct BailOutGraphBuilderForNode {
       }
     }
 
+    // we are either in `prim::If` or `prim::Loop`
+    // bailout graph building will continue from `outer_node` next
+    // remember/map the outputs needed to unwind this `prim::If`
+    // or `prim::Loop`
     if (outer_node) {
       auto block_outputs = n->owningBlock()->outputs();
       // skip the first input for loops (current iteration count)
@@ -89,8 +119,6 @@ struct BailOutGraphBuilderForNode {
   }
 
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
-    old_to_new_.clear();
-    copy_graph_ = std::make_shared<Graph>();
     buildBailOutBlockFrom(n);
     // add graph outputs
     for (auto ov : graph_->outputs()) {
@@ -117,11 +145,7 @@ struct BailOutInserter {
     setSubgraphs();
   }
 
-  // remove all BailOuts and Guards
-  // we will profile this graph
-  // and insert guards and bailouts again
-  // where needed if its guard fails
-  void sanitizeGraph(Block* b) {
+  void removeAllBailOutsAndGuards(Block* b) {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       if (it->kind() == prim::Guard) {
         // this will need to be profiled again
@@ -142,14 +166,16 @@ struct BailOutInserter {
       }
 
       for (auto ib : it->blocks()) {
-        sanitizeGraph(ib);
+        removeAllBailOutsAndGuards(ib);
       }
     }
   }
 
   void setSubgraphs() {
     for (auto e : subgraphs) {
-      sanitizeGraph(e.second->block());
+      removeAllBailOutsAndGuards(e.second->block());
+      // this isn't strictly necessarily
+      // but it makes debugging much easier
       ConstantPooling(e.second);
       e.first->g_(attr::Subgraph, e.second);
     }
