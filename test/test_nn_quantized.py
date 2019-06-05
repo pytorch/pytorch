@@ -29,7 +29,7 @@ class ModuleAPITest(TestCase):
         Y = X.numpy().copy()
         Y[Y < 0] = 0
         qY = _quantize(Y, scale, zero_point)
-        qX = X.quantize_linear(scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
         qY_hat = F.relu(qX)
         np.testing.assert_equal(qY, qY_hat.int_repr())
 
@@ -40,8 +40,9 @@ class ModuleAPITest(TestCase):
                            kH_range=(3, 5), kW_range=(3, 5),
                            dtypes=((torch.quint8, np.uint8, 0),)),
            padH=st.integers(1, 3), padW=st.integers(1, 3),
+           dH=st.integers(1, 2), dW=st.integers(1, 2),
            sH=st.integers(1, 3), sW=st.integers(1, 3))
-    def test_conv_api(self, Q, padH, padW, sH, sW):
+    def test_conv_api(self, Q, padH, padW, dH, dW, sH, sW):
         """Tests the correctness of the conv module.
 
         The correctness is defined against the functional implementation.
@@ -49,7 +50,6 @@ class ModuleAPITest(TestCase):
         ref_op = qF.conv2d
 
         # Not implemented parameters
-        dH, dW = 1, 1
         o_padH, o_padW = 0, 0
         groups = 1
 
@@ -86,35 +86,27 @@ class ModuleAPITest(TestCase):
         q_bias = torch.quantize_linear(bias, scale, zero_point, torch.qint32)
 
         # Results check
-        print("TEST 1")
         conv_2d = Conv2d(weight=q_filters, bias=q_bias,
                          scale=scale, zero_point=zero_point,
                          dtype=torch_type,
                          stride=stride, padding=i_padding,
                          dilation=dilation, groups=groups,
                          padding_mode='zeros')
-
         try:
-            print("TEST 2")
             ref_result = qF.conv2d(q_inputs, q_filters, bias=q_bias,
                                    scale=scale, zero_point=zero_point,
                                    stride=stride, padding=i_padding,
                                    dilation=dilation, groups=groups,
                                    prepacked=False, dtype=torch_type)
-            print("TEST 3")
-        except Exception as e:
+        except RuntimeError as e:
             # We should be throwing the same error.
-            print("TEST 4")
-            np.testing.assert_raises_regex(Exception, str(e),
+            e_msg = str(e).split("\n")[0].split("(")[0].strip()
+            np.testing.assert_raises_regex(type(e), e_msg,
                                            conv_2d, q_inputs)
-            print("TEST 5")
         else:
-            print("TEST 6")
             q_result = conv_2d(q_inputs)
-            print("TEST 7")
             np.testing.assert_equal(ref_result.int_repr().numpy(),
                                     q_result.int_repr().numpy())
-            print("TEST 8")
 
 if __name__ == '__main__':
     run_tests()

@@ -45,8 +45,8 @@ Decl mergeTypesFromTypeComment(
 }
 
 struct ParserImpl {
-  explicit ParserImpl(const std::string& str)
-      : L(str), shared(sharedParserData()) {}
+  explicit ParserImpl(const std::shared_ptr<Source>& source)
+      : L(source), shared(sharedParserData()) {}
 
   Ident parseIdent() {
     auto t = L.expect(TK_IDENT);
@@ -618,7 +618,8 @@ struct ParserImpl {
   SharedParserData& shared;
 };
 
-Parser::Parser(const std::string& src) : pImpl(new ParserImpl(src)) {}
+Parser::Parser(const std::shared_ptr<Source>& src)
+    : pImpl(new ParserImpl(src)) {}
 
 Parser::~Parser() = default;
 

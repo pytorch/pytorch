@@ -1280,6 +1280,18 @@ class _TestTorchMixin(object):
                             expected = brute_cdist(x, y, p=p)
                             self.assertTrue(torch.allclose(expected, actual))
 
+    def test_cdist_norm_batch(self):
+        for device in torch.testing.get_all_device_types():
+            for r1 in [3, 4, 5, 6]:
+                for m in [2, 3, 4, 10]:
+                    for r2 in [4, 6, 7, 8]:
+                        for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+                            x = torch.randn(2, 3, 6, r1, m, device=device)
+                            y = torch.randn(2, 3, 6, r2, m, device=device)
+                            actual = torch.cdist(x, y, p=p)
+                            expected = brute_cdist(x, y, p=p)
+                            self.assertTrue(torch.allclose(expected, actual))
+
     def test_cdist_large(self):
         for device in torch.testing.get_all_device_types():
             x = torch.randn(1000, 10, device=device)
@@ -1288,10 +1300,18 @@ class _TestTorchMixin(object):
             expected = brute_cdist(x, y, p=2)
             self.assertTrue(torch.allclose(expected, actual))
 
+    def test_cdist_large_batch(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.randn(4, 3, 1000, 10, device=device)
+            y = torch.randn(4, 3, 1000, 10, device=device)
+            actual = torch.cdist(x, y, p=2)
+            expected = brute_cdist(x, y, p=2)
+            self.assertTrue(torch.allclose(expected, actual))
+
     def test_cdist_non_contiguous(self):
         for device in torch.testing.get_all_device_types():
-            x = torch.randn(5, 7, device=device).t()
-            y = torch.randn(5, 3, device=device).t()
+            x = torch.randn(5, 7, device=device).transpose(-1, -2)
+            y = torch.randn(5, 3, device=device).transpose(-1, -2)
             actual = torch.cdist(x, y, p=2)
             expected = brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
@@ -1308,6 +1328,32 @@ class _TestTorchMixin(object):
 
             x = torch.randn(5, 7, device=device).t()
             y = torch.randn(3, 5, device=device)
+            actual = torch.cdist(x, y, p=2)
+            expected = brute_cdist(x, y, p=2)
+            self.assertFalse(x.is_contiguous())
+            self.assertTrue(y.is_contiguous())
+            self.assertTrue(torch.allclose(expected, actual))
+
+    def test_cdist_non_contiguous_batch(self):
+        for device in torch.testing.get_all_device_types():
+            x = torch.randn(4, 3, 2, 5, 7, device=device).transpose(-1, -2)
+            y = torch.randn(4, 3, 2, 5, 3, device=device).transpose(-1, -2)
+            actual = torch.cdist(x, y, p=2)
+            expected = brute_cdist(x, y, p=2)
+            self.assertFalse(x.is_contiguous())
+            self.assertFalse(y.is_contiguous())
+            self.assertTrue(torch.allclose(expected, actual))
+
+            x = torch.randn(7, 2, 7, 5, device=device)
+            y = torch.randn(7, 2, 5, 3, device=device).transpose(-1, -2)
+            actual = torch.cdist(x, y, p=2)
+            expected = brute_cdist(x, y, p=2)
+            self.assertTrue(x.is_contiguous())
+            self.assertFalse(y.is_contiguous())
+            self.assertTrue(torch.allclose(expected, actual))
+
+            x = torch.randn(4, 5, 7, device=device).transpose(-1, -2)
+            y = torch.randn(4, 3, 5, device=device)
             actual = torch.cdist(x, y, p=2)
             expected = brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
@@ -3226,7 +3272,7 @@ class _TestTorchMixin(object):
             self.assertIs(default_dtype, torch.tensor(()).dtype)
             self.assertIs(default_dtype, torch.tensor(5.).dtype)
             self.assertIs(torch.int64, torch.tensor(5).dtype)
-            self.assertIs(torch.uint8, torch.tensor(True).dtype)
+            self.assertIs(torch.bool, torch.tensor(True).dtype)
             self.assertIs(torch.int32, torch.tensor(5, dtype=torch.int32).dtype)
             self.assertIs(default_dtype, torch.tensor(((7, 5), (9, 5.))).dtype)
             self.assertIs(default_dtype, torch.tensor(((5., 5), (3, 5))).dtype)
@@ -7178,6 +7224,16 @@ class _TestTorchMixin(object):
                 numt = conv_fn(torch.Tensor(set_numpy(numt, indexer, val)))
                 self.assertEqual(pyt, numt)
 
+            def assert_backward_eq(tensor, indexer):
+                cpu = tensor.float().clone().detach().requires_grad_(True)
+                outcpu = cpu[indexer]
+                gOcpu = torch.rand_like(outcpu)
+                outcpu.backward(gOcpu)
+                gpu = cpu.cuda().detach().requires_grad_(True)
+                outgpu = gpu[indexer]
+                outgpu.backward(gOcpu.cuda())
+                self.assertEqual(cpu.grad, gpu.grad)
+
             def get_set_tensor(indexed, indexer):
                 set_size = indexed[indexer].size()
                 set_count = indexed[indexer].numel()
@@ -7211,6 +7267,8 @@ class _TestTorchMixin(object):
 
             for indexer in get_indices_to_test:
                 assert_get_eq(reference, indexer)
+                if torch.cuda.is_available():
+                    assert_backward_eq(reference, indexer)
 
             for indexer in indices_to_test:
                 assert_set_eq(reference, indexer, 44)
@@ -7238,6 +7296,8 @@ class _TestTorchMixin(object):
                 [[[0, 1], [2, 3]], [[0]], slice(None)],
                 [[[2, 1]], [[0, 3], [4, 4]], slice(None)],
                 [[[2]], [[0, 3], [4, 1]], slice(None)],
+                # non-contiguous indexing subspace
+                [[0, 2, 3], slice(None), [1, 3, 4]],
 
                 # less dim, ellipsis
                 [[0, 2], ],
@@ -7268,6 +7328,8 @@ class _TestTorchMixin(object):
                 assert_set_eq(reference,
                               indexer,
                               get_set_tensor(reference, indexer))
+                if torch.cuda.is_available():
+                    assert_backward_eq(reference, indexer)
 
             reference = conv_fn(torch.arange(0., 1296).view(3, 9, 8, 6))
 
@@ -7347,6 +7409,8 @@ class _TestTorchMixin(object):
             for indexer in indices_to_test:
                 assert_get_eq(reference, indexer)
                 assert_set_eq(reference, indexer, 1333)
+                if torch.cuda.is_available():
+                    assert_backward_eq(reference, indexer)
 
     def test_advancedindex(self):
         self._test_advancedindex(self, lambda x: x)
@@ -11647,6 +11711,16 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(0, b.ndim)
         c = torch.randn(1, 0)
         self.assertEqual(2, c.ndim)
+
+    def test_T(self):
+        a = torch.randn(2, 3, 4)
+        t1 = a.T
+        t2 = a.permute(2, 1, 0)
+        self.assertEqual(t2, t1)
+        b = torch.randn(10)
+        self.assertEqual(b, b.T)
+        scalar = torch.tensor(5)
+        self.assertEqual(scalar, scalar.T)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
