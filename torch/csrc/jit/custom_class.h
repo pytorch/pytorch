@@ -46,17 +46,17 @@ struct class_ {
     pyClass->def(name.c_str(), f);
     auto qualFuncName = className + "::" + name;
     static auto classRegistry =
-        c10::RegisterOperators().op(qualFuncName, [f](caffe2::Blob a) {
-          auto clss = reinterpret_cast<CurClass*>(a.GetRaw());
-          return std::invoke(f, *clss);
+        c10::RegisterOperators().op(qualFuncName, [f](CurClass cur) {
+          return std::invoke(f, cur);
         });
     auto graph = std::make_shared<Graph>();
     auto input = graph->addInput()->setType(classType);
     auto& ops = getAllOperatorsFor(Symbol::fromQualString(qualFuncName));
     std::cout << ops.size() << std::endl;
 
-    // graph->insertNode(graph->create(qualFuncName, {input}))->output();
-    // classCu->create_function(name, graph);
+    auto res = graph->insertNode(graph->create(Symbol::fromQualString(qualFuncName), {input}))->output();
+    graph->registerOutput(res);
+    classCu->create_function(name, graph);
     return *this;
   }
 };

@@ -112,6 +112,10 @@ OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(TensorType::get());
   return value;
 }
+BlobTypePtr BlobType::get() {
+  static auto value = BlobType::create();
+  return value;
+}
 ListTypePtr ListType::ofTensors() {
   static auto value = ListType::create(TensorType::get());
   return value;
@@ -481,6 +485,9 @@ ClassTypePtr ClassType::create(
     std::shared_ptr<CompilationUnit> cu) {
   return ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
 }
+ClassTypePtr ClassType::create() {
+  return ClassTypePtr(new ClassType());
+}
 
 ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
   return ClassTypePtr(new ClassType(
@@ -548,5 +555,10 @@ ClassType::ClassType(
     : Type(TypeKind::ClassType),
       name_(std::move(name)),
       compilation_unit_(std::move(cu)) {}
+
+ClassType::ClassType()
+    : Type(TypeKind::ClassType),
+      name_(c10::QualifiedName("Foo")),
+      compilation_unit_(nullptr) {}
 
 } // namespace c10

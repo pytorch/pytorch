@@ -14,6 +14,7 @@
 #include <iostream>
 #include <type_traits>
 
+struct ClassType;
 namespace torch {
 namespace jit {
 namespace script {
@@ -47,6 +48,7 @@ _(ProfiledTensorType) \
 _(DeviceObjType) \
 _(FunctionType) \
 _(ClassType) \
+_(BlobType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1220,6 +1222,31 @@ private:
   std::string name_;
 };
 
+struct BlobType;
+using BlobTypePtr = std::shared_ptr<BlobType>;
+// This type represents a Python Blob
+struct CAFFE2_API BlobType : public Type {
+  static BlobTypePtr create() {
+    return BlobTypePtr(new BlobType()); // NOLINT(modernize-make-shared)
+  }
+  DEFINE_IS_SUBCLASS(BlobType);
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return rhs->kind() == TypeKind::BlobType;
+  }
+  std::string str() const override {
+    return "Blob";
+  }
+  static const TypeKind Kind = TypeKind::BlobType;
+  // global singleton
+  static BlobTypePtr get();
+private:
+  BlobType()
+  : Type(TypeKind::BlobType) {}
+};
+
 CAFFE2_API std::ostream& operator<<(std::ostream & out, const Type & t);
 CAFFE2_API std::ostream& operator<<(std::ostream & out, const VaryingShape & t);
 // what is the type, ignoring extra size/shape information?
@@ -1330,6 +1357,12 @@ struct getTypePtr_<at::optional<T>> final {
     return type;
   }
 };
+template <>
+struct getTypePtr_<caffe2::Blob> final {
+  static TypePtr call() {
+    return BlobType::get();
+  }
+};
 }
 template<class T> inline TypePtr getTypePtr() {
   // TODO: static_assert that a templated function exists, and throw a friendy
@@ -1356,7 +1389,6 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
  * User Defined Types
  */
 
-struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
 using ::torch::jit::script::Function;
@@ -1367,6 +1399,7 @@ struct CAFFE2_API ClassType : public Type {
   static ClassTypePtr create(
       QualifiedName qualifiedName,
       std::shared_ptr<CompilationUnit> cu);
+  static ClassTypePtr create();
 
   // Create a type representing a Module,
   // These do not have methods, and are not globally registered
@@ -1383,7 +1416,8 @@ struct CAFFE2_API ClassType : public Type {
   bool isSubtypeOf(const TypePtr rhs) const override {
     // XXX: We do not have inheritance implemented, only types that are the
     // same can subtype from each other.
-    return *this == *rhs;
+    return true;
+    // return *this == *rhs;
   }
 
   std::string str() const override {
@@ -1492,6 +1526,7 @@ struct CAFFE2_API ClassType : public Type {
 
  private:
   ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu);
+  ClassType();
 
   // Fully qualified name of type (note that this has to be globally unique).
   // Looks like: "foo.bar.Baz".
@@ -1509,4 +1544,14 @@ struct CAFFE2_API ClassType : public Type {
   std::shared_ptr<CompilationUnit> compilation_unit_;
 
 };
+
+namespace detail {
+template <>
+struct getTypePtr_<ivalue::Object> final {
+  static TypePtr call() {
+    static auto type = ClassType::create();
+    return type;
+  }
+};
+}
 } // namespace c10

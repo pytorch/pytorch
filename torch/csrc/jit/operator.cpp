@@ -201,6 +201,7 @@ bool Operator::matches(const Node* node) const {
   if (actuals.size() < formals.size())
     return false;
 
+  std::cout<<"got here!"<<std::endl;
   TypeEnv type_env;
   for (size_t i = 0; i < formals.size(); ++i) {
     const MatchTypeReturn matched_type =
@@ -209,11 +210,14 @@ bool Operator::matches(const Node* node) const {
       return false;
     }
     TypePtr formal = *matched_type.type;
+    std::cout<<"Actuals: "<<actuals[i]->type()->str()<<std::endl;
+    std::cout<<"formal: "<<formal->str()<<std::endl;
     if (!actuals[i]->type()->isSubtypeOf(formal)) {
       return false;
     }
   }
 
+  std::cout<<"and here?"<<std::endl;
   // too many inputs
   if (!schema().is_vararg() && actuals.size() != formals.size()) {
     return false;
@@ -225,6 +229,8 @@ bool Operator::matches(const Node* node) const {
 std::shared_ptr<Operator> findOperatorFor(const Node* node) {
   const auto& candidates = getAllOperatorsFor(node->kind());
   for (const auto& candidate : candidates) {
+    std::cout<<"schema: "<<candidate->schema().name()<<std::endl;
+    std::cout<<"node: "<<node->kind().toQualString()<<std::endl;
     if (candidate->matches(node)) {
       return candidate;
     }

@@ -33,8 +33,7 @@ namespace detail {
     bool,
     std::string,
     at::Tensor,
-    at::Scalar,
-    caffe2::Blob
+    at::Scalar
   >;
 
   // ivalue_to_arg_type<T>: Take an IValue that is an argument to a kernel and
@@ -49,6 +48,12 @@ namespace detail {
   struct ivalue_to_arg_type<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static T call(IValue&& v) {
       return std::move(v).to<T>();
+    }
+  };
+  template <class T>
+  struct ivalue_to_arg_type<ivalue::Object> {
+    static ivalue::Object call(IValue&& v) {
+      return *v.toObject();
     }
   };
   template<class T>
