@@ -1911,7 +1911,6 @@ def _get_builtin_table():
         (math.factorial, "aten::factorial"),
         (math.frexp, "aten::frexp"),
         (math.isnan, "aten::isnan"),
-        (math.isfinite, "aten::isfinite"),
         (math.isinf, "aten::isinf"),
         (math.degrees, "aten::degrees"),
         (math.radians, "aten::radians"),
@@ -1937,6 +1936,7 @@ def _get_builtin_table():
         _builtin_table[id(math.gcd)] = "aten::gcd"
     if PY37:
         _builtin_table[id(math.remainder)] = "aten::mathremainder"
+        _builtin_table[id(math.isfinite)] = "aten::isfinite"
 
     return _builtin_table
 
