@@ -13,7 +13,7 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 class RegisterOperators::OperatorRegistrar final {
 public:
   explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<TensorTypeId> dispatch_key, KernelFunction* kernel, KernelCacheCreatorFunction&& cache_creator)
-  : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
+  : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt), wrapper_registration_handle_(c10::nullopt) {
     // either both, kernel and cache_creator, or none must be set.
     TORCH_INTERNAL_ASSERT((kernel != nullptr) == static_cast<bool>(cache_creator));
 
@@ -23,6 +23,15 @@ public:
       } else {
         kernel_registration_handle_ = Dispatcher::singleton().registerCatchallKernel(op_.opHandle(), kernel, std::move(cache_creator));
       }
+    }
+  }
+
+  explicit OperatorRegistrar(FunctionSchema&& schema, KernelFunctionWrapper* wrapper)
+  : op_(Dispatcher::singleton().registerSchema(std::move(schema), OperatorOptions())), kernel_registration_handle_(c10::nullopt), wrapper_registration_handle_(c10::nullopt) {
+    TORCH_INTERNAL_ASSERT(wrapper != nullptr);
+
+    if (wrapper != nullptr) {
+      wrapper_registration_handle_ = Dispatcher::singleton().registerVariableWrapper(op_.opHandle(), wrapper);
     }
   }
 
@@ -36,6 +45,7 @@ public:
 private:
   c10::SchemaRegistrationHandleRAII op_;
   c10::optional<RegistrationHandleRAII> kernel_registration_handle_;
+  c10::optional<RegistrationHandleRAII> wrapper_registration_handle_;
 };
 
 void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNameStr, Options&& options) {
@@ -66,6 +76,15 @@ void RegisterOperators::checkSchemaAndRegisterOp_(const std::string& schemaOrNam
       registerOp_(std::move(inferred_schema_with_name), std::move(options));
     }
   #endif
+}
+
+void RegisterOperators::registerVariableWrapper_(const std::string &schemaOrNameStr, KernelFunctionWrapper* wrapper) {
+  either<OperatorName, FunctionSchema> schemaOrName = torch::jit::parseSchemaOrName(schemaOrNameStr);
+  if (schemaOrName.is_right()) {
+    registrars_.emplace_back(std::move(schemaOrName).right(), wrapper);
+  } else {
+    AT_ERROR("Autograd wrappers must be registered with a schema");
+  }
 }
 
 c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const std::string& opNameStr, const RegisterOperators::Options& options) {

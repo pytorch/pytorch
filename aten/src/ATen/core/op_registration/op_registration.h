@@ -398,9 +398,23 @@ public:
       return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, std::forward<FuncType>(func)));
     }
 
+    /**
+     * This API registers an operator based on a kernel lambda.
+     *
+     * This API looks like:
+     *
+     * > static auto registry = c10::RegisterOperators()
+     * >     .wrapper("{schema}", &my_variable_wrapper);
+     */
+    RegisterOperators wrapper(const std::string& schemaOrName, KernelFunctionWrapper* wrapper) {
+      registerVariableWrapper_(schemaOrName, wrapper);
+      return std::move(*this);
+    }
+
 private:
   void checkSchemaAndRegisterOp_(FunctionSchema schema, Options&& config);
   void checkSchemaAndRegisterOp_(const std::string& schemaOrName, Options&& config);
+  void registerVariableWrapper_(const std::string &schemaOrName, KernelFunctionWrapper* wrapper);
 
   static c10::FunctionSchema inferSchemaFromKernels_(const std::string& opNameStr, const Options& options);
   void checkNoDuplicateKernels_(const FunctionSchema& schema, const Options& options);

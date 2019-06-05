@@ -79,6 +79,24 @@ RegistrationHandleRAII OperatorEntry::registerCatchallKernel(DispatchTableEntry 
   });
 }
 
+RegistrationHandleRAII OperatorEntry::registerVariableWrapper(KernelFunctionWrapper* wrapper) {
+  std::unique_lock<std::mutex> lock(kernelsMutex_);
+
+  // Add the wrapper to the kernels list,
+  // possibly creating the list if this is the first wrapper.
+  wrappers_.push_front(wrapper);
+  std::list<KernelFunctionWrapper*>::iterator inserted = wrappers_.begin();
+  // update the dispatch table, i.e. re-establish the invariant
+  // that the dispatch table points to the newest wrapper
+  updateVariableWrapper_();
+
+  return RegistrationHandleRAII([this, inserted] {
+    // list iterators stay valid even if the list changes,
+    // so we can use the iterator to deregister the wrapper from the list
+    deregisterVariableWrapper_(inserted);
+  });
+}
+
 void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
@@ -112,6 +130,12 @@ void OperatorEntry::deregisterCatchallKernel_(std::list<DispatchTableEntry>::ite
   updateCatchallDispatchTable_();
 }
 
+void OperatorEntry::deregisterVariableWrapper_(std::list<KernelFunctionWrapper*>::iterator wrapper) {
+  std::unique_lock<std::mutex> lock(kernelsMutex_);
+  wrappers_.erase(wrapper);
+  updateVariableWrapper_();
+}
+
 void OperatorEntry::updateDispatchTable_(TensorTypeId dispatch_key) {
   // precondition: kernelsMutex_ is locked
 
@@ -143,6 +167,13 @@ void OperatorEntry::updateCatchallDispatchTable_() {
       dispatchTable.setCatchallKernel(kernels_.right().front());
     });
   }
+}
+
+void OperatorEntry::updateVariableWrapper_() {
+  // precondition: kernelsMutex_ is locked
+  dispatchTable_.write([&] (DispatchTable& dispatchTable) {
+    dispatchTable.registerVariableWrapper(wrappers_.front());
+  });
 }
 
 }

@@ -15,6 +15,9 @@ using c10::RegisterOperators;
 using c10::OperatorKernel;
 using c10::Dispatcher;
 using c10::IValue;
+using c10::KernelFunction;
+using c10::KernelCache;
+using torch::jit::Stack;
 using at::Tensor;
 
 namespace {
@@ -39,6 +42,34 @@ struct MockKernel final : OperatorKernel {
 private:
   bool* called_;
 };
+
+static bool dummy_autograd_called = false;
+void dummy_autograd(torch::jit::Stack*, c10::KernelFunction*, c10::KernelCache* cache) {
+  dummy_autograd_called = true;
+}
+
+TEST(OperatorRegistrationTest, whenCallingVariableOpWithVariable_thenCallsWrapper) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(TensorType1()))
+                                           .wrapper("_test::dummy(Tensor dummy) -> ()", &dummy_autograd);
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value());
+  dummy_autograd_called = false;
+  callOp(*op, dummyVariable(TensorType1()));
+  EXPECT_TRUE(dummy_autograd_called);
+}
+
+TEST(OperatorRegistrationTest, whenCallingVariableOpWithTensor_thenDoesNotCallWrapper) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(TensorType1()))
+                                           .wrapper("_test::dummy(Tensor dummy) -> ()", &dummy_autograd);
+
+  auto op = Dispatcher::singleton().findSchema("_test::dummy", "");
+  ASSERT_TRUE(op.has_value());
+  dummy_autograd_called = false;
+  callOp(*op, dummyTensor(TensorType1()));
+  EXPECT_FALSE(dummy_autograd_called);
+}
+
 TEST(OperatorRegistrationTest, whenCallingOpWithWrongDispatchKey_thenFails) {
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(TensorType1()));
 

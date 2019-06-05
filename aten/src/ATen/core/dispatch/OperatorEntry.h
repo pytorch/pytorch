@@ -3,6 +3,7 @@
 #include <ATen/core/dispatch/DispatchTable.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
+#include <ATen/core/dispatch/KernelFunction.h>
 #include <list>
 
 namespace c10 {
@@ -29,10 +30,17 @@ public:
     });
   }
 
+  KernelFunctionWrapper* getVariableWrapper(const Stack* stack) const {
+    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
+      return dispatchTable.getVariableWrapper(stack);
+    });
+  }
+
   void prepareForDeregistration();
 
   RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel);
   RegistrationHandleRAII registerCatchallKernel(DispatchTableEntry kernel);
+  RegistrationHandleRAII registerVariableWrapper(KernelFunctionWrapper* wrapper);
 
   const OperatorOptions& options() {
     return options_;
@@ -41,6 +49,7 @@ public:
 private:
   void deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel);
   void deregisterCatchallKernel_(std::list<DispatchTableEntry>::iterator kernel);
+  void deregisterVariableWrapper_(std::list<KernelFunctionWrapper*>::iterator wrapper);
 
   FunctionSchema schema_;
 
@@ -80,6 +89,7 @@ private:
     std::list<DispatchTableEntry> // catch-all kernels
   > kernels_;
   std::mutex kernelsMutex_; // protects kernels_
+  std::list<KernelFunctionWrapper*> wrappers_;
 
   // Some metadata about the operator
   OperatorOptions options_;
@@ -88,6 +98,7 @@ private:
   // contains the front element from the kernels list for a given dispatch key.
   void updateDispatchTable_(TensorTypeId dispatch_key);
   void updateCatchallDispatchTable_();
+  void updateVariableWrapper_();
 };
 
 }

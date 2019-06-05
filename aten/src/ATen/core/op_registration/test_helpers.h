@@ -4,6 +4,7 @@
 #include <gmock/gmock.h>
 
 #include <ATen/core/Tensor.h>
+#include <c10/core/TensorImpl.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
@@ -96,6 +97,38 @@ inline at::Tensor dummyTensor(c10::TensorTypeId dispatch_key) {
     allocator,
     /*resizable=*/true);
   return at::detail::make_tensor<c10::TensorImpl>(storage_impl, dispatch_key);
+}
+
+struct AutogradMeta : at::AutogradMetaInterface {
+  void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) override {
+    TORCH_INTERNAL_ASSERT(false);
+  };
+  bool requires_grad() const override {
+    TORCH_INTERNAL_ASSERT(false);
+  }
+  at::Tensor& grad() override {
+    TORCH_INTERNAL_ASSERT(false);
+  }
+  const at::Tensor& grad() const override {
+    TORCH_INTERNAL_ASSERT(false);
+  }
+  ~AutogradMeta() override {
+  }
+};
+
+inline at::Tensor dummyVariable(c10::TensorTypeId dispatch_key) {
+  auto* allocator = c10::GetCPUAllocator();
+  int64_t nelements = 1;
+  auto dtype = caffe2::TypeMeta::Make<float>();
+  auto storage_impl = c10::make_intrusive<c10::StorageImpl>(
+    dtype,
+    nelements,
+    allocator->allocate(nelements * dtype.itemsize()),
+    allocator,
+    /*resizable=*/true);
+  auto tensor = at::detail::make_tensor<c10::TensorImpl>(storage_impl, dispatch_key);
+  tensor.unsafeGetTensorImpl()->set_autograd_meta(c10::guts::make_unique<AutogradMeta>());
+  return tensor;
 }
 
 template<class... Args>

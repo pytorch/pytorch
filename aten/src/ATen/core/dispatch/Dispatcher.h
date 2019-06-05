@@ -36,16 +36,20 @@ public:
    * Call the operator kernel with the given arguments.
    */
   void call(Stack* stack) const {
+    if (variable_wrapper_) {
+      return (*variable_wrapper_)(stack, kernel_, cache_.get());
+    }
     return (*kernel_)(stack, cache_.get());
   }
 
 private:
-  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator)
-  : kernel_(kernel), cache_(cache_creator()) {}
+  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator, KernelFunctionWrapper* variable_wrapper)
+  : kernel_(kernel), cache_(cache_creator()), variable_wrapper_(variable_wrapper) {}
   friend class Dispatcher;
 
   KernelFunction* kernel_;
   std::unique_ptr<c10::KernelCache> cache_;
+  KernelFunctionWrapper* variable_wrapper_;
 };
 
 /**
@@ -129,6 +133,14 @@ public:
   RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
 
   /**
+   * Register a varible wrapper for an operator.
+   *
+   * @return A RAII object that manages the lifetime of the registration.
+   *         Once that object is destructed, the kernel will be deregistered.
+   */
+  RegistrationHandleRAII registerVariableWrapper(const OperatorHandle& op, KernelFunctionWrapper* wrapper);
+
+  /**
    * Perform a dynamic dispatch and get the kernel for an operator.
    */
   OpKernel lookup(const OperatorHandle& op, const Stack* stack) const;
@@ -199,7 +211,8 @@ private:
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(stack);
-  return OpKernel(kernel.kernel_func, kernel.cache_creator_func);
+  const KernelFunctionWrapper* wrapper = op.operatorIterator_->op.getVariableWrapper(stack);
+  return OpKernel(kernel.kernel_func, kernel.cache_creator_func, wrapper);
 }
 
 } // namespace c10

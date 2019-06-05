@@ -201,6 +201,21 @@ class DispatchTable final {
      );
    }
 
+   KernelFunctionWrapper* getVariableWrapper(const Stack* stack) const {
+     if (dispatch_strategy_.get_is_variable(stack, operator_name_)) {
+       return variable_wrapper_;
+     }
+     return nullptr;
+   }
+
+   void registerVariableWrapper(KernelFunctionWrapper* wrapper) {
+     variable_wrapper_ = wrapper;
+   }
+
+   void deregisterVariableWrapper() {
+     variable_wrapper_ = nullptr;
+   }
+
    std::string listAllDispatchKeys() const {
      return kernels_.map<std::string>(
        [] (const detail::KernelTable_& table) {return table.list_all_dispatch_keys();},
@@ -242,6 +257,23 @@ private:
         return first_tensor_arg.unsafeToTensorImpl()->type_id();
       }
     }
+
+    bool get_is_variable(const Stack* stack, const std::string& operator_name) const {
+      const IValue& first_tensor_arg = torch::jit::peek(
+        *stack,
+        0,
+        reverse_index_of_first_tensor_arg_
+      );
+      if (C10_UNLIKELY(first_tensor_arg_is_tensor_list_)) {
+        const auto& tensor_list = first_tensor_arg.toTensorListRef();
+        if (tensor_list.size() == 0) {
+          throw std::runtime_error("Tried to dispatch operator " + operator_name + " based on an empty tensor list. When the first tensor argument of an operator is a tensor list, then it must not be empty.");
+        }
+        return tensor_list[0].is_variable();
+      } else {
+        return first_tensor_arg.unsafeToTensorImpl()->is_variable();
+      }
+    }
   };
 
   static DispatchStrategy get_dispatch_strategy_(const FunctionSchema& schema) {
@@ -265,6 +297,7 @@ private:
   // The empty state (i.e. no kernels registered) is represented
   // as an empty table.
   either<detail::KernelTable_, DispatchTableEntry> kernels_;
+  KernelFunctionWrapper* variable_wrapper_;
   DispatchStrategy dispatch_strategy_;
   std::string operator_name_;
 };

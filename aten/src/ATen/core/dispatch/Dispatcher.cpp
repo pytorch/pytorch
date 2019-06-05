@@ -114,6 +114,11 @@ RegistrationHandleRAII Dispatcher::registerCatchallKernel(const OperatorHandle& 
   return op.operatorIterator_->op.registerCatchallKernel(DispatchTableEntry{kernel_func, std::move(cache_creator_func)});
 }
 
+RegistrationHandleRAII Dispatcher::registerVariableWrapper(const OperatorHandle& op, KernelFunctionWrapper* wrapper) {
+  // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
+  return op.operatorIterator_->op.registerVariableWrapper(wrapper);
+}
+
 void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
   std::lock_guard<std::mutex> lock(mutex_);
 
