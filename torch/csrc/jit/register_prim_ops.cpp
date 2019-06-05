@@ -124,6 +124,44 @@ static int64_t gcd(int64_t a, int64_t b) {
   return std::abs(a);
 }
 
+int64_t partProduct(int n, int m) {
+  if (m <= (n + 1))
+    return (int64_t)n;
+  if (m == (n + 2))
+    return (int64_t)n * m;
+  int k = (n + m) / 2;
+  if ((k & 1) != 1)
+    k = k - 1;
+  return partProduct(n, k) * partProduct(k + 2, m);
+}
+
+void loop(int n, int64_t& p, int64_t& r) {
+  if (n <= 2)
+    return;
+  loop(n / 2, p, r);
+  p = p * partProduct(n / 2 + 1 + ((n / 2) & 1), n - 1 + (n & 1));
+  r = r * p;
+}
+
+int nminussumofbits(int v) {
+  long w = (long)v;
+  w -= (0xaaaaaaaa & w) >> 1;
+  w = (w & 0x33333333) + ((w >> 2) & 0x33333333);
+  w = (w + (w >> 4)) & 0x0f0f0f0f;
+  w += w >> 8;
+  w += w >> 16;
+  return v - (int)(w & 0xff);
+}
+
+int64_t factorial(int n) {
+  if (n < 0) {
+    throw std::runtime_error("factorial() not defined for negative values");
+  }
+  int64_t p = 1, r = 1;
+  loop(n, p, r);
+  return r << nminussumofbits(n);
+}
+
 // reference function THPVariable_to in python_variable_methods.cpp
 static at::Tensor to_dispatch(
     at::Tensor self,
@@ -1118,21 +1156,25 @@ RegisterOperators logging_operators(
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
       DEFINE_INT_FLOAT_OP(aten_op, op, bool), DEFINE_STR_CMP_OP(aten_op, op)
 
-#define DEFINE_UNARY_OP(aten_op, op, int_result, float_result)            \
-  Operator(                                                               \
-      #aten_op "(int a) -> " #int_result,                                 \
-      [](Stack& stack) {                                                  \
-        int64_t a;                                                        \
-        pop(stack, a);                                                    \
-        push(stack, op);                                                  \
-        return 0;                                                         \
-      }),                                                                 \
-      Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) { \
-        double a;                                                         \
-        pop(stack, a);                                                    \
-        push(stack, op);                                                  \
-        return 0;                                                         \
-      })
+#define DEFINE_UNARY_INT_OP(aten_op, op, result)              \
+  Operator(#aten_op "(int a) -> " #result, [](Stack& stack) { \
+    int64_t a;                                                \
+    pop(stack, a);                                            \
+    push(stack, op);                                          \
+    return 0;                                                 \
+  })
+
+#define DEFINE_UNARY_FLOAT_OP(aten_op, op, result)              \
+  Operator(#aten_op "(float a) -> " #result, [](Stack& stack) { \
+    double a;                                                   \
+    pop(stack, a);                                              \
+    push(stack, op);                                            \
+    return 0;                                                   \
+  })
+
+#define DEFINE_UNARY_OP(aten_op, op, int_result, float_result) \
+  DEFINE_UNARY_INT_OP(aten_op, op, int_result),                \
+      DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result)
 
 #define DEFINE_BOOL_OP(aten_op, op)                                \
   Operator(#aten_op "(bool a, bool b) -> bool", [](Stack& stack) { \
@@ -2181,6 +2223,7 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
     DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
+    DEFINE_UNARY_INT_OP(aten::factorial, factorial(a), int),
     Operator(
         "aten::modf(float a) -> (float, float)",
         [](Stack& stack) {
