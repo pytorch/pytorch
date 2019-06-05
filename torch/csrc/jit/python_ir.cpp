@@ -231,6 +231,7 @@ void initPythonIRBindings(PyObject* module_) {
           [](const std::shared_ptr<Graph> g,
              const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
+             const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool strip_doc_string) {
@@ -240,6 +241,7 @@ void initPythonIRBindings(PyObject* module_) {
                 g,
                 initializers,
                 onnx_opset_version,
+                dynamic_axes,
                 defer_weight_export,
                 operator_export_type,
                 strip_doc_string);
@@ -259,6 +261,7 @@ void initPythonIRBindings(PyObject* module_) {
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,
+          py::arg("dynamic_axes"),
           py::arg("defer_weight_export") = false,
           py::arg("operator_export_type") =
               ::torch::onnx::OperatorExportTypes::ONNX,
