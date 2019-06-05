@@ -207,15 +207,15 @@ void AliasDb::assignWildcardToContained(const Value* v) {
 void AliasDb::assignWildcardToContained(Element* e, const TypePtr& type) {
   TORCH_INTERNAL_ASSERT(shouldAnnotate(type));
   // Assign wildcards to contained types
-  for (const auto& type : type->containedTypes()) {
-    if (shouldAnnotate(type)) {
-      auto contained = memoryDAG_->makeFreshValue(nullptr);
-      auto wildcard = getOrCreateWildcard(type);
-      memoryDAG_->makePointerTo(contained, wildcard);
-      memoryDAG_->addToContainedElements(contained, e);
+  for (const auto& containedType : type->containedTypes()) {
+    if (shouldAnnotate(containedType)) {
+      auto containedElement = memoryDAG_->makeFreshValue(nullptr);
+      auto wildcard = getOrCreateWildcard(containedType);
+      memoryDAG_->makePointerTo(containedElement, wildcard);
+      memoryDAG_->addToContainedElements(containedElement, e);
 
       // Handle nested containers
-      assignWildcardToContained(contained, type);
+      assignWildcardToContained(containedElement, containedType);
     }
   }
 }
