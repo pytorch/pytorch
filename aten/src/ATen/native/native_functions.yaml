@@ -2122,6 +2122,11 @@
     CPU: _s_gamma_cpu
     CUDA: _s_gamma_cuda
 
+- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
+  dispatch:
+    CPU: _dirichlet_grad_cpu
+    CUDA: _dirichlet_grad_cuda
+
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
   variants: function
   dispatch:
@@ -3993,14 +3998,6 @@
   dispatch:
     CPU: legacy::cpu::_th_alias
     CUDA: legacy::cuda::_th_alias
-
-- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_dirichlet_grad_out
-
-- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
-  dispatch:
-    CPU: legacy::cpu::_th_dirichlet_grad
 
 - func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
