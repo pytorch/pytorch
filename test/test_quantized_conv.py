@@ -83,18 +83,15 @@ class FunctionalAPITest(TestCase):
         try:
             ref_result = ref_op(q_inputs, q_filters_ref, q_bias, stride,
                                 i_padding, dilation,
-                                o_padding, groups,
-                                scale, zero_point)
+                                groups, scale, zero_point)
         except RuntimeError as e:
-            if "[QConv2dInt8]" in str(e):
-                np.testing.assert_raises(
-                    RuntimeError, qF.conv2d,
-                    q_inputs, q_filters_ref, bias=q_bias,
-                    scale=scale, zero_point=zero_point,
-                    stride=stride, padding=i_padding, dilation=dilation,
-                    groups=groups, prepacked=True, dtype=torch_type)
-            else:
-                raise(e)  # Unexpected error
+            e_msg = str(e).split("\n")[0].split("(")[0].strip()
+            np.testing.assert_raises_regex(
+                type(e), e_msg, qF.conv2d,
+                q_inputs, q_filters_ref, bias=q_bias,
+                scale=scale, zero_point=zero_point,
+                stride=stride, padding=i_padding, dilation=dilation,
+                groups=groups, prepacked=True, dtype=torch_type)
         else:
             if prepacked:
                 q_filters = torch.ops.quantized.fbgemm_conv_prepack(q_filters,

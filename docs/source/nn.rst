@@ -1046,6 +1046,11 @@ Non-linear activation functions
 
 .. autofunction:: glu
 
+:hidden:`gelu`
+~~~~~~~~~~~~~~~
+
+.. autofunction:: gelu
+
 :hidden:`logsigmoid`
 ~~~~~~~~~~~~~~~~~~~~
 

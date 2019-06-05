@@ -73,12 +73,10 @@ def conv2d(input, weight, bias,
     stride = _extend_to_list(stride, spatial_dim_len)
     padding = _extend_to_list(padding, spatial_dim_len)
     dilation = _extend_to_list(dilation, spatial_dim_len)
-    _output_padding = _extend_to_list(0, spatial_dim_len)
 
     if not prepacked:
         weight = ops.quantized.fbgemm_conv_prepack(weight, groups)
 
     return ops.quantized.fbgemm_conv2d(input, weight, bias,
                                        stride, padding, dilation,
-                                       _output_padding, groups,
-                                       scale, zero_point)
+                                       groups, scale, zero_point)

@@ -45,6 +45,11 @@ def main():
 
     parser.add_argument(
         '--list_ops',
+        help='List operators without running them',
+        action='store_true')
+
+    parser.add_argument(
+        '--list_tests',
         help='List all test cases without running them',
         action='store_true')
 

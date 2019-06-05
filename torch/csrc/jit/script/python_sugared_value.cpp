@@ -1,13 +1,15 @@
-#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/script/module_python.h>
+#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
+
+#include <Python.h>
 
 namespace torch {
 namespace jit {
@@ -105,7 +107,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
       c10::nullopt,
       inputs_,
       attributes,
-      failure_messages,
+      &failure_messages,
       /*conv_tensor_to_num*/ true);
   if (!matched_schema)
     throw ErrorReport(loc) << failure_messages.str();
@@ -231,10 +233,10 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
         c10::nullopt,
         new_inputs,
         attributes,
-        err,
+        &err,
         true);
     if (match) {
-      return MethodValue(module_, fn)
+      return MethodValue(module_, method_name)
           .call(loc, caller, inputs, attributes, n_binders);
     }
   }
@@ -347,9 +349,10 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   if (py::isinstance(attr, py::module::import("torch").attr("Tensor"))) {
     hint = "Tensors must be added to a module as a buffer or parameter";
   }
-  throw ErrorReport(loc)
-      << "attribute '" << field << "' of type '" << typeString(attr)
-      << "' is not usable in a script method (" << hint << ")";
+  throw ErrorReport(loc) << "attribute '" << field << "' of type '"
+                         << typeString(attr)
+                         << "' is not usable in a script method (" << hint
+                         << ")";
 }
 
 std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
@@ -508,6 +511,15 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto& pyCu = CompilationUnit::_get_python_cu();
     if (auto classType = pyCu.get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
+    }
+    // Use a heuristic here to identify NamedTuple instances:
+    // 1) must be a subclass of tuple
+    // 2) Has an attribute "_fields"
+    auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
+    if (PyObject_IsSubclass(obj.ptr(), tuple_type) &&
+        py::hasattr(obj, "_fields")) {
+      throw ErrorReport(loc)
+          << "NamedTuple is currently not supported in TorchScript";
     }
   }
 
