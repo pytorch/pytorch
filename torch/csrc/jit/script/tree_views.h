@@ -600,6 +600,11 @@ struct Assign : public Stmt {
   Expr rhs() const {
     return Expr(subtree(1));
   }
+
+  bool has_type() const {
+    return tree()->trees().size() == 3;
+  }
+
   Expr type() const {
     return Expr(subtree(2));
   }
