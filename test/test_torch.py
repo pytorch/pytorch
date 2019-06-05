@@ -1487,7 +1487,7 @@ class _TestTorchMixin(object):
                     y = np.array([val, val, val])
                     r1 = x >> shift
                     r2 = y >> shift
-                    self.assertTrue(np.allclose(r2, r1.numpy()))
+                    self.assertTrue(np.allclose(r2, r1.cpu().numpy()))
 
     def test_irshift_same_as_numpy(self):
         for val in [-100, -2, -1, 0, 1, 2, 100]:
@@ -1497,7 +1497,7 @@ class _TestTorchMixin(object):
                     y = np.array([val, val, val])
                     x >>= shift
                     y >>= shift
-                    self.assertTrue(np.allclose(y, x.numpy()))
+                    self.assertTrue(np.allclose(y, x.cpu().numpy()))
 
     def test_all_any_with_dim(self):
         def test(x):
