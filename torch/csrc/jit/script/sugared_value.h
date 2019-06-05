@@ -417,14 +417,6 @@ struct TORCH_API IsInstanceValue : SugaredValue {
   }
 };
 
-// matched against for special handling of isinstance expressions
-// struct TORCH_API IterableValue : SugaredValue {
-//   IterableValue() = default;
-//   std::string kind() const override {
-//     return "Iterable";
-//   }
-// };
-
 // This represents the "__new__" method on classes, which can't be a MethodValue
 // because it takes a ClassValue as input.
 // So if we see:
