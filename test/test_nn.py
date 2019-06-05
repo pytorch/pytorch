@@ -84,16 +84,6 @@ def repeat_test_for_types(dtypes):
     return repeat_helper
 
 
-def _copy_rnn(rnn_src, rnn_dst):
-        for x_layer, y_layer in zip(rnn_dst.all_weights, rnn_src.all_weights):
-            for x, y in zip(x_layer, y_layer):
-                x.data.copy_(y.data)
-                del x
-                del y
-            del x_layer
-            del y_layer
-
-
 class PackedSequenceTest(TestCase):
 
     _type_by_name = {
@@ -5417,9 +5407,8 @@ class TestNN(NNTestCase):
             nn.RNN(10, 20, batch_first=True, bidirectional=True)
         ]
         for rnn in rnns:
-            rnn_cpu = deepcopy(rnn).cpu()
-            rnn.cuda()
             rnn.bias_ih_l0_reverse = rnn.bias_ih_l0
+            rnn.cuda()
             input = Variable(torch.randn(5, 4, 10).cuda(), requires_grad=True)
             hx = Variable(torch.randn(2, 5, 20).cuda(), requires_grad=True)
             all_vars = [input, hx] + list(rnn.parameters())
@@ -5437,16 +5426,19 @@ class TestNN(NNTestCase):
             opt.step()
             with warnings.catch_warnings(record=True) as w:
                 output_cuda = rnn(input, hx)
-
-            _copy_rnn(rnn, rnn_cpu)
-            rnn_cpu.bias_ih_l0_reverse = rnn_cpu.bias_ih_l0
-            hx = (hx[0].cpu(), hx[1].cpu()) if isinstance(rnn_cpu, nn.LSTM) else hx.cpu()
-            output_cpu = rnn_cpu(input.cpu(), hx)
+            rnn.cpu()
+            hx = (hx[0].cpu(), hx[1].cpu()) if isinstance(rnn, nn.LSTM) else hx.cpu()
+            output_cpu = rnn(input.cpu(), hx)
             self.assertEqual(output_cuda, output_cpu)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(NO_HALF_TENSORTYPES)
     def test_cuda_rnn_fused(self, dtype=torch.float):
+
+        def copy_rnn(rnn1, rnn2):
+            for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
+                for x, y in zip(x_layer, y_layer):
+                    x.data.copy_(y.data)
 
         def check_rnn_grads(rnn1, rnn2):
             for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
@@ -5467,7 +5459,7 @@ class TestNN(NNTestCase):
                 for bias in (True, False):
                     rnn = module(input_size, hidden_size, num_layers, bias=bias).to(dtype)
                     rnn_cuda = module(input_size, hidden_size, num_layers, bias=bias).to("cuda", dtype)
-                    _copy_rnn(rnn_cuda, rnn)
+                    copy_rnn(rnn, rnn_cuda)
 
                     is_lstm = isinstance(rnn, nn.LSTM)
                     if is_lstm:
@@ -5649,8 +5641,12 @@ class TestNN(NNTestCase):
 
     def _test_RNN_cpu_vs_cudnn(self, dropout):
 
-        def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy):
+        def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy, weights_val):
             is_lstm = isinstance(rnn, nn.LSTM)
+
+            for x_layer, y_layer in zip(rnn.all_weights, weights_val):
+                for x, y in zip(x_layer, y_layer):
+                    x.data.copy_(y.data)
 
             if isinstance(input_val, rnn_utils.PackedSequence):
                 input = rnn_utils.PackedSequence(
@@ -5752,7 +5748,7 @@ class TestNN(NNTestCase):
                              batch_first=batch_first)
 
                 outputs_cpu = forward_backward(
-                    False, rnn, input_val, hx_val, grad_output, grad_hy)
+                    False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
 
                 rnn_gpu = module(input_size,
                                  hidden_size,
@@ -5762,10 +5758,8 @@ class TestNN(NNTestCase):
                                  bidirectional=bidirectional,
                                  batch_first=batch_first)
 
-                _copy_rnn(rnn, rnn_gpu)
-
                 outputs_gpu = forward_backward(
-                    True, rnn_gpu, input_val, hx_val, grad_output, grad_hy)
+                    True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
 
                 compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
@@ -5778,11 +5772,10 @@ class TestNN(NNTestCase):
                 num_layers * num_directions, batch, hidden_size)
 
             rnn = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
-            outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy)
+            outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
 
             rnn_gpu = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
-            _copy_rnn(rnn, rnn_gpu)
-            outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, grad_output, grad_hy)
+            outputs_gpu = forward_backward(True, rnn_gpu, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
 
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
