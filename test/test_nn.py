@@ -321,7 +321,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 input = input.float()
             module.float()
             module(input)
-            for p in module.parameters():  # yf225 TODO: problem: module.parameters() creates another reference to param
+            for p in module.parameters():
                 test_case.assertIsInstance(p, torch.FloatTensor)
                 del p
 
@@ -330,7 +330,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 input = input.double()
             module.double()
             module(input)
-            for p in module.parameters():  # yf225 TODO: problem: module.parameters() creates another reference to param
+            for p in module.parameters():
                 test_case.assertIsInstance(p, torch.DoubleTensor)
                 del p
 
