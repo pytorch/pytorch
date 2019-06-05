@@ -199,7 +199,7 @@ class Module(object):
                 param_applied = fn(self._parameters[key])
                 grad_applied = fn(self._parameters[key]._grad) if self._parameters[key]._grad is not None else None
                 param_is_same_impl_type = self._parameters[key]._is_same_impl_type(param_applied)
-                if grad_applied:
+                if grad_applied is not None:
                     grad_is_same_impl_type = self._parameters[key]._grad._is_same_impl_type(grad_applied)
 
                 if param_is_same_impl_type:
@@ -228,7 +228,7 @@ class Module(object):
                         # yf225 TODO: in a separate PR, we should enforce that `self._parameters[key].requires_grad == True`
                         self._parameters[key] = param_applied.requires_grad_(self._parameters[key].requires_grad)
 
-                if grad_applied:
+                if grad_applied is not None:
                     if grad_is_same_impl_type:
                         self._parameters[key]._grad.data = grad_applied
                     else:
