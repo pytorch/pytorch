@@ -1602,6 +1602,22 @@ if _enabled:
                             continue
                     ScriptModule.__setattr__(self, name, item)
 
+            # Copy buffers
+            for name in original._buffers:
+                if original._buffers[name] is None:
+                    object.__setattr__(self, name, None)
+                else:
+                    self.register_buffer(name, original._buffers[name])
+
+            # Copy constants
+            self.__dict__["_constants_set"] = constants_set
+            for name in self.__dict__["_constants_set"]:
+                if hasattr(original, name):
+                    if (name in original._parameters or name in original._buffers) and item is not None:
+                        # for 'None' parameters/buffers, don't actually add their values if it exists
+                        continue
+                    ScriptModule.__setattr__(self, name, getattr(original, name))
+
             # Copy annotations, pull types from `__annotations__` or try to infer
             # the type if possible
             class_annotations = getattr(original, '__annotations__', {})
@@ -1620,22 +1636,6 @@ if _enabled:
                     the_type = torch.jit.annotations.try_to_infer_type(item)
                 if the_type is not None:
                     self._c._register_attribute(name, the_type, item)
-
-            # Copy buffers
-            for name in original._buffers:
-                if original._buffers[name] is None:
-                    object.__setattr__(self, name, None)
-                else:
-                    self.register_buffer(name, original._buffers[name])
-
-            # Copy constants
-            self.__dict__["_constants_set"] = constants_set
-            for name in self.__dict__["_constants_set"]:
-                if hasattr(original, name):
-                    if (name in original._parameters or name in original._buffers) and item is not None:
-                        # for 'None' parameters/buffers, don't actually add their values if it exists
-                        continue
-                    ScriptModule.__setattr__(self, name, getattr(original, name))
 
             # Copy overloads
             self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
