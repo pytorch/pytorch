@@ -1479,6 +1479,7 @@ class _TestTorchMixin(object):
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_rshift_same_as_numpy(self):
         for val in [-100, -2, -1, 0, 1, 2, 100]:
             for shift in [-1000, -2, -1, 0, 1, 2, 100]:
@@ -1489,6 +1490,7 @@ class _TestTorchMixin(object):
                     r2 = y >> shift
                     self.assertTrue(np.allclose(r2, r1.cpu().numpy()))
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_irshift_same_as_numpy(self):
         for val in [-100, -2, -1, 0, 1, 2, 100]:
             for shift in [-1000, -2, -1, 0, 1, 2, 100]:
