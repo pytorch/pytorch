@@ -6723,7 +6723,7 @@ a")
             return torch.tensor([[1]])
 
         list_input = [func1, func2, func3, func4, func5, func6, func7]
-        expected_shape = ["Long(*)", ("Byte(*)"), "Double(*)", "Double()", "Long()", "Byte()", "Long(*, *)"]
+        expected_shape = ["Long(*)", ("Bool(*)"), "Double(*)", "Double()", "Long()", "Bool()", "Long(*, *)"]
 
         for fn, expect in zip(list_input, expected_shape):
             self.checkScript(fn, ())
