@@ -23,7 +23,7 @@ struct FBGEMM_API PackedLinearWeight {
 struct FBGEMM_API PackedConvWeight {
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
   std::vector<int32_t> col_offsets;
-  std::vector<int32_t> kernel;
+  std::vector<int64_t> kernel;
   float w_scale;
   int32_t w_zp;
 };
