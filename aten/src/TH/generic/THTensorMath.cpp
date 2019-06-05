@@ -179,6 +179,29 @@ void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value)
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
+void THTensor_(cadd)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
+{
+  THTensor_(resizeAs)(r_, t);
+  int64_t r_Size = THTensor_(nElement)(r_);
+  int64_t srcSize = THTensor_(nElement)(src);
+  int r_Contig = THTensor_(isContiguous)(r_);
+  int tContig = THTensor_(isContiguous)(t);
+  int srcContig = THTensor_(isContiguous)(src);
+  if (srcSize == r_Size) {
+    if (r_Contig && tContig && srcContig) {
+      if(r_ == t) {
+        THBlas_(axpy)(THTensor_(nElement)(t), value, src->data<scalar_t>(), 1, r_->data<scalar_t>(), 1);
+      } else {
+        TH_TENSOR_APPLY3_CONTIG(scalar_t, r_, scalar_t, t, scalar_t, src, THVector_(cadd)(r__data, t_data, src_data, value, r__len););
+      }
+    } else {
+      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data + value * *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
+    }
+  } else {
+    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data + value * *src_data;);
+  }
+}
+
 // Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
 static inline bool modulo_wrap(scalar_t a, scalar_t b) {
   return (a != 0) && (a < 0) != (b < 0);
@@ -202,29 +225,6 @@ void THTensor_(clamp)(THTensor *r_, THTensor *t, scalar_t min_value, scalar_t ma
     });
   } else {
     TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = (*t_data < min_value) ? min_value : (*t_data > max_value ? max_value : *t_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-  }
-}
-
-void THTensor_(cadd)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t srcSize = THTensor_(nElement)(src);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  int srcContig = THTensor_(isContiguous)(src);
-  if (srcSize == r_Size) {
-    if (r_Contig && tContig && srcContig) {
-      if(r_ == t) {
-        THBlas_(axpy)(THTensor_(nElement)(t), value, src->data<scalar_t>(), 1, r_->data<scalar_t>(), 1);
-      } else {
-        TH_TENSOR_APPLY3_CONTIG(scalar_t, r_, scalar_t, t, scalar_t, src, THVector_(cadd)(r__data, t_data, src_data, value, r__len););
-      }
-    } else {
-      TH_TENSOR_APPLY3_PARALLEL(r_Size, r_Contig, tContig, srcContig, scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data + value * *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-    }
-  } else {
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data + value * *src_data;);
   }
 }
 

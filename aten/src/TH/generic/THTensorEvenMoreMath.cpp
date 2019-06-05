@@ -399,6 +399,36 @@ void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int ac
   THLongTensor_free(index);
 }
 
+void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
+{
+  ptrdiff_t i, numel;
+  THTensor *tSlice;
+  int64_t *index_data;
+
+  numel = THLongTensor_nElement(index);
+  THArgCheck(THTensor_nDimensionLegacyNoScalars(index) == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < THTensor_nDimensionLegacyNoScalars(tensor), 4,"Indexing dim %d is out of bounds of tensor", dim);
+
+  index = THLongTensor_newContiguous(index);
+  index_data = THLongTensor_data(index);
+
+  for (i=0; i<numel; i++)
+  {
+    if (tensor->dim() > 1)
+    {
+      tSlice = THTensor_(new)();
+      THTensor_(select)(tSlice, tensor,dim,index_data[i]);
+      THTensor_(fill)(tSlice, val);
+      c10::raw::intrusive_ptr::decref(tSlice);
+    }
+    else
+    {
+      THTensor_(set1d)(tensor, index_data[i], val);
+    }
+  }
+  THLongTensor_free(index);
+}
+
 #if !defined(TH_REAL_IS_BOOL)
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
@@ -546,36 +576,6 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
       THTensor_(set1d)(tensor,
               index_data[i],
               THTensor_(get1d)(src,i) + THTensor_(get1d)(tensor,index_data[i]));
-    }
-  }
-  THLongTensor_free(index);
-}
-
-void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
-{
-  ptrdiff_t i, numel;
-  THTensor *tSlice;
-  int64_t *index_data;
-
-  numel = THLongTensor_nElement(index);
-  THArgCheck(THTensor_nDimensionLegacyNoScalars(index) == 1, 3, "Index is supposed to be a vector");
-  THArgCheck(dim < THTensor_nDimensionLegacyNoScalars(tensor), 4,"Indexing dim %d is out of bounds of tensor", dim);
-
-  index = THLongTensor_newContiguous(index);
-  index_data = THLongTensor_data(index);
-
-  for (i=0; i<numel; i++)
-  {
-    if (tensor->dim() > 1)
-    {
-      tSlice = THTensor_(new)();
-      THTensor_(select)(tSlice, tensor,dim,index_data[i]);
-      THTensor_(fill)(tSlice, val);
-      c10::raw::intrusive_ptr::decref(tSlice);
-    }
-    else
-    {
-      THTensor_(set1d)(tensor, index_data[i], val);
     }
   }
   THLongTensor_free(index);

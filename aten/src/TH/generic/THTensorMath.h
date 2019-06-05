@@ -66,6 +66,7 @@ TH_API void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THL
 TH_API void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
 TH_API void THTensor_(take)(THTensor *tensor, THTensor *src, THLongTensor *index);
 TH_API void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate);
+TH_API void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val);
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
@@ -73,9 +74,6 @@ TH_API void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t
 TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
 TH_API void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value);
 TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* src);
-
-TH_API void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
-TH_API void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val);
 
 TH_API void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index);
 TH_API void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
@@ -86,6 +84,8 @@ TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 
 TH_API void THTensor_(neg)(THTensor *self, THTensor *src);
 TH_API void THTensor_(cinv)(THTensor *self, THTensor *src);
+
+TH_API void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
 
 TH_API void THTensor_(add)(THTensor *r_, THTensor *t, scalar_t value);
 TH_API void THTensor_(sub)(THTensor *r_, THTensor *t, scalar_t value);

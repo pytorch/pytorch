@@ -285,6 +285,8 @@
 ]]
 [[
   name: _th_index_fill_
+  cpu_bool: True
+  cuda_bool: True
   cname: indexFill
   variants: function
   return: argument 0

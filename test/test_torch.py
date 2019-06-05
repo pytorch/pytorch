@@ -7578,6 +7578,17 @@ class _TestTorchMixin(object):
             dest2[idx[i]] = dest2[idx[i]] + src[i]
         self.assertEqual(dest, dest2)
 
+    def test_index_fill(self):
+        for device in torch.testing.get_all_device_types():
+            for dt in torch.testing.get_all_dtypes():
+                if dt == torch.half:
+                    continue
+
+                x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
+                index = torch.tensor([0], device=device)
+                x.index_fill_(1, index, 0)
+                self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dt, device=device))
+
     def test_index_select(self):
         for device in torch.testing.get_all_device_types():
             src = torch.randn(3, 4, 5, device=device)
