@@ -91,7 +91,7 @@ struct TORCH_API RecordFunction {
   RecordFunction* parent_ = nullptr;
 
   bool initialized_ = false;
-  bool run_sampled_ = true;
+  bool run_sampled_ = false;
 };
 
 TORCH_API bool hasCallbacks();
