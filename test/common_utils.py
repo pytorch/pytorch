@@ -302,15 +302,33 @@ class CudaMemoryLeakCheck():
         return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
 
     def __enter__(self):
-        self.befores = self.get_cuda_memory_usage()
+        # Before starting CUDA test save currently active streams on all
+        # CUDA devices and set new non default streams to all CUDE devices
+        # to ensure CUDA tests do not use default stream by mistake.
+        beforeDevice = torch.cuda.current_device()
+        self.beforeStreams = []
+        for d in range(torch.cuda.device_count()):
+            self.beforeStreams.append(torch.cuda.current_stream(d))
+            deviceStream = torch.cuda.Stream(device = d)
+            torch._C._cuda_setStream(deviceStream._cdata)
+        torch._C._cuda_setDevice(beforeDevice)
+
+        self.beforeMemUsages = self.get_cuda_memory_usage()
 
     def __exit__(self, exec_type, exec_value, traceback):
+        # After completing CUDA test load previously active streams on all
+        # CUDA devices.
+        beforeDevice = torch.cuda.current_device()
+        for d in range(torch.cuda.device_count()):
+            torch._C._cuda_setStream(self.beforeStreams[d]._cdata)
+        torch._C._cuda_setDevice(beforeDevice)
+
         # Don't check for leaks if an exception was thrown
         if exec_type is not None:
             return
-        afters = self.get_cuda_memory_usage()
+        afterMemUsages = self.get_cuda_memory_usage()
 
-        for i, (before, after) in enumerate(zip(self.befores, afters)):
+        for i, (before, after) in enumerate(zip(self.beforeMemUsages, afterMemUsages)):
             if not TEST_WITH_ROCM:
                 self.testcase.assertEqual(
                     before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
