@@ -84,6 +84,16 @@ def repeat_test_for_types(dtypes):
     return repeat_helper
 
 
+def _copy_rnn(rnn_src, rnn_dst):
+        for x_layer, y_layer in zip(rnn_dst.all_weights, rnn_src.all_weights):
+            for x, y in zip(x_layer, y_layer):
+                x.data.copy_(y.data)
+                del x
+                del y
+            del x_layer
+            del y_layer
+
+
 class PackedSequenceTest(TestCase):
 
     _type_by_name = {
@@ -580,15 +590,6 @@ class TestNN(NNTestCase):
         s = nn.Sequential(n, n)
 
         return l, n, s
-
-    def _copy_rnn(rnn_src, rnn_dst):
-        for x_layer, y_layer in zip(rnn_dst.all_weights, rnn_src.all_weights):
-            for x, y in zip(x_layer, y_layer):
-                x.data.copy_(y.data)
-                del x
-                del y
-            del x_layer
-            del y_layer
 
     def test_module_backcompat(self):
         from torch.serialization import SourceChangeWarning
