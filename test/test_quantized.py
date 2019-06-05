@@ -488,14 +488,14 @@ class TestQuantizedConv(unittest.TestCase):
         # N
         batch_size = 1
         # C
-        input_channels = 16
+        input_channels = 1
         # H, W
         height = width = 24
         # K
-        output_channels = 8
+        output_channels = 1
 
         kernel_h = kernel_w = 3
-        stride_h = stride_w = 1
+        stride_h = stride_w = 2
         padding_h = padding_w = 1
         dilation_h = dilation_w = 1
         groups = 1
@@ -570,11 +570,10 @@ class TestQuantizedConv(unittest.TestCase):
             X_q,
             W_prepack,
             b_q,
-            [1, 1],  # stride
-            [1, 1],  # padding
-            [1, 1],  # dilation
-            [0, 0],  # output_padding
-            1,  # groups
+            [stride_h, stride_w],  # stride
+            [padding_h, padding_w],  # padding
+            [dilation_h, dilation_w],  # dilation
+            groups,  # groups
             Y_scale,
             Y_zero_point,
         )
