@@ -18,6 +18,7 @@ class Caffe2BenchmarkBase(object):
     """ This is a base class used to create Caffe2 operator benchmark
     """
     tensor_index = 0
+    test_index = 0
 
     def __init__(self):
         self.args = {}
@@ -52,17 +53,22 @@ class Caffe2BenchmarkBase(object):
             ret = int(value)
         return str(ret)
 
-    def test_name(self, **kargs):
+    def test_name(self, name_type, **kargs):
         """ this is a globally unique name which can be used to
             label a specific test
         """
-        test_name_str = []
-        for key in kargs:
-            value = kargs[key]
-            test_name_str.append(
-                key + self._value_to_str(value))
-        name = (self.module_name() + '_' +
-                '_'.join(test_name_str)).replace(" ", "")
+        if name_type == "long": 
+            test_name_str = []
+            for key in kargs:
+                value = kargs[key]
+                test_name_str.append(
+                    key + self._value_to_str(value))
+            name = (self.module_name() + '_' +
+                    '_'.join(test_name_str)).replace(" ", "")
+        elif name_type == "short":
+            # this is used to generate test name based on unique index
+            name = '_'.join([self.module_name(), 'test', str(Caffe2BenchmarkBase.test_index)])
+            Caffe2BenchmarkBase.test_index += 1
         return name
 
 
