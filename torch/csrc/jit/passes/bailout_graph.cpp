@@ -141,11 +141,10 @@ struct BailOutInserter {
 
   void run() {
     insertBailOuts(graph_->block());
-    // set bailout subgraphs
-    setSubgraphs();
+    replaceGuardsWithBailouts();
   }
 
-  void removeAllBailOutsAndGuards(Block* b) {
+  void removeGuards(Block* b) {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       if (it->kind() == prim::Guard) {
         // this will need to be profiled again
@@ -155,29 +154,20 @@ struct BailOutInserter {
         it.destroyCurrent();
       }
 
-      if (it->kind() == prim::BailOut) {
-        // this is the index of an input we are actually guarding
-        auto index = it->i(attr::slot);
-        // this will need to be profiled again
-        it->inputs()[index]->setType(TensorType::create());
-        // destroy the guard
-        it->output()->replaceAllUsesWith(it->inputs()[index]);
-        it.destroyCurrent();
-      }
-
       for (auto ib : it->blocks()) {
-        removeAllBailOutsAndGuards(ib);
+        removeGuards(ib);
       }
     }
   }
 
-  void setSubgraphs() {
+  void replaceGuardsWithBailouts() {
     for (auto e : subgraphs) {
-      removeAllBailOutsAndGuards(e.second->block());
+      e.second->insertBefore(e.first);
+      e.first->output()->replaceAllUsesWith(e.second->output());
+      removeGuards(e.second->g(attr::Subgraph)->block());
       // this isn't strictly necessarily
       // but it makes debugging much easier
-      ConstantPooling(e.second);
-      e.first->g_(attr::Subgraph, e.second);
+      ConstantPooling(e.second->g(attr::Subgraph));
     }
   }
 
@@ -190,11 +180,6 @@ struct BailOutInserter {
         BailOutGraphBuilderForNode bg(graph_);
         auto bailout_graph = bg.buildBailOutGraphFrom(node);
 
-        // N.B. we don't immediately set SubGraph attribute
-        // since we might need to copy this node the second time
-        // if the node is in a loop which then gets copied again and again
-        subgraphs.insert({bailout_node, bailout_graph});
-
         for (size_t i = 0; i < bg.live_inputs_.size(); i++) {
           bailout_node->addInput(bg.live_inputs_[i]);
 
@@ -205,9 +190,8 @@ struct BailOutInserter {
             bailout_node->output()->setType(it->output()->type());
           }
         }
-        bailout_node->insertBefore(*it);
-        it->output()->replaceAllUsesWith(bailout_node->output());
-        it.destroyCurrent();
+        bailout_node->g_(attr::Subgraph, bailout_graph);
+        subgraphs.insert({node, bailout_node});
       } else {
         for (auto ib : it->blocks()) {
           insertBailOuts(ib);
@@ -217,7 +201,7 @@ struct BailOutInserter {
   }
 
   std::shared_ptr<Graph> graph_;
-  std::unordered_map<Node*, std::shared_ptr<Graph>> subgraphs;
+  std::unordered_map<Node*, Node*> subgraphs;
 };
 
 void InsertBailOuts(std::shared_ptr<Graph> graph) {
