@@ -63,7 +63,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   THIndex_t *indices_data;
 
 
-  AT_CHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4),
+  TORCH_CHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4),
            "non-empty 3D or 4D (batch mode) tensor expected for input, but got sizes: ", input->sizes());
   THNN_CHECK_SHAPE_INDICES(input, indices);
 

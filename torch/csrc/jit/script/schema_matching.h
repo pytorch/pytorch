@@ -28,7 +28,7 @@ TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
     c10::optional<NamedValue> self,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
-    std::ostream& failure_messages,
+    std::ostream* failure_messages,
     bool allow_conversions);
 
 TORCH_API bool convertibleToList(
@@ -44,7 +44,9 @@ TORCH_API Value* emitBuiltinCall(
     at::ArrayRef<NamedValue> attributes,
     // if true, emitBuiltinCall will throw an exception if this builtin does not
     // exist, otherwise it will return nullptr if the builtin is not found.
-    bool required);
+    bool required,
+    // should error strings be eager materialized?
+    bool render_errors = false);
 
 TORCH_API c10::optional<size_t> findInputWithName(
     const std::string& name,

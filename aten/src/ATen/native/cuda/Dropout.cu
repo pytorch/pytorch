@@ -102,6 +102,8 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
   Tensor ret = at::empty_like(self);
   Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte));
   const int64_t nelem = self.numel();
+//empty tensors should not get here, but just in case, avoid FPE
+  if (nelem==0) return std::tuple<Tensor,Tensor>(self, mask);
   const int64_t block_size = 256;
   unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
   dim3 dim_block(block_size);
@@ -152,7 +154,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
 
 Tensor masked_scale_cuda(const Tensor& self, const Tensor& mask, double scale){
    Tensor ret = at::empty_like(self);
-   AT_CHECK(mask.scalar_type() == at::ScalarType::Byte, "mask should be torch.uint8 dtype");
+   TORCH_CHECK(mask.scalar_type() == at::ScalarType::Byte, "mask should be torch.uint8 dtype");
    AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "masked_scale", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
       accscalar_t pa = (accscalar_t)(scale);

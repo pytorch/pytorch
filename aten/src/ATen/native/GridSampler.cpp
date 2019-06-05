@@ -559,39 +559,39 @@ grid_sampler_3d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
 
 Tensor grid_sampler(const Tensor& input, const Tensor& grid,
                     int64_t interpolation_mode, int64_t padding_mode) {
-  AT_CHECK(
+  TORCH_CHECK(
     input.defined() && grid.defined(),
     "grid_sampler(): expected input and grid to not be undefined, but input "
     "is ", input, " and grid is ", grid);
   auto input_opt = input.options();
   auto grid_opt = grid.options();
-  AT_CHECK(
+  TORCH_CHECK(
     input_opt.device() == grid_opt.device(),
     "grid_sampler(): expected input and grid to be on same device, but input "
     "is on ", input_opt.device(), " and grid is on ", grid_opt.device());
-  AT_CHECK(
+  TORCH_CHECK(
     input_opt.dtype() == grid_opt.dtype(),
     "grid_sampler(): expected input and grid to have same dtype, but input "
     "has ", input_opt.dtype(), " and grid has ", grid_opt.dtype());
-  AT_CHECK(
+  TORCH_CHECK(
     input_opt.layout() == kStrided && grid_opt.layout() == kStrided,
     "grid_sampler(): expected input and grid to have torch.strided layout, but "
     "input has ", input_opt.layout(), " and grid has ", grid_opt.layout());
-  AT_CHECK(
+  TORCH_CHECK(
     (input.dim() == 4 || input.dim() == 5) && input.dim() == grid.dim(),
     "grid_sampler(): expected 4D or 5D input and grid with same number of "
     "dimensions, but got input with sizes ", input.sizes(),
     " and grid with sizes ", grid.sizes());
-  AT_CHECK(
+  TORCH_CHECK(
     input.size(0) == grid.size(0),
     "grid_sampler(): expected grid and input to have same batch size, but got "
     "input with sizes ", input.sizes(), " and grid with sizes ", grid.sizes());
-  AT_CHECK(
+  TORCH_CHECK(
     grid.size(-1) == input.dim() - 2,
     "grid_sampler(): expected grid to have size ", input.dim() - 2, " in last "
     "dimension, but got grid with sizes ", grid.sizes());
   for (int64_t i = 2; i < input.dim(); i++) {
-    AT_CHECK(input.size(i) > 0,
+    TORCH_CHECK(input.size(i) > 0,
       "grid_sampler(): expected input to have non-empty spatial dimensions, "
       "but input has sizes ", input.sizes(), " with dimension ", i, " being "
       "empty");

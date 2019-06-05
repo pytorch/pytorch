@@ -11,7 +11,6 @@ CONFIG_TREE_DATA = [
         (Ver("gcc", "4.9"), [X("py2")]),
     ]),
     (Ver("ubuntu", "16.04"), [
-        (Ver("cuda", "8.0"), [X("py2")]),
         (Ver("cuda", "9.0"), [
             # TODO make explicit that this is a "secret TensorRT build"
             #  (see https://github.com/pytorch/pytorch/pull/17323#discussion_r259446749)

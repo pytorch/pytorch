@@ -12,6 +12,12 @@ namespace {
 
 static const int forward_threads = 256;
 
+#ifdef __HIP_PLATFORM_HCC__
+static const int WARP_SIZE = 64;
+#else
+static const int WARP_SIZE = 32;
+#endif
+
 template <typename scalar_t>
 static __forceinline__ __device__ scalar_t device_sqrt(scalar_t val);
 
@@ -216,7 +222,7 @@ void cdist_kernel_impl(Tensor& result, const Tensor& x1, const Tensor& x2, doubl
   int64_t r2 = x2.size(-2);
   int64_t m = x1.size(-1);
   const dim3 grid(r1*r2);
-  const dim3 block(forward_threads);
+  const dim3 block(std::min((int64_t)forward_threads, ((m - 1) / WARP_SIZE + 1) * WARP_SIZE));
 
   AT_DISPATCH_FLOATING_TYPES(x1.scalar_type(), "cdist_cuda", [&] {
     if (p == 0.0) {

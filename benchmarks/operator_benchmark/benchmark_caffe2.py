@@ -3,8 +3,9 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, workspace
-from operator_benchmark import benchmark_core, benchmark_utils
+from caffe2.python import workspace
+import benchmark_core
+import benchmark_utils
 
 """Caffe2 performance microbenchmarks.
 
@@ -13,31 +14,83 @@ microbenchmarks.
 """
 
 
-def Caffe2OperatorTestCase(test_name, op_type, input_shapes, op_args, run_mode):
-    """Benchmark Tester function for Caffe2 framework.
+class Caffe2BenchmarkBase(object):
+    """ This is a base class used to create Caffe2 operator benchmark
     """
-    idx = 0
-    input_blobs = []
-    for input in input_shapes:
-        blob_name = 'input_' + test_name + str(input_shapes) + str(op_args) + str(idx)
-        input_blobs.append(blob_name)
-        # TODO: figure out the data type from operator schema/
-        # or accept custom data type for more comprehensive coverage.
-        # Also, consider a more complex range/distribution of numerical inputs.
-        workspace.FeedBlob(blob_name, benchmark_utils.numpy_random_fp32(*input))
-        idx += 1
+    tensor_index = 0
 
-    # TODO: consider reuse logic in Caffe2's Functional utility to get
-    # these benefits
-    # - Read operator schema to figure out if inplace enforcement is needed
-    # for the operator and name the output blob appropriately.
-    # - Also figure out the number of outputs from operator schema.
-    op = core.CreateOperator(
-        op_type, input_blobs, ['out'], **op_args
-    )
+    def __init__(self):
+        self.args = {}
+        self.user_provided_name = None
 
-    def benchmark_func(num_runs):
-        if not workspace.RunOperatorMultiple(op, num_runs):
-            raise RuntimeError('Unable to run operator test case ' % test_name)
+    # TODO: Add other dtype support
+    def tensor(self, *shapes):
+        """ A wapper function to create tensor (blob in caffe2) filled with random
+            value. The name/label of the tensor is returned and it is available 
+            throughout the benchmark execution phase. 
+        """
+        blob_name = 'blob_' + str(Caffe2BenchmarkBase.tensor_index)
+        workspace.FeedBlob(blob_name, benchmark_utils.numpy_random_fp32(*shapes))
+        Caffe2BenchmarkBase.tensor_index += 1
+        return blob_name
 
-    benchmark_core.add_benchmark_tester("Caffe2", test_name, input_shapes, op_args, run_mode, benchmark_func)
+    def module_name(self):
+        """ this is used to label the operator being benchmarked
+        """
+        if self.user_provided_name:
+            return self.user_provided_name 
+        return self.__class__.__name__
+
+    def set_module_name(self, name): 
+        self.user_provided_name = name
+
+    def _value_to_str(self, value):
+        """ if value is bool, we will convert it to 0 and 1 
+        """
+        ret = value
+        if type(value) == bool:
+            ret = int(value)
+        return str(ret)
+
+    def test_name(self, **kargs):
+        """ FIXME(mingzhe0908):
+            this is a globally unique name which can be used to
+            label a specific test
+        """
+        test_name_str = []
+        for key in kargs:
+            value = kargs[key]
+            test_name_str.append(
+                key + self._value_to_str(value))
+        return '_'.join(test_name_str)
+
+
+class Caffe2OperatorTestCase(object):
+    """ This class includes all the information needed to benchmark an operator. 
+        op_bench: it's a user-defined class (child of Caffe2BenchmarkBase) 
+        which includes input and operator, .etc
+        test_config: a namedtuple includes test_name, input_shape, tag, run_backward.
+        When run_backward is false, the run_forward method will be executed, otherwise
+        run_backward method will be executed. 
+    """
+    def __init__(self, op_bench, test_config):
+        self.op_bench = op_bench
+        self.test_config = test_config
+        self.framework = "Caffe2"
+
+    def run_forward(self, num_runs):
+        """ Run the forward path of an operator in a loop
+        """
+        if not workspace.RunOperatorMultiple(self.op_bench.forward(), num_runs):
+            raise ValueError("Unable to run operator test case: {}".format(self.test_name))
+
+    def run_backward(self, num_runs):
+        """ Run the backward path of an operator in a loop
+        """
+        if not workspace.RunOperatorMultiple(self.op_bench.backward(), num_runs):
+            raise ValueError("Unable to run operator gradient test case: {}".format(self.test_name))
+
+
+def register_caffe2_op_test_case(op_bench, test_config):
+    test_case = Caffe2OperatorTestCase(op_bench, test_config)
+    benchmark_core._register_test(test_case)

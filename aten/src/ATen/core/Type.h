@@ -5,9 +5,9 @@
 #include <c10/util/Deprecated.h>
 #include <ATen/core/Generator.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Half.h>
 #include <c10/core/TensorTypeIdRegistration.h>
@@ -182,7 +182,7 @@ struct CAFFE2_API Type {
   virtual Tensor & clamp_max_(Tensor & self, Scalar max) const = 0;
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
   virtual Tensor & clamp_min_(Tensor & self, Scalar min) const = 0;
-  virtual Tensor contiguous(const Tensor & self) const = 0;
+  virtual Tensor contiguous(const Tensor & self, MemoryFormat memory_format) const = 0;
   virtual Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
   virtual Tensor cos(const Tensor & self) const = 0;
   virtual Tensor & cos_(Tensor & self) const = 0;
@@ -371,7 +371,7 @@ struct CAFFE2_API Type {
   virtual Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & sparse_resize_(Tensor & self, IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) const = 0;
   virtual Tensor & sparse_resize_and_clear_(Tensor & self, IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) const = 0;
-  virtual Tensor sparse_mask(const Tensor & self, SparseTensorRef mask) const = 0;
+  virtual Tensor sparse_mask(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor to_dense(const Tensor & self) const = 0;
   virtual int64_t sparse_dim(const Tensor & self) const = 0;
   virtual int64_t _dimI(const Tensor & self) const = 0;
@@ -390,7 +390,6 @@ struct CAFFE2_API Type {
   virtual Tensor to_sparse(const Tensor & self, int64_t sparse_dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self) const = 0;
   virtual Tensor to_mkldnn(const Tensor & self) const = 0;
-  virtual Tensor quantize_linear(const Tensor & self, double scale, int64_t zero_point) const = 0;
   virtual Tensor dequantize(const Tensor & self) const = 0;
   virtual Scalar q_scale(const Tensor & self) const = 0;
   virtual Scalar q_zero_point(const Tensor & self) const = 0;
@@ -400,7 +399,6 @@ struct CAFFE2_API Type {
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking, bool copy) const = 0;
   virtual Scalar item(const Tensor & self) const = 0;
-  virtual void* data_ptr(const Tensor & self) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) const = 0;
   virtual Tensor & set_(Tensor & self, const Tensor & source) const = 0;
@@ -522,7 +520,7 @@ struct CAFFE2_API Type {
   virtual std::tuple<Tensor,Tensor> solve(const Tensor & self, const Tensor & A) const = 0;
   virtual Tensor cholesky_inverse(const Tensor & self, bool upper) const = 0;
   virtual std::tuple<Tensor,Tensor> pstrf(const Tensor & self, bool upper, Scalar tol) const = 0;
-  virtual std::tuple<Tensor,Tensor> qr(const Tensor & self) const = 0;
+  virtual std::tuple<Tensor,Tensor> qr(const Tensor & self, bool some) const = 0;
   virtual std::tuple<Tensor,Tensor> geqrf(const Tensor & self) const = 0;
   virtual Tensor orgqr(const Tensor & self, const Tensor & input2) const = 0;
   virtual Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) const = 0;

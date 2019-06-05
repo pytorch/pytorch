@@ -16,6 +16,12 @@ caffe2_binary_target("split_db.cc")
 caffe2_binary_target("db_throughput.cc")
 
 
+if (BUILD_TEST AND NOT ANDROID)
+  # Core overhead benchmark
+  caffe2_binary_target("core_overhead_benchmark.cc")
+  target_link_libraries(core_overhead_benchmark benchmark)
+endif()
+
 if (USE_CUDA)
   caffe2_binary_target("inspect_gpu.cc")
   target_link_libraries(inspect_gpu ${CUDA_LIBRARIES})

@@ -85,10 +85,15 @@ def overlay_windows_vcvars(env):
         from distutils._msvccompiler import _get_vc_env
         vc_arch = 'x64' if IS_64BIT else 'x86'
         vc_env = _get_vc_env(vc_arch)
+        # Keys in `_get_vc_env` are always lowercase.
+        # We turn them into uppercase before overlaying vcvars
+        # because OS environ keys are always uppercase on Windows.
+        # https://stackoverflow.com/a/7797329
+        vc_env = {k.upper(): v for k, v in vc_env.items()}
         for k, v in env.items():
-            lk = k.lower()
-            if lk not in vc_env:
-                vc_env[lk] = v
+            uk = k.upper()
+            if uk not in vc_env:
+                vc_env[uk] = v
         return vc_env
     else:
         return env
@@ -113,15 +118,12 @@ def create_build_env():
     if USE_CUDA:
         my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
 
-    if IS_WINDOWS:
-        # When using Ninja under Windows, the gcc toolchain will be chosen as default.
-        # But it should be set to MSVC as the user's first choice.
-        if USE_NINJA:
-            my_env = overlay_windows_vcvars(my_env)
-            cc = my_env.get('CC', 'cl')
-            cxx = my_env.get('CXX', 'cl')
-            my_env['CC'] = cc
-            my_env['CXX'] = cxx
+    if IS_WINDOWS and USE_NINJA:
+        # When using Ninja under Windows, the gcc toolchain will be chosen as
+        # default. But it should be set to MSVC as the user's first choice.
+        my_env = overlay_windows_vcvars(my_env)
+        my_env.setdefault('CC', 'cl')
+        my_env.setdefault('CXX', 'cl')
     return my_env
 
 
@@ -137,18 +139,18 @@ def run_cmake(version,
     if USE_NINJA:
         cmake_args.append('-GNinja')
     elif IS_WINDOWS:
+        cmake_args.append('-GVisual Studio 15 2017')
         if IS_64BIT:
-            cmake_args.append('-GVisual Studio 15 2017 Win64')
+            cmake_args.append('-Ax64')
             cmake_args.append('-Thost=x64')
-        else:
-            cmake_args.append('-GVisual Studio 15 2017')
     try:
         import numpy as np
-        NUMPY_INCLUDE_DIR = np.get_include()
-        USE_NUMPY = True
     except ImportError:
         USE_NUMPY = False
         NUMPY_INCLUDE_DIR = None
+    else:
+        NUMPY_INCLUDE_DIR = np.get_include()
+        USE_NUMPY = True
 
     cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
     ldflags = os.getenv('LDFLAGS', "")
@@ -167,7 +169,6 @@ def run_cmake(version,
         BUILDING_WITH_TORCH_LIBS=os.getenv("BUILDING_WITH_TORCH_LIBS", "ON"),
         TORCH_BUILD_VERSION=version,
         CMAKE_BUILD_TYPE=build_type,
-        CMAKE_VERBOSE_MAKEFILE="ON",
         BUILD_PYTHON=build_python,
         BUILD_SHARED_LIBS=os.getenv("BUILD_SHARED_LIBS", "ON"),
         BUILD_BINARY=check_env_flag('BUILD_BINARY'),
@@ -211,17 +212,31 @@ def run_cmake(version,
         USE_REDIS=os.getenv('USE_REDIS'),
         USE_GLOG=os.getenv('USE_GLOG'),
         USE_GFLAGS=os.getenv('USE_GFLAGS'),
+        USE_ASAN=check_env_flag('USE_ASAN'),
         WERROR=os.getenv('WERROR'))
+
+    if os.getenv('_GLIBCXX_USE_CXX11_ABI'):
+        cmake_defines(cmake_args, GLIBCXX_USE_CXX11_ABI=os.getenv('_GLIBCXX_USE_CXX11_ABI'))
 
     if os.getenv('USE_OPENMP'):
         cmake_defines(cmake_args, USE_OPENMP=check_env_flag('USE_OPENMP'))
 
+    if os.getenv('USE_TBB'):
+        cmake_defines(cmake_args, USE_TBB=check_env_flag('USE_TBB'))
+
     if os.getenv('MKL_SEQ'):
         cmake_defines(cmake_args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
+
+    if os.getenv('MKL_TBB'):
+        cmake_defines(cmake_args, INTEL_MKL_TBB=check_env_flag('MKL_TBB'))
 
     mkldnn_threading = os.getenv('MKLDNN_THREADING')
     if mkldnn_threading:
         cmake_defines(cmake_args, MKLDNN_THREADING=mkldnn_threading)
+
+    parallel_backend = os.getenv('PARALLEL_BACKEND')
+    if parallel_backend:
+        cmake_defines(cmake_args, PARALLEL_BACKEND=parallel_backend)
 
     if USE_GLOO_IBVERBS:
         cmake_defines(cmake_args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
@@ -258,10 +273,11 @@ def build_caffe2(version,
                  cmake_python_library,
                  build_python,
                  rerun_cmake,
+                 cmake_only,
                  build_dir):
     my_env = create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
-    max_jobs = os.getenv('MAX_JOBS', None)
+    max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
     cmake_cache_file = 'build/CMakeCache.txt'
     if rerun_cmake and os.path.isfile(cmake_cache_file):
         os.remove(cmake_cache_file)
@@ -272,28 +288,18 @@ def build_caffe2(version,
                   build_test,
                   build_dir,
                   my_env)
-    if IS_WINDOWS:
-        build_cmd = ['cmake', '--build', '.', '--target', 'install', '--config', build_type, '--']
-        if USE_NINJA:
-            # sccache will fail if all cores are used for compiling
-            j = max(1, multiprocessing.cpu_count() - 1)
-            if max_jobs is not None:
-                j = min(int(max_jobs), j)
-            build_cmd += ['-j', str(j)]
-            check_call(build_cmd, cwd=build_dir, env=my_env)
-        else:
-            j = max_jobs or str(multiprocessing.cpu_count())
-            build_cmd += ['/maxcpucount:{}'.format(j)]
-            check_call(build_cmd, cwd=build_dir, env=my_env)
+    if cmake_only:
+        return
+    build_cmd = [get_cmake_command(),
+                 '--build', '.', '--target', 'install', '--config', build_type]
+    # This ``if-else'' clause would be unnecessary when cmake 3.12 becomes
+    # minimum, which provides a '-j' option: build_cmd += ['-j', max_jobs]
+    # would be sufficient by then.
+    if IS_WINDOWS and not USE_NINJA:  # We are likely using msbuild here
+        build_cmd += ['--', '/maxcpucount:{}'.format(max_jobs)]
     else:
-        if USE_NINJA:
-            ninja_cmd = ['ninja', 'install', '-v']
-            if max_jobs is not None:
-                ninja_cmd += ['-j', max_jobs]
-            check_call(ninja_cmd, cwd=build_dir, env=my_env)
-        else:
-            max_jobs = max_jobs or str(multiprocessing.cpu_count())
-            check_call(['make', '-j', str(max_jobs), 'install'], cwd=build_dir, env=my_env)
+        build_cmd += ['--', '-j', max_jobs]
+    check_call(build_cmd, cwd=build_dir, env=my_env)
 
     # in cmake, .cu compilation involves generating certain intermediates
     # such as .cu.o and .cu.depend, and these intermediates finally get compiled

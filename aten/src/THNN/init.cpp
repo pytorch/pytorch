@@ -127,12 +127,6 @@
 #include <THNN/generic/TemporalRowConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/TemporalUpSamplingNearest.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/TemporalUpSamplingLinear.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/FeatureLPPooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
@@ -151,22 +145,10 @@
 #include <THNN/generic/SpatialAveragePooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SpatialDilatedMaxPooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SpatialMaxUnpooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SpatialUpSamplingNearest.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SpatialUpSamplingBilinear.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/VolumetricAveragePooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SpatialUpSamplingBicubic.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricConvolutionMM.c>
@@ -178,19 +160,7 @@
 #include <THNN/generic/VolumetricDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/VolumetricAdaptiveAveragePooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricDilatedMaxPooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/VolumetricMaxUnpooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricUpSamplingNearest.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/VolumetricUpSamplingTrilinear.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SpatialClassNLLCriterion.c>

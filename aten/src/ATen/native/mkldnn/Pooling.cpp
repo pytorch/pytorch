@@ -73,7 +73,7 @@ static Tensor _mkldnn_pool2d(
     IntArrayRef dilation,
     bool ceil_mode,
     ideep::algorithm algo) {
-  AT_CHECK(!ceil_mode, "Currently Mkldnn Pooling operators do not support ceil_mode.");
+  TORCH_CHECK(!ceil_mode, "Currently Mkldnn Pooling operators do not support ceil_mode.");
   auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", 2);
   auto stride_vec = expand_param_if_needed(stride, "stride", 2);
   auto padding_vec = expand_param_if_needed(padding, "padding", 2);

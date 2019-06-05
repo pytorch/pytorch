@@ -8,7 +8,8 @@ import argparse
 
 from caffe2.python import workspace
 
-from operator_benchmark import benchmark_core, benchmark_utils
+import benchmark_core
+import benchmark_utils
 
 """Performance microbenchmarks's main binary.
 
@@ -26,28 +27,24 @@ def main():
     )
 
     parser.add_argument(
-        '--run_mode',
-        help='Run mode. '
-        'short: run all operators with few shapes'
-        'long: run all operators with all shapes',
-        choices=benchmark_core.RUN_MODES.keys(),
+        '--tag_filter',
+        help='tag_filter can be used to run the benchmarks which matches the tag',
         default='short')
 
     # This option is used to filter test cases to run.
-    # Currently, the matching is sub-string but we can consider support regex.
-    # For example, if test_case_filter = 'matmul', in will match these test
-    # cases:
-    # matmul_benchmark.Caffe2OperatorTestCase.matmul_512_128_512_transa_transb
-    # matmul_benchmark.PyTorchOperatorTestCase.matmul_100_200_150
-    # ...
     parser.add_argument(
         '--operator',
-        help='Only run the test cases that contain the provided operator'
+        help='Run the test cases that contain the provided operator'
         ' as a substring of their names',
         default=None)
 
     parser.add_argument(
-        '--list_tests',
+        '--test_name',
+        help='Run tests that have the provided test_name',
+        default=None)
+
+    parser.add_argument(
+        '--list_ops',
         help='List all test cases without running them',
         action='store_true')
 
@@ -55,6 +52,13 @@ def main():
         "--iterations",
         help="Repeat each operator for the number of iterations",
         type=int
+    )
+
+    parser.add_argument(
+        "--min_time_per_test",
+        help="Set the minimum time (unit: seconds) to run each test",
+        type=int,
+        default=0,
     )
 
     parser.add_argument(
@@ -69,6 +73,12 @@ def main():
         help="Print result when running on AI-PEP",
         default=False,
         type=bool
+    )
+
+    parser.add_argument(
+        "--forward_only",
+        help="Only run the forward path of operators",
+        action='store_true'
     )
 
     parser.add_argument(

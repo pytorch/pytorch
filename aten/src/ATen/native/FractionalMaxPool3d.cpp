@@ -161,7 +161,7 @@ void fractional_max_pool3d_out_cpu_template(
   int64_t widthDim = 3;
 
   int64_t ndims = input_.ndimension();
-  AT_CHECK(input_.numel() != 0 && (ndims == 4 || ndims == 5),
+  TORCH_CHECK(input_.numel() != 0 && (ndims == 4 || ndims == 5),
     "fractional_max_pool3d_out(): non-empty 4D or 5D (batch mode) tensor ",
     " expected for input, but got: ", ndims);
 
@@ -179,13 +179,13 @@ void fractional_max_pool3d_out_cpu_template(
   int64_t inputH = input_.size(heightDim);
   int64_t inputW = input_.size(widthDim);
 
-  AT_CHECK(outputT + poolSizeT - 1 < inputT,
+  TORCH_CHECK(outputT + poolSizeT - 1 < inputT,
            "fractional_max_pool3d_out(): pool time ", poolSizeT,
            " too large relative to input time ", inputT);
-  AT_CHECK(outputW + poolSizeW - 1 < inputW,
+  TORCH_CHECK(outputW + poolSizeW - 1 < inputW,
            "fractional_max_pool3d_out(): pool width ", poolSizeW,
            " too large relative to input width ", inputW);
-  AT_CHECK(outputH + poolSizeH - 1 < inputH,
+  TORCH_CHECK(outputH + poolSizeH - 1 < inputH,
            "fractional_max_pool3d_out(): pool height ", poolSizeH,
            " too large relative to input height ", inputH);
 
@@ -317,12 +317,12 @@ void fractional_max_pool3d_backward_out_cpu_template(
   int64_t inputH = input.size(heightDim);
   int64_t inputW = input.size(widthDim);
 
-  AT_CHECK(outputT == gradOutput_.size(timeDim),
+  TORCH_CHECK(outputT == gradOutput_.size(timeDim),
            "fractional_max_pool3d_backward_out(): gradOutput time unexpected");
-  AT_CHECK(outputH == gradOutput_.size(heightDim),
+  TORCH_CHECK(outputH == gradOutput_.size(heightDim),
            "fractional_max_pool3d_backward_out(): ",
            "gradOutput height unexpected");
-  AT_CHECK(outputW == gradOutput_.size(widthDim),
+  TORCH_CHECK(outputW == gradOutput_.size(widthDim),
            "fractional_max_pool3d_backward_out(): gradOutput width unexpected");
 
   /* get contiguous gradOutput */

@@ -30,7 +30,7 @@ inline std::pair<int64_t, int64_t> collapse_dims(
     T* strides,
     int64_t dims,
     const int excludeDim = -1) {
-  AT_CHECK(
+  TORCH_CHECK(
       excludeDim >= -1 && excludeDim < dims,
       "expected excluded dim between -1 and dims - 1");
 

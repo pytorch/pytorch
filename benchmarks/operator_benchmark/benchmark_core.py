@@ -8,53 +8,41 @@ import numpy as np
 import timeit
 import json
 
-from operator_benchmark import benchmark_utils
+import benchmark_utils
+from collections import namedtuple
 
 """Performance microbenchmarks.
 
 This module contains core functionalities for performance microbenchmark tests.
 """
 
-
-# List of run modes we support.
-# Each benchmark test case is associated with a run mode.
-# If the value of the test case's run mode is less than the value of the
-# benchmark binary's run mode, the test case will be executed, e.g. a short-mode
-# test case will be executed when the binary is on either long and short
-# modes; while a long-mode test case will only be executed when the binary is
-# on long-mode.
-RUN_MODES = {'short': 0, 'long': 1}
-BENCHMARK_TESTER = [{} for _ in range(len(RUN_MODES))]
-BENCHMARK_TEST_GROUP = {}
-
-
-def add_benchmark_tester(framework, op_name, input_shapes, op_args, run_mode, func):
-    func_name = "__".join([framework, op_name, benchmark_utils.shape_to_string(input_shapes)
-                          , str(op_args), run_mode])
-    run_mode = RUN_MODES[run_mode]
-    for mode in RUN_MODES.values():
-        # short mode runs with some of the input shapes for an op
-        # long mode runs with all the input shapes for an op
-        if (mode < run_mode):
-            continue
-        BENCHMARK_TESTER[mode][func_name] = func
-
-
-def register_test(func):
-    """Decorator to register a benchmark test group.
-    A benchmark test group is a function that returns a list of benchmark test
-    case objects to be run.
-    """
-    BENCHMARK_TEST_GROUP[__name__ + "." + func.__name__] = func
-    return func
-
-
-HEADER_LINE = """
-# {}
-# PyTorch/Caffe2 Operator Micro-benchmarks
-# {}
-# Run_mode : {}
 """
+This is used to store configs of tests 
+An example input is: 
+TestConfig(test_name='M_8_N_2_K_1', input_config='M: 8, N: 2, K: 1', 
+    tag='long', run_backward=False)
+"""
+TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
+
+
+BENCHMARK_TESTER = {}
+
+
+def _register_test(test_case):
+    """ This method is used to register test. func_name is a global unique 
+    string. For PyTorch add operator with M=8, N=2, K=1, tag = long, here 
+    are the values for the members in test_case:
+    op.module_name: add
+    framework: PyTorch
+    test_config: TestConfig(test_name='M_8_N_2_K_1', input_config='M: 8, N: 2, K: 1', 
+        tag='long', run_backward=False)
+    func_name: addPyTorchTestConfig(test_name='M8_N2_K1', input_config='M: 8, N: 2, K: 1',
+                                    tag='long', run_backward=False)
+    """
+    test_config = test_case.test_config
+    op = test_case.op_bench
+    func_name = "{}{}{}".format(op.module_name(), test_case.framework, str(test_config))
+    BENCHMARK_TESTER[func_name] = test_case
 
 
 class BenchmarkRunner(object):
@@ -62,90 +50,163 @@ class BenchmarkRunner(object):
     benchmark test groups.
 
     Attributes:
-        run_mode (str): Must of one of 'short', 'long'. For long mode, the
-    benchmark runner takes a longer time to run since it repeats each benchmark
-    test case more times to reduce measured variance, and it also executes
-    longer running test cases that is marked as long mode.
-        operator (str): Only run benchmark test cases that contains
+        tag_filter (str): control the benchmarks which matches the tag. 
+        operator (str): only run benchmark test cases that contains
     this filter string in the test case's id.
+        test_name (str): only run benchmark test cases that matches this filter,
+        this is a case-sensitive substring match and it happens in
+        the _keep_test method. 
     """
     def __init__(self, args):
-        # Depend on the run mode, set the execution contrains based of number of
-        # runs per measure, and number of measures.
         # TODO: consider time-bound constraints as well.
         self.args = args
         self.iters = 100
         self.has_explicit_iteration_count = False
         self.multiplier = 2
-        self.min_time = 0.8
+        self.predefined_minimum_secs = 4
         self.max_iters = 1e6
-        for test_group in BENCHMARK_TEST_GROUP.items():
-            test_group_func = test_group[1]
-            test_group_func()
         if self.args.iterations:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
 
-    def _print_header(self, run_mode):
+    def _print_header(self):
         DASH_LINE = '-' * 40
-        print(HEADER_LINE.format(DASH_LINE, DASH_LINE, self.args.run_mode, self.iters))
-        print("# List of Operators to run:")
-        if self.args.operator is None:
-            ops = set()
-            for tester in BENCHMARK_TESTER[run_mode].items():
-                full_test_id = tester[0]
-                framework, op_name, input_shapes, args, run_mode = full_test_id.split("__")
-                if op_name not in ops:
-                    print("# {}".format(op_name))
-                    ops.add(op_name)
-        else:
-            print("# {}".format(self.args.operator))
-        print("\n")
+        print("# {}\n"
+              "# PyTorch/Caffe2 Operator Micro-benchmarks\n"
+              "# {}\n"
+              "# Tag : {}\n".format(DASH_LINE, DASH_LINE, self.args.tag_filter))
+        if self.args.list_ops:
+            print("# List of Operators to run:")
+            if self.args.operator is None:
+                ops = set(test_case.op_bench.module_name()
+                          for _, test_case in BENCHMARK_TESTER.items())
+                for op in ops: 
+                    print("# {}".format(op))
+            else:
+                print("# {}".format(self.args.operator))
 
-    def _print_perf_result(self, full_test_id, input_shapes, args, reported_run_time):
+    def _print_perf_result(self, full_test_id, reported_run_time_us, test_case):
         if self.args.ai_pep_format:
             # Output for AI-PEP
             print("Caffe2Observer " + json.dumps(
                 {
                     "type": "NET",
                     "metric": full_test_id,
-                    "unit": "ms",
-                    "value": str(reported_run_time),
+                    "unit": "us",
+                    "value": str(reported_run_time_us),
                 }
             ))
         else:
-            print("# Input Shape: {}".format(input_shapes))
-            if len(args) > 0:
-                print("Args: {}".format(args))
-            print("Execution Time (us) : {:.3f}\n".format(reported_run_time))
-
+            # FIXME: change the print format here 
+            output = "# Name: {}\n" \
+                     "# Input: {}\n" \
+                     "{} Execution Time (us) : {:.3f}\n"
+            if test_case.framework == "PyTorch":
+                # FIXME: add JIT 
+                output = "# Mode: Eager\n" + output
+            print(output.format(
+                test_case.test_config.test_name,
+                test_case.test_config.input_config,
+                "Backward" if test_case.test_config.run_backward else "Forward", reported_run_time_us))
 
     def _predict_num_iter_needed(self, i):
         return (i * self.multiplier)
 
-    def _report_iteration_result(self, iters, run_time):
-        return (iters > self.max_iters or
-                run_time > 5 * self.min_time)
+    def _iteration_result_is_significant(self, iters, run_time_sec, curr_test_total_time, has_explicit_iteration_count):
+        """ This function decides whether the measured time can be reported based on the 
+        following conditions: 1) the number of iterations is larger than the max_iters.
+        2) the execution time is larger than the predefined minimum_time
+        3) the execution time is larger than user defined minimum_time 
+        """
+        return ((iters > self.max_iters or
+                run_time_sec > self.predefined_minimum_secs or 
+                has_explicit_iteration_count) and
+                curr_test_total_time > self.args.min_time_per_test)
+
+    def _launch_forward(self, test_case, iters):
+        """ Use Python's timeit module to measure execution time (unit: second).
+        """
+        if test_case.framework == "PyTorch":
+            test_case.op_bench.generate_jit_forward_graph(iters)
+
+        forward_time = timeit.timeit(functools.partial(test_case.run_forward, iters), number=1)
+        return forward_time
+
+    def _launch_backward(self, test_case, iters):
+        """ This function runs forward path of an op to get an output. Then the backward path is executed 
+        and the execution time is reported
+        """
+        if test_case.framework == "PyTorch":
+            # We only need to get the output for backward path, so there is no need to use JIT here 
+            test_case.run_forward_eager()
+            test_case.loss_func()
+        else:
+            test_case.run_forward(1)
+        backward_time = timeit.timeit(functools.partial(test_case.run_backward, iters), number=1)
+        return backward_time
+
+    def _measure_time(self, launch_test, test_case, iters):
+        """
+        This function execute the operator for <iters> iterations then look at the time. 
+        If it's not significant, the number of iterations will be increased before rerun. 
+        The execution stops when the time becomes significant.
+        """
+        curr_test_total_time = 0
+        while True:
+            run_time_sec = launch_test(test_case, iters)
+            curr_test_total_time += run_time_sec
+            # Analyze time after each run to decide if the result is stable
+            results_are_significant = self._iteration_result_is_significant(
+                iters, run_time_sec, curr_test_total_time, self.has_explicit_iteration_count)
+
+            if results_are_significant:
+                break
+
+            # Re-estimate the hopefully-sufficient
+            # iteration count, and run the benchmark again...
+            iters = self._predict_num_iter_needed(iters)
+
+        reported_run_time_us = (1e6 * run_time_sec / iters)
+        return reported_run_time_us
+
+    def _check_keep(self, test_flag, cmd_flag):
+        return (cmd_flag is None or test_flag == cmd_flag)
+
+    def _check_keep_list(self, test_flag, cmd_flag_list):
+        if (cmd_flag_list is None or 
+                any(test_flag == cmd_flag for cmd_flag in cmd_flag_list)):
+            return True
+        return False
+
+    def _keep_test(self, test_case):
+        # TODO: consider regex matching for test filtering.
+        # Currently, this is a sub-string matching.
+        op_test_config = test_case.test_config
+
+        if self.args.framework:
+            frameworks = benchmark_utils.get_requested_frameworks(self.args.framework)
+
+        # Filter framework, operator, test_name, tag, forward_only
+        if (self._check_keep(op_test_config.test_name, self.args.test_name) and
+            self._check_keep(op_test_config.tag, self.args.tag_filter) and
+            self._check_keep(test_case.op_bench.module_name(), self.args.operator) and
+            self._check_keep_list(test_case.framework, frameworks) and 
+                (op_test_config.run_backward == self.args.forward_only)):
+            return True
+
+        return False
 
     def run(self):
-        run_mode = RUN_MODES[self.args.run_mode]
-        self._print_header(run_mode)
+        self._print_header()
 
-        if self.args.list_tests:
+        if self.args.list_ops:
             return
 
-        for tester in BENCHMARK_TESTER[run_mode].items():
-            full_test_id = tester[0]
-            benchmark_func = tester[1]
-            framework, op_name, input_shapes, args, run_mode = full_test_id.split("__")
-            # TODO: consider regex matching for test filtering.
-            # Currently, this is a sub-string matching.
-            if self.args.operator and (self.args.operator not in full_test_id):
+        for full_test_id, test_case in BENCHMARK_TESTER.items():
+            op_test_config = test_case.test_config 
+
+            if not self._keep_test(test_case):
                 continue
-            if self.args.framework:
-                frameworks = benchmark_utils.get_requested_frameworks(self.args.framework)
-                if all(fr not in full_test_id for fr in frameworks):
-                    continue
 
             # To reduce variance, fix a numpy randseed to the test case,
             # so that the randomly generated input tensors remain the
@@ -154,38 +215,19 @@ class BenchmarkRunner(object):
             # requirement.
             np.random.seed(seed=hash(full_test_id) & ((1 << 32) - 1))
 
-            print("# Benchmarking {} {}".format(
-                framework,
-                op_name))
-            # Warmup
-            functools.partial(benchmark_func, self.args.warmup_iterations)
+            print("# Benchmarking {}: {}".format(
+                test_case.framework,
+                test_case.op_bench.module_name()))
 
-            # Actual Execution
-            run_time = 0
-            iters = self.iters
-            while True:
-                # Use Python's timeit module to measure execution time (unit: second).
-                # Each experiment consists of repeated execution of
-                # the benchmark_func a number of times (self.iters)
-                # because otherwise the duration is too short to get
-                # an accurate measure. The benchmark loop is pushed
-                # to C++ to minimize Python overhead.
-                # The experiment is also repeated a number of times
-                # (num_repeats) and we then take the minimum execution
-                # time as the final measurement result (this is also
-                # recommended by timeit's doc).
-                run_time = min(timeit.repeat(functools.partial(benchmark_func, iters),
-                               repeat=1, number=1))
-                # Analyze time after each run to decide if the result is stable
-                results_are_significant = self.has_explicit_iteration_count or \
-                    self._report_iteration_result(iters, run_time)
+            if op_test_config.run_backward:
+                # Warmup
+                self._launch_backward(test_case, self.args.warmup_iterations)
+                # Actual Execution
+                reported_time = self._measure_time(self._launch_backward, test_case, self.iters)
+            else: 
+                # Warmup
+                self._launch_forward(test_case, self.args.warmup_iterations)
+                # Actual Execution
+                reported_time = self._measure_time(self._launch_forward, test_case, self.iters)
 
-                if results_are_significant:
-                    break
-
-                # Re-estimate the hopefully-sufficient
-                # iteration count, and run the benchmark again...
-                iters = self._predict_num_iter_needed(iters)
-
-            reported_run_time = (1e6 * run_time / iters)
-            self._print_perf_result(full_test_id, input_shapes, args, reported_run_time)
+            self._print_perf_result(full_test_id, reported_time, test_case)

@@ -201,6 +201,7 @@ static void Caffe2InitializeCuda() {
     VLOG(1) << "No cuda gpu present. Skipping.";
     return;
   }
+  C10_LOG_API_USAGE_ONCE("caffe2.init.cuda");
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
   CAFFE_ENFORCE_LE(

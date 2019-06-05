@@ -149,6 +149,16 @@
 #   LIBRARY_PATH
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
+#
+#   PARALLEL_BACKEND
+#     parallel backend to use for intra- and inter-op parallelism
+#     possible values:
+#       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
+#       NATIVE - use native thread pool for both intra- and inter-op tasks
+#
+#   USE_TBB
+#      use TBB for parallelization
+#
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, find_packages
@@ -188,10 +198,16 @@ RUN_BUILD_DEPS = True
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
 RERUN_CMAKE = False
+CMAKE_ONLY = False
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == '--cmake':
         RERUN_CMAKE = True
+        continue
+    if arg == '--cmake-only':
+        # Stop once cmake terminates. Leave users a chance to adjust build
+        # options.
+        CMAKE_ONLY = True
         continue
     if arg == 'rebuild' or arg == 'build':
         arg = 'build'  # rebuild is gone, make it build
@@ -238,7 +254,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.1.0a0'
+version = '1.2.0a0'
 sha = 'Unknown'
 
 try:
@@ -279,10 +295,15 @@ def build_deps():
     check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
     check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
     check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
     check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'foxi', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'fbgemm', 'third_party',
+                            'asmjit', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'onnx', 'third_party',
+                            'benchmark', 'CMakeLists.txt'))
 
     check_pydep('yaml', 'pyyaml')
     check_pydep('typing', 'typing')
@@ -291,7 +312,13 @@ def build_deps():
                  cmake_python_library=cmake_python_library,
                  build_python=True,
                  rerun_cmake=RERUN_CMAKE,
+                 cmake_only=CMAKE_ONLY,
                  build_dir='build')
+    if CMAKE_ONLY:
+        report('Finished running cmake. Run "ccmake build" or '
+               '"cmake-gui build" to adjust build options and '
+               '"python setup.py install" to build.')
+        sys.exit()
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
@@ -594,10 +621,11 @@ main_link_args.extend(CAFFE2_LIBS)
 
 try:
     import numpy as np
-    NUMPY_INCLUDE_DIR = np.get_include()
-    USE_NUMPY = True
 except ImportError:
     USE_NUMPY = False
+else:
+    NUMPY_INCLUDE_DIR = np.get_include()
+    USE_NUMPY = True
 
 if USE_CUDA:
     if IS_WINDOWS:

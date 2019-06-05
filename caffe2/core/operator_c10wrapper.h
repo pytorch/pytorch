@@ -1,5 +1,7 @@
 #pragma once
 
+// TODO Also register c10 operators on mobile
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/ArrayRef.h>
@@ -180,7 +182,7 @@ class C10OperatorWrapper final : public Operator<Context> {
     if (default_value.has_value()) {
       return this->template GetSingleArgument<T>(name, default_value->to<T>());
     } else {
-      AT_CHECK(
+      TORCH_CHECK(
           this->template HasSingleArgumentOfType<T>(name),
           "Error in caffe2->c10 wrapper: Expected argument '",
           name,
@@ -225,9 +227,8 @@ createC10OperatorWrapper(const char* op_name, const char* overload_name) {
 }
 
 } // namespace detail
+} // namespace caffe2
 
-// TODO Also register c10 operators on mobile
-#if !defined(CAFFE2_IS_XPLAT_BUILD)
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(        \
@@ -256,4 +257,3 @@ createC10OperatorWrapper(const char* op_name, const char* overload_name) {
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP( \
     OperatorName, Name)
 #endif
-} // namespace caffe2

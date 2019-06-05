@@ -38,7 +38,7 @@ using Kwargs = std::unordered_map<std::string, IValue>;
 // It contains schema information, and the executor that manages the
 // execution of the function. script::Method is a wrapper around a
 // underlying Function that also provides a `self` object.
-struct TORCH_API Function {
+struct TORCH_API Function : public std::enable_shared_from_this<Function> {
   Function(
       std::string name,
       bool optimize,
@@ -108,7 +108,7 @@ struct TORCH_API Function {
   }
 
   void check_single_output() {
-    AT_CHECK(
+    TORCH_CHECK(
         graph()->outputs().size() == 1,
         "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
   }
@@ -131,7 +131,7 @@ struct TORCH_API Function {
       c10::optional<NamedValue> self,
       ArrayRef<NamedValue> args,
       ArrayRef<NamedValue> kwargs,
-      std::stringstream& failure_messages,
+      std::ostream* failure_messages,
       bool conv_tensors_to_nums);
 
   Value* emit_call(
@@ -184,7 +184,8 @@ struct TORCH_API Function {
 // are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
-  // constructor that takes a set of functions to compile using the native resolver
+  // constructor that takes a set of functions to compile using the native
+  // resolver
   explicit CompilationUnit(const std::string& source);
   CompilationUnit() = default;
 
@@ -297,7 +298,7 @@ struct TORCH_API CompilationUnit {
 
  private:
   Function& register_function(std::shared_ptr<Function> fn) {
-    AT_CHECK(
+    TORCH_CHECK(
         0 == dict_.count(fn->name()),
         "method '",
         fn->name(),

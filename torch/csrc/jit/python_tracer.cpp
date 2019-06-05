@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/pybind.h>
 #include <torch/csrc/jit/python_tracer.h>
@@ -42,6 +43,8 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     const py::function& var_name_lookup_fn,
     bool force_outplace,
     const std::shared_ptr<script::Module>& self) {
+  C10_LOG_API_USAGE_ONCE("torch.tracer");
+
   auto enter_info = tracer::enter(std::move(trace_inputs), self);
   auto graph = enter_info.first->graph;
 
@@ -64,9 +67,9 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
           "captured in traces, so it would be a no-op.");
     }
     tracer::exit({toIValue(out)});
-    EliminateDeadCode(graph);
+    Inline(*graph);
     LowerSimpleTuples(graph);
-
+    EliminateDeadCode(graph);
     return graph;
   } catch (...) {
     tracer::abandon();

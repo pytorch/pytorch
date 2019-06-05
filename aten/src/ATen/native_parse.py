@@ -127,6 +127,8 @@ def type_argument_translations(arg):
     # we change this at either a JIT schema or C++ level.
     elif default == 'Mean':
         default = 'Reduction::Mean'
+    elif default == 'contiguous_format':
+        default = 'MemoryFormat::Contiguous'
     else:
         try:
             default = int(default)

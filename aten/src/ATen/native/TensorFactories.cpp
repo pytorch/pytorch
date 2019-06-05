@@ -9,7 +9,6 @@
 #include <ATen/CheckGenerator.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 #include <ATen/LegacyTHDispatcher.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
@@ -35,17 +34,17 @@ void window_function_checks(
     const char* function_name,
     const TensorOptions& options,
     int64_t window_length) {
-  AT_CHECK(
+  TORCH_CHECK(
       options.layout() != kSparse,
       function_name,
       " is not implemented for sparse types, got: ",
       options);
-  AT_CHECK(
+  TORCH_CHECK(
       at::isFloatingType(typeMetaToScalarType(options.dtype())),
       function_name,
       " expects floating point dtypes, got: ",
       options);
-  AT_CHECK(
+  TORCH_CHECK(
       window_length >= 0,
       function_name,
       " requires non-negative window_length, got window_length=",
@@ -163,6 +162,15 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
     res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
   }
+  if (self.is_quantized()) {
+    // TODO: uncomment when qscheme diff is landed
+    // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
+    //                       "empty_like for quantized Tensor only works for
+    //                        PerTensorAffine scheme right now");
+    return at::_empty_affine_quantized(self.sizes(), self.options(),
+                                       self.q_scale().toDouble(),
+                                       self.q_zero_point().toLong());
+  }
   return at::empty(self.sizes(), options);
 }
 
@@ -182,7 +190,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n) {
 }
 
 Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
-  AT_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
+  TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
 
   if(m < 0) {
     m = n;
@@ -459,7 +467,7 @@ Tensor& randperm_out(Tensor& result, int64_t n) {
 }
 
 Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
-  AT_CHECK(n >= 0, "n must be non-negative, got", n);
+  TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   result.resize_({n});
   auto gen = get_generator(generator);
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm", [&]() -> void {
@@ -738,7 +746,7 @@ AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
-    AT_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
+    TORCH_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
     size_t my_size = size.value_or(0);
     int flags = shared.value_or(false) ? TH_ALLOCATOR_MAPPED_SHARED : 0;
     auto dtype = options.dtype();

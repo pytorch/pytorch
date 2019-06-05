@@ -4,7 +4,6 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/qint8.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/tracer.h>
 

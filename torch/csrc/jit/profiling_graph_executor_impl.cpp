@@ -9,7 +9,7 @@ bool& getProfilingMode() {
 }
 
 void ProfilingGraphExecutorImpl::run(Stack& stack) {
-  AT_CHECK(
+  TORCH_CHECK(
       stack.size() >= num_inputs,
       "expected ",
       num_inputs,

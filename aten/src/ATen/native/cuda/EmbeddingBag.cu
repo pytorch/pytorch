@@ -472,7 +472,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
     const Tensor& offsets,
     const Tensor& offset2bag,
     int64_t mode) {
-  AT_CHECK(
+  TORCH_CHECK(
       mode == MODE_SUM,
       "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
 

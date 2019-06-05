@@ -162,9 +162,7 @@ struct Value {
 
  public:
   Value* setType(TypePtr type);
-  void inferTypeFrom(const at::Tensor& output) {
-    setType(CompleteTensorType::create(output));
-  }
+  TORCH_API void inferTypeFrom(const at::Tensor& output);
   const TypePtr& type() const {
     AT_ASSERT(type_ != nullptr);
     return type_;
@@ -607,7 +605,7 @@ struct TORCH_API Node {
 
   template <typename T>
   T* expect() {
-    AT_CHECK(
+    TORCH_CHECK(
         T::Kind == kind(),
         "expected a ",
         T::Kind.toDisplayString(),
@@ -634,7 +632,8 @@ struct TORCH_API Node {
   std::ostream& print(
       std::ostream& out,
       size_t level,
-      std::vector<const Node*>* groups) const;
+      std::vector<const Node*>* groups,
+      bool print_source_locations = true) const;
 
   virtual ~Node() = default;
 
@@ -1177,7 +1176,11 @@ struct Graph {
 
   TORCH_API ~Graph();
 
-  TORCH_API std::string toString() const;
+  TORCH_API std::string toString(bool print_source_locations=false) const;
+
+  TORCH_API std::ostream& print(
+      std::ostream& out,
+      bool print_source_locations = true) const;
 
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 

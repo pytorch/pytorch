@@ -5,8 +5,11 @@
 #include <unordered_map>
 #include <algorithm>
 
-#include <ATen/core/aten_interned_strings.h>
 #include <c10/macros/Macros.h>
+
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+#include <ATen/core/aten_interned_strings.h>
+#endif
 
 namespace c10 {
 
@@ -70,6 +73,7 @@ namespace c10 {
   _(prim, requires_grad)           \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
+  _(prim, Guard)                   \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
   _(prim, MMTreeReduce)            \
@@ -79,9 +83,12 @@ namespace c10 {
   _(prim, abs)                     \
   _(prim, rangelist)               \
   _(aten, _grad_sum_to_size)       \
+  _(aten, _size_if_not_equal)      \
   _(aten, _ncf_unsqueeze)          \
   _(aten, warn)                    \
   _(aten, floordiv)                \
+  _(aten, __range_length)          \
+  _(aten, __derive_index)          \
   _(aten, __round_to_zero_floordiv)\
   _(aten, _unwrap_optional)        \
   _(prim, fork)                    \
@@ -93,6 +100,8 @@ namespace c10 {
   _(prim, profile)                 \
   _(prim, AddStatValue)            \
   _(prim, TimePoint)               \
+  _(prim, CallFunction)            \
+  _(prim, CallMethod)              \
   _(aten, append)                  \
   _(aten, item)                    \
   _(aten, format)                  \

@@ -129,7 +129,7 @@ from 0 to (dim0 * dim1 ...) - 1. rank(A) == rank(B) >= 2. In case of A and B bei
 two diemnsional, it behaves like normal matrix multiplication.
 )DOC")
     .Input(0, "A", "tensor of shape (dim0, dim1 ... M, K)")
-    .Input(1, "B", "tensor of shpae (dim0, dim2 ... K, N)")
+    .Input(1, "B", "tensor of shape (dim0, dim1 ... K, N)")
     .Output(0, "Y", "tensor of shape (dim0, dim1 ... M, N)")
     .Arg(
         "trans_a",

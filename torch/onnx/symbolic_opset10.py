@@ -23,10 +23,7 @@ import torch.onnx.symbolic_opset9
 # models with mixed versions of operators.
 # TODO : add support for the blacklisted operators in black_listed_operators
 black_listed_operators = ["flip",
-                          "slice",
-                          "upsample_nearest2d", "upsample_bilinear2d",
-                          "dropout", "feature_dropout", "alpha_dropout", "feature_alpha_dropout",
-                          "dropout_", "feature_dropout_", "alpha_dropout_", "feature_alpha_dropout_"]
+                          "slice"]
 
 for black_listed_op in black_listed_operators:
     vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
@@ -121,26 +118,9 @@ avg_pool1d = _avg_pool('avg_pool1d', _single)
 avg_pool2d = _avg_pool('avg_pool2d', _pair)
 avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
-def _slice_op(g, input, axes, starts, ends, steps=None):
-    assert len(starts) == len(ends)
-    assert len(starts) == len(axes)
-    assert steps is None or len(starts) == len(steps)
-    if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807 \
-       and (steps is None or (len(steps) == 1 and steps[0] == 1)):
-        return input    
-    axes = g.op("Constant", value_t=torch.tensor(axes))
-    starts = g.op("Constant", value_t=torch.tensor(starts))
-    ends = g.op("Constant", value_t=torch.tensor(ends))
-    if steps is None:
-        return g.op("Slice", input, starts, ends, axes)
-    steps = g.op("Constant", value_t=torch.tensor(steps))
-    return g.op("Slice", input, starts, ends, axes, steps)
-
-
 
 import torch.onnx.symbolic_helper as sym_help
 def _interpolate(name, dim, interpolate_mode):
-    @parse_args('v', 'v')
     def symbolic_fn(g, input, output_size, align_corners=None):
         if align_corners:
             return _unimplemented(name, "align_corners == True")
@@ -148,33 +128,21 @@ def _interpolate(name, dim, interpolate_mode):
         output_size = sym_help._maybe_get_const(output_size, 'is')
         if sym_help._is_value(output_size):
             offset = 2
-            input_length = len(input.type().sizes())
             offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
             dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-            divisor = _slice_op(g, g.op("Shape", input),axes=[0],ends=[input_length],starts=[offset]
-            )
+            divisor = _slice_op(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
             divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
             scale_dims = g.op("Div", dividend, divisor)
             scales = g.op("Concat", offsets, scale_dims, axis_i=0)
         else:
-            scales_constant = [1. 
-                               if i < 2 else 
-                               float(output_size[i - 2]) / float(input.type().sizes()[i])
+            scales_constant = [1. if i < 2 else
+                               float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
                                for i in range(0, dim)]
             scales = g.op("Constant", value_t=torch.tensor(scales_constant))
         return g.op("Resize", input, scales, mode_s=interpolate_mode)
-       
     return symbolic_fn
 
 upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
 upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
 upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
-upsample_bilinear1d = _interpolate('upsample_bilinear1d', 3, "bilinear")
-upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "bilinear")
-upsample_bilinear3d = _interpolate('upsample_bilinear3d', 5, "bilinear")
-
-
-
-
-    
-    
+upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
