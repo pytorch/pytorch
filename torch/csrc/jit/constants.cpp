@@ -141,19 +141,19 @@ RegisterOperators reg({
           } else if (type->isSubtypeOf(ListType::ofInts())) {
             const auto& is = node->is(attr::value);
             return [is](Stack& stack) {
-              push(stack, std::move(is));
+              push(stack, is);
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofBools())) {
             const auto bs = fmap<bool>(node->is(attr::value));
             return [bs](Stack& stack) {
-              push(stack, std::move(bs));
+              push(stack, bs);
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofTensors())) {
             const auto& ts = node->ts(attr::value);
             return [ts](Stack& stack) {
-              push(stack, std::move(ts));
+              push(stack, ts);
               return 0;
             };
           } else if (type == StringType::get()) {

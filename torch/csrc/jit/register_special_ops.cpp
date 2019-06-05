@@ -191,7 +191,7 @@ RegisterOperators reg({
           // TODO: allow list of optionals to be filled in with defaults
           // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
 
-          push(stack, list);
+          push(stack, std::move(list));
           return 0;
         }),
     Operator(
@@ -219,7 +219,7 @@ RegisterOperators reg({
 
             at::Tensor result =
                 at::embedding_renorm_(weight, input, max_norm, norm_type);
-            push(stack, result);
+            push(stack, std::move(result));
 
             return 0;
           };
@@ -280,7 +280,7 @@ RegisterOperators reg({
           if (scalar_type != initial_scalar_type || dev != tensor.device()) { \
             tensor = tensor.to(dev, scalar_type);                             \
           }                                                                   \
-          push(stack, tensor);                                                \
+          push(stack, std::move(tensor));                                     \
           tensor.set_requires_grad(requires_grad);                            \
           return 0;                                                           \
         };                                                                    \
@@ -320,7 +320,7 @@ RegisterOperators reg({
 
             at::Tensor result =
                 at::embedding_renorm_(weight, input, max_norm, norm_type);
-            push(stack, result);
+            push(stack, std::move(result));
 
             return 0;
           };
@@ -377,7 +377,7 @@ RegisterOperators reg({
                   "Pass in a dtype argument to ensure consistent behavior");
             }
             tensor.set_requires_grad(requires_grad);
-            push(stack, tensor);
+            push(stack, std::move(tensor));
             return 0;
           };
         }),

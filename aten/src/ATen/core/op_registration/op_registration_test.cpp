@@ -955,13 +955,13 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
   // weird deeply nested type
   using DeeplyNestedType = c10::ListPtr<c10::DictPtr<std::string, c10::ListPtr<c10::optional<c10::DictPtr<int64_t, std::string>>>>>;
-  constexpr auto makeDeeplyNestedObject = [] () -> DeeplyNestedType {
+  auto makeDeeplyNestedObject = [] () -> DeeplyNestedType {
     auto inner3 = c10::make_dict<int64_t, std::string>();
     inner3.insert(1, "1");
     auto inner2 = c10::make_list<c10::optional<c10::DictPtr<int64_t, std::string>>>();
     inner2.push_back(std::move(inner3));
     auto inner1 = c10::make_dict<std::string, c10::ListPtr<c10::optional<c10::DictPtr<int64_t, std::string>>>>();
-    inner1.insert("key", inner2);
+    inner1.insert("key", std::move(inner2));
     auto result = c10::make_list<c10::DictPtr<std::string, c10::ListPtr<c10::optional<c10::DictPtr<int64_t, std::string>>>>>();
     result.push_back(inner1);
     return result;

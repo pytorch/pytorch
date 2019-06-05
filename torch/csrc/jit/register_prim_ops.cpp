@@ -281,7 +281,7 @@ RegisterOperators reg(
            IValue scalar;
            pop(stack, scalar);
            if (scalar.isDouble()) {
-             push(stack, scalar);
+             push(stack, std::move(scalar));
            } else {
              push(stack, static_cast<double>(scalar.toInt()));
            }
@@ -325,7 +325,7 @@ RegisterOperators reg(
            IValue scalar;
            pop(stack, scalar);
            if (scalar.isInt()) {
-             push(stack, scalar);
+             push(stack, std::move(scalar));
            } else {
              push(stack, static_cast<int64_t>(scalar.toDouble()));
            }
@@ -675,7 +675,7 @@ RegisterOperators reg(
            IValue self, size;
            pop(stack, self, size);
            if (size.isNone()) {
-             push(stack, self);
+             push(stack, std::move(self));
            } else {
              push(
                  stack,
@@ -701,15 +701,15 @@ RegisterOperators reg(
          [](const Node* node) {
            size_t num_elems = node->outputs().size();
            return [=](Stack& stack) {
-             auto tuple = pop(stack).toTupleRef();
-             if (tuple.size() != num_elems) {
+             auto tuple = pop(stack).toTuple();
+             if (tuple.elements().size() != num_elems) {
                AT_ERROR(
                    "Expected a tuple of ",
                    num_elems,
                    " elements, but got ",
-                   tuple.size());
+                   tuple.elements().size());
              }
-             stack.insert(stack.end(), tuple.begin(), tuple.end());
+             stack.insert(stack.end(), tuple.elements().begin(), tuple.elements().end());
              return 0;
            };
          }),
@@ -719,10 +719,10 @@ RegisterOperators reg(
            int64_t beg_ind = node->i(attr::beg);
            int64_t end_ind = node->i(attr::end);
            return [=](Stack& stack) {
-             auto tuple = pop(stack).toTupleRef();
+             auto tuple = pop(stack).toTuple();
              c10::impl::GenericListPtr output_elems = c10::impl::make_generic_list();
              for (int64_t i = beg_ind; i < end_ind; ++i) {
-               output_elems.emplace_back(tuple[i]);
+               output_elems.emplace_back(tuple.elements()[i]);
              }
              push(stack, c10::ivalue::TuplePtr::create(std::move(output_elems)));
              return 0;
@@ -733,13 +733,13 @@ RegisterOperators reg(
          [](const Node* node) {
            return [](Stack& stack) {
              int64_t index = pop(stack).toInt();
-             auto tuple = pop(stack).toTupleRef();
-             auto norm_index = normalizeIndex(index, tuple.size());
+             auto tuple = pop(stack).toTuple();
+             auto norm_index = normalizeIndex(index, tuple.elements().size());
              if (norm_index < 0 ||
-                 norm_index > static_cast<int64_t>(tuple.size())) {
+                 norm_index > static_cast<int64_t>(tuple.elements().size())) {
                throw std::out_of_range("Tuple list index out of range");
              }
-             stack.emplace_back(tuple[norm_index]);
+             stack.emplace_back(tuple.elements()[norm_index]);
              return 0;
            };
          }),
@@ -916,7 +916,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            auto val = pop(stack);
            TORCH_CHECK(!val.isNone(), "Unwrapping null optional");
-           push(stack, val);
+           push(stack, std::move(val));
            return 0;
          }),
      // This op can be removed in preprocessing before being run in the
@@ -1140,7 +1140,7 @@ int stringSlice(Stack& stack) {
   }
 
   std::string result(string.begin() + start, string.begin() + end);
-  push(stack, result);
+  push(stack, std::move(result));
   return 0;
 }
 
@@ -1463,11 +1463,11 @@ int listAdd(Stack& stack) {
   c10::ListPtr<T> ret = c10::make_list<T>();
   const auto total_size = a.size() + b.size();
   ret.reserve(total_size);
-  for (const T& a_element : a) {
-    ret.push_back(a_element);
+  for (T a_element : a) {
+    ret.push_back(std::move(a_element));
   }
-  for (const T& b_element : b) {
-    ret.push_back(b_element);
+  for (T b_element : b) {
+    ret.push_back(std::move(b_element));
   }
 
   push(stack, std::move(ret));
@@ -1579,7 +1579,7 @@ int listSetItem(Stack& stack) {
   pop(stack, list, idx, value);
   setItem(list, idx, std::move(value));
 
-  push(stack, list);
+  push(stack, std::move(list));
   return 0;
 }
 
@@ -1668,7 +1668,7 @@ int dictGetDefault(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   auto value = dict.find(index);
   if (value == dict.end()) {
-    push(stack, default_value);
+    push(stack, std::move(default_value));
   } else {
     push(stack, value->value());
   }
@@ -1724,7 +1724,7 @@ RegisterOperators reg2({
           for (auto c : str) {
             chars.push_back(std::string(1, c));
           }
-          push(stack, chars);
+          push(stack, std::move(chars));
           return 0;
         }),
 // Mutable ops for lists containing mutable types.
@@ -2177,7 +2177,7 @@ RegisterOperators reg2({
           for (size_t i = 0; i < l.size(); i++) {
             t[i] = l.get(i);
           }
-          push(stack, t);
+          push(stack, std::move(t));
           return 0;
         }),
 #define CREATE_DICT_OPS(key_type)                                             \
@@ -2409,7 +2409,7 @@ Operation interpolate_op(const Node* n) {
     pop(stack, input, size, scale_factors, mode, align_corners);
     at::Tensor res = interpolate(
         input, size, scale_factors, mode, align_corners.toOptional<bool>());
-    push(stack, res);
+    push(stack, std::move(res));
     return 0;
   };
 }
@@ -2446,7 +2446,7 @@ Operation upsample_nearest_op(const Node* n) {
         convert_scale_factor_to_double(scale_factor_int);
     at::Tensor res =
         interpolate(input, size, scale_factor_double, "nearest", c10::nullopt);
-    push(stack, res);
+    push(stack, std::move(res));
     return 0;
   };
 }
@@ -2467,7 +2467,7 @@ Operation upsample_op(const Node* n) {
         scale_factor_double,
         mode,
         align_corners.toOptional<bool>());
-    push(stack, res);
+    push(stack, std::move(res));
     return 0;
   };
 }
@@ -2482,7 +2482,7 @@ Operation upsample_bilinear_op(const Node* n) {
         convert_scale_factor_to_double(scale_factor_int);
     at::Tensor res =
         interpolate(input, size, scale_factor_double, "bilinear", true);
-    push(stack, res);
+    push(stack, std::move(res));
     return 0;
   };
 }

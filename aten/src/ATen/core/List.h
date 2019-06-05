@@ -247,7 +247,7 @@ public:
   ListPtr copy() const;
 
   /**
-   * Returns a reference to the element at specified location pos, with bounds checking.
+   * Returns the element at specified location pos, with bounds checking.
    * If pos is not within the range of the container, an exception of type std::out_of_range is thrown.
    */
   value_type get(size_type pos) const;
