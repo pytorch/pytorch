@@ -423,7 +423,6 @@ struct Environment {
            makeMagic(
                "__len__",
                std::make_shared<BuiltinFunction>(aten::len, at::nullopt))},
-          {"range", std::make_shared<BuiltinFunction>(aten::range, at::nullopt)},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
@@ -1515,7 +1514,7 @@ struct to_ir {
           << "range expected at most 3 arguments, got " << args.size();
     }
     const auto& ident_name = target.name();
-    AT_CHECK(
+    TORCH_CHECK(
         end_val != nullptr && start_val != nullptr && step_val != nullptr,
         "Expected non-null pointers for range() arguments");
     auto addOp = [end_val, range](

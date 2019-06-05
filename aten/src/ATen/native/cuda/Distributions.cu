@@ -263,6 +263,20 @@ void gamma_grad_cuda_kernel(
       });
 }
 
+template <typename scalar_t>
+void dirichlet_grad_cuda_kernel(
+    at::Tensor& ret,
+    const at::Tensor& x,
+    const at::Tensor& alpha,
+    const at::Tensor& total) {
+  using accscalar_t = at::acc_type<scalar_t, true>;
+  at::cuda::CUDA_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(
+      ret, x, alpha, total,
+      [] __device__ (scalar_t& ret_val, const scalar_t& x_val, const scalar_t& alpha_val, const scalar_t& total_val) {
+        ret_val = dirichlet_grad_one<scalar_t, accscalar_t>(x_val, alpha_val, total_val);
+      });
+}
+
 template<typename scalar_t, typename prob_t>
 void bernoulli_tensor_cuda_kernel(
     at::Tensor& ret, const at::Tensor& p,
@@ -356,6 +370,14 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "_standard_gamma_grad_cuda", [&] {
      gamma_grad_cuda_kernel<scalar_t>(ret, self, output);
    });
+  return ret;
+}
+
+Tensor _dirichlet_grad_cuda(const Tensor& x, const Tensor& alpha, const Tensor& total) {
+  Tensor ret = at::empty(x.sizes(), x.options());
+  AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "_dirichlet_grad_cuda", [&] {
+    dirichlet_grad_cuda_kernel<scalar_t>(ret, x, alpha, total);
+  });
   return ret;
 }
 
