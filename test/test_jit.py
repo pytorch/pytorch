@@ -14156,6 +14156,7 @@ EXCLUDE_SCRIPT = {
     # unknown builtin op
     'test_nn_fold',
 
+    # jit doesn't support sparse tensors.
     'test_to_sparse'
 }
 

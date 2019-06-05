@@ -1624,10 +1624,14 @@ class TestAutograd(TestCase):
     def test_sparse_gather_both_scalar(self):
         self._test_sparse_gather((), (), 0)
 
-    def test_to_sparse_autograd(self):
+    # autograd tests via common_method_invocations don't allow input tensors to
+    # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when
+    # check_sparse_nnz is set to False.)
+    def test_sparse_mask_autograd(self):
         for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
             tensor = torch.randn(3, requires_grad=True, device=device)
-            converted = tensor.to_sparse().to_dense()
+            mask = torch.ones(3, device=device).to_sparse()
+            converted = tensor.sparse_mask(mask).to_dense()
             converted.sum().backward()
             self.assertEqual(tensor.grad, torch.ones(3, device=device))
 
