@@ -185,10 +185,19 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricConvolutionMM.c>
+#include <TH/THGenerateLongType.h>
+
+#include <THNN/generic/VolumetricConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricFullDilatedConvolution.c>
+#include <TH/THGenerateLongType.h>
+
+#include <THNN/generic/VolumetricFullDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
+
+#include <THNN/generic/VolumetricDilatedConvolution.c>
+#include <TH/THGenerateLongType.h>
 
 #include <THNN/generic/VolumetricDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>

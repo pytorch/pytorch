@@ -522,6 +522,33 @@ class TestLongTensor(TestCase):
         d_result = torch.nn.functional.conv2d(d_input, d_filter, dilation=2)
         self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
 
+    def test_longtensor_conv3d_same_as_doubletensor(self):
+        l_input = torch.LongTensor(20, 16, 50, 10, 20).random_(-1000, 1000).cpu()
+        l_filter = torch.LongTensor(33, 16, 3, 3, 3).random_(-1000, 1000).cpu()
+        l_result = torch.nn.functional.conv3d(l_input, l_filter)
+        d_input = l_input.clone().double()
+        d_filter = l_filter.clone().double()
+        d_result = torch.nn.functional.conv3d(d_input, d_filter)
+        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
+
+    def test_longtensor_transpose3d_same_as_doubletensor(self):
+        l_input = torch.LongTensor(20, 16, 50, 10, 20).random_(-1000, 1000).cpu()
+        l_filter = torch.LongTensor(16, 33, 3, 3, 3).random_(-1000, 1000).cpu()
+        l_result = torch.nn.functional.conv3d(l_input, l_filter)
+        d_input = l_input.clone().double()
+        d_filter = l_filter.clone().double()
+        d_result = torch.nn.functional.conv3d(d_input, d_filter)
+        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
+
+    def test_longtensor_dilated3d_same_as_doubletensor(self):
+        l_input = torch.LongTensor(20, 16, 50, 10, 20).random_(-1000, 1000).cpu()
+        l_filter = torch.LongTensor(33, 16, 3, 3, 3).random_(-1000, 1000).cpu()
+        l_result = torch.nn.functional.conv3d(l_input, l_filter, dilation=2)
+        d_input = l_input.clone().double()
+        d_filter = l_filter.clone().double()
+        d_result = torch.nn.functional.conv3d(d_input, d_filter, dilation=2)
+        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
+
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
 
