@@ -9,12 +9,13 @@ import torch.optim as optim
 import torch.cuda
 import torch.jit.quantized
 from contextlib import contextmanager
+from collections import namedtuple
 from itertools import product, chain
 import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import _nested_map
 from torch.onnx import OperatorExportTypes
-from torch._six import inf, PY2, builtins, StringIO
+from torch._six import inf, PY2, PY37, builtins, StringIO
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
@@ -3724,8 +3725,9 @@ def foo(x):
         scripted = torch.jit.script(foobar)
 
         _, lineno = inspect.getsourcelines(foobar)
-        FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))\
-                   .run(scripted.graph)
+        fc = FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))
+        fc.run(scripted.graph)
+        fc.run(str(scripted.graph))
 
     def test_file_line_save_load(self):
         class Scripted(torch.jit.ScriptModule):
@@ -3742,7 +3744,9 @@ def foo(x):
         bytesio = io.BytesIO(buffer)
         scripted = torch.jit.load(bytesio)
 
-        FileCheck().check('code/archive.py:4:10').run(scripted.graph)
+        fc = FileCheck().check('code/archive.py:4:10')
+        fc.run(scripted.graph)
+        fc.run(str(scripted.graph))
 
     def test_file_line_string(self):
         scripted = torch.jit.CompilationUnit('''
@@ -3750,7 +3754,9 @@ def foo(xyz):
     return torch.neg(xyz)
         ''')
 
-        FileCheck().check('<string>:2:12').run(scripted.foo.graph)
+        fc = FileCheck().check('<string>:2:12')
+        fc.run(scripted.foo.graph)
+        fc.run(str(scripted.foo.graph))
 
     def test_file_line_trace(self):
         def foobar(xyz):
@@ -3759,8 +3765,9 @@ def foo(xyz):
         scripted = torch.jit.trace(foobar, (torch.rand(3, 4)))
 
         _, lineno = inspect.getsourcelines(foobar)
-        FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))\
-                   .run(scripted.graph)
+        fc = FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))
+        fc.run(scripted.graph)
+        fc.run(str(scripted.graph))
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -6120,18 +6127,24 @@ a")
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
                     self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
 
-
-        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc", "expm1", "fabs"]
+        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
+                           "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
+                           "asinh", "atanh", "acosh", "sinh", "cosh", "tanh"]
+        binary_float_ops = ["atan2", "fmod", "copysign"]
         for op in unary_float_ops:
             checkMathWrap(op)
+        for op in binary_float_ops:
+            checkMathWrap(op, 2)
 
-        checkMathWrap("copysign", 2)
+        checkMath("modf", 1, ret_type="Tuple[float, float]")
         checkMath("pow", 2, is_float=False, ret_type="int")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
             checkMathWrap("floor", ret_type="int")
             checkMathWrap("ceil", ret_type="int")
             checkMathWrap("gcd", 2, is_float=False, ret_type="int")
+        if PY37:
+            checkMathWrap("remainder", 2)
 
     @unittest.skipIf(PY2, "Requires python 3")
     def test_math_gcd(self):
@@ -13306,6 +13319,15 @@ a")
 
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
+
+    def test_named_tuple_error(self):
+        _GoogLeNetOutputs = namedtuple('GoogLeNetOuputs', ['logits', 'aux_logits2', 'aux_logits1'])
+
+        with self.assertRaisesRegex(RuntimeError, 'NamedTuple is currently not supported'):
+            @torch.jit.script
+            def foo(x):
+                return _GoogLeNetOutputs(x, x, x)
+
 
     def _test_pickle_checkpoint(self, device):
         with TemporaryFileName() as fname:
