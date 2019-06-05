@@ -6139,7 +6139,7 @@ a")
                            "asinh", "atanh", "acosh", "sinh", "cosh", "tanh"]
         binary_float_ops = ["atan2", "fmod", "copysign"]
         for op in unary_float_ops:
-            checkMathWrap(op)
+            checkMathWrap(op, 1)
         for op in binary_float_ops:
             checkMathWrap(op, 2)
 
@@ -6152,6 +6152,7 @@ a")
             checkMathWrap("gcd", 2, is_float=False, ret_type="int")
         if PY37:
             checkMathWrap("remainder", 2)
+        checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, i) for i in range(-2, 10)])
 
     @unittest.skipIf(PY2, "Requires python 3")
     def test_math_gcd(self):
