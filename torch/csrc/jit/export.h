@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/util/Registry.h>
+
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/onnx/onnx.h>
@@ -8,6 +10,20 @@
 
 namespace torch {
 namespace jit {
+
+struct TORCH_API JitExportByURI {
+  JitExportByURI() {}
+
+  virtual void write(const script::Module& module,
+      const std::string& filename,
+      const script::ExtraFilesMap& extra_files) = 0;
+
+  virtual ~JitExportByURI() {}
+};
+
+C10_DECLARE_REGISTRY(JitExportByURIRegistry, JitExportByURI);
+#define REGISTER_JIT_EXPORT_BY_PATH(clsname, key) \
+  C10_REGISTER_TYPED_CLASS(JitExportByURIRegistry, key, clsname)
 
 // This map is used to keep track of parameters that should be exported
 // externally. When `defer_weight_export` is true, the returned map contains

@@ -1173,12 +1173,39 @@ void ExportModule(
   serializer.serialize(module, extra_files);
 }
 
+C10_DEFINE_REGISTRY(JitExportByURIRegistry, JitExportByURI);
+
+namespace {
+struct JitExportLocalFile : public JitExportByURI {
+  JitExportLocalFile() {}
+
+  void write(const script::Module& module,
+      const std::string& filename,
+      const script::ExtraFilesMap& extra_files) override {
+    ScriptModuleSerializer serializer(filename);
+    serializer.serialize(module, extra_files);
+  }
+};
+
+const std::string JIT_EXPORT_LOCAL_FILE_KEY = "local";
+REGISTER_JIT_EXPORT_BY_PATH(JitExportLocalFile, JIT_EXPORT_LOCAL_FILE_KEY);
+} // namespace
+
 void ExportModule(
     const script::Module& module,
     const std::string& filename,
     const script::ExtraFilesMap& extra_files) {
-  ScriptModuleSerializer serializer(filename);
-  serializer.serialize(module, extra_files);
+  auto start_pos = filename.find("://");
+  std::string key;
+  if (start_pos == std::string::npos) {
+    key = JIT_EXPORT_LOCAL_FILE_KEY;
+  } else {
+    key = filename.substr(start_pos + 3);
+  }
+  bool has_key = JitExportByURIRegistry()->Has(key);
+  AT_CHECK(has_key, "unsupported path: ", filename, ", key: ", key);
+  auto writer = JitExportByURIRegistry()->Create(JIT_EXPORT_LOCAL_FILE_KEY);
+  writer->write(module, filename, extra_files);
 }
 
 } // namespace jit
