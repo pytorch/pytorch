@@ -309,6 +309,96 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
   THLongTensor_free(index);
 }
 
+static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) {
+  auto size = THTensor_sizesLegacyNoScalars(tensor);
+  auto stride = THTensor_stridesLegacyNoScalars(tensor);
+  int nDim = THTensor_nDimensionLegacyAll(tensor);
+  ptrdiff_t dataOffset = 0;
+  for (int i = nDim - 1; i >= 0; i--) {
+    dataOffset += (linearIndex % size[i]) * stride[i];
+    linearIndex /= size[i];
+  }
+  return dataOffset;
+}
+
+static inline void THTensor_(checkLinearIndex)(int64_t linearIndex, int64_t numel) {
+  THArgCheck(linearIndex < numel && linearIndex >= -numel, 2, "out of range: %d out of %d", (int)linearIndex, (int)numel);
+}
+
+static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
+  return linearIndex < 0 ? linearIndex + numel : linearIndex;
+}
+
+void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
+{
+  THTensor_(resizeNd)(r_, index->dim(), THTensor_getSizePtr(index), NULL);
+  THTensor* dst = THTensor_(newContiguous)(r_);
+
+  index = THLongTensor_newContiguous(index);
+  int64_t* index_data = THLongTensor_data(index);
+  ptrdiff_t srcElements = THTensor_(nElement)(src);
+  scalar_t* src_data = src->data<scalar_t>();
+  scalar_t* dst_data = dst->data<scalar_t>();
+  ptrdiff_t nIndices = THLongTensor_nElement(index);
+  int isContiguous = THTensor_(isContiguous)(src);
+
+  // Exceptions must not be thrown across parallel sections, so we
+  // record the position of the invalid index and throw the exception after the
+  // loop.
+  std::atomic<int64_t> invalidIdxPos(-1);
+
+  at::parallel_for(0, nIndices, TH_OMP_OVERHEAD_THRESHOLD,
+      [&](int64_t start, int64_t end) {
+    for (auto i = start; i < end; i++) {
+      int64_t idx = index_data[i];
+      if (idx < srcElements && idx >= -srcElements) {
+        idx = THTensor_(wrapLinearIndex)(idx, srcElements);
+        if (isContiguous) {
+          dst_data[i] = src_data[idx];
+        } else {
+          dst_data[i] = src_data[THTensor_(dataOffset)(src, idx)];
+        }
+      } else {
+        int64_t tmp = -1;
+        invalidIdxPos.compare_exchange_strong(tmp, i);
+      }
+    }
+  });
+
+  if (invalidIdxPos >= 0) {
+    THTensor_(checkLinearIndex)(index_data[invalidIdxPos], srcElements);
+  }
+
+  THLongTensor_free(index);
+  THTensor_(freeCopyTo)(dst, r_);
+}
+
+void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate)
+{
+  THArgCheck(THLongTensor_nElement(index) == THTensor_(nElement)(src), 3,
+    "src should have the same number of elements as index");
+
+  index = THLongTensor_newContiguous(index);
+  src = THTensor_(newContiguous)(src);
+  scalar_t* data = tensor->data<scalar_t>();
+  ptrdiff_t numel = THTensor_(nElement)(tensor);
+  int is_contiguous = THTensor_(isContiguous)(tensor);
+
+  TH_TENSOR_APPLY2(int64_t, index, scalar_t, src,
+    THTensor_(checkLinearIndex)(*index_data, numel);
+    int64_t linearIndex = THTensor_(wrapLinearIndex)(*index_data, numel);
+    int64_t dataOffset = is_contiguous ? linearIndex : THTensor_(dataOffset)(tensor, linearIndex);
+    if (accumulate) {
+      data[dataOffset] += *src_data;
+    } else {
+      data[dataOffset] = *src_data;
+    }
+  );
+
+  c10::raw::intrusive_ptr::decref(src);
+  THLongTensor_free(index);
+}
+
 #if !defined(TH_REAL_IS_BOOL)
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
@@ -418,96 +508,6 @@ void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* s
                      cntr++;
                    });
   c10::raw::intrusive_ptr::decref(srct);
-}
-
-static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) {
-  auto size = THTensor_sizesLegacyNoScalars(tensor);
-  auto stride = THTensor_stridesLegacyNoScalars(tensor);
-  int nDim = THTensor_nDimensionLegacyAll(tensor);
-  ptrdiff_t dataOffset = 0;
-  for (int i = nDim - 1; i >= 0; i--) {
-    dataOffset += (linearIndex % size[i]) * stride[i];
-    linearIndex /= size[i];
-  }
-  return dataOffset;
-}
-
-static inline void THTensor_(checkLinearIndex)(int64_t linearIndex, int64_t numel) {
-  THArgCheck(linearIndex < numel && linearIndex >= -numel, 2, "out of range: %d out of %d", (int)linearIndex, (int)numel);
-}
-
-static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
-  return linearIndex < 0 ? linearIndex + numel : linearIndex;
-}
-
-void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
-{
-  THTensor_(resizeNd)(r_, index->dim(), THTensor_getSizePtr(index), NULL);
-  THTensor* dst = THTensor_(newContiguous)(r_);
-
-  index = THLongTensor_newContiguous(index);
-  int64_t* index_data = THLongTensor_data(index);
-  ptrdiff_t srcElements = THTensor_(nElement)(src);
-  scalar_t* src_data = src->data<scalar_t>();
-  scalar_t* dst_data = dst->data<scalar_t>();
-  ptrdiff_t nIndices = THLongTensor_nElement(index);
-  int isContiguous = THTensor_(isContiguous)(src);
-
-  // Exceptions must not be thrown across parallel sections, so we
-  // record the position of the invalid index and throw the exception after the
-  // loop.
-  std::atomic<int64_t> invalidIdxPos(-1);
-
-  at::parallel_for(0, nIndices, TH_OMP_OVERHEAD_THRESHOLD,
-      [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      int64_t idx = index_data[i];
-      if (idx < srcElements && idx >= -srcElements) {
-        idx = THTensor_(wrapLinearIndex)(idx, srcElements);
-        if (isContiguous) {
-          dst_data[i] = src_data[idx];
-        } else {
-          dst_data[i] = src_data[THTensor_(dataOffset)(src, idx)];
-        }
-      } else {
-        int64_t tmp = -1;
-        invalidIdxPos.compare_exchange_strong(tmp, i);
-      }
-    }
-  });
-
-  if (invalidIdxPos >= 0) {
-    THTensor_(checkLinearIndex)(index_data[invalidIdxPos], srcElements);
-  }
-
-  THLongTensor_free(index);
-  THTensor_(freeCopyTo)(dst, r_);
-}
-
-void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate)
-{
-  THArgCheck(THLongTensor_nElement(index) == THTensor_(nElement)(src), 3,
-    "src should have the same number of elements as index");
-
-  index = THLongTensor_newContiguous(index);
-  src = THTensor_(newContiguous)(src);
-  scalar_t* data = tensor->data<scalar_t>();
-  ptrdiff_t numel = THTensor_(nElement)(tensor);
-  int is_contiguous = THTensor_(isContiguous)(tensor);
-
-  TH_TENSOR_APPLY2(int64_t, index, scalar_t, src,
-    THTensor_(checkLinearIndex)(*index_data, numel);
-    int64_t linearIndex = THTensor_(wrapLinearIndex)(*index_data, numel);
-    int64_t dataOffset = is_contiguous ? linearIndex : THTensor_(dataOffset)(tensor, linearIndex);
-    if (accumulate) {
-      data[dataOffset] += *src_data;
-    } else {
-      data[dataOffset] = *src_data;
-    }
-  );
-
-  c10::raw::intrusive_ptr::decref(src);
-  THLongTensor_free(index);
 }
 
 void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)

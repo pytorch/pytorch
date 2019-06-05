@@ -356,8 +356,6 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 #undef LARGE_INDEX
 }
 
-#if !defined(THC_REAL_IS_BOOL) /* non bool only part */
-
 void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLongTensor *index)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
@@ -421,6 +419,8 @@ void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, T
     dispatchTakePut<scalar_t, TensorPutOp>(state, dst, src, index);
   }
 }
+
+#if !defined(THC_REAL_IS_BOOL) /* non bool only part */
 
 void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, THCTensor *src)
 {

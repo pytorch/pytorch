@@ -7642,6 +7642,7 @@ class _TestTorchMixin(object):
         idx = torch.LongTensor([[0, 2], [3, 4]])
         check(src, idx)
         check(src.transpose(1, 2), idx)
+        check(src.bool(), idx)
 
     def test_take_empty(self):
         for device in torch.testing.get_all_device_types():
@@ -7664,6 +7665,9 @@ class _TestTorchMixin(object):
         values = torch.randn(2, 2)
         check(dst, idx, values)
         check(dst.transpose(1, 2), idx, values)
+
+        values = torch.tensor([[False, False], [False, False]])
+        check(dst.bool(), idx, values)
 
     def test_put_accumulate(self):
         dst = torch.ones(2, 2)
