@@ -201,7 +201,7 @@ struct BailOutInserter {
   }
 
   std::shared_ptr<Graph> graph_;
-  std::unordered_map<Node*, Node*> subgraphs;
+  std::map<Node*, Node*> subgraphs;
 };
 
 void InsertBailOuts(std::shared_ptr<Graph> graph) {
