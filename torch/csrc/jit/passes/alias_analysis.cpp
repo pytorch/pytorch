@@ -969,8 +969,7 @@ bool AliasDb::tryMove(
     Node* movePoint,
     MoveSide moveSide,
     bool dryRun) {
- AT_ASSERT(toMove->owningBlock() == movePoint->owningBlock());
-
+  AT_ASSERT(toMove->owningBlock() == movePoint->owningBlock());
   if (toMove == movePoint) {
     return true;
   }
