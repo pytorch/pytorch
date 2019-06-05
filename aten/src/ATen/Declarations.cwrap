@@ -228,6 +228,8 @@
 [[
   name: _th_index_copy_
   cname: indexCopy
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   return: argument 0
   arguments:

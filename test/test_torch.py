@@ -7531,24 +7531,32 @@ class _TestTorchMixin(object):
             reference[0.0, :, 0.0] = 1
 
     def test_index_copy(self):
-        num_copy, num_dest = 3, 20
-        dest = torch.randn(num_dest, 4, 5)
-        src = torch.randn(num_copy, 4, 5)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
-        dest2 = dest.clone()
-        dest.index_copy_(0, idx, src)
-        for i in range(idx.size(0)):
-            dest2[idx[i]] = src[i]
-        self.assertEqual(dest, dest2, 0)
+        for device in torch.testing.get_all_device_types():
+            num_copy, num_dest = 3, 20
+            dest = torch.randn(num_dest, 4, 5, device=device)
+            src = torch.randn(num_copy, 4, 5, device=device)
+            idx = torch.randperm(num_dest, device=device).narrow(0, 0, num_copy)
+            dest2 = dest.clone()
+            dest.index_copy_(0, idx, src)
+            for i in range(idx.size(0)):
+                dest2[idx[i]] = src[i]
+            self.assertEqual(dest, dest2, 0)
 
-        dest = torch.randn(num_dest)
-        src = torch.randn(num_copy)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
-        dest2 = dest.clone()
-        dest.index_copy_(0, idx, src)
-        for i in range(idx.size(0)):
-            dest2[idx[i]] = src[i]
-        self.assertEqual(dest, dest2, 0)
+            dest = torch.randn(num_dest, device=device)
+            src = torch.randn(num_copy, device=device)
+            idx = torch.randperm(num_dest, device=device).narrow(0, 0, num_copy)
+            dest2 = dest.clone()
+            dest.index_copy_(0, idx, src)
+            for i in range(idx.size(0)):
+                dest2[idx[i]] = src[i]
+            self.assertEqual(dest, dest2, 0)
+
+            # Bool tensor
+            dest = torch.zeros(2, 2, dtype=torch.bool, device=device)
+            src = torch.tensor([[True, True], [True, True]], device=device)
+            index = torch.tensor([0, 1], device=device)
+            dest.index_copy_(0, index, src)
+            self.assertEqual(dest, torch.tensor([[True, True], [True, True]], device=device))
 
     def test_index_add(self):
         num_copy, num_dest = 3, 3

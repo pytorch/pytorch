@@ -269,6 +269,46 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   THLongTensor_free(index);
 }
 
+void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
+{
+  ptrdiff_t i, numel;
+  THTensor *tSlice, *sSlice;
+  int64_t *index_data;
+
+  // Error checking for this function has moved to ATen!!
+
+  numel = THLongTensor_nElement(index);
+
+  index = THLongTensor_newContiguous(index);
+  index_data = THLongTensor_data(index);
+
+  if (tensor->dim() > 1 )
+  {
+    tSlice = THTensor_(new)();
+    sSlice = THTensor_(new)();
+
+    for (i=0; i<numel; i++)
+    {
+      THTensor_(select)(tSlice, tensor, dim, index_data[i]);
+      THTensor_(select)(sSlice, src, dim, i);
+      at::Tensor tSlice_wrap = THTensor_wrap(tSlice);
+      at::Tensor sSlice_wrap = THTensor_wrap(sSlice);
+      at::native::copy_(tSlice_wrap, sSlice_wrap);
+    }
+
+    c10::raw::intrusive_ptr::decref(tSlice);
+    c10::raw::intrusive_ptr::decref(sSlice);
+  }
+  else
+  {
+    for (i=0; i<numel; i++)
+    {
+      THTensor_(set1d)(tensor, index_data[i], THTensor_(get1d)(src,i));
+    }
+  }
+  THLongTensor_free(index);
+}
+
 #if !defined(TH_REAL_IS_BOOL)
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
@@ -378,46 +418,6 @@ void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* s
                      cntr++;
                    });
   c10::raw::intrusive_ptr::decref(srct);
-}
-
-void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
-{
-  ptrdiff_t i, numel;
-  THTensor *tSlice, *sSlice;
-  int64_t *index_data;
-
-  // Error checking for this function has moved to ATen!!
-
-  numel = THLongTensor_nElement(index);
-
-  index = THLongTensor_newContiguous(index);
-  index_data = THLongTensor_data(index);
-
-  if (tensor->dim() > 1 )
-  {
-    tSlice = THTensor_(new)();
-    sSlice = THTensor_(new)();
-
-    for (i=0; i<numel; i++)
-    {
-      THTensor_(select)(tSlice, tensor, dim, index_data[i]);
-      THTensor_(select)(sSlice, src, dim, i);
-      at::Tensor tSlice_wrap = THTensor_wrap(tSlice);
-      at::Tensor sSlice_wrap = THTensor_wrap(sSlice);
-      at::native::copy_(tSlice_wrap, sSlice_wrap);
-    }
-
-    c10::raw::intrusive_ptr::decref(tSlice);
-    c10::raw::intrusive_ptr::decref(sSlice);
-  }
-  else
-  {
-    for (i=0; i<numel; i++)
-    {
-      THTensor_(set1d)(tensor, index_data[i], THTensor_(get1d)(src,i));
-    }
-  }
-  THLongTensor_free(index);
 }
 
 static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) {

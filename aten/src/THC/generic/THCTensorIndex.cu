@@ -175,8 +175,6 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 #undef LARGE_INDEX
 }
 
-#if !defined(THC_REAL_IS_BOOL) /* non bool only part */
-
 // Check tensor dimensions for index operations, and return the slice size.
 // src can be nullptr in case of indexFill: in that case it is ignored.
 static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
@@ -357,6 +355,8 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 #undef SMALL_INDEX
 #undef LARGE_INDEX
 }
+
+#if !defined(THC_REAL_IS_BOOL) /* non bool only part */
 
 void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLongTensor *index)
 {
