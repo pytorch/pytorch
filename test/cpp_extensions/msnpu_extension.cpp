@@ -26,8 +26,7 @@ Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
 
 Tensor sum_override(const Tensor & self, ScalarType dtype) {
   test_int = 2;
-  auto typeMeta = scalarTypeToTypeMeta(dtype);
-  return get_dtype_tensor(typeMeta);
+  return get_dtype_tensor(self.dtype());
 }
 
 // needed for sum backwards
