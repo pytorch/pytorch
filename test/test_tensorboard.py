@@ -462,7 +462,7 @@ if TEST_TENSORBOARD:
                 'vgg19': (2, 3, 224, 224),
                 'vgg16_bn': (2, 3, 224, 224),
                 'vgg19_bn': (2, 3, 224, 224),
-                'mobilenet_v2': (2, 3, 224, 224),  # will fail optimize_graph
+                'mobilenet_v2': (2, 3, 224, 224),
             }
             for model_name, input_shape in model_input_shapes.items():
                 with SummaryWriter(comment=model_name) as w:

@@ -151,8 +151,6 @@ class GraphPy(object):
                 self.unique_name_to_scoped_name[input_node_id] = node.scopeName + '/' + input_node_id
 
         for key, node in self.nodes_io.items():
-            if hasattr(node, 'input_or_output'):
-                self.unique_name_to_scoped_name[key] = node.input_or_output + '/' + node.uniqueName
             if hasattr(node, 'scope') and node.scope is not None:
                 self.unique_name_to_scoped_name[key] = node.scope + '/' + node.uniqueName
                 if node.scope == '' and self.shallowest_scope_name:
@@ -239,7 +237,7 @@ def graph(model, args, verbose=False):
 
     if verbose:
         print(graph)
-    list_of_nodes = parse(graph, args, omit_useless_nodes)
+    list_of_nodes = parse(graph, args)
     # We are hardcoding that this was run on CPU even though it might have actually
     # run on GPU. Note this is what is shown in TensorBoard and has no bearing
     # on actual execution.
