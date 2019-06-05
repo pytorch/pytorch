@@ -941,17 +941,19 @@ def createResolutionCallbackFromClosure(fn):
     return env
 
 def _create_constant_iterable_module(module):
-    for i, submodule in enumerate(module):
+    modules = OrderedDict()
+
+    for key, submodule in module._modules.items():
         if isinstance(submodule, (ModuleList, Sequential)):
             # Make each item in the module a constant
-            module[i] = _create_constant_iterable_module(submodule)
+            modules[key] = _create_constant_iterable_module(submodule)
         else:
-            module[i] = _convert_to_script_module(submodule)
+            modules[key] = _convert_to_script_module(submodule)
 
     if isinstance(module, Sequential):
-        return _ConstSequential(module)
+        return _ConstSequential(Sequential(modules))
     elif isinstance(module, ModuleList):
-        return _ConstModuleList(module)
+        return _ConstModuleList(modules)
     else:
         raise RuntimeError("Only nn.ModuleList and nn.Sequential can be made "
                            "into constant modules, found {}".format(module))
@@ -962,7 +964,13 @@ def _make_strong_submodule(field, module, parent):
         # It's not a submodule, don't do anything
         return None
 
-    return _convert_to_script_module(module)
+    # Convert the module to a ScriptModule
+    new_strong_submodule = _convert_to_script_module(module)
+
+    # Install the ScriptModule on the python side
+    parent._modules._python_modules[field] = new_strong_submodule
+
+    return new_strong_submodule
 
 
 def _try_compile_fn(fn):
@@ -1175,7 +1183,8 @@ class OrderedModuleDict(OrderedDictWrapper):
 
     def __setitem__(self, k, v):
         if k in self._python_modules:
-            raise RuntimeError("cannot re-assign modules in a ScriptModule")
+            raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
+                               "tried to replace existing module '{}': {}".format(k, v))
         if isinstance(v, ScriptModule):
             self.module._register_module(k, v._c)
 
@@ -1822,6 +1831,7 @@ if _enabled:
 class _ConstModuleList(ScriptModule):
     def __init__(self, modules):
         super(_ConstModuleList, self).__init__()
+
         if isinstance(modules, OrderedDict):
             for key, module in modules.items():
                 if _is_weak_type(type(module)):

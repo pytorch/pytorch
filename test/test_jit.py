@@ -13410,8 +13410,11 @@ class TestRecursiveScript(JitTestCase):
         """
         sm = torch.jit.script(nn_module)
 
-        eager_out = nn_module(*args)
-        script_out = sm(*args)
+        with freeze_rng_state():
+            eager_out = nn_module(*args)
+
+        with freeze_rng_state():
+            script_out = sm(*args)
 
         self.assertEqual(eager_out, script_out)
         self.assertExportImportModule(sm, args)
@@ -13460,9 +13463,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, t):
                 return self.other(t) * 2
 
-        sm = torch.jit.script(M())
-
-        self.assertExportImportModule(sm, (torch.ones(2, 2),))
+        self.checkModule(M(), (torch.ones(2, 2),))
 
     def test_module_function_export(self):
         class Other(torch.nn.Module):
@@ -13491,19 +13492,22 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, t):
                 return self.other(t) * 2
 
-        sm = torch.jit.script(M())
-        self.assertExportImportModule(sm, (torch.ones(2, 2),))
+        self.checkModule(M(), (torch.ones(2, 2),))
 
     def test_iterable_modules(self):
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                return x + 10
+
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
                 self.sequential = nn.Sequential(
-                    nn.Linear(5, 5),
-                    nn.Linear(5, 5),
-                    nn.Sequential(nn.Linear(5, 5), nn.Linear(5, 5))
+                    Inner(),
+                    Inner(),
+                    nn.Sequential(Inner(), Inner())
                 )
-                self.module_list = nn.ModuleList([nn.Linear(5, 5), nn.Linear(5, 5)])
+                self.module_list = nn.ModuleList([Inner(), Inner()])
 
             def forward(self, x):
                 for mod in self.module_list:
@@ -13511,7 +13515,12 @@ class TestRecursiveScript(JitTestCase):
                 x += self.sequential(x)
                 return x
 
-        self.checkModule(M(), (torch.randn(5, 5),))
+
+
+        m = M()
+        self.checkModule(m, (torch.randn(5, 5),))
+        m.module_list.add_module('new', Inner())
+        self.checkModule(m, (torch.randn(5, 5),))
 
 
 class MnistNet(nn.Module):
