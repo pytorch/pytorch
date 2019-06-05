@@ -211,7 +211,7 @@ private:
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(stack);
-  const KernelFunctionWrapper* wrapper = op.operatorIterator_->op.getVariableWrapper(stack);
+  KernelFunctionWrapper* wrapper = op.operatorIterator_->op.getVariableWrapper(stack);
   return OpKernel(kernel.kernel_func, kernel.cache_creator_func, wrapper);
 }
 

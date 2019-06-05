@@ -202,7 +202,7 @@ class DispatchTable final {
    }
 
    KernelFunctionWrapper* getVariableWrapper(const Stack* stack) const {
-     if (dispatch_strategy_.get_is_variable(stack, operator_name_)) {
+     if (variable_wrapper_ && dispatch_strategy_.get_is_variable(stack, operator_name_)) {
        return variable_wrapper_;
      }
      return nullptr;
@@ -297,7 +297,7 @@ private:
   // The empty state (i.e. no kernels registered) is represented
   // as an empty table.
   either<detail::KernelTable_, DispatchTableEntry> kernels_;
-  KernelFunctionWrapper* variable_wrapper_;
+  KernelFunctionWrapper* variable_wrapper_ = nullptr;
   DispatchStrategy dispatch_strategy_;
   std::string operator_name_;
 };
