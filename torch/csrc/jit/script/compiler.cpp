@@ -1550,72 +1550,6 @@ struct to_ir {
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
-  void emitForInTensorLoop(const For& stmt, Value* tensorArg) {
-    auto targets = stmt.targets();
-    auto target = Var(targets[0]).name();
-    auto itrs = stmt.itrs();
-    auto body = stmt.body();
-    auto& range = stmt.range();
-
-    auto outermost_dim_index = graph->insertConstant(0, IntType::get(), range);
-    auto num_dim = graph->insert(aten::dim, {tensorArg});
-    Value* cond_value = emitBuiltinCall(
-        range,
-        *method.graph(),
-        aten::eq,
-        c10::nullopt,
-        {num_dim, outermost_dim_index},
-        {},
-        /*required=*/true);
-
-    Node* n = graph->insertNode(create(prim::If, range, 0));
-    n->addInput(cond_value);
-    auto true_block = n->addBlock();
-    n->addBlock();
-    {
-      WithInsertPoint guard(true_block);
-      graph->insert(
-          prim::RaiseException,
-          {std::string("iteration over a 0-d tensor")},
-          {},
-          range);
-    }
-
-    auto sizes_tuple = emitBuiltinCall(
-        range,
-        *graph,
-        aten::size,
-        c10::nullopt,
-        {tensorArg},
-        {},
-        /*required=*/true);
-
-    auto max_trip_count_val = emitBuiltinCall(
-        range,
-        *graph,
-        aten::select,
-        c10::nullopt,
-        {sizes_tuple, outermost_dim_index},
-        {},
-        /*required=*/true);
-
-    const auto& ident_name = target.name();
-    auto assigner = [outermost_dim_index, ident_name, range, tensorArg, this](
-                        Value* index, std::shared_ptr<Environment> env) {
-      auto cur_elm = emitBuiltinCall(
-          range,
-          *this->graph,
-          aten::select,
-          c10::nullopt,
-          {tensorArg, outermost_dim_index, index},
-          {},
-          /*required=*/true);
-      env->setVar(range, ident_name, cur_elm);
-    };
-
-    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
-  }
-
   void emitFor(const For& stmt) {
     auto targets = stmt.targets();
     auto itrs = stmt.itrs();
@@ -1658,7 +1592,8 @@ struct to_ir {
     auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
 
     // for-in lists
-    if (siv && siv->getValue()->type()->kind() == TypeKind::ListType) {
+    if (siv && (siv->getValue()->type()->kind() == TypeKind::ListType
+        || siv->getValue()->type()->isSubtypeOf(TensorType::get()))) {
       std::vector<IterType> iters_info;
       std::vector<TypePtr> types_info = siv->getItersTypeInfo(stmt.range(), method);
       TORCH_INTERNAL_ASSERT(targets.size() == types_info.size());
@@ -1669,13 +1604,6 @@ struct to_ir {
 
       Node* loop_node = emitNewLoopCommon(stmt.range(), stmt.body(), iters_info, {});
       siv->fillInLoopInfo(stmt.range(), method, loop_node, iters_info.size());
-      return;
-    }
-
-    // for-in tensors
-    if (siv && siv->getValue()->type()->isSubclass(TypeKind::TensorType)) {
-      auto value = siv->asValue(stmt.range(), method);
-      emitForInTensorLoop(stmt, value);
       return;
     }
 

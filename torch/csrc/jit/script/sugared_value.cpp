@@ -242,6 +242,8 @@ std::vector<TypePtr> SimpleValue::getItersTypeInfo(
     TypePtr val_type = getValue()->type();
     if (auto list_type = val_type->cast<ListType>()) {
       return {list_type->getElementType()};
+    } else if (val_type->isSubtypeOf(TensorType::get())) {
+      return {val_type};
     } else {
       throw ErrorReport(loc)
           << "Value type " << val_type->str() << "cannot be used as a iterator";
@@ -258,9 +260,11 @@ void SimpleValue::fillInLoopInfo(
   Value* val = getValue();
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
+
+  // start insertion point right before Loop node
+  WithInsertPoint guard(n);
   if (auto list_type = val_type->cast<ListType>()) {
     // fill in max_trip_count_val
-    WithInsertPoint guard(n);
     Value* max_trip_count_val = g.insert(aten::len, {val}, {}, loc);
     n->insertInput(0, max_trip_count_val);
 
@@ -278,6 +282,41 @@ void SimpleValue::fillInLoopInfo(
       it->output()->replaceAllUsesWith(cur_elem);
       it.destroyCurrent();
     }
+  } else if (val_type->isSubtypeOf(TensorType::get())) {
+    // fill in max_trip_count_val
+    Value* outermost_dim_index = g.insertConstant(0, IntType::get(), loc);
+    // zero-dim tensor error handling
+    Value* num_dim = g.insert(aten::dim, {val}, {}, loc);
+    Value* cond_value = g.insert(aten::eq, {num_dim, outermost_dim_index}, {}, loc);
+    Node* if_node = g.insertNode(g.create(prim::If, 0)->setSourceRange(loc));
+    if_node->addInput(cond_value);
+
+    Block* true_block = if_node->addBlock();
+    if_node->addBlock();
+    {
+      WithInsertPoint guard(true_block);
+      g.insert(prim::RaiseException,
+          {std::string("iteration over a 0-d tensor!")}, {}, loc);
+    }
+
+    Value* sizes_tuple = g.insert(aten::size, {val}, {}, loc);
+    Value* max_trip_count_val = g.insert(aten::select, {sizes_tuple, outermost_dim_index}, {}, loc);
+    n->insertInput(0, max_trip_count_val);
+    // fill in the target element assignment value in the beginning of the FOR loop
+    {
+      TORCH_CHECK(iters_size == 1, "more than one iterable for in tensor");
+      Block* body_block = n->blocks()[0];
+      // replace the first Placeholder node in the block with the correct assignment
+      auto it = body_block->nodes().begin();
+      Value* trip_count = body_block->inputs()[0]; // Iteration num
+      TORCH_INTERNAL_ASSERT(it->kind() == prim::Placeholder);
+
+      WithInsertPoint it_guard(*it);
+      Value* cur_elem = g.insert(aten::select, {val, outermost_dim_index, trip_count}, {}, loc);
+      it->output()->replaceAllUsesWith(cur_elem);
+      it.destroyCurrent();
+    }
+
   } else {
       throw ErrorReport(loc)
           << "Value type " << val_type->str() << "does not have loop information to fill";
