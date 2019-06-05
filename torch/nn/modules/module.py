@@ -211,19 +211,11 @@ class Module(object):
                     # yf225 TODO: also, post in the following threads about this behavior change:
                     # 1. https://discuss.pytorch.org/t/effect-of-calling-model-cuda-after-constructing-an-optimizer/15165
                     # 2. https://github.com/pytorch/pytorch/issues/7844
-
-                    # if self._parameters[key].device != param_applied.device:
-                    #     if sys.getrefcount(self._parameters[key]) > 2:  # this is at least 2, see https://docs.python.org/3/library/sys.html#sys.getrefcount for reasons
-                    #         # yf225 TODO: use something like "warnings.warn(..., stacklevel=2)"
-                    #         raise RuntimeError("Attempted to change device of `{}`, but there are existing references to that tensor which would be broken by the device change. Current count: {}".format(key, sys.getrefcount(self._parameters[key])))
-                    # self._parameters[key].data = param_applied
-
-                    # yf225 TODO temporary: try this out and see what breaks:
                     if self._parameters[key].device != param_applied.device:
-                        with torch.no_grad():
-                            self._parameters[key] = param_applied.requires_grad_(self._parameters[key].requires_grad)
-                    else:
-                        self._parameters[key].data = param_applied
+                        if sys.getrefcount(self._parameters[key]) > 2:  # this is at least 2, see https://docs.python.org/3/library/sys.html#sys.getrefcount for reasons
+                            # yf225 TODO: use something like "warnings.warn(..., stacklevel=2)"
+                            raise RuntimeError("Attempted to change device of `{}`, but there are existing references to that tensor which would be broken by the device change. Current count: {}".format(key, sys.getrefcount(self._parameters[key])))
+                    self._parameters[key].data = param_applied
                 else:
                     with torch.no_grad():
                         # yf225 TODO: improve comment here
@@ -237,17 +229,8 @@ class Module(object):
                         self._parameters[key] = param_applied.requires_grad_(self._parameters[key].requires_grad)
 
                 if grad_applied is not None:
-                    # if grad_is_same_impl_type:
-                    #     self._parameters[key]._grad.data = grad_applied
-                    # else:
-                    #     self._parameters[key]._grad = grad_applied
-
-                    # yf225 TODO temporary: try this out and see what breaks:
                     if grad_is_same_impl_type:
-                        if self._parameters[key]._grad.device != param_applied.device:
-                            self._parameters[key]._grad = grad_applied
-                        else:
-                            self._parameters[key]._grad.data = grad_applied
+                        self._parameters[key]._grad.data = grad_applied
                     else:
                         self._parameters[key]._grad = grad_applied
 
