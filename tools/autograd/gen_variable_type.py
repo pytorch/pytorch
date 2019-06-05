@@ -452,11 +452,6 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
     wrapper_registrations = []
 
     for declaration in aten_declarations:
-        # Factory methods usually do not appear in `VariableType` at all, since they
-        # don't dispatch via `Type`; except in the case where the implementation is 'abstract'
-        # in which case they do!
-        if declaration['is_factory_method']:
-            continue
         formal_types = [arg['type'] for arg in declaration['arguments']]
         wrapper_formal = WRAPPER_FORMAL.substitute(declaration, formal_types=formal_types)
         variable_formals = [wrapper_formal] + declaration['type_method_formals']

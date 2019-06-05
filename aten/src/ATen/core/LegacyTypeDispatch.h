@@ -103,7 +103,6 @@ class CAFFE2_API LegacyTypeDispatch {
     type_registry[static_cast<int>(b)] = std::move(t);
     detail::getVariableHooks().registerVariableTypeFor(this, b);
   }
-private:
   void initForDeviceType(DeviceType p) {
     static std::once_flag cpu_once;
     static std::once_flag cuda_once;
@@ -121,6 +120,7 @@ private:
       });
     }
   }
+ private:
   void initForScalarType(ScalarType s) {
     static std::once_flag once;
     // Only complex may need initialization
@@ -168,7 +168,11 @@ struct CAFFE2_API AutoNonVariableTypeMode {
  * See NOTE [ Treating Variables as non-Variables in type dispatch ]
  */
 inline Type& legacyTensorType(const TensorImpl& tensor) {
-  return globalLegacyTypeDispatch().getType(
+  // NB: It's valid to use getTypeRaw here, because the TensorImpl	  return globalLegacyTypeDispatch().getType(
+  // could not have been created without initializing the Type first.
+  // NB: This is not actually true via the Caffe2 codepath! But we call
+  // initializeLegacyTypeDispatchFor in the right place.
+  return *globalLegacyTypeDispatch().getTypeRaw(
       tensorTypeIdToBackend(tensor.type_id()),
       typeMetaToScalarType(tensor.dtype()),
       tensor.is_variable());

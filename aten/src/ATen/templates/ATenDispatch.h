@@ -3,6 +3,11 @@
 #include <c10/core/Backend.h>
 #include <unordered_map>
 
+// This dispatch class serves as a replacement for Type based dispatch.
+// It stores a function for each native function and backend pair.
+// Functions that are the same for all backends can be registered under
+// Backend::Undefined.
+
 namespace at {
 
 template<class FuncType>
@@ -39,6 +44,9 @@ class CAFFE2_API ATenDispatch {
    return *this;
   }
 
+  // This template doesn't need to be so verbose, but MSVC has a bug in parsing templates that makes calls
+  // to this fail. This can be fixed when we add overloads to make all native function names unique, so that
+  // the type can be inferred when we call.
   template <class FuncType, class Return, class... Parameters>
   ATenDispatch& registerVariableWrapper(const char* schema, Return (*fn)(FuncType*, Parameters...)) {
     auto id = getSchemaId(schema);

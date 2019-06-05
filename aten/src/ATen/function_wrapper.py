@@ -76,6 +76,10 @@ case ScalarType::${ScalarName}: {
 }
 """)
 
+# Native functions are generated and registered on the dispatcher. We register the
+# function on Backend::Undefined if it does not have backend dependent dispatch.
+# In this case, it will be called for all backends, but can be overwritten on a
+# per backend basis.
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
 static ${return_type} ${api_name}(${type_method_formals});
 """)
@@ -139,11 +143,12 @@ NATIVE_DECLARATION = CodeTemplate("""\
 CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
-# special method definition for factory functions in Functions.h
+# special method definition for factory functions in Functions.h that initializes backends
 FACTORY_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
-    const DeviceGuard guard(options.device());
-    return at::native::${api_name}(${type_method_actuals});
+    globalLegacyTypeDispatch().initForDeviceType(backendToDeviceType(${inferred_backend}));
+    return globalATenDispatch().getOp<${return_type} (${formals_types})>(
+        ${inferred_backend}, ${inferred_is_variable}, ${id}, "${api_name}")(${native_actuals});
 }
 """)
 
@@ -1018,8 +1023,7 @@ def create_generic(top_env, declarations):
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
-        is_factory_method = find_formal('TensorOptions', formals) and \
-            not dispatch_options and 'method' not in option['variants']
+        is_factory_method = find_formal('TensorOptions', formals) and 'method' not in option['variants']
 
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
@@ -1093,8 +1097,12 @@ def create_generic(top_env, declarations):
                 option['inferred_is_variable'] = 'false'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             top_env['function_declarations'].append(declaration.substitute(env))
-            top_env['function_definitions'].append(
-                FUNCTION_DEFINITION.substitute(env))
+            if is_factory_method:
+                top_env['function_definitions'].append(
+                    FACTORY_DEFINITION.substitute(env))
+            else:
+                top_env['function_definitions'].append(
+                    FUNCTION_DEFINITION.substitute(env))
             method_of.append('namespace')
 
         output_options.append(OutputDeclaration(
