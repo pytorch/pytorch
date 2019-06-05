@@ -126,9 +126,12 @@ def _check_capability():
     for d in range(device_count()):
         capability = get_device_capability(d)
         major = capability[0]
+        minor = capability[1]
         name = get_device_name(d)
         if capability == (3, 0) or major < 3:
             warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
+        elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
+            warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
 
 def _lazy_call(callable):
