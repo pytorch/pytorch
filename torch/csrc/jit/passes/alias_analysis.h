@@ -150,6 +150,8 @@ class AliasDb {
   TORCH_API void addToContainedElements(
       const Value* element,
       const Value* container);
+  void assignWildcardToContained(Element* e, const TypePtr& type);
+  void assignWildcardToContained(const Value* v);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);

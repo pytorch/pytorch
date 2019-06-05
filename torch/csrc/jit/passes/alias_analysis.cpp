@@ -195,9 +195,35 @@ void AliasDb::dump() const {
   std::cout << "\n";
 }
 
+void AliasDb::assignWildcardToContained(const Value* v) {
+  if (!shouldAnnotate(v)) {
+    return;
+  }
+  auto it = elementMap_.find(v);
+  TORCH_INTERNAL_ASSERT(it != elementMap_.end());
+  assignWildcardToContained(it->second, v->type());
+}
+
+void AliasDb::assignWildcardToContained(Element* e, const TypePtr& type) {
+  TORCH_INTERNAL_ASSERT(shouldAnnotate(type));
+  // Assign wildcards to contained types
+  for (const auto& type : type->containedTypes()) {
+    if (shouldAnnotate(type)) {
+      auto contained = memoryDAG_->makeFreshValue(nullptr);
+      auto wildcard = getOrCreateWildcard(type);
+      memoryDAG_->makePointerTo(contained, wildcard);
+      memoryDAG_->addToContainedElements(contained, e);
+
+      // Handle nested containers
+      assignWildcardToContained(contained, type);
+    }
+  }
+}
+
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   for (auto input : graph->inputs()) {
     setWildcard(input);
+    assignWildcardToContained(input);
   }
   analyze(graph->block());
 }
@@ -606,13 +632,7 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
   giveFreshAlias(container);
 
   // Register contained types
-  auto el = getOrCreateElement(container);
-  for (const auto& type : container->type()->containedTypes()) {
-    if (shouldAnnotate(type)) {
-      auto wildcard = getOrCreateWildcard(type);
-      memoryDAG_->addToContainedElements(wildcard, el);
-    }
-  }
+  assignWildcardToContained(container);
 }
 
 // BroadcastingChunk: all inputs are broadcasted, and then individually chunked.

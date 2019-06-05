@@ -101,6 +101,8 @@ void MemoryDAG::makePointerTo(Element* from, Element* to) {
 }
 
 void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
+  TORCH_INTERNAL_ASSERT(
+      elem != container, "Elements cannot contain themselves");
   container->containedElements.set(elem->index);
 }
 
