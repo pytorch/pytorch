@@ -709,12 +709,12 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
 
   // Check __getstate__
   //   __getstate__ is expected to be (self) -> T
-  AT_CHECK(
+  TORCH_CHECK(
       get_schema.arguments().size() == 1,
       "'__getstate__' must have 'self' as its only argument, but found ",
       get_schema.arguments().size(),
       " arguments");
-  AT_CHECK(
+  TORCH_CHECK(
       get_schema.returns().size() == 1,
       "'__getstate__' must return 1 value, but found ",
       get_schema.returns().size());
@@ -728,18 +728,18 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   }
   auto set_schema = setstate->getSchema();
 
-  AT_CHECK(
+  TORCH_CHECK(
       set_schema.arguments().size() == 2,
       "'__setstate__' must have 'self' and the state as its "
       "only arguments, but found ",
       set_schema.arguments().size(),
       " arguments");
-  AT_CHECK(
+  TORCH_CHECK(
       set_schema.returns().size() == 1,
       "'__setstate__' must return None, but found ",
       set_schema.returns().size(),
       " return values");
-  AT_CHECK(
+  TORCH_CHECK(
       set_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
       "'__setstate__' must return None, but found value of type",
       set_schema.returns().at(0).type()->python_str());
@@ -749,7 +749,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   auto get_type = get_schema.returns().at(0).type();
   auto set_type = set_schema.arguments().at(1).type();
 
-  AT_CHECK(
+  TORCH_CHECK(
       set_type->isSubtypeOf(get_type),
       "'__getstate__'s return type (",
       get_type->python_str(),
@@ -763,7 +763,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
 /// Run module.__getstate__() and return the result
 IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
   auto getstate = module.find_method("__getstate__");
-  AT_CHECK(
+  TORCH_CHECK(
       getstate != nullptr,
       "Cannot call '__getstate__' method because"
       " it does not exist");
