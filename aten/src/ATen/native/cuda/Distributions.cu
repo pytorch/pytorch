@@ -590,6 +590,32 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
    });
 }
 
+void geometric_kernel_cuda(TensorIterator& iter, double p_, Generator* gen_) {
+  auto gen = check_generator<CUDAGenerator>(gen_, &globalContext().defaultGenerator(kCUDA));
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "geometric_cuda", [&] {
+    if (std::is_same<scalar_t, double>::value) {
+      // define lambda for geometric transformation
+      auto geometric_func = [p_] __device__ (double rand) {
+        return static_cast<scalar_t>(::ceil(::log(rand) / ::log(static_cast<double>(1.0)-p_)));
+      };
+      distribution_nullary_kernel<scalar_t, double, curand4_engine_calls/2>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform2_double(state); },
+        geometric_func);
+    } else {
+      auto p = static_cast<float>(p_);
+      auto geometric_func = [p] __device__ (float rand) {
+        // use __logf fast approximation for peak bandwidth
+        return static_cast<scalar_t>(::ceil(__logf(rand) / __logf(static_cast<float>(1.0)-p)));
+      };
+      distribution_nullary_kernel<scalar_t, float, curand4_engine_calls>(iter,
+        gen,
+        [] __device__ (curandStatePhilox4_32_10_t* state) { return curand_uniform4(state); },
+        geometric_func);
+    }
+   });
+}
+
 Tensor& uniform_cuda_(Tensor& self, double from, double to, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   uniform_kernel_cuda(*iter, from, to, gen);
@@ -678,6 +704,13 @@ Tensor& cauchy_cuda_(Tensor& self, double median, double sigma, Generator* gen) 
 Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   exponential_kernel_cuda(*iter, lambda, gen);
+  return self;
+}
+
+Tensor& geometric_cuda_(Tensor& self, double p, Generator* gen) {
+  TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
+  auto iter = TensorIterator::nullary_op(self);
+  geometric_kernel_cuda(*iter, p, gen);
   return self;
 }
 

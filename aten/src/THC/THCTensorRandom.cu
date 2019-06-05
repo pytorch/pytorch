@@ -101,20 +101,6 @@ THC_API __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_s
   }
 }
 
-#define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)      \
-__global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)    \
-{                                                                              \
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;                             \
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;                \
-  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {      \
-    CURAND_T x = CURAND_FUNC(&state[blockIdx.x]);                              \
-    if (i < size) {                                                            \
-      T y = TRANSFORM;                                                         \
-      result[i] = y;                                                           \
-    }                                                                          \
-  }                                                                            \
-}
-
 #define GENERATE_KERNEL2(NAME, T, ARG1, ARG2, CURAND_T, CURAND_FUNC, TRANSFORM)      \
 __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2)    \
 {                                                                                    \
@@ -135,5 +121,4 @@ __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2) 
 #include <THC/generic/THCTensorRandom.cu>
 #include <THC/THCGenerateBoolType.h>
 
-#undef GENERATE_KERNEL1
 #undef GENERATE_KERNEL2

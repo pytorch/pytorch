@@ -319,28 +319,6 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
 
 #endif
 
-#if defined(THC_REAL_IS_DOUBLE)
-GENERATE_KERNEL1(generate_geometric, double, double p, double, curand_uniform_double, ceil(log(x) / log(1-p)))
-#else
-GENERATE_KERNEL1(generate_geometric, scalar_t, double p, float, curand_uniform, (ScalarConvert<float, scalar_t>::to(ceilf(logf(x) / log(1-p)))))
-#endif
-
-void THCTensor_(geometric)(THCState* state, THCTensor *self_, double p)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);
-  if (size == 0) return;
-  THCGenerator* gen = THCRandom_getGenerator(state);
-
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);
-  scalar_t *data = THCTensor_(data)(state, self);
-
-  generate_geometric<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, p);
-
-  THCTensor_(freeCopyTo)(state, self, self_);
-};
-
 #undef NUM_BLOCKS
 
 #endif

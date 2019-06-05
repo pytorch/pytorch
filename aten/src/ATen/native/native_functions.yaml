@@ -3243,7 +3243,7 @@
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_geometric_
-    CUDA: legacy::cuda::_th_geometric_
+    CUDA: geometric_cuda_
 
 # wrappers for TH functions
 

@@ -10,7 +10,4 @@ THC_API void THCTensor_(multinomialAliasSetup)(struct THCState *state, THCTensor
 THC_API void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCTensor *_q, THCudaLongTensor *_J, int n_sample);
 
 #endif
-
-THC_API void THCTensor_(geometric)(struct THCState *state, THCTensor *self, double p);
-
 #endif
