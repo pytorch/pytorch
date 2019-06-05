@@ -2702,7 +2702,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   return: self
   arguments:
     - THTensor* self
