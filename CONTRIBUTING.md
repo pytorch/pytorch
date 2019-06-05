@@ -369,6 +369,39 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
     slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
 2. `cuda-gdb` and `cuda-memcheck` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
+3. CUDA supports a lot of C++11 features such as, `std::numeric_limits`, `std::nextafter`,
+   `std::tuple` etc. in device code. Many of such features are possible because of the
+   [--expt-relaxed-constexpr](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#constexpr-functions)
+   nvcc flag. There is a known [issue](https://github.com/ROCm-Developer-Tools/HIP/issues/374)
+   that ROCm errors out on device code, which uses such stl functions.
+4. A good performance metric for a CUDA kernel is the
+   [Effective Memory Bandwidth](https://devblogs.nvidia.com/how-implement-performance-metrics-cuda-cc/).
+   It is useful for you to measure this metric whenever you are writing/optimizing a CUDA
+   kernel. Following script shows how we can measure the effective bandwidth of CUDA `uniform_`
+   kernel.
+   ```python
+   import torch
+   import time
+   size = 128*512
+   nrep = 100
+   nbytes_read_write = 4 # this is number of bytes read + written by a kernel. Change this to fit your kernel.
+
+   for i in range(10):
+       a=torch.Tensor(size).cuda().uniform_()
+       torch.cuda.synchronize()
+       start = time.time()
+       # dry run to alloc
+       out = a.uniform_()
+       torch.cuda.synchronize()
+       start = time.time()
+       for i in range(nrep):
+         out = a.uniform_()
+       torch.cuda.synchronize()
+       end = time.time()
+       timec = (end-start)/nrep
+       print("uniform, size, elements", size, "forward", timec, "bandwidth (GB/s)", size*(nbytes_read_write)*1e-9/timec)
+       size *=2
+   ```
 
 
 Hope this helps, and thanks for considering to contribute.
