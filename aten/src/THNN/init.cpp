@@ -145,6 +145,9 @@
 #include <THNN/generic/SpatialAveragePooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
+#include <THNN/generic/SpatialMaxUnpooling.c>
+#include <TH/THGenerateFloatTypes.h>
+
 #include <THNN/generic/VolumetricAveragePooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
@@ -155,6 +158,9 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricDilatedConvolution.c>
+#include <TH/THGenerateFloatTypes.h>
+
+#include <THNN/generic/VolumetricMaxUnpooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SpatialClassNLLCriterion.c>

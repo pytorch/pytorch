@@ -134,6 +134,18 @@
     output: 'false'
     grad_input: 'false'
 
+- name: _thnn_max_unpool2d(Tensor self, LongTensor indices, IntArrayRef[2] output_size)
+  cname: SpatialMaxUnpooling
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
+
+- name: _thnn_max_unpool3d(Tensor self, LongTensor indices, IntArrayRef[3] output_size, IntArrayRef[3] stride, IntArrayRef[3] padding)
+  cname: VolumetricMaxUnpooling
+  scalar_check:
+    output: 'false'
+    grad_input: 'false'
+
 # Private functions. These also exist in TH, but we want the backwards functions
 # to implement derivatives.
 

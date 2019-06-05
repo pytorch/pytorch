@@ -35,6 +35,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDepthwiseConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDilatedConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullDilatedConvolution.cu
+${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxUnpooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialSubSampling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Sqrt.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Square.cu
@@ -47,6 +48,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullDilatedConvolution.cu
+${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxUnpooling.cu
 PARENT_SCOPE)
 
 set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE}
