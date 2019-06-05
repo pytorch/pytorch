@@ -934,6 +934,16 @@ class _TestTorchMixin(object):
     def test_min(self):
         self._testSelection(torch.min, min)
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_large_reduction_inner(self):
+        # This test stresses THC_transformReduceInnermostDimIndex
+        for n, m in [(4, 1001), (1001, 4)]:
+            a = torch.tensor((np.random.rand(n, m) * 10000).astype(np.int32))
+            min_ref = torch.min(a, 1)
+            cuda_min = torch.min(a.cuda(), 1)
+            self.assertEqual(min_ref[0].numpy(), cuda_min[0].cpu().numpy())
+            self.assertEqual(min_ref[1].numpy(), cuda_min[1].cpu().numpy())
+
     @staticmethod
     def _test_min_with_inf(self, dtypes=(torch.float, torch.double), device='cpu'):
         for dtype in dtypes:

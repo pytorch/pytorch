@@ -15,6 +15,7 @@
 
 // Threads per thread block
 #define THC_NONCONTIG_REDUCE_BLOCK_SIZE 32 * 16
+#define THC_ONEDIM_REDUCE_NUM_THREADS 256
 #define CHUNKPERBLOCK 256
 
 template <typename IndexType>

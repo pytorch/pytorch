@@ -8,6 +8,7 @@
 #include <THC/THCReduceAll.cuh>
 #include <THC/THCTensorCopy.hpp>
 #include <THC/THCThrustAllocator.cuh>
+#include <cub/block/block_reduce.cuh>
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
 #include <thrust/transform_reduce.h>
@@ -420,9 +421,10 @@ THC_transformReduceOuterDimIndex(THCState *state,
   THCudaCheck(cudaGetLastError());
 }
 
+
 /* Reduce the innermost dimension of a tensor (on thrust::pair functors which are (value, index))
  *
- * For an n-d tensor (n <= 4) where the reduction is along the innermost dimension:
+ * For an n-d tensor where the reduction is along the innermost dimension:
  *
  * - block.x is the innermost dimension, i.e. dimension 0;
  * - block.y and grid.y make up dimension 1; and
@@ -430,9 +432,37 @@ THC_transformReduceOuterDimIndex(THCState *state,
  *
  * Reduction along other dimensions is handled in a separate kernel.
  */
+
+ // This version is faster when the row size is large
 template <typename K, typename Index, class BinaryFunction>
 __global__ void
-kernelTransformReduceInnermostDimIndex(K *tgt1,
+kernelTransformReduceInnermostDimIndexWide(K *tgt1,
+                                       Index* tgt2,
+                                       K *src_,
+                                       unsigned num_rows,
+                                       unsigned row_size,
+                                       thrust::pair<K, Index> init,
+                                       BinaryFunction binary_op) {
+    typedef cub::BlockReduce<thrust::pair<K, Index>, THC_ONEDIM_REDUCE_NUM_THREADS> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage temp_storage;
+
+    unsigned row = blockIdx.x;
+    thrust::pair<K, Index> red = init;
+    for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
+       K *src = src_ + row * row_size;
+       red = binary_op(red, thrust::make_pair<K, Index>(src[col], col));
+    }
+    thrust::pair<K, Index> result = BlockReduce(temp_storage).Reduce(red, binary_op);
+    if (threadIdx.x == 0) {
+       tgt1[row] = result.first;
+       tgt2[row] = result.second;
+    }
+}
+
+// This version is faster when the row size is small
+template <typename K, typename Index, class BinaryFunction>
+__global__ void
+kernelTransformReduceInnermostDimIndexSkinny(K *tgt1,
                                        Index* tgt2,
                                        K *src_,
                                        unsigned num_rows,
@@ -504,15 +534,24 @@ THC_transformReduceInnermostDimIndex(THCState *state,
   }
   unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, ndim - 1);
 
-  dim3 threads(16, 32);
-  dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
+  if (row_size > 1000) {
+    kernelTransformReduceInnermostDimIndexWide
+      <<<num_rows, THC_ONEDIM_REDUCE_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+        tgt1->template data<ScalarTypeK>(),
+        tgt2->template data<ScalarTypeIndex>(),
+        src->template data<ScalarTypeK>(),
+        num_rows, row_size, init, binary_op);
+  } else {
+     dim3 threads(16, 32);
+     dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
 
-  kernelTransformReduceInnermostDimIndex
-    <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
-      tgt1->template data<ScalarTypeK>(),
-      tgt2->template data<ScalarTypeIndex>(),
-      src->template data<ScalarTypeK>(),
-      num_rows, row_size, init, binary_op);
+     kernelTransformReduceInnermostDimIndexSkinny
+       <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+         tgt1->template data<ScalarTypeK>(),
+         tgt2->template data<ScalarTypeIndex>(),
+         src->template data<ScalarTypeK>(),
+         num_rows, row_size, init, binary_op);
+  }
 
   THCudaCheck(cudaGetLastError());
 }
