@@ -2160,6 +2160,12 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
     DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
     DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
+    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
+    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
+    DEFINE_UNARY_OP(aten::acosh, std::acosh(a), float, float),
+    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
+    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
+    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
     Operator(
         "aten::modf(float a) -> (float, float)",
