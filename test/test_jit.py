@@ -6128,7 +6128,8 @@ a")
                     self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
 
 
-        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc", "expm1", "fabs"]
+        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc",
+                           "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan"]
         for op in unary_float_ops:
             checkMathWrap(op)
 
