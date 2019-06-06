@@ -27,7 +27,7 @@ struct BailOutGraphBuilderForNode {
     auto node = old_value->node();
     // this reduces the number of inputs to a bailout graph significantly
     // making it easier to debug
-    if (node->kind() == prim::Constant) {
+    if (node->kind() == prim::Constant && !new_value) {
       auto new_const = copy_graph_->createClone(node, {nullptr});
       copy_graph_->block()->appendNode(new_const);
       return new_const->output();
@@ -63,11 +63,10 @@ struct BailOutGraphBuilderForNode {
       auto new_max_count = addNewInputForValue(n->inputs()[0]);
       auto cur_iter = addNewInputForValue(n->blocks()[0]->inputs()[0]);
       // subtract the number of iterations we already did
-      auto updated_max_trip_count = copy_graph_->create(aten::sub);
-      block->appendNode(updated_max_trip_count);
-      updated_max_trip_count->addInput(new_max_count);
-      updated_max_trip_count->addInput(cur_iter);
-      addNewInputForValue(n->inputs()[0], updated_max_trip_count->output());
+      WithInsertPoint guard(*block->nodes().end());
+      auto updated_max_trip_count =
+          copy_graph_->insert(aten::sub, {new_max_count, cur_iter});
+      addNewInputForValue(n->inputs()[0], updated_max_trip_count);
       // N.B. the rest of inputs have already been mapped
       // when loop->blocks()[0] was processed
     } else if (n->kind() == prim::If) {
