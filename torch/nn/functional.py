@@ -3077,27 +3077,29 @@ def _pad_circular(input, padding):
 
 
 @weak_script
-def multi_head_attention_forward(query,                  # type: Tensor
-                                 key,                    # type: Tensor
-                                 value,                  # type: Tensor
-                                 embed_dim_to_check,     # type: int
-                                 num_heads,              # type: int
-                                 q_proj_weight,          # type: Tensor
-                                 k_proj_weight,          # type: Tensor
-                                 v_proj_weight,          # type: Tensor
-                                 in_proj_bias,           # type: Tensor
-                                 bias_k,                 # type: Optional[Tensor]
-                                 bias_v,                 # type: Optional[Tensor]
-                                 add_zero_attn,          # type: bool
-                                 dropout_p,              # type: float
-                                 out_proj_weight,        # type: Tensor
-                                 out_proj_bias,          # type: Tensor
-                                 training=True,          # type: bool
-                                 key_padding_mask=None,  # type: Optional[Tensor]
-                                 need_weights=True,      # type: bool
-                                 attn_mask=None,         # type: Optional[Tensor]
-                                 saved_k=None,           # type: Optional[Tensor]
-                                 saved_v=None            # type: Optional[Tensor]
+def multi_head_attention_forward(query,                        # type: Tensor
+                                 key,                          # type: Tensor
+                                 value,                        # type: Tensor
+                                 embed_dim_to_check,           # type: int
+                                 num_heads,                    # type: int
+                                 in_proj_weight,               # type: Tensor
+                                 in_proj_bias,                 # type: Tensor
+                                 bias_k,                       # type: Optional[Tensor]
+                                 bias_v,                       # type: Optional[Tensor]
+                                 add_zero_attn,                # type: bool
+                                 dropout_p,                    # type: float
+                                 out_proj_weight,              # type: Tensor
+                                 out_proj_bias,                # type: Tensor
+                                 training=True,                # type: bool
+                                 key_padding_mask=None,        # type: Optional[Tensor]
+                                 need_weights=True,            # type: bool
+                                 attn_mask=None,               # type: Optional[Tensor]
+                                 use_chunk_proj_weight=True,   # type: bool
+                                 q_proj_weight=None,           # type: Optional[Tensor]
+                                 k_proj_weight=None,           # type: Optional[Tensor]
+                                 v_proj_weight=None,           # type: Optional[Tensor]
+                                 saved_k=None,                 # type: Optional[Tensor]
+                                 saved_v=None                  # type: Optional[Tensor]
                                  ):
     # type: (...) -> Tuple[Tensor, Optional[Tensor]]
     r"""
@@ -3106,7 +3108,7 @@ def multi_head_attention_forward(query,                  # type: Tensor
             See "Attention Is All You Need" for more details.
         embed_dim_to_check: total dimension of the model.
         num_heads: parallel attention heads.
-        q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
+        in_proj_weight, in_proj_bias: input projection weight and bias.
         bias_k, bias_v: bias of the key and value sequences to be added at dim=0.
         add_zero_attn: add a new batch of zeros to the key and
                        value sequences at dim=1.
@@ -3117,6 +3119,8 @@ def multi_head_attention_forward(query,                  # type: Tensor
             be ignored by the attention.
         need_weights: output attn_output_weights.
         attn_mask: mask that prevents attention to certain positions.
+        use_chunk_proj_weight: use in_proj_weight insteady of q_proj_weight, k_proj_weight, v_proj_weight.
+        q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         saved_k, saved_v: static key and value used for attention operators.
 
 
@@ -3129,7 +3133,7 @@ def multi_head_attention_forward(query,                  # type: Tensor
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
-        - attn_mask: :math:`(L, L)` where L is the target sequence length, S is the source sequence length.
+        - attn_mask: :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
         - saved_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length, 
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
         - saved_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length, 
@@ -3154,9 +3158,75 @@ def multi_head_attention_forward(query,                  # type: Tensor
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 
-    q = linear(query, q_proj_weight, in_proj_bias[0:embed_dim])
-    k = linear(key, k_proj_weight, in_proj_bias[embed_dim:(embed_dim * 2)])
-    v = linear(value, v_proj_weight, in_proj_bias[(embed_dim * 2):])
+    if use_chunk_proj_weight:
+        if qkv_same:
+            # self-attention
+            q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
+
+        elif kv_same:
+            # encoder-decoder attention
+            _b = in_proj_bias
+            _start = 0
+            _end = embed_dim
+            _w = in_proj_weight[_start:_end, :]
+            if _b is not None:
+                _b = _b[_start:_end]
+            q = linear(query, _w, _b)
+
+            if key is None:
+                assert value is None
+                k = None
+                v = None
+            else:
+
+                _b = in_proj_bias
+                _start = embed_dim
+                _end = None
+                _w = in_proj_weight[_start:, :]
+                if _b is not None:
+                    _b = _b[_start:]
+                k, v = linear(key, _w, _b).chunk(2, dim=-1)
+
+        else:
+            _b = in_proj_bias
+            _start = 0
+            _end = embed_dim
+            _w = in_proj_weight[_start:_end, :]
+            if _b is not None:
+                _b = _b[_start:_end]
+            q = linear(query, _w, _b)
+
+            _b = in_proj_bias
+            _start = embed_dim
+            _end = embed_dim * 2
+            _w = in_proj_weight[_start:_end, :]
+            if _b is not None:
+                _b = _b[_start:_end]
+            k = linear(key, _w, _b)
+
+            _b = in_proj_bias
+            _start = embed_dim * 2
+            _end = None
+            _w = in_proj_weight[_start:, :]
+            if _b is not None:
+                _b = _b[_start:]
+            v = linear(value, _w, _b)
+    else:
+        assert q_proj_weight is not None
+        q_embed_dim = query.size(-1)
+        assert tuple(q_proj_weight.size()) == (embed_dim, q_embed_dim)
+
+        assert k_proj_weight is not None
+        k_embed_dim = key.size(-1)
+        assert tuple(k_proj_weight.size()) == (embed_dim, k_embed_dim)
+
+        assert v_proj_weight is not None
+        q = linear(query, q_proj_weight, in_proj_bias[0:embed_dim])
+        k = linear(key, k_proj_weight, in_proj_bias[embed_dim:(embed_dim * 2)])
+        v = linear(value, v_proj_weight, in_proj_bias[(embed_dim * 2):])
+        v_embed_dim = value.size(-1)
+        assert tuple(v_proj_weight.size()) == (embed_dim, v_embed_dim)
+
     q *= scaling
 
     if bias_k is not None and bias_v is not None:

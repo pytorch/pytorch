@@ -3382,22 +3382,42 @@ class TestNN(NNTestCase):
                 _V = source_hid_tensor
                 _K = source_hid_tensor
  
-                result, result_weight = torch.nn.functional.multi_head_attention_forward(
-                    _Q, _K, _V,
-                    d_model, nheads,
-                    multihead_attn_module.q_proj_weight, multihead_attn_module.k_proj_weight,
-                    multihead_attn_module.v_proj_weight, multihead_attn_module.in_proj_bias,
-                    multihead_attn_module.bias_k, multihead_attn_module.bias_v,
-                    multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
-                    multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
-                    multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
-                    saved_k=saved_k_tensor, saved_v=saved_v_tensor) 
+                if multihead_attn_module._qkv_same_embed_dim:
+                    result, result_weight = torch.nn.functional.multi_head_attention_forward(
+                        _Q, _K, _V,
+                        d_model, nheads,
+                        multihead_attn_module.in_proj_weight, multihead_attn_module.in_proj_bias,
+                        multihead_attn_module.bias_k, multihead_attn_module.bias_v,
+                        multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
+                        multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
+                        multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
+                        saved_k=saved_k_tensor, saved_v=saved_v_tensor) 
+                else:
+                    result, result_weight = torch.nn.functional.multi_head_attention_forward(
+                        _Q, _K, _V,
+                        d_model, nheads,
+                        multihead_attn_module.in_proj_weight, multihead_attn_module.in_proj_bias,
+                        multihead_attn_module.bias_k, multihead_attn_module.bias_v,
+                        multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
+                        multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
+                        multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
+                        False, multihead_attn_module.q_proj_weight, 
+                        multihead_attn_module.k_proj_weight, multihead_attn_module.v_proj_weight,
+                        saved_k=saved_k_tensor, saved_v=saved_v_tensor) 
 
                 result = result.squeeze(0).detach().numpy()
 
-                Q_fc = _fc(Q, multihead_attn_module.q_proj_weight, multihead_attn_module.in_proj_bias[:d_model])
-                K_fc = _fc(K, multihead_attn_module.k_proj_weight, multihead_attn_module.in_proj_bias[d_model:(d_model * 2)])
-                V_fc = _fc(V, multihead_attn_module.v_proj_weight, multihead_attn_module.in_proj_bias[(d_model * 2):])
+                q_proj_weight = multihead_attn_module.in_proj_weight[:d_model]
+                k_proj_weight = multihead_attn_module.in_proj_weight[d_model:(d_model * 2)]
+                v_proj_weight = multihead_attn_module.in_proj_weight[(d_model * 2):]
+                if not multihead_attn_module._qkv_same_embed_dim:
+                    q_proj_weight = multihead_attn_module.q_proj_weight
+                    k_proj_weight = multihead_attn_module.k_proj_weight
+                    v_proj_weight = multihead_attn_module.v_proj_weight
+
+                Q_fc = _fc(Q, q_proj_weight, multihead_attn_module.in_proj_bias[:d_model])
+                K_fc = _fc(K, k_proj_weight, multihead_attn_module.in_proj_bias[d_model:(d_model * 2)])
+                V_fc = _fc(V, v_proj_weight, multihead_attn_module.in_proj_bias[(d_model * 2):])
 
                 if add_bias_kv:
                     K_fc = np.concatenate((K_fc, np.repeat(bias_k, K_fc.shape[0], axis=0)), axis=1)
