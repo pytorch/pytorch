@@ -49,7 +49,9 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       device_option_(
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
       newstyle_outputs_(c10::make_list<at::Tensor>()),
+#endif
       input_size_(operator_def.input_size()),
       event_(caffe2::make_unique<Event>(device_option_)) {
   static GlobalInitIsCalledGuard guard;

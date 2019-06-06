@@ -174,10 +174,7 @@ template<class Key, class Value> DictPtr<IValue, IValue> toGenericDict(DictPtr<K
 template<class Key, class Value>
 class DictPtr final {
 private:
-  constexpr static bool is_generic_dict() {
-    return std::is_same<IValue, Key>::value && std::is_same<IValue, Value>::value;
-  }
-  static_assert(is_generic_dict() || guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "Invalid Key type for Dict. We only support int64_t, double, bool, and string.");
+  static_assert((std::is_same<IValue, Key>::value && std::is_same<IValue, Value>::value) || guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "Invalid Key type for Dict. We only support int64_t, double, bool, and string.");
 
   // impl_ stores the underlying map as a ska::flat_hash_map.
   // We intentionally don't offer conversion from/to

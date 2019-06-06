@@ -384,13 +384,13 @@ inline py::object toPyObject(IValue&& ivalue) {
   } else if (ivalue.isString()) {
     return py::cast(std::move(ivalue).toStringRef());
   } else if (ivalue.isIntList()) {
-    return py::cast(std::move(ivalue).toIntList());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toIntList()));
   } else if (ivalue.isDoubleList()) {
-    return py::cast(std::move(ivalue).toDoubleList());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toDoubleList()));
   } else if (ivalue.isBoolList()) {
-    return py::cast(std::move(ivalue).toBoolList());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toBoolList()));
   } else if (ivalue.isTensorList()) {
-    return py::cast(std::move(ivalue).toTensorList());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toTensorList()));
   } else if (ivalue.isGenericList()) {
     auto list = std::move(ivalue).toGenericList();
     py::list t{list.size()};

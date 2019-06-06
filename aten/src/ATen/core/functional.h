@@ -2,7 +2,6 @@
 
 #include <vector>
 #include <c10/util/ArrayRef.h>
-#include <ATen/core/List.h>
 
 namespace c10 {
 

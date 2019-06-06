@@ -1551,7 +1551,7 @@ int listSlice(Stack& stack) {
 template <typename T>
 int listSort(Stack& stack) {
   c10::ListPtr<T> list = pop(stack).to<c10::ListPtr<T>>();
-  std::sort(list.begin(), list.end(), [] (T a, T b) {return a < b;});
+  std::sort(list.begin(), list.end(), [] (auto&& a, auto&& b) {return static_cast<T>(std::move(a)) < static_cast<T>(std::move(b));});
   return 0;
 }
 
@@ -1562,8 +1562,8 @@ int listSort<at::Tensor>(Stack& stack) {
   std::sort(
       list.begin(),
       list.end(),
-      [](at::Tensor a, at::Tensor b) {
-        return a.lt(b).is_nonzero();
+      [](auto&& a, auto&& b) {
+        return static_cast<at::Tensor>(std::move(a)).lt(static_cast<at::Tensor>(std::move(b))).is_nonzero();
       });
   return 0;
 }

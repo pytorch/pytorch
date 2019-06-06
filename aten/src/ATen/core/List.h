@@ -172,7 +172,7 @@ template<class T> ListPtr<T> toTypedList(ListPtr<IValue> list);
 template<class T> ListPtr<IValue> toGenericList(ListPtr<T> list);
 const IValue* ptr_to_first_element(const ListPtr<IValue>& list);
 template<class T> ListPtr<T> toList(std::vector<T> list);
-template<class T> std::vector<T> toVector(const ListPtr<T>& list);
+template<class T> const std::vector<T>& toVector(const ListPtr<T>& list);
 }
 template<class T> bool list_is_equal(const ListPtr<T>& lhs, const ListPtr<T>& rhs);
 
@@ -409,7 +409,7 @@ private:
   template<class T_> friend ListPtr<IValue> impl::toGenericList(ListPtr<T_>);
   friend const IValue* impl::ptr_to_first_element(const ListPtr<IValue>& list);
   template<class T_> friend ListPtr<T_> impl::toList(std::vector<T_> list);
-  template<class T_> friend std::vector<T_> impl::toVector(const ListPtr<T_>& list);
+  template<class T_> friend const std::vector<T_>& impl::toVector(const ListPtr<T_>& list);
 };
 
 namespace impl {
@@ -443,14 +443,10 @@ inline const IValue* ptr_to_first_element(const GenericListPtr& list) {
 }
 
 template<class T>
-std::vector<T> toVector(const ListPtr<T>& list) {
+const std::vector<T>& toVector(const ListPtr<T>& list) {
   static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename ListPtr<T>::StorageT>::value, "toVector only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-  std::vector<T> result;
-  result.reserve(list.size());
-  for (size_t i = 0; i < list.size(); ++i) {
-    result.push_back(list.get(i));
-  }
-  return result;
+
+  return list.impl_->list;
 }
 
 template<class T>

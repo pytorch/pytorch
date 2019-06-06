@@ -226,9 +226,9 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   }
   if (ivalue.isGenericDict()) {
     auto dict_type = type->expect<DictType>();
-    const auto& dict = ivalue.toGenericDict();
+    auto dict = ivalue.toGenericDict();
     return std::all_of(
-        dict.begin(), dict.end(), [=](const c10::impl::GenericDictPtr::const_iterator::value_type& item) {
+        dict.begin(), dict.end(), [=](const auto& item) {
           return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
               isSubvalueOf(item.value(), dict_type->getValueType());
         });
