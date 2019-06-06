@@ -30,7 +30,7 @@ TreeIterator::TreeIterator(const std::vector<std::string>& fields) {
   // populate field vector and split field names
   fields_.resize(fields.size());
   std::vector<std::vector<std::string>> nameParts(fields_.size());
-  for (int i = 0; i < fields.size(); ++i) {
+  for (size_t i = 0; i < fields.size(); ++i) {
     auto& field = fields_.at(i);
     field.name = fields[i];
     field.id = i;
@@ -49,7 +49,7 @@ TreeIterator::TreeIterator(const std::vector<std::string>& fields) {
   // find length-field with maximum prefix matching for each field
   for (auto& field : fields_) {
     // by default, we are matching against the root domain
-    int maxMatchLevel = 1;
+    size_t maxMatchLevel = 1;
     int maxMatchLengthFieldId = -1;
     for (int j = 0; j < numLengthFields(); ++j) {
       const auto& lenField = lengthField(j);
@@ -193,8 +193,9 @@ namespace {
 
 class CreateTreeCursorOp : public Operator<CPUContext> {
  public:
-  CreateTreeCursorOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit CreateTreeCursorOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         fields_(OperatorBase::GetRepeatedArgument<std::string>("fields")) {}
 
   bool RunOnDevice() override {
@@ -209,8 +210,9 @@ class CreateTreeCursorOp : public Operator<CPUContext> {
 
 class GetCursorOffsetOp : public Operator<CPUContext> {
  public:
-  GetCursorOffsetOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit GetCursorOffsetOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
@@ -225,8 +227,9 @@ class GetCursorOffsetOp : public Operator<CPUContext> {
 
 class ResetCursorOp : public Operator<CPUContext> {
  public:
-  ResetCursorOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit ResetCursorOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
@@ -238,8 +241,9 @@ class ResetCursorOp : public Operator<CPUContext> {
 
 class CheckDatasetConsistencyOp : public Operator<CPUContext> {
  public:
-  CheckDatasetConsistencyOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit CheckDatasetConsistencyOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         iterator_(OperatorBase::GetRepeatedArgument<std::string>("fields")) {}
 
   bool RunOnDevice() override {
@@ -256,12 +260,12 @@ class CheckDatasetConsistencyOp : public Operator<CPUContext> {
     sizes.resize(iterator_.numOffsetFields());
     // gather length data
     lengths.resize(iterator_.numLengthFields());
-    for (int i = 0; i < lengths.size(); ++i) {
+    for (size_t i = 0; i < lengths.size(); ++i) {
       lengths[i] = Input(iterator_.lengthField(i).id).data<TLength>();
     }
     // gather size limits
     limits.assign(sizes.size(), std::numeric_limits<TOffset>::max());
-    for (int i = 0; i < iterator_.fields().size(); ++i) {
+    for (size_t i = 0; i < iterator_.fields().size(); ++i) {
       int lengthIdx = iterator_.fields()[i].lengthFieldId + 1;
       CAFFE_ENFORCE_GT(Input(i).dim(), 0);
       TOffset size = (TOffset)Input(i).sizes()[0];
@@ -286,7 +290,7 @@ class CheckDatasetConsistencyOp : public Operator<CPUContext> {
     // advance to the end
     offsets.assign(sizes.size(), 0);
     iterator_.advance(lengths, offsets, sizes, limits, limits[0]);
-    for (int i = 0; i < limits.size(); ++i) {
+    for (size_t i = 0; i < limits.size(); ++i) {
       CAFFE_ENFORCE(limits[i] == offsets[i]);
     }
     return true;
@@ -298,8 +302,9 @@ class CheckDatasetConsistencyOp : public Operator<CPUContext> {
 
 class PackRecordsOp : public Operator<CPUContext> {
  public:
-  PackRecordsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit PackRecordsOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         fields_(OperatorBase::GetRepeatedArgument<std::string>("fields")) {}
 
   bool RunOnDevice() override {
@@ -342,8 +347,9 @@ class PackRecordsOp : public Operator<CPUContext> {
 
 class UnPackRecordsOp : public Operator<CPUContext> {
  public:
-  UnPackRecordsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit UnPackRecordsOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         fields_(OperatorBase::GetRepeatedArgument<std::string>("fields")) {}
 
   bool RunOnDevice() override {
@@ -452,8 +458,9 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
 class ReadNextBatchOp : public Operator<CPUContext> {
  public:
-  ReadNextBatchOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit ReadNextBatchOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         batchSize_(OperatorBase::GetSingleArgument<int>("batch_size", 1)),
         enforceBatchSize_(OperatorBase::GetSingleArgument<bool>(
             "enforce_batch_size",
@@ -528,8 +535,9 @@ class ReadNextBatchOp : public Operator<CPUContext> {
 
 class ComputeOffsetOp : public Operator<CPUContext> {
  public:
-  ComputeOffsetOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit ComputeOffsetOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& cursor = OperatorBase::Input<std::unique_ptr<TreeCursor>>(0);
@@ -577,8 +585,9 @@ class ComputeOffsetOp : public Operator<CPUContext> {
 
 class SortAndShuffleOp : public Operator<CPUContext> {
  public:
-  SortAndShuffleOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit SortAndShuffleOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         sort_by_field_idx_(
             OperatorBase::GetSingleArgument<int>("sort_by_field_idx", 1)),
         batch_size_(OperatorBase::GetSingleArgument<int>("batch_size", 1)),
@@ -662,8 +671,9 @@ class SortAndShuffleOp : public Operator<CPUContext> {
 
 class ReadRandomBatchOp : public Operator<CPUContext> {
  public:
-  ReadRandomBatchOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit ReadRandomBatchOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         batchSize_(OperatorBase::GetSingleArgument<int>("batch_size", 1)),
         enforceBatchSize_(
             OperatorBase::GetSingleArgument<bool>("enforce_batch_size", false)),
@@ -756,8 +766,9 @@ template <class Context>
 class AppendOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  AppendOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit AppendOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& a = Input(0);
@@ -776,7 +787,7 @@ class AppendOp final : public Operator<Context> {
       CAFFE_ENFORCE(a.sizes()[i] == b.sizes()[i]);
     }
     auto oldSize = c->numel();
-    c->Extend(b.sizes()[0], kDatasetGrowthPct, &context_);
+    c->Extend(b.sizes()[0], kDatasetGrowthPct);
     auto* dst = (char*)c->raw_mutable_data() + oldSize * b.dtype().itemsize();
     context_.CopyItemsSameDevice(b.dtype(), b.numel(), b.raw_data(), dst);
     return true;
@@ -787,8 +798,9 @@ template <class Context>
 class AtomicAppendOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  AtomicAppendOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit AtomicAppendOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& mutex = OperatorBase::Input<std::unique_ptr<std::mutex>>(0);
@@ -826,7 +838,7 @@ class AtomicAppendOp final : public Operator<Context> {
         continue;
       }
       auto oldSize = c->numel();
-      c->Extend(b.sizes()[0], kDatasetGrowthPct, &context_);
+      c->Extend(b.sizes()[0], kDatasetGrowthPct);
       auto* dst = (char*)c->raw_mutable_data() + oldSize * b.dtype().itemsize();
       context_.CopyItemsSameDevice(b.dtype(), b.numel(), b.raw_data(), dst);
     }
@@ -916,8 +928,9 @@ template <class Context>
 class CollectTensorOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  CollectTensorOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit CollectTensorOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         numToCollect_(
             OperatorBase::GetSingleArgument<int>("num_to_collect", -1)),
         numVisited_(0) {
@@ -984,8 +997,9 @@ class CollectTensorOp final : public Operator<Context> {
 
 class TrimDatasetOp : public Operator<CPUContext> {
  public:
-  TrimDatasetOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
+  template <class... Args>
+  explicit TrimDatasetOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...),
         iterator_(OperatorBase::GetRepeatedArgument<std::string>("fields")),
         multiple_of_(OperatorBase::GetSingleArgument<int>("multiple_of", 1)) {
     CAFFE_ENFORCE_GE(multiple_of_, 1);
@@ -1419,7 +1433,7 @@ SHOULD_NOT_DO_GRADIENT(PackRecords);
 class TreeCursorSerializer : public BlobSerializerBase {
  public:
   TreeCursorSerializer() {}
-  ~TreeCursorSerializer() {}
+  ~TreeCursorSerializer() override {}
 
   void Serialize(
       const void* pointer,

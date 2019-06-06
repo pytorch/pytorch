@@ -8,52 +8,51 @@
 
 #include "caffe2/operators/group_norm_op.h"
 
-#include <cub/block/block_reduce.cuh>
-
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/utils/math_utils.h"
+#include "caffe2/utils/math.h"
+#include "caffe2/utils/math/reduce.cuh"
 
 namespace caffe2 {
 
 namespace {
 
 template <typename T>
-using BlockReduce = cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS>;
-
-template <typename T>
 __global__ void ComputeFusedParamsCUDAKernel(
     const int N,
     const int G,
-    const int D,
+    const int K,
     const T* mu,
     const T* rsig,
     const T* gamma,
     const T* beta,
     T* scale,
-    T* bias) {
-  const int outer_size = N * G;
-  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
-    const int g = i % G;
-#if __CUDA_ARCH__ >= 350
-    const T mu_val = __ldg(mu + i);
-    const T rsig_val = __ldg(rsig + i);
+    T* bias);
+
+template <>
+__global__ void ComputeFusedParamsCUDAKernel<float>(
+    const int N,
+    const int G,
+    const int K,
+    const float* mu,
+    const float* rsig,
+    const float* gamma,
+    const float* beta,
+    float* scale,
+    float* bias) {
+  const int C = G * K;
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < N * C) {
+    const int ng = index / K;
+    const int c = index % C;
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    const float scale_val = __ldg(gamma + c) * __ldg(rsig + ng);
+    scale[index] = scale_val;
+    bias[index] = fmaf(-scale_val, __ldg(mu + ng), __ldg(beta + c));
 #else
-    const T mu_val = mu[i];
-    const T rsig_val = rsig[i];
+    const float scale_val = gamma[c] * rsig[ng];
+    scale[index] = scale_val;
+    bias[index] = fmaf(-scale_val, mu[ng], beta[c]);
 #endif
-    for (int j = threadIdx.x; j < D; j += blockDim.x) {
-      const int index = i * D + j;
-      const int i_gamma = g * D + j;
-#if __CUDA_ARCH__ >= 350
-      const T scale_val = __ldg(gamma + i_gamma) * rsig_val;
-      scale[index] = scale_val;
-      bias[index] = __ldg(beta + i_gamma) - scale_val * mu_val;
-#else
-      const T scale_val = gamma[i_gamma] * rsig_val;
-      scale[index] = scale_val;
-      bias[index] = beta[i_gamma] - scale_val * mu_val;
-#endif
-    }
   }
 }
 
@@ -76,23 +75,14 @@ __global__ void GroupNormForwardCUDAKernel<float, StorageOrder::NCHW>(
     const float* scale,
     const float* bias,
     float* Y) {
-  const int outer_size = N * C;
-  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
-#if __CUDA_ARCH__ >= 350
-    const float scale_val = __ldg(scale + i);
-    const float bias_val = __ldg(bias + i);
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < N * C * HxW) {
+    const int nc = index / HxW;
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    Y[index] = fmaf(__ldg(X + index), __ldg(scale + nc), __ldg(bias + nc));
 #else
-    const float scale_val = scale[i];
-    const float bias_val = bias[i];
+    Y[index] = fmaf(X[index], scale[nc], bias[nc]);
 #endif
-    for (int j = threadIdx.x; j < HxW; j += blockDim.x) {
-      const int index = i * HxW + j;
-#if __CUDA_ARCH__ >= 350
-      Y[index] = __ldg(X + index) * scale_val + bias_val;
-#else
-      Y[index] = X[index] * scale_val + bias_val;
-#endif
-    }
   }
 }
 
@@ -105,152 +95,258 @@ __global__ void GroupNormForwardCUDAKernel<float, StorageOrder::NHWC>(
     const float* scale,
     const float* bias,
     float* Y) {
-  const int outer_size = N * HxW;
-  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
-    const int n = i / HxW;
-    for (int j = threadIdx.x; j < C; j += blockDim.x) {
-      const int index = i * C + j;
-      const int i_scale = n * C + j;
-#if __CUDA_ARCH__ >= 350
-      Y[index] =
-          __ldg(X + index) * __ldg(scale + i_scale) + __ldg(bias + i_scale);
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < N * C * HxW) {
+    const int nc = index / (HxW * C) * C + index % C;
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    Y[index] = fmaf(__ldg(X + index), __ldg(scale + nc), __ldg(bias + nc));
 #else
-      Y[index] = X[index] * scale[i_scale] + bias[i_scale];
+    Y[index] = fmaf(X[index], scale[nc], bias[nc]);
 #endif
-    }
   }
 }
 
-template <typename T, StorageOrder kOrder>
-__global__ void ComputeInternalGradientsCUDAKernel(
-    const int N,
-    const int G,
-    const int D,
+template <typename T>
+__global__ void ComputeInternalGradientsNCHWCUDAKernel(
     const int HxW,
     const T* dY,
     const T* X,
-    const T* gamma,
     T* ds,
     T* db) {
-  const int outer_size = N * G;
-  const int inner_size = D * HxW;
   __shared__ typename BlockReduce<T>::TempStorage ds_storage;
   __shared__ typename BlockReduce<T>::TempStorage db_storage;
-  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
-    T ds_val = 0;
-    T db_val = 0;
-    for (int j = threadIdx.x; j < inner_size; j += blockDim.x) {
-      const int i_gamma = i % G * D + j / HxW;
-      const int index = kOrder == StorageOrder::NCHW
-          ? i * inner_size + j
-          : (i / G * HxW + j % HxW) * G * D + i_gamma;
-#if __CUDA_ARCH__ >= 350
-      ds_val += __ldg(gamma + i_gamma) * __ldg(dY + index) * __ldg(X + index);
-      db_val += __ldg(gamma + i_gamma) * __ldg(dY + index);
+  const int nc = blockIdx.x;
+  T ds_sum = 0;
+  T db_sum = 0;
+  for (int i = threadIdx.x; i < HxW; i += blockDim.x) {
+    const int index = nc * HxW + i;
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    ds_sum += __ldg(dY + index) * __ldg(X + index);
+    db_sum += __ldg(dY + index);
 #else
-      ds_val += gamma[i_gamma] * dY[index] * X[index];
-      db_val += gamma[i_gamma] * dY[index];
+    ds_sum += dY[index] * X[index];
+    db_sum += dY[index];
 #endif
-    }
-    ds_val = BlockReduce<T>(ds_storage).Reduce(ds_val, cub::Sum());
-    db_val = BlockReduce<T>(db_storage).Reduce(db_val, cub::Sum());
-    if (threadIdx.x == 0) {
-      ds[i] = ds_val;
-      db[i] = db_val;
-    }
-    __syncthreads();
+  }
+  ds_sum = BlockReduce<T>(ds_storage).Sum(ds_sum);
+  db_sum = BlockReduce<T>(db_storage).Sum(db_sum);
+  if (threadIdx.x == 0) {
+    ds[nc] = ds_sum;
+    db[nc] = db_sum;
   }
 }
 
 // Math:
 // Y = gamma * (X - mu) * rsig + beta
 // let s = gamma * rsig
-// let b = beta - mu * rsig
+// let b = beta - gamma * mu * rsig
 // Y = s * X + b
-// let n = D * HxW
+// let n = K * HxW
 // dL/dX = dL/dY * dY/dX = dL/dY * (d(s * X)/dX + db/dX)
 // d(s * X)/dX = s + X * ds/dX = s + gamma * X * drsig/dX
-// db/dX = -u * drsig/dX - rsig * dmu/dX
+// db/dX = -gamma * u * drsig/dX - gamma * rsig * dmu/dX
 // drsig/dX = -rsig^3 * (X - mu) / n
 // dmu/dX = 1 / n
-template <typename T, StorageOrder kOrder>
-__global__ void GroupNormBackwardCUDAKernel(
-    const int size,
+template <typename T>
+__global__ void ComputeYGradientScaleCUDAKernel(
+    const int N,
     const int G,
-    const int D,
-    const int HxW,
-    const T* dY,
-    const T* X,
+    const int K,
+    const T* rsig,
+    const T* gamma,
+    T* dY_scale) {
+  const int C = G * K;
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < N * C) {
+    const int ng = index / K;
+    const int c = index % C;
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    dY_scale[index] = __ldg(gamma + c) * __ldg(rsig + ng);
+#else
+    dY_scale[index] = gamma[c] * rsig[ng];
+#endif
+  }
+}
+
+template <typename T>
+__global__ void ComputeXScaleAndBiasCUDAKernel(
+    const int G,
+    const int K,
+    const T alpha,
+    const T* ds,
+    const T* db,
     const T* mu,
     const T* rsig,
     const T* gamma,
-    const T* ds,
-    const T* db,
-    T* dX) {
-  const int C = G * D;
-  const T denom = T(1) / static_cast<T>(D * HxW);
-  CUDA_1D_KERNEL_LOOP(i, size) {
-    const int i_mu = kOrder == StorageOrder::NCHW
-        ? i / (D * HxW)
-        : i / (C * HxW) * G + (i / D % G);
-    const int i_gamma = kOrder == StorageOrder::NCHW ? (i / HxW) % C : i % C;
-#if __CUDA_ARCH__ >= 350
-    const T u = (__ldg(db + i_mu) * __ldg(mu + i_mu) - __ldg(ds + i_mu)) *
-        (__ldg(X + i) - __ldg(mu + i_mu)) *
-        math::utils::Cube<T>(__ldg(rsig + i_mu));
-    const T v = __ldg(db + i_mu) * __ldg(rsig + i_mu);
-    dX[i] = __ldg(gamma + i_gamma) * __ldg(dY + i) * __ldg(rsig + i_mu) +
-        (u - v) * denom;
+    T* X_scale,
+    T* bias);
+
+template <>
+__global__ void ComputeXScaleAndBiasCUDAKernel<float>(
+    const int G,
+    const int K,
+    const float alpha,
+    const float* ds,
+    const float* db,
+    const float* mu,
+    const float* rsig,
+    const float* gamma,
+    float* X_scale,
+    float* bias) {
+  __shared__ typename BlockReduce<float>::TempStorage ds_storage;
+  __shared__ typename BlockReduce<float>::TempStorage db_storage;
+  const int n = blockIdx.x;
+  const int g = blockIdx.y;
+  const int ng = n * G + g;
+  float ds_sum = 0;
+  float db_sum = 0;
+  for (int i = threadIdx.x; i < K; i += blockDim.x) {
+    const int index = ng * K + i;
+    const int c = g * K + i;
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    ds_sum += __ldg(ds + index) * __ldg(gamma + c);
+    db_sum += __ldg(db + index) * __ldg(gamma + c);
 #else
-    const T u = (db[i_mu] * mu[i_mu] - ds[i_mu]) * (X[i] - mu[i_mu]) *
-        math::utils::Cube<T>(rsig[i_mu]);
-    const T v = db[i_mu] * rsig[i_mu];
-    dX[i] = gamma[i_gamma] * dY[i] * rsig[i_mu] + (u - v) * denom;
+    ds_sum += ds[index] * gamma[c];
+    db_sum += db[index] * gamma[c];
+#endif
+  }
+  ds_sum = BlockReduce<float>(ds_storage).Sum(ds_sum);
+  db_sum = BlockReduce<float>(db_storage).Sum(db_sum);
+  if (threadIdx.x == 0) {
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    const float x = fmaf(db_sum, __ldg(mu + ng), -ds_sum) *
+        math::utils::Cube<float>(__ldg(rsig + ng)) * alpha;
+    X_scale[ng] = x;
+    bias[ng] = -fmaf(x, __ldg(mu + ng), db_sum * __ldg(rsig + ng) * alpha);
+#else
+    const float x = fmaf(db_sum, mu[ng], -ds_sum) *
+        math::utils::Cube<float>(rsig[ng]) * alpha;
+    X_scale[ng] = x;
+    bias[ng] = -fmaf(x, mu[ng], db_sum * rsig[ng] * alpha);
 #endif
   }
 }
 
 template <typename T, StorageOrder kOrder>
+__global__ void GroupNormBackwardCUDAKernel(
+    const int N,
+    const int G,
+    const int K,
+    const int HxW,
+    const T* dY_scale,
+    const T* dY,
+    const T* X_scale,
+    const T* X,
+    const T* bias,
+    T* dX);
+
+template <>
+__global__ void GroupNormBackwardCUDAKernel<float, StorageOrder::NCHW>(
+    const int N,
+    const int G,
+    const int K,
+    const int HxW,
+    const float* dY_scale,
+    const float* dY,
+    const float* X_scale,
+    const float* X,
+    const float* bias,
+    float* dX) {
+  const int C = G * K;
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < N * C * HxW) {
+    const int nc = index / HxW;
+    const int ng = nc / K;
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    dX[index] = fmaf(
+        __ldg(dY_scale + nc),
+        __ldg(dY + index),
+        fmaf(__ldg(X_scale + ng), __ldg(X + index), __ldg(bias + ng)));
+#else
+    dX[index] =
+        fmaf(dY_scale[nc], dY[index], fmaf(X_scale[ng], X[index], bias[ng]));
+#endif
+  }
+}
+
+template <>
+__global__ void GroupNormBackwardCUDAKernel<float, StorageOrder::NHWC>(
+    const int N,
+    const int G,
+    const int K,
+    const int HxW,
+    const float* dY_scale,
+    const float* dY,
+    const float* X_scale,
+    const float* X,
+    const float* bias,
+    float* dX) {
+  const int C = G * K;
+  const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
+  if (index < N * C * HxW) {
+    const int nc = index / (HxW * C) * C + index % C;
+    const int ng = nc / K;
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    dX[index] = fmaf(
+        __ldg(dY_scale + nc),
+        __ldg(dY + index),
+        fmaf(__ldg(X_scale + ng), __ldg(X + index), __ldg(bias + ng)));
+#else
+    dX[index] =
+        fmaf(dY_scale[nc], dY[index], fmaf(X_scale[ng], X[index], bias[ng]));
+#endif
+  }
+}
+
+template <typename T>
 __global__ void GammaBetaBackwardCUDAKernel(
     const int N,
     const int G,
-    const int D,
-    const int HxW,
-    const T* dY,
-    const T* X,
+    const int K,
+    const T* ds,
+    const T* db,
     const T* mu,
     const T* rsig,
     T* dgamma,
-    T* dbeta) {
-  const int outer_size = G * D;
-  const int inner_size = N * HxW;
-  __shared__ typename BlockReduce<T>::TempStorage dg_storage;
-  __shared__ typename BlockReduce<T>::TempStorage db_storage;
-  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
-    T dg_val = 0;
-    T db_val = 0;
-    for (int j = threadIdx.x; j < inner_size; j += blockDim.x) {
-      const int n = j / HxW;
-      const int index = kOrder == StorageOrder::NCHW
-          ? (n * outer_size + i) * HxW + j % HxW
-          : j * outer_size + i;
-      const int i_mu = n * G + i / D;
-#if __CUDA_ARCH__ >= 350
-      dg_val += __ldg(dY + index) * (__ldg(X + index) - __ldg(mu + i_mu)) *
-          __ldg(rsig + i_mu);
-      db_val += __ldg(dY + index);
+    T* dbeta);
+
+template <>
+__global__ void GammaBetaBackwardCUDAKernel<float>(
+    const int N,
+    const int G,
+    const int K,
+    const float* ds,
+    const float* db,
+    const float* mu,
+    const float* rsig,
+    float* dgamma,
+    float* dbeta) {
+  __shared__ typename BlockReduce<float>::TempStorage dg_storage;
+  __shared__ typename BlockReduce<float>::TempStorage db_storage;
+  const int C = G * K;
+  const int g = blockIdx.x;
+  const int k = blockIdx.y;
+  const int c = g * K + k;
+  float dg_sum = 0;
+  float db_sum = 0;
+  for (int i = threadIdx.x; i < N; i += blockDim.x) {
+    const int nc = i * C + c;
+    const int ng = i * G + g;
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+    dg_sum += fmaf(-__ldg(db + nc), __ldg(mu + ng), __ldg(ds + nc)) *
+        __ldg(rsig + ng);
+    db_sum += __ldg(db + nc);
 #else
-      dg_val += dY[index] * (X[index] - mu[i_mu]) * rsig[i_mu];
-      db_val += dY[index];
+    dg_sum += fmaf(-db[nc], mu[ng], ds[nc]) * rsig[ng];
+    db_sum += db[nc];
 #endif
-    }
-    dg_val = BlockReduce<T>(dg_storage).Reduce(dg_val, cub::Sum());
-    db_val = BlockReduce<T>(db_storage).Reduce(db_val, cub::Sum());
-    if (threadIdx.x == 0) {
-      dgamma[i] = dg_val;
-      dbeta[i] = db_val;
-    }
-    __syncthreads();
+  }
+  dg_sum = BlockReduce<float>(dg_storage).Sum(dg_sum);
+  db_sum = BlockReduce<float>(db_storage).Sum(db_sum);
+  if (threadIdx.x == 0) {
+    dgamma[c] = dg_sum;
+    dbeta[c] = db_sum;
   }
 }
 
@@ -260,18 +356,17 @@ template <>
 void GroupNormOp<float, CUDAContext>::ComputeFusedParams(
     const int N,
     const int G,
-    const int D,
+    const int K,
     const float* mu,
     const float* rsig,
     const float* gamma,
     const float* beta,
     float* scale,
     float* bias) {
+  const int M = math::DivUp(N * G * K, CAFFE_CUDA_NUM_THREADS);
   ComputeFusedParamsCUDAKernel<float>
-      <<<std::min(N * G, CAFFE_MAXIMUM_NUM_BLOCKS),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(N, G, D, mu, rsig, gamma, beta, scale, bias);
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          N, G, K, mu, rsig, gamma, beta, scale, bias);
 }
 
 template <>
@@ -283,11 +378,10 @@ void GroupNormOp<float, CUDAContext>::GroupNormForwardNCHW(
     const float* scale,
     const float* bias,
     float* Y) {
+  const int M = math::DivUp(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
   GroupNormForwardCUDAKernel<float, StorageOrder::NCHW>
-      <<<std::min(N * C, CAFFE_MAXIMUM_NUM_BLOCKS),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(N, C, HxW, X, scale, bias, Y);
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          N, C, HxW, X, scale, bias, Y);
 }
 
 template <>
@@ -299,11 +393,10 @@ void GroupNormOp<float, CUDAContext>::GroupNormForwardNHWC(
     const float* scale,
     const float* bias,
     float* Y) {
+  const int M = math::DivUp(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
   GroupNormForwardCUDAKernel<float, StorageOrder::NHWC>
-      <<<std::min(N * HxW, CAFFE_MAXIMUM_NUM_BLOCKS),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(N, C, HxW, X, scale, bias, Y);
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          N, C, HxW, X, scale, bias, Y);
 }
 
 // Math:
@@ -311,10 +404,10 @@ void GroupNormOp<float, CUDAContext>::GroupNormForwardNHWC(
 // let: b = beta - mu * gamma * rsig
 // then: Y = s * X + b
 template <>
-bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceImpl(
+bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW(
     const int N,
     const int G,
-    const int D,
+    const int K,
     const int HxW,
     const float* dY_data,
     const float* X_data,
@@ -324,105 +417,159 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceImpl(
     float* dX_data,
     float* dgamma_data,
     float* dbeta_data) {
-  const int size = N * G * D * HxW;
-  const int C = G * D;
-  ds_.Resize(N, G);
-  db_.Resize(N, G);
+  const int C = G * K;
+  ReinitializeTensor(&ds_, {N, C}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(&db_, {N, C}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(&dY_scale_, {N, C}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(&X_scale_, {N, G}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(&bias_, {N, G}, at::dtype<float>().device(CUDA));
   float* ds_data = ds_.mutable_data<float>();
   float* db_data = db_.mutable_data<float>();
-  if (order_ == StorageOrder::NCHW) {
-    // Computes dL/ds and dL/db.
-    // dL/ds = Sum(dL/dY * gamma * X)
-    // dL/db = Sum(dL/dY * gamma)
-    ComputeInternalGradientsCUDAKernel<float, StorageOrder::NCHW>
-        <<<std::min(N * G, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context_.cuda_stream()>>>(
-            N, G, D, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
+  float* dY_scale_data = dY_scale_.mutable_data<float>();
+  float* X_scale_data = X_scale_.mutable_data<float>();
+  float* bias_data = bias_.mutable_data<float>();
 
-    // Computes dL/dX.
-    GroupNormBackwardCUDAKernel<float, StorageOrder::NCHW>
-        <<<CAFFE_GET_BLOCKS(size),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context_.cuda_stream()>>>(
-            size,
-            G,
-            D,
-            HxW,
-            dY_data,
-            X_data,
-            mu_data,
-            rsig_data,
-            gamma_data,
-            ds_data,
-            db_data,
-            dX_data);
+  ComputeInternalGradientsNCHWCUDAKernel<float>
+      <<<N * C, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          HxW, dY_data, X_data, ds_data, db_data);
 
-    // Computes dL/dgamma and dL/dbeta.
-    GammaBetaBackwardCUDAKernel<float, StorageOrder::NCHW>
-        <<<std::min(C, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context_.cuda_stream()>>>(
-            N,
-            G,
-            D,
-            HxW,
-            dY_data,
-            X_data,
-            mu_data,
-            rsig_data,
-            dgamma_data,
-            dbeta_data);
-  } else {
-    // Computes dL/ds and dL/db.
-    // dL/ds = Sum(dL/dY * gamma * X)
-    // dL/db = Sum(dL/dY * gamma)
-    ComputeInternalGradientsCUDAKernel<float, StorageOrder::NHWC>
-        <<<std::min(N * G, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context_.cuda_stream()>>>(
-            N, G, D, HxW, dY_data, X_data, gamma_data, ds_data, db_data);
+  // Computes dL/dX.
+  int M = math::DivUp(N * C, CAFFE_CUDA_NUM_THREADS);
+  ComputeYGradientScaleCUDAKernel<float>
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          N, G, K, rsig_data, gamma_data, dY_scale_data);
+  ComputeXScaleAndBiasCUDAKernel<float>
+      <<<dim3(N, G), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          G,
+          K,
+          1.0f / static_cast<float>(K * HxW),
+          ds_data,
+          db_data,
+          mu_data,
+          rsig_data,
+          gamma_data,
+          X_scale_data,
+          bias_data);
+  M = math::DivUp(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
+  GroupNormBackwardCUDAKernel<float, StorageOrder::NCHW>
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          N,
+          G,
+          K,
+          HxW,
+          dY_scale_data,
+          dY_data,
+          X_scale_data,
+          X_data,
+          bias_data,
+          dX_data);
 
-    // Computes dL/dX.
-    GroupNormBackwardCUDAKernel<float, StorageOrder::NHWC>
-        <<<CAFFE_GET_BLOCKS(size),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context_.cuda_stream()>>>(
-            size,
-            G,
-            D,
-            HxW,
-            dY_data,
-            X_data,
-            mu_data,
-            rsig_data,
-            gamma_data,
-            ds_data,
-            db_data,
-            dX_data);
+  // Computes dL/dgamma and dL/dbeta.
+  GammaBetaBackwardCUDAKernel<
+      float><<<dim3(G, K), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+      N, G, K, ds_data, db_data, mu_data, rsig_data, dgamma_data, dbeta_data);
+  return true;
+}
 
-    // Computes dL/dgamma and dL/dbeta.
-    GammaBetaBackwardCUDAKernel<float, StorageOrder::NHWC>
-        <<<std::min(C, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context_.cuda_stream()>>>(
-            N,
-            G,
-            D,
-            HxW,
-            dY_data,
-            X_data,
-            mu_data,
-            rsig_data,
-            dgamma_data,
-            dbeta_data);
-  }
+template <>
+bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC(
+    const int N,
+    const int G,
+    const int K,
+    const int HxW,
+    const float* dY_data,
+    const float* X_data,
+    const float* mu_data,
+    const float* rsig_data,
+    const float* gamma_data,
+    float* dX_data,
+    float* dgamma_data,
+    float* dbeta_data) {
+  const int C = G * K;
+  ReinitializeTensor(&ds_, {N, C}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(&db_, {N, C}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(&dY_scale_, {N, C}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(&X_scale_, {N, G}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(&bias_, {N, G}, at::dtype<float>().device(CUDA));
+  ReinitializeTensor(&ones_, {HxW}, at::dtype<float>().device(CUDA));
+  float* ds_data = ds_.mutable_data<float>();
+  float* db_data = db_.mutable_data<float>();
+  float* dY_scale_data = dY_scale_.mutable_data<float>();
+  float* X_scale_data = X_scale_.mutable_data<float>();
+  float* bias_data = bias_.mutable_data<float>();
+  float* ones_data = ones_.mutable_data<float>();
+
+  math::Set<float, CUDAContext>(HxW, 1.0f, ones_data, &context_);
+  math::Mul<float, CUDAContext>(
+      N * C * HxW, dY_data, X_data, dX_data, &context_);
+  math::GemmStridedBatched<float, CUDAContext>(
+      CblasTrans,
+      CblasNoTrans,
+      N,
+      C,
+      1,
+      HxW,
+      1.0f,
+      dX_data,
+      C * HxW,
+      ones_data,
+      0,
+      0.0f,
+      ds_data,
+      C,
+      &context_);
+  math::GemmStridedBatched<float, CUDAContext>(
+      CblasTrans,
+      CblasNoTrans,
+      N,
+      C,
+      1,
+      HxW,
+      1.0f,
+      dY_data,
+      C * HxW,
+      ones_data,
+      0,
+      0.0f,
+      db_data,
+      C,
+      &context_);
+
+  // Computes dL/dX.
+  int M = math::DivUp(N * C, CAFFE_CUDA_NUM_THREADS);
+  ComputeYGradientScaleCUDAKernel<float>
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          N, G, K, rsig_data, gamma_data, dY_scale_data);
+  ComputeXScaleAndBiasCUDAKernel<float>
+      <<<dim3(N, G), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          G,
+          K,
+          1.0f / static_cast<float>(K * HxW),
+          ds_data,
+          db_data,
+          mu_data,
+          rsig_data,
+          gamma_data,
+          X_scale_data,
+          bias_data);
+  M = math::DivUp(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
+  GroupNormBackwardCUDAKernel<float, StorageOrder::NHWC>
+      <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+          N,
+          G,
+          K,
+          HxW,
+          dY_scale_data,
+          dY_data,
+          X_scale_data,
+          X_data,
+          bias_data,
+          dX_data);
+
+  // Computes dL/dgamma and dL/dbeta.
+  GammaBetaBackwardCUDAKernel<
+      float><<<dim3(G, K), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+      N, G, K, ds_data, db_data, mu_data, rsig_data, dgamma_data, dbeta_data);
   return true;
 }
 

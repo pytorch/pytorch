@@ -38,8 +38,9 @@ void ColwiseMaxAndArg(
 
 class ViterbiPathOp : public Operator<CPUContext> {
  public:
-  ViterbiPathOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit ViterbiPathOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   void GatherRow(
       const TensorCPU& data,
@@ -78,7 +79,6 @@ class ViterbiPathOp : public Operator<CPUContext> {
   bool RunOnDevice() override {
     auto& predictions = Input(0);
     auto& transitions = Input(1);
-    auto* viterbiPath = Output(0);
 
     CAFFE_ENFORCE(
         predictions.dim() == 2 && transitions.dim() == 2,
@@ -90,7 +90,7 @@ class ViterbiPathOp : public Operator<CPUContext> {
 
     auto seqLen = predictions.dim32(0);
 
-    viterbiPath->Resize(seqLen);
+    auto* viterbiPath = Output(0, {seqLen}, at::dtype<int32_t>());
     auto block_size = predictions.numel() / predictions.size(0);
     auto block_bytesize =
         predictions.size_from_dim(1) * predictions.dtype().itemsize();
@@ -147,12 +147,12 @@ class ViterbiPathOp : public Operator<CPUContext> {
 };
 class SwapBestPathOp : public Operator<CPUContext> {
  public:
-  SwapBestPathOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit SwapBestPathOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
   bool RunOnDevice() override {
     auto& data = Input(0);
     auto& newBestIdicies = Input(1);
-    auto* updatedData = Output(0);
 
     CAFFE_ENFORCE(
         data.dim() == 2 && newBestIdicies.dim() == 1,
@@ -162,7 +162,7 @@ class SwapBestPathOp : public Operator<CPUContext> {
         data.size(0) == newBestIdicies.size(0),
         "predictions and bestPath dimensions not matching");
 
-    updatedData->ResizeLike(data);
+    auto* updatedData = Output(0, data.sizes(), at::dtype<float>());
     float* outData = updatedData->template mutable_data<float>();
     context_.CopyItemsSameDevice(
         data.dtype(), data.numel(), data.template data<float>(), outData);

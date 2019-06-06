@@ -45,7 +45,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
 
     const auto backend = cuda ? torch::kCUDA : torch::kCPU;
     auto inputs =
-        torch::rand({nlen, bs, 1}, backend).round().toType(torch::kFloat32);
+        torch::rand({nlen, bs, 1}, backend).round().to(torch::kFloat32);
     auto labels = inputs.sum(0).detach();
     inputs.set_requires_grad(true);
 
@@ -226,4 +226,16 @@ TEST_F(RNNTest, EndToEndRNNRelu_CUDA) {
 TEST_F(RNNTest, EndToEndRNNTanh_CUDA) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
       [](int s) { return RNN(RNNOptions(s, s).tanh().layers(2)); }, true));
+}
+
+TEST_F(RNNTest, PrettyPrintRNNs) {
+  ASSERT_EQ(
+      c10::str(LSTM(LSTMOptions(128, 64).layers(3).dropout(0.2))),
+      "torch::nn::LSTM(input_size=128, hidden_size=64, layers=3, dropout=0.2)");
+  ASSERT_EQ(
+      c10::str(GRU(GRUOptions(128, 64).layers(3).dropout(0.5))),
+      "torch::nn::GRU(input_size=128, hidden_size=64, layers=3, dropout=0.5)");
+  ASSERT_EQ(
+      c10::str(RNN(RNNOptions(128, 64).layers(3).dropout(0.2).tanh())),
+      "torch::nn::RNN(input_size=128, hidden_size=64, layers=3, dropout=0.2, activation=tanh)");
 }

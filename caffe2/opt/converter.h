@@ -21,7 +21,7 @@ CAFFE2_API void removeDataEdgeIndicators(caffe2::NetDef* net);
 // Optionally this function will update a vector that maps operators in the
 // netdef positionally to NodeRefs in the resultant NNModule.
 CAFFE2_API nom::repr::NNModule convertToNNModule(
-    caffe2::NetDef& net,
+    const caffe2::NetDef& net,
     bool strict = false,
     std::vector<nom::repr::NNGraph::NodeRef>* = nullptr);
 CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
@@ -62,7 +62,7 @@ C10_DECLARE_REGISTRY(ConverterRegistry, Converter);
   class opName##Converter : public Converter {                                \
     std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator( \
         const OperatorDef& op) override {                                     \
-      return util::make_unique<repr::opName>();                               \
+      return nom::util::make_unique<nom::repr::opName>();                     \
     }                                                                         \
     virtual ~opName##Converter() {}                                           \
   };

@@ -128,42 +128,6 @@ function(caffe2_parse_version_str LIBNAME VERSIONSTR)
   set(${LIBNAME}_VERSION "${${LIBNAME}_VERSION_MAJOR}.${${LIBNAME}_VERSION_MINOR}.${${LIBNAME}_VERSION_PATCH}" PARENT_SCOPE)
 endfunction()
 
-##############################################################################
-# Helper function to automatically generate __init__.py files where python
-# sources reside but there are no __init__.py present.
-function(caffe_autogen_init_py_files)
-  if (CAFFE2_AUTOGEN_INIT_PY_ALREADY_RUN)
-    message(STATUS
-        "A previous caffe2 cmake run already created the __init__.py files.")
-    return()
-  endif()
-  file(GLOB_RECURSE all_python_files RELATIVE ${PROJECT_SOURCE_DIR}
-       "${PROJECT_SOURCE_DIR}/caffe2/*.py")
-  set(python_paths_need_init_py)
-  foreach(python_file ${all_python_files})
-    get_filename_component(python_path ${python_file} PATH)
-    string(REPLACE "/" ";" path_parts ${python_path})
-    set(rebuilt_path ${CMAKE_BINARY_DIR})
-    foreach(path_part ${path_parts})
-      set(rebuilt_path "${rebuilt_path}/${path_part}")
-      list(APPEND python_paths_need_init_py ${rebuilt_path})
-    endforeach()
-  endforeach()
-  list(REMOVE_DUPLICATES python_paths_need_init_py)
-  # Since the _pb2.py files are yet to be created, we will need to manually
-  # add them to the list.
-  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe2/proto)
-
-  foreach(tmp ${python_paths_need_init_py})
-    if(NOT EXISTS ${tmp}/__init__.py)
-      # message(STATUS "Generate " ${tmp}/__init__.py)
-      file(WRITE ${tmp}/__init__.py "")
-    endif()
-  endforeach()
-  set(CAFFE2_AUTOGEN_INIT_PY_ALREADY_RUN TRUE CACHE INTERNAL
-      "Helper variable to record if autogen_init_py is already run or not.")
-endfunction()
-
 ###
 # Removes common indentation from a block of text to produce code suitable for
 # setting to `python -c`, or using with pycmd. This allows multiline code to be
@@ -274,59 +238,3 @@ function(print_target_properties tgt)
     endif()
   endforeach(prop)
 endfunction(print_target_properties)
-
-
-###
-# Helper function to add style warning options to the given target
-# Optionally pass in the second argument ($ARGV1) which will force -Werror if
-# it evaluates to true.
-function(target_enable_style_warnings TARGET)
-  if(MSVC)
-    # TODO Also add some warning options that MSVC can understand
-    set(WARNING_OPTIONS "")
-  else()
-    set(WARNING_OPTIONS
-            -Wall
-            -Wextra
-            -Wold-style-cast
-            -Wno-missing-braces
-            -Wcast-align
-            -Wcast-qual
-            -Wctor-dtor-privacy
-            -Wdisabled-optimization
-            -Wformat=2
-            -Winit-self
-            -Wmissing-include-dirs
-            -Woverloaded-virtual
-            -Wredundant-decls
-            -Wno-shadow
-            -Wsign-promo
-            -Wno-strict-overflow
-            -fdiagnostics-show-option
-            -Wno-conversion
-            -Wpedantic
-            -Wundef
-            )
-    # -Wno-gnu-zero-variadic-macro-arguments is not available in GCC-4.8.5. Set
-    # only when using clang.
-    # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
-    if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-      list(APPEND WARNING_OPTIONS "-Wno-gnu-zero-variadic-macro-arguments")
-    endif()
-    set(WERROR $ENV{WERROR})
-    if (${ARGC} GREATER 1)
-      # accessing ${ARGV1} is UB when ${ARGC} <= 1
-      # CMake doesn't do smart AND, so we have to use a nested `if`
-      if (${ARGV1})
-        set(WERROR TRUE)
-      endif()
-    endif()
-    if (WERROR)
-      list(APPEND WARNING_OPTIONS "-Werror")
-    endif()
-  endif()
-  if(APPLE)
-    set(WARNING_OPTIONS -Wno-gnu-zero-variadic-macro-arguments)
-  endif()
-  target_compile_options(${TARGET} PRIVATE ${WARNING_OPTIONS})
-endfunction()

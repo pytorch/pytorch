@@ -1,6 +1,6 @@
-#include "THCUNN.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -61,5 +61,5 @@ struct ELUupdateGradInput_functor
   }
 };
 
-#include "generic/ELU.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/ELU.cu>
+#include <THC/THCGenerateFloatTypes.h>

@@ -8,15 +8,15 @@
 #include <omp.h>
 #endif
 
-C10_DECLARE_int32(dnnlowp_activation_quantization_precision);
-C10_DECLARE_int32(dnnlowp_weight_quantization_precision);
-C10_DECLARE_int32(dnnlowp_requantization_multiplier_precision);
-C10_DECLARE_int32(dnnlowp_eltwise_quantization_precision);
-C10_DECLARE_bool(dnnlowp_force_scale_power_of_two);
-C10_DECLARE_bool(dnnlowp_preserve_activation_sparsity);
-C10_DECLARE_bool(dnnlowp_preserve_weight_sparsity);
-C10_DECLARE_string(dnnlowp_activation_quantization_kind);
-C10_DECLARE_string(dnnlowp_weight_quantization_kind);
+C10_DECLARE_int32(caffe2_dnnlowp_activation_quantization_precision);
+C10_DECLARE_int32(caffe2_dnnlowp_weight_quantization_precision);
+C10_DECLARE_int32(caffe2_dnnlowp_requantization_multiplier_precision);
+C10_DECLARE_int32(caffe2_dnnlowp_eltwise_quantization_precision);
+C10_DECLARE_bool(caffe2_dnnlowp_force_scale_power_of_two);
+C10_DECLARE_bool(caffe2_dnnlowp_preserve_activation_sparsity);
+C10_DECLARE_bool(caffe2_dnnlowp_preserve_weight_sparsity);
+C10_DECLARE_string(caffe2_dnnlowp_activation_quantization_kind);
+C10_DECLARE_string(caffe2_dnnlowp_weight_quantization_kind);
 
 namespace dnnlowp {
 
@@ -37,7 +37,9 @@ static bool HasDNNLowPEngine_(const OperatorBase& op) {
 }
 
 void PropagateOutputTensorQuantizationParams(
-    OperatorBase *op, int idx, const TensorQuantizationParams& qparams) {
+    OperatorBase* op,
+    int idx,
+    const TensorQuantizationParams& qparams) {
   LOG_IF(WARNING, !HasDNNLowPEngine_(*op));
   Int8TensorCPU* output =
       op->Outputs()[idx]->template GetMutable<Int8TensorCPU>();
@@ -46,7 +48,9 @@ void PropagateOutputTensorQuantizationParams(
 }
 
 TensorQuantizationParams GetInputTensorQuantizationParamsOf(
-    OperatorBase *op, int idx, const QuantizationFactory *qfactory,
+    OperatorBase* op,
+    int idx,
+    const QuantizationFactory* qfactory,
     bool is_weight /*=false*/) {
   LOG_IF(WARNING, !HasDNNLowPEngine_(*op));
 
@@ -57,14 +61,14 @@ TensorQuantizationParams GetInputTensorQuantizationParamsOf(
     qparams.zero_point = int8_tensor.zero_point;
     qparams.precision = qfactory->GetActivationPrecision();
     return qparams;
-  }
-  else {
-    const TensorCPU *tensor = &op->template Input<Tensor>(idx, CPU);
+  } else {
+    const TensorCPU* tensor = &op->template Input<Tensor>(idx, CPU);
     CAFFE_ENFORCE(tensor->template IsType<float>());
     CAFFE_ENFORCE(tensor->numel() == 0 || tensor->template data<float>());
 
     float min, max;
-    FindMinMax(tensor->template data<float>(), &min, &max, tensor->numel());
+    fbgemm::FindMinMax(
+        tensor->template data<float>(), &min, &max, tensor->numel());
 
     return qfactory->ChooseQuantizationParams(min, max, is_weight);
   }
@@ -104,14 +108,16 @@ void SetStaticQuantizationParams(
 }
 
 bool HasStaticQuantization(
-    const caffe2::OperatorBase* op, int output_index /*=0*/) {
+    const caffe2::OperatorBase* op,
+    int output_index /*=0*/) {
   LOG_IF(WARNING, !HasDNNLowPEngine_(*op));
   return op->HasSingleArgumentOfType<float>(
       OutputScaleArgumentName(output_index));
 }
 
 TensorQuantizationParams GetStaticQuantizationParamsOf(
-    const caffe2::OperatorBase* op, int idx) {
+    const caffe2::OperatorBase* op,
+    int idx) {
   LOG_IF(WARNING, !HasDNNLowPEngine_(*op));
   unique_ptr<QuantizationFactory> qfactory = GetQuantizationFactoryOf(op);
 
@@ -126,9 +132,10 @@ TensorQuantizationParams GetStaticQuantizationParamsOf(
 
 template <typename T>
 const T* QuantizeInputIfNeeded(
-  OperatorBase* op, int input_index,
-  const TensorQuantizationParams& qparams, vector<T>& temp,
-  const QuantizationFactory *qfactory) {
+    OperatorBase* op,
+    int input_index,
+    const TensorQuantizationParams& qparams,
+    vector<T>& temp) {
   if (op->InputIsType<int8::Int8TensorCPU>(input_index)) {
     // Already quantized
     return op->Input<int8::Int8TensorCPU>(input_index).t.data<T>();
@@ -136,16 +143,18 @@ const T* QuantizeInputIfNeeded(
     // Need to quantize
     const TensorCPU& tensor = op->Input<Tensor>(input_index, CPU);
     temp.resize(tensor.numel());
-    Quantize<T>(tensor.data<float>(), temp.data(), temp.size(), qparams);
+    fbgemm::Quantize<T>(
+        tensor.data<float>(), temp.data(), temp.size(), qparams);
     return temp.data();
   }
 }
 
 template <typename T>
 const T* RowWiseQuantizeInputIfNeeded(
-  OperatorBase* op, int input_index,
-  const std::vector<TensorQuantizationParams>& qparams, vector<T>& temp,
-  const QuantizationFactory *qfactory) {
+    OperatorBase* op,
+    int input_index,
+    const std::vector<TensorQuantizationParams>& qparams,
+    vector<T>& temp) {
   if (op->InputIsType<int8::Int8TensorCPU>(input_index)) {
     // Already quantized
     return op->Input<int8::Int8TensorCPU>(input_index).t.data<T>();
@@ -155,10 +164,10 @@ const T* RowWiseQuantizeInputIfNeeded(
     temp.resize(tensor.numel());
     // number of rows
     int N = qparams.size();
-    int rowwidth = temp.size()/N;
+    int rowwidth = temp.size() / N;
     // quantize each row
     for (int i = 0; i < N; i++) {
-      Quantize<T>(
+      fbgemm::Quantize<T>(
           tensor.data<float>() + rowwidth * i,
           temp.data() + rowwidth * i,
           rowwidth,
@@ -168,41 +177,41 @@ const T* RowWiseQuantizeInputIfNeeded(
   }
 }
 
-template
-const uint8_t *QuantizeInputIfNeeded<uint8_t>(
-  OperatorBase *op, int input_index,
-  const TensorQuantizationParams& qparams, vector<uint8_t>& temp,
-  const QuantizationFactory *qfactory);
+template const uint8_t* QuantizeInputIfNeeded<uint8_t>(
+    OperatorBase* op,
+    int input_index,
+    const TensorQuantizationParams& qparams,
+    vector<uint8_t>& temp);
 
-template
-const int8_t *QuantizeInputIfNeeded<int8_t>(
-  OperatorBase *op, int input_index,
-  const TensorQuantizationParams& qparams, vector<int8_t>& temp,
-  const QuantizationFactory *qfactory);
+template const int8_t* QuantizeInputIfNeeded<int8_t>(
+    OperatorBase* op,
+    int input_index,
+    const TensorQuantizationParams& qparams,
+    vector<int8_t>& temp);
 
-template
-const uint16_t *QuantizeInputIfNeeded<uint16_t>(
-  OperatorBase *op, int input_index,
-  const TensorQuantizationParams& qparams, vector<uint16_t>& temp,
-  const QuantizationFactory *qfactory);
+template const uint16_t* QuantizeInputIfNeeded<uint16_t>(
+    OperatorBase* op,
+    int input_index,
+    const TensorQuantizationParams& qparams,
+    vector<uint16_t>& temp);
 
-template
-const int16_t *QuantizeInputIfNeeded<int16_t>(
-  OperatorBase *op, int input_index,
-  const TensorQuantizationParams& qparams, vector<int16_t>& temp,
-  const QuantizationFactory *qfactory);
+template const int16_t* QuantizeInputIfNeeded<int16_t>(
+    OperatorBase* op,
+    int input_index,
+    const TensorQuantizationParams& qparams,
+    vector<int16_t>& temp);
 
-template
-const uint8_t *RowWiseQuantizeInputIfNeeded<uint8_t>(
-  OperatorBase *op, int input_index,
-  const std::vector<TensorQuantizationParams>& qparams, vector<uint8_t>& temp,
-  const QuantizationFactory *qfactory);
+template const uint8_t* RowWiseQuantizeInputIfNeeded<uint8_t>(
+    OperatorBase* op,
+    int input_index,
+    const std::vector<TensorQuantizationParams>& qparams,
+    vector<uint8_t>& temp);
 
-template
-const uint16_t *RowWiseQuantizeInputIfNeeded<uint16_t>(
-  OperatorBase *op, int input_index,
-  const std::vector<TensorQuantizationParams>& qparams, vector<uint16_t>& temp,
-  const QuantizationFactory *qfactory);
+template const uint16_t* RowWiseQuantizeInputIfNeeded<uint16_t>(
+    OperatorBase* op,
+    int input_index,
+    const std::vector<TensorQuantizationParams>& qparams,
+    vector<uint16_t>& temp);
 
 void MeasureQuantizationError(
     const float* actual,
@@ -228,7 +237,8 @@ void ReportQuantizationError(
     const QuantizationErrorStats& stat) {
   if (stat.sum_sq == 0) {
     LOG(INFO) << " output " << op->debug_def().output(0) << " of operator "
-              << op << " with type " << op->debug_def().type()
+              << op << " with type " << op->debug_def().type() << " and engine "
+              << op->debug_def().engine()
               << " has l2 relative error nan (stat.sum_err_sq "
               << stat.sum_err_sq << " stat.sum_sq 0)"
               << " and max abs error " << stat.max_abs_err << " (reference is "
@@ -238,8 +248,8 @@ void ReportQuantizationError(
               << " cnt " << stat.measure_cnt;
   } else {
     LOG(INFO) << " output " << op->debug_def().output(0) << " of operator "
-              << op << " with type " << op->debug_def().type()
-              << " has l2 relative error "
+              << op << " with type " << op->debug_def().type() << " and engine "
+              << op->debug_def().engine() << " has l2 relative error "
               << std::sqrt(stat.sum_err_sq) / std::sqrt(stat.sum_sq)
               << " and max abs error " << stat.max_abs_err << " (reference is "
               << stat.max_err_ref << " and actual is " << stat.max_err_actual
@@ -253,46 +263,52 @@ static unique_ptr<QuantizationFactory> GetQuantizationFactoryOf_(
     const OperatorDef& op_def) {
   int activation_precision =
       ArgumentHelper::GetSingleArgument<OperatorDef, int>(
-          op_def, "activation_precision",
-          FLAGS_dnnlowp_activation_quantization_precision);
+          op_def,
+          "activation_precision",
+          FLAGS_caffe2_dnnlowp_activation_quantization_precision);
   int weight_precision = ArgumentHelper::GetSingleArgument<OperatorDef, int>(
-      op_def, "weight_precision", FLAGS_dnnlowp_weight_quantization_precision);
+      op_def,
+      "weight_precision",
+      FLAGS_caffe2_dnnlowp_weight_quantization_precision);
   int requantization_multiplier_precision =
       ArgumentHelper::GetSingleArgument<OperatorDef, int>(
           op_def,
           "requantization_multiplier_precision",
-          FLAGS_dnnlowp_requantization_multiplier_precision);
+          FLAGS_caffe2_dnnlowp_requantization_multiplier_precision);
   int eltwise_quantization_precision =
       ArgumentHelper::GetSingleArgument<OperatorDef, int>(
           op_def,
           "eltwise_quantization_precision",
-          FLAGS_dnnlowp_eltwise_quantization_precision);
+          FLAGS_caffe2_dnnlowp_eltwise_quantization_precision);
   bool preserve_activation_sparsity =
       ArgumentHelper::GetSingleArgument<OperatorDef, bool>(
           op_def,
           "preserve_activation_sparsity",
-          FLAGS_dnnlowp_preserve_activation_sparsity);
+          FLAGS_caffe2_dnnlowp_preserve_activation_sparsity);
   bool preserve_weight_sparsity =
       ArgumentHelper::GetSingleArgument<OperatorDef, bool>(
-          op_def, "preserve_weight_sparsity",
-          FLAGS_dnnlowp_preserve_weight_sparsity);
+          op_def,
+          "preserve_weight_sparsity",
+          FLAGS_caffe2_dnnlowp_preserve_weight_sparsity);
   bool force_scale_power_of_two =
       ArgumentHelper::GetSingleArgument<OperatorDef, bool>(
-          op_def, "force_scale_power_of_two",
-          FLAGS_dnnlowp_force_scale_power_of_two);
+          op_def,
+          "force_scale_power_of_two",
+          FLAGS_caffe2_dnnlowp_force_scale_power_of_two);
   string activation_quantization_kind =
       ArgumentHelper::GetSingleArgument<OperatorDef, string>(
           op_def,
           "activation_quantization_kind",
-          FLAGS_dnnlowp_activation_quantization_kind);
+          FLAGS_caffe2_dnnlowp_activation_quantization_kind);
   string weight_quantization_kind =
       ArgumentHelper::GetSingleArgument<OperatorDef, string>(
-          op_def, "weight_quantization_kind",
-          FLAGS_dnnlowp_weight_quantization_kind);
+          op_def,
+          "weight_quantization_kind",
+          FLAGS_caffe2_dnnlowp_weight_quantization_kind);
 
   VLOG(2) << "Quantization method for op with output " << op_def.output(0)
-          << " activation_precision " << activation_precision
-          << " weight_precision " << weight_precision
+          << " engine " << op_def.engine() << " activation_precision "
+          << activation_precision << " weight_precision " << weight_precision
           << " requantization_multiplier_precision "
           << requantization_multiplier_precision
           << " eltwise_quantization_precision "
@@ -303,8 +319,7 @@ static unique_ptr<QuantizationFactory> GetQuantizationFactoryOf_(
           << activation_quantization_kind << " weight_quantization_kind "
           << weight_quantization_kind;
 
-  return unique_ptr<QuantizationFactory>(
-    new QuantizationFactory(
+  return unique_ptr<QuantizationFactory>(new QuantizationFactory(
       activation_precision,
       weight_precision,
       requantization_multiplier_precision,
@@ -354,12 +369,11 @@ void ParseDNNLowPOperatorArguments(
     bool* dequantize_output,
     bool* measure_quantization_error,
     string* followed_by) {
-
   // When exiting quantized region or we're just doing per-op quantization,
   // dequantize the outputs as floats.
   if (dequantize_output) {
     *dequantize_output =
-      op->GetSingleArgument<bool>("dequantize_output", false);
+        op->GetSingleArgument<bool>("dequantize_output", false);
     if (*dequantize_output) {
       VLOG(2) << "Dequantize output " << op->debug_def().output(0)
               << " of operator type " << op->debug_def().type();
@@ -369,7 +383,7 @@ void ParseDNNLowPOperatorArguments(
   // Measure quantization error by comparing with reference fp32 operators.
   if (measure_quantization_error) {
     *measure_quantization_error =
-      op->GetSingleArgument<bool>("measure_quantization_error", false);
+        op->GetSingleArgument<bool>("measure_quantization_error", false);
   }
 
   // Output scale and zero_point can be specified (actually recommended to be
@@ -379,11 +393,10 @@ void ParseDNNLowPOperatorArguments(
     TensorQuantizationParams qparams = GetStaticQuantizationParamsOf(op, 0);
     unique_ptr<QuantizationFactory> qfactory = GetQuantizationFactoryOf(op);
     if (qparams.zero_point != (1 << (qfactory->GetActivationPrecision() - 1)) &&
-        qparams.zero_point != 0 &&
-        qfactory->GetPreserveActivationSparsity()) {
+        qparams.zero_point != 0 && qfactory->GetPreserveActivationSparsity()) {
       LOG(WARNING) << "Symmetric quantization is used for activation but "
-                      "Y_zero_point is " << qparams.zero_point << " for "
-                   << op->debug_def().output(0)
+                      "Y_zero_point is "
+                   << qparams.zero_point << " for " << op->debug_def().output(0)
                    << " output activation of an operator with type "
                    << op->debug_def().type();
     }
@@ -391,19 +404,17 @@ void ParseDNNLowPOperatorArguments(
     if (op->HasSingleArgumentOfType<int>("Y_zero_point")) {
       LOG(WARNING) << "Y_zero_point without Y_scale for "
                    << op->debug_def().output(0)
-                   << " (an output of operator type "
-                   << op->debug_def().type() << ") doesn't make sense";
+                   << " (an output of operator type " << op->debug_def().type()
+                   << ") doesn't make sense";
     }
   }
 
   // When an operator has only one consumer and the consumer only cares about
   // a limited range of values, we can quantize more precisely.
   if (op->HasSingleArgumentOfType<string>("followed_by")) {
-    string followed_by_ =
-      op->GetSingleArgument<string>("followed_by", "");
-    VLOG(2) << "Operator with type " << op->debug_def().type()
-            << " and output " << op->debug_def().output(0)
-            << " is followed by " << followed_by_;
+    string followed_by_ = op->GetSingleArgument<string>("followed_by", "");
+    VLOG(2) << "Operator with type " << op->debug_def().type() << " and output "
+            << op->debug_def().output(0) << " is followed by " << followed_by_;
 
     AdjustOutputTensorQuantizationParamsWithFollowedBy(op, followed_by_);
     if (followed_by) {
@@ -413,7 +424,8 @@ void ParseDNNLowPOperatorArguments(
 }
 
 NetDef AddScaleZeroOffsetArgumentsWithHistogram(
-    NetDef net_def, const string& histogram_file_name) {
+    NetDef net_def,
+    const string& histogram_file_name) {
   ifstream f(histogram_file_name);
 
   // check the format by looking at the first line
@@ -426,7 +438,8 @@ NetDef AddScaleZeroOffsetArgumentsWithHistogram(
     ++nwords_first_line;
   }
 
-  ist = istringstream(first_line);
+  ist.str(first_line);
+  ist.clear();
 
   bool new_format = true;
   int op_index, i, nbins;
@@ -434,14 +447,14 @@ NetDef AddScaleZeroOffsetArgumentsWithHistogram(
   float min, max;
   ist >> op_index >> op_type >> i >> tensor_name >> min >> max >> nbins;
   if (nwords_first_line != nbins + 7) {
-    ist = istringstream(first_line);
+    ist.str(first_line);
+    ist.clear();
     ist >> op_index >> i >> tensor_name >> min >> max >> nbins;
     if (nwords_first_line == nbins + 6) {
       new_format = false;
-    }
-    else {
-      LOG(WARNING)
-        << "histogram file " << histogram_file_name << " has an invalid format";
+    } else {
+      LOG(WARNING) << "histogram file " << histogram_file_name
+                   << " has an invalid format";
       return net_def;
     }
   }
@@ -456,23 +469,21 @@ NetDef AddScaleZeroOffsetArgumentsWithHistogram(
 
       if (new_format) {
         f >> op_index2 >> op_type >> i2 >> tensor_name >> min >> max >> nbins;
-      }
-      else {
+      } else {
         f >> op_index2 >> i2 >> tensor_name >> min >> max >> nbins;
       }
-      LOG_IF(WARNING, op_index2 != op_index) <<
-        "op index " << op_index2 << " doesn't match with " << op_index;
-      LOG_IF(WARNING, tensor_name != op_def.output(i)) <<
-        tensor_name << " in histogram file line " << op_index <<
-        " doesn't match with operation def " <<
-        op_def.output(i);
-      LOG_IF(WARNING, i2 != i) <<
-        "output tensor index " << i2 << " doesn't match with " << i;
+      LOG_IF(WARNING, op_index2 != op_index)
+          << "op index " << op_index2 << " doesn't match with " << op_index;
+      LOG_IF(WARNING, tensor_name != op_def.output(i))
+          << tensor_name << " in histogram file line " << op_index
+          << " doesn't match with operation def " << op_def.output(i);
+      LOG_IF(WARNING, i2 != i)
+          << "output tensor index " << i2 << " doesn't match with " << i;
       if (new_format) {
-        LOG_IF(WARNING, op_type != op_def.type()) <<
-          "operator type " << op_type << " in histogram file line " <<
-          op_index << " doesn't match with operation def " <<
-          op_def.type();
+        LOG_IF(WARNING, op_type != op_def.type())
+            << "operator type " << op_type << " in histogram file line "
+            << op_index << " doesn't match with operation def "
+            << op_def.type();
       }
 
       vector<uint64_t> bins;

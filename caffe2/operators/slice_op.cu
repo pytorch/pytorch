@@ -61,35 +61,35 @@ bool SliceImplGpu(
   auto* starts_data = starts.template data<SIndex>();
   auto* ends_data = ends.template data<SIndex>();
 
-  CAFFE_ENFORCE_EQ(starts.ndim(), 1);
-  CAFFE_ENFORCE_EQ(ends.ndim(), 1);
-  CAFFE_ENFORCE_GE(data.ndim(), starts.size());
-  CAFFE_ENFORCE_EQ(starts.size(), ends.size());
+  CAFFE_ENFORCE_EQ(starts.dim(), 1);
+  CAFFE_ENFORCE_EQ(ends.dim(), 1);
+  CAFFE_ENFORCE_GE(data.dim(), starts.size());
+  CAFFE_ENFORCE_EQ(starts.numel(), ends.numel());
 
-  std::vector<int> starts_idx(data.ndim());
-  std::vector<int> ends_idx(data.ndim());
-  std::vector<int> dst_sizes(data.ndim());
+  std::vector<int> starts_idx(data.dim());
+  std::vector<int> ends_idx(data.dim());
+  std::vector<int> dst_sizes(data.dim());
 
-  for (int i = 0; i < data.ndim(); ++i) {
-    if (i >= starts.size()) {
+  for (int i = 0; i < data.dim(); ++i) {
+    if (i >= starts.numel()) {
       starts_idx[i] = 0;
-      ends_idx[i] = data.dims()[i];
+      ends_idx[i] = data.size(i);
       continue;
     }
-    if (data.dims()[i] > 0) {
+    if (data.size(i) > 0) {
       auto start = starts_data[i];
       auto end = ends_data[i];
       if (start < 0) {
-        start = data.dims()[i] + 1 + start;
+        start = data.sizes()[i] + 1 + start;
       }
       if (end < 0) {
-        end = data.dims()[i] + 1 + end;
+        end = data.sizes()[i] + 1 + end;
       }
-      if (start > data.dims()[i]) {
-        start = data.dims()[i];
+      if (start > data.sizes()[i]) {
+        start = data.sizes()[i];
       }
-      if (end > data.dims()[i]) {
-        end = data.dims()[i];
+      if (end > data.sizes()[i]) {
+        end = data.sizes()[i];
       }
       CAFFE_ENFORCE_GE(start, 0);
       CAFFE_ENFORCE_GE(end, 0);
@@ -104,7 +104,7 @@ bool SliceImplGpu(
     }
   }
 
-  if (data.size() <= 0) {
+  if (data.numel() <= 0) {
     // When the input is empty, we do not need to do copy.
     if (!backward) {
       output->Resize(dst_sizes);
@@ -114,8 +114,8 @@ bool SliceImplGpu(
   }
   // for now only supports slicing in 1 dimension
   int dim = -1;
-  for (int i = 0; i < data.ndim(); ++i) {
-    if (starts_idx[i] > 0 || ends_idx[i] < data.dims()[i]) {
+  for (int i = 0; i < data.dim(); ++i) {
+    if (starts_idx[i] > 0 || ends_idx[i] < data.sizes()[i]) {
       CAFFE_ENFORCE_EQ(
           dim, -1, "Currently only possible to slice in 1 dimension.");
       dim = i;
@@ -123,20 +123,20 @@ bool SliceImplGpu(
   }
   if (dim == -1) {
     if (!backward) {
-      output->CopyFrom(data, context);
+      output->CopyFrom(data, true /*async*/);
     } else {
-      gdata->CopyFrom(*go, context);
+      gdata->CopyFrom(*go, true /*async*/);
     }
     return true;
   }
   int unit = std::accumulate(
-      data.dims().begin() + dim + 1,
-      data.dims().end(),
+      data.sizes().begin() + dim + 1,
+      data.sizes().end(),
       1,
       std::multiplies<int>());
   int num_blocks = std::accumulate(
-      data.dims().begin(),
-      data.dims().begin() + dim,
+      data.sizes().begin(),
+      data.sizes().begin() + dim,
       1,
       std::multiplies<int>());
   if (!backward) {
@@ -154,7 +154,7 @@ bool SliceImplGpu(
     size_t src_nbytes = data.nbytes();
     size_t dst_nbytes = output->nbytes();
 
-    size_t src_block_size = unit * data.dims()[dim];
+    size_t src_block_size = unit * data.sizes()[dim];
     size_t dst_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
     size_t src_offset = unit * starts_idx[dim];
 
@@ -187,7 +187,7 @@ bool SliceImplGpu(
     size_t dst_nbytes = gdata->nbytes();
 
     size_t src_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
-    size_t dst_block_size = unit * data.dims()[dim];
+    size_t dst_block_size = unit * data.sizes()[dim];
     size_t dst_offset = unit * starts_idx[dim];
 
     if (num_blocks == 0 || dst_block_size == 0) {
@@ -202,7 +202,7 @@ bool SliceImplGpu(
     // Zero out gradient blob before copy since we copy in fewer items than
     // there is space for
     math::Set<float, CUDAContext>(
-        gdata->size(),
+        gdata->numel(),
         0.0f,
         (float*)gdata->raw_mutable_data(go->meta()),
         context);
@@ -235,8 +235,8 @@ template<>
 class SliceOp<CUDAContext> : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  SliceOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  template<class... Args> explicit SliceOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
@@ -255,16 +255,16 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
     auto& data = Input(0);
 
     if (InputSize() > 1) {
-      starts_host_.CopyFrom(Input(1));
-      ends_host_.CopyFrom(Input(2));
+      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
     } else {
       if (!statically_inited_) {
         CAFFE_ENFORCE(HasArgument("starts"));
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        starts_host_.Resize(starts_.size());
-        ends_host_.Resize(ends_.size());
+        ReinitializeTensor(&starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(&ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.mutable_data<SIndex>(),
@@ -285,8 +285,8 @@ class SliceOp<CUDAContext> : public Operator<CUDAContext> {
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
   bool statically_inited_;
-  Tensor starts_host_{CPU};
-  Tensor ends_host_{CPU};
+  Tensor starts_host_;
+  Tensor ends_host_;
 
 };  // class SliceOp<CUDAContext>
 
@@ -296,8 +296,8 @@ template <>
 class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws),
+  template<class... Args> explicit SliceGradientOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
         starts_(this->template GetRepeatedArgument<int64_t>("starts")),
         ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
@@ -318,8 +318,8 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
     auto& data = Input(0);
 
     if (InputSize() == 4) {
-      starts_host_.CopyFrom(Input(1));
-      ends_host_.CopyFrom(Input(2));
+      ReinitializeAndCopyFrom(&starts_host_, at::dtype<SIndex>().device(CPU), Input(1));
+      ReinitializeAndCopyFrom(&ends_host_, at::dtype<SIndex>().device(CPU), Input(2));
 
       auto& go = Input(3);
 
@@ -331,8 +331,8 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
         CAFFE_ENFORCE(HasArgument("ends"));
         CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
 
-        starts_host_.Resize(starts_.size());
-        ends_host_.Resize(ends_.size());
+        ReinitializeTensor(&starts_host_, {static_cast<int64_t>(starts_.size())}, at::dtype<SIndex>().device(CPU));
+        ReinitializeTensor(&ends_host_, {static_cast<int64_t>(ends_.size())}, at::dtype<SIndex>().device(CPU));
 
         memcpy(
             starts_host_.mutable_data<SIndex>(),
@@ -356,8 +356,8 @@ class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
   std::vector<int64_t> starts_;
   std::vector<int64_t> ends_;
   bool statically_inited_;
-  Tensor starts_host_{CPU};
-  Tensor ends_host_{CPU};
+  Tensor starts_host_;
+  Tensor ends_host_;
 };  // class SliceGradientOp<CUDAContext>
 REGISTER_CUDA_OPERATOR(SliceGradient, SliceGradientOp<CUDAContext>);
 } // namespace caffe2

@@ -67,7 +67,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     checkAllDefined(c, {running_mean, running_var});
   }
   checkAllSameGPU(c, {input, weight, bias, running_mean, running_var});
-  if (input->type().scalarType() == ScalarType::Half) {
+  if (input->scalar_type() == ScalarType::Half) {
     checkScalarType(c, weight, ScalarType::Float);
   } else {
     checkAllSameType(c, {input, weight});
@@ -88,10 +88,10 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
     mode = CUDNN_BATCHNORM_SPATIAL;
-#if CUDNN_VERSION >= 7003
-    if(training)
-      mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
-#endif
+    // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
+    // introduced in CuDNN 7 for performance optimization, but it results in
+    // accuracy losses in convolution models such as ResNeXt-101 and
+    // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
   }
 
   auto output_t = at::empty(input->sizes(), input->options());
@@ -163,7 +163,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 
   checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});
   checkAllSameGPU(c, {input, grad_output, weight, save_mean, save_var});
-  if (input->type().scalarType() == ScalarType::Half) {
+  if (input->scalar_type() == ScalarType::Half) {
     checkScalarType(c, weight, ScalarType::Float);
   } else {
     checkAllSameType(c, {input, weight});
@@ -183,11 +183,11 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   if (input->dim() == 2) {
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
-#if CUDNN_VERSION >= 7003
-    mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
-#else
+    // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
+    // introduced in CuDNN 7 for performance optimization, but it results in
+    // accuracy losses in convolution models such as ResNeXt-101 and
+    // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
     mode = CUDNN_BATCHNORM_SPATIAL;
-#endif
   }
 
   auto grad_input_t  = at::empty(input->sizes(), input->options());

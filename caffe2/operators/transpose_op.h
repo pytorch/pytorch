@@ -16,8 +16,9 @@ class TransposeOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
 
-  TransposeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit TransposeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         axes_(this->template GetRepeatedArgument<int>("axes")) {
     // We will check the legality of axes_: it should be from 0 to axes_.size().
     std::vector<int> axes_sorted = axes_;
@@ -29,8 +30,6 @@ class TransposeOp final : public Operator<Context> {
     }
   }
 
-  ~TransposeOp() = default;
-
   bool RunOnDevice() override {
     // Do the actual transpose, which is implemented in DoRunWithType().
     return DispatchHelper<TensorTypes<float, double, int, int64_t>>::call(
@@ -41,7 +40,7 @@ class TransposeOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
+
     const int ndim = X.dim();
     if (axes_.empty()) {
       axes_.resize(ndim);
@@ -49,13 +48,13 @@ class TransposeOp final : public Operator<Context> {
     } else {
       CAFFE_ENFORCE_EQ(ndim, axes_.size());
     }
-    const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
-    std::vector<int> Y_dims(ndim);
+    const std::vector<std::int64_t> X_dims = X.sizes().vec();
+    std::vector<std::int64_t> Y_dims(ndim);
     for (int i = 0; i < ndim; ++i) {
       Y_dims[i] = X_dims[axes_[i]];
     }
-    Y->Resize(Y_dims);
-    math::Transpose<T, Context>(
+    auto* Y = Output(0, Y_dims, at::dtype<T>());
+    math::Transpose<std::int64_t, T, Context>(
         X_dims.size(),
         X_dims.data(),
         axes_.data(),

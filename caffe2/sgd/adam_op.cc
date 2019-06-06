@@ -7,6 +7,15 @@ OPERATOR_SCHEMA(Adam)
     .NumInputs(6)
     .NumOutputs(3, 4)
     .AllowInplace({{0, 0}, {1, 1}, {2, 2}})
+    .DeviceInferenceFunction([](const OperatorDef& def) {
+      auto op_device =
+          def.has_device_option() ? def.device_option() : DeviceOption();
+      vector<DeviceOption> in_dev(def.input_size(), op_device);
+      vector<DeviceOption> out_dev(def.output_size(), op_device);
+      // ITER input lives on CPU
+      in_dev[5] = DeviceOption();
+      return std::make_pair(in_dev, out_dev);
+    })
     .SetDoc(R"DOC(
 
 Computes the Adam update (https://arxiv.org/abs/1412.6980) for an

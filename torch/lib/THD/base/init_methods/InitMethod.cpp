@@ -1,4 +1,4 @@
-#include "InitMethod.hpp"
+#include <THD/base/init_methods/InitMethod.hpp>
 
 #ifdef THD_INIT_EXTENSION_H
 #define INCF(F) INCF_(F)

@@ -1,29 +1,30 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numpy as np
-import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core, dyndep
-from hypothesis import given
-import hypothesis.strategies as st
 import collections
+
+import caffe2.python.hypothesis_test_util as hu
+import hypothesis.strategies as st
+import numpy as np
+from caffe2.python import core, dyndep, workspace
 from dnnlowp_test_utils import check_quantized_results_close
+from hypothesis import given
+
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPAddOpTest(hu.HypothesisTestCase):
-    @given(N=st.integers(32, 256),
-           in_quantized=st.booleans(),
-           out_quantized=st.booleans(),
-           in_place=st.sampled_from([
-               (False, False), (True, False), (False, True)]),
-           **hu.gcs_cpu_only)
-    def test_dnnlowp_elementwise_add_int(self, N,
-                                         in_quantized, out_quantized, in_place,
-                                         gc, dc):
+    @given(
+        N=st.integers(32, 256),
+        in_quantized=st.booleans(),
+        out_quantized=st.booleans(),
+        in_place=st.sampled_from([(False, False), (True, False), (False, True)]),
+        **hu.gcs_cpu_only
+    )
+    def test_dnnlowp_elementwise_add_int(
+        self, N, in_quantized, out_quantized, in_place, gc, dc
+    ):
         # FIXME: DNNLOWP Add doesn't support inplace operation and
         # dequantize_output=1 at the same time
         if in_place[0] or in_place[1]:
@@ -41,16 +42,12 @@ class DNNLowPAddOpTest(hu.HypothesisTestCase):
         # B has scale 1/2, so exactly represented after quantization
         B = np.round(np.random.rand(N) * 255 / 2 - 64).astype(np.float32)
         B[0] = -64
-        B[1] = 127. / 2
+        B[1] = 127.0 / 2
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
         outputs = []
 
-        op_engine_list = [
-            ("Add", ""),
-            ("Add", "DNNLOWP"),
-            ("Int8Add", "DNNLOWP"),
-        ]
+        op_engine_list = [("Add", ""), ("Add", "DNNLOWP"), ("Int8Add", "DNNLOWP")]
 
         for op_type, engine in op_engine_list:
             net = core.Net("test_net")
@@ -60,31 +57,25 @@ class DNNLowPAddOpTest(hu.HypothesisTestCase):
 
             if do_quantize:
                 quantize_A = core.CreateOperator(
-                    "Quantize",
-                    ['A'], ['A_q'],
-                    engine=engine,
-                    device_option=gc,
+                    "Quantize", ["A"], ["A_q"], engine=engine, device_option=gc
                 )
                 net.Proto().op.extend([quantize_A])
 
                 quantize_B = core.CreateOperator(
-                    "Quantize",
-                    ['B'], ['B_q'],
-                    engine=engine,
-                    device_option=gc,
+                    "Quantize", ["B"], ["B_q"], engine=engine, device_option=gc
                 )
                 net.Proto().op.extend([quantize_B])
 
-            out = 'Y'
+            out = "Y"
             if in_place[0]:
-                out = 'A'
+                out = "A"
             elif in_place[1]:
-                out = 'B'
+                out = "B"
 
             add = core.CreateOperator(
                 op_type,
-                ['A_q', 'B_q'] if do_quantize else ['A', 'B'],
-                [(out + '_q') if do_dequantize else out],
+                ["A_q", "B_q"] if do_quantize else ["A", "B"],
+                [(out + "_q") if do_dequantize else out],
                 dequantize_output=not do_dequantize,
                 engine=engine,
                 device_option=gc,
@@ -93,19 +84,16 @@ class DNNLowPAddOpTest(hu.HypothesisTestCase):
 
             if do_dequantize:
                 dequantize = core.CreateOperator(
-                    "Dequantize",
-                    [out + '_q'],
-                    [out],
-                    engine=engine,
-                    device_option=gc,
+                    "Dequantize", [out + "_q"], [out], engine=engine, device_option=gc
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob('A').feed(A, device_option=gc)
-            self.ws.create_blob('B').feed(B, device_option=gc)
+            self.ws.create_blob("A").feed(A, device_option=gc)
+            self.ws.create_blob("B").feed(B, device_option=gc)
             self.ws.run(net)
-            outputs.append(Output(
-                Y=self.ws.blobs[out].fetch(), op_type=op_type, engine=engine))
+            outputs.append(
+                Output(Y=self.ws.blobs[out].fetch(), op_type=op_type, engine=engine)
+            )
 
         check_quantized_results_close(outputs)
 
@@ -121,24 +109,20 @@ class DNNLowPAddOpTest(hu.HypothesisTestCase):
 
         B = np.round(np.random.rand(4, 5) * 255 / 2 - 64).astype(np.float32)
         B[0, 0] = -64
-        B[0, 1] = 127. / 2
+        B[0, 1] = 127.0 / 2
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
         outputs = []
 
-        op_engine_list = [
-            ("Add", ""),
-            ("Add", "DNNLOWP"),
-            ("Int8Add", "DNNLOWP"),
-        ]
+        op_engine_list = [("Add", ""), ("Add", "DNNLOWP"), ("Int8Add", "DNNLOWP")]
 
         for op_type, engine in op_engine_list:
             net = core.Net("test_net")
 
             add = core.CreateOperator(
                 op_type,
-                ['A', 'B'],
-                ['Y'],
+                ["A", "B"],
+                ["Y"],
                 engine=engine,
                 device_option=gc,
                 broadcast=1,
@@ -146,21 +130,23 @@ class DNNLowPAddOpTest(hu.HypothesisTestCase):
             )
             net.Proto().op.extend([add])
 
-            self.ws.create_blob('A').feed(A, device_option=gc)
-            self.ws.create_blob('B').feed(B, device_option=gc)
+            self.ws.create_blob("A").feed(A, device_option=gc)
+            self.ws.create_blob("B").feed(B, device_option=gc)
             self.ws.run(net)
-            outputs.append(Output(
-                Y=self.ws.blobs["Y"].fetch(), op_type=op_type, engine=engine))
+            outputs.append(
+                Output(Y=self.ws.blobs["Y"].fetch(), op_type=op_type, engine=engine)
+            )
 
         check_quantized_results_close(outputs)
 
     @given(**hu.gcs_cpu_only)
     def test_dnnlowp_elementwise_add_broadcast_axis(self, gc, dc):
         for bdim, axis in [
-                ((3, 4), 1),      # broadcasting intermediate dimensions
-                ((2,), 0),        # broadcasting the first dimension
-                ((1, 4, 1), 1)]:
-                # broadcasting with single elem dimensions at both ends
+            ((3, 4), 1),  # broadcasting intermediate dimensions
+            ((2,), 0),  # broadcasting the first dimension
+            ((1, 4, 1), 1),
+        ]:
+            # broadcasting with single elem dimensions at both ends
 
             min_ = -100
             max_ = min_ + 255
@@ -171,25 +157,20 @@ class DNNLowPAddOpTest(hu.HypothesisTestCase):
             A.flat[0] = min_
             A.flat[1] = max_
             B.flat[0] = -64
-            B.flat[1] = 127. / 2
+            B.flat[1] = 127.0 / 2
 
-            Output = collections.namedtuple(
-                "Output", ["Y", "op_type", "engine"])
+            Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
             outputs = []
 
-            op_engine_list = [
-                ("Add", ""),
-                ("Add", "DNNLOWP"),
-                ("Int8Add", "DNNLOWP"),
-            ]
+            op_engine_list = [("Add", ""), ("Add", "DNNLOWP"), ("Int8Add", "DNNLOWP")]
 
             for op_type, engine in op_engine_list:
                 net = core.Net("test_net")
 
                 add = core.CreateOperator(
                     op_type,
-                    ['A', 'B'],
-                    ['Y'],
+                    ["A", "B"],
+                    ["Y"],
                     engine=engine,
                     device_option=gc,
                     broadcast=1,
@@ -198,11 +179,11 @@ class DNNLowPAddOpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([add])
 
-                self.ws.create_blob('A').feed(A, device_option=gc)
-                self.ws.create_blob('B').feed(B, device_option=gc)
+                self.ws.create_blob("A").feed(A, device_option=gc)
+                self.ws.create_blob("B").feed(B, device_option=gc)
                 self.ws.run(net)
-                outputs.append(Output(
-                    Y=self.ws.blobs["Y"].fetch(),
-                    op_type=op_type, engine=engine))
+                outputs.append(
+                    Output(Y=self.ws.blobs["Y"].fetch(), op_type=op_type, engine=engine)
+                )
 
             check_quantized_results_close(outputs)

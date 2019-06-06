@@ -14,9 +14,10 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop);
 static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop);
 
 void TensorIterator::parallel_reduce(const loop2d_t& loop) {
-  AT_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
+  TORCH_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
   int64_t numel = this->numel();
-  if (numel < at::internal::GRAIN_SIZE || at::get_max_threads() == 1 || at::in_parallel_region()) {
+  if (numel < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
+      at::in_parallel_region()) {
     serial_for_each(loop, {0, numel});
   } else if (use_two_pass_reduction(*this)) {
     two_pass_reduction(*this, loop);
@@ -26,16 +27,16 @@ void TensorIterator::parallel_reduce(const loop2d_t& loop) {
 }
 
 static bool use_two_pass_reduction(TensorIterator& iter) {
-  return iter.tensor(0).numel() == 1;
+  return iter.output(0).numel() == 1;
 }
 
 static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
-  int max_threads = at::get_max_threads();
+  int max_threads = at::get_num_threads();
 
-  auto& dst = iter.tensor(0);
+  auto dst = iter.output(0);
   auto buffer_shape = DimVector(dst.sizes());
   buffer_shape.insert(buffer_shape.begin(), max_threads);
-  auto buffer = at::empty(buffer_shape, dst.type());
+  auto buffer = at::empty(buffer_shape, dst.options());
 
   std::unique_ptr<bool[]> written(new bool[max_threads]);
   std::fill(written.get(), written.get() + max_threads, false);
@@ -46,7 +47,7 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
     auto slice = buffer[thread_num];
     slice.copy_(dst);
 
-    auto sub_iter = TensorIterator::reduce_op(slice, iter.tensor(1));
+    auto sub_iter = TensorIterator::reduce_op(slice, iter.input(0));
     sub_iter->serial_for_each(loop, {begin, end});
   });
 
@@ -65,7 +66,7 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
 /// Chooses a dimension over which to parallelize. Prefers the outer-most
 /// dimension thats larger than the number of available threads.
 static int find_split_dim(TensorIterator& iter) {
-  int num_threads = at::get_max_threads();
+  int num_threads = at::get_num_threads();
   auto shape = iter.shape();
 
   // start with the outer-most dimension
@@ -113,6 +114,59 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop) {
     sub_iter.narrow(dim, begin, end - begin);
     sub_iter.for_each(loop);
   });
+}
+
+void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop, bool parallelize) {
+  AT_ASSERT(ninputs() == 1);
+  AT_ASSERT(noutputs() >= 1);
+
+  auto shape = this->shape();
+  if (output(0).numel() == 0) {
+    return;
+  }
+  if (output(0).numel() == 1) {
+    loop(*this);
+  }
+  else if (numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
+      at::in_parallel_region() || !parallelize) {
+    auto reduce_dims = num_reduce_dims();
+
+    auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);
+
+    int64_t non_reduced_numel = 1;
+    for (int i = 0; i < non_reduced_shape.size(); ++i) {
+      non_reduced_numel *= non_reduced_shape[i];
+    }
+    DimCounter dims {non_reduced_shape, {0, non_reduced_numel}};
+    while (!dims.is_done()) {
+      TensorIterator reduced = *this;
+      reduced.select_all_keeping_dim(reduce_dims, dims.values);
+      loop(reduced);
+      dims.increment({1, 1});
+    }
+  }
+  else {
+    int dim = find_split_dim(*this);
+    int64_t cols = shape[dim];
+    at::parallel_for(0, cols, 1, [&](int64_t begin, int64_t end) {
+      if (begin == end) {
+        return;
+      }
+
+      auto sub_iter = *this;
+
+      sub_iter.narrow(dim, begin, end - begin);
+      // On some broken setups, `#ifdef _OPENMP` is true,
+      // and `get_num_threads` returns > 1, but
+      // `#pragma omp parallel` is ignored.
+      // There is no API to check for this, so we need to explicitly
+      // stop trying to parallelize if we've already gotten here.
+      //
+      // (If we are on one of those broken setups, we will
+      //  only have one thread here, and end - begin == cols.)
+      sub_iter.foreach_reduced_elt(loop, false);
+    });
+  }
 }
 
 }  // namespace at

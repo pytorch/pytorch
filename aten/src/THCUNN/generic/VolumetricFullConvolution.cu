@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricFullConvolution.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricFullConvolution.cu"
 #else
 
 void THNN_(VolumetricFullConvolution_updateOutput)(

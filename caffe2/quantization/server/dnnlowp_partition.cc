@@ -2,19 +2,15 @@
 
 #include "caffe2/core/logging.h"
 
-namespace caffe2
-{
+namespace caffe2 {
 
 static size_t GetWorkPerThread_(size_t work, int nthreads, int work_align) {
-  return ((work + work_align - 1) / work_align + nthreads - 1) /
-         nthreads * work_align;
+  return ((work + work_align - 1) / work_align + nthreads - 1) / nthreads *
+      work_align;
 }
 
-std::pair<size_t, size_t> Get1DPartition(
-    size_t work,
-    int nthreads,
-    int tid,
-    int work_align /*=1*/) {
+std::pair<size_t, size_t>
+Get1DPartition(size_t work, int nthreads, int tid, int work_align /*=1*/) {
   size_t work_per_thread = GetWorkPerThread_(work, nthreads, work_align);
   size_t work_begin = std::min(tid * work_per_thread, work);
   size_t work_end = std::min(work_begin + work_per_thread, work);
@@ -26,10 +22,10 @@ void Get1DPartitionOf2D(
     int n,
     int nthreads,
     int tid,
-    int *m_begin,
-    int *m_end,
-    int *n_begin,
-    int *n_end,
+    int* m_begin,
+    int* m_end,
+    int* n_begin,
+    int* n_end,
     int n_align /*=1*/) {
   if (m >= nthreads) {
     // When m >= nthreads, just parallelize over m.
@@ -53,8 +49,8 @@ void Get1DPartitionOf2D(
     CAFFE_ENFORCE_GE(tid_within_row, 0);
     CAFFE_ENFORCE_LT(tid_within_row, nthreads_within_row);
 
-    std::tie(*n_begin, *n_end) = Get1DPartition(
-        n, nthreads_within_row, tid_within_row, n_align);
+    std::tie(*n_begin, *n_end) =
+        Get1DPartition(n, nthreads_within_row, tid_within_row, n_align);
   }
 }
 

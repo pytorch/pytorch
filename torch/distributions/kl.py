@@ -17,12 +17,11 @@ from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
 from .half_normal import HalfNormal
+from .independent import Independent
 from .laplace import Laplace
-from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import (LowRankMultivariateNormal, _batch_lowrank_logdet,
-                                          _batch_lowrank_mahalanobis, _batch_vector_diag)
-from .multivariate_normal import (MultivariateNormal, _batch_diag, _batch_mahalanobis,
-                                  _batch_trtrs_lower)
+                                          _batch_lowrank_mahalanobis)
+from .multivariate_normal import (MultivariateNormal, _batch_mahalanobis)
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -117,7 +116,7 @@ def _infinite_like(tensor):
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
-    return tensor.new_tensor(inf).expand_as(tensor)
+    return torch.full_like(tensor, inf)
 
 
 def _x_log_x(tensor):
@@ -300,19 +299,24 @@ def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(p, q):
         raise ValueError("KL-divergence between two Low Rank Multivariate Normals with\
                           different event shapes cannot be computed")
 
-    term1 = (_batch_lowrank_logdet(q.cov_factor, q.cov_diag, q._capacitance_tril) -
-             _batch_lowrank_logdet(p.cov_factor, p.cov_diag, p._capacitance_tril))
-    term3 = _batch_lowrank_mahalanobis(q.cov_factor, q.cov_diag, q.loc - p.loc,
+    term1 = (_batch_lowrank_logdet(q._unbroadcasted_cov_factor, q._unbroadcasted_cov_diag,
+                                   q._capacitance_tril) -
+             _batch_lowrank_logdet(p._unbroadcasted_cov_factor, p._unbroadcasted_cov_diag,
+                                   p._capacitance_tril))
+    term3 = _batch_lowrank_mahalanobis(q._unbroadcasted_cov_factor, q._unbroadcasted_cov_diag,
+                                       q.loc - p.loc,
                                        q._capacitance_tril)
     # Expands term2 according to
     # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ (pW @ pW.T + pD)
     #                  = [inv(qD) - A.T @ A] @ (pD + pW @ pW.T)
-    qWt_qDinv = q.cov_factor.transpose(-1, -2) / q.cov_diag.unsqueeze(-2)
-    A = _batch_trtrs_lower(qWt_qDinv, q._capacitance_tril)
-    term21 = (p.cov_diag / q.cov_diag).sum(-1)
-    term22 = _batch_trace_XXT(p.cov_factor * q.cov_diag.rsqrt().unsqueeze(-1))
-    term23 = _batch_trace_XXT(A * p.cov_diag.sqrt().unsqueeze(-2))
-    term24 = _batch_trace_XXT(A.matmul(p.cov_factor))
+    qWt_qDinv = (q._unbroadcasted_cov_factor.transpose(-1, -2) /
+                 q._unbroadcasted_cov_diag.unsqueeze(-2))
+    A = torch.triangular_solve(qWt_qDinv, q._capacitance_tril, upper=False)[0]
+    term21 = (p._unbroadcasted_cov_diag / q._unbroadcasted_cov_diag).sum(-1)
+    term22 = _batch_trace_XXT(p._unbroadcasted_cov_factor *
+                              q._unbroadcasted_cov_diag.rsqrt().unsqueeze(-1))
+    term23 = _batch_trace_XXT(A * p._unbroadcasted_cov_diag.sqrt().unsqueeze(-2))
+    term24 = _batch_trace_XXT(A.matmul(p._unbroadcasted_cov_factor))
     term2 = term21 + term22 - term23 - term24
     return 0.5 * (term1 + term2 + term3 - p.event_shape[0])
 
@@ -323,16 +327,20 @@ def _kl_multivariatenormal_lowrankmultivariatenormal(p, q):
         raise ValueError("KL-divergence between two (Low Rank) Multivariate Normals with\
                           different event shapes cannot be computed")
 
-    term1 = (_batch_lowrank_logdet(q.cov_factor, q.cov_diag, q._capacitance_tril) -
-             2 * _batch_diag(p._unbroadcasted_scale_tril).log().sum(-1))
-    term3 = _batch_lowrank_mahalanobis(q.cov_factor, q.cov_diag, q.loc - p.loc,
+    term1 = (_batch_lowrank_logdet(q._unbroadcasted_cov_factor, q._unbroadcasted_cov_diag,
+                                   q._capacitance_tril) -
+             2 * p._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1))
+    term3 = _batch_lowrank_mahalanobis(q._unbroadcasted_cov_factor, q._unbroadcasted_cov_diag,
+                                       q.loc - p.loc,
                                        q._capacitance_tril)
     # Expands term2 according to
     # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ p_tril @ p_tril.T
     #                  = [inv(qD) - A.T @ A] @ p_tril @ p_tril.T
-    qWt_qDinv = q.cov_factor.transpose(-1, -2) / q.cov_diag.unsqueeze(-2)
-    A = _batch_trtrs_lower(qWt_qDinv, q._capacitance_tril)
-    term21 = _batch_trace_XXT(p._unbroadcasted_scale_tril * q.cov_diag.rsqrt().unsqueeze(-1))
+    qWt_qDinv = (q._unbroadcasted_cov_factor.transpose(-1, -2) /
+                 q._unbroadcasted_cov_diag.unsqueeze(-2))
+    A = torch.triangular_solve(qWt_qDinv, q._capacitance_tril, upper=False)[0]
+    term21 = _batch_trace_XXT(p._unbroadcasted_scale_tril *
+                              q._unbroadcasted_cov_diag.rsqrt().unsqueeze(-1))
     term22 = _batch_trace_XXT(A.matmul(p._unbroadcasted_scale_tril))
     term2 = term21 - term22
     return 0.5 * (term1 + term2 + term3 - p.event_shape[0])
@@ -344,19 +352,22 @@ def _kl_lowrankmultivariatenormal_multivariatenormal(p, q):
         raise ValueError("KL-divergence between two (Low Rank) Multivariate Normals with\
                           different event shapes cannot be computed")
 
-    term1 = (2 * _batch_diag(q._unbroadcasted_scale_tril).log().sum(-1) -
-             _batch_lowrank_logdet(p.cov_factor, p.cov_diag, p._capacitance_tril))
+    term1 = (2 * q._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1) -
+             _batch_lowrank_logdet(p._unbroadcasted_cov_factor, p._unbroadcasted_cov_diag,
+                                   p._capacitance_tril))
     term3 = _batch_mahalanobis(q._unbroadcasted_scale_tril, (q.loc - p.loc))
     # Expands term2 according to
     # inv(qcov) @ pcov = inv(q_tril @ q_tril.T) @ (pW @ pW.T + pD)
     combined_batch_shape = torch._C._infer_size(q._unbroadcasted_scale_tril.shape[:-2],
-                                                p.cov_factor.shape[:-2])
+                                                p._unbroadcasted_cov_factor.shape[:-2])
     n = p.event_shape[0]
     q_scale_tril = q._unbroadcasted_scale_tril.expand(combined_batch_shape + (n, n))
-    p_cov_factor = p.cov_factor.expand(combined_batch_shape + (n, p.cov_factor.size(-1)))
-    p_cov_diag = _batch_vector_diag(p.cov_diag.sqrt()).expand(combined_batch_shape + (n, n))
-    term21 = _batch_trace_XXT(_batch_trtrs_lower(p_cov_factor, q_scale_tril))
-    term22 = _batch_trace_XXT(_batch_trtrs_lower(p_cov_diag, q_scale_tril))
+    p_cov_factor = p._unbroadcasted_cov_factor.expand(combined_batch_shape +
+                                                      (n, p.cov_factor.size(-1)))
+    p_cov_diag = (torch.diag_embed(p._unbroadcasted_cov_diag.sqrt())
+                  .expand(combined_batch_shape + (n, n)))
+    term21 = _batch_trace_XXT(torch.triangular_solve(p_cov_factor, q_scale_tril, upper=False)[0])
+    term22 = _batch_trace_XXT(torch.triangular_solve(p_cov_diag, q_scale_tril, upper=False)[0])
     term2 = term21 + term22
     return 0.5 * (term1 + term2 + term3 - p.event_shape[0])
 
@@ -368,14 +379,14 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
         raise ValueError("KL-divergence between two Multivariate Normals with\
                           different event shapes cannot be computed")
 
-    half_term1 = (_batch_diag(q._unbroadcasted_scale_tril).log().sum(-1) -
-                  _batch_diag(p._unbroadcasted_scale_tril).log().sum(-1))
+    half_term1 = (q._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1) -
+                  p._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1))
     combined_batch_shape = torch._C._infer_size(q._unbroadcasted_scale_tril.shape[:-2],
                                                 p._unbroadcasted_scale_tril.shape[:-2])
     n = p.event_shape[0]
     q_scale_tril = q._unbroadcasted_scale_tril.expand(combined_batch_shape + (n, n))
     p_scale_tril = p._unbroadcasted_scale_tril.expand(combined_batch_shape + (n, n))
-    term2 = _batch_trace_XXT(_batch_trtrs_lower(p_scale_tril, q_scale_tril))
+    term2 = _batch_trace_XXT(torch.triangular_solve(p_scale_tril, q_scale_tril, upper=False)[0])
     term3 = _batch_mahalanobis(q._unbroadcasted_scale_tril, (q.loc - p.loc))
     return half_term1 + 0.5 * (term2 + term3 - n)
 
@@ -718,3 +729,11 @@ def _kl_uniform_pareto(p, q):
     result = t2 * (q.alpha + 1) - t1
     result[p.low < q.support.lower_bound] = inf
     return result
+
+
+@register_kl(Independent, Independent)
+def _kl_independent_independent(p, q):
+    if p.reinterpreted_batch_ndims != q.reinterpreted_batch_ndims:
+        raise NotImplementedError
+    result = kl_divergence(p.base_dist, q.base_dist)
+    return _sum_rightmost(result, p.reinterpreted_batch_ndims)

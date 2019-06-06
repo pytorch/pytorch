@@ -29,9 +29,11 @@ message ExternalDataProto {
   optional SourceType source_type = 1 [default = INLINE_CONTAINER];
   // used together with type
   optional string record_id = 2;
+  // the size of the entire record (in bytes)
+  optional uint64 record_size = 5;
   // the offset of the starting point, the content may be shared between
   // multiple tensors
-  optional int64 offset = 3;
+  optional int64 offset = 3 [default = 0];
   // the strides of the content
   repeated int64 strides = 4;
 }
@@ -124,6 +126,17 @@ message QTensorProto {
   repeated int32 data = 6 [packed = true];
   optional string name = 7;
   optional TensorProto.DataType data_type = 8 [default = INT32];
+
+  // Multi-group quantization params
+  repeated double scales = 9;
+  repeated double biases = 10;
+
+  // Multi-group quantization needed, indicates in which dimension
+  // we do the "group wise quantization"
+  optional int32 axis = 11;
+
+  // It should be true if it is a multi-group quantization proto
+  optional bool is_multiparam = 12 [default = false];
 }
 
 // TensorProtos stores multiple TensorProto objects in one single proto. This
@@ -161,12 +174,13 @@ message Argument {
   repeated bytes strings = 7;
   repeated TensorProto tensors = 11;
   repeated NetDef nets = 9;
+  repeated QTensorProto qtensors = 12;
 }
 
 // DeviceType that Caffe2 currently supports.
 // Note: if you add a device type, make sure you add the corresponding device
 // line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc
-// and update c10/DeviceType.h
+// and update c10/core/DeviceType.h
 enum DeviceTypeProto {
   PROTO_CPU = 0;                    // In default, we will use CPU.
   PROTO_CUDA = 1;                   // CUDA.
@@ -176,8 +190,10 @@ enum DeviceTypeProto {
   PROTO_IDEEP = 5;                  // IDEEP.
   PROTO_HIP = 6;                    // AMD HIP
   PROTO_FPGA = 7;                   // FPGA
+  PROTO_MSNPU = 8;                  // MSNPU
+  PROTO_XLA = 9;                    // XLA / TPU
   // Change the following number if you add more devices in the code.
-  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 8;
+  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 10;
   PROTO_ONLY_FOR_TEST = 20901;   // This device type is only for test.
 }
 

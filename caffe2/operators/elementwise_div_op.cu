@@ -396,9 +396,9 @@ class BinaryElementwiseWithArgsGradientOp<
         }
       } else {
         std::copy(
-            C.dims().cbegin(), C.dims().cend(), std::back_inserter(A_dims));
+            C.sizes().cbegin(), C.sizes().cend(), std::back_inserter(A_dims));
         std::copy(
-            B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+            B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
       }
       B_data = B.template data<T>();
       C_data = C.template data<T>();
@@ -425,9 +425,9 @@ class BinaryElementwiseWithArgsGradientOp<
         }
       } else {
         std::copy(
-            A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
+            A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
         std::copy(
-            B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+            B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
       }
       dC_data = dC.template data<T>();
       A_data = A.template data<T>();

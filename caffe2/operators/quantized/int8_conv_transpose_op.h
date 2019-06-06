@@ -17,8 +17,9 @@ namespace int8 {
 class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
  public:
   USE_CONV_TRANSPOSE_UNPOOL_BASE_FUNCTIONS(CPUContext);
-  Int8ConvTransposeOp(const OperatorDef& def, Workspace* ws)
-      : ConvTransposeUnpoolBase(def, ws) {
+  template <class... Args>
+  explicit Int8ConvTransposeOp(Args&&... args)
+      : ConvTransposeUnpoolBase(std::forward<Args>(args)...) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC,
         "Int8ConvTransposeOp only supports NHWC order");
@@ -56,7 +57,8 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
     const auto KW = W.t.size(2);
     const auto OC = W.t.size(3);
 
-    ConvTransposeUnpoolBase<CPUContext>::SetOutputSize(X.t, &(Y->t), OC);
+    auto sizes = ConvTransposeUnpoolBase<CPUContext>::GetOutputSize(X.t, OC);
+    ReinitializeTensor(&(Y->t), sizes, at::dtype<uint8_t>().device(CPU));
     CHECK_EQ(OC, Y->t.size(3));
 
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
@@ -86,12 +88,18 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
             X.scale,
             W.zero_point,
             W.scale,
+#ifndef _MSC_VER
             W.t.template data<uint8_t>(),
             B.t.template data<int32_t>(),
+#else
+            W.t.data<uint8_t>(),
+            B.t.data<int32_t>(),
+#endif
             Y->zero_point,
             Y->scale,
             std::numeric_limits<uint8_t>::min(),
             std::numeric_limits<uint8_t>::max(),
+            0 /* flags */,
             &this->qnnpackObject_);
         CAFFE_ENFORCE(
             createStatus == qnnp_status_success,

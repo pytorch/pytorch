@@ -3,9 +3,9 @@
 
 #include <cuda.h>
 #include <assert.h>
-#include "THCGeneral.h"
-#include "THCIntegerDivider.cuh"
-#include "THCTensor.h"
+#include <THC/THCGeneral.h>
+#include <THC/THCIntegerDivider.cuh>
+#include <THC/THCTensor.h>
 
 // Maximum number of dimensions allowed for cutorch
 #define MAX_CUTORCH_DIMS 25

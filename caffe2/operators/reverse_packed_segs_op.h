@@ -42,9 +42,8 @@ class ReversePackedSegsOp final : public Operator<Context> {
         "segments, embeddings>");
     CAFFE_ENFORCE(lengths.dim() == 1, "LENGTH should be 1-D");
 
-    auto* output = Output(0);
     const auto shape = data.sizes();
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype<T>());
 
     const auto max_length = data.sizes()[0];
     const auto batch_size = data.sizes()[1];

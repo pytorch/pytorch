@@ -19,20 +19,20 @@ void concat(
   // Precompute the output sizes to avoid resizing
   std::vector<std::vector<int64_t>> outputDims(numTensors);
 
-  for (int i = 0; i < numTensors; ++i) {
+  for (size_t i = 0; i < numTensors; ++i) {
     SmartTensorPrinter::PrintTensor(inputZero.at(i));
-    outputDims[i] = inputZero.at(i).dims().vec();
+    outputDims[i] = inputZero.at(i).sizes().vec();
     outputDims[i].insert(outputDims[i].begin(), numRows);
   }
 
   // Resize to the final output size
   std::vector<void*> destinations(numTensors);
-  for (int i = 0; i < numTensors; ++i) {
+  for (size_t i = 0; i < numTensors; ++i) {
     outputs[i]->Resize(outputDims[i]);
     destinations[i] = outputs[i]->raw_mutable_data(inputZero[i].meta());
   }
 
-  for (int i = 0; i < numRows; ++i) {
+  for (size_t i = 0; i < numRows; ++i) {
     CAFFE_ENFORCE_EQ(inputs[i].size(), numTensors);
 
     for (int j = 0; j < numTensors; ++j) {
@@ -42,7 +42,7 @@ void concat(
       CAFFE_ENFORCE_EQ(inputZero[j].itemsize(), input.itemsize());
       CAFFE_ENFORCE_EQ(inputZero[j].ndim(), input.dim());
       for (int k = 0; k < input.dim(); ++k) {
-        CAFFE_ENFORCE_EQ(input.sizes()[k], inputZero[j].dims()[k]);
+        CAFFE_ENFORCE_EQ(input.sizes()[k], inputZero[j].size(k));
       }
 
       // Skip empty tensors

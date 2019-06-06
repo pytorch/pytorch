@@ -5,12 +5,9 @@ from __future__ import unicode_literals
 
 import argparse
 import glob
-import numpy as np
 import onnx.backend.test
-import caffe2.python.onnx.backend as c2
 import os
 import shutil
-from onnx import numpy_helper
 from test_caffe2_common import run_generated_test
 import google.protobuf.text_format
 import test_onnx_common

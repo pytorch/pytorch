@@ -27,7 +27,7 @@ class TensorFiller {
     CAFFE_ENFORCE_LE(min, max);
 
     Tensor temp_tensor(shape_, Context::GetDeviceType());
-    tensor->swap(temp_tensor);
+    std::swap(*tensor, temp_tensor);
     Type* data = tensor->template mutable_data<Type>();
 
     // select distribution
@@ -77,10 +77,13 @@ class TensorFiller {
     return *this;
   }
 
-  // a helper function to construct the lengths vector for sparse features
+  // A helper function to construct the lengths vector for sparse features
+  // We try to pad least one index per batch unless the total_length is 0
   template <class Type>
   TensorFiller& SparseLengths(Type total_length) {
-    return FixedSum(total_length).Min(0).Max(total_length);
+    return FixedSum(total_length)
+        .Min(std::min(static_cast<Type>(1), total_length))
+        .Max(total_length);
   }
 
   // a helper function to construct the segments vector for sparse features

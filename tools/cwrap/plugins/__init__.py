@@ -33,13 +33,13 @@ class CWrapPlugin(object):
 
         Template('PyBool_Check($arg)')
 
-        Note that the name of the identifier that will be subsituted must be
+        Note that the name of the identifier that will be substituted must be
         $arg.
 
         Args:
             arg: a Python object with a 'type' field representing the type
             to generate a check string for.
-            option: dictionary containing the information for this specific
+            option: a dictionary containing the information for this specific
             option.
 
         Returns:
@@ -420,15 +420,15 @@ class CWrapPlugin(object):
         return template
 
 
-from .NNExtension import NNExtension
-from .NullableArguments import NullableArguments
-from .OptionalArguments import OptionalArguments
-from .ArgcountChecker import ArgcountChecker
-from .ArgumentReferences import ArgumentReferences
-from .BeforeAfterCall import BeforeAfterCall
-from .ConstantArguments import ConstantArguments
-from .ReturnArguments import ReturnArguments
-from .GILRelease import GILRelease
-from .AutoGPU import AutoGPU
-from .CuDNNPlugin import CuDNNPlugin
-from .WrapDim import WrapDim
+from .NNExtension import NNExtension  # noqa: F401
+from .NullableArguments import NullableArguments  # noqa: F401
+from .OptionalArguments import OptionalArguments  # noqa: F401
+from .ArgcountChecker import ArgcountChecker  # noqa: F401
+from .ArgumentReferences import ArgumentReferences  # noqa: F401
+from .BeforeAfterCall import BeforeAfterCall  # noqa: F401
+from .ConstantArguments import ConstantArguments  # noqa: F401
+from .ReturnArguments import ReturnArguments  # noqa: F401
+from .GILRelease import GILRelease  # noqa: F401
+from .AutoGPU import AutoGPU  # noqa: F401
+from .CuDNNPlugin import CuDNNPlugin  # noqa: F401
+from .WrapDim import WrapDim  # noqa: F401

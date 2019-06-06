@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/MultiMarginCriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/MultiMarginCriterion.c"
 #else
 
 // TODO: improve error messages
@@ -20,7 +20,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   int64_t t, d;
   scalar_t sum;
 
-  AT_CHECK(!input->is_empty() && input->dim() <= 2,
+  TORCH_CHECK(!input->is_empty() && input->dim() <= 2,
            "non-empty vector or matrix expected, got size: ", input->sizes());
 
   if (input->dim() <= 1)
@@ -32,15 +32,15 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
+    TORCH_CHECK(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
              "inconsistent target size, got: ", target->sizes());
   }
 
   for (t = 0; t < nframe; t++)
   {
     THIndex_t idx = THIndexTensor_(get1d)(target, t);
-    THArgCheck((idx >= TH_INDEX_BASE) && (idx < dim + TH_INDEX_BASE), 3,
-	       "target out of range");
+    THArgCheck((idx >= 0) && (idx < dim), 3,
+               "target out of range");
   }
 
   input = THTensor_(newContiguous)(input);
@@ -57,7 +57,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     for (t = 0; t < nframe; t++)
     {
       sum = 0;
-      THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
+      THIndex_t target_idx = target_data[t];
       scalar_t input_target = input_data[target_idx];
       for (d = 0; d < dim; d++)
       {
@@ -85,7 +85,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     sum = 0;
     for (t = 0; t < nframe; t++)
     {
-      THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
+      THIndex_t target_idx = target_data[t];
       scalar_t input_target = input_data[target_idx];
       for (d = 0; d < dim; d++)
       {
@@ -136,7 +136,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   int64_t t, d;
   scalar_t g;
 
-  AT_CHECK(!input->is_empty() && (input->dim() <= 2),
+  TORCH_CHECK(!input->is_empty() && (input->dim() <= 2),
            "non-empty vector or matrix expected, got size: ", input->sizes());
 
   if (input->dim() <= 1)
@@ -148,7 +148,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
+    TORCH_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
              "inconsistent target size, got: ", target->sizes());
   }
 
@@ -168,7 +168,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
 
   for (t = 0; t < nframe; t++)
   {
-    THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
+    THIndex_t target_idx = target_data[t];
     scalar_t input_target = input_data[target_idx];
     scalar_t gradInput_target = 0;
     for (d = 0; d < dim; d++)

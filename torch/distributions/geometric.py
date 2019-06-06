@@ -3,14 +3,15 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, _finfo
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 
 class Geometric(Distribution):
     r"""
-    Creates a Geometric distribution parameterized by :attr:`probs`, where :attr:`probs` is the probability of
-    success of Bernoulli trials. It represents the probability that in :math:`k + 1` Bernoulli trials, the
+    Creates a Geometric distribution parameterized by :attr:`probs`,
+    where :attr:`probs` is the probability of success of Bernoulli trials.
+    It represents the probability that in :math:`k + 1` Bernoulli trials, the
     first :math:`k` trials failed, before seeing a success.
 
     Samples are non-negative integers [0, :math:`\inf`).
@@ -22,7 +23,7 @@ class Geometric(Distribution):
         tensor([ 2.])
 
     Args:
-        probs (Number, Tensor): the probabilty of sampling `1`. Must be in range (0, 1]
+        probs (Number, Tensor): the probability of sampling `1`. Must be in range (0, 1]
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
     arg_constraints = {'probs': constraints.unit_interval,
@@ -50,7 +51,7 @@ class Geometric(Distribution):
         batch_shape = torch.Size(batch_shape)
         if 'probs' in self.__dict__:
             new.probs = self.probs.expand(batch_shape)
-        else:
+        if 'logits' in self.__dict__:
             new.logits = self.logits.expand(batch_shape)
         super(Geometric, new).__init__(batch_shape, validate_args=False)
         new._validate_args = self._validate_args
@@ -74,13 +75,14 @@ class Geometric(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
+        tiny = torch.finfo(self.probs.dtype).tiny
         with torch.no_grad():
             if torch._C._get_tracing_state():
                 # [JIT WORKAROUND] lack of support for .uniform_()
                 u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
-                u = u.clamp(min=_finfo(self.probs).tiny)
+                u = u.clamp(min=tiny)
             else:
-                u = self.probs.new(shape).uniform_(_finfo(self.probs).tiny, 1)
+                u = self.probs.new(shape).uniform_(tiny, 1)
             return (u.log() / (-self.probs).log1p()).floor()
 
     def log_prob(self, value):

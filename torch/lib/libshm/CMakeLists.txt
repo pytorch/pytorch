@@ -24,16 +24,15 @@ ENDIF ()
 
 ADD_LIBRARY(shm SHARED core.cpp)
 
-target_include_directories(shm PRIVATE
-  ${TORCH_ROOT}
-  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
+target_include_directories(shm PUBLIC
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
+  ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
   )
 
 ADD_EXECUTABLE(torch_shm_manager manager.cpp)
-INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(torch_shm_manager shm)
+set_target_properties(torch_shm_manager PROPERTIES INSTALL_RPATH "${_rpath_portable_origin}/../lib")
 ### Torch packages supposes libraries prefix is "lib"
 SET_TARGET_PROPERTIES(shm PROPERTIES
   PREFIX "lib"

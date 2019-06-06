@@ -5,22 +5,29 @@
 #include <unordered_map>
 #include <algorithm>
 
-#include <ATen/core/aten_interned_strings.h>
 #include <c10/macros/Macros.h>
+
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+#include <ATen/core/aten_interned_strings.h>
+#endif
 
 namespace c10 {
 
-#if !C10_MOBILE
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
   _(namespaces, onnx)              \
   _(namespaces, attr)              \
   _(namespaces, scope)             \
+  _(namespaces, user)              \
+  _(namespaces, _caffe2)           \
   _(namespaces, namespaces)        \
   _(prim, Assign)                  \
+  _(prim, BroadcastingChunk)       \
+  _(prim, BroadcastSizes)          \
   _(prim, Constant)                \
-  _(prim, None)                    \
+  _(prim, ChunkSizes)              \
   _(prim, Drop)                    \
   _(prim, Eval)                    \
   _(prim, Expand) /* onnx */       \
@@ -38,10 +45,12 @@ namespace c10 {
   _(prim, Placeholder) /* debug */ \
   _(prim, Print)                   \
   _(prim, PythonOp)                \
+  _(prim, IgnoredPythonOp)         \
   _(prim, Reverse)                 \
   _(prim, Return)                  \
   _(prim, Store)                   \
-  _(prim, Undefined)               \
+  _(prim, AutogradZero)            \
+  _(prim, AutogradAnyNonZero)      \
   _(prim, Starred)                 \
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
@@ -49,33 +58,84 @@ namespace c10 {
   _(prim, TupleSlice)              \
   _(prim, ListConstruct)           \
   _(prim, ListUnpack)              \
-  _(prim, BoolToTensor)            \
+  _(prim, DictConstruct)           \
+  _(prim, DictIndex)               \
+  _(prim, StringIndex)             \
   _(prim, NumToTensor)             \
-  _(prim, TensorToNum)             \
   _(prim, ImplicitTensorToNum)     \
-  _(prim, TensorToBool)            \
-  _(prim, IntToFloat)              \
-  _(prim, FloatToInt)              \
-  _(prim, StringToFloat)           \
-  _(prim, TensorDevice)            \
-  _(prim, TensorDType)             \
-  _(prim, TensorShape)             \
+  _(prim, Bool)                    \
+  _(prim, Int)                     \
+  _(prim, Float)                   \
+  _(prim, str)                     \
+  _(prim, device)                  \
+  _(prim, dtype)                   \
+  _(prim, shape)                   \
+  _(prim, requires_grad)           \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
-  _(prim, AnyDefined)              \
+  _(prim, Guard)                   \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
-  _(prim, NoneGenerator)           \
+  _(prim, MMTreeReduce)            \
+  _(prim, MMBatchSide)             \
+  _(prim, min)                     \
+  _(prim, max)                     \
+  _(prim, abs)                     \
+  _(prim, rangelist)               \
+  _(aten, _grad_sum_to_size)       \
+  _(aten, _size_if_not_equal)      \
+  _(aten, _ncf_unsqueeze)          \
+  _(aten, warn)                    \
   _(aten, floordiv)                \
+  _(aten, __range_length)          \
+  _(aten, __derive_index)          \
+  _(aten, __round_to_zero_floordiv)\
+  _(aten, _unwrap_optional)        \
   _(prim, fork)                    \
   _(prim, RaiseException)          \
+  _(prim, Function)                \
+  _(prim, CreateObject)            \
+  _(prim, SetAttr)                 \
+  _(prim, GetAttr)                 \
+  _(prim, profile)                 \
+  _(prim, AddStatValue)            \
+  _(prim, TimePoint)               \
+  _(prim, CallFunction)            \
+  _(prim, CallMethod)              \
   _(aten, append)                  \
+  _(aten, item)                    \
   _(aten, format)                  \
   _(aten, __not__)                 \
   _(aten, __is__)                  \
   _(aten, __isnot__)               \
   _(aten, copy_)                   \
+  _(aten, t_)                      \
+  _(aten, addbmm_)                 \
+  _(aten, addcdiv_)                \
+  _(aten, addcmul_)                \
+  _(aten, addmv_)                  \
+  _(aten, addr_)                   \
+  _(aten, baddbmm_)                \
+  _(aten, ge_)                     \
+  _(aten, gt_)                     \
+  _(aten, le_)                     \
+  _(aten, lerp_)                   \
+  _(aten, lt_)                     \
+  _(aten, ne_)                     \
+  _(aten, transpose_)              \
+  _(aten, unsqueeze_)              \
   _(aten, _set_item)               \
+  _(aten, manual_seed)             \
+  _(aten, set_)                    \
+  _(aten, index_put_)              \
+  _(aten, device)                  \
+  _(aten, hash)                    \
+  _(aten, len)                     \
+  _(aten, list)                    \
+  _(aten, wait)                    \
+  _(aten, save)                    \
+  _(aten, ord)                     \
+  _(prim, unchecked_unwrap_optional)\
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \
@@ -104,6 +164,9 @@ namespace c10 {
   _(onnx, Less)                    \
   _(onnx, Not)                     \
   _(onnx, ATen)                    \
+  _(onnx, Split)                   \
+  _(onnx, ConstantOfShape)         \
+  _(onnx, Cast)         \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
   _(attr, Subgraph)                \
   _(attr, ReverseSubgraph)         \
@@ -128,7 +191,10 @@ namespace c10 {
   _(attr, name)                    \
   _(attr, a)                       \
   _(attr, b)                       \
-  _(attr, beg)
+  _(attr, beg)                     \
+  _(attr, idx)                     \
+  _(attr, split)                   \
+  _(attr, slot)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
@@ -136,6 +202,8 @@ namespace c10 {
   _(namespaces, onnx)              \
   _(namespaces, attr)              \
   _(namespaces, scope)             \
+  _(namespaces, user)              \
+  _(namespaces, _caffe2)           \
   _(namespaces, namespaces)
 #endif
 
@@ -145,7 +213,7 @@ namespace c10 {
 // 'onnx' symbols correspond to ONNX operators.  Their semantics
 // are defined in https://github.com/onnx/onnx/blob/master/docs/Operators.md
 // The particular version we are targeting is specified by '_onnx_opset_version'
-// in torch.onnx.symbolic
+// in torch.onnx.symbolic_helper
 //
 // In general, most ONNX operators won't get an entry here, because they
 // are handled from the Python end.  However, you may occasionally need
@@ -177,7 +245,7 @@ namespace c10 {
 
 using unique_t = uint32_t;
 
-static const std::string domain_prefix = "org.pytorch.";
+const std::string& domain_prefix();
 
 // A Symbol is like an interned string, but with a little extra
 // structure; it is namespaced via SymbolNamespace and the resulting
@@ -202,6 +270,8 @@ struct CAFFE2_API Symbol {
   static Symbol aten(const std::string & s);
   static Symbol onnx(const std::string & s);
   static Symbol prim(const std::string & s);
+  static Symbol user(const std::string & s);
+  static Symbol caffe2(const std::string & s);
   // TODO: eliminate me
   static Symbol scope(const std::string & s);
 
@@ -209,6 +279,8 @@ struct CAFFE2_API Symbol {
   bool is_aten() const;
   bool is_prim() const;
   bool is_onnx() const;
+  bool is_user() const;
+  bool is_caffe2() const;
 
   // So we can switch on this
   constexpr operator unique_t() const {
@@ -267,10 +339,14 @@ inline Symbol Symbol::aten(const std::string & s)  { return Symbol::fromQualStri
 inline Symbol Symbol::onnx(const std::string & s)  { return Symbol::fromQualString("onnx::" + s); }
 inline Symbol Symbol::prim(const std::string & s)  { return Symbol::fromQualString("prim::" + s); }
 inline Symbol Symbol::scope(const std::string & s) { return Symbol::fromQualString("scope::" + s); }
+inline Symbol Symbol::user(const std::string & s) { return Symbol::fromQualString("user::" + s); }
+inline Symbol Symbol::caffe2(const std::string & s) { return Symbol::fromQualString("_caffe2::" + s); }
 inline bool Symbol::is_attr() const { return ns() == namespaces::attr; }
 inline bool Symbol::is_aten() const { return ns() == namespaces::aten; }
 inline bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
+inline bool Symbol::is_user() const { return ns() == namespaces::user; }
+inline bool Symbol::is_caffe2() const { return ns() == namespaces::_caffe2; }
 
 } // namespace c10
 

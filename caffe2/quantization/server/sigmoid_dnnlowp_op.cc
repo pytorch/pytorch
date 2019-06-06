@@ -8,10 +8,9 @@ using namespace dnnlowp;
 template <typename T>
 class SigmoidFunctor {
  public:
-  explicit SigmoidFunctor() : sigmoid_() {};
+  explicit SigmoidFunctor() : sigmoid_() {}
 
-  inline void
-  operator()(const int n, const T *x, T *y) {
+  inline void operator()(const int n, const T* x, T* y) {
     for (int i = 0; i < n; ++i) {
       y[i] = sigmoid_.Compute(x[i]);
     }
@@ -26,13 +25,17 @@ class SigmoidFunctor {
 };
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Sigmoid, DNNLOWP,
-  UnaryElementwiseWithArgsDNNLowPOp<
-    std::uint8_t, SigmoidFunctor<std::uint8_t>>);
+    Sigmoid,
+    DNNLOWP,
+    UnaryElementwiseWithArgsDNNLowPOp<
+        std::uint8_t,
+        SigmoidFunctor<std::uint8_t>>);
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-  Int8Sigmoid, DNNLOWP,
-  UnaryElementwiseWithArgsDNNLowPOp<
-    std::uint8_t, SigmoidFunctor<std::uint8_t>>);
+    Int8Sigmoid,
+    DNNLOWP,
+    UnaryElementwiseWithArgsDNNLowPOp<
+        std::uint8_t,
+        SigmoidFunctor<std::uint8_t>>);
 
 } // namespace caffe2

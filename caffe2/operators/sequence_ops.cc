@@ -66,12 +66,10 @@ bool RemovePaddingOp<CPUContext>::DoRunWithType() {
     lengths_size = lengths.numel();
   }
 
-  auto* out = Output(0);
-  {
-    auto out_dims = in.sizes().vec();
-    out_dims[0] -= pad_width * lengths_size;
-    out->Resize(std::move(out_dims));
-  }
+  auto out_dims = in.sizes().vec();
+  out_dims[0] -= pad_width * lengths_size;
+  auto* out = Output(0, std::move(out_dims), at::dtype<T>());
+
   const auto* in_ptr = in.template data<T>();
   auto* out_ptr = out->template mutable_data<T>();
   int64_t total_length = 0;
@@ -90,8 +88,8 @@ bool RemovePaddingOp<CPUContext>::DoRunWithType() {
   if (OutputSize() == 1) {
     return true;
   }
-  auto* lengths_out = Output(1);
-  lengths_out->Resize(lengths_size);
+
+  auto* lengths_out = Output(1, {lengths_size}, at::dtype<int32_t>());
   std::transform(
       lengths_ptr,
       lengths_ptr + lengths_size,
@@ -150,8 +148,8 @@ bool AddPaddingOp<CPUContext>::MakePadding(
   if (OutputSize() == 1) {
     return true;
   }
-  auto* lengths_out = Output(1);
-  lengths_out->Resize(lengths_size);
+
+  auto* lengths_out = Output(1, {lengths_size}, at::dtype<int32_t>());
   const auto pad_width = startPaddingWidth_ + endPaddingWidth_;
   std::transform(
       lengths_ptr,
@@ -168,7 +166,6 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE(lengths.dim() == 1, "LENGTH should be 1-D");
   CAFFE_ENFORCE(InputSize() >= 1, "Input size must be no less than 1");
 
-  auto* out_lengths = Output(0);
   int needPadding = 0;
   int sumLen = 0;
   for (int i = 0; i < lengths.numel(); ++i) {
@@ -178,7 +175,7 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
     sumLen += lengthsPtr[i];
   }
 
-  out_lengths->Resize(lengths.numel());
+  auto* out_lengths = Output(0, {lengths.numel()}, at::dtype<int32_t>());
   auto* outLengthsPtr = out_lengths->template mutable_data<int32_t>();
   for (int i = 0; i < lengths.numel(); ++i) {
     if (lengthsPtr[i] == 0) {
@@ -206,7 +203,10 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
     Tensor zero{CPU};
     zero.Resize(block_size);
     auto zeroPtr = static_cast<char*>(zero.raw_mutable_data(features.dtype()));
-    memset(zeroPtr, 0, zero.nbytes());
+    // TODO Handle other composite types, such as vector<...>
+    if (!features.dtype().Match<std::string>()) {
+      memset(zeroPtr, 0, zero.nbytes());
+    }
     int start_dest = 0;
     int start_src = 0;
     for (int i = 0; i < lengths.numel(); ++i) {

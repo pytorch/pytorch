@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "c10/core/thread_pool.h"
 #include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
@@ -16,10 +17,8 @@
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/simple_queue.h"
-#include "caffe2/utils/thread_pool.h"
 
 C10_DECLARE_string(caffe2_override_executor);
 
@@ -62,6 +61,13 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
   }
 
   virtual bool RunAsync();
+
+  /* Benchmarks a network for one individual run so that we can feed new
+   * inputs on additional calls.
+   * This function returns the number of microseconds spent
+   * during the benchmark
+   */
+  virtual float TEST_Benchmark_One_Run();
 
   /**
    * Benchmarks a network.
@@ -131,6 +137,8 @@ class CAFFE2_API ExecutorHelper {
  public:
   ExecutorHelper() {}
   virtual TaskThreadPoolBase* GetPool(const DeviceOption& option) const;
+  virtual std::vector<OperatorBase*> GetOperators() const;
+  virtual int GetNumWorkers() const;
   virtual ~ExecutorHelper() {}
 };
 

@@ -2,7 +2,6 @@
 #include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
-#include "caffe2/core/net_dag.h"
 #include "caffe2/core/net_simple.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator.h"
@@ -21,7 +20,7 @@ class DummyObserver final : public ObserverBase<T> {
   void Start() override;
   void Stop() override;
 
-  ~DummyObserver() {}
+  ~DummyObserver() override {}
 };
 
 template <>

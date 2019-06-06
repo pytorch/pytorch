@@ -6,13 +6,14 @@
 #include <torch/types.h>
 
 #include <torch/csrc/autograd/functions/comm.h>
+#ifdef USE_CUDA
 #include <torch/csrc/cuda/comm.h>
-#include <torch/csrc/utils/functional.h>
+#endif
+#include <ATen/core/functional.h>
 
 #include <ATen/Device.h>
-#include <ATen/OptionsGuard.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/TensorOptions.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
 
 #include <cstddef>
@@ -72,10 +73,10 @@ std::vector<Tensor> parallel_apply(
     std::vector<ModuleType>& modules,
     const std::vector<Tensor>& inputs,
     const optional<std::vector<Device>>& devices = nullopt) {
-  AT_CHECK(
+  TORCH_CHECK(
       modules.size() == inputs.size(), "Must have as many inputs as modules");
   if (devices) {
-    AT_CHECK(
+    TORCH_CHECK(
         modules.size() == devices->size(),
         "Must have as many devices as modules");
   }
@@ -97,9 +98,9 @@ std::vector<Tensor> parallel_apply(
           int64_t index, int64_t stop) {
         for (; index < stop; ++index) {
           try {
-            torch::OptionsGuard options_guard(
-                devices ? (*devices)[index] : inputs[index].device());
             auto output = modules[index]->forward(inputs[index]);
+            output =
+                output.to(devices ? (*devices)[index] : inputs[index].device());
             std::lock_guard<std::mutex> lock(mutex);
             outputs[index] = output;
           } catch (...) {
@@ -139,8 +140,9 @@ Tensor data_parallel(
     int64_t dim = 0) {
   if (!devices) {
     const auto device_count = torch::cuda::device_count();
-    AT_CHECK(device_count > 0, "Expected at least one CUDA device");
-    devices.emplace();
+    TORCH_CHECK(
+        device_count > 0, "Expected at least one CUDA device to be available");
+    devices = std::vector<Device>();
     devices->reserve(device_count);
     for (size_t index = 0; index < device_count; ++index) {
       devices->emplace_back(kCUDA, index);
@@ -151,7 +153,8 @@ Tensor data_parallel(
   }
 
   if (devices->size() == 1) {
-    OptionsGuard guard(devices->front());
+    module->to(devices->front());
+    input = input.to(devices->front());
     return module->forward(std::move(input)).to(*output_device);
   }
 

@@ -27,8 +27,8 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
   valsOffsets_[D] = output_dim;
 
   CAFFE_ENFORCE_EQ(vals.numel(), output_dim);
-  auto* output = Output(ONE_HOT);
-  output->Resize(N, output_dim);
+
+  auto* output = Output(ONE_HOT, {N, output_dim}, at::dtype<T>());
 
   const auto* input_data = input.template data<T>();
   const auto* vals_data = vals.template data<T>();
@@ -128,8 +128,8 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
     // Number of buckets is number of bucket edges + 1
     output_dim += (lens_data[i] + 1);
   }
-  auto* output = Output(ONE_HOT);
-  output->Resize(N, output_dim);
+
+  auto* output = Output(ONE_HOT, {N, output_dim}, at::dtype<float>());
 
   const auto* input_data = input.template data<float>();
   const auto* boundaries_data = boundaries.template data<float>();
@@ -169,8 +169,9 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
 
 class SegmentOneHotOp : public Operator<CPUContext> {
  public:
-  SegmentOneHotOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit SegmentOneHotOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     auto& lengths = Input(0);
@@ -185,8 +186,8 @@ class SegmentOneHotOp : public Operator<CPUContext> {
 
     auto* lengths_ptr = lengths.data<int32_t>();
     auto* indices_ptr = indices.data<int64_t>();
-    auto* one_hots = Output(0);
-    one_hots->Resize(batch_size, index_size);
+
+    auto* one_hots = Output(0, {batch_size, index_size}, at::dtype<float>());
     auto* one_hots_ptr = one_hots->template mutable_data<float>();
     if (one_hots->numel() == 0) {
       return true;

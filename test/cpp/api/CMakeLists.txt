@@ -5,6 +5,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/dataloader.cpp
   ${TORCH_API_TEST_DIR}/expanding-array.cpp
   ${TORCH_API_TEST_DIR}/integration.cpp
+  ${TORCH_API_TEST_DIR}/init.cpp
   ${TORCH_API_TEST_DIR}/jit.cpp
   ${TORCH_API_TEST_DIR}/memory.cpp
   ${TORCH_API_TEST_DIR}/misc.cpp
@@ -20,6 +21,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
   ${TORCH_API_TEST_DIR}/tensor_options.cpp
   ${TORCH_API_TEST_DIR}/tensor.cpp
+  ${TORCH_API_TEST_DIR}/torch_include.cpp
 )
 
 if (USE_CUDA)
@@ -28,7 +30,7 @@ endif()
 
 add_executable(test_api ${TORCH_API_TEST_SOURCES})
 target_include_directories(test_api PRIVATE ${ATen_CPU_INCLUDE})
-target_link_libraries(test_api PRIVATE torch gtest)
+target_link_libraries(test_api PRIVATE caffe2 gtest)
 
 if (USE_CUDA)
   target_link_libraries(test_api PRIVATE
@@ -36,6 +38,9 @@ if (USE_CUDA)
     ${CUDA_NVRTC_LIB}
     ${CUDA_CUDA_LIB}
     ${TORCH_CUDA_LIBRARIES})
+
+  target_link_libraries(test_api PRIVATE caffe2_gpu)
+
   target_compile_definitions(test_api PRIVATE "USE_CUDA")
 endif()
 

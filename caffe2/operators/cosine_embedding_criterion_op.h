@@ -10,8 +10,9 @@ namespace caffe2 {
 template <class Context>
 class CosineEmbeddingCriterionOp final : public Operator<Context> {
  public:
-  CosineEmbeddingCriterionOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit CosineEmbeddingCriterionOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(float, "margin", margin_, 0.0) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
@@ -24,8 +25,9 @@ class CosineEmbeddingCriterionOp final : public Operator<Context> {
 template <class Context>
 class CosineEmbeddingCriterionGradientOp final : public Operator<Context> {
  public:
-  CosineEmbeddingCriterionGradientOp(const OperatorDef& def, Workspace* ws)
-      : Operator<Context>(def, ws),
+  template <class... Args>
+  explicit CosineEmbeddingCriterionGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(float, "margin", margin_, 0.0) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 

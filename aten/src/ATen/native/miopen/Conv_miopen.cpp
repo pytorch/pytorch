@@ -1,6 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+
+// TODO: Remove the condition on AT_ROCM_ENABLED entirely,
+// don't build this file as part of CPU build.
 #include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_ROCM_ENABLED()
@@ -11,21 +14,21 @@ namespace at { namespace native {
 
 at::Tensor miopen_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
-    IntList padding, IntList stride, IntList dilation,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
   AT_ERROR("miopen_convolution: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_backward_input(
-    IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
   AT_ERROR("miopen_convolution_backward_input: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_backward_weight(
-    IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
   AT_ERROR("miopen_convolution_backward_weight: ATen not compiled with MIOpen support");
 }
@@ -37,44 +40,72 @@ at::Tensor miopen_convolution_backward_bias(
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
   AT_ERROR("miopen_convolution_backward: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_transpose(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
-    IntList padding, IntList output_padding, IntList stride, IntList dilation,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
   AT_ERROR("miopen_convolution_transpose: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_transpose_backward_input(
     const at::Tensor& grad_output, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
   AT_ERROR("miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
 }
 
 at::Tensor miopen_convolution_transpose_backward_weight(
-    IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
   AT_ERROR("miopen_convolution_transpose_backward_weight: ATen not compiled with MIOpen support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
-    IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
   AT_ERROR("miopen_convolution_transpose_backward: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_depthwise_convolution(
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  AT_ERROR("miopen_depthwise_convolution: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_depthwise_convolution_backward_input(
+    IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  AT_ERROR("miopen_depthwise_convolution_backward_input: ATen not compiled with MIOpen support");
+}
+
+at::Tensor miopen_depthwise_convolution_backward_weight(
+    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  AT_ERROR("miopen_depthwise_convolution_backward_weight: ATen not compiled with MIOpen support");
+}
+
+std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backward(
+    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+  AT_ERROR("miopen_depthwise_convolution_backward: ATen not compiled with MIOpen support");
 }
 
 }}
 
 #else  // AT_ROCM_ENABLED
 
-#include "THC/THC.h"
+#include <THH/THH.h>
 
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Descriptors.h>
@@ -115,8 +146,8 @@ constexpr int max_dim = 3;
 // takes an extra output_padding argument to resolve the ambiguity.
 
 static std::vector<int64_t> conv_output_size(
-    IntList input_size, IntList weight_size,
-    IntList padding, IntList stride, IntList dilation, int64_t groups
+    IntArrayRef input_size, IntArrayRef weight_size,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
@@ -133,8 +164,8 @@ static std::vector<int64_t> conv_output_size(
 }
 
 std::vector<int64_t> conv_input_size(
-    IntList output_size, IntList weight_size,
-    IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups
+    IntArrayRef output_size, IntArrayRef weight_size,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
   // ASSERT(output_size.size() > 2)
   // ASSERT(output_size.size() == weight_size.size())
@@ -151,8 +182,8 @@ std::vector<int64_t> conv_input_size(
 }
 
 std::vector<int64_t> conv_weight_size(
-    IntList input_size, IntList output_size,
-    IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups
+    IntArrayRef input_size, IntArrayRef output_size,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
   auto dim = input_size.size();
   std::vector<int64_t> weight_size(dim);
@@ -178,12 +209,12 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
 // ---------------------------------------------------------------------
 
 // Used on pad, stride and dilation
-static void check_args(CheckedFrom c, IntList args, size_t expected_size, const char* arg_name)
+static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, const char* arg_name)
 {
-  AT_CHECK(args.size() <= expected_size,
+  TORCH_CHECK(args.size() <= expected_size,
            "Too many ", arg_name, " values (", args.size(), ") supplied, expecting ",
            expected_size, " (while checking arguments for ", c, ")");
-  AT_CHECK(args.size() >= expected_size,
+  TORCH_CHECK(args.size() >= expected_size,
            "Not enough ", arg_name, " values (", args.size(), ") supplied, expecting ",
            expected_size, " (while checking arguments for ", c, ")");
 
@@ -201,7 +232,7 @@ static void check_args(CheckedFrom c, IntList args, size_t expected_size, const 
 static void convolution_shape_check(
     CheckedFrom c,
     const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
-    IntList padding, IntList stride, IntList dilation, int64_t groups)
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
 {
   check_args(c, padding, input->dim() - 2, "padding");
   check_args(c, stride, padding.size(), "stride");
@@ -221,6 +252,7 @@ static void convolution_shape_check(
 // parameters
 struct ConvolutionParams
 {
+  miopenHandle_t handle;
   miopenDataType_t dataType;
   int input_size[2 + max_dim];
   int input_stride[2 + max_dim];
@@ -230,6 +262,7 @@ struct ConvolutionParams
   int dilation[max_dim];
   int64_t groups;
   bool deterministic;
+  int device_id; //This is needed to distinguish between miopen handles of multiple gpus.
   // NB: transposed purposely omitted: transposed just swaps
   // forward and backward, so you can reuse the benchmark entry,
 };
@@ -238,14 +271,15 @@ struct ConvolutionParams
 static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD");
 
 void setConvolutionParams(
-    ConvolutionParams* params,
+    ConvolutionParams* params, miopenHandle_t handle,
     const at::Tensor& input, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool deterministic) {
 
   miopenDataType_t dataType = getMiopenDataType(input);
   memset(params, 0, sizeof(ConvolutionParams));
   params->dataType = dataType;
+  params->handle = handle;
   // ASSERT(weight.dim() == input.dim())
   for (int i = 0; i != input.dim(); ++i) {
     params->input_size[i] = (int) input.size(i);
@@ -261,6 +295,9 @@ void setConvolutionParams(
   }
   params->groups = groups;
   params->deterministic = deterministic;
+  int device_id;
+  HIP_CHECK(hipGetDevice(&device_id));
+  params->device_id = device_id;
 }
 
 // Convenience struct for passing around descriptors and data
@@ -328,6 +365,10 @@ struct BenchmarkCache {
 BenchmarkCache<miopenConvFwdAlgorithm_t> fwd_algos;
 BenchmarkCache<miopenConvBwdDataAlgorithm_t> bwd_data_algos;
 BenchmarkCache<miopenConvBwdWeightsAlgorithm_t> bwd_filter_algos;
+
+BenchmarkCache<size_t> fwd_wssizes;
+BenchmarkCache<size_t> bwd_data_wssizes;
+BenchmarkCache<size_t> bwd_filter_wssizes;
 
 struct Workspace {
   Workspace(size_t size) : size(size), data(NULL) {
@@ -402,6 +443,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
 
   static constexpr auto DEFAULT_ALGO = miopenConvolutionFwdAlgoGEMM;
   static BenchmarkCache<algo_t>& cache() { return fwd_algos; }
+  static BenchmarkCache<size_t>& wsscache() { return fwd_wssizes; }
 
   static perf_t findAlgorithm(const ConvolutionArgs& args) {
     int perf_count;
@@ -414,7 +456,7 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
         args.wdesc.desc(), args.weight.data_ptr(),
         args.cdesc.desc(),
         args.odesc.desc(), args.output.data_ptr(),
-        1,	// just return the fastest
+        1,        // just return the fastest
         &perf_count,
         &perf_results,
         ws.data,
@@ -431,6 +473,7 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
 
   static constexpr auto DEFAULT_ALGO = miopenConvolutionBwdDataAlgoGEMM;
   static BenchmarkCache<algo_t>& cache() { return bwd_data_algos; }
+  static BenchmarkCache<size_t>& wsscache() { return bwd_data_wssizes; }
 
   static perf_t findAlgorithm(const ConvolutionArgs& args) {
     int perf_count;
@@ -460,6 +503,7 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
 
   static constexpr auto DEFAULT_ALGO = miopenConvolutionBwdWeightsAlgoGEMM;
   static BenchmarkCache<algo_t>& cache() { return bwd_filter_algos; }
+  static BenchmarkCache<size_t>& wsscache() { return bwd_filter_wssizes; }
 
   static perf_t findAlgorithm(const ConvolutionArgs& args) {
     int perf_count;
@@ -486,6 +530,7 @@ template<typename algo_t>
 void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   using search = algorithm_search<algo_t>;
   auto& cache = search::cache();
+  auto& wsscache = search::wsscache();
 
   if (cache.find(args.params, algo)) {
     return;
@@ -505,8 +550,9 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   *algo = reinterpret_cast<algo_t&>(perfResults);
 
   cache.insert(args.params, *algo);
+  wsscache.insert(args.params, perfResults.memory);
 
-  THCCachingAllocator_emptyCache();
+  c10::hip::HIPCachingAllocator::emptyCache();
 }
 
 template<typename algo_t>
@@ -519,7 +565,7 @@ Workspace chooseAlgorithm(
 
   using search = algorithm_search<algo_t>;
   size_t workspace_size;
-  workspace_size = getWorkspaceSize(args, *algo);
+  search::wsscache().find(args.params, &workspace_size);
   try {
     return Workspace(workspace_size);
   } catch (const std::exception& e) {
@@ -528,9 +574,9 @@ Workspace chooseAlgorithm(
     // switch to default algorithm and record it in the cache to prevent
     // further OOM errors
     *algo = search::DEFAULT_ALGO;
-    search::cache().insert(args.params, *algo);
-
     workspace_size = getWorkspaceSize(args, *algo);
+    search::cache().insert(args.params, *algo);
+    search::wsscache().insert(args.params, workspace_size);
     return Workspace(workspace_size);
   }
 }
@@ -581,18 +627,19 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
 //
 void raw_miopen_convolution_forward_out(
     const Tensor& output, const Tensor& input, const Tensor& weight,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
 
   auto dataType = getMiopenDataType(input);
+  miopenConvolutionMode_t c_mode = miopenConvolution;
 
   ConvolutionArgs args{ input, output, weight };
   args.handle = getMiopenHandle();
-  setConvolutionParams(&args.params, input, weight, padding, stride, dilation, groups, deterministic);
+  setConvolutionParams(&args.params, args.handle, input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
   args.wdesc.set(weight);
   args.odesc.set(output);
-  args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
   miopenConvFwdAlgorithm_t fwdAlg;
   Workspace workspace = chooseAlgorithm(args, benchmark, &fwdAlg);
@@ -611,7 +658,7 @@ void raw_miopen_convolution_forward_out(
 Tensor miopen_convolution_forward(
     CheckedFrom c,
     const TensorArg& input, const TensorArg& weight,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
   checkAllSameType(c, {input, weight});
@@ -638,7 +685,7 @@ Tensor miopen_convolution_forward(
 
 Tensor miopen_convolution(
     const Tensor& input_t, const Tensor& weight_t, const Tensor& bias_t,
-    IntList padding, IntList stride, IntList dilation,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
   TensorArg input  { input_t,  "input",  1 },
@@ -654,9 +701,84 @@ Tensor miopen_convolution(
   return output_t;
 }
 
+//Depthwise Convolutions
+void raw_miopen_depthwise_convolution_forward_out(
+    const Tensor& output, const Tensor& input, const Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+
+  auto dataType = getMiopenDataType(input);
+  miopenConvolutionMode_t c_mode = miopenDepthwise;
+
+  ConvolutionArgs args{ input, output, weight };
+  args.handle = getMiopenHandle();
+  setConvolutionParams(&args.params, args.handle, input, weight, padding, stride, dilation, groups, deterministic);
+  args.idesc.set(input);
+  args.wdesc.set(weight);
+  args.odesc.set(output);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+
+  miopenConvFwdAlgorithm_t fwdAlg;
+  Workspace workspace = chooseAlgorithm(args, benchmark, &fwdAlg);
+
+  Constant one(dataType, 1);
+  Constant zero(dataType, 0);
+
+  MIOPEN_CHECK(miopenConvolutionForward(
+    args.handle,
+    &one, args.idesc.desc(), input.data_ptr(),
+    args.wdesc.desc(), weight.data_ptr(),
+    args.cdesc.desc(), fwdAlg, &zero,
+    args.odesc.desc(), output.data_ptr(), workspace.data, workspace.size));
+}
+
+Tensor miopen_depthwise_convolution_forward(
+    CheckedFrom c,
+    const TensorArg& input, const TensorArg& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic)
+{
+  checkAllSameType(c, {input, weight});
+  checkAllSameGPU(c, {input, weight});
+
+  auto output_t = at::empty(
+                    conv_output_size(input->sizes(), weight->sizes(),
+                                     padding, stride, dilation, groups),
+                    input->options());
+
+  TensorArg output{ output_t, "result", 0 };
+  convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
+
+  Tensor weight_contig = weight->contiguous();
+
+  raw_miopen_depthwise_convolution_forward_out(
+      *output, *input, weight_contig,
+      padding, stride, dilation, groups, benchmark, deterministic);
+
+  return *output;
+}
+
+Tensor miopen_depthwise_convolution(
+    const Tensor& input_t, const Tensor& weight_t, const Tensor& bias_t,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
+    int64_t groups, bool benchmark, bool deterministic)
+{
+  TensorArg input  { input_t,  "input",  1 },
+            weight { weight_t, "weight", 2 },
+            bias   { bias_t,   "bias",   3 };
+  setMIOpenStreamToCurrent();
+  CheckedFrom c = "miopen_depthwise_convolution";
+  auto output_t = miopen_depthwise_convolution_forward(
+    c, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
+  if (bias->defined()) {
+    miopen_convolution_add_bias_(c, { output_t, "result", 0 }, bias);
+  }
+  return output_t;
+}
+
 Tensor miopen_convolution_transpose_backward_input(
     const Tensor& grad_output_t, const Tensor& weight_t,
-    IntList padding, IntList stride, IntList dilation,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
   TensorArg grad_output { grad_output_t,  "grad_output", 1 },
@@ -669,7 +791,7 @@ Tensor miopen_convolution_transpose_backward_input(
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
-    IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
   Tensor grad_output = grad_output_t.contiguous();
@@ -698,18 +820,19 @@ void raw_miopen_convolution_backward_input_out(
     const at::Tensor& grad_input,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
 
   auto dataType = getMiopenDataType(grad_output);
+  miopenConvolutionMode_t c_mode = miopenConvolution;
 
   ConvolutionArgs args{ grad_input, grad_output, weight };
   args.handle = getMiopenHandle();
-  setConvolutionParams(&args.params, grad_input, weight, padding, stride, dilation, groups, deterministic);
+  setConvolutionParams(&args.params, args.handle, grad_input, weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(grad_input);
   args.wdesc.set(weight);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
   miopenConvBwdDataAlgorithm_t bwdDataAlg;
   Workspace workspace = chooseAlgorithm(args, benchmark, &bwdDataAlg);
@@ -729,8 +852,8 @@ void raw_miopen_convolution_backward_input_out(
 
 Tensor miopen_convolution_backward_input(
     CheckedFrom c,
-    IntList input_size, const TensorArg& grad_output, const TensorArg& weight,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef input_size, const TensorArg& grad_output, const TensorArg& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
   checkAllSameType(c, {grad_output, weight});
@@ -755,7 +878,7 @@ Tensor miopen_convolution_backward_input(
 Tensor miopen_convolution_transpose_forward(
     CheckedFrom c,
     const TensorArg& grad_output, const TensorArg& weight,
-    IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
   auto input_size = conv_input_size(grad_output->sizes(), weight->sizes(),
@@ -765,8 +888,8 @@ Tensor miopen_convolution_transpose_forward(
 }
 
 Tensor miopen_convolution_backward_input(
-    IntList input_size, const Tensor& grad_output_t, const Tensor& weight_t,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef input_size, const Tensor& grad_output_t, const Tensor& weight_t,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
@@ -778,9 +901,79 @@ Tensor miopen_convolution_backward_input(
       padding, stride, dilation, groups, benchmark, deterministic);
 }
 
+//Depthwise convolutions backward data.
+void raw_miopen_depthwise_convolution_backward_input_out(
+    const at::Tensor& grad_input,
+    const at::Tensor& grad_output,
+    const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+
+  auto dataType = getMiopenDataType(grad_output);
+  miopenConvolutionMode_t c_mode = miopenDepthwise;
+
+  ConvolutionArgs args{ grad_input, grad_output, weight };
+  args.handle = getMiopenHandle();
+  setConvolutionParams(&args.params, args.handle, grad_input, weight, padding, stride, dilation, groups, deterministic);
+  args.idesc.set(grad_input);
+  args.wdesc.set(weight);
+  args.odesc.set(grad_output);
+  args.cdesc.set(dataType, c_mode, grad_output.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+
+  miopenConvBwdDataAlgorithm_t bwdDataAlg;
+  Workspace workspace = chooseAlgorithm(args, benchmark, &bwdDataAlg);
+
+  Constant one(dataType, 1);
+  Constant zero(dataType, 0);
+
+  MIOPEN_CHECK(miopenConvolutionBackwardData(
+      args.handle,
+      &one, args.odesc.desc(), grad_output.data_ptr(),
+      args.wdesc.desc(), weight.data_ptr(),
+      args.cdesc.desc(), bwdDataAlg, &zero,
+      args.idesc.desc(), grad_input.data_ptr(), workspace.data, workspace.size));
+}
+
+Tensor miopen_depthwise_convolution_backward_input(
+    CheckedFrom c,
+    IntArrayRef input_size, const TensorArg& grad_output, const TensorArg& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic)
+{
+  checkAllSameType(c, {grad_output, weight});
+  checkAllSameGPU(c, {grad_output, weight});
+
+  auto grad_input_t = at::empty(input_size, grad_output->options());
+
+  TensorArg grad_input{ grad_input_t, "result", 0 };
+  convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
+
+  Tensor weight_contig = weight->contiguous();
+
+  raw_miopen_depthwise_convolution_backward_input_out(
+      *grad_input, *grad_output, weight_contig,
+      padding, stride, dilation, groups, benchmark, deterministic);
+
+  return *grad_input;
+}
+
+Tensor miopen_depthwise_convolution_backward_input(
+    IntArrayRef input_size, const Tensor& grad_output_t, const Tensor& weight_t,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic)
+{
+  TensorArg grad_output{ grad_output_t, "grad_output", 1 },
+            weight{ weight_t, "weight", 2 };
+  setMIOpenStreamToCurrent();
+  return miopen_depthwise_convolution_backward_input(
+      "miopen_depthwise_convolution_backward_input",
+      input_size, grad_output, weight,
+      padding, stride, dilation, groups, benchmark, deterministic);
+}
+
 std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
 
   Tensor grad_output = grad_output_t.contiguous();
@@ -799,9 +992,30 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
   return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
 }
 
+std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backward(
+    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+
+  Tensor grad_output = grad_output_t.contiguous();
+
+  Tensor grad_input, grad_weight, grad_bias;
+  if (output_mask[0]) {
+    grad_input = at::miopen_depthwise_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+  }
+  if (output_mask[1]) {
+    grad_weight = at::miopen_depthwise_convolution_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+  }
+  if (output_mask[2]) {
+    grad_bias = at::miopen_convolution_backward_bias(grad_output);
+  }
+
+  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
+}
+
 Tensor miopen_convolution_transpose(
     const Tensor& input_t, const Tensor& weight_t, const Tensor& bias_t,
-    IntList padding, IntList output_padding, IntList stride, IntList dilation,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
   TensorArg input  { input_t,  "input",  1 },
@@ -824,18 +1038,19 @@ Tensor miopen_convolution_transpose(
 
 void raw_miopen_convolution_backward_weight_out(
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic) {
 
   auto dataType = getMiopenDataType(input);
+  miopenConvolutionMode_t c_mode = miopenConvolution;
 
   ConvolutionArgs args{ input, grad_output, grad_weight };
   args.handle = getMiopenHandle();
-  setConvolutionParams(&args.params, input, grad_weight, padding, stride, dilation, groups, deterministic);
+  setConvolutionParams(&args.params, args.handle, input, grad_weight, padding, stride, dilation, groups, deterministic);
   args.idesc.set(input);
   args.wdesc.set(grad_weight);
   args.odesc.set(grad_output);
-  args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
   miopenConvBwdWeightsAlgorithm_t bwdFilterAlg;
   Workspace workspace = chooseAlgorithm(args, benchmark, &bwdFilterAlg);
@@ -853,8 +1068,8 @@ void raw_miopen_convolution_backward_weight_out(
 
 Tensor miopen_convolution_backward_weight(
     CheckedFrom c,
-    IntList weight_size, const TensorArg& grad_output, const TensorArg& input,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef weight_size, const TensorArg& grad_output, const TensorArg& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
 
@@ -875,11 +1090,66 @@ Tensor miopen_convolution_backward_weight(
   return grad_weight_t;
 }
 
+//Depthwise backward weights.
+void raw_miopen_depthwise_convolution_backward_weight_out(
+    const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+
+  auto dataType = getMiopenDataType(input);
+  miopenConvolutionMode_t c_mode = miopenDepthwise;
+
+  ConvolutionArgs args{ input, grad_output, grad_weight };
+  args.handle = getMiopenHandle();
+  setConvolutionParams(&args.params, args.handle, input, grad_weight, padding, stride, dilation, groups, deterministic);
+  args.idesc.set(input);
+  args.wdesc.set(grad_weight);
+  args.odesc.set(grad_output);
+  args.cdesc.set(dataType, c_mode, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
+
+  miopenConvBwdWeightsAlgorithm_t bwdFilterAlg;
+  Workspace workspace = chooseAlgorithm(args, benchmark, &bwdFilterAlg);
+
+  Constant one(dataType, 1);
+  Constant zero(dataType, 0);
+
+  MIOPEN_CHECK(miopenConvolutionBackwardWeights(
+      args.handle,
+      &one, args.odesc.desc(), grad_output.data_ptr(),
+      args.idesc.desc(), input.data_ptr(),
+      args.cdesc.desc(), bwdFilterAlg, &zero,
+      args.wdesc.desc(), grad_weight.data_ptr(), workspace.data, workspace.size));
+}
+
+Tensor miopen_depthwise_convolution_backward_weight(
+    CheckedFrom c,
+    IntArrayRef weight_size, const TensorArg& grad_output, const TensorArg& input,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic)
+{
+
+  checkAllSameType(c, {grad_output, input});
+  checkAllSameGPU(c, {grad_output, input});
+
+  auto grad_weight_t = at::empty(weight_size, grad_output->options());
+
+  // For uniformity with everything else, although it seems grad_weight
+  // would be unambiguous too.
+  TensorArg grad_weight{ grad_weight_t, "result", 0 };
+  convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
+
+  raw_miopen_depthwise_convolution_backward_weight_out(
+      *grad_weight, *grad_output, *input,
+      padding, stride, dilation, groups, benchmark, deterministic);
+
+  return grad_weight_t;
+}
+
 Tensor miopen_convolution_backward_weight(
-    IntList weight_size,
+    IntArrayRef weight_size,
     const Tensor& grad_output_t,
     const Tensor& input_t,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
@@ -892,10 +1162,10 @@ Tensor miopen_convolution_backward_weight(
 }
 
 Tensor miopen_convolution_transpose_backward_weight(
-    IntList weight_size,
+    IntArrayRef weight_size,
     const Tensor& grad_output_t,
     const Tensor& input_t,
-    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
@@ -904,6 +1174,22 @@ Tensor miopen_convolution_transpose_backward_weight(
   return miopen_convolution_backward_weight(
       "miopen_convolution_backward_weight",
       weight_size, input, grad_output,
+      padding, stride, dilation, groups, benchmark, deterministic);
+}
+
+Tensor miopen_depthwise_convolution_backward_weight(
+    IntArrayRef weight_size,
+    const Tensor& grad_output_t,
+    const Tensor& input_t,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic)
+{
+  TensorArg grad_output{ grad_output_t, "grad_output", 1 },
+            input{ input_t, "input", 2 };
+  setMIOpenStreamToCurrent();
+  return miopen_depthwise_convolution_backward_weight(
+      "miopen_depthwise_convolution_backward_weight",
+      weight_size, grad_output, input,
       padding, stride, dilation, groups, benchmark, deterministic);
 }
 

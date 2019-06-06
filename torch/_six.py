@@ -20,10 +20,12 @@
 
 import itertools
 import sys
+import builtins
 
 
 PY2 = sys.version_info[0] == 2
 PY3 = sys.version_info[0] == 3
+PY37 = sys.version_info[0] == 3 and sys.version_info[1] == 7
 
 if PY2:
     inf = float('inf')
@@ -48,7 +50,13 @@ else:
 if PY2:
     FileNotFoundError = IOError
 else:
-    FileNotFoundError = FileNotFoundError
+    FileNotFoundError = builtins.FileNotFoundError
+
+
+if PY2:
+    import Queue as queue  # noqa: F401
+else:
+    import queue  # noqa: F401
 
 
 def with_metaclass(meta, *bases):
@@ -65,16 +73,16 @@ def with_metaclass(meta, *bases):
 
 # A portable way of referring to the generator version of map
 # in both Python 2 and Python 3.
-# TODO: Move this into an appropriate utility library.
 if hasattr(itertools, 'imap'):
-    imap = itertools.imap
+    imap = itertools.imap  # type: ignore
 else:
-    imap = map
+    imap = map  # type: ignore
 
 
 if PY3:
     import builtins
-    exec_ = getattr(builtins, "exec")
+    # See https://github.com/PyCQA/flake8-bugbear/issues/64
+    exec_ = getattr(builtins, "exec")  # noqa: B009
 else:
     def exec_(_code_, _globs_=None, _locs_=None):
         """Execute code in a namespace."""
@@ -124,3 +132,30 @@ if PY2:
 elif PY3:
     def get_function_from_type(cls, name):
         return getattr(cls, name, None)
+
+if PY2:
+    import __builtin__ as builtins
+elif PY3:
+    import builtins
+
+if PY2:
+    import StringIO
+    StringIO = StringIO.StringIO
+elif PY3:
+    import io
+    StringIO = io.StringIO
+
+
+# The codes below is not copied from the six package, so the copyright
+# declaration at the beginning does not apply.
+#
+# Copyright(c) PyTorch contributors
+#
+
+def istuple(obj):
+    # Usually instances of PyStructSequence is also an instance of tuple
+    # but in some py2 environment it is not, so we have to manually check
+    # the name of the type to determine if it is a namedtupled returned
+    # by a pytorch operator.
+    t = type(obj)
+    return isinstance(obj, tuple) or t.__module__ == 'torch.return_types'

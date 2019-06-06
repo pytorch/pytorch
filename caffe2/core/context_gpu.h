@@ -20,6 +20,11 @@
 #include "caffe2/core/common_cudnn.h"
 #endif // CAFFE2_USE_CUDNN
 
+#include <c10/core/Device.h>
+#include <c10/core/Stream.h>
+#include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
+
 namespace caffe2 {
 
 enum class CudaMemoryPoolType {
@@ -43,19 +48,18 @@ CAFFE2_CUDA_API CudaMemoryPoolType GetCudaMemoryPoolType();
  * having the ThreadLocalCUDAObjects wrapper that takes care of allocating
  * and deallocating these objects at the thread scope. This class is solely
  * used inside CUDAContext and should not be used externally.
+ *
+ * This class manages the mapping from logical stream ID (int stream_id
+ * passed around in Caffe2) and CUDAStream objects.  We intend to eventually
+ * deprecate the logical stream ID interface, but not for now.
  */
 class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   friend class CUDAContext;
 
  private:
   ThreadLocalCUDAObjects() {
-    for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
-      cuda_streams_[i] = vector<cudaStream_t>();
-      cublas_handles_[i] = vector<cublasHandle_t>();
-#ifdef CAFFE2_USE_CUDNN
-      cudnn_handles_[i] = vector<cudnnHandle_t>();
-#endif // CAFFE2_USE_CUDNN
-      current_stream_id_[i] = 0;
+    for (DeviceIndex i = 0; i < C10_COMPILE_TIME_MAX_GPUS; ++i) {
+      cuda_streams_[i] = vector<c10::cuda::CUDAStream>();
     }
   }
 
@@ -63,27 +67,19 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // This is the new API we're trying to migrate use cases to and get rid of
   // explicit stream id passing. For now it's invoked in
   // CUDAContext::SwitchToDevice
-  void SetCurrentStreamId(int gpu, int stream_id) {
+  void SetCurrentStreamId(DeviceIndex gpu, StreamId stream_id) {
     // TODO: use current device id from thread local instead of passing gpu in
-    current_stream_id_[gpu] = stream_id;
+    c10::cuda::setCurrentCUDAStream(GetCUDAStream(gpu, stream_id));
   }
 
-  // Uses the logical stream id from the thread local to pick the stream
-  // We're going to migrate all usages to this case API instead of passing the
-  // stream id directly
-  cudaStream_t GetStream(int gpu) {
-    return GetStream(gpu, current_stream_id_[gpu]);
-  }
-
-  cudaStream_t GetStream(int gpu, int stream_id) {
-    vector<cudaStream_t>& gpu_streams = cuda_streams_[gpu];
-    if (gpu_streams.size() <= (unsigned)stream_id) {
-      gpu_streams.resize(stream_id + 1, nullptr);
-    }
-    if (!gpu_streams[stream_id]) {
-      DeviceGuard guard(gpu);
-      CUDA_ENFORCE(cudaStreamCreateWithFlags(
-          &gpu_streams[stream_id], cudaStreamNonBlocking));
+  // Retrieves the CUDAStream corresponding to a logical stream ID, ensuring
+  // that it exists in cuda_streams_ if it has not been allocated yet.
+  c10::cuda::CUDAStream GetCUDAStream(DeviceIndex gpu, StreamId stream_id) {
+    vector<c10::cuda::CUDAStream>& gpu_streams = cuda_streams_[gpu];
+    while (gpu_streams.size() <= static_cast<size_t>(stream_id)) {
+      // NB: This streams are not guaranteed to be unique; we'll
+      // wrap around once we run out of streams in the pool.
+      gpu_streams.emplace_back(c10::cuda::getStreamFromPool(/* high priority */ false, gpu));
     }
     return gpu_streams[stream_id];
   }
@@ -91,88 +87,86 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // Uses the logical stream id from the thread local to pick the stream
   // We're going to migrate all usages to this case API instead of passing the
   // stream id directly
-  cublasHandle_t GetHandle(int gpu) {
-    return GetHandle(gpu, current_stream_id_[gpu]);
+  cudaStream_t GetStream(DeviceIndex gpu) {
+    return c10::cuda::getCurrentCUDAStream(gpu).stream();
   }
 
-  cublasHandle_t GetHandle(int gpu, int stream_id) {
-    DeviceGuard guard(gpu);
-    vector<cublasHandle_t>& gpu_handles = cublas_handles_[gpu];
-    if (gpu_handles.size() <= (unsigned)stream_id) {
-      gpu_handles.resize(stream_id + 1, nullptr);
-    }
-    if (!gpu_handles[stream_id]) {
-      CUBLAS_ENFORCE(cublasCreate(&gpu_handles[stream_id]));
+  cudaStream_t GetStream(DeviceIndex gpu, StreamId stream_id) {
+    return GetCUDAStream(gpu, stream_id).stream();
+  }
+
+  // Uses the logical stream id from the thread local to pick the stream
+  // We're going to migrate all usages to this case API instead of passing the
+  // stream id directly
+  cublasHandle_t GetHandle(DeviceIndex gpu) {
+    return GetHandle(c10::cuda::getCurrentCUDAStream(gpu));
+  }
+
+  cublasHandle_t GetHandle(c10::cuda::CUDAStream cuda_stream) {
+    CUDAGuard guard(cuda_stream.device_index());
+    // Default construct in the map if it doesn't exist, and return a mutable
+    // refernce to it.
+    auto& r = cublas_handles_[cuda_stream];
+    if (r == nullptr) {
+      CUBLAS_ENFORCE(cublasCreate(&r));
       // The default is CUBLAS_POINTER_MODE_HOST. You can override
       // it after obtaining the cublas handle, but do that with
       // caution.
-      CUBLAS_ENFORCE(cublasSetPointerMode(
-          gpu_handles[stream_id], CUBLAS_POINTER_MODE_HOST));
-      CUBLAS_ENFORCE(
-          cublasSetStream(gpu_handles[stream_id], GetStream(gpu, stream_id)));
+      CUBLAS_ENFORCE(cublasSetPointerMode(r, CUBLAS_POINTER_MODE_HOST));
+      CUBLAS_ENFORCE(cublasSetStream(r, cuda_stream));
     }
-    return gpu_handles[stream_id];
+    return r;
   }
 
 #ifdef CAFFE2_USE_CUDNN
   // Uses the logical stream id from the thread local to pick the stream
   // We're going to migrate all usages to this case API instead of passing the
   // stream id directly
-  cudnnHandle_t GetCudnnHandle(int gpu) {
-    return GetCudnnHandle(gpu, current_stream_id_[gpu]);
+  cudnnHandle_t GetCudnnHandle(DeviceIndex gpu) {
+    return GetCudnnHandle(c10::cuda::getCurrentCUDAStream(gpu));
   }
 
-  cudnnHandle_t GetCudnnHandle(int gpu, int stream_id) {
-    DeviceGuard guard(gpu);
-    vector<cudnnHandle_t>& gpu_handles = cudnn_handles_[gpu];
-    if (gpu_handles.size() <= (unsigned)stream_id) {
-      gpu_handles.resize(stream_id + 1, nullptr);
+  cudnnHandle_t GetCudnnHandle(c10::cuda::CUDAStream cuda_stream) {
+    CUDAGuard guard(cuda_stream.device_index());
+    auto& r = cudnn_handles_[cuda_stream];
+    if (r == nullptr) {
+      CUDNN_ENFORCE(cudnnCreate(&r));
+      CUDNN_ENFORCE(cudnnSetStream(r, cuda_stream));
     }
-    if (!gpu_handles[stream_id]) {
-      CUDNN_ENFORCE(cudnnCreate(&gpu_handles[stream_id]));
-      CUDNN_ENFORCE(
-          cudnnSetStream(gpu_handles[stream_id], GetStream(gpu, stream_id)));
-    }
-    return gpu_handles[stream_id];
+    return r;
   }
 #endif // CAFFE2_USE_CUDNN
 
   ~ThreadLocalCUDAObjects() noexcept {
-    for (int i = 0; i < CAFFE2_COMPILE_TIME_MAX_GPUS; ++i) {
-      for (auto& handle : cublas_handles_[i]) {
-        if (handle) {
-          CUBLAS_CHECK(cublasDestroy(handle));
-        }
+    for (auto element : cublas_handles_) {
+      if (element.second) {
+        CUBLAS_CHECK(cublasDestroy(element.second));
       }
-      for (auto& stream : cuda_streams_[i]) {
-        if (stream) {
-          CUDA_CHECK(cudaStreamDestroy(stream));
-        }
-      }
-
-#ifdef CAFFE2_USE_CUDNN
-      for (auto& handle : cudnn_handles_[i]) {
-        if (handle) {
-          CUDNN_CHECK(cudnnDestroy(handle));
-        }
-      }
-#endif // CAFFE2_USE_CUDNN
     }
-  }
-  vector<cudaStream_t> cuda_streams_[CAFFE2_COMPILE_TIME_MAX_GPUS];
-  vector<cublasHandle_t> cublas_handles_[CAFFE2_COMPILE_TIME_MAX_GPUS];
 #ifdef CAFFE2_USE_CUDNN
-  vector<cudnnHandle_t> cudnn_handles_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+    for (auto element : cudnn_handles_) {
+      if (element.second) {
+        CUDNN_CHECK(cudnnDestroy(element.second));
+      }
+    }
 #endif // CAFFE2_USE_CUDNN
-  int current_stream_id_[CAFFE2_COMPILE_TIME_MAX_GPUS];
+  }
+  // WARNING: mapping from logical stream ID to c10::cuda::CUDAStream
+  // is NOT bijective; multiple logical stream IDs may map to the
+  // same underlying stream ID.
+  vector<c10::cuda::CUDAStream> cuda_streams_[C10_COMPILE_TIME_MAX_GPUS];
+  std::unordered_map<c10::cuda::CUDAStream, cublasHandle_t> cublas_handles_;
+#ifdef CAFFE2_USE_CUDNN
+  std::unordered_map<c10::cuda::CUDAStream, cudnnHandle_t> cudnn_handles_;
+#endif // CAFFE2_USE_CUDNN
 };
 
 class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
  public:
   // The default cuda context constructor.
-  explicit CUDAContext(const int gpu_id = -1);
+  explicit CUDAContext(DeviceIndex gpu_id = -1);
   explicit CUDAContext(const DeviceOption& option);
-  explicit CUDAContext(const at::Device& device)
+  explicit CUDAContext(Device device)
       : CUDAContext(DeviceToOption(device)) {}
 
   ~CUDAContext() override {
@@ -188,11 +182,12 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     FinishDeviceComputation();
   }
 
-  inline void SwitchToDevice(int stream_id) override {
+  inline void SwitchToDevice(StreamId stream_id) override {
     getCudaObjects().SetCurrentStreamId(gpu_id_, stream_id);
     CaffeCudaSetDevice(gpu_id_);
   }
 
+  // void SwitchToDevice()
   using BaseContext::SwitchToDevice;
 
   inline void WaitEvent(const Event& ev) override {
@@ -208,7 +203,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   // FinishDeviceComputation must be called on the same cpu thread as
   // SwitchToDevice()
   void FinishDeviceComputation() override {
-    cudaStreamSynchronize(getCudaObjects().GetStream(gpu_id_));
+    CUDA_ENFORCE(cudaStreamSynchronize(getCudaObjects().GetStream(gpu_id_)));
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
       CAFFE_THROW("Encountered CUDA error: ", cudaGetErrorString(error));
@@ -223,7 +218,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     return getCudaObjects().GetStream(gpu_id_);
   }
 
-  static cudaStream_t cuda_stream(int gpu_id, int stream_id) {
+  static cudaStream_t cuda_stream(DeviceIndex gpu_id, StreamId stream_id) {
     return getCudaObjects().GetStream(gpu_id, stream_id);
   }
 
@@ -239,7 +234,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 
   curandGenerator_t& curand_generator() {
     if (!curand_generator_) {
-      DeviceGuard guard(gpu_id_);
+      CUDAGuard guard(gpu_id_);
       CURAND_ENFORCE(
           curandCreateGenerator(&curand_generator_, CURAND_RNG_PSEUDO_DEFAULT));
       CURAND_ENFORCE(
@@ -300,6 +295,19 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
   }
 
+  static void CopyBytesAsync(
+      size_t nbytes,
+      const void* src,
+      Device src_device,
+      void* dst,
+      Device dst_device);
+  static void CopyBytesSync(
+      size_t nbytes,
+      const void* src,
+      Device src_device,
+      void* dst,
+      Device dst_device);
+
   // By default CUDA operators have async device parts
   static bool HasAsyncPartDefault() {
     return true;
@@ -309,7 +317,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     return true;
   }
 
-  static bool IsStreamFree(const DeviceOption& option, int stream_id) {
+  static bool IsStreamFree(const DeviceOption& option, StreamId stream_id) {
     auto stream = CUDAContext::cuda_stream(option.device_id(), stream_id);
     return cudaStreamQuery(stream) == cudaSuccess;
   }
@@ -331,84 +339,6 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   int random_seed_;
   curandGenerator_t curand_generator_{nullptr};
   static ThreadLocalCUDAObjects& getCudaObjects();
-};
-
-// For the CPU context, we also allow a (probably expensive) function
-// to copy the data from a cuda context. Inside the function, we create
-// a temporary CUDAContext object to carry out the copy. From the caller's
-// side, these functions are synchronous with respect to the host, similar
-// to a normal CPUContext::CopyBytes<CPUContext, CPUContext> call.
-template<>
-inline void CPUContext::CopyBytes<CUDAContext, CPUContext>(
-    size_t nbytes, const void* src, void* dst) {
-  CUDAContext context(GetGPUIDForPointer(src));
-  context.CopyBytes<CUDAContext, CPUContext>(nbytes, src, dst);
-}
-template<>
-inline void CPUContext::CopyBytes<CPUContext, CUDAContext>(
-    size_t nbytes, const void* src, void* dst) {
-  CUDAContext context(GetGPUIDForPointer(dst));
-  context.CopyBytes<CPUContext, CUDAContext>(nbytes, src, dst);
-}
-
-/**
- * An allocator that does the CPU memory allocation with pinned memory.
- *
- * This is needed because if we want to do any asynchronous cuda memcpy,
- * the underlying CPU memory also needs to be allocated into pinned memory
- * space. As a result, whenever Caffe2 is built with GPU and there is
- * GPU present during runtime, at global initialization time we will set
- * the CPU memory allocator to allocate pinned memory.
- */
-struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
-  PinnedCPUAllocator() {}
-  ~PinnedCPUAllocator() override {}
-  at::DataPtr allocate(size_t nbytes) const override {
-    void* data;
-    at::DataPtr data_ptr;
-    std::lock_guard<std::mutex> lock(CUDAContext::mutex());
-    if (IsNUMAEnabled()) {
-      data_ptr = baseAllocator_.allocate(nbytes);
-      data = data_ptr.get();
-      CAFFE_ENFORCE(data);
-      CUDA_ENFORCE(cudaHostRegister(data, nbytes, cudaHostRegisterDefault));
-    } else {
-      CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
-      data_ptr = {data, data, &Delete, at::Device(CPU)};
-    }
-    memset(data, 0, nbytes);
-    return data_ptr;
-  }
-
-  at::DeleterFnPtr raw_deleter() const override {
-    return &Delete;
-  }
-
- private:
-  static void Delete(void* data) {
-    // Caffe2 uses a lazy way to figure out if one is actually going to use GPUs
-    // or not. If a CUDAContext::New() call is made, inside the CUDAContext
-    // function we will switch the cpu side allocator to a PinnedCPUAllocator.
-    // But, if one calls CPUContext::New() before any cuda allocations,
-    // PinnedCPUAllocator can still delete the corresponding memory.
-    std::lock_guard<std::mutex> lock(CUDAContext::mutex());
-    if (IsNUMAEnabled()) {
-      CUDA_ENFORCE(cudaHostUnregister(data));
-      DefaultCPUAllocator::Delete(data);
-    } else {
-      cudaError_t err = cudaFreeHost(data);
-      if (err == cudaErrorInvalidValue) {
-        free(data);
-        // Calling cudaGetLastError will reset the cuda error.
-        cudaGetLastError();
-      } else {
-        // For all other errors, still do a cuda check.
-        CUDA_ENFORCE(err);
-      }
-    }
-  }
-
-  DefaultCPUAllocator baseAllocator_;
 };
 
 using TensorCUDA = Tensor;

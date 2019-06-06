@@ -1,11 +1,11 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "THCThrustAllocator.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/unique.h>
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCTensorSort.cuh"
-#include "../THC/THCTensorMathReduce.cuh"
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCTensorSort.cuh>
+#include <THC/THCTensorMathReduce.cuh>
 
 #ifdef __HIP_PLATFORM_HCC__
 const int WARP_SIZE = 64;
@@ -39,7 +39,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
     // Entire block cooperates to load a batch of 1024 indices to process
     int tid = threadIdx.x + threadIdx.y*blockDim.x;
     if(batch_start + tid < n)
-      indices_batch[tid] = (int)(indices[batch_start + tid] - TH_INDEX_BASE);
+      indices_batch[tid] = (int)(indices[batch_start + tid]);
 
     // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
     for(int chunk_start = batch_start; chunk_start < n; chunk_start += blockDim.y)
@@ -54,7 +54,7 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
       int dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
 
       // All warps load their smem segments with incoming grad data
-      if(src_row < n && f < s && dst_row != padding_idx - TH_INDEX_BASE)
+      if(src_row < n && f < s && dst_row != padding_idx)
         my_s[threadIdx.x] =  ScalarConvert<Dtype, Acctype>::to(scale*grad[src_row*stride + f]);
 
       __syncthreads();
@@ -64,22 +64,30 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
       // If so, we elect the first warp in each matching group as the leader.
       // Each leader warp serializes the accumulates targeting dst_row in shared memory,
       // then finishes by adding the accumulated buffer to dst_row in grad_weight.
-      if(dst_row != padding_idx - TH_INDEX_BASE && src_row < n) // Per-warp exit condition
+      if(dst_row != padding_idx && src_row < n) // Per-warp exit condition
       {
         int match_found_this_thread =
           (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
         if(threadIdx.x >= n_this_chunk)
           match_found_this_thread = 0;
+#ifdef __HIP_PLATFORM_HCC__
+        unsigned long long int matchmask = WARP_BALLOT(match_found_this_thread);
+        int first_remaining_peer = __ffsll(matchmask) - 1;
+#else
         unsigned int matchmask = WARP_BALLOT(match_found_this_thread);
-
         int first_remaining_peer = __ffs(matchmask) - 1;
+#endif
 
         if(threadIdx.y == first_remaining_peer) // Nominate lowest-indexed warp as the leader
         {
           matchmask ^= (1 << first_remaining_peer);
           while(matchmask)
           {
+#ifdef __HIP_PLATFORM_HCC__
+            first_remaining_peer = __ffsll(matchmask) - 1;
+#else
             first_remaining_peer = __ffs(matchmask) - 1;
+#endif
             my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
             matchmask ^= (1 << first_remaining_peer);
           }
@@ -117,8 +125,8 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
       && input[idx] != paddingValue) {
     do {
       const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-      const int weightRow = ((int) input[idx] - TH_INDEX_BASE) * stride;
-      const int gradOutputRow = ((int) indices[idx] - TH_INDEX_BASE) * stride;
+      const int weightRow = ((int) input[idx]) * stride;
+      const int gradOutputRow = ((int) indices[idx]) * stride;
       const Acctype scale = count ? ScalarConvert<Dtype, Acctype>::to(defaultScale) / count[idx] : ScalarConvert<Dtype, Acctype>::to(defaultScale);
 
       Acctype gradient[SZ];
@@ -200,7 +208,7 @@ void calculate_norms_and_renorm(DType *weights,
   AccType *sdata = reinterpret_cast<AccType *>(smem);
 
   IndexType tid = threadIdx.x;
-  IndexType baseIndex = (indices[blockIdx.x] - TH_INDEX_BASE) * dim;
+  IndexType baseIndex = (indices[blockIdx.x]) * dim;
 
   AccType accZero = ScalarConvert<int, AccType>::to(0);
   AccType v = accZero;
@@ -227,5 +235,5 @@ void calculate_norms_and_renorm(DType *weights,
 
 }
 
-#include "generic/LookupTable.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/LookupTable.cu>
+#include <THC/THCGenerateFloatTypes.h>

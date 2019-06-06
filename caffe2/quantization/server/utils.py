@@ -1,11 +1,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import copy
+from collections import defaultdict
 
 import numpy as np
 from caffe2.python import core, utils
 from caffe2.python.fb import hardcode_scale_zp
-from collections import defaultdict
 
 
 def pairwise(iterable):
@@ -270,7 +270,7 @@ def swap_first_concat_relu(net, ignore_op_with_output=None):
         concat = copy.deepcopy(current)
         relu = copy.deepcopy(next_)
         pre_ops = copy.deepcopy(net.op[:i])
-        post_ops = copy.deepcopy(net.op[j + 1:])
+        post_ops = copy.deepcopy(net.op[j + 1 :])
 
         # Delete the Relu after Concat
         concat.output[0] = relu.output[0]
@@ -280,13 +280,13 @@ def swap_first_concat_relu(net, ignore_op_with_output=None):
             k = last_producer(pre_ops, blob)
             producer = pre_ops[k]
             assert producer.output[0] == blob
-            producer.output[0] = blob + '_pre_relu'
+            producer.output[0] = blob + "_pre_relu"
 
             new_relu = copy.deepcopy(relu)
             new_relu.input[0] = producer.output[0]
             new_relu.output[0] = blob
 
-            pre_ops = pre_ops[:k + 1] + [new_relu] + pre_ops[k + 1:]
+            pre_ops = pre_ops[: k + 1] + [new_relu] + pre_ops[k + 1 :]
 
         new_ops = pre_ops + [concat] + post_ops
         del net.op[:]
@@ -305,17 +305,17 @@ def swap_concat_relu(net, ignore_op_with_output=None):
 
 
 def add_version_to_conv_bias(net, init_net):
-    '''
+    """
     In architectures such as FPN (https://arxiv.org/abs/1612.03144), few Conv
     ops share the same weight and bias and are run at different scales of
     the input. Since 'bias_scale = input_scale * weight_scale', sharing the
     same bias blob among multiple Conv ops means that we need different bias
     scale for each of the ops. To achieve this, we just duplicate those bias
     blobs that are used by multiple Conv ops before performing int8 rewrite.
-    '''
+    """
     bias_count = defaultdict(int)
     for op in net._net.op:
-        if 'Conv' in op.type and len(op.input) >= 3:
+        if "Conv" in op.type and len(op.input) >= 3:
             bias_count[op.input[2]] += 1
 
     bias_fill_op = {}
@@ -325,7 +325,7 @@ def add_version_to_conv_bias(net, init_net):
 
     bias_version = defaultdict(int)
     for op in net._net.op:
-        if 'Conv' in op.type and len(op.input) >= 3:
+        if "Conv" in op.type and len(op.input) >= 3:
             bias = op.input[2]
             if bias_count[bias] <= 1:
                 continue
@@ -335,7 +335,7 @@ def add_version_to_conv_bias(net, init_net):
             if version == 0:
                 continue
 
-            new_bias = bias + '_v' + str(version)
+            new_bias = bias + "_v" + str(version)
             fill_op = copy.deepcopy(bias_fill_op[bias])
             fill_op.output[0] = new_bias
             init_net._net.op.extend([fill_op])
@@ -352,10 +352,7 @@ def add_quantization_param_args_(op, q_param):
     )
 
 
-def add_quantization_param_args(op, tensor, preserve_sparsity=False):
-    tensor_min = 0 if tensor.size == 0 else tensor.min()
-    tensor_max = 0 if tensor.size == 0 else tensor.max()
-
+def choose_quantization_params(tensor_min, tensor_max, preserve_sparsity=False):
     if tensor_min < 0 and tensor_max > 0 and preserve_sparsity:
         symmetric_qmin = -(255 // 2 + 1)
         symmetric_qmax = 255 // 2
@@ -369,6 +366,15 @@ def add_quantization_param_args(op, tensor, preserve_sparsity=False):
 
     if tensor_min < 0 and tensor_max > 0 and preserve_sparsity:
         q_param = hardcode_scale_zp.QuantizationParam(q_param.scale, 128)
+
+    return q_param
+
+
+def add_quantization_param_args(op, tensor, preserve_sparsity=False):
+    tensor_min = 0 if tensor.size == 0 else tensor.min()
+    tensor_max = 0 if tensor.size == 0 else tensor.max()
+
+    q_param = choose_quantization_params(tensor_min, tensor_max, preserve_sparsity)
 
     add_quantization_param_args_(op, q_param)
     return q_param

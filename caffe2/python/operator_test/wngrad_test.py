@@ -182,10 +182,8 @@ class TestWngrad(serial.SerializedTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
-           data_strategy=st.data(),
            **hu.gcs_cpu_only)
-    def test_sparse_wngrad_empty(self, inputs, seq_b, lr, epsilon,
-                                  data_strategy, gc, dc):
+    def test_sparse_wngrad_empty(self, inputs, seq_b, lr, epsilon, gc, dc):
         param = inputs[0]
         seq_b = np.array([seq_b, ], dtype=np.float32)
         lr = np.array([lr], dtype=np.float32)

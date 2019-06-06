@@ -12,14 +12,15 @@ using namespace std;
 
 template <typename T>
 ConcatDNNLowPOp<T>::ConcatDNNLowPOp(
-    const OperatorDef& operator_def, Workspace* ws)
-  : BaseType(operator_def, ws) {
+    const OperatorDef& operator_def,
+    Workspace* ws)
+    : BaseType(operator_def, ws) {
   if (HasArgument("axis")) {
-    axis_ = OperatorBase::GetSingleArgument<int>("axis", -1);
-    add_axis_ = OperatorBase::GetSingleArgument<int>("add_axis", 0);
+    axis_ = this->template GetSingleArgument<int>("axis", -1);
+    add_axis_ = this->template GetSingleArgument<int>("add_axis", 0);
   } else {
     axis_ = GetDimFromOrderString(
-        OperatorBase::GetSingleArgument<string>("order", "NCHW"));
+        this->template GetSingleArgument<string>("order", "NCHW"));
     add_axis_ = 0;
   }
   CAFFE_ENFORCE_GE(axis_, 0);
@@ -34,7 +35,7 @@ bool ConcatDNNLowPOp<T>::RunOnDevice() {
   Tensor* split = nullptr;
   int* axis_data = nullptr;
   if (OutputSize() >= 2) {
-    split = OperatorBase::Output<Tensor>(1, CPU);
+    split = this->template Output<Tensor>(1, CPU);
     split->Resize(vector<int64_t>(1, InputSize()));
     axis_data = split->template mutable_data<int>();
   }
@@ -106,7 +107,7 @@ bool ConcatDNNLowPOp<T>::RunOnDevice() {
   output->Resize(output_dims);
   size_t output_offset = 0;
 
-  char *output_data = reinterpret_cast<char*>(GetQuantizedOutputData_());
+  char* output_data = reinterpret_cast<char*>(GetQuantizedOutputData_());
 
   for (int i = 0; i < InputSize(); ++i) {
     auto& input = InputTensorCPU_(i);
@@ -136,15 +137,14 @@ bool ConcatDNNLowPOp<T>::RunOnDevice() {
       int j_end = (before_end - 1) * axis_dim * after + after_end;
 
       if (InputTensorCPU_(i).template IsType<T>()) {
-        const T *input_data = input.template data<T>();
+        const T* input_data = input.template data<T>();
         for (int j = j_begin; j < j_end; ++j) {
-          input_temp[j] = dnnlowp::Requantize<T>(
+          input_temp[j] = fbgemm::Requantize<T>(
               input_data[j] - in_qparams_[i].zero_point,
               requantization_params_[i]);
         }
-      }
-      else {
-        dnnlowp::Quantize<T>(
+      } else {
+        fbgemm::Quantize<T>(
             input.template data<float>() + j_begin,
             input_temp.data() + j_begin,
             j_end - j_begin,
@@ -177,7 +177,7 @@ void ConcatDNNLowPOp<T>::GetQuantizationParameters_() {
   using namespace dnnlowp;
   for (int i = 0; i < InputSize(); ++i) {
     in_qparams_[i] =
-      GetInputTensorQuantizationParamsOf(this, i, qfactory_.get());
+        GetInputTensorQuantizationParamsOf(this, i, qfactory_.get());
   }
 
   GetOutputQuantizationParams_();
@@ -185,12 +185,14 @@ void ConcatDNNLowPOp<T>::GetQuantizationParameters_() {
   for (int i = 0; i < InputSize(); ++i) {
     float real_multiplier = in_qparams_[i].scale / out_qparams_.scale;
     requantization_params_[i] = qfactory_->ChooseRequantizationMultiplier(
-      real_multiplier, out_qparams_);
+        real_multiplier, out_qparams_);
   }
 }
 
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Concat, DNNLOWP, ConcatDNNLowPOp<uint8_t>);
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    Int8Concat, DNNLOWP, ConcatDNNLowPOp<uint8_t>);
+    Int8Concat,
+    DNNLOWP,
+    ConcatDNNLowPOp<uint8_t>);
 
 } // namespace caffe2

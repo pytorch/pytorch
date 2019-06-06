@@ -1,9 +1,9 @@
 #pragma once
 
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 #include <ATen/ATen.h>
 
-#include "torch/csrc/utils/python_arg_parser.h"
+#include <torch/csrc/utils/python_arg_parser.h>
 
 namespace torch { namespace autograd { namespace utils {
 
@@ -31,8 +31,8 @@ inline std::tuple<c10::optional<at::Device>, c10::optional<at::ScalarType>, bool
     if (!allow_copy && !r.isNone(2))
       throw std::runtime_error(".to() does not accept copy argument");
     return std::make_tuple(
-      torch::tensors::getDevice(tensor),
-      tensor.type().scalarType(),
+      tensor.device(),
+      tensor.scalar_type(),
       r.toBool(1),
       r.toBool(2)
     );

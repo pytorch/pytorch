@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorIndex.h"
+#define THC_GENERIC_FILE "THC/generic/THCTensorIndex.h"
 #else
 
 THC_API void THCTensor_(indexCopy)(THCState *state, THCTensor *res_, int dim, THCudaLongTensor *indices, THCTensor *src);

@@ -17,25 +17,9 @@ using SparseType = Type;
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
 inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
-  AT_ASSERTM(!self.is_variable(), "_internal_get_SparseTensorImpl: should not be a variable");
+  AT_ASSERTM(!self.is_variable(), "_internal_get_SparseTensorImpl: should not be a variable");  // TODO: remove this when Variable and Tensor are merged
   AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
-}
-
-// Port of the old THCSTensor_(checkGPU), but it doesn't really belong here
-// because it is more general
-// NB: I dropped kernelP2PEnabled support
-// NB: This only works if the tensors are KNOWN to be CUDA.
-// TODO: Generalize it so it works on CPU as well
-inline bool check_device(ArrayRef<Tensor> ts) {
-  if (ts.empty()) {
-    return true;
-  }
-  int64_t curDevice = current_device();
-  for (const Tensor& t : ts) {
-    if (t.get_device() != curDevice) return false;
-  }
-  return true;
 }
 
 // Takes indices and values and directly puts them into the sparse tensor, no
@@ -47,7 +31,10 @@ inline void alias_into_sparse(const SparseTensor& self, const LongTensor& indice
 // Take indices and values and makes a (data) copy of them to put into the sparse
 // indices/values.  This used to be called THSTensor_(_set)
 inline void copy_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values, bool non_blocking) {
-  alias_into_sparse(self, self._indices().type().copy(indices, non_blocking), self._values().type().copy(values, non_blocking));
+  alias_into_sparse(
+      self,
+      indices.to(self._indices().options(), non_blocking, /*copy=*/true),
+      values.to(self._values().options(), non_blocking, /*copy=*/true));
 }
 
 // TODO: put this into the public API
@@ -82,7 +69,7 @@ inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz) {
 // the flattened tensor `t.reshape( prod(full_size[:indices.size(0)]), -1 )`.
 // if forceClone is true, the result will forced to be a clone of self.
 // if force_clone is true, the result will forced to be a clone of self.
-inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool force_clone = false) {
+inline LongTensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_clone = false) {
   int64_t sparse_dim = indices.size(0);
   if (sparse_dim == 1) {
     if (force_clone) {
@@ -98,8 +85,10 @@ inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool
       indices_mult_cpu_vec[i] = mult;
       mult *= full_size[i];
     }
-    auto indices_mult_cpu = indices.type().cpu()
-                                   .tensorFromBlob(indices_mult_cpu_vec.data(), /*size=*/{sparse_dim, 1});
+    auto indices_mult_cpu = at::from_blob(
+        indices_mult_cpu_vec.data(),
+        /*size=*/{sparse_dim, 1},
+        indices.options().device(kCPU));
     // NB: must be blocking because this blob may be freed after this closure,
     //     and non_blocking copy will see garbage.
     auto indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/false);
@@ -107,6 +96,35 @@ inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool
     // on CUDA Long. So mul is faster.
     return indices.mul(indices_mult).sum(0);
   }
+}
+
+// Flatten sparse tensor's indices from nD to 1D, similar to NOTE [ Flatten Sparse Indices ],
+// except this one allows partial flatten: only flatten on specified dims. Note that
+// the flatten indices might be uncoalesced if dims_to_flatten.size() < sparse_dim.
+// Also if input indices is already coalesced, the flattened indices will also be sorted.
+//
+// args:
+//    indices: sparse tensor indices
+//    sizes: sparse tensor sizes
+//    dims_to_flatten: a list of dim index to flatten
+//
+// Ex1:
+//   indices = [[2, 4, 0],
+//             [3, 1, 3]]
+//   sizes = [2, 12]
+//   dims_to_flatten = [0, 1]
+//   new_indices = [ 2 * 12 + 3, 4 * 12 + 1, 0 * 12 + 3 ] = [27, 49, 3]
+//
+// Ex2:
+//   dims_to_flatten = [1]
+//   new_indices = [ 3, 1, 3 ]  # uncoalesced
+inline LongTensor flatten_indices_by_dims(const LongTensor& indices, const IntArrayRef& sizes, const IntArrayRef& dims_to_flatten){
+  LongTensor new_indices = at::zeros({indices.size(1)}, indices.options());
+  for (auto d : dims_to_flatten) {
+    new_indices.mul_(sizes[d]);
+    new_indices.add_(indices.select(0, d));
+  }
+  return new_indices;
 }
 
 }} // namespace at::sparse

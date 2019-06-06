@@ -29,7 +29,7 @@ class GatherDNNLowPOp final : public GatherOp<CPUContext> {
   static_assert(std::is_integral<T>::value, "Integral required.");
 
  public:
-  GatherDNNLowPOp(const OperatorDef& operator_def, Workspace *ws);
+  GatherDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
   ~GatherDNNLowPOp();
   bool RunOnDevice() override;
 
@@ -37,10 +37,9 @@ class GatherDNNLowPOp final : public GatherOp<CPUContext> {
   bool DoRunWithType() {
     // If we endup using it on GPU doing O(N) memcpy is probably not best :)
     // TODO: implement prefetching if it starts mattering (TF does it)
-    auto& data = OperatorBase::Input<int8::Int8TensorCPU>(DATA).t;
+    auto& data = (this->template Input<int8::Int8TensorCPU>(DATA)).t;
     auto& indices = Input(INDICES);
-    auto* output =
-        &Outputs()[0]->template GetMutable<int8::Int8TensorCPU>()->t;
+    auto* output = &Outputs()[0]->template GetMutable<int8::Int8TensorCPU>()->t;
 
     CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
     auto shape = indices.sizes().vec();
@@ -90,5 +89,22 @@ class GatherDNNLowPOp final : public GatherOp<CPUContext> {
 
   bool arguments_parsed_{false};
 }; // class GatherDNNLowPOp
+
+namespace internal {
+
+template <typename T, bool ReluFused>
+void ElementWiseSumAVX2(
+    const T* input0,
+    const T* input1,
+    T* output,
+    int len,
+    float a_scale,
+    int32_t a_zero_point,
+    float b_scale,
+    int32_t b_zero_point,
+    float c_scale,
+    int32_t c_zero_points);
+
+}
 
 } // namespace caffe2

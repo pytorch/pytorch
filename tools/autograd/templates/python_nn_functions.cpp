@@ -2,6 +2,7 @@
 
 // ${generated_comment}
 
+
 #include "torch/csrc/Device.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
@@ -9,11 +10,13 @@
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/utils/python_arg_parser.h"
+#include "torch/csrc/utils/structseq.h"
 
 #include "python_nn_functions_dispatch.h"
 
 using at::Tensor;
 using at::Scalar;
+using at::MemoryFormat;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {

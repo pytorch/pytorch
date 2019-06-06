@@ -7,8 +7,8 @@ template <>
 class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
     : public Operator<CUDAContext> {
  public:
-  CopyOnDeviceLikeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws) {}
+  template<class... Args> explicit CopyOnDeviceLikeOp(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...) {}
   USE_OPERATOR_FUNCTIONS(CUDAContext);
 
   bool RunOnDevice() override {
@@ -18,7 +18,7 @@ class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
     output->ResizeLike(input);
     context.template CopyItems<CUDAContext, CUDAContext>(
         input.meta(),
-        input.size(),
+        input.numel(),
         input.raw_data(),
         output->raw_mutable_data(input.meta()));
     return true;

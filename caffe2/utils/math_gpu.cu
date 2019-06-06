@@ -18,7 +18,7 @@
 
 #include "caffe2/utils/fixed_divisor.h"
 // TODO: Move this to fixed_divisor.h
-#ifdef __HIPCC__
+#ifdef __HIP_PLATFORM_HCC__
 #define FIXED_DIVISOR int32_t
 #define FIXED_DIVISOR_DIV(d, n) (n / d)
 #define FIXED_DIVISOR_MOD(d, n) (n % d)
@@ -28,14 +28,20 @@
     *q = n_copy / d;                      \
     *r = n_copy % d;                      \
   } while (0)
-#else // __HIPCC__
+#else // __HIP_PLATFORM_HCC__
 #define FIXED_DIVISOR FixedDivisor<int32_t>
 #define FIXED_DIVISOR_DIV(d, n) (d.Div(n))
 #define FIXED_DIVISOR_MOD(d, n) (d.Mod(n))
 #define FIXED_DIVISOR_DIV_MOD(d, n, q, r) (d.DivMod(n, q, r))
-#endif // __HIPCC__
+#endif // __HIP_PLATFORM_HCC__
 
-#include "caffe2/utils/math_utils.h"
+#ifdef __HIP_PLATFORM_HCC__
+using CUBLAS_HALF_TYPE = rocblas_half;
+#else // __HIP_PLATFORM_HCC
+using CUBLAS_HALF_TYPE = __half;
+#endif // __HIP_PLATFORM_HCC
+
+#include "caffe2/utils/math/utils.h"
 
 #if THRUST_VERSION >= 100800
 #define THRUST_SUPPORTS_PER_THREAD
@@ -68,17 +74,6 @@ DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Sub, -)
 DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Mul, *)
 DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Div, /)
 #undef DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR
-
-template <typename T>
-__global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-#if __CUDA_ARCH__ >= 350
-    c10::cuda::compat::sincos(__ldg(X + i), S + i, C + i);
-#else
-    c10::cuda::compat::sincos(X[i], S + i, C + i);
-#endif
-  }
-}
 
 template <typename TIn, typename TOut, class BinaryOperator>
 __global__ void SimpleBinaryOpCUDAKernel(
@@ -306,161 +301,6 @@ CAFFE2_CUDA_EXPORT void BroadcastBinaryOp(
 }
 
 } // namespace
-
-#define DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(T, Func, op)            \
-  __global__ void Func##CUDAKernel(const int N, const T* X, T* Y) { \
-    CUDA_1D_KERNEL_LOOP(i, N) {                                     \
-      Y[i] = op(X[i]);                                              \
-    }                                                               \
-  }                                                                 \
-  template <>                                                       \
-  CAFFE2_CUDA_EXPORT void Func<T, CUDAContext>(                     \
-      const int N, const T* x, T* y, CUDAContext* context) {        \
-    Func##CUDAKernel<<<                                             \
-        CAFFE_GET_BLOCKS(N),                                        \
-        CAFFE_CUDA_NUM_THREADS,                                     \
-        0,                                                          \
-        context->cuda_stream()>>>(N, x, y);                         \
-  }
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Exp, expf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Log, logf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cos, cosf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Acos, acosf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sin, sinf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Asin, asinf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Tan, tanf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Atan, atanf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sinh, sinhf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cosh, coshf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Tanh, tanhf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Abs, fabsf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, utils::Square<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqrt, sqrtf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Rsqrt, rsqrtf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cbrt, cbrtf)
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cube, utils::Cube<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Cube, utils::Cube<double>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int32_t,
-    Cube,
-    utils::Cube<std::int32_t>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int64_t,
-    Cube,
-    utils::Cube<std::int64_t>)
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(bool, Not, utils::Not)
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Neg, utils::Negate<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Neg, utils::Negate<double>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int32_t,
-    Neg,
-    utils::Negate<std::int32_t>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int64_t,
-    Neg,
-    utils::Negate<std::int64_t>)
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sign, utils::Sign<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Sign, utils::Sign<double>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int32_t,
-    Sign,
-    utils::Sign<std::int32_t>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
-    std::int64_t,
-    Sign,
-    utils::Sign<std::int64_t>)
-
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Inv, utils::Inv<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Inv, utils::Inv<double>)
-
-#undef DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION
-
-#define CAFFE2_SPECIALIZED_CUDA_SINCOS(T)                            \
-  template <>                                                        \
-  CAFFE2_CUDA_EXPORT void SinCos<T, CUDAContext>(                    \
-      const int N, const T* x, T* ys, T* yc, CUDAContext* context) { \
-    SinCosCUDAKernel<<<                                              \
-        CAFFE_GET_BLOCKS(N),                                         \
-        CAFFE_CUDA_NUM_THREADS,                                      \
-        0,                                                           \
-        context->cuda_stream()>>>(N, x, ys, yc);                     \
-  }
-CAFFE2_SPECIALIZED_CUDA_SINCOS(float)
-CAFFE2_SPECIALIZED_CUDA_SINCOS(double)
-#undef CAFFE2_SPECIALIZED_CUDA_SINCOS
-
-#define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op) \
-  template <>                                                     \
-  CAFFE2_CUDA_EXPORT void Func<TIn, CUDAContext>(                 \
-      const int N,                                                \
-      const TIn* A,                                               \
-      const TIn* B,                                               \
-      TOut* C,                                                    \
-      CUDAContext* context) {                                     \
-    SimpleBinaryOpCUDAKernel<TIn, TOut, Op<TIn>>                  \
-        <<<CAFFE_GET_BLOCKS(N),                                   \
-           CAFFE_CUDA_NUM_THREADS,                                \
-           0,                                                     \
-           context->cuda_stream()>>>(N, Op<TIn>(), A, B, C);      \
-  }
-
-#define DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(Func, Op)                \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, bool, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, bool, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, bool, Func, Op)        \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, bool, Func, Op)       \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Func, Op)
-
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(EQ, thrust::equal_to)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(NE, thrust::not_equal_to)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(LT, thrust::less)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(LE, thrust::less_equal)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(GT, thrust::greater)
-DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION(GE, thrust::greater_equal)
-
-#undef DEFINE_SIMPLE_CUDA_COMPARE_FUNCTION
-
-#define DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Func, Op)                         \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, float, Func, Op)               \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, double, Func, Op)             \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(at::Half, at::Half, Func, Op)
-
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Add, AddFunctor)
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Sub, SubFunctor)
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Mul, MulFunctor)
-DEFINE_SIMPLE_CUDA_BINARY_FUNCTION(Div, DivFunctor)
-
-#undef DEFINE_SIMPLE_CUDA_BINARY_FUNCTION
-
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, And, thrust::logical_and)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Or, thrust::logical_or)
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Xor, thrust::bit_xor)
-
-#define DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(Func, Op)                 \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(bool, bool, Func, Op)                 \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int32_t, std::int32_t, Func, Op) \
-  DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op)
-
-DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseAnd, thrust::bit_and)
-DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseOr, thrust::bit_or)
-DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
-
-#undef DEFINE_SIMPLE_CUDA_BITWISE_BINARY_FUNCTION
-
-DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
-    float,
-    float,
-    ElemwiseMax,
-    thrust::maximum);
-
-#undef DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION
 
 #define DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op)   \
   template <>                                                             \
@@ -743,9 +583,6 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
     at::Half* C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if defined(__HIPCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
-#else
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
   const int lda = (trans_A == CblasNoTrans) ? K : M;
@@ -757,6 +594,39 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
   if (math_type == TensorProto_DataType_FLOAT) {
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+#ifdef __HIP_PLATFORM_HCC__
+    // rocblas doesn't support cublasSgemmEx type API yet.
+    // It has more general rocblas_gemm_ex API which is more close to
+    // cublasGemmEx rocblas_gemm_ex does D = alpha*op( A )*op( B ) + beta*C,
+    // whereas cublasgemmEx does C = alpha*op( A )*op( B ) + beta*C
+    ROCBLAS_ENFORCE(rocblas_gemm_ex(
+        context->rocblashandle(),
+        cu_trans_B,
+        cu_trans_A,
+        N,
+        M,
+        K,
+        &alpha,
+        B,
+        rocblas_datatype_f16_r,
+        ldb,
+        A,
+        rocblas_datatype_f16_r,
+        lda,
+        &beta,
+        C,
+        rocblas_datatype_f16_r,
+        N,
+        C, // D
+        rocblas_datatype_f16_r, // D type
+        N, // ldd
+        rocblas_datatype_f32_r, // compute type
+        rocblas_gemm_algo_standard, // rocblas_gemm_algo
+        0, // solution index, reserved for future use
+        0, // flags, reserved for future use
+        NULL, // size of workspace
+        NULL)); // workspace
+#else
     CUBLAS_ENFORCE(cublasSgemmEx(
         context->cublas_handle(),
         cu_trans_B,
@@ -775,6 +645,7 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
         C,
         CUDA_R_16F,
         N));
+#endif // __HIP_PLATFORM_HCC__
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // convert alpha, beta from float -> __half
     const __half alpha_fp16 = at::Half(alpha);
@@ -789,19 +660,18 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
         N,
         M,
         K,
-        &alpha_fp16,
-        (const __half*)B,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&alpha_fp16),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(B),
         ldb,
-        (const __half*)A,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(A),
         lda,
-        &beta_fp16,
-        (__half*)C,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&beta_fp16),
+        reinterpret_cast<CUBLAS_HALF_TYPE*>(C),
         N));
   } else {
     // fail
     CAFFE_THROW("Unsupported math type");
   }
-#endif
 }
 
 template <>
@@ -841,7 +711,7 @@ CAFFE2_CUDA_EXPORT void GemmBatched<float, CUDAContext>(
     float** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 8 || defined(__HIPCC__)
+#if __CUDACC_VER_MAJOR__ < 8 || defined(__HIP_PLATFORM_HCC__)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<float, CUDAContext>(
@@ -910,7 +780,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<float, CUDAContext>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if __CUDACC_VER_MAJOR__ < 8 && !defined(__HIPCC__)
+#if __CUDACC_VER_MAJOR__ < 8 && !defined(__HIP_PLATFORM_HCC__)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<float, CUDAContext>(
@@ -968,9 +838,6 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     at::Half** C,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if defined(__HIPCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
-#else
 #if __CUDACC_VER_MAJOR__ < 9
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
@@ -1083,7 +950,6 @@ CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext>(
     CAFFE_THROW("Unsupported math type");
   }
 #endif
-#endif
 }
 
 template <>
@@ -1104,10 +970,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-#if defined(__HIPCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
-#else
-#if __CUDACC_VER_MAJOR__ < 8
+#if __CUDACC_VER_MAJOR__ < 8 && !defined(__HIP_PLATFORM_HCC__)
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     Gemm<at::Half, CUDAContext>(
@@ -1127,7 +990,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
   const cublasOperation_t cu_trans_B =
       (trans_B == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   if (math_type == TensorProto_DataType_FLOAT) {
-#if CUDA_VERSION < 9010
+#if CUDA_VERSION < 9010 && !defined(__HIP_PLATFORM_HCC__)
     // loop over matrices in the batch
     for (int i = 0; i < batch_size; ++i) {
       Gemm<at::Half, CUDAContext>(
@@ -1139,6 +1002,42 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
 #else
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+#ifdef __HIP_PLATFORM_HCC__
+    // D[i*stride_d] = alpha*op(A[i*stride_a])*op(B[i*stride_b]) +
+    // beta*C[i*stride_c], for i in [0,batch_count-1]
+    ROCBLAS_ENFORCE(rocblas_gemm_strided_batched_ex(
+        context->rocblashandle(),
+        cu_trans_B,
+        cu_trans_A,
+        N,
+        M,
+        K,
+        &alpha,
+        B,
+        rocblas_datatype_f16_r,
+        ldb,
+        B_stride,
+        A,
+        rocblas_datatype_f16_r,
+        lda,
+        A_stride,
+        &beta,
+        C,
+        rocblas_datatype_f16_r,
+        ldc,
+        C_stride,
+        C, // D
+        rocblas_datatype_f16_r, // D type
+        ldc, // ldd
+        C_stride, // D stride
+        batch_size,
+        rocblas_datatype_f32_r, // compute type
+        rocblas_gemm_algo_standard, // rocblas_gemm_algo
+        0, // solution index, reserved for future use
+        0, // flags, reserved for future use
+        NULL, // size of workspace
+        NULL)); // workspace
+#else
     CUBLAS_ENFORCE(cublasGemmStridedBatchedEx(
         context->cublas_handle(),
         cu_trans_B,
@@ -1163,6 +1062,7 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         batch_size,
         CUDA_R_32F,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+#endif // __HIP_PLATFORM_HCC__
 #endif
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
@@ -1177,15 +1077,15 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         N,
         M,
         K,
-        &alpha_fp16,
-        (const __half*)B,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&alpha_fp16),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(B),
         ldb,
         B_stride,
-        (const __half*)A,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(A),
         lda,
         A_stride,
-        &beta_fp16,
-        (__half*)C,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&beta_fp16),
+        reinterpret_cast<CUBLAS_HALF_TYPE*>(C),
         ldc,
         C_stride,
         batch_size));
@@ -1193,7 +1093,139 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
     CAFFE_THROW("Unsupported math type");
   }
 #endif
-#endif
+}
+
+template <>
+CAFFE2_CUDA_EXPORT void Gemv<float, CUDAContext>(
+    const CBLAS_TRANSPOSE trans_A,
+    const int M,
+    const int N,
+    const float alpha,
+    const float* A,
+    const float* x,
+    const float beta,
+    float* y,
+    CUDAContext* context,
+    TensorProto::DataType math_type) {
+  const cublasOperation_t cu_trans_A =
+      (trans_A == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
+  CUBLAS_ENFORCE(
+      cublasSetPointerMode(context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+  CUBLAS_ENFORCE(cublasSgemv(
+      context->cublas_handle(),
+      cu_trans_A,
+      N,
+      M,
+      &alpha,
+      A,
+      N,
+      x,
+      1,
+      &beta,
+      y,
+      1));
+}
+
+template <>
+CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
+    const CBLAS_TRANSPOSE trans_A,
+    const int M,
+    const int N,
+    const float alpha,
+    const at::Half* A,
+    const at::Half* x,
+    const float beta,
+    at::Half* y,
+    CUDAContext* context,
+    TensorProto::DataType math_type) {
+  const cublasOperation_t cu_trans_A =
+      (trans_A == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
+
+  // sort out what we need to call cublasSgemmEx / cublasHgemm
+  const int m = (cu_trans_A == CUBLAS_OP_N) ? N : M;
+  const int k = (cu_trans_A == CUBLAS_OP_N) ? M : N;
+  const int lda = (cu_trans_A == CUBLAS_OP_N) ? m : k;
+  const int ldc = m;
+
+  if (math_type == TensorProto_DataType_FLOAT) {
+    CUBLAS_ENFORCE(cublasSetPointerMode(
+        context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+#ifdef __HIP_PLATFORM_HCC__
+    // rocblas doesn't support cublasSgemmEx type API yet.
+    // It has more general rocblas_gemm_ex API which is more close to
+    // cublasGemmEx rocblas_gemm_ex does D = alpha*op( A )*op( B ) + beta*C,
+    // whereas cublasgemmEx does C = alpha*op( A )*op( B ) + beta*C
+    ROCBLAS_ENFORCE(rocblas_gemm_ex(
+        context->rocblashandle(),
+        cu_trans_A,
+        rocblas_operation_none,
+        m,
+        1,
+        k,
+        &alpha,
+        A,
+        rocblas_datatype_f16_r,
+        lda,
+        x,
+        rocblas_datatype_f16_r,
+        k,
+        &beta,
+        y,
+        rocblas_datatype_f16_r,
+        ldc,
+        y, // D
+        rocblas_datatype_f16_r, // D type
+        ldc, // ldd
+        rocblas_datatype_f32_r, // compute type
+        rocblas_gemm_algo_standard, // rocblas_gemm_algo
+        0, // solution index, reserved for future use
+        0, // flags, reserved for future use
+        NULL, // size of workspace
+        NULL)); // workspace
+#else
+    CUBLAS_ENFORCE(cublasSgemmEx(
+        context->cublas_handle(),
+        cu_trans_A,
+        CUBLAS_OP_N,
+        m,
+        1,
+        k,
+        &alpha,
+        A,
+        CUDA_R_16F,
+        lda,
+        x,
+        CUDA_R_16F,
+        k,
+        &beta,
+        y,
+        CUDA_R_16F,
+        ldc));
+#endif // __HIP_PLATFORM_HCC__
+  } else if (math_type == TensorProto_DataType_FLOAT16) {
+    const __half alpha_fp16 = at::Half(alpha);
+    const __half beta_fp16 = at::Half(beta);
+    CUBLAS_ENFORCE(cublasSetPointerMode(
+        context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
+    CUBLAS_ENFORCE(cublasHgemm(
+        context->cublas_handle(),
+        cu_trans_A,
+        CUBLAS_OP_N,
+        m,
+        1,
+        k,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&alpha_fp16),
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(A),
+        lda,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(x),
+        k,
+        reinterpret_cast<const CUBLAS_HALF_TYPE*>(&beta_fp16),
+        reinterpret_cast<CUBLAS_HALF_TYPE*>(y),
+        ldc));
+  } else {
+    // fail
+    CAFFE_THROW("Unsupported math type");
+  }
 }
 
 #if CUDA_VERSION >= 9000
@@ -1277,6 +1309,68 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext, TensorCoreEngine>(
 }
 
 template <>
+CAFFE2_CUDA_EXPORT void GemmBatched<float, CUDAContext, TensorCoreEngine>(
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
+    const int batch_size,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
+    const float** A,
+    const float** B,
+    const float beta,
+    float** C,
+    CUDAContext* context,
+    TensorProto::DataType math_type) {
+  GemmBatched<float, CUDAContext, DefaultEngine>(
+      trans_A,
+      trans_B,
+      batch_size,
+      M,
+      N,
+      K,
+      alpha,
+      A,
+      B,
+      beta,
+      C,
+      context,
+      math_type);
+}
+
+template <>
+CAFFE2_CUDA_EXPORT void GemmBatched<at::Half, CUDAContext, TensorCoreEngine>(
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
+    const int batch_size,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
+    const at::Half** A,
+    const at::Half** B,
+    const float beta,
+    at::Half** C,
+    CUDAContext* context,
+    TensorProto::DataType math_type) {
+  GemmBatched<at::Half, CUDAContext, DefaultEngine>(
+      trans_A,
+      trans_B,
+      batch_size,
+      M,
+      N,
+      K,
+      alpha,
+      A,
+      B,
+      beta,
+      C,
+      context,
+      math_type);
+}
+
+template <>
 CAFFE2_CUDA_EXPORT void
 GemmStridedBatched<float, CUDAContext, TensorCoreEngine>(
     const CBLAS_TRANSPOSE trans_A,
@@ -1295,7 +1389,7 @@ GemmStridedBatched<float, CUDAContext, TensorCoreEngine>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-  return GemmStridedBatched<float, CUDAContext, DefaultEngine>(
+  GemmStridedBatched<float, CUDAContext, DefaultEngine>(
       trans_A,
       trans_B,
       batch_size,
@@ -1333,7 +1427,7 @@ GemmStridedBatched<at::Half, CUDAContext, TensorCoreEngine>(
     const int C_stride,
     CUDAContext* context,
     TensorProto::DataType math_type) {
-  return GemmStridedBatched<at::Half, CUDAContext, DefaultEngine>(
+  GemmStridedBatched<at::Half, CUDAContext, DefaultEngine>(
       trans_A,
       trans_B,
       batch_size,
@@ -1350,6 +1444,38 @@ GemmStridedBatched<at::Half, CUDAContext, TensorCoreEngine>(
       C_stride,
       context,
       math_type);
+}
+
+template <>
+CAFFE2_CUDA_EXPORT void Gemv<float, CUDAContext, TensorCoreEngine>(
+    const CBLAS_TRANSPOSE trans_A,
+    const int M,
+    const int N,
+    const float alpha,
+    const float* A,
+    const float* x,
+    const float beta,
+    float* y,
+    CUDAContext* context,
+    TensorProto::DataType math_type) {
+  Gemv<float, CUDAContext, DefaultEngine>(
+      trans_A, M, N, alpha, A, x, beta, y, context, math_type);
+}
+
+template <>
+CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext, TensorCoreEngine>(
+    const CBLAS_TRANSPOSE trans_A,
+    const int M,
+    const int N,
+    const float alpha,
+    const at::Half* A,
+    const at::Half* x,
+    const float beta,
+    at::Half* y,
+    CUDAContext* context,
+    TensorProto::DataType math_type) {
+  Gemv<at::Half, CUDAContext, DefaultEngine>(
+      trans_A, M, N, alpha, A, x, beta, y, context, math_type);
 }
 
 #endif // CUDA_VERSION >= 9000
@@ -1395,37 +1521,6 @@ CAFFE2_CUDA_EXPORT void GemmEx<float, CUDAContext>(
       ldc));
 }
 
-template <>
-CAFFE2_CUDA_EXPORT void Gemv<float, CUDAContext>(
-    const CBLAS_TRANSPOSE trans_A,
-    const int M,
-    const int N,
-    const float alpha,
-    const float* A,
-    const float* x,
-    const float beta,
-    float* y,
-    CUDAContext* context,
-    TensorProto::DataType math_type) {
-  const cublasOperation_t cu_trans_A =
-      (trans_A == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
-  CUBLAS_ENFORCE(
-      cublasSetPointerMode(context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-  CUBLAS_ENFORCE(cublasSgemv(
-      context->cublas_handle(),
-      cu_trans_A,
-      N,
-      M,
-      &alpha,
-      A,
-      N,
-      x,
-      1,
-      &beta,
-      y,
-      1));
-}
-
 // Batched Add variants
 namespace {
 
@@ -1466,133 +1561,6 @@ __global__ void AddStripedBatchKernel(
 CAFFE2_SPECIALIZED_CUDA_ADD_STRIPED_BATCH(float);
 CAFFE2_SPECIALIZED_CUDA_ADD_STRIPED_BATCH(at::Half);
 #undef CAFFE2_SPECIALIZED_CUDA_ADD_STRIPED_BATCH
-
-template <>
-CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
-    const CBLAS_TRANSPOSE trans_A,
-    const int M,
-    const int N,
-    const float alpha,
-    const at::Half* A,
-    const at::Half* x,
-    const float beta,
-    at::Half* y,
-    CUDAContext* context,
-    TensorProto::DataType math_type) {
-#if defined(__HIPCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
-#else
-  const cublasOperation_t cu_trans_A =
-      (trans_A == CblasNoTrans) ? CUBLAS_OP_T : CUBLAS_OP_N;
-
-  // sort out what we need to call cublasSgemmEx / cublasHgemm
-  const int m = (cu_trans_A == CUBLAS_OP_N) ? N : M;
-  const int k = (cu_trans_A == CUBLAS_OP_N) ? M : N;
-  const int lda = (cu_trans_A == CUBLAS_OP_N) ? m : k;
-  const int ldc = m;
-
-  if (math_type == TensorProto_DataType_FLOAT) {
-    CUBLAS_ENFORCE(cublasSetPointerMode(
-        context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-    CUBLAS_ENFORCE(cublasSgemmEx(
-        context->cublas_handle(),
-        cu_trans_A,
-        CUBLAS_OP_N,
-        m,
-        1,
-        k,
-        &alpha,
-        A,
-        CUDA_R_16F,
-        lda,
-        x,
-        CUDA_R_16F,
-        k,
-        &beta,
-        y,
-        CUDA_R_16F,
-        ldc));
-  } else if (math_type == TensorProto_DataType_FLOAT16) {
-    const __half alpha_fp16 = at::Half(alpha);
-    const __half beta_fp16 = at::Half(beta);
-    CUBLAS_ENFORCE(cublasSetPointerMode(
-        context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-    CUBLAS_ENFORCE(cublasHgemm(
-        context->cublas_handle(),
-        cu_trans_A,
-        CUBLAS_OP_N,
-        m,
-        1,
-        k,
-        &alpha_fp16,
-        (const __half*)A,
-        lda,
-        (const __half*)x,
-        k,
-        &beta_fp16,
-        (__half*)y,
-        ldc));
-  } else {
-    // fail
-    CAFFE_THROW("Unsupported math type");
-  }
-#endif
-}
-
-namespace {
-
-template <typename T>
-__global__ void SetKernel(const int N, const T alpha, T* Y) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    Y[i] = alpha;
-  }
-}
-
-} // namespace
-
-#define CAFFE2_SPECIALIZED_CUDA_SET(T)                              \
-  template <>                                                       \
-  CAFFE2_CUDA_API void Set<T, CUDAContext>(                         \
-      const size_t N, const T alpha, T* Y, CUDAContext* context) {  \
-    if (N == 0) {                                                   \
-      return;                                                       \
-    }                                                               \
-    if (alpha == T(0)) {                                            \
-      cudaMemsetAsync(Y, 0, sizeof(T) * N, context->cuda_stream()); \
-    } else {                                                        \
-      SetKernel<T>                                                  \
-          <<<CAFFE_GET_BLOCKS(N),                                   \
-             CAFFE_CUDA_NUM_THREADS,                                \
-             0,                                                     \
-             context->cuda_stream()>>>(N, alpha, Y);                \
-    }                                                               \
-  }
-CAFFE2_SPECIALIZED_CUDA_SET(float);
-CAFFE2_SPECIALIZED_CUDA_SET(double);
-CAFFE2_SPECIALIZED_CUDA_SET(bool);
-CAFFE2_SPECIALIZED_CUDA_SET(int8_t);
-CAFFE2_SPECIALIZED_CUDA_SET(int16_t);
-CAFFE2_SPECIALIZED_CUDA_SET(int);
-CAFFE2_SPECIALIZED_CUDA_SET(int64_t);
-CAFFE2_SPECIALIZED_CUDA_SET(char);
-CAFFE2_SPECIALIZED_CUDA_SET(uint8_t);
-CAFFE2_SPECIALIZED_CUDA_SET(uint16_t);
-#undef CAFFE2_SPECIALIZED_CUDA_SET
-
-template <>
-CAFFE2_CUDA_EXPORT void Set<at::Half, CUDAContext>(
-    const size_t N,
-    const at::Half alpha,
-    at::Half* Y,
-    CUDAContext* context) {
-  if (N > 0) {
-    SetKernel<at::Half>
-        <<<CAFFE_GET_BLOCKS(N),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context->cuda_stream()>>>(N, alpha, Y);
-  }
-}
 
 namespace {
 template <typename T>
@@ -1727,8 +1695,8 @@ CAFFE2_CUDA_EXPORT void Dot<at::Half, CUDAContext>(
     const at::Half* b,
     at::Half* y,
     CUDAContext* context) {
-#if defined(__HIPCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
+#if defined(__HIP_PLATFORM_HCC__)
+  CAFFE_THROW("HIP currently does not support FP16 completely yet.");
 #else
   // execute with 32-bit math
   CUBLAS_ENFORCE(cublasSetPointerMode(
@@ -1993,535 +1961,6 @@ CAFFE2_CUDA_EXPORT void Select<at::Half, CUDAContext>(
 
 namespace {
 
-template <typename TAlpha, typename TData>
-__global__ void
-ScaleCUDAKernel(const int n, const TAlpha alpha, const TData* x, TData* y) {
-  CUDA_1D_KERNEL_LOOP(i, n) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
-    y[i] = __ldg(x + i) * static_cast<TData>(alpha);
-#else
-    y[i] = x[i] * static_cast<TData>(alpha);
-#endif
-  }
-}
-
-template <typename TAlpha, typename TData>
-__global__ void
-ScaleCUDAKernel(const int n, const TAlpha* alpha, const TData* x, TData* y) {
-  CUDA_1D_KERNEL_LOOP(i, n) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
-    y[i] = __ldg(x + i) * static_cast<TData>(__ldg(alpha));
-#else
-    y[i] = x[i] * static_cast<TData>(*alpha);
-#endif
-  }
-}
-
-template <typename T>
-__global__ void PowKernel(const int n, const T* x, const T exponent, T* y) {
-  CUDA_1D_KERNEL_LOOP(i, n) {
-    y[i] = powf(x[i], exponent);
-  }
-}
-
-} // namespace
-
-template <>
-CAFFE2_CUDA_EXPORT void Powx<float, CUDAContext>(
-    const int N,
-    const float* a,
-    const float b,
-    float* y,
-    CUDAContext* context) {
-  PowKernel<<<
-      CAFFE_GET_BLOCKS(N),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context->cuda_stream()>>>(N, a, b, y);
-}
-
-#define DELEGATE_CUBLAS_SCALE_FUNCTION(TAlpha, TData, CuBLASFunc)            \
-  template <>                                                                \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                 \
-      const int N,                                                           \
-      const TAlpha alpha,                                                    \
-      const TData* x,                                                        \
-      TData* y,                                                              \
-      CUDAContext* context) {                                                \
-    if (N == 0) {                                                            \
-      return;                                                                \
-    }                                                                        \
-    if (x != y) {                                                            \
-      cudaMemcpyAsync(                                                       \
-          y,                                                                 \
-          x,                                                                 \
-          sizeof(TData) * N,                                                 \
-          cudaMemcpyDeviceToDevice,                                          \
-          context->cuda_stream());                                           \
-    }                                                                        \
-    if (alpha != TAlpha(1)) {                                                \
-      CUBLAS_ENFORCE(cublasSetPointerMode(                                   \
-          context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));              \
-      CUBLAS_ENFORCE(CuBLASFunc(context->cublas_handle(), N, &alpha, y, 1)); \
-    }                                                                        \
-  }                                                                          \
-  template <>                                                                \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                 \
-      const int N,                                                           \
-      const TAlpha* alpha,                                                   \
-      const TData* x,                                                        \
-      TData* y,                                                              \
-      CUDAContext* context) {                                                \
-    if (N == 0) {                                                            \
-      return;                                                                \
-    }                                                                        \
-    if (x != y) {                                                            \
-      cudaMemcpyAsync(                                                       \
-          y,                                                                 \
-          x,                                                                 \
-          sizeof(TData) * N,                                                 \
-          cudaMemcpyDeviceToDevice,                                          \
-          context->cuda_stream());                                           \
-    }                                                                        \
-    CUBLAS_ENFORCE(cublasSetPointerMode(                                     \
-        context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));              \
-    CUBLAS_ENFORCE(CuBLASFunc(context->cublas_handle(), N, alpha, y, 1));    \
-  }
-DELEGATE_CUBLAS_SCALE_FUNCTION(float, float, cublasSscal)
-DELEGATE_CUBLAS_SCALE_FUNCTION(double, double, cublasDscal)
-#undef DELEGATE_CUBLAS_SCALE_FUNCTION
-
-#define CAFFE2_SPECIALIZED_CUDA_SCALE(TAlpha, TData)         \
-  template <>                                                \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>( \
-      const int N,                                           \
-      const TAlpha alpha,                                    \
-      const TData* x,                                        \
-      TData* y,                                              \
-      CUDAContext* context) {                                \
-    if (N == 0) {                                            \
-      return;                                                \
-    }                                                        \
-    if (alpha == TAlpha(1)) {                                \
-      if (x != y) {                                          \
-        cudaMemcpyAsync(                                     \
-            y,                                               \
-            x,                                               \
-            sizeof(TData) * N,                               \
-            cudaMemcpyDeviceToDevice,                        \
-            context->cuda_stream());                         \
-      }                                                      \
-      return;                                                \
-    }                                                        \
-    ScaleCUDAKernel<TAlpha, TData>                           \
-        <<<CAFFE_GET_BLOCKS(N),                              \
-           CAFFE_CUDA_NUM_THREADS,                           \
-           0,                                                \
-           context->cuda_stream()>>>(N, alpha, x, y);        \
-  }                                                          \
-  template <>                                                \
-  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>( \
-      const int N,                                           \
-      const TAlpha* alpha,                                   \
-      const TData* x,                                        \
-      TData* y,                                              \
-      CUDAContext* context) {                                \
-    if (N == 0) {                                            \
-      return;                                                \
-    }                                                        \
-    ScaleCUDAKernel<TAlpha, TData>                           \
-        <<<CAFFE_GET_BLOCKS(N),                              \
-           CAFFE_CUDA_NUM_THREADS,                           \
-           0,                                                \
-           context->cuda_stream()>>>(N, alpha, x, y);        \
-  }
-CAFFE2_SPECIALIZED_CUDA_SCALE(std::int32_t, std::int32_t)
-CAFFE2_SPECIALIZED_CUDA_SCALE(std::int64_t, std::int64_t)
-
-#ifndef __HIPCC__
-template <>
-CAFFE2_CUDA_EXPORT void Scale<at::Half, at::Half, CUDAContext>(
-    const int N,
-    const at::Half alpha,
-    const at::Half* x,
-    at::Half* y,
-    CUDAContext* context) {
-  if (N == 0) {
-    return;
-  }
-  if (x != y) {
-    cudaMemcpyAsync(
-        y,
-        x,
-        sizeof(at::Half) * N,
-        cudaMemcpyDeviceToDevice,
-        context->cuda_stream());
-  }
-  CUBLAS_ENFORCE(
-      cublasSetPointerMode(context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-  CUBLAS_ENFORCE(cublasScalEx(
-      context->cublas_handle(),
-      N,
-      &alpha,
-      CUDA_R_16F,
-      y,
-      CUDA_R_16F,
-      1,
-      CUDA_R_32F));
-}
-
-template <>
-CAFFE2_CUDA_EXPORT void Scale<at::Half, at::Half, CUDAContext>(
-    const int N,
-    const at::Half* alpha,
-    const at::Half* x,
-    at::Half* y,
-    CUDAContext* context) {
-  if (N == 0) {
-    return;
-  }
-  if (x != y) {
-    cudaMemcpyAsync(
-        y,
-        x,
-        sizeof(at::Half) * N,
-        cudaMemcpyDeviceToDevice,
-        context->cuda_stream());
-  }
-  CUBLAS_ENFORCE(cublasSetPointerMode(
-      context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
-  CUBLAS_ENFORCE(cublasScalEx(
-      context->cublas_handle(),
-      N,
-      alpha,
-      CUDA_R_16F,
-      y,
-      CUDA_R_16F,
-      1,
-      CUDA_R_32F));
-}
-
-template <>
-CAFFE2_CUDA_EXPORT void Scale<float, at::Half, CUDAContext>(
-    const int N,
-    const float alpha,
-    const at::Half* x,
-    at::Half* y,
-    CUDAContext* context) {
-  if (N == 0) {
-    return;
-  }
-  if (x != y) {
-    cudaMemcpyAsync(
-        y,
-        x,
-        sizeof(at::Half) * N,
-        cudaMemcpyDeviceToDevice,
-        context->cuda_stream());
-  }
-  if (alpha != 1.0f) {
-    CUBLAS_ENFORCE(cublasSetPointerMode(
-        context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-    CUBLAS_ENFORCE(cublasScalEx(
-        context->cublas_handle(),
-        N,
-        &alpha,
-        CUDA_R_32F,
-        y,
-        CUDA_R_16F,
-        1,
-        CUDA_R_32F));
-  }
-}
-
-template <>
-CAFFE2_CUDA_EXPORT void Scale<float, at::Half, CUDAContext>(
-    const int N,
-    const float* alpha,
-    const at::Half* x,
-    at::Half* y,
-    CUDAContext* context) {
-  if (N == 0) {
-    return;
-  }
-  if (x != y) {
-    cudaMemcpyAsync(
-        y,
-        x,
-        sizeof(at::Half) * N,
-        cudaMemcpyDeviceToDevice,
-        context->cuda_stream());
-  }
-  CUBLAS_ENFORCE(cublasSetPointerMode(
-      context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
-  CUBLAS_ENFORCE(cublasScalEx(
-      context->cublas_handle(),
-      N,
-      alpha,
-      CUDA_R_32F,
-      y,
-      CUDA_R_16F,
-      1,
-      CUDA_R_32F));
-}
-
-#else // __HIPCC__
-
-namespace {
-template <>
-__global__ void ScaleCUDAKernel<at::Half, at::Half>(
-    const int n,
-    const at::Half alpha,
-    const at::Half* x,
-    at::Half* y) {
-  CUDA_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, at::Half>(
-        convert::To<at::Half, float>(x[i]) *
-        convert::To<at::Half, float>(alpha));
-  }
-}
-
-template <>
-__global__ void ScaleCUDAKernel<at::Half, at::Half>(
-    const int n,
-    const at::Half* alpha,
-    const at::Half* x,
-    at::Half* y) {
-  CUDA_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, at::Half>(
-        convert::To<at::Half, float>(x[i]) *
-        convert::To<at::Half, float>(*alpha));
-  }
-}
-
-template <>
-__global__ void ScaleCUDAKernel<float, at::Half>(
-    const int n,
-    const float alpha,
-    const at::Half* x,
-    at::Half* y) {
-  CUDA_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, at::Half>(
-        convert::To<at::Half, float>(x[i]) * alpha);
-  }
-}
-
-template <>
-__global__ void ScaleCUDAKernel<float, at::Half>(
-    const int n,
-    const float* alpha,
-    const at::Half* x,
-    at::Half* y) {
-  CUDA_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, at::Half>(
-        convert::To<at::Half, float>(x[i]) * (*alpha));
-  }
-}
-} // namespace
-
-CAFFE2_SPECIALIZED_HIP_SCALE(at::Half, at::Half)
-CAFFE2_SPECIALIZED_HIP_SCALE(float, at::Half)
-#endif // __HIPCC__
-
-#undef CAFFE2_SPECIALIZED_CUDA_SCALE
-
-template <>
-CAFFE2_CUDA_EXPORT void Axpy<float, CUDAContext>(
-    const int N,
-    const float alpha,
-    const float* X,
-    float* Y,
-    CUDAContext* context) {
-  CUBLAS_ENFORCE(
-      cublasSetPointerMode(context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-  CUBLAS_ENFORCE(cublasSaxpy(context->cublas_handle(), N, &alpha, X, 1, Y, 1));
-}
-
-template <>
-CAFFE2_CUDA_EXPORT void Axpy<double, CUDAContext>(
-    const int N,
-    const float alpha,
-    const double* X,
-    double* Y,
-    CUDAContext* context) {
-  double alpha_d{alpha};
-  CUBLAS_ENFORCE(
-      cublasSetPointerMode(context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-  CUBLAS_ENFORCE(
-      cublasDaxpy(context->cublas_handle(), N, &alpha_d, X, 1, Y, 1));
-}
-
-template <>
-CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
-    const int N,
-    const float alpha,
-    const at::Half* X,
-    at::Half* Y,
-    CUDAContext* context) {
-#if defined(__HIPCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
-#else
-  CUBLAS_ENFORCE(
-      cublasSetPointerMode(context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
-  CUBLAS_ENFORCE(cublasAxpyEx(
-      context->cublas_handle(),
-      N,
-      &alpha,
-      CUDA_R_32F,
-      X,
-      CUDA_R_16F,
-      1,
-      Y,
-      CUDA_R_16F,
-      1,
-      CUDA_R_32F));
-#endif
-}
-
-template <>
-CAFFE2_CUDA_EXPORT void Axpy<float, CUDAContext>(
-    const int N,
-    const float* alpha,
-    const float* X,
-    float* Y,
-    CUDAContext* context) {
-  CUBLAS_ENFORCE(cublasSetPointerMode(
-      context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
-  CUBLAS_ENFORCE(cublasSaxpy(context->cublas_handle(), N, alpha, X, 1, Y, 1));
-}
-
-template <>
-CAFFE2_CUDA_EXPORT void Axpy<at::Half, CUDAContext>(
-    const int N,
-    const float* alpha,
-    const at::Half* X,
-    at::Half* Y,
-    CUDAContext* context) {
-#if defined(__HIPCC__) && !ROCBLAS_FP16
-  CAFFE_THROW("HIP currently does not support FP16 yet.");
-#else
-  CUBLAS_ENFORCE(cublasSetPointerMode(
-      context->cublas_handle(), CUBLAS_POINTER_MODE_DEVICE));
-  CUBLAS_ENFORCE(cublasAxpyEx(
-      context->cublas_handle(),
-      N,
-      alpha,
-      CUDA_R_32F,
-      X,
-      CUDA_R_16F,
-      1,
-      Y,
-      CUDA_R_16F,
-      1,
-      CUDA_R_32F));
-#endif
-}
-
-namespace {
-
-template <typename TCoeff, typename TData>
-__global__ void AxpbyCUDAKernel(
-    const int N,
-    const TCoeff a,
-    const TData* x,
-    const TCoeff b,
-    TData* y) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-#if __CUDA_ARCH__ >= 350
-    y[i] = __ldg(x + i) * a + y[i] * b;
-#else
-    y[i] = x[i] * a + y[i] * b;
-#endif
-  }
-}
-
-template <>
-__global__ void AxpbyCUDAKernel<float, at::Half>(
-    const int N,
-    const float a,
-    const at::Half* x,
-    const float b,
-    at::Half* y) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    y[i] = convert::To<float, at::Half>(
-        convert::To<at::Half, float>(x[i]) * a +
-        convert::To<at::Half, float>(y[i]) * b);
-  }
-}
-
-template <typename TCoeff, typename TData>
-__global__ void AxpbyCUDAKernel(
-    const int N,
-    const TCoeff* a,
-    const TData* x,
-    const TCoeff* b,
-    TData* y) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-#if __CUDA_ARCH__ >= 350
-    y[i] = __ldg(x + i) * __ldg(a) + y[i] * __ldg(b);
-#else
-    y[i] = x[i] * *a + y[i] * *b;
-#endif
-  }
-}
-
-template <>
-__global__ void AxpbyCUDAKernel<float, at::Half>(
-    const int N,
-    const float* a,
-    const at::Half* x,
-    const float* b,
-    at::Half* y) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-#if __CUDA_ARCH__ >= 350
-    y[i] = convert::To<float, at::Half>(
-        convert::To<at::Half, float>(x[i]) * __ldg(a) +
-        convert::To<at::Half, float>(y[i]) * __ldg(b));
-#else
-    y[i] = convert::To<float, at::Half>(
-        convert::To<at::Half, float>(x[i]) * *a +
-        convert::To<at::Half, float>(y[i]) * *b);
-#endif
-  }
-}
-
-} // namespace
-
-#define CAFFE2_SPECIALIZED_CUDA_AXPBY(TCoeff, TData)         \
-  template <>                                                \
-  CAFFE2_CUDA_EXPORT void Axpby<TCoeff, TData, CUDAContext>( \
-      const int n,                                           \
-      const TCoeff a,                                        \
-      const TData* x,                                        \
-      const TCoeff b,                                        \
-      TData* y,                                              \
-      CUDAContext* context) {                                \
-    AxpbyCUDAKernel<TCoeff, TData>                           \
-        <<<CAFFE_GET_BLOCKS(n),                              \
-           CAFFE_CUDA_NUM_THREADS,                           \
-           0,                                                \
-           context->cuda_stream()>>>(n, a, x, b, y);         \
-  }                                                          \
-  template <>                                                \
-  CAFFE2_CUDA_EXPORT void Axpby<TCoeff, TData, CUDAContext>( \
-      const int n,                                           \
-      const TCoeff* a,                                       \
-      const TData* x,                                        \
-      const TCoeff* b,                                       \
-      TData* y,                                              \
-      CUDAContext* context) {                                \
-    AxpbyCUDAKernel<TCoeff, TData>                           \
-        <<<CAFFE_GET_BLOCKS(n),                              \
-           CAFFE_CUDA_NUM_THREADS,                           \
-           0,                                                \
-           context->cuda_stream()>>>(n, a, x, b, y);         \
-  }
-CAFFE2_SPECIALIZED_CUDA_AXPBY(float, float)
-CAFFE2_SPECIALIZED_CUDA_AXPBY(float, at::Half)
-#undef CAFFE2_SPECIALIZED_CUDA_AXPBY
-
-namespace {
-
 template <typename T>
 __global__ void Im2ColNCHWCUDAKernel(
     const int n,
@@ -2558,7 +1997,7 @@ __global__ void Im2ColNCHWCUDAKernel(
       for (int j = 0; j < kernel_w; ++j) {
         const int h = h_in + dh;
         const int w = w_in + dw;
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
         *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
                 utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data_ptr + dh * input_w + dw)
@@ -2609,7 +2048,7 @@ __global__ void Im2ColNHWCCUDAKernel(
       for (int j = 0; j < kernel_w; ++j) {
         const int h = h_in + dh;
         const int w = w_in + dw;
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
         *col_data_ptr = utils::IsAGeZeroAndALtB(h, input_h) &&
                 utils::IsAGeZeroAndALtB(w, input_w)
             ? __ldg(img_data + (h * input_w + w) * channels + channel_in)
@@ -2671,7 +2110,7 @@ __global__ void Col2ImNCHWCUDAKernel(
               (((c * patch_h + h_k) * patch_w + w_k) * output_h + h_col) *
                   output_w +
               w_col;
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
           val += __ldg(col_data + col_data_index);
 #else
           val += col_data[col_data_index];
@@ -2723,7 +2162,7 @@ __global__ void Col2ImNHWCCUDAKernel(
           h_k /= dilation_h;
           w_k /= dilation_w;
           const int c_col = (h_k * patch_w + w_k) * channels + c;
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
           val += __ldg(
               col_data + (h_col * output_w + w_col) * channels_col + c_col);
 #else
@@ -2775,7 +2214,7 @@ __global__ void Im2ColNdNCHWCUDAKernel(
         is_padding |= !utils::IsAGeZeroAndALtB(d_img, img_shape.data[d_i + 1]);
         img_index = img_index * img_shape.data[d_i + 1] + d_img;
       }
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
       if (!kCol2Im) {
         Y_data[col_index] = is_padding ? 0 : __ldg(X_data + img_index);
       } else if (!is_padding) {
@@ -3248,6 +2687,22 @@ CAFFE2_CUDA_EXPORT void CopyVector<float, CUDAContext>(
   }
 }
 
+template <>
+CAFFE2_CUDA_EXPORT void CopyVector<int, CUDAContext>(
+    const int N,
+    const int* src,
+    int* dst,
+    CUDAContext* context) {
+  if (src != dst && N > 0) {
+    cudaMemcpyAsync(
+        dst,
+        src,
+        sizeof(int) * N,
+        cudaMemcpyDeviceToDevice,
+        context->cuda_stream());
+  }
+}
+
 namespace {
 
 template <typename T>
@@ -3354,273 +2809,6 @@ CAFFE2_CUDA_EXPORT void Maximum(
 
 namespace {
 
-template <typename T, class Reducer, int D>
-__global__ void ReduceTensorCUDAKernel(
-    const int outer_size,
-    const int inner_size,
-    SimpleArray<int, D> X_strides,
-    SimpleArray<FIXED_DIVISOR, D> Y_dims,
-    const Reducer reducer,
-    const T init,
-    const T alpha,
-    const T* X,
-    T* Y) {
-  __shared__ typename BlockReduce<T>::TempStorage temp_storage;
-  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
-    T val = init;
-    for (int j = threadIdx.x; j < inner_size; j += blockDim.x) {
-      int X_index = 0;
-      int Y_index = i * inner_size + j;
-#pragma unroll
-      for (int d = D - 1; d >= 0; --d) {
-        int r;
-        FIXED_DIVISOR_DIV_MOD(Y_dims.data[d], Y_index, &Y_index, &r);
-        X_index += r * X_strides.data[d];
-      }
-#if __CUDA_ARCH__ >= 350
-      val = reducer(val, __ldg(X + X_index));
-#else
-      val = reducer(val, X[X_index]);
-#endif
-    }
-    val = BlockReduce<T>(temp_storage).Reduce(val, reducer);
-    if (threadIdx.x == 0) {
-      Y[i] = val * alpha;
-    }
-    __syncthreads();
-  }
-}
-
-template <typename T, class Reducer, int D>
-CAFFE2_CUDA_EXPORT void ReduceTensorCUDAImpl(
-    const int outer_size,
-    const int inner_size,
-    const int* dims,
-    const int* axes,
-    const Reducer& reducer,
-    const T init,
-    const T alpha,
-    const T* X,
-    T* Y,
-    CUDAContext* context) {
-  SimpleArray<int, D> X_strides;
-  SimpleArray<FIXED_DIVISOR, D> Y_dims;
-  utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
-  for (int i = 0; i < D; ++i) {
-    Y_dims.data[i] = FIXED_DIVISOR(dims[axes[i]]);
-  }
-  ReduceTensorCUDAKernel<T, Reducer, D>
-      <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context->cuda_stream()>>>(
-          outer_size,
-          inner_size,
-          X_strides,
-          Y_dims,
-          reducer,
-          init,
-          alpha,
-          X,
-          Y);
-}
-
-template <typename T, class Reducer>
-CAFFE2_CUDA_EXPORT void ReduceTensorCUDA(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const Reducer& reducer,
-    const T init,
-    const T alpha,
-    const T* X,
-    T* Y,
-    CUDAContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-  std::vector<int> Y_dims_vector(dims, dims + num_dims);
-  for (int i = 0; i < num_axes; ++i) {
-    Y_dims_vector[axes[i]] = 1;
-  }
-  const int* X_dims = dims;
-  const int* Y_dims = Y_dims_vector.data();
-  const int X_size =
-      std::accumulate(X_dims, X_dims + num_dims, 1, std::multiplies<int>());
-  const int Y_size =
-      std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>());
-  if (X_size == 0) {
-    Set<T, CUDAContext>(Y_size, alpha * init, Y, context);
-    return;
-  }
-  if (alpha == T(0)) {
-    Set<T, CUDAContext>(Y_size, T(0), Y, context);
-    return;
-  }
-  if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {
-    Scale<T, T, CUDAContext>(X_size, alpha, X, Y, context);
-    return;
-  }
-  int rows;
-  int cols;
-  if (utils::IsRowwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {
-    RowwiseReduceKernel<T>
-        <<<std::min(rows, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context->cuda_stream()>>>(rows, cols, reducer, init, alpha, X, Y);
-    return;
-  }
-  if (utils::IsColwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {
-    ColwiseReduceKernel<T>
-        <<<std::min(rows, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context->cuda_stream()>>>(rows, cols, reducer, init, alpha, X, Y);
-    return;
-  }
-  std::vector<int> transpose_axes(num_dims);
-  utils::ComputeTransposeAxesForReduceOp(
-      num_dims, num_axes, axes, transpose_axes.data());
-  const int outer_size = Y_size;
-  const int inner_size = X_size / Y_size;
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
-      num_dims,
-      ReduceTensorCUDAImpl,
-      T,
-      Reducer,
-      outer_size,
-      inner_size,
-      dims,
-      transpose_axes.data(),
-      reducer,
-      init,
-      alpha,
-      X,
-      Y,
-      context);
-}
-
-} // namespace
-
-#define CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(T)        \
-  template <>                                        \
-  CAFFE2_CUDA_EXPORT void ReduceMin<T, CUDAContext>( \
-      const int num_dims,                            \
-      const int* dims,                               \
-      const int num_axes,                            \
-      const int* axes,                               \
-      const T alpha,                                 \
-      const T* X,                                    \
-      T* Y,                                          \
-      CUDAContext* context) {                        \
-    ReduceTensorCUDA(                                \
-        num_dims,                                    \
-        dims,                                        \
-        num_axes,                                    \
-        axes,                                        \
-        cub::Min(),                                  \
-        std::numeric_limits<T>::max(),               \
-        alpha,                                       \
-        X,                                           \
-        Y,                                           \
-        context);                                    \
-  }
-CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(std::int32_t)
-CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(std::int64_t)
-CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(float)
-CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(double)
-#undef CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN
-
-#define CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(T)        \
-  template <>                                        \
-  CAFFE2_CUDA_EXPORT void ReduceMax<T, CUDAContext>( \
-      const int num_dims,                            \
-      const int* dims,                               \
-      const int num_axes,                            \
-      const int* axes,                               \
-      const T alpha,                                 \
-      const T* X,                                    \
-      T* Y,                                          \
-      CUDAContext* context) {                        \
-    ReduceTensorCUDA(                                \
-        num_dims,                                    \
-        dims,                                        \
-        num_axes,                                    \
-        axes,                                        \
-        cub::Max(),                                  \
-        std::numeric_limits<T>::lowest(),            \
-        alpha,                                       \
-        X,                                           \
-        Y,                                           \
-        context);                                    \
-  }
-CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(std::int32_t)
-CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(std::int64_t)
-CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(float)
-CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(double)
-#undef CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX
-
-#define CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(T)        \
-  template <>                                        \
-  CAFFE2_CUDA_EXPORT void ReduceSum<T, CUDAContext>( \
-      const int num_dims,                            \
-      const int* dims,                               \
-      const int num_axes,                            \
-      const int* axes,                               \
-      const T alpha,                                 \
-      const T* X,                                    \
-      T* Y,                                          \
-      CUDAContext* context) {                        \
-    ReduceTensorCUDA(                                \
-        num_dims,                                    \
-        dims,                                        \
-        num_axes,                                    \
-        axes,                                        \
-        cub::Sum(),                                  \
-        T(0),                                        \
-        alpha,                                       \
-        X,                                           \
-        Y,                                           \
-        context);                                    \
-  }
-CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(std::int32_t)
-CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(std::int64_t)
-CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(float)
-CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(double)
-#undef CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM
-
-#define CAFFE2_SPECIALIZED_CUDA_REDUCE_MEAN(T)        \
-  template <>                                         \
-  CAFFE2_CUDA_EXPORT void ReduceMean<T, CUDAContext>( \
-      const int num_dims,                             \
-      const int* dims,                                \
-      const int num_axes,                             \
-      const int* axes,                                \
-      const T alpha,                                  \
-      const T* X,                                     \
-      T* Y,                                           \
-      CUDAContext* context) {                         \
-    int scale = 1;                                    \
-    for (int i = 0; i < num_axes; ++i) {              \
-      scale *= dims[axes[i]];                         \
-    }                                                 \
-    ReduceTensorCUDA(                                 \
-        num_dims,                                     \
-        dims,                                         \
-        num_axes,                                     \
-        axes,                                         \
-        cub::Sum(),                                   \
-        T(0),                                         \
-        alpha / static_cast<T>(scale),                \
-        X,                                            \
-        Y,                                            \
-        context);                                     \
-  }
-CAFFE2_SPECIALIZED_CUDA_REDUCE_MEAN(float)
-#undef CAFFE2_SPECIALIZED_CUDA_REDUCE_MEAN
-
-namespace {
-
 template <typename T, int D>
 __global__ void BroadcastCUDAKernel(
     const int Y_size,
@@ -3638,7 +2826,7 @@ __global__ void BroadcastCUDAKernel(
       FIXED_DIVISOR_DIV_MOD(Y_dims.data[i], Y_index_val, &Y_index_val, &d);
       X_index += d * X_strides.data[i];
     }
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
+#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
     Y[Y_index] = __ldg(X + X_index) * alpha;
 #else
     Y[Y_index] = X[X_index] * alpha;
@@ -3716,242 +2904,6 @@ CAFFE2_SPECIALIZED_CUDA_BROADCAST(double)
 namespace {
 
 template <typename T>
-__global__ void RowwiseMomentsCUDAKernel(
-    const int rows,
-    const int cols,
-    const T* X,
-    T* mean,
-    T* variance) {
-  __shared__ typename BlockReduce<T>::TempStorage m_storage;
-  __shared__ typename BlockReduce<T>::TempStorage v_storage;
-  const T scale = T(1) / static_cast<T>(cols);
-  for (int i = blockIdx.x; i < rows; i += gridDim.x) {
-    T m_val = 0;
-    T v_val = 0;
-    for (int j = threadIdx.x; j < cols; j += blockDim.x) {
-      const int X_index = i * cols + j;
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
-      m_val += __ldg(X + X_index);
-      v_val += __ldg(X + X_index) * __ldg(X + X_index);
-#else
-      m_val += X[X_index];
-      v_val += X[X_index] * X[X_index];
-#endif
-    }
-    m_val = BlockReduce<T>(m_storage).Sum(m_val);
-    v_val = BlockReduce<T>(v_storage).Sum(v_val);
-    if (threadIdx.x == 0) {
-      const T mu = m_val * scale;
-      mean[i] = mu;
-      variance[i] = v_val * scale - mu * mu;
-    }
-    __syncthreads();
-  }
-}
-
-template <typename T>
-__global__ void ColwiseMomentsCUDAKernel(
-    const int rows,
-    const int cols,
-    const T* X,
-    T* mean,
-    T* variance) {
-  __shared__ typename BlockReduce<T>::TempStorage m_storage;
-  __shared__ typename BlockReduce<T>::TempStorage v_storage;
-  const T scale = T(1) / static_cast<T>(rows);
-  for (int i = blockIdx.x; i < cols; i += gridDim.x) {
-    T m_val = 0;
-    T v_val = 0;
-    for (int j = threadIdx.x; j < rows; j += blockDim.x) {
-      const int X_index = j * cols + i;
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
-      m_val += __ldg(X + X_index);
-      v_val += __ldg(X + X_index) * __ldg(X + X_index);
-#else
-      m_val += X[X_index];
-      v_val += X[X_index] * X[X_index];
-#endif
-    }
-    m_val = BlockReduce<T>(m_storage).Sum(m_val);
-    v_val = BlockReduce<T>(v_storage).Sum(v_val);
-    if (threadIdx.x == 0) {
-      const T mu = m_val * scale;
-      mean[i] = mu;
-      variance[i] = v_val * scale - mu * mu;
-    }
-    __syncthreads();
-  }
-}
-
-template <typename T, int D>
-__global__ void MomentsCUDAKernel(
-    const int outer_size,
-    const int inner_size,
-    SimpleArray<int, D> X_strides,
-    SimpleArray<FIXED_DIVISOR, D> Y_dims,
-    const T* X,
-    T* mean,
-    T* variance) {
-  __shared__ typename BlockReduce<T>::TempStorage m_storage;
-  __shared__ typename BlockReduce<T>::TempStorage v_storage;
-  const T scale = T(1) / static_cast<T>(inner_size);
-  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
-    T m_val = 0;
-    T v_val = 0;
-    for (int j = threadIdx.x; j < inner_size; j += blockDim.x) {
-      int X_index = 0;
-      int Y_index = i * inner_size + j;
-#pragma unroll
-      for (int d = D - 1; d >= 0; --d) {
-        int r;
-        FIXED_DIVISOR_DIV_MOD(Y_dims.data[d], Y_index, &Y_index, &r);
-        X_index += r * X_strides.data[d];
-      }
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
-      m_val += __ldg(X + X_index);
-      v_val += __ldg(X + X_index) * __ldg(X + X_index);
-#else
-      m_val += X[X_index];
-      v_val += X[X_index] * X[X_index];
-#endif
-    }
-    m_val = BlockReduce<T>(m_storage).Sum(m_val);
-    v_val = BlockReduce<T>(v_storage).Sum(v_val);
-    if (threadIdx.x == 0) {
-      const T mu = m_val * scale;
-      mean[i] = mu;
-      variance[i] = v_val * scale - mu * mu;
-    }
-    __syncthreads();
-  }
-}
-
-template <typename T, int D>
-CAFFE2_CUDA_EXPORT void MomentsCUDAImpl(
-    const int outer_size,
-    const int inner_size,
-    const int* dims,
-    const int* axes,
-    const T* X,
-    T* mean,
-    T* variance,
-    CUDAContext* context) {
-  SimpleArray<int, D> X_strides;
-  SimpleArray<FIXED_DIVISOR, D> Y_dims;
-  utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
-  for (int i = 0; i < D; ++i) {
-    Y_dims.data[i] = FIXED_DIVISOR(dims[axes[i]]);
-  }
-  MomentsCUDAKernel<T, D>
-      <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context->cuda_stream()>>>(
-          outer_size, inner_size, X_strides, Y_dims, X, mean, variance);
-}
-
-template <typename T>
-CAFFE2_CUDA_EXPORT void MomentsCUDA(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T* X,
-    T* mean,
-    T* variance,
-    CUDAContext* context) {
-  CAFFE_ENFORCE_LE(num_axes, num_dims);
-  std::vector<int> Y_dims_vector(dims, dims + num_dims);
-  for (int i = 0; i < num_axes; ++i) {
-    Y_dims_vector[axes[i]] = 1;
-  }
-  const int* X_dims = dims;
-  const int* Y_dims = Y_dims_vector.data();
-  const int X_size =
-      std::accumulate(X_dims, X_dims + num_dims, 1, std::multiplies<int>());
-  const int Y_size =
-      std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>());
-  if (X_size == 0) {
-    Set<T, CUDAContext>(Y_size, T(0), mean, context);
-    Set<T, CUDAContext>(Y_size, T(0), variance, context);
-    return;
-  }
-  if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {
-    cudaMemcpyAsync(
-        mean,
-        X,
-        sizeof(T) * X_size,
-        cudaMemcpyDeviceToDevice,
-        context->cuda_stream());
-    Set<T, CUDAContext>(Y_size, T(0), variance, context);
-    return;
-  }
-  int rows;
-  int cols;
-  if (utils::IsRowwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {
-    RowwiseMomentsCUDAKernel<T>
-        <<<std::min(rows, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context->cuda_stream()>>>(rows, cols, X, mean, variance);
-    return;
-  }
-  if (utils::IsColwiseReduce(num_dims, X_dims, Y_dims, &rows, &cols)) {
-    ColwiseMomentsCUDAKernel<T>
-        <<<std::min(rows, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context->cuda_stream()>>>(rows, cols, X, mean, variance);
-    return;
-  }
-  std::vector<int> transpose_axes(num_dims);
-  utils::ComputeTransposeAxesForReduceOp(
-      num_dims, num_axes, axes, transpose_axes.data());
-  const int pivot = num_dims - num_axes;
-  int outer_size = 1;
-  for (int i = 0; i < pivot; ++i) {
-    outer_size *= dims[transpose_axes[i]];
-  }
-  int inner_size = 1;
-  for (int i = pivot; i < num_dims; ++i) {
-    inner_size *= dims[transpose_axes[i]];
-  }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
-      num_dims,
-      MomentsCUDAImpl,
-      T,
-      outer_size,
-      inner_size,
-      dims,
-      transpose_axes.data(),
-      X,
-      mean,
-      variance,
-      context);
-}
-
-} // namespace
-
-#define CAFFE2_SPECIALIZED_CUDA_MOMENTS(T)                           \
-  template <>                                                        \
-  CAFFE2_CUDA_EXPORT void Moments<T, CUDAContext>(                   \
-      const int num_dims,                                            \
-      const int* dims,                                               \
-      const int num_axes,                                            \
-      const int* axes,                                               \
-      const T* X,                                                    \
-      T* mean,                                                       \
-      T* variance,                                                   \
-      CUDAContext* context) {                                        \
-    MomentsCUDA<T>(                                                  \
-        num_dims, dims, num_axes, axes, X, mean, variance, context); \
-  }
-CAFFE2_SPECIALIZED_CUDA_MOMENTS(float)
-#undef CAFFE2_SPECIALIZED_CUDA_MOMENTS
-
-namespace {
-
-template <typename T>
 __global__ void
 InvStdCUDAKernel(const int N, const T epsilon, const T* var, T* inv_std);
 
@@ -3984,232 +2936,6 @@ DELEGATE_INV_STD_KERNEL_FUNCTION(float, rsqrtf)
   }
 CAFFE2_SPECIALIZED_CUDA_INV_STD(float)
 #undef CAFFE2_SPECIALIZED_CUDA_INV_STD
-
-namespace {
-
-constexpr int kTileDim = 32;
-constexpr int kBlockRows = 8;
-
-// Splits the original matrix into submatrices with size 32 * 32.
-// Each block transposes one submatrix by loading it into shared memory.
-// Reference https://devblogs.nvidia.com/efficient-matrix-transpose-cuda-cc/
-template <typename T>
-__global__ void BatchTranspose2DCUDAKernel(
-    const int N,
-    const int H,
-    const int W,
-    const T* X,
-    T* Y) {
-  __shared__ T tile[kTileDim][kTileDim + 1];
-  const int h = (H + kTileDim - 1) / kTileDim;
-  const int w = (W + kTileDim - 1) / kTileDim;
-  const int outer_size = N * h * w;
-  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
-    const int n = i / (h * w);
-    const int k = i % (h * w);
-    const int r = k / w;
-    const int c = k % w;
-    const int offset = n * H * W;
-    int x = c * kTileDim + threadIdx.x;
-    int y = r * kTileDim + threadIdx.y;
-    if (x < W) {
-      for (int j = 0; j < kTileDim && y + j < H; j += kBlockRows) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
-        tile[threadIdx.y + j][threadIdx.x] =
-            __ldg(X + offset + (y + j) * W + x);
-#else
-        tile[threadIdx.y + j][threadIdx.x] = X[offset + (y + j) * W + x];
-#endif
-      }
-    }
-    __syncthreads();
-    x = r * kTileDim + threadIdx.x;
-    y = c * kTileDim + threadIdx.y;
-    if (x < H) {
-      for (int j = 0; j < kTileDim && y + j < W; j += kBlockRows) {
-        Y[offset + (y + j) * H + x] = tile[threadIdx.x][threadIdx.y + j];
-      }
-    }
-    __syncthreads();
-  }
-}
-
-template <typename T, int D>
-__global__ void TransposeCUDAKernel(
-    const int size,
-    const SimpleArray<int, D> X_strides,
-    const SimpleArray<FIXED_DIVISOR, D> Y_dims,
-    const T* X,
-    T* Y) {
-  CUDA_1D_KERNEL_LOOP(Y_index, size) {
-    int X_index = 0;
-    int Y_index_val = Y_index;
-#pragma unroll
-    for (int i = D - 1; i >= 0; --i) {
-      int d;
-      FIXED_DIVISOR_DIV_MOD(Y_dims.data[i], Y_index_val, &Y_index_val, &d);
-      X_index += d * X_strides.data[i];
-    }
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
-    Y[Y_index] = __ldg(X + X_index);
-#else
-    Y[Y_index] = X[X_index];
-#endif
-  }
-}
-
-template <typename T, int D>
-CAFFE2_CUDA_EXPORT void TransposeCUDAImpl(
-    const int* dims,
-    const int* axes,
-    const T* X,
-    T* Y,
-    CUDAContext* context) {
-  SimpleArray<int, D> X_strides;
-  SimpleArray<FIXED_DIVISOR, D> Y_dims;
-  utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
-  int size = 1;
-  for (int i = 0; i < D; ++i) {
-    Y_dims.data[i] = FIXED_DIVISOR(dims[axes[i]]);
-    size *= dims[i];
-  }
-  TransposeCUDAKernel<T, D>
-      <<<CAFFE_GET_BLOCKS(size),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context->cuda_stream()>>>(size, X_strides, Y_dims, X, Y);
-}
-
-} // namespace
-
-#define CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(T)                                 \
-  template <>                                                                \
-  CAFFE2_CUDA_EXPORT void Transpose<T, CUDAContext>(                         \
-      const int ndim,                                                        \
-      const int* dims,                                                       \
-      const int* axes,                                                       \
-      const T* X,                                                            \
-      T* Y,                                                                  \
-      CUDAContext* context) {                                                \
-    if (utils::IsIdentityPermutation(ndim, axes)) {                          \
-      const int size =                                                       \
-          std::accumulate(dims, dims + ndim, 1, std::multiplies<int>());     \
-      context->template CopySameDevice<T>(size, X, Y);                       \
-      return;                                                                \
-    }                                                                        \
-    if (utils::IsBatchTranspose2D(ndim, axes)) {                             \
-      const int N =                                                          \
-          std::accumulate(dims, dims + ndim - 2, 1, std::multiplies<int>()); \
-      const int H = dims[ndim - 2];                                          \
-      const int W = dims[ndim - 1];                                          \
-      const int h = (H + kTileDim - 1) / kTileDim;                           \
-      const int w = (W + kTileDim - 1) / kTileDim;                           \
-      const int outer_size = N * h * w;                                      \
-      const dim3 dim_block(kTileDim, kBlockRows, 1);                         \
-      BatchTranspose2DCUDAKernel<T>                                          \
-          <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),                 \
-             dim_block,                                                      \
-             0,                                                              \
-             context->cuda_stream()>>>(N, H, W, X, Y);                       \
-      return;                                                                \
-    }                                                                        \
-    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(                                  \
-        ndim, TransposeCUDAImpl, T, dims, axes, X, Y, context);              \
-  }
-CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(float)
-CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(double)
-CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(int)
-CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(int64_t)
-#undef CAFFE2_SPECIALIZED_CUDA_TRANSPOSE
-
-namespace {
-
-template <typename T, StorageOrder kOrder>
-__global__ void AffineChannelCUDAKernel(
-    const int size,
-    const int C,
-    const int HxW,
-    const T* X,
-    const T* scale,
-    const T* bias,
-    T* Y) {
-  CUDA_1D_KERNEL_LOOP(i, size) {
-    const int c = kOrder == StorageOrder::NCHW ? i / HxW % C : i % C;
-#if __CUDA_ARCH__ >= 350 || defined(__HIPCC__)
-    Y[i] = __ldg(scale + c) * __ldg(X + i) + __ldg(bias + c);
-#else
-    Y[i] = scale[c] * X[i] + bias[c];
-#endif
-  }
-}
-
-} // namespace
-
-#define CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL(T, kOrder)              \
-  template <>                                                          \
-  CAFFE2_CUDA_EXPORT void AffineChannel<T, CUDAContext, kOrder>(       \
-      const int N,                                                     \
-      const int C,                                                     \
-      const int HxW,                                                   \
-      const T* X,                                                      \
-      const T* scale,                                                  \
-      const T* bias,                                                   \
-      T* Y,                                                            \
-      CUDAContext* context) {                                          \
-    const int size = N * C * HxW;                                      \
-    AffineChannelCUDAKernel<T, kOrder>                                 \
-        <<<CAFFE_GET_BLOCKS(size),                                     \
-           CAFFE_CUDA_NUM_THREADS,                                     \
-           0,                                                          \
-           context->cuda_stream()>>>(size, C, HxW, X, scale, bias, Y); \
-  }
-CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL(float, StorageOrder::NCHW)
-CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL(float, StorageOrder::NHWC)
-#undef CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL
-
-#define CAFFE2_SPECIALIZED_CUDA_NCHW2NHWC(T)               \
-  template <>                                              \
-  CAFFE2_CUDA_EXPORT void NCHW2NHWC<T, CUDAContext>(       \
-      const int N,                                         \
-      const int C,                                         \
-      const int HxW,                                       \
-      const T* X,                                          \
-      T* Y,                                                \
-      CUDAContext* context) {                              \
-    const int h = (C + kTileDim - 1) / kTileDim;           \
-    const int w = (HxW + kTileDim - 1) / kTileDim;         \
-    const int outer_size = N * h * w;                      \
-    const dim3 dim_block(kTileDim, kBlockRows, 1);         \
-    BatchTranspose2DCUDAKernel<T>                          \
-        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS), \
-           dim_block,                                      \
-           0,                                              \
-           context->cuda_stream()>>>(N, C, HxW, X, Y);     \
-  }
-CAFFE2_SPECIALIZED_CUDA_NCHW2NHWC(float)
-#undef CAFFE2_SPECIALIZED_CUDA_NCHW2NHWC
-
-#define CAFFE2_SPECIALIZED_CUDA_NHWC2NCHW(T)               \
-  template <>                                              \
-  CAFFE2_CUDA_EXPORT void NHWC2NCHW<T, CUDAContext>(       \
-      const int N,                                         \
-      const int C,                                         \
-      const int HxW,                                       \
-      const T* X,                                          \
-      T* Y,                                                \
-      CUDAContext* context) {                              \
-    const int h = (HxW + kTileDim - 1) / kTileDim;         \
-    const int w = (C + kTileDim - 1) / kTileDim;           \
-    const int outer_size = N * h * w;                      \
-    const dim3 dim_block(kTileDim, kBlockRows, 1);         \
-    BatchTranspose2DCUDAKernel<T>                          \
-        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS), \
-           dim_block,                                      \
-           0,                                              \
-           context->cuda_stream()>>>(N, HxW, C, X, Y);     \
-  }
-CAFFE2_SPECIALIZED_CUDA_NHWC2NCHW(float)
-#undef CAFFE2_SPECIALIZED_CUDA_NHWC2NCHW
 
 } // namespace math
 } // namespace caffe2

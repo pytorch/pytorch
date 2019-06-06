@@ -82,34 +82,47 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
 
   bool RunOnDevice() override {
     for (int i = 0; i < InputSize(); ++i) {
-      if (InputIsType<itensor>(i) &&
-          Input(i).get_data_type() == itensor::data_type::f32) {
+      if (InputIsType<itensor>(i)
+          && (Input(i).has_scale()
+            || Input(i).get_data_type() == idtype::f32)) {
         auto& input = Input(i);
         if (input_share_[i]) {
           local_input_blobs_[i]->Reset();
+          input_share_[i] = false;
         }
-        input_share_[i] = false;
         auto dtensor = BlobGetMutableTensor(local_input_blobs_[i], CPU);
         dtensor->Resize(input.get_dims());
-        if (input.is_public_format()) {
+        // If fallback from INT8, the public format of original input is nhwc.
+        // While the required format is nchw, need to reorder to nchw.
+        if (input.get_public_format() == iformat::nhwc) {
+          itensor temp_ten ({input.get_dims(), idtype::f32, iformat::nchw},
+              dtensor->template mutable_data<float>());
+          temp_ten.feed_from(input);
+        } else if (!input.need_reorder()) {
+          CAFFE_ENFORCE(!input.has_scale(),
+              "Incorrect invocation of get_data_handle");
           dtensor->ShareExternalPointer(
               static_cast<float*>(input.get_data_handle()));
         } else {
-          input.reorder_to(dtensor->template mutable_data<float>());
+          input.to_public(dtensor->template mutable_data<float>());
         }
       } else {
         VLOG(1) << "Input " << i << " is not ideep::tensor. Skipping copy.";
-        // Note(jiayq): This removes a const but conceptually
-        // local_input_blobs will only be used as const blob input for the
-        // base op so we are still fine.
-        local_input_blobs_[i]->ShareExternal(
-            const_cast<void *>(OperatorBase::Inputs()[i]->GetRaw()),
-            OperatorBase::Inputs()[i]->meta());
+        if (OperatorBase::Inputs()[i]->GetRaw() != local_input_blobs_[i]->GetRaw()) {
+          // Note(jiayq): This removes a const but conceptually
+          // local_input_blobs will only be used as const blob input for the
+          // base op so we are still fine.
+          local_input_blobs_[i]->ShareExternal(
+              const_cast<void *>(OperatorBase::Inputs()[i]->GetRaw()),
+              OperatorBase::Inputs()[i]->meta());
+        }
         input_share_[i] = true;
       }
     }
 
-    if (!base_op_->Run()) {
+    // Some CPU ops inherited from OperatorBase directly might need this default
+    // input argument '0' like 'PrefetchOperator'.
+    if (!base_op_->Run(0)) {
       LOG(ERROR) << "Base op run failed in IDEEPFallbackOp. Def: "
                  << ProtoDebugString(this->debug_def());
       return false;
@@ -126,8 +139,7 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
       auto src_dims = src.sizes().vec();
-      if (src.template IsType<float>() && src.sizes().size() != 0 &&
-          src.numel() != 0 && base_op_->type() != "Python") {
+      if (src.template IsType<float>() && src.dim() != 0 && base_op_->type() != "Python") {
         Blob* dst = OperatorBase::OutputBlob(i);
         // The output tensor must be ideep tensor with public format.
         // If reusing ideep tensor with non-public format, the tensor buffer
@@ -140,21 +152,26 @@ class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
         itensor::dims dst_dims (src_dims.begin(), src_dims.end());
         auto dtensor = dst->template GetMutable<itensor>();
         if (dtensor->get_dims() != dst_dims) {
-          dtensor->resize(dst_dims, itensor::data_type::f32);
+          dtensor->resize(dst_dims, idtype::f32);
         }
         if (output_inplace_[i]) {
-          dtensor->reorder_from(dst_dims, itensor::data_type::f32,
-                                const_cast<void*>(src.raw_data()));
+          dtensor->feed_from(dst_dims, idtype::f32,
+              const_cast<void*>(src.raw_data()));
         } else {
+          CAFFE_ENFORCE(!dtensor->has_scale(),
+              "Incorrect invocation of set_data_handle");
           dtensor->set_data_handle(const_cast<void *>(src.raw_data()));
         }
       } else {
         VLOG(2) << "Output " << base_def_.output(i) << " as CPUTensor";
         Blob* dst = OperatorBase::OutputBlob(i);
-        dst->Reset(new Tensor(CPU));
-        auto dtensor = BlobGetMutableTensor(dst, CPU);
-        dtensor->Resize(src_dims);
-        dtensor->ShareData(src);
+        if (output_inplace_[i]) {
+          auto dtensor = BlobGetMutableTensor(dst, CPU);
+          dtensor->CopyFrom(src);
+        } else {
+          dst->Reset(new Tensor(CPU));
+          BlobSetTensor(dst, src.Alias());
+        }
       }
     }
     return true;

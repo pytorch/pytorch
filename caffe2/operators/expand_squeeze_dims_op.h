@@ -10,8 +10,9 @@ template <class Context>
 class ExpandDimsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ExpandDimsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit ExpandDimsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         dims_(this->template GetRepeatedArgument<int>("dims")) {
     auto originalSize = dims_.size();
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
@@ -26,7 +27,7 @@ class ExpandDimsOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    output->CopyFrom(input, &context_);
+    output->CopyFrom(input, true /*async*/);
     if (dims_.empty()) {
       return true;
     }
@@ -53,8 +54,9 @@ template <class Context>
 class SqueezeOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SqueezeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SqueezeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         dims_(this->template GetRepeatedArgument<int>("dims")) {
     auto originalSize = dims_.size();
     CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
@@ -70,7 +72,7 @@ class SqueezeOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    output->CopyFrom(input, &context_);
+    output->CopyFrom(input, true /*async*/);
 
     CAFFE_ENFORCE_GT(
         input.dim(),
@@ -85,11 +87,11 @@ class SqueezeOp : public Operator<Context> {
   }
 
   static std::vector<int> ComputeDims(
-      at::IntList inputDims,
+      at::IntArrayRef inputDims,
       std::vector<int> dims) {
-    int j = 0;
+    size_t j = 0;
     std::vector<int> newDims;
-    for (int i = 0; i < inputDims.size(); ++i) {
+    for (size_t i = 0; i < inputDims.size(); ++i) {
       if (j < dims.size() && dims[j] == i) {
         CAFFE_ENFORCE_EQ(
             inputDims[i],

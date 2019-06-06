@@ -5,9 +5,9 @@
 #include <limits>
 #include <cuda.h>
 #include <assert.h>
-#include "TH/THHalf.h"
-#include "ATen/ATen.h"
-#include "ATen/cuda/NumericLimits.cuh"
+#include <TH/THHalf.h>
+#include <ATen/ATen.h>
+#include <ATen/cuda/NumericLimits.cuh>
 
 // WARNING: THCNumerics is being deprecated. Please follow the comments
 // in this file to learn about new usages.
@@ -50,6 +50,7 @@ struct THCNumerics<uint8_t> {
   static inline __host__ __device__ bool gt(uint8_t a, uint8_t b) { return a > b; }
   static inline __host__ __device__ bool ge(uint8_t a, uint8_t b) { return a >= b; }
   static inline __host__ __device__ bool eq(uint8_t a, uint8_t b) { return a == b; }
+  static inline __device__ bool eq_with_nan(uint8_t a, uint8_t b) { return a == b; }
   static inline __host__ __device__ bool ne(uint8_t a, uint8_t b) { return a != b; }
 
   static inline __host__ __device__  uint8_t neg(int8_t a) { return -a; }
@@ -64,6 +65,29 @@ struct THCNumerics<uint8_t> {
 };
 
 template <>
+struct THCNumerics<bool> {
+  static inline __host__ __device__ bool min() { return at::numeric_limits<bool>::lowest(); }
+  static inline __host__ __device__ bool max() { return at::numeric_limits<bool>::max(); }
+  static inline __host__ __device__ bool lower_bound() { return at::numeric_limits<bool>::lower_bound(); }
+  static inline __host__ __device__ bool upper_bound() { return at::numeric_limits<bool>::upper_bound(); }
+
+  static inline __host__ __device__ bool lt(bool a, bool b) { return a < b; }
+  static inline __host__ __device__ bool le(bool a, bool b) { return a <= b; }
+  static inline __host__ __device__ bool gt(bool a, bool b) { return a > b; }
+  static inline __host__ __device__ bool ge(bool a, bool b) { return a >= b; }
+  static inline __host__ __device__ bool eq(bool a, bool b) { return a == b; }
+  static inline __host__ __device__ bool ne(bool a, bool b) { return a != b; }
+  static inline __host__ __device__ bool add(bool a, bool b) { return a + b; }
+  static inline __host__ __device__ bool mul(bool a, bool b) { return a && b; }
+  static inline __host__ __device__ bool sub(bool a, bool b) { return a - b; }
+  static inline __host__ __device__ bool div(bool a, bool b) { return a / b; }
+  static inline __host__ __device__ bool neg(bool a) { return !a; }
+  static inline __host__ __device__ bool abs(bool a) { return a; }
+  static inline __host__ __device__ bool isnan(bool a) { return false; }
+  static inline __host__ __device__ bool isinf(bool a) { return false; }
+};
+
+template <>
 struct THCNumerics<int8_t> {
   static inline __host__ __device__ int8_t min() { return at::numeric_limits<int8_t>::lowest(); }
   static inline __host__ __device__ int8_t max() { return at::numeric_limits<int8_t>::max(); }
@@ -75,6 +99,7 @@ struct THCNumerics<int8_t> {
   static inline __host__ __device__ bool gt(int8_t a, int8_t b) { return a > b; }
   static inline __host__ __device__ bool ge(int8_t a, int8_t b) { return a >= b; }
   static inline __host__ __device__ bool eq(int8_t a, int8_t b) { return a == b; }
+  static inline __device__ bool eq_with_nan(int8_t a, int8_t b) { return a == b; }
   static inline __host__ __device__ bool ne(int8_t a, int8_t b) { return a != b; }
 
   static inline __host__ __device__  int8_t neg(int8_t a) { return -a; }
@@ -100,6 +125,7 @@ struct THCNumerics<int16_t> {
   static inline __host__ __device__ bool gt(int16_t a, int16_t b) { return a > b; }
   static inline __host__ __device__ bool ge(int16_t a, int16_t b) { return a >= b; }
   static inline __host__ __device__ bool eq(int16_t a, int16_t b) { return a == b; }
+  static inline __device__ bool eq_with_nan(int16_t a, int16_t b) { return a == b; }
   static inline __host__ __device__ bool ne(int16_t a, int16_t b) { return a != b; }
 
   static inline __host__ __device__  int16_t neg(int16_t a) { return -a; }
@@ -125,6 +151,7 @@ struct THCNumerics<int32_t> {
   static inline __host__ __device__ bool gt(int32_t a, int32_t b) { return a > b; }
   static inline __host__ __device__ bool ge(int32_t a, int32_t b) { return a >= b; }
   static inline __host__ __device__ bool eq(int32_t a, int32_t b) { return a == b; }
+  static inline __device__ bool eq_with_nan(int32_t a, int32_t b) { return a == b; }
   static inline __host__ __device__ bool ne(int32_t a, int32_t b) { return a != b; }
 
   static inline __host__ __device__  int32_t neg(int32_t a) { return -a; }
@@ -150,6 +177,7 @@ struct THCNumerics<int64_t> {
   static inline __host__ __device__ bool gt(int64_t a, int64_t b) { return a > b; }
   static inline __host__ __device__ bool ge(int64_t a, int64_t b) { return a >= b; }
   static inline __host__ __device__ bool eq(int64_t a, int64_t b) { return a == b; }
+  static inline __device__ bool eq_with_nan(int64_t a, int64_t b) { return a == b; }
   static inline __host__ __device__ bool ne(int64_t a, int64_t b) { return a != b; }
 
 
@@ -177,6 +205,7 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ bool gt(at::Half a, at::Half b) { return a > b; }
   static inline __host__ __device__ bool ge(at::Half a, at::Half b) { return a >= b; }
   static inline __host__ __device__ bool eq(at::Half a, at::Half b) { return a == b; }
+  static inline __device__ bool eq_with_nan(at::Half a, at::Half b) { return __half_as_ushort(a) == __half_as_ushort(b); }
   static inline __host__ __device__ bool ne(at::Half a, at::Half b) { return a != b; }
 
   static inline __host__ __device__ at::Half exp(at::Half a) { return std::exp(a); }
@@ -205,8 +234,8 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half erf(at::Half a) { return ::erf(a); }
   static inline __host__ __device__ at::Half erfc(at::Half a) { return ::erfc(a); }
   static inline __host__ __device__ at::Half erfinv(at::Half a) { return ::erfinv(a); }
-  static inline __host__ __device__ at::Half abs(at::Half a) { return ::abs(a); }
-  static inline __host__ __device__ at::Half round(at::Half a) { return ::round(a); }
+  static inline __host__ __device__ at::Half abs(at::Half a) { return std::abs(a); }
+  static inline __host__ __device__ at::Half round(at::Half a) { return ::nearbyint(a); }
 
   static inline __host__ __device__ at::Half frac(at::Half a) {
     #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
@@ -261,6 +290,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__ bool gt(float a, float b) { return a > b; }
   static inline __host__ __device__ bool ge(float a, float b) { return a >= b; }
   static inline __host__ __device__ bool eq(float a, float b) { return a == b; }
+  static inline __device__ bool eq_with_nan(float a, float b) { return __float_as_int(a) == __float_as_int(b); }
   static inline __host__ __device__ bool ne(float a, float b) { return a != b; }
 
   static inline __host__ __device__  float lgamma(float a) { return lgammaf(a);}
@@ -292,7 +322,7 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float erf  (float a) { return   erff(a); }
   static inline __host__ __device__  float erfc (float a) { return  erfcf(a); }
   static inline __host__ __device__  float abs  (float a) { return  fabsf(a); }
-  static inline __host__ __device__  float round(float a) { return roundf(a); }
+  static inline __host__ __device__  float round(float a) { return nearbyintf(a); }
   static inline __host__ __device__  float frac (float a) { return a - truncf(a); }
   static inline __host__ __device__  float cinv (float a) { return 1.0f / a; }
   static inline __host__ __device__  float add  (float a, float b) { return a + b; }
@@ -320,6 +350,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__ bool gt(double a, double b) { return a > b; }
   static inline __host__ __device__ bool ge(double a, double b) { return a >= b; }
   static inline __host__ __device__ bool eq(double a, double b) { return a == b; }
+  static inline __device__ bool eq_with_nan(double a, double b) { return __double_as_longlong(a) == __double_as_longlong(b); }
   static inline __host__ __device__ bool ne(double a, double b) { return a != b; }
 
   static inline __host__ __device__  double lgamma(double a) { return ::lgamma(a);}
@@ -351,7 +382,7 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double erf  (double a) { return   ::erf(a); }
   static inline __host__ __device__  double erfc (double a) { return  ::erfc(a); }
   static inline __host__ __device__  double abs  (double a) { return   fabs(a); }
-  static inline __host__ __device__  double round(double a) { return ::round(a); }
+  static inline __host__ __device__  double round(double a) { return ::nearbyint(a); }
   static inline __host__ __device__  double frac (double a) { return a - ::trunc(a); }
   static inline __host__ __device__  double cinv (double a) { return 1.0 / a; }
   static inline __host__ __device__  double add  (double a, double b) { return a + b; }
