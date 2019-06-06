@@ -125,7 +125,7 @@ def type_to_python(typename, size=None):
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',
-        'QScheme': 'qscheme',
+        'QScheme': 'QScheme',
     }[typename]
 
     return typename
@@ -464,7 +464,7 @@ def gen_pyi(declarations_path, out):
     tensor_method_declarations = get_py_variable_methods(declarations)
     for name in sorted(tensor_method_declarations.keys()):
         unsorted_tensor_method_hints[name] += \
-            generate_type_hints(name, tensor_method_declarations[name], is_tensor=name != 'qscheme')
+            generate_type_hints(name, tensor_method_declarations[name], is_tensor=True)
 
     for op in all_ops:
         name = '__{}__'.format(op)
