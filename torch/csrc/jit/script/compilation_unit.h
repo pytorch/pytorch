@@ -121,25 +121,6 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
     return executor_;
   }
 
-  // returns nullptr and fills in failure_messages if the callee does not
-  // match the functions schema
-
-  // TODO: defined in module.cpp, move to compilation_unit.cpp
-  Value* try_emit_call(
-      Graph& graph,
-      const SourceRange& loc,
-      c10::optional<NamedValue> self,
-      ArrayRef<NamedValue> args,
-      ArrayRef<NamedValue> kwargs,
-      std::ostream* failure_messages,
-      bool conv_tensors_to_nums);
-
-  Value* emit_call(
-      Graph& graph,
-      const SourceRange& loc,
-      ArrayRef<NamedValue> args,
-      ArrayRef<NamedValue> kwargs);
-
  private:
   static FunctionSchema defaultSchemaFor(const Function& function) {
     std::vector<Argument> args;
@@ -167,7 +148,7 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
   std::once_flag executor_init_;
 
   // an optional function that actually creates the method when
-  // emit_call_to(this,...) is first called. this is used by the compiler so
+  // ensure_defined() is called. This is used by the compiler so
   // that it can construct methods out of order
   std::function<void(Function&)> function_creator_;
 
