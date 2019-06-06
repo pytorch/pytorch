@@ -2600,7 +2600,7 @@
     CPU: per_tensor_affine_qtensor_cpu
 
 - func: qscheme(Tensor self) -> QScheme
-  variants: function, method
+  variants: method
   dispatch:
     QuantizedCPU: qscheme_quant
 
