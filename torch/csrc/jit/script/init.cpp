@@ -198,7 +198,7 @@ static TupleTypePtr getTupleTensorType(
   AT_ASSERT(s_iter != s_iter_end);
 
   std::vector<TypePtr> types;
-  for (auto subType : tupleType->containedTypes()) {
+  for (const auto& subType : tupleType->containedTypes()) {
     if (subType->kind() == TupleType::Kind) {
       types.push_back(getTupleTensorType(s_iter+1, s_iter_end, subType, isDimensionedTensor));
     } else {
@@ -237,7 +237,7 @@ static std::shared_ptr<Graph> _propagate_shapes(
 
 static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
     Graph& graph,
-    std::vector<at::Tensor> inputs,
+    const std::vector<at::Tensor>& inputs,
     bool with_grad = false,
     bool propagate = true) {
   auto retval = graph.copy();
