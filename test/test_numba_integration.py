@@ -117,12 +117,6 @@ class TestNumbaIntegration(common.TestCase):
         ]
 
         for dt in torch_dtypes:
-            if dt == torch.int8 and not IS_WINDOWS:
-                # "CharTensor" numpy conversion not supported
-                with self.assertRaises(TypeError):
-                    torch.arange(10).to(dt).numpy()
-
-                continue
 
             # CPU tensors of all types do not register as cuda arrays,
             # attempts to convert raise a type error.
