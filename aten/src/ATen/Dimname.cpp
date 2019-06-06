@@ -1,5 +1,5 @@
 #ifdef NAMEDTENSOR_ENABLED
-#include <ATen/core/Dimname.h>
+#include <ATen/Dimname.h>
 #include <c10/util/Exception.h>
 
 namespace at {
