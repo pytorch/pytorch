@@ -124,52 +124,6 @@ static int64_t gcd(int64_t a, int64_t b) {
   return std::abs(a);
 }
 
-int64_t partProduct(int n, int m) {
-  if (m <= (n + 1))
-    return (int64_t)n;
-  if (m == (n + 2))
-    return (int64_t)n * m;
-  int k = (n + m) / 2;
-  if ((k & 1) != 1)
-    k = k - 1;
-  return partProduct(n, k) * partProduct(k + 2, m);
-}
-
-void loop(int n, int64_t& p, int64_t& r) {
-  if (n <= 2)
-    return;
-  loop(n / 2, p, r);
-  p = p * partProduct(n / 2 + 1 + ((n / 2) & 1), n - 1 + (n & 1));
-  r = r * p;
-}
-
-int nminussumofbits(int v) {
-  long w = (long)v;
-  w -= (0xaaaaaaaa & w) >> 1;
-  w = (w & 0x33333333) + ((w >> 2) & 0x33333333);
-  w = (w + (w >> 4)) & 0x0f0f0f0f;
-  w += w >> 8;
-  w += w >> 16;
-  return v - (int)(w & 0xff);
-}
-
-int64_t factorial(int n) {
-  if (n < 0) {
-    throw std::runtime_error("factorial() not defined for negative values");
-  }
-  int64_t p = 1, r = 1;
-  loop(n, p, r);
-  return r << nminussumofbits(n);
-}
-static const double degToRad = std::acos(-1.0) / 180.0;
-static const double radToDeg = 180.0 / std::acos(-1.0);
-double degrees(double x) {
-  return x * radToDeg;
-}
-double radians(double x) {
-  return x * degToRad;
-}
-
 // reference function THPVariable_to in python_variable_methods.cpp
 static at::Tensor to_dispatch(
     at::Tensor self,
@@ -610,22 +564,8 @@ RegisterOperators reg(
              {Argument("message", StringType::get()),
               Argument("stacklevel", IntType::get(), c10::nullopt, 2, true)},
              {}),
-         [](const Node* node) -> std::function<int(Stack&)> {
-           auto range = node->sourceRange().source();
-           if (range->filename()) {
-             auto line = range->starting_line_no() +
-                 range->lineno_for_offset(node->sourceRange().start());
-             return [=](Stack& stack) {
-               drop(stack, 1);
-               c10::SourceLocation location{
-                   "", range->filename()->c_str(), uint32_t(line)};
-               c10::Warning::warn(location,
-                   pop(stack).toStringRef());
-               return 0;
-             };
-           }
-
-           return [=](Stack& stack) {
+         [](const Node* node) {
+           return [](Stack& stack) {
              drop(stack, 1);
              AT_WARN(pop(stack).toStringRef());
              return 0;
@@ -1164,25 +1104,21 @@ RegisterOperators logging_operators(
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool), \
       DEFINE_INT_FLOAT_OP(aten_op, op, bool), DEFINE_STR_CMP_OP(aten_op, op)
 
-#define DEFINE_UNARY_INT_OP(aten_op, op, result)              \
-  Operator(#aten_op "(int a) -> " #result, [](Stack& stack) { \
-    int64_t a;                                                \
-    pop(stack, a);                                            \
-    push(stack, op);                                          \
-    return 0;                                                 \
-  })
-
-#define DEFINE_UNARY_FLOAT_OP(aten_op, op, result)              \
-  Operator(#aten_op "(float a) -> " #result, [](Stack& stack) { \
-    double a;                                                   \
-    pop(stack, a);                                              \
-    push(stack, op);                                            \
-    return 0;                                                   \
-  })
-
-#define DEFINE_UNARY_OP(aten_op, op, int_result, float_result) \
-  DEFINE_UNARY_INT_OP(aten_op, op, int_result),                \
-      DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result)
+#define DEFINE_UNARY_OP(aten_op, op, int_result, float_result)            \
+  Operator(                                                               \
+      #aten_op "(int a) -> " #int_result,                                 \
+      [](Stack& stack) {                                                  \
+        int64_t a;                                                        \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
+      }),                                                                 \
+      Operator(#aten_op "(float a) -> " #float_result, [](Stack& stack) { \
+        double a;                                                         \
+        pop(stack, a);                                                    \
+        push(stack, op);                                                  \
+        return 0;                                                         \
+      })
 
 #define DEFINE_BOOL_OP(aten_op, op)                                \
   Operator(#aten_op "(bool a, bool b) -> bool", [](Stack& stack) { \
@@ -2217,57 +2153,6 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
     DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
     DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
-    DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
-    DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
-    DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
-    DEFINE_BINARY_FLOAT_OP(aten::atan2, std::atan2(a, b)),
-    DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
-    DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
-    DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
-    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
-    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
-    DEFINE_UNARY_OP(aten::acosh, std::acosh(a), float, float),
-    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
-    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
-    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
-    DEFINE_UNARY_OP(aten::degrees, degrees(a), float, float),
-    DEFINE_UNARY_OP(aten::radians, radians(a), float, float),
-    DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
-    DEFINE_UNARY_INT_OP(aten::factorial, factorial(a), int),
-    DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
-    DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
-    DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
-    Operator(
-        "aten::modf(float a) -> (float, float)",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          double b, c;
-          b = modf(a, &c);
-          push(stack, b, c);
-          return 0;
-        }),
-    Operator(
-        "aten::frexp(float a) -> (float, int)",
-        [](Stack& stack) {
-          double a;
-          pop(stack, a);
-          double m;
-          int e;
-          m = std::frexp(a, &e);
-          push(stack, m, e);
-          return 0;
-        }),
-    Operator(
-        "aten::ldexp(float x, int i) -> float",
-        [](Stack& stack) {
-          double a;
-          int64_t b;
-          pop(stack, a, b);
-          push(stack, std::ldexp(a, b));
-          return 0;
-        }),
-    DEFINE_BINARY_FLOAT_OP(aten::mathremainder, std::remainder(a, b)),
 
     // TODO: move abs to aten namespace because it's schematized!
     DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),

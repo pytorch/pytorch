@@ -62,7 +62,54 @@ class AliasDb {
   TORCH_API bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`? i.e. may they overlap?
-  TORCH_API bool mayAlias(const ValueSet& a, const ValueSet& b) const;
+  //
+  // NOTE: Bit of ugly templating, but this is just to make sure we can
+  // transform an arbitrary container of `Values` to the same container of
+  // `Elements`.
+  template <
+      typename... Other1,
+      template <typename, typename...> class T,
+      typename... Other2,
+      template <typename, typename...> class U>
+  bool mayAlias(
+      const T<const Value*, Other1...>& a,
+      const U<const Value*, Other2...>& b) const {
+    if (a.empty() || b.empty()) {
+      return false;
+    }
+
+    // Record all memory locations from group `a`
+    MemoryLocations memoryLocations;
+    for (auto it = a.cbegin(); it != a.cend();) {
+      const auto value = *it;
+      if (elementMap_.count(value)) {
+        auto element = elementMap_.at(value);
+        memoryLocations |= element->getMemoryLocations();
+      }
+
+      do {
+        ++it;
+      } while (it != a.cend() && *it == value);
+    }
+
+    // If any of group `b`s memory locations overlap, return true.
+    for (auto it = b.cbegin(); it != b.cend();) {
+      const auto value = *it;
+      if (elementMap_.count(value)) {
+        auto element = elementMap_.at(value);
+
+        if (memoryLocations.intersects(element->getMemoryLocations())) {
+          return true;
+        }
+      }
+
+      do {
+        ++it;
+      } while (it != b.cend() && *it == value);
+    }
+    // No overlap, so group `a` and `b` do not share a memory location
+    return false;
+  }
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
   TORCH_API bool hasWriters(const Node* n) const;
@@ -100,21 +147,17 @@ class AliasDb {
   // NOTE: this only returns values directly written to, not aliases thereof
   //
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
-  MemoryLocations getWrites(Node* n, bool recurseBlocks = false) const;
-  void getWritesImpl(Block* b, MemoryLocations& ret, bool recurseBlocks = false)
-      const;
-  void getWritesImpl(Node* n, MemoryLocations& ret, bool recurseBlocks = false)
-      const;
+  ValueSet getWrites(Node* n, bool recurseBlocks = false) const;
+  void getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks = false) const;
+  void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
   // Do any nodes write to `v`s memory location?
   TORCH_API bool hasWriters(const Value* v) const;
   // Register the fact that `n` writes to `v`.
   void registerWrite(const Value* v, Node* n);
-  void registerWrite(const Element* e, Node* n);
   // Get all the values that `n` reads from.
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
-  MemoryLocations getReads(Node* n, bool recurseBlocks = false) const;
-  void getReadsImpl(Node* n, MemoryLocations& ret, bool recurseBlocks = false)
-      const;
+  ValueSet getReads(Node* n, bool recurseBlocks = false) const;
+  void getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
 
   /**
    * Wildcard methods
@@ -182,8 +225,8 @@ class AliasDb {
   /**
    * State for tracking write info.
    */
-  // Map of nodes to the memory locations that they write to
-  ska::flat_hash_map<Node*, MemoryLocations> writeIndex_;
+  // Map of nodes to the values that they write to
+  ska::flat_hash_map<Node*, ValueSet> writeIndex_;
   // Set of all memory locations that may have been written to.
   mutable MemoryLocations writeCache_;
   mutable bool isWriteCacheStale_ = true;

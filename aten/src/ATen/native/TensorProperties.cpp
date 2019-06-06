@@ -67,7 +67,7 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
       break;
     }
     case MemoryFormat::ChannelsLast: {
-      TORCH_CHECK(
+      AT_CHECK(
           result.dim() == 4,
           " required rank 4 tensor to use channels_last format");
       std::vector<int64_t> newStrides(self.dim());
@@ -80,7 +80,7 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
       break;
     }
     default: {
-      TORCH_CHECK(false, " unsupported memory format");
+      AT_CHECK(false, " unsupported memory format");
     }
   }
   return result.copy_(self);
