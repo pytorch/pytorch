@@ -19,7 +19,6 @@ std::unordered_set<Symbol> skip_list = {
     prim::If,
     prim::Loop,
     prim::Function,
-    prim::forkClosure,
     prim::Constant,
     prim::AutogradZero,
     prim::unchecked_unwrap_optional, // TODO remove

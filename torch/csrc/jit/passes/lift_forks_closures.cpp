@@ -77,9 +77,10 @@ void liftClosure(Node* closure) {
   auto context_type = TupleType::create(
       fmap(pack_context->inputs(), [](Value* v) { return v->type(); }));
   pack_context->output()->setType(context_type);
-  context->setType(context_type);
-  AT_ASSERT(closure->output()->uses().size() == 1);
-  auto closure_tuple = closure->output()->uses().at(0).user;
+  auto closure_tuple =
+      g->create(prim::TupleConstruct, {}, 1)->insertAfter(pack_context);
+  closure->output()->replaceAllUsesWith(closure_tuple->output());
+  closure_tuple->addInput(closure->output());
   closure_tuple->addInput(pack_context->output());
   closure_tuple->output()->setType(
       TupleType::create({closure->output()->type(), context_type}));

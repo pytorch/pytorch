@@ -39,7 +39,6 @@ namespace c10 {
   _(prim, JumpZ) /* debug */       \
   _(prim, Load)                    \
   _(prim, Loop)                    \
-  _(prim, LoopCondition)           \
   _(prim, Param)                   \
   _(prim, PackPadded) /* onnx */   \
   _(prim, PadPacked) /* onnx */    \
@@ -93,7 +92,6 @@ namespace c10 {
   _(aten, __round_to_zero_floordiv)\
   _(aten, _unwrap_optional)        \
   _(prim, fork)                    \
-  _(prim, forkClosure)             \
   _(prim, RaiseException)          \
   _(prim, Function)                \
   _(prim, CreateObject)            \

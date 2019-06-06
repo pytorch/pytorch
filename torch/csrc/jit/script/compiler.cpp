@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_forks_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
@@ -33,7 +32,6 @@ namespace script {
 using FunctionTable = std::unordered_map<std::string, Function&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using TypeTable = std::unordered_map<std::string, TypePtr>;
-using SimpleValueTable = std::unordered_map<std::string, Value*>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
@@ -269,7 +267,6 @@ struct Environment {
   }
 
   SugaredValuePtr findInAnyFrame(const std::string& name) {
-    WithInsertPoint insert(b);
     for (auto runner = this; runner; runner = runner->next.get()) {
       if (auto r = runner->findInThisFrame(name)) {
         return r;
@@ -726,7 +723,8 @@ struct to_ir {
 
   // XXX - right now closures are used _only_ for defining gradients internally
   // There are several unfinished aspects that make them unusable generally
-  // 1. We do not have a type, ivalue, operator to represent prim::Function.
+  // 1. We do not have a type, ivalue, operator to represent prim::Function, so
+  // closure_node has type None
   // 2. There is no export logic for it yet, so it cannot be
   // exported/python_printed
   // 3. There is nothing preventing the assignment of already existing variables
@@ -736,6 +734,8 @@ struct to_ir {
   //    prevents people from accidentally using this feature.
   void emitClosure(const Def& def) {
     Node* closure_node = graph->insertNode(graph->create(prim::Function, 1));
+    // it is not a real thing yet, so just say the type is None
+    closure_node->output()->setType(NoneType::get());
     Block* block = closure_node->addBlock();
     {
       WithInsertPoint guard(block);
@@ -747,17 +747,9 @@ struct to_ir {
                   // never create a Method for the closure
       popFrame(/*ends_def=*/true);
     }
-    AT_ASSERT(block->outputs().size() == 1);
-    // Set the type of the closure equal to its return type.
-    // Since the closures are not-first class yet in the type system,
-    // we use their output type to correctly type forks of closures,
-    // and after the graph is transformed to SSA ensure that forked closures
-    // are actually being invoked on a closure and not an arbitrary value.
-    closure_node->output()->setType(block->outputs().at(0)->type());
-    std::shared_ptr<Graph> subgraph;
-    auto tup = graph->insertNode(graph->createTuple({closure_node->output()}))
-                   ->output();
-    environment_stack->setVar(def.name().range(), def.name().name(), tup);
+    auto closure_value = std::make_shared<ClosureValue>(closure_node->output());
+    environment_stack->setSugaredVar(
+        def.name().range(), def.name().name(), closure_value);
   }
 
   void emitReturn(const Return& stmt) {
@@ -1096,25 +1088,42 @@ struct to_ir {
       environment_stack->setVariableTypeError(v, error.what());
     };
 
+    // When we access either the true or false environment,
+    // we need to set the insertion point so the prim::Load is inserted
+    // into the right block
     for (auto& v : save_true->definedVariables()) {
-      if (save_false->findInAnyFrame(v)) {
-        mutated_variables.insert(v);
-      } else {
-        err(v, "false branch");
+      {
+        WithInsertPoint insert(false_block);
+        if (save_false->findInAnyFrame(v)) {
+          mutated_variables.insert(v);
+        } else {
+          err(v, "false branch");
+        }
       }
     }
     for (auto& v : save_false->definedVariables()) {
-      if (save_true->findInAnyFrame(v)) {
-        mutated_variables.insert(v);
-      } else {
-        err(v, "true branch");
+      {
+        WithInsertPoint insert(true_block);
+        if (save_true->findInAnyFrame(v)) {
+          mutated_variables.insert(v);
+        } else {
+          err(v, "true branch");
+        }
       }
     }
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
-      auto tv = save_true->getVar(x, stmt.range());
-      auto fv = save_false->getVar(x, stmt.range());
+      Value* tv;
+      Value* fv;
+      {
+        WithInsertPoint insert(true_block);
+        tv = save_true->getVar(x, stmt.range());
+      }
+      {
+        WithInsertPoint insert(false_block);
+        fv = save_false->getVar(x, stmt.range());
+      }
       auto unified = unifyTypes(tv->type(), fv->type());
 
       // attempt to unify the types. we allow variables to be set to different
@@ -1258,21 +1267,11 @@ struct to_ir {
 
       emitStatements(body);
 
-      Node* loop_condition =
-          graph->insertNode(create(prim::LoopCondition, range, 0));
-      auto condition_block = loop_condition->addBlock();
-      {
-        pushFrame(condition_block);
-        WithInsertPoint insert(condition_block);
-        Value* block_condition = (cond)
-            ? emitCond(cond.value())
-            : graph->insertConstant(true, nullptr, range);
-        condition_block->insertOutput(0, block_condition);
-        popFrame();
-      }
-      auto block_continue_condition =
-          loop_condition->addOutput()->setType(BoolType::get());
-      body_block->registerOutput(block_continue_condition);
+      Value* block_condition = (cond)
+          ? emitCond(cond.value())
+          : graph->insertConstant(true, nullptr, range);
+
+      body_block->registerOutput(block_condition);
 
       popFrame();
     }
@@ -2350,32 +2349,22 @@ struct to_ir {
     Node* fork_node;
     TypePtr out_type;
 
-    // We have two pathways for forks, one for invocations of closures
-    // and one for invocations of builtins or functions. If the input value is
-    // simple than we go through the closure pathway.
-    auto simple_forked = asSimple(forked);
-    if (simple_forked) {
-      // because closures are not first-class yet, they are represented as
-      // a tuple of (Output Type, Context). We need to extract the output type
-      // so the rest of the function type checks. Later, we ensure that
-      // the input actually is a closure and not just a tuple, and inline the
-      // closure into the fork.
-      auto tuple_type = simple_forked->type()->cast<TupleType>();
-      if (!tuple_type) {
-        throw ErrorReport(loc) << "Cannot fork this value";
-      }
-      fork_node =
-          graph->insertNode(graph->create(prim::forkClosure, {simple_forked}, 1)
-                                ->setSourceRange(loc));
-      out_type = tuple_type->elements().at(0);
-    } else {
-      // Build a template of the graph to be executed
-      fork_node = g->insertNode(method.graph()->create(prim::fork, 1))
-                      ->setSourceRange(loc);
-      auto body_block = fork_node->addBlock();
-      {
-        std::shared_ptr<SugaredValue> fn_sugared_output;
-        WithInsertPoint guard(body_block);
+    // Build a template of the graph to be executed
+    fork_node = g->insertNode(method.graph()->create(prim::fork, 1))
+                    ->setSourceRange(loc);
+    auto body_block = fork_node->addBlock();
+    {
+      // If we are forking a closure, we inline the closure into the fork
+      // body, if we are forking a builtin or function we emit the call
+      // in the fork body. Closures need special handling because  they are not
+      // first class yet.
+      std::shared_ptr<SugaredValue> fn_sugared_output;
+      WithInsertPoint guard(body_block);
+      if (ClosureValue* sv = dynamic_cast<ClosureValue*>(forked.get())) {
+        fn_sugared_output = sv->inlineInto(body_block);
+        AT_ASSERT(body_block->outputs().size() == 1);
+        out_type = body_block->outputs().at(0)->type();
+      } else {
         fn_sugared_output = forked->call(loc, method, inputs, attributes, 1);
         auto fn_simple_output = fn_sugared_output->asValue(loc, method);
         body_block->registerOutput(fn_simple_output);
@@ -3041,12 +3030,10 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
   if (convert_ssa) {
     ConvertToSSA(to_clean);
   }
-  // NB ORDERING: SSA conversion, lifting of closures and forks,
-  // and inling of forked closurees has to go in that order.
-  // this way closures get converted to SSA while part of their original
-  // graph, and closures are lifted & ready to be inlined into fork nodes.
+  // NB ORDERING: SSA conversion has to occur before
+  // lifting of closures and forks, this way closures & forks are converted
+  // to SSA while part of their original graph
   liftClosuresAndForks(to_clean);
-  inlineForkedClosures(to_clean);
   // remove any uses of tuples that we inserted that are not needed
   Inline(*to_clean);
   LowerSimpleTuples(to_clean);

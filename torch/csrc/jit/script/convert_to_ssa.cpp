@@ -15,14 +15,14 @@ namespace script {
 // %a : int = prim::Load[name="a"]()
 // prim::Print(%a)
 //
-// First, this pass recursively adds the correct outputs to If & Loop nodes.
+// First, this pass recursively adds the Loads & Stores to control flow nodes
 // Then the graph is converted to SSA form.
 
 using ValueEnvironment = MiniEnvironment<Value*>;
 using TypeEnvironment = MiniEnvironment<TypePtr>;
 
-// Adds Outputs to Loops & Ifs given a graph of Loads & Stores
-struct ControlFlowOutputs {
+// Adds Loads & Stores to Loops & Ifs
+struct ControlFlowLoadStores {
   static void addBlockInput(
       Block* b,
       const TypePtr& type,
@@ -60,12 +60,12 @@ struct ControlFlowOutputs {
     n->addInput(inp);
   }
 
-  void addIfOutputs(Node* n) {
+  void addIfLoadStores(Node* n) {
     auto true_block = n->blocks().at(0);
     auto false_block = n->blocks().at(1);
 
-    auto true_vars = addControlFlowOutputs(true_block);
-    auto false_vars = addControlFlowOutputs(false_block);
+    auto true_vars = addControlFlowLoadStores(true_block);
+    auto false_vars = addControlFlowLoadStores(false_block);
     std::set<std::string> mutated_variables;
 
     for (auto& v : true_vars->definedVariables()) {
@@ -106,9 +106,9 @@ struct ControlFlowOutputs {
   // all loop_carried_... lists are the same length and represent the value of
   // loop-carried variables whose definitions are updated as the loop executes
   // in a way that ensure single static assignment.
-  void addLoopOutputs(Node* n) {
+  void addLoopLoadStores(Node* n) {
     auto body_block = n->blocks().at(0);
-    auto loop_vars = addControlFlowOutputs(body_block);
+    auto loop_vars = addControlFlowLoadStores(body_block);
     for (const auto& name : loop_vars->definedVariables()) {
       // we require that the variable is defined outside the loop to be emitted,
       // and we do not refine the type of the parent variable since the loop may
@@ -125,39 +125,23 @@ struct ControlFlowOutputs {
       addBlockOutput(body_block, parent_type, name);
       addNodeOutput(n, parent_type, name);
     }
-
-    // loop continue expression should go after the loop carried outputs
-    auto loop_condition = body_block->outputs().at(0)->node();
-    AT_ASSERT(loop_condition->kind() == prim::LoopCondition);
-    loop_condition->moveBefore(body_block->return_node());
-    auto loop_condition_block = loop_condition->blocks().at(0);
-    for (auto it = loop_condition_block->nodes().begin();
-         it != loop_condition_block->nodes().end();) {
-      auto block_node = *it++;
-      block_node->moveBefore(loop_condition);
-    }
-
-    for (Node* n : loop_condition_block->nodes()) {
-      n->moveBefore(loop_condition);
-    }
-    body_block->eraseOutput(0);
-    body_block->insertOutput(0, loop_condition_block->outputs().at(0));
-    loop_condition->destroy();
   }
 
-  std::shared_ptr<TypeEnvironment> addControlFlowOutputs(Block* block) {
+  std::shared_ptr<TypeEnvironment> addControlFlowLoadStores(Block* block) {
     pushFrame(block);
-    for (auto it = block->nodes().begin(); it != block->nodes().end(); it++) {
-      auto n = *it;
+    for (Node* n : block->nodes()) {
       switch (n->kind()) {
         case prim::If: {
-          addIfOutputs(n);
+          addIfLoadStores(n);
         } break;
         case prim::Loop: {
-          addLoopOutputs(n);
+          addLoopLoadStores(n);
         } break;
-        case prim::Function: {
-          addControlFlowOutputs(n->blocks().at(0));
+        case prim::Function:
+        case prim::fork: {
+          for (auto b : n->blocks()) {
+            addControlFlowLoadStores(b);
+          }
         } break;
         case prim::Store: {
           environment_stack->setVar(n->s(attr::name), n->input()->type());
@@ -178,7 +162,7 @@ struct ControlFlowOutputs {
   }
 
   void run(std::shared_ptr<Graph>& graph) {
-    addControlFlowOutputs(graph->block());
+    addControlFlowLoadStores(graph->block());
   }
 
   std::shared_ptr<TypeEnvironment> environment_stack = nullptr;
@@ -195,6 +179,7 @@ struct SSATransformer {
       switch (n->kind()) {
         case prim::If:
         case prim::Loop:
+        case prim::fork:
         case prim::Function: {
           for (auto b : n->blocks()) {
             convertBlockToSSA(b);
@@ -238,7 +223,7 @@ struct SSATransformer {
 // Converting to SSA works in two parts. First we add outputs to control flow
 // nodes, then we stitch together Loads & Stores into SSA form.
 void ConvertToSSA(std::shared_ptr<Graph>& graph) {
-  ControlFlowOutputs ctrl;
+  ControlFlowLoadStores ctrl;
   ctrl.run(graph);
   SSATransformer ssa;
   ssa.run(graph);
