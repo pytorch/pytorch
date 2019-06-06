@@ -12,11 +12,10 @@ void THNN_(SpatialSumPooling_updateOutput)(
           int dH,
           int padW,
           int padH,
-          bool ceil_mode,
-          bool count_include_pad)
+          bool ceil_mode)
 {
   THNN_(SpatialSumAveragePooling_updateOutput)
-    (state, input, output, kW, kH, dW, dH, padW, padH, ceil_mode, count_include_pad, false);
+    (state, input, output, kW, kH, dW, dH, padW, padH, ceil_mode, false, false);
 }
 
 #endif

@@ -23,8 +23,82 @@ TH_API void THNN_(SpatialSumPooling_updateOutput)(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
-          bool ceil_mode,
-          bool count_include_pad);
+          bool ceil_mode);
+
+TH_API void THNN_(SpatialDilatedConvolution_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,         // [OPTIONAL]
+          THTensor *columns,
+          THTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int dilationW, int dilationH);
+
+TH_API void THNN_(SpatialFullDilatedConvolution_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,         // [OPTIONAL]
+          THTensor *columns,
+          THTensor *ones,
+          int kW, int kH,
+          int dW, int dH,
+          int padW, int padH,
+          int dilationW, int dilationH,
+          int adjW, int adjH);
+
+TH_API void THNN_(VolumetricDilatedConvolution_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,           // [OPTIONAL]
+          THTensor *columns,
+          THTensor *ones,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          int dilationT, int dilationW, int dilationH);
+
+TH_API void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
+          THNNState *state,         // library state
+          THTensor *input,          // 4D or 5D (batch) tensor
+          THTensor *output,         // [OUT] volumetric convolution output
+          THTensor *weight,         // weight tensor (nInputPlane x nOutputPlane x kT x kH x kW)
+          THTensor *bias,           // [OPTIONAL] gradBias tensor (nOutputPlane)
+          THTensor *finput,         // [OUT] internal columns buffer
+          THTensor *fgradInput,     // [OUT] internal ones buffer
+          int kT, int kW, int kH,   // kernel size
+          int dT, int dW, int dH,   // stride of the convolution
+          int pT, int pW, int pH,   // padding
+          int dilationT, int dilationW, int dilationH,
+          int aT, int aW, int aH);  // extra output adjustment
+
+TH_API void THNN_(VolumetricConvolutionMM_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          THTensor *weight,
+          THTensor *bias,           // [OPTIONAL]
+          THTensor *finput,
+          THTensor *fgradInput,     // HACK to make signature line up with backward
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int pT, int pW, int pH);
+
+TH_API void THNN_(VolumetricSumPooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int kT, int kW, int kH,
+          int dT, int dW, int dH,
+          int padT, int padW, int padH,
+          bool ceil_mode);
 
 #if !defined(TH_REAL_IS_LONG)
 
@@ -488,19 +562,6 @@ TH_API void THNN_(SpatialAveragePooling_updateGradInput)(
           bool ceil_mode,
           bool count_include_pad);
 
-TH_API void THNN_(SpatialDilatedConvolution_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,         // [OPTIONAL]
-          THTensor *columns,
-          THTensor *ones,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int dilationW, int dilationH);
-
 TH_API void THNN_(SpatialDilatedConvolution_updateGradInput)(
           THNNState *state,
           THTensor *input,
@@ -526,20 +587,6 @@ TH_API void THNN_(SpatialDilatedConvolution_accGradParameters)(
           int padW, int padH,
           int dilationW, int dilationH,
           accreal scale);
-
-TH_API void THNN_(SpatialFullDilatedConvolution_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,         // [OPTIONAL]
-          THTensor *columns,
-          THTensor *ones,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          int dilationW, int dilationH,
-          int adjW, int adjH);
 
 TH_API void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
           THNNState *state,
@@ -700,19 +747,6 @@ TH_API void THNN_(VolumetricAveragePooling_updateGradInput)(
           int padT, int padW, int padH,
           bool ceil_mode, bool count_include_pad);
 
-TH_API void THNN_(VolumetricDilatedConvolution_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,           // [OPTIONAL]
-          THTensor *columns,
-          THTensor *ones,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH,
-          int dilationT, int dilationW, int dilationH);
-
 TH_API void THNN_(VolumetricDilatedConvolution_updateGradInput)(
           THNNState *state,
           THTensor *input,
@@ -739,19 +773,6 @@ TH_API void THNN_(VolumetricDilatedConvolution_accGradParameters)(
           int dilationT, int dilationW, int dilationH,
           accreal scale);
 
-TH_API void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
-          THNNState *state,         // library state
-          THTensor *input,          // 4D or 5D (batch) tensor
-          THTensor *output,         // [OUT] volumetric convolution output
-          THTensor *weight,         // weight tensor (nInputPlane x nOutputPlane x kT x kH x kW)
-          THTensor *bias,           // [OPTIONAL] gradBias tensor (nOutputPlane)
-          THTensor *finput,         // [OUT] internal columns buffer
-          THTensor *fgradInput,     // [OUT] internal ones buffer
-          int kT, int kW, int kH,   // kernel size
-          int dT, int dW, int dH,   // stride of the convolution
-          int pT, int pW, int pH,   // padding
-          int dilationT, int dilationW, int dilationH,
-          int aT, int aW, int aH);  // extra output adjustment
 TH_API void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
           THNNState *state,         // library state
           THTensor *input,          // 4D or 5D (batch) tensor
@@ -908,17 +929,6 @@ TH_API void THNN_(Tanh_updateGradInput)(
           THTensor *gradInput,
           THTensor *output);
 
-TH_API void THNN_(VolumetricConvolutionMM_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,           // [OPTIONAL]
-          THTensor *finput,
-          THTensor *fgradInput,     // HACK to make signature line up with backward
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int pT, int pW, int pH);
 TH_API void THNN_(VolumetricConvolutionMM_updateGradInput)(
           THNNState *state,
           THTensor *input,

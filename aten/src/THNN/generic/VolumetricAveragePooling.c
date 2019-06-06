@@ -86,7 +86,7 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
   }
 }
 
-static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
+static void THNN_(VolumetricSumAveragePooling_updateOutput_frame)(
           scalar_t *input_p,
           scalar_t *output_p,
           int64_t nslices,
@@ -105,7 +105,8 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           int padT,
           int padW,
           int padH,
-          bool count_include_pad)
+          bool count_include_pad,
+          bool avg)
 {
   int64_t k;
 #pragma omp parallel for private(k)
@@ -141,12 +142,6 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           hend = std::min(hend, iheight);
           wend = std::min(wend, iwidth);
 
-          int divide_factor;
-          if (count_include_pad)
-            divide_factor = pool_size;
-          else
-            divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
-
           /* compute local sum: */
           scalar_t sum = 0.0;
           int64_t x, y, z;
@@ -161,16 +156,32 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
               }
             }
           }
-
-          /* set output to local max */
-          *op++ += sum / divide_factor;
+#if !defined(TH_REAL_IS_LONG)
+          if (avg) {
+            int divide_factor;
+            if (count_include_pad)
+              divide_factor = pool_size;
+            else
+              divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
+            /* set output to local max */
+            *op++ += sum / divide_factor;
+          } else {
+            *op++ += sum;
+          }
+#else
+          if (avg) {
+            THError("Avg is not supported for non-float tensors");
+          } else {
+            *op++ += sum;
+          }
+#endif
         }
       }
     }
   }
 }
 
-void THNN_(VolumetricAveragePooling_updateOutput)(
+void THNN_(VolumetricSumAveragePooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
@@ -184,7 +195,8 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
           int padW,
           int padH,
           bool ceil_mode,
-          bool count_include_pad)
+          bool count_include_pad,
+          bool avg)
 {
   int64_t nslices;
   int64_t itime;
@@ -233,14 +245,15 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     input_data = input->data<scalar_t>();
     output_data = output->data<scalar_t>();
 
-    THNN_(VolumetricAveragePooling_updateOutput_frame)(
+    THNN_(VolumetricSumAveragePooling_updateOutput_frame)(
       input_data, output_data, nslices,
       itime, iwidth, iheight,
       otime, owidth, oheight,
       kT, kW, kH,
       dT, dW, dH,
       padT, padW, padH,
-      count_include_pad
+      count_include_pad,
+      avg
     );
   }
   else  /* batch mode */
@@ -260,20 +273,41 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
 #pragma omp parallel for private(p)
     for (p=0; p < nBatch; p++)
     {
-      THNN_(VolumetricAveragePooling_updateOutput_frame)(
+      THNN_(VolumetricSumAveragePooling_updateOutput_frame)(
         input_data + p * istride, output_data + p * ostride, nslices,
         itime, iwidth, iheight,
         otime, owidth, oheight,
         kT, kW, kH,
         dT, dW, dH,
         padT, padW, padH,
-        count_include_pad
+        count_include_pad,
+        avg
       );
     }
   }
 
   /* cleanup */
   c10::raw::intrusive_ptr::decref(input);
+}
+
+void THNN_(VolumetricAveragePooling_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int kT,
+          int kW,
+          int kH,
+          int dT,
+          int dW,
+          int dH,
+          int padT,
+          int padW,
+          int padH,
+          bool ceil_mode,
+          bool count_include_pad)
+{
+  THNN_(VolumetricSumAveragePooling_updateOutput)
+    (state, input, output, kT, kW, kH, dT, dW, dH, padT, padW, padH, ceil_mode, count_include_pad, true);
 }
 
 static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(

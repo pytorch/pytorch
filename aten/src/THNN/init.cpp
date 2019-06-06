@@ -71,6 +71,9 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/Col2Im.c>
+#include <TH/THGenerateLongType.h>
+
+#include <THNN/generic/Col2Im.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/ELU.c>
@@ -149,7 +152,13 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SpatialFullDilatedConvolution.c>
+#include <TH/THGenerateLongType.h>
+
+#include <THNN/generic/SpatialFullDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
+
+#include <THNN/generic/SpatialDilatedConvolution.c>
+#include <TH/THGenerateLongType.h>
 
 #include <THNN/generic/SpatialDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
@@ -179,16 +188,34 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricAveragePooling.c>
+#include <TH/THGenerateLongType.h>
+
+#include <THNN/generic/VolumetricAveragePooling.c>
+#include <TH/THGenerateFloatTypes.h>
+
+#include <THNN/generic/VolumetricSumPooling.c>
+#include <TH/THGenerateLongType.h>
+
+#include <THNN/generic/VolumetricSumPooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SpatialUpSamplingBicubic.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricConvolutionMM.c>
+#include <TH/THGenerateLongType.h>
+
+#include <THNN/generic/VolumetricConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/VolumetricFullDilatedConvolution.c>
+#include <TH/THGenerateLongType.h>
+
+#include <THNN/generic/VolumetricFullDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
+
+#include <THNN/generic/VolumetricDilatedConvolution.c>
+#include <TH/THGenerateLongType.h>
 
 #include <THNN/generic/VolumetricDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>

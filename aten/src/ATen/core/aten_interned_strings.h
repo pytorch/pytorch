@@ -209,6 +209,8 @@ _(aten, avg_pool1d) \
 _(aten, avg_pool2d) \
 _(aten, avg_pool2d_backward) \
 _(aten, avg_pool2d_forward) \
+_(aten, sum_pool3d) \
+_(aten, sum_pool3d_forward) \
 _(aten, avg_pool3d) \
 _(aten, avg_pool3d_backward) \
 _(aten, avg_pool3d_forward) \

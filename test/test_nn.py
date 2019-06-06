@@ -504,6 +504,51 @@ class TestLongTensor(TestCase):
         d_result = torch.nn.functional.conv2d(d_input, d_filter)
         self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
 
+    def test_longtensor_transpose2d_same_as_doubletensor(self):
+        l_input = torch.LongTensor(1, 4, 5, 5).random_(-1000, 1000).cpu()
+        l_filter = torch.LongTensor(4, 8, 3, 3).random_(-1000, 1000).cpu()
+        l_result = torch.nn.functional.conv_transpose2d(l_input, l_filter)
+        d_input = l_input.clone().double()
+        d_filter = l_filter.clone().double()
+        d_result = torch.nn.functional.conv_transpose2d(d_input, d_filter)
+        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
+
+    def test_longtensor_dilated2d_same_as_doubletensor(self):
+        l_input = torch.LongTensor(1, 3, 32, 32).random_(-1000, 1000).cpu()
+        l_filter = torch.LongTensor(6, 3, 5, 5).random_(-1000, 1000).cpu()
+        l_result = torch.nn.functional.conv2d(l_input, l_filter, dilation=2)
+        d_input = l_input.clone().double()
+        d_filter = l_filter.clone().double()
+        d_result = torch.nn.functional.conv2d(d_input, d_filter, dilation=2)
+        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
+
+    def test_longtensor_conv3d_same_as_doubletensor(self):
+        l_input = torch.LongTensor(20, 16, 50, 10, 20).random_(-1000, 1000).cpu()
+        l_filter = torch.LongTensor(33, 16, 3, 3, 3).random_(-1000, 1000).cpu()
+        l_result = torch.nn.functional.conv3d(l_input, l_filter)
+        d_input = l_input.clone().double()
+        d_filter = l_filter.clone().double()
+        d_result = torch.nn.functional.conv3d(d_input, d_filter)
+        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
+
+    def test_longtensor_transpose3d_same_as_doubletensor(self):
+        l_input = torch.LongTensor(20, 16, 50, 10, 20).random_(-1000, 1000).cpu()
+        l_filter = torch.LongTensor(16, 33, 3, 3, 3).random_(-1000, 1000).cpu()
+        l_result = torch.nn.functional.conv_transpose3d(l_input, l_filter)
+        d_input = l_input.clone().double()
+        d_filter = l_filter.clone().double()
+        d_result = torch.nn.functional.conv_transpose3d(d_input, d_filter)
+        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
+
+    def test_longtensor_dilated3d_same_as_doubletensor(self):
+        l_input = torch.LongTensor(20, 16, 50, 10, 20).random_(-1000, 1000).cpu()
+        l_filter = torch.LongTensor(33, 16, 3, 3, 3).random_(-1000, 1000).cpu()
+        l_result = torch.nn.functional.conv3d(l_input, l_filter, dilation=2)
+        d_input = l_input.clone().double()
+        d_filter = l_filter.clone().double()
+        d_result = torch.nn.functional.conv3d(d_input, d_filter, dilation=2)
+        self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
+
     def test_longtensor_sum_pool2d(self):
         n = 50
         m = 50
@@ -524,6 +569,31 @@ class TestLongTensor(TestCase):
                 l_result = torch.nn.functional.sum_pool2d(l_input, (i + 1, j + 1))
                 d_result = torch.nn.functional.sum_pool2d(d_input, (i + 1, j + 1))
                 self.assertTrue(torch.allclose(l_result.double(), d_result, atol=1e-5))
+
+    def test_longtensor_sum_pool3d(self):
+        n = 10
+        m = 10
+        l = 3
+        input = torch.rand(1, n, m, l).cpu()
+        for i in range(1, n + 1):
+            for j in range(1, m + 1):
+                for k in range(1, l + 1):
+                    acctual = torch.nn.functional.sum_pool3d(input, (i, j, k))
+                    expected = torch.nn.functional.avg_pool3d(input, (i, j, k)) * (i * j * k)
+                    self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
+
+    def test_longtensor_sum_pool3d_same_as_doubletensor(self):
+        n = 7
+        m = 7
+        l = 2
+        l_input = torch.rand(1, n, m, l).cpu()
+        d_input = l_input.clone().double()
+        for i in range(n):
+            for j in range(m):
+                for k in range(l):
+                    l_result = torch.nn.functional.sum_pool3d(l_input, (i + 1, j + 1, k + 1))
+                    d_result = torch.nn.functional.sum_pool3d(d_input, (i + 1, j + 1, k + 1))
+                    self.assertTrue(torch.allclose(l_result.double(), d_result, atol=1e-5))
 
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True

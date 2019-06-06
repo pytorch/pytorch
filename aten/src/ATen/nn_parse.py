@@ -415,15 +415,15 @@ def run(paths):
                 if cname + suffix in header_functions:
                     bwd_functions.append(header_functions[cname + suffix])
 
-            defualt_scalar_types = ['Float', 'Double', 'Half']
+            default_scalar_types = ['Float', 'Double', 'Half']  # Half will be stripped for CPU backend
             forward_backend_types = {}
             backward_backend_types = {}
             for backend in backends:
                 backend_props = func.get(backend, {})
-                forward_backend_types[backend] = backend_props.get('forward_scalar_types', defualt_scalar_types)
-                backward_backend_types[backend] = backend_props.get('backward_backend_types', defualt_scalar_types)
+                forward_backend_types[backend] = backend_props.get('forward_scalar_types', default_scalar_types)
+                backward_backend_types[backend] = backend_props.get('backward_backend_types', default_scalar_types)
 
-            base = base_declaration(func, fwd_function, backends, defualt_scalar_types)
+            base = base_declaration(func, fwd_function, backends, default_scalar_types)
             declarations.append(forward_declaration(base, fwd_function, forward_backend_types))
             if bwd_functions:
                 declarations.append(backward_declaration(base, bwd_functions, backward_backend_types))
