@@ -13,80 +13,51 @@ struct BailOutGraphBuilderForNode {
     copy_graph_ = std::make_shared<Graph>();
   }
 
-  // addNewInputForValue works similarly to the way Block::cloneFrom works
-  // it maintains a map from the original values to the cloned ones.
-  // `new_value` is used when we need to map a value that has no direct
-  // counterpart in the original graph. for example, if we are building a
-  // bailout graph for a node in a loop we will need a new value for upper limit
-  // (old_upper_limit - current_iteration) so the original upper limit value
-  // maps to this new value if a value used in a bailout graph is a constant we
-  // create the same constant in a new graph. this reduces the number of inputs
-  // to the bailout graph significantly finally, we keep track of the values we
-  // haven't seen before (i.e. `new_value = nullptr`)
-  Value* addNewInputForValue(Value* old_value, Value* new_value = nullptr) {
+  // capture `old_value` into the bailout graph
+  // by creating a new input and mapping
+  // `old_value` to it
+  Value* addNewInputForValue(Value* old_value) {
     auto node = old_value->node();
     // this reduces the number of inputs to a bailout graph significantly
     // making it easier to debug
-    if (node->kind() == prim::Constant && !new_value) {
+    if (node->kind() == prim::Constant) {
       auto new_const = copy_graph_->createClone(node, {nullptr});
       copy_graph_->block()->appendNode(new_const);
       return new_const->output();
     }
 
-    if (!new_value) {
-      new_value = copy_graph_->block()->addInput();
-      live_inputs_.push_back(old_value);
-    }
+    live_inputs_.push_back(old_value);
+    auto new_value = copy_graph_->block()->addInput();
+    return mapExistingInputForValue(old_value, new_value);
+  }
+
+  Value* mapExistingInputForValue(Value* old_value, Value* new_value) {
     this->old_to_new_[old_value] = new_value;
     new_value->copyMetadata(old_value);
     return new_value;
   }
 
-  // buildBailOutBlockFrom builds a bailout graph recursively
-  // unwinding control-flow structure for a given node
-  // it works as follows
-  // * if the node is in a true or false arm of an `prim::If` node
-  // the rest of the arm gets inlined in the bailout graph
-  // and we continue building the rest of the bailout graph
-  // from the node *following* the owning `prim::If`.
-  // * if the node is in a loop, the rest of the loop gets inlined
-  // we remember the loop outputs needed to execute the
-  // we adjust the upper limit (old_upper_limit - current_iteration)
-  // note the stop condition is already mapped (remembered)
-  // then, we continue building the rest of the bailout graph
-  // starting from the owning `prim::Loop` note
-  // Note, the `prim::Loop` node *does* get cloned.
-  void buildBailOutBlockFrom(Node* n) {
-    auto outer_node = n->owningBlock()->owningNode();
-    auto* block = copy_graph_->block();
-    if (n->kind() == prim::Loop) {
-      auto new_max_count = addNewInputForValue(n->inputs()[0]);
-      auto cur_iter = addNewInputForValue(n->blocks()[0]->inputs()[0]);
-      // subtract the number of iterations we already did
-      WithInsertPoint guard(*block->nodes().end());
-      auto updated_max_trip_count =
-          copy_graph_->insert(aten::sub, {new_max_count, cur_iter});
-      addNewInputForValue(n->inputs()[0], updated_max_trip_count);
-      // N.B. the rest of inputs have already been mapped
-      // when loop->blocks()[0] was processed
-    } else if (n->kind() == prim::If) {
-      // N.B. nothing to do; outputs should've already been mapped properly
-      // when we processed if block (either true of false arm)
-      // skip if since the rest of true or false block has already been
-      // inlined
-      n = n->next();
+  Value* getOrAddInputForValue(Value* v) {
+    if (this->old_to_new_.count(v) == 0) {
+      return addNewInputForValue(v);
+    } else {
+      return this->old_to_new_[v];
     }
+  }
 
+  // buildBailOutBlockFrom builds a bailout graph from
+  // a given node `n` until the end of the owning block
+  // If `n` belongs to `prim::If` or `prim::Loop`
+  // buildBailOutGraphForOwningNode continues
+  // from block's owning node (e.g. `prim::If` or
+  // `prim::Loop`)
+  void buildBailOutBlockFrom(Node* n) {
+    auto* block = copy_graph_->block();
     auto b = n->owningBlock();
-    // start from a given node, it could be any node anywhere in a graph
-    // if it happens to be an if node, we advance past it (see the above)
     graph_node_list_iterator it(n, kNextDirection);
     for (; it != b->nodes().end(); it++) {
-      auto env = [this](Value* v) {
-        auto new_value =
-            (this->old_to_new_.count(v) == 0) ? nullptr : this->old_to_new_[v];
-        return addNewInputForValue(v, new_value);
-      };
+      auto env = [this](Value* v) { return getOrAddInputForValue(v); };
+
       auto node = *it;
 
       auto new_node = block->appendNode(copy_graph_->createClone(node, env));
@@ -102,18 +73,54 @@ struct BailOutGraphBuilderForNode {
     // bailout graph building will continue from `outer_node` next
     // remember/map the outputs needed to unwind this `prim::If`
     // or `prim::Loop`
+    auto outer_node = n->owningBlock()->owningNode();
     if (outer_node) {
-      auto block_outputs = n->owningBlock()->outputs();
-      // skip the first input for loops (current iteration count)
-      size_t i = outer_node->kind() == prim::Loop;
-      auto new_outputs = outer_node->kind() == prim::Loop
-          ? outer_node->inputs()
-          : outer_node->outputs();
-      for (; i < block_outputs.size(); i++) {
-        auto nv = old_to_new_[block_outputs[i]];
-        old_to_new_[new_outputs.at(i)] = nv;
-      }
+      buildBailOutGraphForOwningNode(n, outer_node);
+    }
+  }
+
+  // buildBailOutGraphForOwningNode builds a bailout graph
+  // for a CFG given node () as follows:
+  // * if `inner_node` is in a true or false arm of an `prim::If` node
+  // the rest of the arm gets inlined in the bailout graph
+  // and we continue building the rest of the bailout graph
+  // from the node *following* `outer_node`.
+  // * if `inner_node` is in a loop, the rest of the loop gets inlined
+  // we remember the loop outputs needed to execute the
+  // we adjust the upper limit (old_upper_limit - current_iteration)
+  // note the stop condition is already mapped (remembered)
+  // then, we continue building the rest of the bailout graph
+  // starting from the owning `outer_node`
+  // which implies `outer_node` will be cloned
+  void buildBailOutGraphForOwningNode(Node* inner_node, Node* outer_node) {
+    auto* block = copy_graph_->block();
+    auto block_outputs = inner_node->owningBlock()->outputs();
+    // skip the first input for loops (current iteration count)
+    size_t i = outer_node->kind() == prim::Loop;
+    auto new_outputs = outer_node->kind() == prim::Loop ? outer_node->inputs()
+                                                        : outer_node->outputs();
+    for (; i < block_outputs.size(); i++) {
+      auto nv = old_to_new_[block_outputs[i]];
+      old_to_new_[new_outputs.at(i)] = nv;
+    }
+
+    if (outer_node->kind() == prim::If) {
+      // skip if since the rest of true or false block has already been
+      // inlined
+      buildBailOutBlockFrom(outer_node->next());
+    } else if (outer_node->kind() == prim::Loop) {
+      auto new_max_count = addNewInputForValue(outer_node->inputs()[0]);
+      auto cur_iter = addNewInputForValue(outer_node->blocks()[0]->inputs()[0]);
+      // subtract the number of iterations we already did
+      WithInsertPoint guard(*block->nodes().end());
+      auto updated_max_trip_count =
+          copy_graph_->insert(aten::sub, {new_max_count, cur_iter});
+      mapExistingInputForValue(outer_node->inputs()[0], updated_max_trip_count);
+      // N.B. the rest of inputs have already been mapped
+      // when loop->blocks()[0] was processed
       buildBailOutBlockFrom(outer_node);
+    } else {
+      AT_ERROR("Unexpected outer node");
     }
   }
 
@@ -121,10 +128,7 @@ struct BailOutGraphBuilderForNode {
     buildBailOutBlockFrom(n);
     // add graph outputs
     for (auto ov : graph_->outputs()) {
-      auto new_value =
-          (this->old_to_new_.count(ov) == 0) ? nullptr : this->old_to_new_[ov];
-      auto nv = addNewInputForValue(ov, new_value);
-      copy_graph_->registerOutput(nv);
+      copy_graph_->registerOutput(getOrAddInputForValue(ov));
     }
     return copy_graph_;
   }
