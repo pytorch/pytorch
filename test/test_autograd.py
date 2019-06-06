@@ -1581,7 +1581,7 @@ class TestAutograd(TestCase):
             input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
                               if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
             target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
-                               if vary_lengths or i == 0 else target_length) for i in range(batch_size)]
+                               if vary_lengths else target_length) for i in range(batch_size)]
 
             def ctc_after_softmax(x):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
@@ -1589,7 +1589,7 @@ class TestAutograd(TestCase):
                 log_probs = torch.log_softmax(x_full, 2)
                 return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-            gradcheck(ctc_after_softmax, [x])
+            gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
 
     def _test_sparse_gather(self, size_x, size_ind, dim):
         x = torch.randn(size_x, requires_grad=True)
@@ -3019,6 +3019,27 @@ class TestAutograd(TestCase):
         gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True)
         with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
             gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
+
+    def test_gradcheck_nondeterministic(self):
+        class NonDetFunc(Function):
+            @staticmethod
+            def forward(ctx, x, jitter=0.0):
+                ctx._jitter = jitter
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return NonDetFunc.apply(grad_out, ctx._jitter) * (1 + torch.rand_like(grad_out) * ctx._jitter), None
+
+        inp = torch.randn(5, 5, requires_grad=True)
+        gradcheck(lambda x: NonDetFunc.apply(x, 0.0), inp)
+        with self.assertRaisesRegex(RuntimeError, 'Backward is not reentrant'):
+            gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp)
+        with self.assertRaisesRegex(RuntimeError, 'Backward is not reentrant'):
+            gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp)
+        gradcheck(lambda x: NonDetFunc.apply(x, 0.0), inp, nondet_tol=1e-5)
+        gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp, nondet_tol=1e-5)
+        gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp, nondet_tol=1e-5)
 
     @unittest.skipIf(not TEST_CUDA, "Requires cuda for multi device")
     def test_multi_device_reentrant_autograd(self):

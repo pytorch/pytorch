@@ -228,6 +228,26 @@ python setup.py install
 
 ```
 
+##### Adjust Build Options (Optional)
+
+You can adjust the configuration of cmake variables optionally (without building first), by doing
+the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
+with such a step.
+
+On Linux
+```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+python setup.py build --cmake-only
+ccmake build  # or cmake-gui build
+```
+
+On macOS
+```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
+ccmake build  # or cmake-gui build
+```
+
 ### Docker Image
 
 Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specify which Python version is to be used by Miniconda, or leave it unset to use the default. Build from pytorch repo directory as docker needs to copy git repo into docker filesystem while building the image.

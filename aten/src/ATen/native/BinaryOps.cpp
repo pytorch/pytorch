@@ -19,7 +19,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     if (self.is_sparse()) {
       at::_sparse_add_out(result, self, other, alpha);
     } else {
-      at::_sparse_dense_add_out(result, self, SparseTensorRef(other), alpha);
+      at::_sparse_dense_add_out(result, self, other, alpha);
     }
     return result;
   } else if (self.is_sparse()) {
@@ -108,7 +108,7 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
     if (self.is_sparse()) {
       at::_sparse_add_out(result, self, other, -alpha);
     } else {
-      at::_sparse_dense_add_out(result, self, SparseTensorRef(other), -alpha);
+      at::_sparse_dense_add_out(result, self, other, -alpha);
     }
     return result;
   } else if (self.is_sparse()) {
