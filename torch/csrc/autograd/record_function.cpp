@@ -2,6 +2,7 @@
 #include <torch/csrc/autograd/function.h>
 
 #include <cstdlib>
+#include <random>
 
 namespace torch { namespace autograd { namespace profiler {
 
@@ -15,6 +16,12 @@ thread_local RecordFunction* thread_local_func_ = nullptr;
 
 bool sampling_prop_set = false;
 double sampling_prob = 1.0;
+
+double sample_zero_one() {
+  static thread_local auto gen = std::mt19937(std::random_device()());
+  std::uniform_real_distribution<double> dist(0.0, 1.0);
+  return dist(gen);
+}
 }
 
 void setSamplingProbability(double prob) {
@@ -34,7 +41,7 @@ double getSamplingProbability() {
 bool shouldRunSampledCallbacks() {
   return (num_sampled_callbacks > 0) &&
       (!sampling_prop_set ||
-      (((double) std::rand() / RAND_MAX) < sampling_prob));
+      (sample_zero_one() < sampling_prob));
 }
 
 void pushCallback(
