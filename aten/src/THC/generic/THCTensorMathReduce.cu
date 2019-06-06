@@ -302,7 +302,13 @@ accreal THCTensor_(meanall)(THCState *state, THCTensor *self)
 
 scalar_t THCTensor_(minall)(THCState *state, THCTensor *self) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  THArgCheck(THTensor_nDimensionLegacyAll(self) > 0, 1, "tensor must have one dimension");
+  THArgCheck(
+      THTensor_(nElement)(tensor) > 0,
+      1,
+      "cannot perform reduction function min "
+      "on tensor with no elements because the "
+      "operation does not have an identity"
+  );
   accreal val;
   if (!THC_reduceAll<scalar_t>(state, self,
                            thrust::identity<accreal>{},
@@ -317,7 +323,13 @@ scalar_t THCTensor_(minall)(THCState *state, THCTensor *self) {
 
 scalar_t THCTensor_(maxall)(THCState *state, THCTensor *self) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  THArgCheck(THTensor_nDimensionLegacyAll(self) > 0, 1, "tensor must have one dimension");
+  THArgCheck(
+      THTensor_(nElement)(tensor) > 0,
+      1,
+      "cannot perform reduction function max "
+      "on tensor with no elements because the "
+      "operation does not have an identity"
+  );
   accreal val;
   if (!THC_reduceAll<scalar_t>(state, self,
                            thrust::identity<accreal>{},
