@@ -8616,7 +8616,8 @@ class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
 add_test(NewModuleTest(
     constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
     input_size=(4, 16),
-    fullname='AdaptiveLogSoftmax'))
+    fullname='AdaptiveLogSoftmax',
+    decorator=skipCUDANonDefaultStreamIf(True)))
 
 
 # The following are helpers for TestNN.test_affine_*

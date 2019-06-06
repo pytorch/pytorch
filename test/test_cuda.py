@@ -2666,6 +2666,7 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipCUDANonDefaultStreamIf(True)
     def test_norm(self):
         _TestTorchMixin._test_norm(self, device='cuda')
 

@@ -932,6 +932,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input',
+        decorator=skipCUDANonDefaultStreamIf(True)
     ),
     dict(
         module_name='BatchNorm1d',
@@ -1344,6 +1345,7 @@ new_module_tests = [
         fullname='Conv2d_depthwise_strided',
         constructor=lambda: nn.Conv2d(4, 4, (3, 3), stride=(2, 2), groups=4),
         input_size=(2, 4, 6, 6),
+        decorator=skipCUDANonDefaultStreamIf(True)
     ),
     dict(
         fullname='Conv2d_depthwise_padded',
@@ -1571,6 +1573,7 @@ new_module_tests = [
         constructor_args=(2, 2, (1, 1, 1)),
         input_size=(2, 3, 5, 5, 5),
         desc='stride_pad',
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         module_name='AvgPool3d',
@@ -1736,6 +1739,7 @@ new_module_tests = [
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bilinear_scale_2d',
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
@@ -1769,6 +1773,7 @@ new_module_tests = [
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bicubic_2d',
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None,
@@ -1776,12 +1781,14 @@ new_module_tests = [
         input_size=(1, 2, 2, 3),
         fullname='interpolate_bicubic_tuple_2d',
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='bicubic', align_corners=False),
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bicubic_scale_2d',
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 2.),
@@ -1789,6 +1796,7 @@ new_module_tests = [
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bicubic_scale_tuple_shared_2d',
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=(2., 1.),
@@ -1815,24 +1823,28 @@ new_module_tests = [
         input_size=(1, 2, 4, 4, 4),
         fullname='interpolate_nearest_3d',
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=(12, 16, 16), scale_factor=None, mode='nearest'),
         input_size=(1, 2, 3, 4, 4),
         fullname='interpolate_nearest_tuple_3d',
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='nearest'),
         input_size=(1, 2, 4, 4, 4),
         fullname='interpolate_nearest_scale_3d',
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
         input_size=(1, 2, 4, 4, 4),
         fullname='interpolate_trilinear_3d',
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=(4, 6, 6),
@@ -1840,6 +1852,7 @@ new_module_tests = [
         input_size=(1, 2, 2, 3, 3),
         fullname='interpolate_trilinear_tuple_3d',
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=False),
@@ -1848,6 +1861,7 @@ new_module_tests = [
         # See https://github.com/pytorch/pytorch/issues/5006
         precision=3e-4,
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=(4, 6, 6), scale_factor=None,
@@ -1855,6 +1869,7 @@ new_module_tests = [
         input_size=(1, 2, 2, 3, 3),
         fullname='interpolate_trilinear_tuple_3d_align_corners',
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=3., mode='trilinear', align_corners=True),
@@ -1863,6 +1878,7 @@ new_module_tests = [
         # See https://github.com/pytorch/pytorch/issues/5006
         precision=3e-4,
         pickle=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         module_name='AdaptiveMaxPool1d',
