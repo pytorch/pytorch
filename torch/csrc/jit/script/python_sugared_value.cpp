@@ -252,16 +252,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // it adds a buffer 'training' to the model if one doesn't exist
   // and then loads that parameter, casting it to bool
   if (field == "training") {
-    Slot* v = module_->find_buffer(field);
+    Slot* v = module_->find_attribute(field);
     if (!v) {
       bool training = py::cast<bool>(py::getattr(py_module_, "training"));
-      auto t =
-          autograd::make_variable(at::full({}, training ? 1 : 0, at::kLong));
-      module_->register_buffer("training", std::move(t));
-      v = module_->find_buffer(field);
+      module_->register_attribute(
+          "training", BoolType::get(), std::move(training));
+      v = module_->find_attribute(field);
     }
-    Value* the_tensor = m.graph()->insertGetAttr(self_, "training");
-    Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
+    Value* the_bool = m.graph()->insertGetAttr(self_, "training");
     return std::make_shared<SimpleValue>(the_bool);
   }
 
