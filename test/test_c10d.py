@@ -1653,30 +1653,30 @@ class ProcessGroupShareTensorTest(TestCase):
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
-    def test_broadcast_gloo(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
-        mp.spawn(ProcessGroupShareTensorTest._test_broadcast_process,
-                 args=(file.name,
-                       shared_tensors,
-                       self.world_size,
-                       ProcessGroupShareTensorTest._init_pg_gloo),
-                 nprocs=self.world_size,
-                 join=True)
+    def test_shared_broadcast_gloo(self):
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
+            mp.spawn(ProcessGroupShareTensorTest._test_broadcast_process,
+                     args=(file.name,
+                           shared_tensors,
+                           self.world_size,
+                           ProcessGroupShareTensorTest._init_pg_gloo),
+                     nprocs=self.world_size,
+                     join=True)
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
     @unittest.skipIf(NO_NCCL, "NCCL needed")
-    def test_broadcast_nccl(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
-        mp.spawn(ProcessGroupShareTensorTest._test_broadcast_process,
-                 args=(file.name,
-                       shared_tensors,
-                       self.world_size,
-                       ProcessGroupShareTensorTest._init_pg_nccl),
-                 nprocs=self.world_size,
-                 join=True)
+    def test_shared_broadcast_nccl(self):
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
+            mp.spawn(ProcessGroupShareTensorTest._test_broadcast_process,
+                     args=(file.name,
+                           shared_tensors,
+                           self.world_size,
+                           ProcessGroupShareTensorTest._init_pg_nccl),
+                     nprocs=self.world_size,
+                     join=True)
 
     @classmethod
     def _test_allreduce_process(
@@ -1688,30 +1688,30 @@ class ProcessGroupShareTensorTest(TestCase):
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
-    def test_allreduce_gloo(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
-        mp.spawn(ProcessGroupShareTensorTest._test_allreduce_process,
-                 args=(file.name,
-                       shared_tensors,
-                       self.world_size,
-                       ProcessGroupShareTensorTest._init_pg_gloo),
-                 nprocs=self.world_size,
-                 join=True)
+    def test_shared_allreduce_gloo(self):
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
+            mp.spawn(ProcessGroupShareTensorTest._test_allreduce_process,
+                     args=(file.name,
+                           shared_tensors,
+                           self.world_size,
+                           ProcessGroupShareTensorTest._init_pg_gloo),
+                     nprocs=self.world_size,
+                     join=True)
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
     @unittest.skipIf(NO_NCCL, "NCCL needed")
-    def test_allreduce_nccl(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
-        mp.spawn(ProcessGroupShareTensorTest._test_allreduce_process,
-                 args=(file.name,
-                       shared_tensors,
-                       self.world_size,
-                       ProcessGroupShareTensorTest._init_pg_nccl),
-                 nprocs=self.world_size,
-                 join=True)
+    def test_shared_allreduce_nccl(self):
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
+            mp.spawn(ProcessGroupShareTensorTest._test_allreduce_process,
+                     args=(file.name,
+                           shared_tensors,
+                           self.world_size,
+                           ProcessGroupShareTensorTest._init_pg_nccl),
+                     nprocs=self.world_size,
+                     join=True)
 
     @classmethod
     def _test_reduce_process(
@@ -1727,16 +1727,16 @@ class ProcessGroupShareTensorTest(TestCase):
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
     @unittest.skipIf(NO_NCCL, "NCCL needed")
-    def test_reduce_nccl(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
-        mp.spawn(ProcessGroupShareTensorTest._test_reduce_process,
-                 args=(file.name,
-                       shared_tensors,
-                       self.world_size,
-                       ProcessGroupShareTensorTest._init_pg_nccl),
-                 nprocs=self.world_size,
-                 join=True)
+    def test_shared_reduce_nccl(self):
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
+            mp.spawn(ProcessGroupShareTensorTest._test_reduce_process,
+                     args=(file.name,
+                           shared_tensors,
+                           self.world_size,
+                           ProcessGroupShareTensorTest._init_pg_nccl),
+                     nprocs=self.world_size,
+                     join=True)
 
     @classmethod
     def _test_allgather_process(
@@ -1750,30 +1750,30 @@ class ProcessGroupShareTensorTest(TestCase):
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
-    def test_allgather_gloo(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
-        mp.spawn(ProcessGroupShareTensorTest._test_allgather_process,
-                 args=(file.name,
-                       shared_tensors,
-                       self.world_size,
-                       ProcessGroupShareTensorTest._init_pg_gloo),
-                 nprocs=self.world_size,
-                 join=True)
+    def test_shared_allgather_gloo(self):
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
+            mp.spawn(ProcessGroupShareTensorTest._test_allgather_process,
+                     args=(file.name,
+                           shared_tensors,
+                           self.world_size,
+                           ProcessGroupShareTensorTest._init_pg_gloo),
+                     nprocs=self.world_size,
+                     join=True)
 
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
     @unittest.skipIf(NO_NCCL, "NCCL needed")
-    def test_allgather_nccl(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
-        mp.spawn(ProcessGroupShareTensorTest._test_allgather_process,
-                 args=(file.name,
-                       shared_tensors,
-                       self.world_size,
-                       ProcessGroupShareTensorTest._init_pg_nccl),
-                 nprocs=self.world_size,
-                 join=True)
+    def test_shared_allgather_nccl(self):
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
+            mp.spawn(ProcessGroupShareTensorTest._test_allgather_process,
+                     args=(file.name,
+                           shared_tensors,
+                           self.world_size,
+                           ProcessGroupShareTensorTest._init_pg_nccl),
+                     nprocs=self.world_size,
+                     join=True)
 
 
 class Net(nn.Module):
