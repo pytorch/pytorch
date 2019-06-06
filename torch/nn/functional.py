@@ -3098,8 +3098,8 @@ def multi_head_attention_forward(query,                        # type: Tensor
                                  q_proj_weight=None,           # type: Optional[Tensor]
                                  k_proj_weight=None,           # type: Optional[Tensor]
                                  v_proj_weight=None,           # type: Optional[Tensor]
-                                 saved_k=None,                 # type: Optional[Tensor]
-                                 saved_v=None                  # type: Optional[Tensor]
+                                 static_k=None,                # type: Optional[Tensor]
+                                 static_v=None                 # type: Optional[Tensor]
                                  ):
     # type: (...) -> Tuple[Tensor, Optional[Tensor]]
     r"""
@@ -3121,7 +3121,7 @@ def multi_head_attention_forward(query,                        # type: Tensor
         attn_mask: mask that prevents attention to certain positions.
         use_chunk_proj_weight: use in_proj_weight insteady of q_proj_weight, k_proj_weight, v_proj_weight.
         q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
-        saved_k, saved_v: static key and value used for attention operators.
+        static_k, static_v: static key and value used for attention operators.
 
 
     Shape:
@@ -3134,9 +3134,9 @@ def multi_head_attention_forward(query,                        # type: Tensor
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - attn_mask: :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
-        - saved_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length, 
+        - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length, 
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
-        - saved_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length, 
+        - static_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length, 
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
 
         Outputs:
@@ -3232,7 +3232,7 @@ def multi_head_attention_forward(query,                        # type: Tensor
     q *= scaling
 
     if bias_k is not None and bias_v is not None:
-        if saved_k is None and saved_v is None:
+        if static_k is None and static_v is None:
             k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
             v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
             if attn_mask is not None:
@@ -3246,8 +3246,8 @@ def multi_head_attention_forward(query,                        # type: Tensor
                                                    dtype=key_padding_mask.dtype,
                                                    device=key_padding_mask.device)], dim=1)
         else:
-            assert saved_k is None, "bias cannot be added to static key."
-            assert saved_v is None, "bias cannot be added to static value."
+            assert static_k is None, "bias cannot be added to static key."
+            assert static_v is None, "bias cannot be added to static value."
     else:
         assert bias_k is None
         assert bias_v is None
@@ -3258,15 +3258,15 @@ def multi_head_attention_forward(query,                        # type: Tensor
     if v is not None:
         v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
 
-    if saved_k is not None:
-        assert saved_k.size(0) == bsz * num_heads 
-        assert saved_k.size(2) == head_dim
-        k = saved_k
+    if static_k is not None:
+        assert static_k.size(0) == bsz * num_heads 
+        assert static_k.size(2) == head_dim
+        k = static_k
 
-    if saved_v is not None:
-        assert saved_v.size(0) == bsz * num_heads 
-        assert saved_v.size(2) == head_dim
-        v = saved_v
+    if static_v is not None:
+        assert static_v.size(0) == bsz * num_heads 
+        assert static_v.size(2) == head_dim
+        v = static_v
 
     src_len = k.size(1)
 
