@@ -3114,6 +3114,37 @@ class TestAutograd(TestCase):
         b.data = a
         self.assertTrue(b_id_saved == id(b))
 
+    def _run_and_capture_stderr(self, code):
+        import os
+        import subprocess
+
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        pipes = subprocess.Popen(
+            [sys.executable, '-c', code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env)
+        return pipes.communicate()[1].decode('ascii')
+
+    def test_thread_shutdown(self):
+        code = """import torch
+from torch.autograd import Function
+class MyFunction(Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad
+
+for shape in [(1,), ()]:
+    v = torch.ones(shape, requires_grad=True)
+    MyFunction.apply(v).backward()
+"""
+        s = self._run_and_capture_stderr(code);
+        self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

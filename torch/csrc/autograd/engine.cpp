@@ -27,7 +27,6 @@
 #include <sstream>
 #include <queue>
 #include <TH/TH.h>
-// #include <cuda_runtime_api.h>
 
 namespace torch { namespace autograd {
 
