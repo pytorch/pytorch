@@ -3233,7 +3233,7 @@ def multi_head_attention_forward(query,                        # type: Tensor
             q = linear(query, q_proj_weight_non_opt, in_proj_bias)
             k = linear(key, k_proj_weight_non_opt, in_proj_bias)
             v = linear(value, v_proj_weight_non_opt, in_proj_bias)
-    q *= scaling
+    q = q * scaling
 
     if bias_k is not None and bias_v is not None:
         if static_k is None and static_v is None:
