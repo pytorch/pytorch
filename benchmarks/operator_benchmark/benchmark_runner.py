@@ -3,7 +3,6 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import sys
 import argparse
 
 from caffe2.python import workspace
@@ -19,8 +18,6 @@ It also registers existing benchmark tests via Python module imports.
 
 
 def main():
-    print("Python version " + str(sys.version_info[0]))
-
     parser = argparse.ArgumentParser(
         description="Run microbenchmarks.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
