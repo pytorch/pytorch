@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Half.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -9,6 +10,14 @@
   case enum_type: {                                \
     using scalar_t = type;                         \
     return __VA_ARGS__();                          \
+  }
+
+#define AT_QINT_PRIVATE_CASE_TYPE(enum_type, type, underlying_enum, underlying_type, ...) \
+  case enum_type: {                                                     \
+    const auto& UNDERLYING_TYPE C10_UNUSED = underlying_enum;           \
+    using scalar_t C10_UNUSED = type;                                   \
+    using underlying_t C10_UNUSED = underlying_type;                    \
+    return __VA_ARGS__();                                               \
   }
 
 namespace detail {
@@ -210,13 +219,16 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 
 #define AT_DISPATCH_QINT_TYPES(TYPE, NAME, ...)                         \
   [&] {                                                                 \
+    const auto& SCALAR_TYPE C10_UNUSED = TYPE;                          \
     switch (TYPE) {                                                     \
-      AT_PRIVATE_CASE_TYPE(                                             \
-          at::ScalarType::QInt8, qint8, __VA_ARGS__)                    \
-      AT_PRIVATE_CASE_TYPE(                                             \
-          at::ScalarType::QInt32, qint32, __VA_ARGS__)                  \
+      AT_QINT_PRIVATE_CASE_TYPE(                                        \
+          kQInt8, qint8, kChar, int8_t, __VA_ARGS__)                    \
+      AT_QINT_PRIVATE_CASE_TYPE(                                        \
+          kQUInt8, quint8, kByte, uint8_t, __VA_ARGS__)                 \
+      AT_QINT_PRIVATE_CASE_TYPE(                                        \
+          kQInt32, qint32, kInt, int, __VA_ARGS__)                      \
       default:                                                          \
-        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");  \
+        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'"); \
     }                                                                   \
   }()
 

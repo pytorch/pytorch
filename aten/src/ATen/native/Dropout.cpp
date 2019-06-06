@@ -21,7 +21,7 @@ Tensor make_feature_noise(const Tensor& input) {
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return input.is_cuda() && p > 0 && p < 1;
+  return input.is_cuda() && p > 0 && p < 1 && input.numel() > 0;
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure
@@ -41,7 +41,7 @@ Tensor multiply(const Tensor& input, const Tensor& noise) {
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
 Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
-  if (p == 0 || !train) {
+  if (p == 0 || !train || input.numel() == 0) {
     return input;
   }
 

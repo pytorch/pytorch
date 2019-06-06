@@ -51,7 +51,7 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeM
 IntArrayRef SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }
-bool SparseTensorImpl::is_contiguous() const {
+bool SparseTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
   AT_ERROR("sparse tensors do not have is_contiguous");
 }
 int64_t SparseTensorImpl::stride(int64_t d) const {

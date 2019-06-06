@@ -3,11 +3,11 @@
 #ifndef BBOX_TRANSFORM_OP_H_
 #define BBOX_TRANSFORM_OP_H_
 
+#include "caffe2/core/c10_operator.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/c10_operator.h"
 
 C10_DECLARE_CAFFE2_OPERATOR(BBoxTransform)
 
@@ -16,7 +16,7 @@ namespace caffe2 {
 template <typename T, class Context>
 class BBoxTransformOp final : public Operator<Context> {
  public:
-  template<class... Args>
+  template <class... Args>
   explicit BBoxTransformOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
         weights_(this->template GetRepeatedArgument<T>(
@@ -32,7 +32,9 @@ class BBoxTransformOp final : public Operator<Context> {
         angle_bound_hi_(
             this->template GetSingleArgument<int>("angle_bound_hi", 90)),
         clip_angle_thresh_(
-            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)) {
+            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)),
+        legacy_plus_one_(
+            this->template GetSingleArgument<bool>("legacy_plus_one", true)) {
     CAFFE_ENFORCE_EQ(
         weights_.size(),
         4,
@@ -62,6 +64,8 @@ class BBoxTransformOp final : public Operator<Context> {
   // tolerance for backward compatibility. Set to negative value for
   // no clipping.
   float clip_angle_thresh_{1.0};
+  // The infamous "+ 1" for box width and height dating back to the DPM days
+  bool legacy_plus_one_{true};
 };
 
 } // namespace caffe2

@@ -85,12 +85,8 @@ class ShapePropagator {
   bool resizesInput(Node* n) {
     static std::unordered_set<Symbol> resize_ops{
         aten::resize_,    aten::resize_as_, aten::copy_,    aten::set_,
-        aten::add_,       aten::addbmm_,    aten::addcdiv_, aten::addcmul_,
-        aten::addmv_,     aten::addr_,      aten::baddbmm_, aten::ge_,
-        aten::gt_,        aten::le_,        aten::lerp_,    aten::lt_,
-        aten::mul_,       aten::ne_,        aten::sub_,     aten::unsqueeze_,
-        aten::t_, // could preserve DimensionedTensorType Here
-        aten::transpose_,
+        aten::unsqueeze_,
+        aten::t_, aten::transpose_, // could preserve DimensionedTensorType Here
     };
 
     if (resize_ops.count(n->kind()))
@@ -701,7 +697,7 @@ class ShapePropagator {
             "aten::atan(Tensor self) -> Tensor",
             "aten::ceil(Tensor self) -> Tensor",
             "aten::clone(Tensor self) -> Tensor",
-            "aten::contiguous(Tensor self) -> Tensor",
+            "aten::contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor",
             "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
             "aten::celu(Tensor self, Scalar alpha) -> Tensor",
             "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",

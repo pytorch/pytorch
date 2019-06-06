@@ -1,9 +1,9 @@
 #ifndef CAFFE2_OPERATORS_GENERATE_PROPOSALS_OP_H_
 #define CAFFE2_OPERATORS_GENERATE_PROPOSALS_OP_H_
 
+#include "caffe2/core/c10_operator.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/c10_operator.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
@@ -79,7 +79,7 @@ template <class Context>
 class GenerateProposalsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  template<class... Args>
+  template <class... Args>
   explicit GenerateProposalsOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
         spatial_scale_(
@@ -99,7 +99,9 @@ class GenerateProposalsOp final : public Operator<Context> {
         angle_bound_hi_(
             this->template GetSingleArgument<int>("angle_bound_hi", 90)),
         clip_angle_thresh_(
-            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)) {}
+            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)),
+        legacy_plus_one_(
+            this->template GetSingleArgument<bool>("legacy_plus_one", true)) {}
 
   ~GenerateProposalsOp() {}
 
@@ -142,6 +144,8 @@ class GenerateProposalsOp final : public Operator<Context> {
   // tolerance for backward compatibility. Set to negative value for
   // no clipping.
   float clip_angle_thresh_{1.0};
+  // The infamous "+ 1" for box width and height dating back to the DPM days
+  bool legacy_plus_one_{true};
 
   // Scratch space required by the CUDA version
   // CUB buffers

@@ -20,7 +20,7 @@ void setSamplingProbability(double prob) {
   if (std::abs(prob - 1.0) < kEps) {
     is_sampled_callbacks = false;
   } else {
-    AT_CHECK(prob > -kEps && prob < 1.0);
+    TORCH_CHECK(prob > -kEps && prob < 1.0);
     is_sampled_callbacks = true;
   }
   sampling_prob = prob;

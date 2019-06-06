@@ -98,7 +98,9 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
             soft_nms_sigma_,
             nms_thres_,
             soft_nms_min_score_thres_,
-            soft_nms_method_);
+            soft_nms_method_,
+            -1, /* topN */
+            legacy_plus_one_);
       } else {
         std::sort(
             inds.data(),
@@ -107,8 +109,13 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
               return cur_scores(lhs) > cur_scores(rhs);
             });
         int keep_max = detections_per_im_ > 0 ? detections_per_im_ : -1;
-        keeps[j] =
-            utils::nms_cpu(cur_boxes, cur_scores, inds, nms_thres_, keep_max);
+        keeps[j] = utils::nms_cpu(
+            cur_boxes,
+            cur_scores,
+            inds,
+            nms_thres_,
+            keep_max,
+            legacy_plus_one_);
       }
       total_keep_count += keeps[j].size();
     }
@@ -124,7 +131,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     // Limit to max_per_image detections *over all classes*
     if (detections_per_im_ > 0 && total_keep_count > detections_per_im_) {
       // merge all scores (represented by indices) together and sort
-      auto get_all_scores_sorted = [&scores, &keeps, total_keep_count]() {
+      auto get_all_scores_sorted = [&]() {
         // flatten keeps[i][j] to [pair(i, keeps[i][j]), ...]
         // first: class index (1 ~ keeps.size() - 1),
         // second: values in keeps[first]
@@ -132,19 +139,19 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
         vector<KeepIndex> ret(total_keep_count);
 
         int ret_idx = 0;
-        for (int i = 1; i < keeps.size(); i++) {
-          auto& cur_keep = keeps[i];
+        for (int j = 1; j < num_classes; j++) {
+          auto& cur_keep = keeps[j];
           for (auto& ckv : cur_keep) {
-            ret[ret_idx++] = {i, ckv};
+            ret[ret_idx++] = {j, ckv};
           }
         }
 
         std::sort(
             ret.data(),
             ret.data() + ret.size(),
-            [&scores](const KeepIndex& lhs, const KeepIndex& rhs) {
-              return scores(lhs.second, lhs.first) >
-                  scores(rhs.second, rhs.first);
+            [this, &scores](const KeepIndex& lhs, const KeepIndex& rhs) {
+              return scores(lhs.second, this->get_score_cls_index(lhs.first)) >
+                  scores(rhs.second, this->get_score_cls_index(rhs.first));
             });
 
         return ret;
@@ -300,6 +307,7 @@ SHOULD_NOT_DO_GRADIENT(BoxWithNMSLimit);
 } // namespace
 } // namespace caffe2
 
+// clang-format off
 C10_REGISTER_CAFFE2_OPERATOR_CPU(
     BoxWithNMSLimit,
     "_caffe2::BoxWithNMSLimit("
@@ -316,7 +324,8 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       "bool rotated, "
       "bool cls_agnostic_bbox_reg, "
       "bool input_boxes_include_bg_cls, "
-      "bool output_classes_include_bg_cls "
+      "bool output_classes_include_bg_cls, "
+      "bool legacy_plus_one "
     ") -> ("
       "Tensor scores, "
       "Tensor boxes, "
@@ -326,3 +335,4 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       //"Tensor keeps_size, "
     ")",
     caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);
+// clang-format on

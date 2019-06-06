@@ -45,12 +45,12 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
   echo $PYTHON_VERSION
-  if [[ $PYTHON_VERSION == "2" ]]; then
-    pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl --user
-  else
-    pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl --user
-  fi
-
+  # if [[ $PYTHON_VERSION == "2" ]]; then
+  #   pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl --user
+  # else
+  #   pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl --user
+  # fi
+  pip install -q tb-nightly --user
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
   pip install mypy --user || true

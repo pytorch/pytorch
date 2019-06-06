@@ -25,7 +25,8 @@ namespace script {
 namespace {
 struct SchemaParser {
   SchemaParser(const std::string& str)
-      : L(str), type_parser(L, /*parse_complete_tensor_types*/ false) {}
+      : L(std::make_shared<Source>(str)),
+        type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
   either<OperatorName, FunctionSchema> parseDeclaration() {
     OperatorName name = parseName();
@@ -158,6 +159,8 @@ struct SchemaParser {
           return static_cast<int64_t>(at::kStrided);
         } else if ("Mean" == text) {
           return static_cast<int64_t>(Reduction::Mean);
+        } else if ("contiguous_format" == text) {
+          return static_cast<int64_t>(c10::MemoryFormat::Contiguous);
         } else {
           throw ErrorReport(L.cur().range) << "invalid numeric default value";
         }
