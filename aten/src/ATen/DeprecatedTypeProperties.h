@@ -5,7 +5,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/Storage.h>
-#include <ATen/core/DeprecatedTypePropertiesRegistry.h>
+#include <ATen/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/Generator.h>
 
 

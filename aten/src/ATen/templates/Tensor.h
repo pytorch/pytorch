@@ -13,7 +13,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/DeprecatedTypePropertiesRegistry.h>
+#include <ATen/DeprecatedTypePropertiesRegistry.h>
 
 namespace caffe2 {
 class Tensor;

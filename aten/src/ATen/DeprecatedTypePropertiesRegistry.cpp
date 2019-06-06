@@ -1,4 +1,4 @@
-#include <ATen/core/DeprecatedTypePropertiesRegistry.h>
+#include <ATen/DeprecatedTypePropertiesRegistry.h>
 
 #include <ATen/DeprecatedTypeProperties.h>
 
