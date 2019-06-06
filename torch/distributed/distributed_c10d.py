@@ -7,8 +7,14 @@ from datetime import timedelta
 # TODO: specify __all__
 
 from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
-from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
-    ScatterOptions, GatherOptions
+from . import (
+    AllreduceOptions,
+    BroadcastOptions,
+    GatherOptions,
+    ReduceOptions,
+    ReduceScatterOptions,
+    ScatterOptions,
+)
 from . import ReduceOp
 from . import PrefixStore
 
@@ -1018,16 +1024,18 @@ def all_gather_multigpu(output_tensor_lists,
 
     Arguments:
         output_tensor_lists (List[List[Tensor]]): Output lists. It should
-            contain correctly-sized tensors on each GPU to be used for output of
-            the collective.
-            e.g. ``output_tensor_lists[i]`` contains the all_gather
-            result that resides on the GPU of ``input_tensor_list[i]``.
-            Note that each element of ``output_tensor_lists[i]`` has the size of
+            contain correctly-sized tensors on each GPU to be used for output
+            of the collective, e.g. ``output_tensor_lists[i]`` contains the
+            all_gather result that resides on the GPU of
+            ``input_tensor_list[i]``.
+
+            Note that each element of ``output_tensor_lists`` has the size of
             ``world_size * len(input_tensor_list)``, since the function all
             gathers the result from every single GPU in the group. To interpret
-            each element of ``output_tensor_list[i]``, note that
+            each element of ``output_tensor_lists[i]``, note that
             ``input_tensor_list[j]`` of rank k will be appear in
-            ``output_tensor_list[i][rank * world_size + j]``
+            ``output_tensor_lists[i][k * world_size + j]``
+
             Also note that ``len(output_tensor_lists)``, and the size of each
             element in ``output_tensor_lists`` (each element is a list,
             therefore ``len(output_tensor_lists[i])``) need to be the same
@@ -1209,6 +1217,116 @@ def scatter(tensor,
         group_src_rank = _get_group_rank(group, src)
         opts.rootRank = group_src_rank
         work = group.scatter(output_tensors, input_tensors, opts)
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
+
+def reduce_scatter_multigpu(output_tensor_list,
+                            input_tensor_lists,
+                            op=ReduceOp.SUM,
+                            group=group.WORLD,
+                            async_op=False):
+    """
+    Reduce and scatter a list of tensors to the whole group.  Only nccl backend
+    is currently supported.
+
+    Each tensor in ``output_tensor_list`` should reside on a separate GPU, as
+    should each list of tensors in ``input_tensor_lists``.
+
+    Arguments:
+        output_tensor_list (List[Tensor]): Output tensors (on different GPUs)
+            to receive the result of the operation.
+
+            Note that ``len(output_tensor_list)`` needs to be the same for all
+            the distributed processes calling this function.
+
+        input_tensor_lists (List[List[Tensor]]): Input lists.  It should
+            contain correctly-sized tensors on each GPU to be used for input of
+            the collective, e.g. ``input_tensor_lists[i]`` contains the
+            reduce_scatter input that resides on the GPU of
+            ``output_tensor_list[i]``.
+
+            Note that each element of ``input_tensor_lists`` has the size of
+            ``world_size * len(output_tensor_list)``, since the function
+            scatters the result from every single GPU in the group.  To
+            interpret each element of ``input_tensor_lists[i]``, note that
+            ``output_tensor_list[j]`` of rank k receives the reduce-scattered
+            result from ``input_tensor_lists[i][k * world_size + j]``
+
+            Also note that ``len(input_tensor_lists)``, and the size of each
+            element in ``input_tensor_lists`` (each element is a list,
+            therefore ``len(input_tensor_lists[i])``) need to be the same for
+            all the distributed processes calling this function.
+
+        group (ProcessGroup, optional): The process group to work on.
+        async_op (bool, optional): Whether this op should be an async op.
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group.
+
+    """
+    if _rank_not_in_group(group):
+        return
+
+    opts = ReduceScatterOptions()
+    opts.reduceOp = op
+
+    if group == GroupMember.WORLD:
+        _check_default_pg()
+        work = _default_pg.reduce_scatter(
+            output_tensor_list,
+            input_tensor_lists,
+            opts
+        )
+    else:
+        work = group.reduce_scatter(
+            output_tensor_list,
+            input_tensor_lists,
+            opts
+        )
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
+
+def reduce_scatter(output,
+                   input_list,
+                   op=ReduceOp.SUM,
+                   group=group.WORLD,
+                   async_op=False):
+    """
+    Reduces, then scatters a list of tensors to all processes in a group.
+
+    Arguments:
+        output (Tensor): Output tensor.
+        input_list (list[Tensor]): List of tensors to reduce and scatter.
+        group (ProcessGroup, optional): The process group to work on.
+        async_op (bool, optional): Whether this op should be an async op.
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group.
+
+    """
+    _check_single_tensor(output, "output")
+    _check_tensor_list(input_list, "input_list")
+    if _rank_not_in_group(group):
+        return
+
+    opts = ReduceScatterOptions()
+    opts.reduceOp = op
+
+    if group == GroupMember.WORLD:
+        _check_default_pg()
+        work = _default_pg.reduce_scatter([output], [input_list], opts)
+    else:
+        work = group.reduce_scatter([output], [input_list], opts)
 
     if async_op:
         return work

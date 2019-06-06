@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/Type.h>
+#include <ATen/Tensor.h>
 #include <ATen/TypeExtendedInterface.h>
 #include <ATen/Utils.h>
 #include <ATen/LegacyTHDispatch.h>

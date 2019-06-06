@@ -68,10 +68,11 @@ class TestOptim(TestCase):
                 y = grad[1]
                 v = torch.DoubleTensor([y - y / 4., y / 4.])
             x = sparse.DoubleTensor(i, v, torch.Size([2]))
-            if sparse_grad:
-                params.grad.data = x
-            else:
-                params.grad.data = x.to_dense()
+            with torch.no_grad():
+                if sparse_grad:
+                    params.grad = x
+                else:
+                    params.grad = x.to_dense()
             return loss
 
         for i in range(2000):
@@ -238,15 +239,7 @@ class TestOptim(TestCase):
     def _build_params_dict_single(self, weight, bias, **kwargs):
         return [dict(params=bias, **kwargs)]
 
-    @skipIfRocm
     def test_sgd(self):
-        def add_param_constructor(weight, bias):
-            """Test the `add_param_group` method"""
-            optimizer = optim.SGD([bias], lr=1e-3)
-            optimizer.add_param_group({'params': [weight]})
-            return optimizer
-
-        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.SGD([weight, bias], lr=1e-3)
         )
@@ -293,13 +286,6 @@ class TestOptim(TestCase):
 
     @skipIfRocm
     def test_adam(self):
-        def add_param_constructor(weight, bias):
-            """Test the `add_param_group` method"""
-            optimizer = optim.Adam([bias], lr=1e-3)
-            optimizer.add_param_group({'params': [weight]})
-            return optimizer
-
-        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adam([weight, bias], lr=1e-3)
         )
@@ -349,13 +335,6 @@ class TestOptim(TestCase):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
     def test_adadelta(self):
-        def add_param_constructor(weight, bias):
-            """Test the `add_param_group` method"""
-            optimizer = optim.Adadelta([bias], rho=0.95)
-            optimizer.add_param_group({'params': [weight]})
-            return optimizer
-
-        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adadelta([weight, bias])
         )
@@ -373,13 +352,6 @@ class TestOptim(TestCase):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
     def test_adagrad(self):
-        def add_param_constructor(weight, bias):
-            """Test the `add_param_group` method"""
-            optimizer = optim.Adagrad([bias], lr=1e-1)
-            optimizer.add_param_group({'params': [weight]})
-            return optimizer
-
-        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
         )
@@ -408,29 +380,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
             optim.Adagrad(None, lr=1e-2, lr_decay=-0.5)
 
-    def test_adagrad_share_memory_flag(self):
-        "Adagrad has a unique share_memory method"
-        linear = torch.nn.Linear(1, 1)
-        optimizer = optim.Adagrad([linear.weight], lr=1e-2)
-
-        optimizer.share_memory()
-        optimizer.add_param_group({'params': [linear.bias]})
-        dummy_loss = linear.weight.sum() + linear.bias.sum()
-        dummy_loss.backward()
-        optimizer.step()
-        for pg in optimizer.param_groups:
-            for p in pg['params']:
-                self.assertTrue(optimizer.state[p]['sum'].is_shared())
-
-    def test_adagrad_share_memory_flag_default(self):
-        "Test if Adagrad can load the state without flag"
-        linear = torch.nn.Linear(1, 1)
-        optimizer = optim.Adagrad([linear.weight], lr=1e-2)
-
-        another_optimizer = optim.SGD([linear.weight], lr=0.01)
-        optimizer.load_state_dict(another_optimizer.state_dict())
-        self.assertFalse(optimizer._is_share_memory)
-
     def test_adagrad_sparse(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.Adagrad(params, lr=1e-1)
@@ -443,13 +392,6 @@ class TestOptim(TestCase):
 
     @skipIfRocm
     def test_adamax(self):
-        def add_param_constructor(weight, bias):
-            """Test the `add_param_group` method"""
-            optimizer = optim.Adamax([bias], lr=1e-1)
-            optimizer.add_param_group({'params': [weight]})
-            return optimizer
-
-        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
         )
@@ -461,15 +403,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
             optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
-    @skipIfRocm
     def test_rmsprop(self):
-        def add_param_constructor(weight, bias):
-            """Test the `add_param_group` method"""
-            optimizer = optim.RMSprop([bias], lr=1e-2)
-            optimizer.add_param_group({'params': [weight]})
-            return optimizer
-
-        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
         )
@@ -483,13 +417,6 @@ class TestOptim(TestCase):
 
     @skipIfRocm
     def test_asgd(self):
-        def add_param_constructor(weight, bias):
-            """Test the `add_param_group` method"""
-            optimizer = optim.ASGD([bias], lr=1e-3, t0=100)
-            optimizer.add_param_group({'params': [weight]})
-            return optimizer
-
-        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
         )
@@ -501,15 +428,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
             optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
-    @skipIfRocm
     def test_rprop(self):
-        def add_param_constructor(weight, bias):
-            """Test the `add_param_group` method"""
-            optimizer = optim.Rprop([bias], lr=1e-3)
-            optimizer.add_param_group({'params': [weight]})
-            return optimizer
-
-        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.Rprop([weight, bias], lr=1e-3)
         )
@@ -523,13 +442,6 @@ class TestOptim(TestCase):
 
     @skipIfRocm
     def test_lbfgs(self):
-        def add_param_constructor(weight, bias):
-            """Test the `add_param_group` method"""
-            optimizer = optim.ASGD([bias])
-            optimizer.add_param_group({'params': [weight]})
-            return optimizer
-
-        self._test_basic_cases(add_param_constructor)
         self._test_basic_cases(
             lambda weight, bias: optim.LBFGS([weight, bias]),
             ignore_multidevice=True
@@ -614,6 +526,82 @@ class TestLRScheduler(TestCase):
         self.opt = SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
+
+    def test_old_pattern_warning(self):
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        def old_pattern():
+            for e in range(epochs):
+                scheduler.step()
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_with_arg(self):
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_resuming(self):
+        epochs = 35
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+
+        def old_pattern():
+            for e in range(epochs):
+                scheduler.step()
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_resuming_with_arg(self):
+        epochs = 35
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+
+    def test_new_pattern_no_warning(self):
+        import warnings
+
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            for e in range(epochs):                
+                self.opt.step()
+                scheduler.step()
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+    def test_new_pattern_no_warning_with_arg(self):
+        import warnings
+
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            for e in range(epochs):                
+                self.opt.step()
+                scheduler.step(e)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
 
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3

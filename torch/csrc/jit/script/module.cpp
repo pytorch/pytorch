@@ -1,12 +1,12 @@
-#include <torch/csrc/jit/script/module.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 
 namespace torch {
 namespace jit {
@@ -31,52 +31,7 @@ void Function::ensure_defined() {
         << " method '" << name() << "' is called recursively. "
         << "Recursive calls are not supported";
   }
-}
-
-Value* Function::try_emit_call(
-    Graph& graph,
-    const SourceRange& loc,
-    c10::optional<NamedValue> self,
-    ArrayRef<NamedValue> args,
-    ArrayRef<NamedValue> kwargs,
-    std::stringstream& failure_messages,
-    bool conv_tensors_to_nums) {
-  ensure_defined();
-  auto fn = this->graph();
-
-  auto matched_schema = tryMatchSchema(
-      getSchema(),
-      loc,
-      graph,
-      std::move(self),
-      args,
-      kwargs,
-      failure_messages,
-      conv_tensors_to_nums);
-  if (!matched_schema)
-    return nullptr;
-
   check_single_output();
-  return inlineCallTo(graph, *fn, matched_schema->inputs).at(0);
-}
-
-Value* Function::emit_call(
-    Graph& graph,
-    const SourceRange& loc,
-    ArrayRef<NamedValue> args,
-    ArrayRef<NamedValue> kwargs) {
-  std::stringstream failure_messages;
-  if (auto result = try_emit_call(
-          graph,
-          loc,
-          c10::nullopt,
-          args,
-          kwargs,
-          failure_messages,
-          /*conv_tensors_to_nums=*/true)) {
-    return result;
-  }
-  throw ErrorReport(loc) << failure_messages.str();
 }
 
 void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
@@ -101,6 +56,21 @@ void Module::save(
   ExportModule(*this, filename, extra_files);
 }
 
+void module_state_to(
+    const Slot& s,
+    const c10::optional<at::Device>& device,
+    const c10::optional<at::ScalarType>& dtype,
+    bool non_blocking) {
+  // Need to access the `at::Tensor` as a `Variable` here.
+  autograd::Variable variable = s.value().toTensor();
+  // Use the data's original device or dtype if not supplied here.
+  auto new_data = variable.to(
+      device.value_or(variable.device()),
+      dtype.value_or(variable.scalar_type()),
+      non_blocking);
+  variable.set_data(new_data);
+}
+
 void Module::to_impl(
     const c10::optional<at::Device>& device,
     const c10::optional<at::ScalarType>& dtype,
@@ -111,15 +81,13 @@ void Module::to_impl(
   }
   // Then convert every of our parameters.
   for (auto& parameter : get_parameters()) {
-    // Need to access the `at::Tensor` as a `Variable` here.
-    autograd::Variable variable = parameter.value().toTensor();
-    at::Tensor data = variable.data();
-    // Use the data's original device or dtype if not supplied here.
-    auto new_data = data.to(
-        device.value_or(data.device()),
-        dtype.value_or(data.scalar_type()),
-        non_blocking);
-    variable.set_data(new_data);
+    module_state_to(parameter, device, dtype, non_blocking);
+  }
+  // Then convert every tensor attributes (buffers).
+  for (auto& attr : get_attributes()) {
+    if (attr.type()->isSubtypeOf(TensorType::get())) {
+      module_state_to(attr, device, dtype, non_blocking);
+    }
   }
 }
 
@@ -180,12 +148,14 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       continue;
     }
     if (e.n->kind() != prim::GetAttr) {
-      throw ErrorReport(e.n->getSourceLocation())
-          << "temporary: the only valid use of a module is looking up an attribute";
+      throw ErrorReport(e.n->sourceRange())
+          << "temporary: the only valid use of a module is looking up an "
+             "attribute but found "
+          << *e.n;
     }
     Slot slot(e.mod, e.mod->type()->getAttributeSlot(e.n->s(attr::name)));
     if (ClassTypePtr c = e.n->output()->type()->cast<ClassType>()) {
-      if (c->name() == "$Module") {
+      if (c->qualname() == "__torch__.$Module") {
         auto obj = slot.value().toObject();
         for (Use use : e.n->output()->uses()) {
           to_scan.emplace_back(ToScan{obj, use.user, use.offset});
@@ -287,7 +257,6 @@ void Module::copy_into(
   }
 }
 
-
 void Module::clone_method(
     const Module& orig,
     const std::string& name,
@@ -334,10 +303,42 @@ void Module::clone_method(const Module& orig, const std::string& name) {
 }
 
 void Module::train(bool on) {
- for (auto& submod : get_modules()) {
-   submod->train(on);
- }
- register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
+  for (auto& submod : get_modules()) {
+    submod->train(on);
+  }
+  register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
+}
+
+IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
+  // Classes live in the top-level compilation unit.
+  if (parent_) {
+    return parent_->create_class(name, std::move(stack));
+  }
+
+  // Look up the class
+  const auto classType =
+      class_compilation_unit().get_class(c10::QualifiedName(name));
+  if (!classType) {
+    AT_ERROR(
+        "Could not find class with name: '",
+        name.qualifiedName(),
+        "' in module.");
+  }
+
+  // Create a bare object with correct number of slots
+  const size_t numAttrs = classType->numAttributes();
+  auto obj = c10::ivalue::Object::create(classType, numAttrs);
+
+  // Invoke the `__init__()` of the class with the arguments provided.
+  Stack stackWithSelf = {obj};
+  for (auto& arg : stack) {
+    stackWithSelf.push_back(std::move(arg));
+  }
+  // Note: following Python, `__init__()` modifies its first parameter in-place
+  // and returns nothing.
+  classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
+
+  return obj;
 }
 
 } // namespace script

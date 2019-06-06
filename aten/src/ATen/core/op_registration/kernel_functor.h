@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/op_registration/kernel_stackbased.h>
 #include <ATen/core/op_registration/infer_schema.h>
 
 namespace c10 {
@@ -41,45 +40,69 @@ namespace detail {
   // cast it to the type that should be passed to the kernel function.
   // Examples: If the IValue contains a plain type like an int, return that.
   //           If the IValue contains an IntList, return it as ArrayRef<int>.
-  // TODO Should we move the IValue so we can avoid bumping the Tensor refcount?
   template<class T, class Enable = void> struct ivalue_to_arg_type {
     // This base case is hit whenever a type does not have a specialisation below.
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
   };
   template<class T>
   struct ivalue_to_arg_type<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    static T call(const IValue& v) {
+    static T call(IValue&& v) {
       return std::move(v).to<T>();
     }
   };
   template<class T>
-  struct ivalue_to_arg_type<ArrayRef<T>> {
-    static ArrayRef<T> call(const IValue& v) {
-      // TODO Do we want to support ArrayRef<optional<T>> ?
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported argument type: c10::ArrayRef<T> and T is not one of the supported primitive types.");
-      return v.to<intrusive_ptr<ivalue::List<T>>>()->elements();
-    }
-  };
-  template<class T>
   struct ivalue_to_arg_type<optional<T>> {
-    static optional<T> call(const IValue& v) {
+    static optional<T> call(IValue&& v) {
       if (v.isNone()) {
         return nullopt;
       }
-      return ivalue_to_arg_type<T>::call(v);
+      return ivalue_to_arg_type<T>::call(std::move(v));
+    }
+  };
+  template<class Key, class Value>
+  struct ivalue_to_arg_type<DictPtr<Key, Value>> {
+    static DictPtr<Key, Value> call(IValue&& v) {
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported argument type: c10::DictPtr<Key, Value> and Key is not one of the supported primitive types.");
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported argument type: c10::DictPtr<Key, Value> and Value is not one of the supported primitive types.");
+
+      auto dict_ptr = std::move(v).toGenericDict();
+      return impl::toTypedDict<Key, Value>(std::move(dict_ptr->elements()));
+    }
+  };
+  template<class T>
+  struct ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> final {
+    static std::vector<T> call(IValue&& v) {
+      return std::move(*std::move(v).to<intrusive_ptr<ivalue::List<T>>>()).elements();
+    }
+  };
+  template<class T>
+  struct ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> final {
+    static std::vector<T> call(IValue&& v) {
+      auto list = std::move(v).toGenericList();
+      std::vector<T> result;
+      result.reserve(list->elements().size());
+      for (auto&& elem : std::move(list)->elements()) {
+        result.push_back(ivalue_to_arg_type<T>::call(std::move(elem)));
+      }
+      return result;
+    }
+  };
+  template<class Key, class Value>
+  struct ivalue_to_arg_type<std::unordered_map<Key, Value>> final {
+    static std::unordered_map<Key, Value> call(IValue&& v) {
+      auto dict = std::move(v).toGenericDict();
+      std::unordered_map<Key, Value> result;
+      result.reserve(dict->elements().size());
+      for (auto& element : dict->elements()) {
+        result.emplace(ivalue_to_arg_type<Key>::call(element.key()), ivalue_to_arg_type<Value>::call(element.value()));
+      }
+      return result;
     }
   };
   // The following specialisations of ivalue_to_arg_type are technically not
   // necessary since we would hit the base case and show an error message
   // there if they didn't exist, but we can show a better error message
   // in some common error scenarios.
-  template<class T>
-  struct ivalue_to_arg_type<std::vector<T>> {
-    // We don't support std::vector because that would prevent us from doing
-    // internal optimization to how we represent lists (e.g. SmallVector).
-    // Users should use ArrayRef instead.
-    static_assert(guts::false_t<std::vector<T>>::value, "You tried to register a kernel with an unsupported argument type: std::vector<T>. Please use c10::ArrayRef<T> instead.");
-  };
   template<class T>
   struct ivalue_to_arg_type<T, guts::enable_if_t<std::is_same<float, T>::value>> {
     // There is no reason to support float when we have double. Keep the API lean.
@@ -94,81 +117,135 @@ namespace detail {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral argument type. Please use int64_t instead.");
   };
 
+  // legacy_ivalue_to_arg_type is like ivalue_to_arg_type but additionally
+  // allows a few deprecated types like std::vector.
   template<class T, class Enable = void>
-  struct return_type_to_ivalue_ {
+  struct legacy_ivalue_to_arg_type final {
+    static auto call(IValue&& v) -> decltype(ivalue_to_arg_type<T>::call(std::move(v))) {
+      return ivalue_to_arg_type<T>::call(std::move(v));
+    }
+  };
+
+  // TODO Make nesting types work with new style API, e.g. Dicts of lists, lists of lists, and so on
+
+  template<class T, class Enable = void>
+  struct return_type_to_ivalue {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type.");
   };
   template<class T>
-  struct return_type_to_ivalue_<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    static IValue call(T&& v) {
-      return IValue(std::move(v));
+  struct return_type_to_ivalue<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+    template<class T_>
+    static IValue call(T_&& v) {
+      return IValue(std::forward<T_>(v));
     }
   };
   template<class T>
-  struct return_type_to_ivalue_<optional<T>> {
+  struct return_type_to_ivalue<optional<T>> {
     static IValue call(optional<T>&& v) {
       if (!v.has_value()) {
         return IValue();
       }
-      return return_type_to_ivalue_<T>::call(std::move(*v));
+      return return_type_to_ivalue<T>::call(std::move(*v));
     }
   };
   template<class T>
-  struct return_type_to_ivalue_<std::vector<T>> {
+  struct return_type_to_ivalue<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> {
     static IValue call(std::vector<T>&& v) {
-      // TODO Do we want to support vector<optional<T>> ?
       static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported return type: vector<T> and T is not one of the supported primitive types.");
+      static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
       return IValue(std::move(v));
     }
   };
-  // The following specialisations of return_type_to_ivalue_ are technically not
+  template<class T>
+  struct return_type_to_ivalue<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> {
+    static IValue call(std::vector<T>&& v) {
+      static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
+      std::vector<IValue> result;
+      result.reserve(v.size());
+      for (auto& elem : v) {
+        result.push_back(return_type_to_ivalue<T>::call(std::move(elem)));
+      }
+      return result;
+    }
+  };
+  template<class Key, class Value>
+  struct return_type_to_ivalue<c10::DictPtr<Key, Value>> {
+    static IValue call(c10::DictPtr<Key, Value>&& v) {
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported return type: DictPtr<Key, Value> and Key is not one of the supported primitive types.");
+      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported return type: DictPtr<Key, Value> and Value is not one of the supported primitive types.");
+      return IValue(impl::toGenericDict(std::move(v)));
+    }
+  };
+  template<class Key, class Value>
+  struct return_type_to_ivalue<std::unordered_map<Key, Value>> final {
+    static IValue call(std::unordered_map<Key, Value>&& v) {
+      c10::impl::GenericDictPtr dict = c10::impl::make_generic_dict();
+      dict.reserve(v.size());
+      for (auto& element : v) {
+        dict.insert(return_type_to_ivalue<Key>::call(Key{element.first}), return_type_to_ivalue<Value>::call(std::move(element.second)));
+      }
+      return dict;
+    }
+  };
+  // The following specialisations of return_type_to_ivalue are technically not
   // necessary since we would hit the base case and show an error message
   // there if they didn't exist, but we can show a better error message
   // in some common error scenarios.
   template<class T>
-  struct return_type_to_ivalue_<c10::ArrayRef<T>> {
+  struct return_type_to_ivalue<c10::ArrayRef<T>> {
     static_assert(guts::false_t<c10::ArrayRef<T>>::value, "You tried to register a kernel with an unsupported return type: c10::ArrayRef<T>. Please use std::vector<T> instead.");
   };
   template<class T>
-  struct return_type_to_ivalue_<T, guts::enable_if_t<std::is_same<float, T>::value>> {
+  struct return_type_to_ivalue<T, guts::enable_if_t<std::is_same<float, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type: float. Please use double instead.");
   };
   template<class T>
-  struct return_type_to_ivalue_<T, guts::enable_if_t<std::is_same<const char*, T>::value>> {
+  struct return_type_to_ivalue<T, guts::enable_if_t<std::is_same<const char*, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type: const char*. Please use std::string instead.");
   };
   template<class T>
-  struct return_type_to_ivalue_<T, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+  struct return_type_to_ivalue<T, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral return argument type. Please use int64_t instead.");
   };
-
-  template<class T>
-  IValue return_type_to_ivalue(T&& v) {
-    return return_type_to_ivalue_<guts::decay_t<T>>::call(std::move(v));
-  }
-
-  template<class Functor, size_t... ivalue_arg_indices>
-  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_ivalue_args_(Functor* functor, ArrayRef<IValue> ivalue_args, guts::index_sequence<ivalue_arg_indices...>) {
-    (void)(ivalue_args); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
-    using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
-    return (*functor)(ivalue_to_arg_type<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(ivalue_args[ivalue_arg_indices])...);
-  }
-
-  template<class Functor>
-  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_ivalue_args(Functor* functor, ArrayRef<IValue> ivalue_args) {
-    constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters;
-    AT_ASSERTM(num_ivalue_args == ivalue_args.size(), "Wrong number of ivalue arguments");
-    return call_functor_with_ivalue_args_<Functor>(functor, ivalue_args, guts::make_index_sequence<num_ivalue_args>());
-  }
-
-  template<class OutputType>
-  struct push_outputs final {
-    static void call(OutputType&& output, Stack* stack) {
-      torch::jit::push(*stack, return_type_to_ivalue(std::move(output)));
+  // legacy_return_type_to_ivalue is like return_type_to_ivalue but additionally
+  // allows a few deprecated types like std::unordered_map.
+  template<class T, class Enable = void>
+  struct legacy_return_type_to_ivalue final {
+    template<class T_>
+    static IValue call(T_&& v) {
+      return return_type_to_ivalue<T>::call(std::forward<T_>(v));
     }
   };
-  template<class... OutputTypes>
-  struct push_outputs<std::tuple<OutputTypes...>> final {
+
+  template<bool AllowDeprecatedTypes, class T> using ivalue_to_arg = guts::conditional_t<AllowDeprecatedTypes, legacy_ivalue_to_arg_type<T>, ivalue_to_arg_type<T>>;
+  template<bool AllowDeprecatedTypes, class T> using return_to_ivalue = guts::conditional_t<AllowDeprecatedTypes, legacy_return_type_to_ivalue<guts::decay_t<T>>, return_type_to_ivalue<guts::decay_t<T>>>;
+
+  template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
+  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack_(Functor* functor, Stack* stack, guts::index_sequence<ivalue_arg_indices...>) {
+    (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
+
+    constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
+
+    using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
+    return (*functor)(ivalue_to_arg<AllowDeprecatedTypes, guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(
+      std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
+    )...);
+  }
+
+  template<class Functor, bool AllowDeprecatedTypes>
+  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
+    constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters;
+    return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, stack, guts::make_index_sequence<num_ivalue_args>());
+  }
+
+  template<class OutputType, bool AllowDeprecatedTypes>
+  struct push_outputs final {
+    static void call(OutputType&& output, Stack* stack) {
+      torch::jit::push(*stack, return_to_ivalue<AllowDeprecatedTypes, OutputType>::call(std::move(output)));
+    }
+  };
+  template<class... OutputTypes, bool AllowDeprecatedTypes>
+  struct push_outputs<std::tuple<OutputTypes...>, AllowDeprecatedTypes> final {
     static void call(std::tuple<OutputTypes...>&& output, Stack* stack) {
       call_(std::move(output), stack, guts::make_index_sequence<sizeof...(OutputTypes)>());
     }
@@ -176,39 +253,35 @@ namespace detail {
   private:
     template<size_t... indices>
     static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, guts::index_sequence<indices...>) {
-      (void)(stack); // when sizeof...(indices) == 0, this argument would be unused and we have to silence the compiler warning.
-      // iterate over all outputs and push them
-      (void)std::initializer_list<int>{(
-        torch::jit::push(*stack, return_type_to_ivalue(std::move(std::get<indices>(output))))
-      , 0)...};
+      torch::jit::push(*stack, return_to_ivalue<AllowDeprecatedTypes, OutputTypes>::call(std::move(std::get<indices>(output)))...);
     }
   };
 
-  template<class KernelFunctor, class Enable = void> struct wrap_kernel_functor final {};
+  template<class KernelFunctor, bool AllowDeprecatedTypes, class Enable = void> struct wrap_kernel_functor final {};
 
   // SFINAE version for kernels that return an output
-  template<class KernelFunctor>
-  struct wrap_kernel_functor<KernelFunctor, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  template<class KernelFunctor, bool AllowDeprecatedTypes>
+  struct wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(Stack* stack, KernelCache* cache) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
-      auto output = call_functor_with_ivalue_args<KernelFunctor>(functor, torch::jit::last(*stack, num_inputs));
+      auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, stack);
       torch::jit::drop(*stack, num_inputs);
-      push_outputs<typename guts::infer_function_traits_t<KernelFunctor>::return_type>::call(std::move(output), stack);
+      push_outputs<typename guts::infer_function_traits_t<KernelFunctor>::return_type, AllowDeprecatedTypes>::call(std::move(output), stack);
     }
   };
 
   // SFINAE version for kernels that don't return an output
-  template<class KernelFunctor>
-  struct wrap_kernel_functor<KernelFunctor, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  template<class KernelFunctor, bool AllowDeprecatedTypes>
+  struct wrap_kernel_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(Stack* stack, KernelCache* cache) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor = static_cast<KernelFunctor*>(cache);
-      call_functor_with_ivalue_args<KernelFunctor>(functor, torch::jit::last(*stack, num_inputs));
+      call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, stack);
       torch::jit::pop(*stack, num_inputs);
     }
   };
@@ -238,63 +311,6 @@ namespace detail {
       return guts::make_unique<FunctionSchema>(inferFunctionSchema<KernelFunctor>("", ""));
     }
   };
-
-  template<class KernelFunctor, class... ConstructorParameters>
-  detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>
-  kernelFunctor(ConstructorParameters&&... constructorParameters) {
-    return {
-      &detail::wrap_kernel_functor<KernelFunctor>::call,
-      detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...),
-      detail::FunctionSchemaInferer<KernelFunctor>()
-    };
-  }
-}
-
-/**
- * Use this to register an operator whose kernel is implemented as a functor
- *
- * Example:
- *
- * > namespace {
- * >   class my_kernel_cpu final : public c10::OperatorKernel {
- * >   public:
- * >     Tensor operator()(Tensor a, Tensor b) {...}
- * >   };
- * > }
- * >
- * > static auto registry = c10::RegisterOperators()
- * >     .op("my_op",
- * >         c10::kernel<my_kernel_cpu>(),
- * >         c10::dispatchKey(CPUTensorId()));
- *
- * The functor constructor can take arguments to configure the kernel.
- * The arguments are defined in the kernel registration.
- * Example:
- *
- * > namespace {
- * >   class my_kernel_cpu final : public c10::OperatorKernel {
- * >   public:
- * >     explicit my_kernel_cpu(std::string some_configuration, int a, bool b)
- * >         : ... {...}
- * >
- * >     Tensor operator()(Tensor a, Tensor b) {...}
- * >   };
- * > }
- * >
- * > static auto registry = c10::RegisterOperators()
- * >     .op("my_op",
- * >         c10::kernel<my_kernel_cpu>("some_configuration", 3, true),
- * >         c10::dispatchKey(CPUTensorId()));
- */
-template<class KernelFunctor, class... ConstructorParameters>
-// enable_if: only enable it if KernelFunctor is actually a functor
-inline constexpr guts::enable_if_t<guts::is_functor<KernelFunctor>::value,
-detail::KernelRegistrationConfigParameter<detail::KernelFactory<KernelFunctor, guts::decay_t<ConstructorParameters>...>, detail::FunctionSchemaInferer<KernelFunctor>>>
-kernel(ConstructorParameters&&... constructorParameters) {
-  static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
-  static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
-
-  return detail::kernelFunctor<KernelFunctor>(std::forward<ConstructorParameters>(constructorParameters)...);
 }
 
 }

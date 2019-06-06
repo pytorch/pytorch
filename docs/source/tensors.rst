@@ -120,6 +120,11 @@ view of a storage and defines numeric operations on it.
     To change an existing tensor's :class:`torch.device` and/or :class:`torch.dtype`, consider using
     :meth:`~torch.Tensor.to` method on the tensor.
 
+.. warning::
+   Current implementation of :class:`torch.Tensor` introduces memory overhead,
+   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors. 
+   If this is your case, consider using one large structure.
+
 .. class:: Tensor()
 
    There are a few main ways to create a tensor, depending on your use case.
@@ -142,6 +147,8 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: is_cuda
    .. autoattribute:: device
    .. autoattribute:: grad
+   .. autoattribute:: ndim
+   .. autoattribute:: T 
 
    .. automethod:: abs
    .. automethod:: abs_
@@ -179,6 +186,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bernoulli_
    .. automethod:: bincount
    .. automethod:: bmm
+   .. automethod:: bool
    .. automethod:: byte
    .. automethod:: btrifact
    .. automethod:: btrifact_with_info
@@ -358,7 +366,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: pstrf
    .. automethod:: put_
    .. automethod:: qr
-   .. automethod:: quantize_linear
    .. automethod:: q_scale
    .. automethod:: q_zero_point
    .. automethod:: random_

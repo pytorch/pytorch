@@ -1,8 +1,11 @@
 #pragma once
 
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/module.h>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -12,24 +15,39 @@ namespace script {
 
 // Add the methods defined in `src` to the module `mod`.
 TORCH_API void import_methods(
+    // CompilationUnit in which to look up any classes used
+    const CompilationUnit& lib_cu,
     const std::shared_ptr<script::Module>& mod,
-    const std::string& src,
-    const std::vector<at::Tensor>& constant_table);
+    const std::shared_ptr<Source>& src,
+    const std::vector<at::Tensor>& constant_table,
+    // Callback to import any dependencies of this source before compiling
+    const std::function<void(const std::string&)>& import_callback);
 
-// Defined the list of classes in `src`.
+// Define the list of classes in `src`.
 TORCH_API void import_libs(
-    const std::string& src,
-    const std::vector<at::Tensor>& constant_table);
+    // The compilation unit that will own the imported libs
+    CompilationUnit& lib_cu,
+    // Qualifier for any classes that `src` defines. Looks like a module path,
+    // like "foo.bar.baz"
+    const std::string& class_qualifier,
+    const std::shared_ptr<Source>& src,
+    const std::vector<at::Tensor>& constant_table,
+    // Callback to import any dependencies of this source before compiling
+    const std::function<void(const std::string&)>& import_callback);
 
-// Add the functions defined in `src` to the module `mod`.
+// Add the functions defined in `src` to the compilation unit `cu`.
 // self is passed through the CompilationUnit's define function.
 // If present, it determines the SugaredValue for the first argument
 // and that argument is no longer expected to have type annotations.
 TORCH_API void import_functions(
+    // CompilationUnit in which to look up any classes used
+    const CompilationUnit& lib_cu,
+    // CompilationoUnit to define the functions in.
     CompilationUnit& cu,
-    const std::string& src,
+    const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
-    const Self& self=nullptr);
+    const Self& self = nullptr,
+    const std::function<void(const std::string&)>& import_callback = nullptr);
 
 } // namespace script
 } // namespace jit

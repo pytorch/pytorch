@@ -6,7 +6,7 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 
 
 def load_onnx_graph(fname):
-    import onnx  # 0.2.1
+    import onnx
     m = onnx.load(fname)
     g = m.graph
     return parse(g)

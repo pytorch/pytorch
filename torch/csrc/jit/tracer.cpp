@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/script/module.h>
+#include <ATen/core/Dict.h>
 
 #include <memory>
 #include <sstream>
@@ -62,7 +63,7 @@ void delValueTrace(const Variable& var) {
   getTracingState()->env_stack.back().value_map.erase(var);
 }
 
-// Given a variable 'var', return the 'node' which represents the instruction
+// Given a IValue 'var', return the 'node' which represents the instruction
 // which computes the value of this variable in the IR.
 // Here, we interpret untraced variables as constants that are just embedded
 // in the graph.  This is useful to handle code which does things like this
@@ -80,7 +81,22 @@ Value* getValueTrace(const IValue& var) {
   auto& state = getTracingState();
   auto& env_stack = getTracingState()->env_stack;
 
-  if (var.isTensor()) {
+  // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...] arguments
+  if (var.isTensorList()) {
+    return state->graph
+        ->insertNode(state->graph->createList(
+            TensorType::get(),
+            fmap(
+                var.toTensorListRef(),
+                [](const IValue& val) { return getValueTrace(val); })))
+        ->output();
+  } else if (var.isTuple()) {
+    return state->graph
+        ->insertNode(state->graph->createTuple(fmap(
+            var.toTuple()->elements(),
+            [](const IValue& val) { return getValueTrace(val); })))
+        ->output(); 
+  } if (var.isTensor()) {
     auto ten = var.toTensor();
     if (!ten.defined()) {
       Node* n = state->graph->createNone(TensorType::get());
@@ -133,33 +149,19 @@ Value* getValueTrace(const IValue& var) {
     oss << "Tried to trace Future that the tracer was not aware of.";
     throw std::runtime_error(oss.str());
   } else {
-    std::ostringstream oss;
-    oss << "Unknown type used in value trace lookup!";
-    throw std::runtime_error(oss.str());
+    // If the values are non-tensors, we try to create constants 
+    // and bake those constants into the traced graph
+    auto constant = tryInsertConstant(*state->graph, var);
+    if (constant) {
+      recordSourceLocation(constant.value()->node());
+      return *constant;
+    }
+    std::ostringstream os;
+    os << "Tracer cannot get value trace for type " << var.tagKind() << ". "
+       << "The below value could not be materialized as a constant:\n"
+       << var;
+    throw std::runtime_error(os.str());
   }
-}
-
-// allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...] arguments
-// One might merge getValueTrace and getNestedValueTrace after checking that
-// casting to IValue instead  of Variable is OK
-Value* getNestedValueTrace(const IValue& v) {
-  auto& state = getTracingState();
-  if (v.isTensorList()) {
-    return state->graph
-        ->insertNode(state->graph->createList(
-            TensorType::get(),
-            fmap(
-                v.toTensorListRef(),
-                [](const IValue& val) { return getNestedValueTrace(val); })))
-        ->output();
-  } else if (v.isTuple()) {
-    return state->graph
-        ->insertNode(state->graph->createTuple(fmap(
-            v.toTuple()->elements(),
-            [](const IValue& val) { return getNestedValueTrace(val); })))
-        ->output();
-  }
-  return getValueTrace(v.toTensor());
 }
 
 Value* getOutputTrace(
@@ -229,6 +231,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
     return Tuple::create(std::move(elems));
   } else if (auto dict_type = type->cast<DictType>()) {
     auto dict = input.toGenericDict();
+
     auto dict_size = dict->elements().size();
     auto unpack_to_list = state->graph->insert(aten::values, {value});
     auto list_unpack = state->graph->createListUnpack(unpack_to_list, dict_size);
@@ -240,7 +243,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
 
     size_t i = 0;
     for (const auto &pair : order) {
-      dict->elements()[pair.first] = addInput(state, pair.second, dict_type->getValueType(), elem_values[i++]);
+      dict->elements().insert_or_assign(pair.first, addInput(state, pair.second, dict_type->getValueType(), elem_values[i++]));
     }
 
     return c10::ivalue::GenericDict::create(std::move(dict->elements()));
@@ -428,9 +431,6 @@ void addInputs(Node* n, const char* name, const std::string& value) {
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
   n->addInput(getValueTrace(value));
 }
-void addInputs(Node* n, const char* name, const at::SparseTensorRef& value) {
-  detail::badArgType(value);
-}
 void addInputs(Node* n, const char* name, at::Generator* value) {
   if (value) {
     detail::badArgType(value);
@@ -447,6 +447,9 @@ void addInputs(Node* n, const char* name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
 void addInputs(Node* n, const char* name, at::ScalarType value) {
+  detail::genericAddInput(n, static_cast<int64_t>(value));
+}
+void addInputs(Node* n, const char* name, at::MemoryFormat value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
 void addInputs(
@@ -675,8 +678,6 @@ const char* WARN_RESIZE =
     " can't be represented in the JIT at the moment, so we won't connect any uses of "
     "this value with its current trace. If you happen to use it again, it will show "
     "up as a constant in the graph.";
-const char* LEGACY_CONSTRUCTOR =
-    " is a legacy constructor and is not supported in the JIT.";
 
 // XXX: _kind can be a nullptr
 void _do_warn(const char* _reason, const char* _kind) {

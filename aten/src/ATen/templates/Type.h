@@ -5,9 +5,9 @@
 #include <c10/util/Deprecated.h>
 #include <ATen/core/Generator.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Half.h>
 #include <c10/core/TensorTypeIdRegistration.h>
@@ -143,5 +143,3 @@ protected:
 };
 
 } // namespace at
-
-#include <ATen/core/Tensor.h>

@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
@@ -74,11 +73,7 @@ class ShapePropagator {
       } catch (propagation_error& e) {
         setUnshapedType(node);
       } catch (std::exception& e) {
-        if (auto sl = node->getSourceLocation()) {
-          sl->wrapAndRethrowException(e, "operation failed shape propagation");
-        } else {
-          throw;
-        }
+         node->sourceRange().wrapAndRethrowException(e, "operation failed shape propagation");
       }
     }
   }
@@ -90,12 +85,8 @@ class ShapePropagator {
   bool resizesInput(Node* n) {
     static std::unordered_set<Symbol> resize_ops{
         aten::resize_,    aten::resize_as_, aten::copy_,    aten::set_,
-        aten::add_,       aten::addbmm_,    aten::addcdiv_, aten::addcmul_,
-        aten::addmv_,     aten::addr_,      aten::baddbmm_, aten::ge_,
-        aten::gt_,        aten::le_,        aten::lerp_,    aten::lt_,
-        aten::mul_,       aten::ne_,        aten::sub_,     aten::unsqueeze_,
-        aten::t_, // could preserve DimensionedTensorType Here
-        aten::transpose_,
+        aten::unsqueeze_,
+        aten::t_, aten::transpose_, // could preserve DimensionedTensorType Here
     };
 
     if (resize_ops.count(n->kind()))
@@ -157,8 +148,8 @@ class ShapePropagator {
       return *iv;
     }
     if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
-      auto attype = type->device().is_cpu() ?
-          at::CPU(type->scalarType()) : at::CUDA(type->scalarType());
+      auto attype = type->device().is_cpu() ? at::CPU(type->scalarType())
+                                            : at::CUDA(type->scalarType());
       at::DeviceGuard device_guard(type->device());
       auto t =
           at::empty_strided(type->sizes(), type->strides(), attype.options())
@@ -555,6 +546,15 @@ class ShapePropagator {
         }
         return;
       }
+      case prim::unchecked_unwrap_optional: {
+        // If we have specialized the optional type to the element type,
+        // we want to pass it down. We write this as input.isSubtypeOf(output)
+        // to be sure that we don't screw up nested optionals.
+        if (node->input()->type()->isSubtypeOf(node->output()->type())) {
+          node->output()->setType(node->input()->type());
+        }
+        return;
+      }
       case prim::ConstantChunk: {
         Value* tensor = node->input();
         if (auto type = tensor->type()->cast<DimensionedTensorType>()) {
@@ -577,10 +577,13 @@ class ShapePropagator {
         return;
       }
       case aten::_unwrap_optional: {
-        auto input_ivalue = toIValue(node->input());
-        if (input_ivalue && input_ivalue->isNone()) {
-          return;
+        // If we have specialized the optional type to the element type,
+        // we want to pass it down. We write this as input.isSubtypeOf(output)
+        // to be sure that we don't screw up nested optionals.
+        if (node->input()->type()->isSubtypeOf(node->output()->type())) {
+          node->output()->setType(node->input()->type());
         }
+        return;
       }
       default:
         break; // fall-through
@@ -694,7 +697,7 @@ class ShapePropagator {
             "aten::atan(Tensor self) -> Tensor",
             "aten::ceil(Tensor self) -> Tensor",
             "aten::clone(Tensor self) -> Tensor",
-            "aten::contiguous(Tensor self) -> Tensor",
+            "aten::contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor",
             "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
             "aten::celu(Tensor self, Scalar alpha) -> Tensor",
             "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",

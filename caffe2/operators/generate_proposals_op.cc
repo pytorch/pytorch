@@ -228,17 +228,19 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
       bbox_deltas_sorted,
       bbox_weights,
       utils::BBOX_XFORM_CLIP_DEFAULT,
+      legacy_plus_one_,
       angle_bound_on_,
       angle_bound_lo_,
       angle_bound_hi_);
 
   // 2. clip proposals to image (may result in proposals with zero area
   // that will be removed in the next step)
-  proposals =
-      utils::clip_boxes(proposals, im_info[0], im_info[1], clip_angle_thresh_);
+  proposals = utils::clip_boxes(
+      proposals, im_info[0], im_info[1], clip_angle_thresh_, legacy_plus_one_);
 
   // 3. remove predicted boxes with either height or width < min_size
-  auto keep = utils::filter_boxes(proposals, min_size, im_info);
+  auto keep =
+      utils::filter_boxes(proposals, min_size, im_info, legacy_plus_one_);
   DCHECK_LE(keep.size(), scores_sorted.size());
 
   // 6. apply loose nms (e.g. threshold = 0.7)
@@ -246,9 +248,15 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   // 8. return the top proposals (-> RoIs top)
   if (post_nms_topN > 0 && post_nms_topN < keep.size()) {
     keep = utils::nms_cpu(
-        proposals, scores_sorted, keep, nms_thresh, post_nms_topN);
+        proposals,
+        scores_sorted,
+        keep,
+        nms_thresh,
+        post_nms_topN,
+        legacy_plus_one_);
   } else {
-    keep = utils::nms_cpu(proposals, scores_sorted, keep, nms_thresh);
+    keep = utils::nms_cpu(
+        proposals, scores_sorted, keep, nms_thresh, -1, legacy_plus_one_);
   }
 
   // Generate outputs
@@ -406,6 +414,7 @@ SHOULD_NOT_DO_GRADIENT(GenerateProposalsCPP);
 
 } // namespace caffe2
 
+// clang-format off
 C10_REGISTER_CAFFE2_OPERATOR_CPU(
     GenerateProposals,
     "_caffe2::GenerateProposals("
@@ -421,6 +430,8 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       "bool angle_bound_on, "
       "int angle_bound_lo, "
       "int angle_bound_hi, "
-      "float clip_angle_thresh"
+      "float clip_angle_thresh, "
+      "bool legacy_plus_one"
     ") -> (Tensor output_0, Tensor output_1)",
     caffe2::GenerateProposalsOp<caffe2::CPUContext>);
+// clang-format on

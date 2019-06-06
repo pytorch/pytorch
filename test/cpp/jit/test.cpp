@@ -12,6 +12,7 @@
 #include <test/cpp/jit/test_alias_analysis.h>
 #include <test/cpp/jit/test_argument_spec.h>
 #include <test/cpp/jit/test_autodiff.h>
+#include <test/cpp/jit/test_class_import.h>
 #include <test/cpp/jit/test_class_parser.h>
 #include <test/cpp/jit/test_code_template.h>
 #include <test/cpp/jit/test_constant_pooling.h>
@@ -27,8 +28,11 @@
 #include <test/cpp/jit/test_misc.h>
 #include <test/cpp/jit/test_netdef_converter.h>
 #include <test/cpp/jit/test_peephole_optimize.h>
+#include <test/cpp/jit/test_qualified_name.h>
+#include <test/cpp/jit/test_save_load.h>
 #include <test/cpp/jit/test_subgraph_matcher.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 using namespace torch::jit::script;
 using namespace torch::jit::test;
@@ -45,6 +49,7 @@ namespace jit {
   _(CustomOperators)               \
   _(CustomOperatorAliasing)        \
   _(IValueKWargs)                  \
+  _(CustomFusion)                  \
   _(Differentiate)                 \
   _(DifferentiateWithRequiresGrad) \
   _(DynamicDAG)                    \
@@ -60,6 +65,7 @@ namespace jit {
   _(SubgraphUtils)                 \
   _(AliasAnalysis)                 \
   _(ContainerAliasing)             \
+  _(AliasRegistration)             \
   _(WriteTracking)                 \
   _(Wildcards)                     \
   _(MemoryDAG)                     \
@@ -71,15 +77,22 @@ namespace jit {
   _(NoneSchemaMatch)               \
   _(ClassParser)                   \
   _(Profiler)                      \
+  _(InsertAndEliminateGuards)      \
   _(PeepholeOptimize)              \
   _(RecordFunction)                \
   _(SubgraphMatching)              \
-  _(ModuleDefine)
+  _(ModuleDefine)                  \
+  _(QualifiedName)                 \
+  _(ClassImport)                   \
+  _(ScriptObject)                  \
+  _(SaveExtraFilesHook)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
+  _(CompleteArgumentSpec)       \
   _(Fusion)                     \
   _(GraphExecutor)              \
+  _(ModuleConversion)           \
   _(Interp)
 
 #if defined(USE_GTEST)
@@ -100,7 +113,7 @@ TH_FORALL_TESTS_CUDA(JIT_GTEST_CUDA)
 #endif
 
 #define JIT_TEST(name) test##name();
-void runJITCPPTests(bool runCuda) {
+TORCH_API void runJITCPPTests(bool runCuda) {
   TH_FORALL_TESTS(JIT_TEST)
   if (runCuda) {
     TH_FORALL_TESTS_CUDA(JIT_TEST)

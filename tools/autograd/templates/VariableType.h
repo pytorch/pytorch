@@ -21,9 +21,9 @@ using at::Context;
 using at::Device;
 using at::Generator;
 using at::IntArrayRef;
+using at::MemoryFormat;
 using at::Scalar;
 using at::ScalarType;
-using at::SparseTensorRef;
 using at::Storage;
 using at::Tensor;
 using at::TensorList;
@@ -64,7 +64,6 @@ private:
   static Variable & checked_cast_variable(Tensor & t, const char * name, int pos);
   static at::Tensor & unpack(Tensor & t, const char * name, int pos);
   static const at::Tensor & unpack(const Tensor & t, const char * name, int pos);
-  static at::SparseTensorRef unpack(SparseTensorRef t, const char * name, int pos);
   static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
   static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
 

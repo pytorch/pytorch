@@ -7,7 +7,6 @@ import numpy as np
 import os
 import shutil
 import sys
-import tempfile
 import unittest
 
 TEST_TENSORBOARD = True
@@ -15,6 +14,20 @@ try:
     import tensorboard.summary.writer.event_file_writer  # noqa F401
 except ImportError:
     TEST_TENSORBOARD = False
+
+HAS_TORCHVISION = True
+try:
+    import torchvision
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
+TEST_CAFFE2 = True
+try:
+    from caffe2.python import workspace
+except ImportError:
+    TEST_CAFFE2 = False
+skipIfNoCaffe2 = unittest.skipIf(not TEST_CAFFE2, "no caffe2")
 
 TEST_MATPLOTLIB = True
 try:
@@ -66,6 +79,10 @@ if TEST_TENSORBOARD:
             self.assertIsInstance(make_np(0), np.ndarray)
             self.assertIsInstance(make_np(0.1), np.ndarray)
 
+        def test_pytorch_autograd_np(self):
+            x = torch.autograd.Variable(torch.Tensor(1))
+            self.assertIsInstance(make_np(x), np.ndarray)
+
         def test_pytorch_write(self):
             with SummaryWriter() as w:
                 w.add_scalar('scalar', torch.autograd.Variable(torch.rand(1)), 0)
@@ -88,7 +105,7 @@ if TEST_TENSORBOARD:
                                     num=num,
                                     sum=floats.sum().item(),
                                     sum_squares=sum_sq,
-                                    bucket_limits=limits.tolist(),
+                                    bucket_limits=limits[1:].tolist(),
                                     bucket_counts=counts.tolist())
 
                 ints = make_np(torch.randint(0, 100, (num,)))
@@ -101,7 +118,7 @@ if TEST_TENSORBOARD:
                                     num=num,
                                     sum=ints.sum().item(),
                                     sum_squares=sum_sq,
-                                    bucket_limits=limits.tolist(),
+                                    bucket_limits=limits[1:].tolist(),
                                     bucket_counts=counts.tolist())
 
                 ints = torch.tensor(range(0, 100)).float()
@@ -131,13 +148,31 @@ if TEST_TENSORBOARD:
             self.assertEqual(converted.shape, (32, 32, 3))
 
         def test_prepare_video(self):
-            # at each timestep the sum over all other dimensions of the video should stay the same
-            V_before = np.random.random((4, 10, 3, 20, 20))
-            V_after = _prepare_video(np.copy(V_before))
-            V_before = np.swapaxes(V_before, 0, 1)
-            V_before = np.reshape(V_before, newshape=(10, -1))
-            V_after = np.reshape(V_after, newshape=(10, -1))
-            np.testing.assert_array_almost_equal(np.sum(V_before, axis=1), np.sum(V_after, axis=1))
+            # At each timeframe, the sum over all other
+            # dimensions of the video should be the same.
+            shapes = [(16, 30, 3, 28, 28),
+                      (36, 30, 3, 28, 28),
+                      (19, 29, 3, 23, 19),
+                      (3, 3, 3, 3, 3)]
+            for s in shapes:
+                V_input = np.random.random(s)
+                V_after = _prepare_video(np.copy(V_input))
+                total_frame = s[1]
+                V_input = np.swapaxes(V_input, 0, 1)
+                for f in range(total_frame):
+                    x = np.reshape(V_input[f], newshape=(-1))
+                    y = np.reshape(V_after[f], newshape=(-1))
+                    np.testing.assert_array_almost_equal(np.sum(x), np.sum(y))
+
+        def test_numpy_vid_uint8(self):
+            V_input = np.random.randint(0, 256, (16, 30, 3, 28, 28)).astype(np.uint8)
+            V_after = _prepare_video(np.copy(V_input)) * 255
+            total_frame = V_input.shape[1]
+            V_input = np.swapaxes(V_input, 0, 1)
+            for f in range(total_frame):
+                x = np.reshape(V_input[f], newshape=(-1))
+                y = np.reshape(V_after[f], newshape=(-1))
+                np.testing.assert_array_almost_equal(np.sum(x), np.sum(y))
 
     freqs = [262, 294, 330, 349, 392, 440, 440, 440, 440, 440, 440]
 
@@ -180,9 +215,6 @@ if TEST_TENSORBOARD:
                                         false_negative_counts,
                                         precision,
                                         recall, n_iter)
-                d = tempfile.mkdtemp()
-                writer.export_scalars_to_json(os.path.join(d, "all_scalars.json"))
-                shutil.rmtree(d)
 
     class TestTensorBoardSummaryWriter(BaseTestCase):
         def test_summary_writer_ctx(self):
@@ -278,7 +310,6 @@ if TEST_TENSORBOARD:
                 summary.histogram('dummy', [1, 3, 4, 5, 6], 'tensorflow')
 
         def test_empty_input(self):
-            print('expect error here:')
             with self.assertRaises(Exception) as e_info:
                 summary.histogram('dummy', np.ndarray(0), 'tensorflow')
 
@@ -354,13 +385,10 @@ if TEST_TENSORBOARD:
         expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      module_id.split('.')[-1] + '.' + functionName + ".expect")
-        print(expected_file)
         assert os.path.exists(expected_file)
         with open(expected_file) as f:
             expected = f.read()
         str_to_compare = str(str_to_compare)
-        print(remove_whitespace(str_to_compare))
-        print(remove_whitespace(expected))
         return remove_whitespace(str_to_compare) == remove_whitespace(expected)
 
     def write_proto(str_to_compare, function_ptr):
@@ -370,7 +398,6 @@ if TEST_TENSORBOARD:
         expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      module_id.split('.')[-1] + '.' + functionName + ".expect")
-        print(expected_file)
         with open(expected_file, 'w') as f:
             f.write(str(str_to_compare))
 
@@ -389,13 +416,62 @@ if TEST_TENSORBOARD:
             with SummaryWriter(comment='LinearModel') as w:
                 w.add_graph(myLinear(), dummy_input, True)
 
+        def test_mlp_graph(self):
+            dummy_input = (torch.zeros(2, 1, 28, 28),)
+
+            # This MLP class with the above input is expected
+            # to fail JIT optimizations as seen at
+            # https://github.com/pytorch/pytorch/issues/18903
+            #
+            # However, it should not raise an error during
+            # the add_graph call and still continue.
+            class myMLP(torch.nn.Module):
+                def __init__(self):
+                    super(myMLP, self).__init__()
+                    self.input_len = 1 * 28 * 28
+                    self.fc1 = torch.nn.Linear(self.input_len, 1200)
+                    self.fc2 = torch.nn.Linear(1200, 1200)
+                    self.fc3 = torch.nn.Linear(1200, 10)
+
+                def forward(self, x, update_batch_stats=True):
+                    h = torch.nn.functional.relu(
+                        self.fc1(x.view(-1, self.input_len)))
+                    h = self.fc2(h)
+                    h = torch.nn.functional.relu(h)
+                    h = self.fc3(h)
+                    return h
+
+            with SummaryWriter(comment='MLPModel') as w:
+                w.add_graph(myMLP(), dummy_input, True)
+
         def test_wrong_input_size(self):
-            print('expect error here:')
             with self.assertRaises(RuntimeError) as e_info:
                 dummy_input = torch.rand(1, 9)
                 model = torch.nn.Linear(3, 5)
                 with SummaryWriter(comment='expect_error') as w:
                     w.add_graph(model, dummy_input)  # error
+
+        @skipIfNoTorchVision
+        def test_torchvision_smoke(self):
+            model_input_shapes = {
+                'alexnet': (2, 3, 224, 224),
+                'resnet34': (2, 3, 224, 224),
+                'resnet152': (2, 3, 224, 224),
+                'densenet121': (2, 3, 224, 224),
+                'vgg16': (2, 3, 224, 224),
+                'vgg19': (2, 3, 224, 224),
+                'vgg16_bn': (2, 3, 224, 224),
+                'vgg19_bn': (2, 3, 224, 224),
+                'mobilenet_v2': (2, 3, 224, 224),  # will fail optimize_graph
+            }
+            for model_name, input_shape in model_input_shapes.items():
+                with SummaryWriter(comment=model_name) as w:
+                    model = getattr(torchvision.models, model_name)()
+                    # ValueError: only one element tensors can be converted to Python scalars
+                    if model_name == 'mobilenet_v2':
+                        w.add_graph(model, torch.zeros(input_shape), operator_export_type="RAW")
+                    else:
+                        w.add_graph(model, torch.zeros(input_shape))
 
     class TestTensorBoardFigure(BaseTestCase):
         @skipIfNoMatplotlib
@@ -453,15 +529,19 @@ if TEST_TENSORBOARD:
             res = make_np(np.int64(100000000000))
             self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
 
-        def test_numpy_vid(self):
-            shapes = [(16, 3, 30, 28, 28), (19, 3, 30, 28, 28), (19, 3, 29, 23, 19)]
-            for s in shapes:
-                x = np.random.random_sample(s)
-                # assert make_np(x, 'VID').shape[3] == 3
+        @skipIfNoCaffe2
+        def test_caffe2_np(self):
+            workspace.FeedBlob("testBlob", np.random.randn(1, 3, 64, 64).astype(np.float32))
+            self.assertIsInstance(make_np('testBlob'), np.ndarray)   
 
-        def test_numpy_vid_uint8(self):
-            x = np.random.randint(0, 256, (16, 3, 30, 28, 28)).astype(np.uint8)
-            # make_np(x, 'VID').shape[3] == 3
+        @skipIfNoCaffe2
+        def test_caffe2_np_expect_fail(self):
+            with self.assertRaises(RuntimeError):
+                res = make_np('This_blob_does_not_exist')
+
+        def test_pytorch_np_expect_fail(self):
+            with self.assertRaises(NotImplementedError):
+                res = make_np({'pytorch': 1.0})
 
 if __name__ == '__main__':
     run_tests()

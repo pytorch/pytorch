@@ -1,12 +1,14 @@
+#include <torch/csrc/jit/passes/python_print.h>
+#include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
+
+using c10::QualifiedName;
 
 namespace torch {
 namespace jit {
@@ -84,48 +86,33 @@ static bool isValidIdentifier(const std::string& name) {
   return true;
 }
 
-// handles names of the form, e.g., self.a.b
-// if a field is not a valid identifier, then it will print as, e.g.
-// getattr(self, "0").b
-struct QualifiedName;
-using QualifiedNamePtr = c10::intrusive_ptr<QualifiedName>;
-struct QualifiedName : c10::intrusive_ptr_target {
-  QualifiedName(QualifiedNamePtr prefix, std::string name)
-      : prefix_(std::move(prefix)), name_(std::move(name)) {}
-  QualifiedNamePtr prefix_;
-  std::string name_;
-  static QualifiedNamePtr create(QualifiedNamePtr prefix, std::string name) {
-    return c10::make_intrusive<QualifiedName>(
-        std::move(prefix), std::move(name));
-  }
-  static QualifiedNamePtr create(std::string name) {
-    return c10::make_intrusive<QualifiedName>(
-        QualifiedNamePtr(), std::move(name));
-  }
-  std::string str() const {
-    std::stringstream ss;
-    emit(ss);
-    return ss.str();
-  }
-
- private:
-  void emit(std::ostream& out) const {
-    if (isValidIdentifier(name_)) {
-      if (prefix_) {
-        prefix_->emit(out);
-        out << ".";
-      }
-      out << name_;
-    } else {
-      AT_ASSERT(prefix_);
-      out << "getattr(";
-      prefix_->emit(out);
-      out << ", ";
-      printQuotedString(out, name_);
-      out << ")";
+static void emitQualifiedName(std::ostream& out, const QualifiedName& name) {
+  const auto& name_ = name.name();
+  const auto& prefix_ = name.prefix();
+  if (isValidIdentifier(name_)) {
+    if (!prefix_.empty()) {
+      emitQualifiedName(out, QualifiedName(prefix_));
+      out << ".";
     }
+    out << name_;
+  } else {
+    AT_ASSERT(!prefix_.empty());
+    out << "getattr(";
+    emitQualifiedName(out, QualifiedName(prefix_));
+    out << ", ";
+    printQuotedString(out, name_);
+    out << ")";
   }
-};
+}
+
+// Get a stringified version of the qualified name.
+// if a field is not a valid Python identifier, then it will print as, e.g.
+// getattr(self, "0").b
+static std::string getValidQualifiedName(const QualifiedName& name) {
+  std::stringstream ss;
+  emitQualifiedName(ss, name);
+  return ss.str();
+}
 
 // some names are valid identifiers but off limits because
 // they are keywords or namespaces used in the output
@@ -140,6 +127,7 @@ const static std::unordered_set<std::string> reserved_names = {
     "inf",
     "nan",
     "ops",
+    "__torch__",
     // the python keywords
     "and",
     "as",
@@ -188,17 +176,22 @@ struct PythonPrintPass {
   // Any classes used are written to this table, to be later written out as
   // dependencies.
   std::vector<ClassTypePtr>& class_table_;
+  std::vector<ClassTypePtr> class_deps_;
   // Helper to avoid duplicating class types
   void addToClassTable(const ClassTypePtr& classType) {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
     // to get imported twice.
-    if (classType->name() == "$Module") {
+    if (classType->qualname() == "__torch__.$Module") {
       return;
     }
     if (std::find(class_table_.cbegin(), class_table_.cend(), classType) ==
         class_table_.cend()) {
       class_table_.push_back(classType);
+    }
+    if (std::find(class_deps_.cbegin(), class_deps_.cend(), classType) ==
+        class_deps_.cend()) {
+      class_deps_.push_back(classType);
     }
   }
 
@@ -217,7 +210,6 @@ struct PythonPrintPass {
   // be emitted as method calls (self.__fork...) rather
   // than as method calls
   bool is_method_;
-
 
   // what valid identifiers are in use for the current function
   std::unordered_set<std::string> used_names_;
@@ -539,7 +531,7 @@ struct PythonPrintPass {
       // this must be a while loop, but check that there isn't _also_ a trip
       // count
       if (trip_count_is_specified) {
-        throw script::ErrorReport(stmt.node()->getSourceLocation())
+        throw script::ErrorReport(stmt.node()->sourceRange())
             << "loop cannot be printed as python "
             << "because it has gone through an optimization "
             << "that combined while and for loops. File a bug.";
@@ -673,20 +665,11 @@ struct PythonPrintPass {
 
     if (!print_const && node->kind() == prim::Constant)
       return;
-    if (node->kind() == prim::PythonOp) {
-      auto value = static_cast<const PythonOp*>(node);
-      if (enforce_importable_ && value->ignore_on_export) {
-        // Op has been marked as ignored, so insert an error in its place
-        indent();
-        body_ << "ops.prim.IgnoredPythonOp()\n";
-        return;
-      }
-    }
     splitLongInlines(node->inputs());
     switch (node->kind()) {
       case prim::Return:
         if (enforce_importable_ && node->inputs().size() != 1) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "Exportable methods must have a single return value. "
               << "Normal use of ScriptMethods should enforce this.";
         }
@@ -731,17 +714,17 @@ struct PythonPrintPass {
         std::shared_ptr<Graph> graph = node->g(attr::Subgraph);
         indent();
         body_ << "def " << name << "():\n";
-        for(size_t i = 0; i < node->inputs().size(); ++i) {
+        for (size_t i = 0; i < node->inputs().size(); ++i) {
           assignValue(graph->inputs().at(i), node->inputs().at(i));
         }
         printBody(graph->block());
         std::stringstream ss;
         ss << "fork(" << name << ")";
-        printOutputDefinition( node,ss.str());
+        printOutputDefinition(node, ss.str());
       } break;
       case prim::Function: {
         if (enforce_importable_) {
-          throw script::ErrorReport(node->getSourceLocation())
+          throw script::ErrorReport(node->sourceRange())
               << "closures are not exportable";
         }
         assignValuesToTheirUniqueNames(node->outputs());
@@ -750,7 +733,7 @@ struct PythonPrintPass {
         indent();
         body_ << "def " << name << "(";
         assignValuesToTheirUniqueNames(graph->inputs());
-        for(size_t i = 0; i < graph->inputs().size(); ++i) {
+        for (size_t i = 0; i < graph->inputs().size(); ++i) {
           Value* v = graph->inputs().at(i);
           if (i > 0) {
             body_ << ", ";
@@ -857,16 +840,20 @@ struct PythonPrintPass {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
-        if (enforce_importable_) {
-          throw script::ErrorReport(node->getSourceLocation())
-              << "could not export python function call " << value->name()
-              << ". Remove calls to Python functions before export. "
+        if (enforce_importable_ && !value->ignore_on_export) {
+          throw script::ErrorReport(node->sourceRange())
+              << "Could not export Python function call '" << value->name()
+              << "'. Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
-              << "If this is a nn.ModuleList, add it to __constants__.";
+              << "If this is a nn.ModuleList, add it to __constants__";
         }
 
-        stmt << "^" << value->name();
-        value->writeScalars(stmt);
+        if (value->ignore_on_export) {
+          stmt << "ops.prim.IgnoredPythonOp";
+        } else {
+          stmt << "^" << value->name();
+          value->writeScalars(stmt);
+        }
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
       case prim::Constant: {
@@ -890,6 +877,9 @@ struct PythonPrintPass {
       case prim::Bool: {
         printValueList(stmt, node->inputs(), "bool(", ")");
       } break;
+      case prim::str: {
+        printValueList(stmt, node->inputs(), "str(", ")");
+      } break;
       case prim::Print: {
         printValueList(stmt, node->inputs(), "print(", ")");
       } break;
@@ -898,8 +888,8 @@ struct PythonPrintPass {
             stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
       } break;
       case prim::TupleIndex: {
-        stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::index)
-             << "]";
+        stmt << "(" << useOf(node->inputs().at(0)) << ")["
+             << useOf(node->inputs().at(1)) << "]";
       } break;
       case prim::TupleSlice: {
         stmt << "(" << useOf(node->input()) << ")[" << node->i(attr::beg) << ":"
@@ -935,7 +925,8 @@ struct PythonPrintPass {
       } break;
       case prim::CreateObject: {
         const auto classType = node->output()->type()->expect<ClassType>();
-        stmt << classType->name() << ".__new__(" << classType->name() << ")";
+        stmt << classType->python_str() << ".__new__("
+             << classType->python_str() << ")";
       } break;
       case prim::GetAttr: {
         const auto obj = node->inputs().at(0);
@@ -1031,30 +1022,28 @@ struct PythonPrintPass {
         printNode(n, /*print_const=*/true);
       }
       // Print body
-      printBlock(
-          body, body->return_node()->inputs().size() > 0);
+      printBlock(body, body->return_node()->inputs().size() > 0);
       printNode(body->return_node(), /*print_const=*/false);
     }
   }
 
-public:
-  void printFunction(script::Function& func) {
+ public:
+  void printFunction(const script::Function& func) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
 
-
     indent();
     body_ << "def " << func.name() << "(";
     auto param_it = graph.inputs().begin();
-    for(const Argument& arg : schema.arguments()) {
+    for (const Argument& arg : schema.arguments()) {
       std::string arg_name = genName(arg.name());
       if (param_it == graph.inputs().begin()) {
         // the first argument may omit its type when it is implied by context
         // the flag is_method_ determines when to do this
         body_ << arg_name;
         if (!is_method_) {
-           body_ << ": " << arg.type()->python_str();
+          body_ << ": " << arg.type()->python_str();
         }
       } else {
         body_ << ",\n    " << arg_name << ": " << arg.type()->python_str();
@@ -1067,6 +1056,19 @@ public:
 
     body_ << ") -> " << resultType(graph)->python_str() << ":\n";
     printBody(graph.block());
+  }
+
+  std::string getImports() {
+    std::ostringstream ret;
+    std::unordered_set<std::string> already_printed;
+    for (const auto& c : class_deps_) {
+      if (already_printed.count(c->qualifier())) {
+        continue;
+      }
+      ret << "import " << c->qualifier() << "\n";
+      already_printed.insert(c->qualifier());
+    }
+    return ret.str();
   }
 
   PythonPrintPass(
@@ -1090,24 +1092,28 @@ public:
     }
   }
 
-  void printCompilationUnit(script::CompilationUnit& cu) {
+  void printCompilationUnit(const script::CompilationUnit& cu) {
     for (auto& func : cu.get_functions()) {
       printFunction(*func);
     }
   }
 
   void printClass(const ClassTypePtr& classType) {
-    body_ << "class " << classType->name() << ":\n";
+    body_ << "class " << classType->basename() << ":\n";
     {
       const auto guard = WithIndented();
       for (auto& method : classType->methods()) {
         printFunction(*method);
       }
     }
+    // remove `classType` from the list of deps
+    class_deps_.erase(
+        std::remove(class_deps_.begin(), class_deps_.end(), classType),
+        class_deps_.end());
   }
 
   void print(std::ostream& out) {
-    out << body_.str();
+    out << getImports() << body_.str();
   }
 };
 
@@ -1119,8 +1125,7 @@ void PythonPrint(
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printFunction(const_cast<script::Function&>(func));
+  pp.printFunction(func);
   pp.print(out);
 }
 
@@ -1132,8 +1137,7 @@ void PythonPrint(
     std::vector<ClassTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  pp.printCompilationUnit(const_cast<script::CompilationUnit&>(cu));
+  pp.printCompilationUnit(cu);
   pp.print(out);
 }
 
@@ -1195,6 +1199,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
+      prim::profile, // used in interpreter only
 
   };
 
@@ -1209,6 +1214,5 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   return handled.count(sym) || unneeded.count(sym) ||
       !required_namespaces.count(sym.ns());
 }
-
 } // namespace jit
 } // namespace torch

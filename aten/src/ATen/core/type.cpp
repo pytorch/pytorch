@@ -1,5 +1,5 @@
 #include <ATen/core/jit_type.h>
-
+#include <ATen/core/Dict.h>
 #include <iostream>
 
 namespace c10 {
@@ -24,7 +24,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     }
     out << ")";
   } else if (auto value = t.cast<ProfiledTensorType>()) {
-    out << "Tensor(dtype = ";
+    out << "ProfiledTensor(dtype = ";
     if  (value->scalarType().has_value())
     {
         out << *value->scalarType();
@@ -60,8 +60,10 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << *(tup->elements()[i]);
     }
     out << ")";
+  } else if (t.kind() == TypeKind::FunctionType) {
+    out << "Function";
   } else {
-    out << t.str();
+     out << t.str();
   }
   return out;
 }
@@ -156,6 +158,8 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
     return TupleType::create(fmap(value.toTuple()->elements(), incompleteInferTypeFrom));
   } else if (value.isDevice()) {
     return DeviceObjType::get();
+  } else if (value.isObject()) {
+    return value.toObject()->type();
   }
   AT_ERROR("Type cannot be accurately recovered from this IValue.");
 }
@@ -180,7 +184,7 @@ TypePtr attemptToRecoverType(const IValue& ivalue) {
     }
     auto item = dict.begin();
     return DictType::create(
-        attemptToRecoverType(item->first), attemptToRecoverType(item->second));
+        attemptToRecoverType(item->key()), attemptToRecoverType(item->value()));
   }
   return incompleteInferTypeFrom(ivalue);
 }
@@ -224,9 +228,9 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     auto dict_type = type->expect<DictType>();
     const auto& dict = ivalue.toGenericDictRef();
     return std::all_of(
-        dict.begin(), dict.end(), [=](const std::pair<IValue, IValue>& item) {
-          return isSubvalueOf(item.first, dict_type->getKeyType()) &&
-              isSubvalueOf(item.second, dict_type->getValueType());
+        dict.begin(), dict.end(), [=](const c10::impl::GenericDictPtr::const_iterator::value_type& item) {
+          return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
+              isSubvalueOf(item.value(), dict_type->getValueType());
         });
   }
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
@@ -323,8 +327,8 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     }
     std::stringstream ss;
-    ss << "type variable '" << vt->name() <<"' previously matched to type " <<
-      it->second->str() << " is matched to type " << actual->str();
+    ss << "Type variable '" << vt->name() << "' previously matched to type " <<
+      it->second->python_str() << " is matched to type " << actual->python_str();
     ret.errMsg = ss.str();
     return ret;
   } else if(auto lt_formal = formal->cast<ListType>()) {
@@ -341,14 +345,15 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a list to " << actual->str();
+      ss << "Cannot match " << lt_formal->python_str() << " to "
+         << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
   } else if(auto tp_formal = formal->cast<TupleType>()) {
     if(auto tp_actual = actual->cast<TupleType>()) {
       if(tp_formal->elements().size() != tp_actual->elements().size()) {
-        ret.errMsg = "cannot match tuples of mismatched size";
+        ret.errMsg = "Cannot match tuples of mismatched size";
         return ret;
       }
       std::vector<TypePtr> elements;
@@ -366,7 +371,7 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a tuple to " << actual->str();
+      ss << "Cannot match a tuple to " << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
@@ -381,7 +386,7 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a future to " << actual->str();
+      ss << "Cannot match a future to " << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
@@ -401,7 +406,9 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     } else {
-      ret.errMsg = "cannot match an Optional[T] to None, because there is no way to determine T from None.";
+      ret.errMsg =
+          "Cannot match an Optional[T] to None, because there is no "
+          "way to determine T from None.";
       return ret;
     }
   } else if (auto dict_formal = formal->cast<DictType>()) {
@@ -426,13 +433,13 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a dict to " << actual->str();
+      ss << "Cannot match a dict to " << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
   }
 
-  AT_ERROR("unhandled free variable container: ", formal->str());
+  AT_ERROR("Unhandled free variable container: ", formal->python_str());
 }
 
 // change return types like List[List[t]] into List[List[int]]
@@ -469,68 +476,25 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
   return *this == *rhs;
 }
 
-namespace {
-class ClassTypeRegistry {
- public:
-  void registerType(std::string name, ClassTypePtr type) {
-    std::lock_guard<std::mutex> g(mutex_);
-    // TODO: new type registrations will override the old ones. Is this safe?
-    reg_[name] = type;
-  }
-
-  ClassTypePtr getType(const std::string& name) {
-    std::lock_guard<std::mutex> g(mutex_);
-    if (reg_.count(name)) {
-      return reg_.at(name);
-    }
-    return nullptr;
-  }
-
-  void clear() {
-    std::lock_guard<std::mutex> g(mutex_);
-    reg_.clear();
-  }
-
- private:
-  std::mutex mutex_;
-  std::unordered_map<std::string, ClassTypePtr> reg_;
-};
-
-ClassTypeRegistry& getRegistry() {
-  static ClassTypeRegistry r;
-  return r;
-}
-} // namespace
-
 ClassTypePtr ClassType::create(
-    const std::string& name,
+    QualifiedName qualifiedName,
     std::shared_ptr<CompilationUnit> cu) {
-  auto ptr = ClassTypePtr(new ClassType(name, std::move(cu)));
-  getRegistry().registerType(name, ptr);
-  return ptr;
+  return ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
 }
 
 ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
-  return ClassTypePtr(new ClassType("$Module", std::move(cu)));
+  return ClassTypePtr(new ClassType(
+      QualifiedName(QualifiedName("__torch__"), "$Module"), std::move(cu)));
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassTypePtr(new ClassType(typename_, compilation_unit_));
+  auto ptr = ClassTypePtr(new ClassType(name_, compilation_unit_));
   AT_ASSERT(numAttributes() == refined_slots.size());
   for(size_t i = 0; i < attributeNames_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
     ptr->addAttribute(attributeNames_[i], refined_slots[i]);
   }
   return ptr;
-}
-
-ClassTypePtr ClassType::get(const std::string& name) {
-  return getRegistry().getType(name);
-}
-
-
-void ClassType::clearRegistry() {
-  getRegistry().clear();
 }
 
 std::string ProfiledTensorType::str() const {
@@ -577,5 +541,12 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     out << ")";
     return out;
 }
+
+ClassType::ClassType(
+    QualifiedName name,
+    std::shared_ptr<CompilationUnit> cu)
+    : Type(TypeKind::ClassType),
+      name_(std::move(name)),
+      compilation_unit_(std::move(cu)) {}
 
 } // namespace c10

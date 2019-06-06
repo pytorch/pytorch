@@ -43,7 +43,7 @@ configure_file(
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../caffe2
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
-if (BUILD_ATEN_MOBILE)
+if (NOT INTERN_BUILD_ATEN_OPS)
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
           DESTINATION include/ATen
           FILES_MATCHING PATTERN "*.h")
@@ -52,7 +52,7 @@ install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
         DESTINATION include/caffe2/core)
 
 # ---[ ATen specific
-if (NOT BUILD_ATEN_MOBILE)
+if (INTERN_BUILD_ATEN_OPS)
   SET(OPT_FLAG "-O3 ")
   IF(MSVC)
     SET(OPT_FLAG "/Ox /fp:strict ")
@@ -101,11 +101,21 @@ if (NOT BUILD_ATEN_MOBILE)
 
   IF(CXX_AVX2_FOUND)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX2_CPU_DEFINITION")
+
+    # Some versions of GCC pessimistically split unaligned load and store
+    # instructions when using the default tuning. This is a bad choice on
+    # new Intel and AMD processors so we disable it when compiling with AVX2.
+    # See https://stackoverflow.com/questions/52626726/why-doesnt-gcc-resolve-mm256-loadu-pd-as-single-vmovupd#tab-top
+    check_cxx_compiler_flag("-mno-avx256-split-unaligned-load -mno-avx256-split-unaligned-store" COMPILER_SUPPORTS_NO_AVX256_SPLIT)
+    IF(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
+      SET(CPU_NO_AVX256_SPLIT_FLAGS "-mno-avx256-split-unaligned-load -mno-avx256-split-unaligned-store")
+    ENDIF(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
+
     LIST(APPEND CPU_CAPABILITY_NAMES "AVX2")
     IF(MSVC)
       LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG}/arch:AVX2")
     ELSE(MSVC)
-      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma")
+      LIST(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -mavx2 -mfma ${CPU_NO_AVX256_SPLIT_FLAGS}")
     ENDIF(MSVC)
   ENDIF(CXX_AVX2_FOUND)
 

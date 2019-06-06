@@ -15,6 +15,7 @@
 #include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
+#include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
@@ -36,6 +37,7 @@ namespace script {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
+using ::c10::QualifiedName;
 // Map which stores filename to content.
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 
@@ -141,7 +143,7 @@ struct TORCH_API Module {
   ~Module() {
     // ClassType own the compilation unit of their Functions, but each
     // Function has a self argument which owns the ClassType, created a
-    // referernce cycle. By dropping all the methods of the module's class
+    // reference cycle. By dropping all the methods of the module's class
     // here we break the cycle.
     class_compilation_unit().drop_all_functions();
   }
@@ -302,6 +304,12 @@ struct TORCH_API Module {
     return offset ? modules_[*offset] : nullptr;
   }
   Method* find_method(const std::string& name) const {
+    // find_offset() method reads "dict_" object.
+    // Lock because another thread can modify "dict_" object at the same time
+    // calling insert() method.
+    // Ideally recursive_mutex should be replaced with shared_mutex (C++ 17)
+    // for the performance reasons.
+    std::unique_lock<std::recursive_mutex> keeper(create_method_guard_);
     auto offset = find_offset(name, EntityType::METHOD);
     if (offset) {
       return methods_[*offset].get();
@@ -312,7 +320,6 @@ struct TORCH_API Module {
       // but we have to update the internal Method cache.
       // This can be removed when class_compilation_unit() is the source of
       // truth for methods.
-      std::lock_guard<std::recursive_mutex> guard(create_method_guard_);
       Module* mutable_this = const_cast<Module*>(this);
       std::unique_ptr<Method> m(new Method(mutable_this, fn));
       return mutable_this
@@ -439,6 +446,14 @@ struct TORCH_API Module {
 
   // so that C++ users can easily add methods
   void define(const std::string& src, const ResolverPtr& resolver = nullptr);
+
+  template <typename... Types>
+  IValue create_class(const c10::QualifiedName& name, Types&&... args)
+      const {
+    return create_class(name, {IValue(std::forward<Types>(args))...});
+  }
+
+  IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
  private:
   std::pair<std::shared_ptr<Function>, std::vector<Slot>>

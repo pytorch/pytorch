@@ -370,7 +370,7 @@ class BuildExtension(build_ext, object):
         check_compiler_abi_compatibility(compiler)
 
     def _add_compile_flag(self, extension, flag):
-        extension.extra_compile_args = copy.copy(extension.extra_compile_args)
+        extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
         if isinstance(extension.extra_compile_args, dict):
             for args in extension.extra_compile_args.values():
                 args.append(flag)
@@ -429,7 +429,6 @@ def CppExtension(name, sources, *args, **kwargs):
         libraries = kwargs.get('libraries', [])
         libraries.append('c10')
         libraries.append('caffe2')
-        libraries.append('torch')
         libraries.append('torch_python')
         libraries.append('_C')
         kwargs['libraries'] = libraries
@@ -476,7 +475,6 @@ def CUDAExtension(name, sources, *args, **kwargs):
         libraries.append('c10')
         libraries.append('c10_cuda')
         libraries.append('caffe2')
-        libraries.append('torch')
         libraries.append('torch_python')
         libraries.append('caffe2_gpu')
         libraries.append('_C')
@@ -891,7 +889,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
 
         extra_ldflags.append('c10.lib')
         extra_ldflags.append('caffe2.lib')
-        extra_ldflags.append('torch.lib')
         extra_ldflags.append('torch_python.lib')
         if with_cuda:
             extra_ldflags.append('caffe2_gpu.lib')

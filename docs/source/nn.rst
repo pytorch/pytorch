@@ -530,7 +530,7 @@ Linear layers
 ----------------------------------
 
 :hidden:`Identity`
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Identity
     :members:
@@ -1045,6 +1045,11 @@ Non-linear activation functions
 ~~~~~~~~~~~~~~~
 
 .. autofunction:: glu
+
+:hidden:`gelu`
+~~~~~~~~~~~~~~~
+
+.. autofunction:: gelu
 
 :hidden:`logsigmoid`
 ~~~~~~~~~~~~~~~~~~~~

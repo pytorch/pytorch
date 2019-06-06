@@ -209,7 +209,7 @@ class QuantizerTestCase(TestCase):
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
         # Insert observers
-        torch._C._jit_pass_insert_observers(scriptM.graph, activationQuantObj.observer)
+        torch._C._jit_pass_insert_observers(scriptM._c, "forward", activationQuantObj.observer)
 
         # Run ScriptM Model and Collect statistics
         scriptM.forward(data)

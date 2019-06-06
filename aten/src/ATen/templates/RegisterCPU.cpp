@@ -2,7 +2,7 @@
 
 // ${generated_comment}
 
-#include <ATen/Type.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/UndefinedType.h>
 #include <ATen/core/VariableHooksInterface.h>

@@ -19,7 +19,7 @@ inline bool check_type(PyObject* obj, at::TensorTypeId id, at::ScalarType dtype)
 
 template<typename T>
 inline T* unpack(PyObject* obj) {
-  return (T*) ((THPVariable*)obj)->cdata.data().unsafeGetTensorImpl();
+  return (T*) ((THPVariable*)obj)->cdata.unsafeGetTensorImpl();
 }
 
 }} // namespace torch::nn
@@ -28,7 +28,7 @@ static inline int get_device(PyObject* args) {
   for (int i = 0, n = PyTuple_GET_SIZE(args); i != n; i++) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
     if (THPVariable_Check(arg)) {
-      auto& tensor = THPVariable_UnpackData(arg);
+      auto& tensor = THPVariable_Unpack(arg);
       if (tensor.is_cuda()) {
         return tensor.get_device();
       }

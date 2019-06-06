@@ -8,6 +8,9 @@ from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 
+# Borrowed from cPython implementation 
+# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411# 
+
 _reserved_prefix = '__jit'
 _reserved_names = {'print'}
 _identifier_chars = set(string.ascii_lowercase + string.ascii_uppercase + string.digits)
@@ -135,34 +138,42 @@ def _uses_true_division(fn):
             '_uses_true_division: expected function or method, got {}'.format(type(fn)))
 
 
-def get_jit_class_def(cls, self_name=None):
+def get_jit_class_def(cls, self_name):
     # Get defs for each method independently
     methods = inspect.getmembers(
         cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
     method_defs = [get_jit_def(method[1],
-                   self_name=cls.__name__) for method in methods]
+                   self_name=self_name) for method in methods]
 
-    source = dedent(inspect.getsource(cls))
-    py_ast = ast.parse(source)
-    ctx = SourceContext(source, False)
-    return build_class_def(ctx, py_ast.body[0], method_defs)
+    sourcelines, file_lineno = inspect.getsourcelines(cls)
+    source = ''.join(sourcelines)
+    filename = inspect.getsourcefile(cls)
+    dedent_src = dedent(source)
+    py_ast = ast.parse(dedent_src)
+    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
+    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
+    return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
 def get_jit_def(fn, self_name=None):
-    source = dedent(inspect.getsource(fn))
-    py_ast = ast.parse(source)
+    sourcelines, file_lineno = inspect.getsourcelines(fn)
+    source = ''.join(sourcelines)
+    filename = inspect.getsourcefile(fn)
+    dedent_src = dedent(source)
+    py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
+    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, _uses_true_division(fn))
+    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
     return build_def(ctx, py_ast.body[0], type_line, self_name)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
 class SourceContext(SourceRangeFactory):
-    def __init__(self, source, uses_true_division=True):
-        super(SourceContext, self).__init__(source)
+    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
+        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
 
 
@@ -174,10 +185,10 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_class_def(ctx, py_def, methods):
+def build_class_def(ctx, py_def, methods, self_name):
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("class"))
-    return ClassDef(Ident(r, py_def.name), methods)
+    return ClassDef(Ident(r, self_name), methods)
 
 
 def build_def(ctx, py_def, type_line, self_name=None):
@@ -223,7 +234,7 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
     elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
     else:
-        annotation_expr = Var(Ident(r, 'Tensor'))
+        annotation_expr = EmptyTypeAnnotation(r)
     return Param(annotation_expr, Ident(r, name), kwarg_only)
 
 
@@ -587,6 +598,27 @@ class ExprBuilder(Builder):
         value = str(expr.s)
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
         return StringLiteral(r, value)
+
+    @staticmethod
+    def build_JoinedStr(ctx, expr):
+        s = ''
+        args = []
+        for value in expr.values:
+            r = ctx.make_range(value.lineno, value.col_offset, value.col_offset + 1)
+            if isinstance(value, ast.FormattedValue):
+                if value.conversion != -1:
+                    raise NotSupportedError(r, 'Don\'t support conversion in JoinedStr')
+                if value.format_spec is not None:
+                    raise NotSupportedError(r, 'Don\'t support formatting in JoinedStr')
+                s += '{}'
+                args.append(build_expr(ctx, value.value))
+            elif isinstance(value, ast.Str):
+                s += value.s
+            else:
+                raise NotSupportedError(r, 'Unsupported value in JoinedStr')
+
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        return Apply(Select(StringLiteral(r, s), Ident(r, 'format')), args, [])
 
     @staticmethod
     def build_ListComp(ctx, stmt):

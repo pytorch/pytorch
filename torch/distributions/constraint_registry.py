@@ -213,3 +213,33 @@ def _transform_to_simplex(constraint):
 @transform_to.register(constraints.lower_cholesky)
 def _transform_to_lower_cholesky(constraint):
     return transforms.LowerCholeskyTransform()
+
+
+@biject_to.register(constraints.cat)
+def _biject_to_cat(constraint):
+    return transforms.CatTransform([biject_to(c)
+                                    for c in constraint.cseq],
+                                   constraint.dim,
+                                   constraint.lengths)
+
+
+@transform_to.register(constraints.cat)
+def _transform_to_cat(constraint):
+    return transforms.CatTransform([transform_to(c)
+                                    for c in constraint.cseq],
+                                   constraint.dim,
+                                   constraint.lengths)
+
+
+@biject_to.register(constraints.stack)
+def _biject_to_stack(constraint):
+    return transforms.StackTransform(
+        [biject_to(c)
+         for c in constraint.cseq], constraint.dim)
+
+
+@transform_to.register(constraints.stack)
+def _transform_to_stack(constraint):
+    return transforms.StackTransform(
+        [transform_to(c)
+         for c in constraint.cseq], constraint.dim)
