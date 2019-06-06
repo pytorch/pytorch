@@ -147,9 +147,6 @@ class AliasDb {
    */
   void makeAllAlias(const std::vector<Value*>& values);
   void makePointerTo(const Value* value, const Value* to);
-  TORCH_API void addToContainedElements(
-      const Value* element,
-      const Value* container);
   void assignWildcardToContained(Element* e, const TypePtr& type);
   void assignWildcardToContained(const Value* v);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);

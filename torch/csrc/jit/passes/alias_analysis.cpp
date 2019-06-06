@@ -132,7 +132,9 @@ void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
 
       // We also consider memory locations of contained values to be "read".
       for (auto contained : el->containedElements) {
-        ret |= memoryDAG_->fromIndex(contained)->getMemoryLocations();
+        if (contained) {
+          ret |= contained->getMemoryLocations();
+        }
       }
     }
   }
@@ -175,7 +177,9 @@ void AliasDb::dump() const {
     if (!element->containedElements.empty()) {
       std::cout << getElementName(element) << " contains: ";
       for (const auto contained : element->containedElements) {
-        std::cout << getElementName(memoryDAG_->fromIndex(contained)) << ", ";
+        if (contained) {
+          std::cout << getElementName(contained) << ", ";
+        }
       }
       std::cout << "\n";
     }
@@ -208,15 +212,16 @@ void AliasDb::assignWildcardToContained(Element* e, const TypePtr& type) {
   TORCH_INTERNAL_ASSERT(shouldAnnotate(type));
   // Assign wildcards to contained types
   for (const auto& containedType : type->containedTypes()) {
+    Element* containedElement = nullptr;
     if (shouldAnnotate(containedType)) {
-      auto containedElement = memoryDAG_->makeFreshValue(nullptr);
+      containedElement = memoryDAG_->makeFreshValue(nullptr);
       auto wildcard = getOrCreateWildcard(containedType);
       memoryDAG_->makePointerTo(containedElement, wildcard);
-      memoryDAG_->addToContainedElements(containedElement, e);
 
       // Handle nested containers
       assignWildcardToContained(containedElement, containedType);
     }
+    memoryDAG_->appendToContainedElements(containedElement, e);
   }
 }
 
@@ -576,11 +581,13 @@ void AliasDb::analyzeTupleConstruct(Node* node) {
   // (even those containing just prmitive types), an element needs to be created
   // for TupleConstruct. When that changes we can create an element
   // only if it contains elements which need annotation
-  getOrCreateElement(node->output());
+  auto tuple = getOrCreateElement(node->output());
   for (const auto& input : node->inputs()) {
+    Element* contained = nullptr;
     if (shouldAnnotate(input)) {
-      addToContainedElements(input, node->output());
+      contained = getOrCreateElement(input);
     }
+    memoryDAG_->appendToContainedElements(contained, tuple);
   }
 }
 
@@ -676,21 +683,6 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   auto toEl = getOrCreateElement(to);
 
   memoryDAG_->makePointerTo(fromEl, toEl);
-}
-
-void AliasDb::addToContainedElements(
-    const Value* elem,
-    const Value* container) {
-  if (!shouldAnnotate(elem)) {
-    return;
-  }
-
-  TORCH_INTERNAL_ASSERT(isContainerType(container->type()));
-
-  auto elemEl = getOrCreateElement(elem);
-  auto contEl = getOrCreateElement(container);
-
-  memoryDAG_->addToContainedElements(elemEl, contEl);
 }
 
 bool AliasDb::mayAlias(const Value* a, const Value* b) const {

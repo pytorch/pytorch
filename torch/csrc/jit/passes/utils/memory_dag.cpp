@@ -54,7 +54,9 @@ void MemoryDAG::collectAllContainedMemoryLocations(
   }
 
   for (const auto& contained : elem->containedElements) {
-    collectAllContainedMemoryLocations(fromIndex(contained), cont);
+    if (contained) {
+      collectAllContainedMemoryLocations(contained, cont);
+    }
   }
 }
 
@@ -92,18 +94,19 @@ void MemoryDAG::makePointerTo(Element* from, Element* to) {
   from->pointsTo.set(to->index);
   to->pointedFrom.set(from->index);
 
-  for (auto containedIdx : to->containedElements) {
-    auto contained = fromIndex(containedIdx);
-    auto el = makeFreshValue(contained->value);
-    makePointerTo(el, contained);
-    from->containedElements.set(el->index);
+  for (auto contained : to->containedElements) {
+    if (contained) {
+      auto el = makeFreshValue(contained->value);
+      makePointerTo(el, contained);
+      appendToContainedElements(contained, el);
+      from->containedElements.push_back(el);
+    }
   }
 }
 
-void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
-  TORCH_INTERNAL_ASSERT(
-      elem != container, "Elements cannot contain themselves");
-  container->containedElements.set(elem->index);
+void MemoryDAG::appendToContainedElements(Element* elem, Element* container) {
+  TORCH_INTERNAL_ASSERT(elem != container, "Elements cannot contain themselves");
+  container->containedElements.push_back(elem);
 }
 
 // Give `v` a fresh alias (i.e. it does not point to any value)

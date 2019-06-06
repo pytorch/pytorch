@@ -948,10 +948,10 @@ void testMemoryDAG() {
     MemoryDAG t;
     auto a = t.makeFreshValue(aValue);
     auto b = t.makeFreshValue(bValue);
-    t.addToContainedElements(a, b);
+    t.appendToContainedElements(a, b);
 
     auto c = t.makeFreshValue(cValue);
-    t.addToContainedElements(a, c);
+    t.appendToContainedElements(a, c);
 
     AT_ASSERT(t.mayContainAlias(a, b));
     AT_ASSERT(t.mayContainAlias(b, a));
@@ -972,7 +972,7 @@ void testMemoryDAG() {
     // b(a)
     // c(a)
     // d(b(a))
-    t.addToContainedElements(b, d);
+    t.appendToContainedElements(b, d);
     AT_ASSERT(t.mayContainAlias(b, d));
     AT_ASSERT(t.mayContainAlias(d, b));
 
@@ -985,7 +985,7 @@ void testMemoryDAG() {
     auto f = t.makeFreshValue(aValue);
     auto e = t.makeFreshValue(bValue);
 
-    t.addToContainedElements(f, e);
+    t.appendToContainedElements(f, e);
 
     for (auto elem : {a, b, c, d}) {
       AT_ASSERT(!t.mayContainAlias(f, elem));

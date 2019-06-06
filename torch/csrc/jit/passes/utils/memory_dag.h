@@ -46,7 +46,7 @@ class TORCH_API MemoryDAG {
   // `to`'s contained elements.
   void makePointerTo(Element* from, Element* to);
 
-  void addToContainedElements(Element* contained, Element* container);
+  void appendToContainedElements(Element* contained, Element* container);
 
   // Make a fresh element (i.e. an element that doesn't point to anything) and
   // return it.
@@ -97,7 +97,11 @@ struct Element {
   MemoryLocations pointedFrom;
 
   // Elements can contain other elements (e.g. List[Tensor])
-  MemoryLocations containedElements;
+  // This is a vector instead of bitset because index matters.
+  //
+  // NOTE: elements MAY BE nullptr; this represents that they are non-aliasing
+  // types.
+  std::vector<Element*> containedElements;
 
   // Return the unique memory locations that `Element` might represent.
   TORCH_API const MemoryLocations& getMemoryLocations() const;
