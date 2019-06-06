@@ -9137,6 +9137,11 @@ class _TestTorchMixin(object):
                     dst2 = tensor.nonzero()
                     dst3 = torch.LongTensor().to(device)
                     torch.nonzero(tensor, out=dst3)
+
+                    self.assertRaisesRegex(
+                        TypeError,
+                        "received an invalid combination of arguments",
+                        lambda: torch.nonzero(tensor, as_tuple=True, out=dst3))
                     if len(shape) == 1:
                         dst = []
                         for i in range(num_src):
@@ -9158,21 +9163,44 @@ class _TestTorchMixin(object):
                             self.assertNotEqual(tensor[dst1[i, 0], dst1[i, 1], dst1[i, 2]].item(), 0)
                         lex = is_lexicographically_sorted(dst1)
                         self.assertEqual(torch.ones_like(lex), lex)
+                    if TEST_NUMPY:
+                        tup1 = torch.nonzero(tensor, as_tuple=True)
+                        tup2 = tensor.nonzero(as_tuple=True)
+                        np1 = tensor.cpu().numpy().nonzero()
+                        for t in (tup1, tup2):
+                            self.assertEqual(len(t), len(np1))
+                            for i in range(len(t)):
+                                self.assertEqual(t[i].cpu().numpy(), np1[i])
 
     def test_nonzero_empty(self):
+        def assert_tuple_empty(tup, dim):
+            self.assertEqual(dim, len(tup))
+            for t in tup:
+                self.assertEqual(torch.Size([0]), t.shape)
         for device in torch.testing.get_all_device_types():
             x = torch.randn(0, 2, 0, 5, 0, device=device)
             y = torch.nonzero(x)
+            z = torch.nonzero(x, as_tuple=True)
+
             self.assertEqual(0, y.numel())
             self.assertEqual(torch.Size([0, 5]), y.shape)
+            assert_tuple_empty(z, 5)
 
             x = torch.tensor(0.5, device=device)
             y = torch.nonzero(x)
-            self.assertEqual(torch.Size([1, 0]), y.shape)
+            # nonzero with as_tuple returns a
+            # tuple of len 1 for a zero-dim tensor.
+            # This is done to match Numpy behavior.
+            z = torch.nonzero(x, as_tuple=True)
+            self.assertEqual(1, len(z))
+            self.assertEqual(torch.zeros(1, dtype=torch.long), z[0])
 
             x = torch.zeros((), device=device)
             y = torch.nonzero(x)
+            z = torch.nonzero(x, as_tuple=True)
             self.assertEqual(torch.Size([0, 0]), y.shape)
+            self.assertEqual(1, len(z))
+            self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
     def test_deepcopy(self):
         from copy import deepcopy
