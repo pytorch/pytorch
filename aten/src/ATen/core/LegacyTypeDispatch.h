@@ -59,8 +59,7 @@ class CAFFE2_API LegacyTypeDispatch {
   }
   Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
     if (p != Backend::Undefined) {
-      initForDeviceType(backendToDeviceType(p));
-      initForScalarType(s);
+      initForBackend(p);
     }
     auto type = getNonVariableTypeRaw(p, s);
 
@@ -103,9 +102,11 @@ class CAFFE2_API LegacyTypeDispatch {
     type_registry[static_cast<int>(b)] = std::move(t);
     detail::getVariableHooks().registerVariableTypeFor(this, b);
   }
-  void initForDeviceType(DeviceType p) {
+  void initForBackend(Backend b) {
+    auto p = backendToDeviceType(b);
     static std::once_flag cpu_once;
     static std::once_flag cuda_once;
+    static std::once_flag complex_once;
     if (p == DeviceType::CPU) {
       std::call_once(cpu_once, [] {
         getLegacyDeviceTypeInit().initCPU();
@@ -119,18 +120,13 @@ class CAFFE2_API LegacyTypeDispatch {
         getLegacyDeviceTypeInit().initHIP();
       });
     }
-  }
- private:
-  void initForScalarType(ScalarType s) {
-    static std::once_flag once;
-    // Only complex may need initialization
-    if (isComplexType(s)) {
-      std::call_once(once, [] {
+    if (b == Backend::ComplexCPU || b == Backend::ComplexCUDA) {
+      std::call_once(complex_once, [] {
         getLegacyDeviceTypeInit().initComplex();
       });
     }
   }
-
+ private:
   // NB: type_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   TypeUniquePtr type_registry
@@ -168,7 +164,7 @@ struct CAFFE2_API AutoNonVariableTypeMode {
  * See NOTE [ Treating Variables as non-Variables in type dispatch ]
  */
 inline Type& legacyTensorType(const TensorImpl& tensor) {
-  // NB: It's valid to use getTypeRaw here, because the TensorImpl	  return globalLegacyTypeDispatch().getType(
+  // NB: It's valid to use getTypeRaw here, because the TensorImpl
   // could not have been created without initializing the Type first.
   // NB: This is not actually true via the Caffe2 codepath! But we call
   // initializeLegacyTypeDispatchFor in the right place.

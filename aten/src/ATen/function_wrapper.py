@@ -146,7 +146,7 @@ CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults
 # special method definition for factory functions in Functions.h that initializes backends
 FACTORY_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
-    globalLegacyTypeDispatch().initForDeviceType(backendToDeviceType(${inferred_backend}));
+    globalLegacyTypeDispatch().initForBackend(${inferred_backend});
     return globalATenDispatch().getOp<${return_type} (${formals_types})>(
         ${inferred_backend}, ${inferred_is_variable}, ${id}, "${api_name}")(${native_actuals});
 }
