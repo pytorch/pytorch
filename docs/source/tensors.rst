@@ -120,6 +120,11 @@ view of a storage and defines numeric operations on it.
     To change an existing tensor's :class:`torch.device` and/or :class:`torch.dtype`, consider using
     :meth:`~torch.Tensor.to` method on the tensor.
 
+.. warning::
+   Current implementation of :class:`torch.Tensor` introduces memory overhead,
+   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors. 
+   If this is your case, consider using one large structure.
+
 .. class:: Tensor()
 
    There are a few main ways to create a tensor, depending on your use case.
@@ -142,6 +147,8 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: is_cuda
    .. autoattribute:: device
    .. autoattribute:: grad
+   .. autoattribute:: ndim
+   .. autoattribute:: T 
 
    .. automethod:: abs
    .. automethod:: abs_
@@ -179,6 +186,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bernoulli_
    .. automethod:: bincount
    .. automethod:: bmm
+   .. automethod:: bool
    .. automethod:: byte
    .. automethod:: btrifact
    .. automethod:: btrifact_with_info
@@ -188,6 +196,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil_
    .. automethod:: char
    .. automethod:: cholesky
+   .. automethod:: cholesky_inverse
    .. automethod:: cholesky_solve
    .. automethod:: chunk
    .. automethod:: clamp
@@ -205,6 +214,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
+   .. automethod:: dequantize
    .. automethod:: det
    .. automethod:: dense_dim
    .. automethod:: detach
@@ -276,6 +286,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_select
    .. automethod:: indices
    .. automethod:: int
+   .. automethod:: int_repr
    .. automethod:: inverse
    .. automethod:: irfft
    .. automethod:: is_contiguous
@@ -307,6 +318,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lt
    .. automethod:: lt_
    .. automethod:: lu
+   .. automethod:: lu_solve
    .. automethod:: map_
    .. automethod:: masked_scatter_
    .. automethod:: masked_scatter
@@ -354,6 +366,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: pstrf
    .. automethod:: put_
    .. automethod:: qr
+   .. automethod:: q_scale
+   .. automethod:: q_zero_point
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
@@ -363,6 +377,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
+   .. automethod:: repeat_interleave
    .. automethod:: requires_grad
    .. automethod:: requires_grad_
    .. automethod:: reshape
@@ -419,6 +434,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: t
    .. automethod:: t_
    .. automethod:: to
+   .. automethod:: to_mkldnn
    .. automethod:: take
    .. automethod:: tan
    .. automethod:: tan_
@@ -444,6 +460,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unfold
    .. automethod:: uniform_
    .. automethod:: unique
+   .. automethod:: unique_consecutive
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: values

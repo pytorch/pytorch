@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/CPUGeneral.h>
-#include <ATen/Type.h>
+#include <ATen/core/ATenGeneral.h>
+#include <ATen/Tensor.h>
 #include <ATen/TypeExtendedInterface.h>
 #include <ATen/Utils.h>
 #include <ATen/LegacyTHDispatch.h>
@@ -47,8 +47,8 @@ class CAFFE2_API Context {
   }
   // The passed in Type must be delete'able
   // TODO: Just make it take a unique_ptr
-  void registerType(Backend b, ScalarType s, Type* t) {
-    globalLegacyTypeDispatch().registerType(b, s,
+  void registerType(Backend b, Type* t) {
+    globalLegacyTypeDispatch().registerType(b,
       LegacyTypeDispatch::TypeUniquePtr{t, LegacyTypeDeleter([](Type* p) { delete p; }) });
   }
 
@@ -164,12 +164,6 @@ CAFFE2_API Context& globalContext();
 
 static inline void init() {
   globalContext();
-  if (const char *env_p = std::getenv("OMP_NUM_THREADS")) {
-    at::set_num_threads(std::stoi(env_p));
-  }
-  if (const char *env_p = std::getenv("MKL_NUM_THREADS")) {
-    at::set_num_threads(std::stoi(env_p));
-  }
 }
 
 static inline TypeExtendedInterface& getNonVariableType(Backend p, ScalarType s) {
@@ -182,16 +176,24 @@ CAFFE2_API TypeExtendedInterface& getType(const Tensor&);
 
 CAFFE2_API Allocator* getCPUAllocator();
 
-static inline TypeExtendedInterface& CPU(ScalarType s) {
-  return getNonVariableType(Backend::CPU, s);
+static inline DeprecatedTypeProperties& getNonVariableDeprecatedTypeProperties(Backend p, ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      p, s, /*is_variable*/false);
 }
 
-static inline TypeExtendedInterface& CUDA(ScalarType s) {
-  return getNonVariableType(Backend::CUDA, s);
+static inline DeprecatedTypeProperties& CPU(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::CPU, s, /*is_variable*/false);
 }
 
-static inline TypeExtendedInterface& HIP(ScalarType s) {
-  return getNonVariableType(Backend::HIP, s);
+static inline DeprecatedTypeProperties& CUDA(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::CUDA, s, /*is_variable*/false);
+}
+
+static inline DeprecatedTypeProperties& HIP(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::HIP, s, /*is_variable*/false);
 }
 
 CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options);

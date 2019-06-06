@@ -62,10 +62,12 @@ TEST(DataTest, TransformCallsGetApplyCorrectly) {
 
 // dummy chunk data reader with 3 chunks and 35 examples in total. Each chunk
 // contains 10, 5, 20 examples respectively.
+
 struct DummyChunkDataReader
-    : public datasets::ChunkDataReader<std::vector<int>> {
+    : public datasets::ChunkDataReader<int> {
  public:
-  using BatchType = std::vector<int>;
+  using BatchType = datasets::ChunkDataReader<int>::ChunkType;
+  using DataType = datasets::ChunkDataReader<int>::ExampleType;
 
   /// Read an entire chunk.
   BatchType read_chunk(size_t chunk_index) override {
@@ -1650,7 +1652,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatch) {
           for (auto iterator = data_loader->begin();
                iterator != data_loader->end();
                ++iterator, ++iteration_count) {
-            std::vector<int>& batch = *iterator;
+            DummyChunkDataReader::BatchType& batch = *iterator;
             ASSERT_EQ(batch.size(), batch_size);
 
             // When prefetch_count is equal to 1 and no worker thread, the batch
@@ -1709,9 +1711,9 @@ TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
 
 TEST(DataLoaderTest, ChunkDataSetWithEmptyBatch) {
   struct DummyEmptyChunkDataReader
-      : datasets::ChunkDataReader<std::vector<int>> {
+      : datasets::ChunkDataReader<int> {
    public:
-    using BatchType = std::vector<int>;
+    using BatchType = datasets::ChunkDataReader<int>::ChunkType;
 
     BatchType read_chunk(size_t chunk_index) override {
       return {};
@@ -1752,9 +1754,9 @@ TEST(DataLoaderTest, ChunkDataSetWithEmptyBatch) {
 }
 
 TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
-  struct D : public datasets::ChunkDataReader<std::vector<int>> {
+  struct D : public datasets::ChunkDataReader<int> {
    public:
-    using BatchType = std::vector<int>;
+    using BatchType = datasets::ChunkDataReader<int>::ChunkType;
 
     BatchType read_chunk(size_t chunk_index) override {
       BatchType batch_data(10, 0);
@@ -1791,7 +1793,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
 
     for (auto iterator = data_loader->begin(); iterator != data_loader->end();
          ++iterator) {
-      std::vector<int> batch = *iterator;
+      DummyChunkDataReader::BatchType batch = *iterator;
       auto batch_size = batch.size();
       if (batch_size == 17) {
         ASSERT_TRUE(batch.size() == 17 || batch.size() == 3);
@@ -1825,8 +1827,8 @@ TEST(DataLoaderTest, CanAccessChunkSamplerWithChunkDataSet) {
   samplers::SequentialSampler& chunk_sampler = dataset->chunk_sampler();
 
   auto data_loader = torch::data::make_data_loader(
-      dataset.map(transforms::BatchLambda<std::vector<int>, int>(
-          [](std::vector<int> batch) {
+      dataset.map(transforms::BatchLambda<DummyChunkDataReader::BatchType, DummyChunkDataReader::DataType>(
+          [](DummyChunkDataReader::BatchType batch) {
             return std::accumulate(batch.begin(), batch.end(), 0);
           })),
       DataLoaderOptions(batch_size).workers(0));
@@ -1869,8 +1871,8 @@ TEST(DataLoaderTest, ChunkDatasetDoesNotHang) {
   samplers::SequentialSampler& chunk_sampler = dataset->chunk_sampler();
 
   auto data_loader = torch::data::make_data_loader(
-      dataset.map(transforms::BatchLambda<std::vector<int>, int>(
-          [](std::vector<int> batch) {
+      dataset.map(transforms::BatchLambda<DummyChunkDataReader::BatchType, DummyChunkDataReader::DataType>(
+          [](DummyChunkDataReader::BatchType batch) {
             return std::accumulate(batch.begin(), batch.end(), 0);
           })),
       DataLoaderOptions(batch_size).workers(0));

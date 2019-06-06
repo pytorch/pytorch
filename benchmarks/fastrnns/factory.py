@@ -2,7 +2,7 @@ import torch
 
 from collections import namedtuple
 
-from .cells import lstm_cell, premul_lstm_cell, flat_lstm_cell
+from .cells import lstm_cell, premul_lstm_cell, premul_lstm_cell_no_bias, flat_lstm_cell
 
 
 # list[list[T]] -> list[T]
@@ -124,6 +124,17 @@ def lstm_premul_creator(script=True, **kwargs):
         inputs=inputs,
         params=flatten_list(params),
         forward=lstm_factory_premul(premul_lstm_cell, script),
+        backward_setup=lstm_backward_setup,
+        backward=simple_backward)
+
+
+def lstm_premul_bias_creator(script=True, **kwargs):
+    input, hidden, params, _ = lstm_inputs(return_module=False, **kwargs)
+    inputs = [input, hidden] + params[0]
+    return ModelDef(
+        inputs=inputs,
+        params=flatten_list(params),
+        forward=lstm_factory_premul_bias(premul_lstm_cell_no_bias, script),
         backward_setup=lstm_backward_setup,
         backward=simple_backward)
 
@@ -376,6 +387,32 @@ def lstm_factory_premul(premul_cell, script):
         hy, cy = hx[0], cx[0]
         for seq_idx in range(len(inputs)):
             hy, cy = premul_cell(inputs[seq_idx], (hy, cy), whh, bih, bhh)
+            outputs += [hy]
+        return torch.stack(outputs), (hy.unsqueeze(0), cy.unsqueeze(0))
+
+    if script:
+        premul_cell = torch.jit.script(premul_cell)
+        dynamic_rnn = torch.jit.script(dynamic_rnn)
+
+    return dynamic_rnn
+
+
+# premul: we're going to premultiply the inputs & weights, and add bias
+def lstm_factory_premul_bias(premul_cell, script):
+    def dynamic_rnn(input, hidden, wih, whh, bih, bhh):
+        # type: (Tensor, Tuple[Tensor, Tensor], Tensor, Tensor, Tensor, Tensor) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
+        hx, cx = hidden
+        outputs = []
+        inpSize = input.size()
+        # add bias for all timesteps instead of going step-by-step, results in a single reduction kernel in the backward
+        # FIXME matmul(x,y) + bias currently goes through jit AD, and backward formula in AD is not optimized for this
+        # case. Workaround with mm and views.
+        inpSize = input.size()
+        inputs = torch.mm(input.view(-1, inpSize[2]), wih.t()) + bih
+        inputs = inputs.view(inpSize[0], inpSize[1], -1).unbind(0)
+        hy, cy = hx[0], cx[0]
+        for seq_idx in range(len(inputs)):
+            hy, cy = premul_cell(inputs[seq_idx], (hy, cy), whh, bhh)
             outputs += [hy]
         return torch.stack(outputs), (hy.unsqueeze(0), cy.unsqueeze(0))
 

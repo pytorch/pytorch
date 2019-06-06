@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPSigmoidOp final : public IDEEPOperator {
  public:
@@ -57,4 +59,4 @@ class IDEEPSigmoidGradientOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(Sigmoid, IDEEPSigmoidOp);
 REGISTER_IDEEP_OPERATOR(SigmoidGradient, IDEEPSigmoidGradientOp);
 
-} // namespace caffe2
+} // namespace

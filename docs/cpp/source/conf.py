@@ -20,10 +20,7 @@
 import os
 # sys.path.insert(0, os.path.abspath('.'))
 
-import sys
 import textwrap
-
-import pytorch_sphinx_theme
 
 # -- General configuration ------------------------------------------------
 
@@ -123,7 +120,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2018, Torch Contributors'
+copyright = '2019, Torch Contributors'
 author = 'Torch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for

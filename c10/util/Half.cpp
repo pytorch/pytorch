@@ -1,5 +1,4 @@
 #include <c10/util/Half.h>
-
 #include <iostream>
 
 namespace c10 {
@@ -12,5 +11,4 @@ std::ostream& operator<<(std::ostream& out, const Half& value) {
   out << (float)value;
   return out;
 }
-
 } // namespace c10

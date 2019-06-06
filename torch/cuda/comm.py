@@ -1,8 +1,7 @@
 import torch
 from . import nccl
-from torch._utils import _accumulate, _take_tensors, _flatten_dense_tensors, \
-    _flatten_sparse_tensors, _unflatten_dense_tensors, \
-    _unflatten_sparse_tensors, _reorder_tensors_as
+from torch._utils import _take_tensors, _flatten_dense_tensors, \
+    _unflatten_dense_tensors, _reorder_tensors_as
 
 
 def broadcast(tensor, devices):

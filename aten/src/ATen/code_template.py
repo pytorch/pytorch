@@ -11,7 +11,10 @@ import re
 
 
 class CodeTemplate(object):
-    substitution_str = r'(^[^\n\S]*)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})'
+    # Python 2.7.5 has a bug where the leading (^[^\n\S]*)? does not work,
+    # workaround via appending another [^\n\S]? inside
+
+    substitution_str = r'(^[^\n\S]*[^\n\S]?)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})'
 
     # older versions of Python have a bug where \w* does not work,
     # so we need to replace with the non-shortened version [a-zA-Z0-9_]*

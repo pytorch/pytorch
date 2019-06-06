@@ -80,9 +80,13 @@ class ArrayRef final {
       : Data(Vec.data()), Length(Vec.size()) {}
 
   /// Construct an ArrayRef from a std::vector.
+  // The enable_if stuff here makes sure that this isn't used for std::vector<bool>,
+  // because ArrayRef can't work on a std::vector<bool> bitfield.
   template <typename A>
   /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
-      : Data(Vec.data()), Length(Vec.size()) {}
+      : Data(Vec.data()), Length(Vec.size()) {
+    static_assert(!std::is_same<T, bool>::value, "ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
+  }
 
   /// Construct an ArrayRef from a std::array
   template <size_t N>
@@ -141,13 +145,13 @@ class ArrayRef final {
 
   /// front - Get the first element.
   AT_CPP14_CONSTEXPR const T& front() const {
-    AT_CHECK(!empty(), "ArrayRef: attempted to access front() of empty list");
+    TORCH_CHECK(!empty(), "ArrayRef: attempted to access front() of empty list");
     return Data[0];
   }
 
   /// back - Get the last element.
   AT_CPP14_CONSTEXPR const T& back() const {
-    AT_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
+    TORCH_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
     return Data[Length - 1];
   }
 
@@ -159,7 +163,7 @@ class ArrayRef final {
   /// slice(n, m) - Chop off the first N elements of the array, and keep M
   /// elements in the array.
   AT_CPP14_CONSTEXPR ArrayRef<T> slice(size_t N, size_t M) const {
-    AT_CHECK(
+    TORCH_CHECK(
         N + M <= size(),
         "ArrayRef: invalid slice, N = ",
         N,
@@ -184,7 +188,7 @@ class ArrayRef final {
 
   /// Vector compatibility
   AT_CPP14_CONSTEXPR const T& at(size_t Index) const {
-    AT_CHECK(
+    TORCH_CHECK(
         Index < Length,
         "ArrayRef: invalid index Index = ",
         Index,
@@ -270,6 +274,6 @@ using IntArrayRef = ArrayRef<int64_t>;
 
 // This alias is deprecated because it doesn't make ownership
 // semantics obvious.  Use IntArrayRef instead!
-using IntList C10_DEPRECATED_USING = ArrayRef<int64_t>;
+C10_DEFINE_DEPRECATED_USING(IntList, ArrayRef<int64_t>)
 
 } // namespace c10

@@ -26,6 +26,14 @@ Backend ${Type}::backend() const {
   return Backend::${Backend};
 }
 
+const char * ${Type}::toString() const {
+  return "${Type}";
+}
+
+TypeID ${Type}::ID() const {
+  return ${TypeID};
+}
+
 ${type_method_definitions}
 
 } // namespace at

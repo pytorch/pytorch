@@ -68,7 +68,7 @@ Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
   }
   if (other_.type() != self.type()) {
     throw TypeError("map_: expected %s for 'other' (got %s)",
-        self.type().toString(), other_.type().toString());
+        self.type().toString().c_str(), other_.type().toString().c_str());
   }
   Tensor other;
   std::tie(other) = expand_inplace(self, other_, "map_");
@@ -83,11 +83,11 @@ Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn
   }
   if (x_.type() != self.type()) {
     throw TypeError("map2_: expected %s for argument 'x' (got %s)",
-        self.type().toString(), x_.type().toString());
+        self.type().toString().c_str(), x_.type().toString().c_str());
   }
   if (y_.type() != self.type()) {
     throw TypeError("map2_: expected %s for argument 'y' (got %s)",
-        self.type().toString(), y_.type().toString());
+        self.type().toString().c_str(), y_.type().toString().c_str());
   }
   Tensor other1, other2;
   std::tie(other1, other2) = expand_inplace(self, x_, y_, "map2_");

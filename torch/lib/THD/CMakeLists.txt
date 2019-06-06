@@ -44,9 +44,11 @@ FIND_PACKAGE(MPI)
 
 INCLUDE_DIRECTORIES(${CAFFE2_INCLUDE_DIR})
 
-IF(NOT USE_CUDA)
-  MESSAGE(STATUS "ignoring CUDA")
-ELSE()
+if (USE_TBB)
+  include_directories(${TBB_ROOT_DIR}/include)
+endif()
+
+IF(USE_CUDA)
   FIND_PACKAGE(CUDA 7.5)
   IF(CUDA_FOUND)
     INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
@@ -54,6 +56,14 @@ ELSE()
 
     ADD_DEFINITIONS(-DUSE_CUDA=1)
   ENDIF()
+ELSEIF(USE_ROCM)
+  INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDE})
+  INCLUDE_DIRECTORIES(${GLOO_HIP_INCLUDE})
+  ADD_DEFINITIONS(-DUSE_ROCM=1)
+  ADD_DEFINITIONS(-D__HIP_PLATFORM_HCC__=1)
+  ADD_DEFINITIONS(-DHIP_VERSION=${HIP_VERSION_MAJOR})
+ELSE()
+  MESSAGE(STATUS "ignoring GPU")
 ENDIF()
 
 IF(MPI_FOUND)
@@ -61,7 +71,7 @@ IF(MPI_FOUND)
   MESSAGE(STATUS "MPI_LIBRARIES: ${MPI_LIBRARIES}")
 ENDIF()
 
-IF(USE_GLOO AND USE_CUDA)
+IF(USE_GLOO AND (USE_CUDA OR USE_ROCM))
   ADD_DEFINITIONS(-DWITH_GLOO=1)
   IF(USE_GLOO_IBVERBS)
     MESSAGE(STATUS "Building the gloo backend with both TCP and infiniband support")
@@ -89,7 +99,7 @@ IF(NOT MPI_FOUND)
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_mpi_smoke.cpp")
 ENDIF()
 
-IF(NOT USE_GLOO OR NOT USE_CUDA)
+IF(NOT (USE_GLOO AND (USE_CUDA OR USE_ROCM)))
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelGloo.cpp")
   LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/Store.cpp")
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_store.cpp")
@@ -111,7 +121,7 @@ ADD_LIBRARY(THD STATIC ${all_cpp})
 
 TARGET_COMPILE_DEFINITIONS(THD PRIVATE "_THD_CORE=1")
 
-ADD_DEPENDENCIES(THD caffe2)
+target_link_libraries(THD caffe2)
 
 target_include_directories(THD PRIVATE
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
@@ -135,8 +145,13 @@ IF(MPI_FOUND)
 ENDIF()
 
 # TODO we shouldn't need the USE_CUDA condition here. See https://github.com/pytorch/pytorch/issues/13101
-IF(USE_GLOO AND USE_CUDA)
+IF(USE_GLOO)
   ADD_DEPENDENCIES(THD gloo)
+  IF(USE_CUDA)
+    ADD_DEPENDENCIES(THD gloo_cuda)
+  ELSEIF(USE_ROCM)
+    ADD_DEPENDENCIES(THD gloo_hip)
+  ENDIF()
 ENDIF()
 
 IF(USE_NCCL)

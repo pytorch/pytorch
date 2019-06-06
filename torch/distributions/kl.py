@@ -19,7 +19,6 @@ from .gumbel import Gumbel
 from .half_normal import HalfNormal
 from .independent import Independent
 from .laplace import Laplace
-from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import (LowRankMultivariateNormal, _batch_lowrank_logdet,
                                           _batch_lowrank_mahalanobis)
 from .multivariate_normal import (MultivariateNormal, _batch_mahalanobis)
@@ -117,7 +116,7 @@ def _infinite_like(tensor):
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
-    return tensor.new_tensor(inf).expand_as(tensor)
+    return torch.full_like(tensor, inf)
 
 
 def _x_log_x(tensor):

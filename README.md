@@ -37,11 +37,12 @@ At a granular level, PyTorch is a library that consists of the following compone
 
 | Component | Description |
 | ---- | --- |
-| **torch** | a Tensor library like NumPy, with strong GPU support |
-| **torch.autograd** | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
-| **torch.nn** | a neural networks library deeply integrated with autograd designed for maximum flexibility |
-| **torch.multiprocessing** | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
-| **torch.utils** | DataLoader, Trainer and other utility functions for convenience |
+| [**torch**](https://pytorch.org/docs/stable/torch.html) | a Tensor library like NumPy, with strong GPU support |
+| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
+| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | a compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
+| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | a neural networks library deeply integrated with autograd designed for maximum flexibility |
+| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
+| [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
 
 Usually one uses PyTorch either as:
 
@@ -54,7 +55,7 @@ Elaborating further:
 
 If you use NumPy, then you have used Tensors (a.k.a ndarray).
 
-![Tensor illustration](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/tensor_illustration.png)
+![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
 
 PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerates the
 computation by a huge amount.
@@ -132,37 +133,58 @@ There is no wrapper code that needs to be written. You can see [a tutorial here]
 Commands to install from binaries via Conda or pip wheels are on our website:
 [https://pytorch.org](https://pytorch.org)
 
+
+#### NVIDIA Jetson platforms
+
+Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are available via the following URLs:
+
+- Stable binaries:
+  - Python 2.7: https://nvidia.box.com/v/torch-stable-cp27-jetson-jp42
+  - Python 3.6: https://nvidia.box.com/v/torch-stable-cp36-jetson-jp42
+- Rolling weekly binaries:
+  - Python 2.7: https://nvidia.box.com/v/torch-weekly-cp27-jetson-jp42
+  - Python 3.6: https://nvidia.box.com/v/torch-weekly-cp36-jetson-jp42
+
+They requires JetPack 4.2 and above and are maintained by @dusty-nv
+
+
 ### From Source
 
-If you are installing from source, we highly recommend installing an [Anaconda](https://www.continuum.io/downloads) environment.
-You will get a high-quality BLAS library (MKL) and you get a controlled compiler version regardless of your Linux distro.
+If you are installing from source, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
+You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
-Once you have [Anaconda](https://www.continuum.io/downloads) installed, here are the instructions.
+Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
-- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v6.x or above
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9 or above
+- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
+
+If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to [are available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
+
 
 #### Install Dependencies
 
 Common
 ```
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
 ```
 
 On Linux
 ```bash
 # Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda90 # or [magma-cuda80 | magma-cuda92 | magma-cuda100 ] depending on your cuda version
+conda install -c pytorch magma-cuda90 # or [magma-cuda92 | magma-cuda100 ] depending on your cuda version
 ```
 
 #### Get the PyTorch Source
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
+# if you are updating an existing checkout
+git submodule sync
+git submodule update --init --recursive
 ```
 
 #### Install PyTorch
@@ -187,9 +209,6 @@ If the version of Visual Studio 2017 is higher than 15.4.5, installing of "VC++ 
 <br/> There is no guarantee of the correct building with VC++ 2017 toolsets, others than version 15.4 v14.11.
 <br/> "VC++ 2017 version 15.4 v14.11 toolset" might be installed onto already installed Visual Studio 2017 by running its installation once again and checking the corresponding checkbox under "Individual components"/"Compilers, build tools, and runtimes".
 
-For building against CUDA 8.0 Visual Studio 2015 Update 3 (version 14.0), and the [patch](https://download.microsoft.com/download/8/1/d/81dbe6bb-ed92-411a-bef5-3a75ff972c6a/vc14-kb4020481.exe) are needed to be installed too.
-The details of the patch can be found [here](https://support.microsoft.com/en-gb/help/4020481/fix-link-exe-crashes-with-a-fatal-lnk1000-error-when-you-use-wholearch).
-
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". For installing it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
 Be sure that CUDA with Nsight Compute is installed after Visual Studio 2017.
 
@@ -199,9 +218,6 @@ REM [Optional] The following two lines are needed for Python 2.7, but the suppor
 set MSSdk=1
 set FORCE_PY27_BUILD=1
 
-REM [Optional] As for CUDA 8, VS2015 Update 3 is required; use the following line.
-set "CUDAHOSTCXX=%VS140COMNTOOLS%..\..\VC\bin\amd64\cl.exe"
-
 set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 set DISTUTILS_USE_SDK=1
 
@@ -210,6 +226,26 @@ for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\
 
 python setup.py install
 
+```
+
+##### Adjust Build Options (Optional)
+
+You can adjust the configuration of cmake variables optionally (without building first), by doing
+the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
+with such a step.
+
+On Linux
+```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+python setup.py build --cmake-only
+ccmake build  # or cmake-gui build
+```
+
+On macOS
+```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
+ccmake build  # or cmake-gui build
 ```
 
 ### Docker Image

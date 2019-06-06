@@ -25,7 +25,7 @@ import os
 
 import torch
 try:
-    import torchvision
+    import torchvision  # noqa: F401
 except ImportError:
     import warnings
     warnings.warn('unable to load "torchvision" package')
@@ -85,7 +85,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2018, Torch Contributors'
+copyright = '2019, Torch Contributors'
 author = 'Torch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for

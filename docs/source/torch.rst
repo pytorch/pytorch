@@ -125,6 +125,8 @@ Parallelism
 ----------------------------------
 .. autofunction:: get_num_threads
 .. autofunction:: set_num_threads
+.. autofunction:: get_num_interop_threads
+.. autofunction:: set_num_interop_threads
 
 Locally disabling gradient computation
 --------------------------------------
@@ -223,9 +225,12 @@ Reduction Ops
 .. autofunction:: norm
 .. autofunction:: prod
 .. autofunction:: std
+.. autofunction:: std_mean
 .. autofunction:: sum
 .. autofunction:: unique
+.. autofunction:: unique_consecutive
 .. autofunction:: var
+.. autofunction:: var_mean
 
 
 Comparison Ops
@@ -280,6 +285,7 @@ Other Operations
 .. autofunction:: histc
 .. autofunction:: meshgrid
 .. autofunction:: renorm
+.. autofunction:: repeat_interleave
 .. autofunction:: roll
 .. autofunction:: tensordot
 .. autofunction:: trace
@@ -304,6 +310,7 @@ BLAS and LAPACK Operations
 .. autofunction:: btriunpack
 .. autofunction:: chain_matmul
 .. autofunction:: cholesky
+.. autofunction:: cholesky_inverse
 .. autofunction:: cholesky_solve
 .. autofunction:: dot
 .. autofunction:: eig
@@ -316,6 +323,8 @@ BLAS and LAPACK Operations
 .. autofunction:: logdet
 .. autofunction:: slogdet
 .. autofunction:: lu
+.. autofunction:: lu_solve
+.. autofunction:: lu_unpack
 .. autofunction:: matmul
 .. autofunction:: matrix_power
 .. autofunction:: matrix_rank

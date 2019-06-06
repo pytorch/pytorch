@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/script/tree_views.h>
 
 namespace torch {
@@ -16,7 +16,7 @@ struct NoneValue : SugaredValue {
 
 std::shared_ptr<SugaredValue> PrintValue::call(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -24,21 +24,8 @@ std::shared_ptr<SugaredValue> PrintValue::call(
   if (!attributes.empty())
     throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
 
-  // temporary hack to allow print statements to work in python 2, where
-  // print(a, b) is treated as a (a, b) tuple input.
-
   std::vector<Value*> lowered_inputs = toValues(*m.graph(), inputs);
-  if (lowered_inputs.size() == 1 &&
-      lowered_inputs.at(0)->node()->kind() == prim::TupleConstruct) {
-    auto input = lowered_inputs[0];
-    for (size_t j = 0; j < input->node()->inputs().size(); ++j) {
-      lowered_inputs.insert(
-          lowered_inputs.begin() + 1 + j, input->node()->inputs().at(j));
-    }
-    lowered_inputs.erase(lowered_inputs.begin());
-  }
-  g.insertNode(g.create(prim::Print, lowered_inputs, 0)
-                   ->setSourceLocation(std::make_shared<SourceRange>(loc)));
+  g.insertNode(g.create(prim::Print, lowered_inputs, 0)->setSourceRange(loc));
   return std::make_shared<NoneValue>();
 }
 
@@ -58,7 +45,7 @@ builtin_cast_methods() {
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -70,7 +57,7 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
   if (value_->type()->isSubtypeOf(TensorType::get())) {
@@ -104,9 +91,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     auto names = tuple_type->names();
     for (size_t i = 0; i < names.size(); i++) {
       if (names[i] == field) {
-        auto r = m.graph()
-                     ->insertNode(m.graph()->createTupleIndex(value_, i))
-                     ->output();
+        auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
+        auto out_type = tuple_type->elements().at(i);
+        auto r =
+            m.graph()
+                ->insertNode(m.graph()->createTupleIndex(value_, idx, out_type))
+                ->output();
         return std::make_shared<SimpleValue>(r);
       }
     }
@@ -116,9 +106,8 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
     if (auto method = classType->getMethod(field)) {
-      return std::make_shared<MethodValue>(shared_from_this(), *method);
+      return std::make_shared<MethodValue>(getValue(), field);
     }
-
     if (!classType->hasAttribute(field)) {
       throw ErrorReport(loc)
           << "Tried to access to nonexistent attribute " << field
@@ -135,7 +124,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     const c10::optional<size_t>& size_hint) {
   static const auto make_simple_value =
       [](Value* v) -> std::shared_ptr<SugaredValue> {
@@ -155,19 +144,20 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
         graph->insertNode(graph->createListUnpack(value_, *size_hint));
     return fmap(unpack->outputs(), make_simple_value);
   }
-  throw ErrorReport(loc) << value_->type()->str()
+  throw ErrorReport(loc) << value_->type()->python_str()
                          << " cannot be used as a tuple";
 }
 
 void SimpleValue::setAttr(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     const std::string& field,
     Value* newValue) {
   const auto classType = value_->type()->cast<ClassType>();
   if (!classType) {
     throw ErrorReport(loc) << "Tried to set an attribute: " << field
-                           << " on a non-class: " << value_->type()->str();
+                           << " on a non-class: "
+                           << value_->type()->python_str();
   }
   auto expectedType = classType->getAttribute(field);
   if (!expectedType) {
@@ -207,17 +197,48 @@ void SimpleValue::setAttr(
   const auto newType = newValue->type();
   if (!newType->isSubtypeOf(expectedType)) {
     throw ErrorReport(loc) << "Wrong type for attribute assignment. Expected "
-                           << expectedType->str() << " but got "
-                           << newType->str();
+                           << expectedType->python_str() << " but got "
+                           << newType->python_str();
   }
 
   auto& g = *m.graph();
   g.insertNode(g.createSetAttr(value_, field, newValue));
 }
 
+std::shared_ptr<SugaredValue> SimpleValue::call(
+    const SourceRange& loc,
+    Function& m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  // allow our 'fake' closures to be called, used for fork serialization
+  // at the moment, but can be expanded later
+  Node* self = getValue()->node();
+  if (self->kind() == prim::TupleConstruct && self->inputs().size() == 2 &&
+      self->inputs().at(0)->node()->kind() == prim::Function) {
+    std::shared_ptr<Graph> graph =
+        self->inputs().at(0)->node()->g(attr::Subgraph);
+    Value* context = self->inputs().at(1);
+    AT_ASSERT(context->node()->kind() == prim::TupleConstruct);
+
+    // fork nodes are emitted in their own block but we do not simplify
+    // tuple construction across blocks. To ensure we clean up the tuple
+    // construct create another copy of the tuple construct in the fork block
+    Value* close_context =
+        m.graph()
+            ->insertNode(m.graph()->createTuple(context->node()->inputs()))
+            ->output();
+    auto fn = CompilationUnit().create_function("anon", graph);
+    std::vector<NamedValue> ctx_inputs = {close_context};
+    ctx_inputs.insert(ctx_inputs.end(), inputs.begin(), inputs.end());
+    return FunctionValue(fn).call(loc, m, ctx_inputs, attributes, n_binders);
+  }
+  return SugaredValue::call(loc, m, inputs, attributes, n_binders);
+}
+
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
@@ -226,21 +247,17 @@ std::shared_ptr<SugaredValue> ClassValue::call(
 
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
-  auto createNode = g.insertNode(g.createObject(type_));
-  auto self = std::make_shared<SimpleValue>(createNode->output());
-
-  auto initMethod = type_->getMethod("__init__");
-  AT_ASSERT(initMethod);
+  auto self = g.insertNode(g.createObject(type_))->output();
 
   // Call the init function
-  MethodValue(self, *initMethod).call(loc, m, inputs, attributes, n_binders);
+  MethodValue(self, "__init__").call(loc, m, inputs, attributes, n_binders);
 
-  return self;
+  return std::make_shared<SimpleValue>(self);
 }
 
 std::shared_ptr<SugaredValue> ClassValue::attr(
     const SourceRange& loc,
-    Method& m,
+    Function& m,
     const std::string& field) {
   if (field != "__new__") {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";

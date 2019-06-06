@@ -133,6 +133,11 @@ class ProcessGroupMPI : public ProcessGroup {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ScatterOptions& opts = ScatterOptions()) override;
 
+  std::shared_ptr<ProcessGroup::Work> reduce_scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
   std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
@@ -149,8 +154,6 @@ class ProcessGroupMPI : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
-
-  std::unordered_map<int, int> getGroupRank();
 
   // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
   static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI(
@@ -181,13 +184,9 @@ class ProcessGroupMPI : public ProcessGroup {
   static std::once_flag onceFlagInitMPI;
 
   static std::mutex pgGlobalMutex_;
-  static int numProcessGroups_;
   static int mpiThreadSupport_;
 
   MPI_Comm pgComm_;
-  int groupRank_;
-  int groupSize_;
-  std::unordered_map<int, int> groupRankMap_;
 };
 
 } // namespace c10d

@@ -3,7 +3,7 @@
 # not currently relevant so they are combined into one list.
 from __future__ import absolute_import, division, print_function, unicode_literals
 load("@bazel_skylib//lib:new_sets.bzl", "sets")
-
+load("//caffe2/caffe2/fb:defs_gpu.bzl", "gpu_library_selector")
 
 GENERATED_CPP = [
     "Functions.cpp",
@@ -38,6 +38,7 @@ libtorch_sources = [
     "torch/csrc/autograd/anomaly_mode.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
+    "torch/csrc/autograd/function_hook.cpp",
     "torch/csrc/autograd/functions/accumulate_grad.cpp",
     "torch/csrc/autograd/functions/basic_ops.cpp",
     "torch/csrc/autograd/functions/tensor.cpp",
@@ -51,22 +52,29 @@ libtorch_sources = [
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/attributes.cpp",
+    "torch/csrc/jit/argument_spec.cpp",
     "torch/csrc/jit/constants.cpp",
     "torch/csrc/jit/node_hashing.cpp",
     "torch/csrc/jit/export.cpp",
+    "torch/csrc/jit/pass_manager.cpp",
     "torch/csrc/jit/pickler.cpp",
     "torch/csrc/jit/graph_executor.cpp",
     "torch/csrc/jit/import.cpp",
+    "torch/csrc/jit/import_export_helpers.cpp",
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/irparser.cpp",
     "torch/csrc/jit/netdef_converter.cpp",
     "torch/csrc/jit/register_c10_ops.cpp",
+    "torch/csrc/jit/subgraph_matcher.cpp",
     "torch/csrc/jit/symbolic_script.cpp",
+    "torch/csrc/jit/profiling_graph_executor_impl.cpp",
+    "torch/csrc/jit/profiling_record.cpp",
     "torch/csrc/jit/operator.cpp",
     "torch/csrc/jit/passes/alias_analysis.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/canonicalize_ops.cpp",
+    "torch/csrc/jit/passes/decompose_ops.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
     "torch/csrc/jit/passes/constant_propagation.cpp",
@@ -75,8 +83,11 @@ libtorch_sources = [
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
+    "torch/csrc/jit/passes/guard_elimination.cpp",
     "torch/csrc/jit/passes/inline_autodiff_subgraphs.cpp",
+    "torch/csrc/jit/passes/inliner.cpp",
     "torch/csrc/jit/passes/inplace_check.cpp",
+    "torch/csrc/jit/passes/insert_guards.cpp",
     "torch/csrc/jit/passes/loop_unrolling.cpp",
     "torch/csrc/jit/passes/lower_grad_of.cpp",
     "torch/csrc/jit/passes/lower_tuples.cpp",
@@ -87,6 +98,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
+    "torch/csrc/jit/passes/subgraph_rewrite.cpp",
     "torch/csrc/jit/passes/utils/subgraph_utils.cpp",
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/register_prim_ops.cpp",
@@ -94,19 +106,20 @@ libtorch_sources = [
     "torch/csrc/jit/register_quantized_ops.cpp",
     "torch/csrc/jit/scope.cpp",
     "torch/csrc/jit/script/compiler.cpp",
+    "torch/csrc/api/src/jit.cpp",
     "torch/csrc/jit/script/edit_distance.cpp",
+    "torch/csrc/jit/script/logging.cpp",
     "torch/csrc/jit/script/final_returns.cpp",
-    "torch/csrc/jit/script/schema_type_parser.cpp",
     "torch/csrc/jit/script/script_type_parser.cpp",
     "torch/csrc/jit/script/sugared_value.cpp",
     "torch/csrc/jit/script/schema_matching.cpp",
     "torch/csrc/jit/script/class_type.cpp",
     "torch/csrc/jit/script/parser.cpp",
+    "torch/csrc/jit/script/jit_exception.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/import_source.cpp",
     "torch/csrc/jit/hooks_for_testing.cpp",
     "torch/csrc/jit/script/builtin_functions.cpp",
-    "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
@@ -134,47 +147,137 @@ libtorch_cuda_sources = [
 
 def add_torch_libs():
     r = {}
-    # We start torch_python_sources with all cpp files, and exclude some
-    # including the files already contained in the torch and cuda bindings
-    globbed_sources = (native.glob(
-        ["torch/csrc/**/*.cpp"],
-        exclude=[
-            # remove anything that has "generic" in it"s path
-            "torch/csrc/**/generic/**/*.cpp",
-            # distributed only uses Module.cpp
-            # so remove all other files and just include that
-            "torch/csrc/distributed/**/*.cpp",
-            # top-level hook of extension registration lives in a separate file
-            "torch/csrc/stub.cpp",
-        ],
-    ) + [
+    libtorch_python_sources = [
+        ":generate-code=THNN.cpp",
+        ":generate-code=python_functions.cpp",
+        ":generate-code=python_nn_functions.cpp",
+        ":generate-code=python_torch_functions.cpp",
+        ":generate-code=python_variable_methods.cpp",
+        "torch/csrc/CudaIPCTypes.cpp",
+        "torch/csrc/DataLoader.cpp",
+        "torch/csrc/Device.cpp",
+        "torch/csrc/Dtype.cpp",
+        "torch/csrc/DynamicTypes.cpp",
+        "torch/csrc/Generator.cpp",
+        "torch/csrc/Layout.cpp",
+        "torch/csrc/MemoryFormat.cpp",
+        "torch/csrc/Module.cpp",
+        "torch/csrc/PtrWrapper.cpp",
+        "torch/csrc/Size.cpp",
+        "torch/csrc/Storage.cpp",
+        "torch/csrc/TypeInfo.cpp",
+        "torch/csrc/api/src/cuda.cpp",
+        "torch/csrc/api/src/data/datasets/mnist.cpp",
+        "torch/csrc/api/src/data/samplers/distributed.cpp",
+        "torch/csrc/api/src/data/samplers/random.cpp",
+        "torch/csrc/api/src/data/samplers/sequential.cpp",
+        "torch/csrc/api/src/data/samplers/stream.cpp",
+        "torch/csrc/api/src/nn/init.cpp",
+        "torch/csrc/api/src/nn/module.cpp",
+        "torch/csrc/api/src/nn/modules/batchnorm.cpp",
+        "torch/csrc/api/src/nn/modules/conv.cpp",
+        "torch/csrc/api/src/nn/modules/dropout.cpp",
+        "torch/csrc/api/src/nn/modules/embedding.cpp",
+        "torch/csrc/api/src/nn/modules/functional.cpp",
+        "torch/csrc/api/src/nn/modules/linear.cpp",
+        "torch/csrc/api/src/nn/modules/named_any.cpp",
+        "torch/csrc/api/src/nn/modules/rnn.cpp",
+        "torch/csrc/api/src/optim/adagrad.cpp",
+        "torch/csrc/api/src/optim/adam.cpp",
+        "torch/csrc/api/src/optim/lbfgs.cpp",
+        "torch/csrc/api/src/optim/optimizer.cpp",
+        "torch/csrc/api/src/optim/rmsprop.cpp",
+        "torch/csrc/api/src/optim/serialize.cpp",
+        "torch/csrc/api/src/optim/sgd.cpp",
+        "torch/csrc/api/src/python/init.cpp",
+        "torch/csrc/api/src/serialize/input-archive.cpp",
+        "torch/csrc/api/src/serialize/output-archive.cpp",
+        "torch/csrc/autograd/functions/init.cpp",
+        "torch/csrc/autograd/init.cpp",
+        "torch/csrc/autograd/python_anomaly_mode.cpp",
+        "torch/csrc/autograd/python_cpp_function.cpp",
+        "torch/csrc/autograd/python_engine.cpp",
+        "torch/csrc/autograd/python_function.cpp",
+        "torch/csrc/autograd/python_hook.cpp",
+        "torch/csrc/autograd/python_legacy_variable.cpp",
+        "torch/csrc/autograd/python_variable.cpp",
+        "torch/csrc/autograd/python_variable_indexing.cpp",
+        "torch/csrc/byte_order.cpp",
         "torch/csrc/distributed/Module.cpp",
+        "torch/csrc/distributed/c10d/comm.cpp",
         "torch/csrc/distributed/c10d/init.cpp",
-        "torch/csrc/distributed/c10d/ddp.cpp",
-    ] + [":generate-code=" + x for x in GENERATED_CPP])
-    libtorch_python_sources = sets.to_list(sets.difference(
-        sets.make(globbed_sources),
-        sets.make(libtorch_sources + libtorch_cuda_sources),
-    ))
+        "torch/csrc/distributed/c10d/reducer.cpp",
+        "torch/csrc/jit/init.cpp",
+        "torch/csrc/jit/passes/inline_fork_wait.cpp",
+        "torch/csrc/jit/passes/onnx.cpp",
+        "torch/csrc/jit/passes/onnx/constant_fold.cpp",
+        "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
+        "torch/csrc/jit/passes/onnx/peephole.cpp",
+        "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp",
+        "torch/csrc/jit/passes/remove_inplace_ops.cpp",
+        "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
+        "torch/csrc/jit/python_arg_flatten.cpp",
+        "torch/csrc/jit/python_interpreter.cpp",
+        "torch/csrc/jit/python_ir.cpp",
+        "torch/csrc/jit/python_tracer.cpp",
+        "torch/csrc/jit/script/init.cpp",
+        "torch/csrc/jit/script/python_sugared_value.cpp",
+        "torch/csrc/jit/script/python_tree_views.cpp",
+        "torch/csrc/multiprocessing/init.cpp",
+        "torch/csrc/onnx/init.cpp",
+        "torch/csrc/serialization.cpp",
+        "torch/csrc/tensor/python_tensor.cpp",
+        "torch/csrc/utils.cpp",
+        "torch/csrc/utils/cuda_lazy_init.cpp",
+        "torch/csrc/utils/invalid_arguments.cpp",
+        "torch/csrc/utils/object_ptr.cpp",
+        "torch/csrc/utils/python_arg_parser.cpp",
+        "torch/csrc/utils/structseq.cpp",
+        "torch/csrc/utils/tensor_apply.cpp",
+        "torch/csrc/utils/tensor_dtypes.cpp",
+        "torch/csrc/utils/tensor_layouts.cpp",
+        "torch/csrc/utils/tensor_memoryformats.cpp",
+        "torch/csrc/utils/tensor_list.cpp",
+        "torch/csrc/utils/tensor_new.cpp",
+        "torch/csrc/utils/tensor_numpy.cpp",
+        "torch/csrc/utils/tensor_types.cpp",
+        "torch/csrc/utils/tuple_parser.cpp",
+    ]
 
+    libtorch_python_cuda_sources = [
+        ":generate-code=THCUNN.cpp",
+        "torch/csrc/cuda/Event.cpp",
+        "torch/csrc/cuda/Module.cpp",
+        "torch/csrc/cuda/Storage.cpp",
+        "torch/csrc/cuda/Stream.cpp",
+        "torch/csrc/cuda/Tensor.cpp",
+        "torch/csrc/cuda/python_comm.cpp",
+        "torch/csrc/cuda/python_nccl.cpp",
+        "torch/csrc/cuda/serialization.cpp",
+        "torch/csrc/cuda/utils.cpp",
+        "torch/csrc/distributed/c10d/ddp.cpp",
+    ]
+
+    compiler_flags_cpu = [
+        "-D_THP_CORE",
+        "-DUSE_C10D",
+        "-DUSE_DISTRIBUTED",
+        "-DUSE_NUMPY",
+        "-DUSE_SCALARS",
+        "-DNO_CUDNN_DESTROY_HANDLE",
+        "-DPYTORCH_ONNX_CAFFE2_BUNDLE",
+        "-Wno-write-strings",
+        "-Wno-format",
+        "-Wno-strict-aliasing",
+        "-Wno-non-virtual-dtor",
+        "-Wno-shadow-compatible-local",
+        "-Wno-empty-body",
+    ]
+    compiler_flags_cuda = [
+        "-DUSE_CUDNN",
+        "-DUSE_NCCL",
+    ]
     common_flags = {
-        "compiler_flags": [
-            "-D_THP_CORE",
-            "-DUSE_C10D",
-            "-DUSE_CUDNN",
-            "-DUSE_DISTRIBUTED",
-            "-DUSE_NCCL",
-            "-DUSE_NUMPY",
-            "-DUSE_SCALARS",
-            "-DNO_CUDNN_DESTROY_HANDLE",
-            "-DPYTORCH_ONNX_CAFFE2_BUNDLE",
-            "-Wno-write-strings",
-            "-Wno-format",
-            "-Wno-strict-aliasing",
-            "-Wno-non-virtual-dtor",
-            "-Wno-shadow-compatible-local",
-            "-Wno-empty-body",
-        ],
         "compiler_specific_flags": {
             "clang": [
                 "-Wno-absolute-value",
@@ -211,6 +314,7 @@ def add_torch_libs():
             ("nanopb", None, "protobuf-nanopb"),
             ("protobuf", None),
         ],
+        compiler_flags=compiler_flags_cpu,
         **common_flags
     )
 
@@ -240,13 +344,42 @@ def add_torch_libs():
             ("cuda", None, "nvrtc-lazy"),
             ("cuda", None, "nvrtc-builtins-lazy"),
         ],
+        compiler_flags=compiler_flags_cpu + compiler_flags_cuda,
         **common_flags
     )
 
     # TODO: split it into cpp and cuda parts similarly to libtorch
-    cpp_library(
+    gpu_library_selector(
         name="_C_impl",
+        deps_cpu=[":_C_impl_cpu"],
+        deps_cuda=[":_C_impl_cuda"],
+        merge_cpu_deps=False,
+    )
+
+    cpp_library(
+        name="_C_impl_cpu",
         srcs=libtorch_python_sources,
+        link_whole=True,
+        deps=[
+            ":libtorch",
+            ":thnn",
+            "//caffe2/torch/lib/THD:THD_cpu",
+            "//caffe2/torch/lib/c10d:c10d_cpu",
+            "//caffe2/torch/lib/libshm:libshm",
+        ],
+        external_deps=[
+            ("numpy", None, "cpp"),
+            ("pybind11", None),
+            ("python", None),
+        ],
+        compiler_flags=compiler_flags_cpu,
+        **common_flags
+    )
+
+    cpp_library(
+        name="_C_impl_cuda",
+        srcs=libtorch_python_sources + libtorch_python_cuda_sources,
+        link_whole=True,
         deps=[
             ":libtorch_cuda",
             ":thnn",
@@ -259,6 +392,7 @@ def add_torch_libs():
             ("pybind11", None),
             ("python", None),
         ],
+        compiler_flags=compiler_flags_cpu + compiler_flags_cuda,
         **common_flags
     )
 

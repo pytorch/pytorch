@@ -175,27 +175,37 @@ class ModelDownloader:
                 deleteDirectory(model_dir)
                 raise
 
-    def get_c2_model(self, model_name):
+    # This version returns an extra debug_str argument that helps to understand
+    # why our work sometimes fails in sandcastle
+    def get_c2_model_dbg(self, model_name):
+        debug_str = "get_c2_model debug:\n"
         model_dir = self._model_dir(model_name)
         if not os.path.exists(model_dir):
             self._download(model_name)
 
         c2_predict_pb = os.path.join(model_dir, 'predict_net.pb')
+        debug_str += "c2_predict_pb path: " + c2_predict_pb + "\n"
         c2_predict_net = caffe2_pb2.NetDef()
         with open(c2_predict_pb, 'rb') as f:
-            c2_predict_net.ParseFromString(f.read())
+            len_read = c2_predict_net.ParseFromString(f.read())
+            debug_str += "c2_predict_pb ParseFromString = " + str(len_read) + "\n"
         c2_predict_net.name = model_name
 
         c2_init_pb = os.path.join(model_dir, 'init_net.pb')
+        debug_str += "c2_init_pb path: " + c2_init_pb + "\n"
         c2_init_net = caffe2_pb2.NetDef()
         with open(c2_init_pb, 'rb') as f:
-            c2_init_net.ParseFromString(f.read())
+            len_read = c2_init_net.ParseFromString(f.read())
+            debug_str += "c2_init_pb ParseFromString = " + str(len_read) + "\n"
         c2_init_net.name = model_name + '_init'
 
         with open(os.path.join(model_dir, 'value_info.json')) as f:
             value_info = json.load(f)
-        return c2_init_net, c2_predict_net, value_info
+        return c2_init_net, c2_predict_net, value_info, debug_str
 
+    def get_c2_model(self, model_name):
+        init_net, predict_net, value_info, _ = self.get_c2_model_dbg(model_name)
+        return init_net, predict_net, value_info
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

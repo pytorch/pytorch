@@ -70,6 +70,7 @@ class TestReaderBuilder(ReaderBuilder):
     def setup(self, ws):
         self._src_ds = make_source_dataset(ws, offset=self._offset, size=self._size,
                                     name=self._name)
+        return {}
 
     def new_reader(self, **kwargs):
         return self._src_ds

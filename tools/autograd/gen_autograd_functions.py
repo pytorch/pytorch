@@ -4,13 +4,14 @@
 #  Functions.h/cpp: subclasses of autograd::Function
 #  python_functions.h/cpp: Python bindings for the above classes
 #
+import os
 import re
 from .utils import nested_dict, CodeTemplate, write
 from .gen_autograd import VIEW_FUNCTIONS
 from .utils import IDENT_REGEX
 
 FUNCTION_DECLARATION = CodeTemplate("""\
-struct ${op} : public ${superclass} {
+struct TORCH_API ${op} : public ${superclass} {
   using ${superclass}::${superclass};
   variable_list apply(variable_list&& grads) override;
   std::string name() const override { return "${op}"; }
@@ -81,17 +82,20 @@ if (should_compute_output({ ${idx_ranges} })) {
 UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 
-def gen_autograd_functions(out, autograd_functions, template_path):
+def gen_autograd_functions_lib(out, autograd_functions, template_path):
+    gen_autograd_functions(out, autograd_functions, template_path, "Functions")
+
+
+def gen_autograd_functions_python(out, autograd_functions, template_path):
+    gen_autograd_functions(out, autograd_functions, template_path, "python_functions")
+
+
+def gen_autograd_functions(out, autograd_functions, template_path, file_basename):
     """Functions.h and Functions.cpp body
 
     These contain the auto-generated subclasses of torch::autograd::Function
     for each every differentiable torch function.
     """
-
-    FUNCTIONS_H = CodeTemplate.from_file(template_path + '/Functions.h')
-    FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/Functions.cpp')
-    PY_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_functions.h')
-    PY_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_functions.cpp')
 
     function_definitions = []
     function_declarations = []
@@ -110,10 +114,10 @@ def gen_autograd_functions(out, autograd_functions, template_path):
         'py_function_initializers': py_function_initializers,
     }
 
-    write(out, 'Functions.h', FUNCTIONS_H, top_env)
-    write(out, 'Functions.cpp', FUNCTIONS_CPP, top_env)
-    write(out, 'python_functions.h', PY_FUNCTIONS_H, top_env)
-    write(out, 'python_functions.cpp', PY_FUNCTIONS_CPP, top_env)
+    for suffix in [".h", ".cpp"]:
+        f = file_basename + suffix
+        templated_output = CodeTemplate.from_file(os.path.join(template_path, f))
+        write(out, f, templated_output, top_env)
 
 
 def process_function(func):

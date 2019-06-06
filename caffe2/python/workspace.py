@@ -36,6 +36,7 @@ SwitchWorkspace = C.switch_workspace
 RootFolder = C.root_folder
 Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
+BenchmarkNetOnce = C.benchmark_net_once
 GetStats = C.get_stats
 
 operator_tracebacks = defaultdict(dict)
@@ -57,6 +58,7 @@ if has_cuda_support:
         return np.asarray(C.get_cuda_peer_access_pattern())
 
     GetDeviceProperties = C.get_device_properties
+    GetGPUMemoryInfo = C.get_gpu_memory_info
 else:
     NumCudaDevices = lambda: 0 # noqa
     GetCUDAVersion = lambda: 0 # noqa
@@ -69,6 +71,7 @@ if has_hip_support:
     def GetGpuPeerAccessPattern():
         return np.asarray(C.get_hip_peer_access_pattern())
     GetDeviceProperties = C.get_device_properties
+    GetGPUMemoryInfo = C.get_gpu_memory_info
 
 if not has_gpu_support:
     # setting cuda as the default GpuDeviceType as some tests
@@ -77,11 +80,17 @@ if not has_gpu_support:
     NumGpuDevices = lambda: 0 # noqa
     GetDeviceProperties = lambda x: None # noqa
     GetGpuPeerAccessPattern = lambda: np.array([]) # noqa
+    GetGPUMemoryInfo = lambda: None # noqa
 
 IsNUMAEnabled = C.is_numa_enabled
 GetNumNUMANodes = C.get_num_numa_nodes
 GetBlobNUMANode = C.get_blob_numa_node
 GetBlobSizeBytes = C.get_blob_size_bytes
+
+
+def FillRandomNetworkInputs(net, input_dims, input_types):
+    C.fill_random_network_inputs(net.Proto().SerializeToString(), input_dims, input_types)
+
 
 def _GetFreeFlaskPort():
     """Get a free flask port."""
@@ -185,12 +194,20 @@ def RunOperatorOnce(operator):
     return C.run_operator_once(StringifyProto(operator))
 
 
+def RunOperatorMultiple(operator, num_runs):
+    return C.run_operator_multiple(StringifyProto(operator), num_runs)
+
+
 def RunOperatorsOnce(operators):
     for op in operators:
         success = RunOperatorOnce(op)
         if not success:
             return False
     return True
+
+
+def ClearGlobalNetObserver():
+    return C.clear_global_net_observer()
 
 
 def CallWithExceptionIntercept(func, op_id_fetcher, net_name, *args, **kwargs):

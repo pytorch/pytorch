@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "caffe2/core/common.h"
+#include "caffe2/core/types.h"
 
 namespace caffe2 {
 
@@ -30,6 +31,19 @@ CAFFE2_API inline bool EndsWith(
         full.compare(full.length() - ending.length(), ending.length(), ending));
   } else {
     return false;
+  }
+}
+
+CAFFE2_API inline int32_t GetDimFromOrderString(const std::string& str) {
+  auto order = StringToStorageOrder(str);
+  switch (order) {
+    case StorageOrder::NHWC:
+      return 3;
+    case StorageOrder::NCHW:
+      return 1;
+    default:
+      CAFFE_THROW("Unsupported storage order: ", str);
+      return -1;
   }
 }
 

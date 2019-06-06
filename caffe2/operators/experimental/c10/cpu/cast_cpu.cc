@@ -1,7 +1,7 @@
-#include <ATen/core/dispatch/KernelRegistration.h>
-#include "caffe2/operators/experimental/c10/schemas/cast.h"
-#include "caffe2/utils/math.h"
+#include <ATen/core/op_registration/op_registration.h>
+#include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/utils/math.h"
 
 using caffe2::CPUContext;
 using caffe2::Tensor;
@@ -26,8 +26,8 @@ void cast_op_cpu_impl(
     const at::Tensor& input_,
     const at::Tensor& output_,
     int64_t to_) {
-  Tensor input{C10Tensor(input_)};
-  Tensor output{C10Tensor(output_)};
+  Tensor input(input_);
+  Tensor output(output_);
   TensorProto_DataType to = static_cast<TensorProto_DataType>(to_);
 
   switch (to) {
@@ -80,16 +80,21 @@ void cast_op_cpu(
     int64_t to) {
   switch (input.scalar_type()) {
 #define CASE(ctype,name,_2) case ScalarType:: name : return cast_op_cpu_impl<ctype>(input, output, to);
-    AT_FORALL_SCALAR_TYPES_AND_BOOL(CASE)
+    AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(CASE)
 #undef CASE
     default: throw std::runtime_error(string() + "Unsupported scalar type " + toString(input.scalar_type()));
   }
 }
-} // namespace
-} // namespace caffe2
 
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::Cast)
-    .kernel<decltype(caffe2::cast_op_cpu), &caffe2::cast_op_cpu>()
-    .dispatchKey(CPUTensorId());
-} // namespace c10
+static auto registry = c10::RegisterOperators().op(
+    "_c10_experimental::Cast",
+    c10::RegisterOperators::options()
+      .kernel<decltype(cast_op_cpu), &cast_op_cpu>(CPUTensorId()));
+
+} // namespace
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::Cast",
+    C10Cast_DontUseThisOpYet)
+
+} // namespace caffe2
