@@ -38,7 +38,7 @@ using Kwargs = std::unordered_map<std::string, IValue>;
 // It contains schema information, and the executor that manages the
 // execution of the function. script::Method is a wrapper around a
 // underlying Function that also provides a `self` object.
-struct TORCH_API Function {
+struct TORCH_API Function : public std::enable_shared_from_this<Function> {
   Function(
       std::string name,
       bool optimize,
@@ -121,25 +121,6 @@ struct TORCH_API Function {
     return executor_;
   }
 
-  // returns nullptr and fills in failure_messages if the callee does not
-  // match the functions schema
-
-  // TODO: defined in module.cpp, move to compilation_unit.cpp
-  Value* try_emit_call(
-      Graph& graph,
-      const SourceRange& loc,
-      c10::optional<NamedValue> self,
-      ArrayRef<NamedValue> args,
-      ArrayRef<NamedValue> kwargs,
-      std::stringstream& failure_messages,
-      bool conv_tensors_to_nums);
-
-  Value* emit_call(
-      Graph& graph,
-      const SourceRange& loc,
-      ArrayRef<NamedValue> args,
-      ArrayRef<NamedValue> kwargs);
-
  private:
   static FunctionSchema defaultSchemaFor(const Function& function) {
     std::vector<Argument> args;
@@ -167,7 +148,7 @@ struct TORCH_API Function {
   std::once_flag executor_init_;
 
   // an optional function that actually creates the method when
-  // emit_call_to(this,...) is first called. this is used by the compiler so
+  // ensure_defined() is called. This is used by the compiler so
   // that it can construct methods out of order
   std::function<void(Function&)> function_creator_;
 
@@ -184,7 +165,8 @@ struct TORCH_API Function {
 // are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
-  // constructor that takes a set of functions to compile using the native resolver
+  // constructor that takes a set of functions to compile using the native
+  // resolver
   explicit CompilationUnit(const std::string& source);
   CompilationUnit() = default;
 

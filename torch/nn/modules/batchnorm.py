@@ -15,7 +15,8 @@ from ..._jit_internal import weak_module, weak_script_method
 class _BatchNorm(Module):
     _version = 2
     __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
-                     'running_mean', 'running_var', 'num_batches_tracked']
+                     'running_mean', 'running_var', 'num_batches_tracked',
+                     'num_features', 'affine']
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
@@ -400,7 +401,7 @@ class SyncBatchNorm(_BatchNorm):
         >>> output = m(input)
 
         >>> # network is nn.BatchNorm layer
-        >>> sync_bn_network = torch.nn.utils.convert_sync_batchnorm(network, process_group)
+        >>> sync_bn_network = nn.SyncBatchNorm.convert_sync_batchnorm(network, process_group)
         >>> # only single gpu per process is currently supported
         >>> ddp_sync_bn_network = torch.nn.parallel.DistributedDataParallel(
         >>>                         sync_bn_network,

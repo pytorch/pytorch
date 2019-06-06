@@ -5,10 +5,22 @@
 namespace caffe2 {
 
 namespace {
+// Populate 'net_pos' argument for any ops that don't already have it. 'net_pos'
+// we populate here starts after the max 'net_pos' value we encountered.
 void annotateOpIndex(NetDef* net) {
-  int i = 0;
+  // find the max net_pos that we have so far.
+  int i = -1;
+  for (const auto& op : net->op()) {
+    ArgumentHelper helper(op);
+    int old_index = helper.GetSingleArgument(op, kNetPos, -1);
+    i = std::max(i, old_index);
+  }
+
+  // populate net_pos for any op that doesn't already have it.
   for (auto& op : *(net->mutable_op())) {
-    AddArgument(kNetPos, i++, &op);
+    if (!ArgumentHelper::HasArgument(op, kNetPos)) {
+      AddArgument(kNetPos, ++i, &op);
+    }
   }
 }
 } // namespace
@@ -144,11 +156,9 @@ ShapeInfoMap BackendTransformerBase::inferShapes(
   return shape_map;
 }
 
-void BackendTransformerBase::dumpNet(
-    const NetDef& pred_net,
-    const ShapeInfoMap& shape_hints,
-    const std::string& fname) const {
-  NetDef shape_net(pred_net);
+void BackendTransformerBase::addShapeToNet(
+    NetDef& shape_net,
+    const ShapeInfoMap& shape_hints) const {
   auto* shape_arg = shape_net.add_arg();
   auto* qshape_arg = shape_net.add_arg();
   shape_arg->set_name("shape_info");
@@ -164,6 +174,14 @@ void BackendTransformerBase::dumpNet(
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
     }
   }
+}
+
+void BackendTransformerBase::dumpNet(
+    const NetDef& pred_net,
+    const ShapeInfoMap& shape_hints,
+    const std::string& fname) const {
+  NetDef shape_net(pred_net);
+  addShapeToNet(shape_net, shape_hints);
   WriteProtoToTextFile(shape_net, fname);
 }
 } // namespace caffe2

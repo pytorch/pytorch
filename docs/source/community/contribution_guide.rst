@@ -8,7 +8,7 @@ The PyTorch Contribution Process
 --------------------------------
 
 The PyTorch organization is governed by `PyTorch
-Governance </docs/community/governance.html>`__.
+Governance </docs/stable/community/governance.html>`__.
 
 The PyTorch development process involves a healthy amount of open
 discussions between the core development team and the community.
@@ -303,7 +303,7 @@ copied to the docs folder in the master branch of
 and is served via GitHub pages.
 
 -  Site: http://pytorch.org/docs
--  GitHub: http://github.com/pytorch/pytorch/docs
+-  GitHub: https://github.com/pytorch/pytorch/tree/master/docs
 -  Served from:
    `https://github.com/pytorch/pytorch.github.io/tree/master/doc <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__
 

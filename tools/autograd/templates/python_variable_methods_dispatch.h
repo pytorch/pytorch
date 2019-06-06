@@ -16,7 +16,6 @@ using at::Scalar;
 using at::TensorList;
 using at::IntArrayRef;
 using at::Generator;
-using at::SparseTensorRef;
 using at::Storage;
 
 ${py_method_dispatch}

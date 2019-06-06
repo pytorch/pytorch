@@ -42,7 +42,8 @@ You can see the full script in
         return model
 
 
-- ``dependencies`` variable is a **list** of package names required to to run the model.
+- ``dependencies`` variable is a **list** of package names required to **load** the model. Note this might
+  be slightly different from dependencies required for training a model.
 - ``args`` and ``kwargs`` are passed along to the real callable function.
 - Docstring of the function works as a help message. It explains what does the model do and what
   are the allowed positional/keyword arguments. It's highly recommended to add a few examples here.
@@ -50,6 +51,7 @@ You can see the full script in
 - Pretrained weights can either be stored locally in the github repo, or loadable by
   ``torch.hub.load_state_dict_from_url()``. In the example above ``torchvision.models.resnet.resnet18``
   handles ``pretrained``, alternatively you can put the following logic in the entrypoint definition.
+- Callables prefixed with underscore are considered as helper functions which won't show up in ``torch.hub.list()``.
 
 ::
 
@@ -92,6 +94,10 @@ A suggested workflow is
 
 - ``dir(model)`` to see all avaialble methods of the model.
 - ``help(model.foo)`` to check what arguments ``model.foo`` takes to run
+
+To help users explore without refering to documentation back and forth, we strongly
+recommend repo owners make function help messages clear and succinct. It's also helpful
+to include a minimal working example.
 
 Where are my downloaded models saved?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

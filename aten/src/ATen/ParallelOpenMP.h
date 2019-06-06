@@ -18,6 +18,7 @@ inline void parallel_for(
     const int64_t end,
     const int64_t grain_size,
     const F& f) {
+  TORCH_CHECK(grain_size >= 0);
   if (begin >= end) {
     return;
   }
@@ -56,6 +57,7 @@ inline scalar_t parallel_reduce(
     const scalar_t ident,
     const F& f,
     const SF& sf) {
+  TORCH_CHECK(grain_size >= 0);
   if (begin >= end) {
     return ident;
   } else if (in_parallel_region() || get_num_threads() == 1) {
