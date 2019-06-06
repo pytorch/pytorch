@@ -235,8 +235,8 @@ static Tensor apply_bag_size(const Tensor &offsets, const Tensor &indices,
   if (mode == MODE_MEAN) {
     // Avoid dividing by 0 for empty bags.
     // Instead we want empty bags to return all 0s
-    if (offsets.size(0) == 1 && indices.size(0) != 0) {
-      auto bag_size_ = indices.size(0);
+    if (offsets.size(0) == 1) {
+      auto bag_size_ = std::max(indices.size(0), 1L);
       output /= bag_size_;
     } else {
       auto bag_size_ = at::max(bag_size, at::ones_like(bag_size))

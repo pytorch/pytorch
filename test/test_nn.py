@@ -2615,14 +2615,14 @@ class TestNN(NNTestCase):
     def _test_embedding_bag_empty_input(self, device):
         m = 4
         n = 3
-        x = torch.LongTensor([]).to(device)
+        x = torch.tensor([], device=device, dtype=torch.long)
         for sparse in [True, False]:
             Embed = torch.nn.EmbeddingBag(m, n, sparse=True)
 
-            output = Embed(input=x, offsets=torch.LongTensor([0]).to(device))
+            output = Embed(input=x, offsets=torch.tensor([0], device=device, dtype=torch.long))
             self.assertEqual(output, torch.zeros_like(output))
 
-            output = Embed(input=x, offsets=torch.LongTensor([0, 0]).to(device))
+            output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=torch.long))
             self.assertEqual(output, torch.zeros_like(output))
 
     def test_embedding_bag_empty_input_cpu(self):
