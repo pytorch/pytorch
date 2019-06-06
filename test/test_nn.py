@@ -2619,10 +2619,10 @@ class TestNN(NNTestCase):
         for sparse in [True, False]:
             Embed = torch.nn.EmbeddingBag(m, n, sparse=True)
 
-            output = Embed(input=x, offsets=torch.LongTensor([0]))
+            output = Embed(input=x, offsets=torch.LongTensor([0]).to(device))
             self.assertEqual(output, torch.zeros_like(output))
 
-            output = Embed(input=x, offsets=torch.LongTensor([0, 0]))
+            output = Embed(input=x, offsets=torch.LongTensor([0, 0]).to(device))
             self.assertEqual(output, torch.zeros_like(output))
 
     def test_embedding_bag_empty_input_cpu(self):
