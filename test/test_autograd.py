@@ -1630,10 +1630,12 @@ class TestAutograd(TestCase):
     def test_sparse_mask_autograd(self):
         for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
             tensor = torch.randn(3, requires_grad=True, device=device)
-            mask = torch.ones(3, device=device).to_sparse()
+            mask = torch.ones(3, device=device)
+            mask[1] = 0
+            mask = mask.to_sparse()
             converted = tensor.sparse_mask(mask).to_dense()
             converted.sum().backward()
-            self.assertEqual(tensor.grad, torch.ones(3, device=device))
+            self.assertEqual(tensor.grad, mask.to_dense())
 
     def test_gc_in_destructor(self):
         """
