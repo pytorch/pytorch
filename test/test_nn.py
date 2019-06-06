@@ -534,10 +534,10 @@ class TestLongTensor(TestCase):
     def test_longtensor_transpose3d_same_as_doubletensor(self):
         l_input = torch.LongTensor(20, 16, 50, 10, 20).random_(-1000, 1000).cpu()
         l_filter = torch.LongTensor(16, 33, 3, 3, 3).random_(-1000, 1000).cpu()
-        l_result = torch.nn.functional.conv3d(l_input, l_filter)
+        l_result = torch.nn.functional.conv_transpose3d(l_input, l_filter)
         d_input = l_input.clone().double()
         d_filter = l_filter.clone().double()
-        d_result = torch.nn.functional.conv3d(d_input, d_filter)
+        d_result = torch.nn.functional.conv_transpose3d(d_input, d_filter)
         self.assertTrue(torch.allclose(l_result.double(), d_result, rtol=0, atol=0))
 
     def test_longtensor_dilated3d_same_as_doubletensor(self):
