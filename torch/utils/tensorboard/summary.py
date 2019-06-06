@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import json
 import logging
 import numpy as np
 import os
@@ -508,6 +509,14 @@ def _get_tensor_summary(name, display_name, description, tensor, content_type, j
     return tensor_summary
 
 
+def _get_json_config(config_dict):
+    """Parses and returns JSON string from python dictionary."""
+    json_config = '{}'
+    if config_dict is not None:
+        json_config = json.dumps(config_dict, sort_keys=True)
+    return json_config
+
+
 # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/mesh/summary.py
 def mesh(tag, vertices, colors, faces, config_dict, display_name=None, description=None):
     """Outputs a merged `Summary` protocol buffer with a mesh/point cloud.
@@ -530,7 +539,6 @@ def mesh(tag, vertices, colors, faces, config_dict, display_name=None, descripti
         Merged summary for mesh/point cloud representation.
       """
     from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
-    from tensorboard.plugins.mesh.summary import _get_json_config
 
     json_config = _get_json_config(config_dict)
 

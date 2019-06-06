@@ -658,28 +658,6 @@ TH_API void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
           int aT, int aW, int aH,   // extra output adjustment
           accreal scale);           // scaling factor
 
-TH_API void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THIndexTensor *indices,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int pT, int pW, int pH,
-          int dilationT, int dilationW, int dilationH,
-          bool ceilMode);
-TH_API void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THIndexTensor *indices,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int pT, int pW, int pH,
-          int dilationT, int dilationW, int dilationH,
-          bool ceilMode);
-
 TH_API void THNN_(VolumetricMaxUnpooling_updateOutput)(
           THNNState *state,
           THTensor *input,

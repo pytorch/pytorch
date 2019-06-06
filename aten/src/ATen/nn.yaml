@@ -134,14 +134,6 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_max_pool3d_with_indices(Tensor self, IntArrayRef[3] kernel_size, IntArrayRef[3] stride={}, IntArrayRef[3] padding=0, IntArrayRef[3] dilation=1, bool ceil_mode=false)
-  cname: VolumetricDilatedMaxPooling
-  default_init:
-    stride: kernel_size
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 - name: _thnn_max_unpool2d(Tensor self, LongTensor indices, IntArrayRef[2] output_size)
   cname: SpatialMaxUnpooling
   scalar_check:

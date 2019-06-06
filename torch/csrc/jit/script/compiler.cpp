@@ -1,12 +1,14 @@
-#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -424,6 +426,7 @@ struct Environment {
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
+          {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"rangelist",
@@ -558,7 +561,6 @@ struct to_ir {
       throw ErrorReport(def.decl().params().range())
           << "methods must have a self argument";
     }
-
     method.setSchema(emitDef(def, self, graph->block()));
     runCleanupPasses(graph);
   }
@@ -594,6 +596,7 @@ struct to_ir {
 
   void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
     // remove any uses of tuples that we inserted that are not needed
+    Inline(*to_clean);
     LowerSimpleTuples(to_clean);
     ConstantPooling(to_clean);
     // For jitter
@@ -670,7 +673,7 @@ struct to_ir {
       auto param = *it;
       auto def = param.defaultValue();
       if (def.present()) {
-        default_types.emplace_back(param.type());
+        default_types.emplace_back(param.type().get());
         default_exprs.emplace_back(def.get());
       }
     }
@@ -683,15 +686,22 @@ struct to_ir {
 
       TypePtr type;
       c10::optional<int32_t> N;
-
-      // BroadcastList list can only appear at the argument level
-      if (auto maybe_broad_list =
-              typeParser_.parseBroadcastList(decl_arg.type())) {
-        type = maybe_broad_list->first;
-        N = maybe_broad_list->second;
-      } else {
-        type = typeParser_.parseTypeFromExpr(decl_arg.type());
+      bool is_inferred_type = false;
+      if (!decl_arg.type().present()) {
+        // If this param doesn't have a type, default to "tensor"
+        is_inferred_type = true;
+        type = TensorType::get();
         N = c10::nullopt;
+      } else {
+        // BroadcastList list can only appear at the argument level
+        if (auto maybe_broad_list =
+                typeParser_.parseBroadcastList(decl_arg.type().get())) {
+          type = maybe_broad_list->first;
+          N = maybe_broad_list->second;
+        } else {
+          type = typeParser_.parseTypeFromExpr(decl_arg.type().get());
+          N = c10::nullopt;
+        }
       }
       c10::optional<IValue> default_value = c10::nullopt;
       if (decl_arg.defaultValue().present()) {
@@ -702,7 +712,9 @@ struct to_ir {
           type,
           N,
           default_value,
-          decl_arg.kwarg_only());
+          decl_arg.kwarg_only(),
+          /*alias_info=*/c10::nullopt,
+          is_inferred_type);
       retval.push_back(arg);
     }
     return retval;
@@ -1194,14 +1206,25 @@ struct to_ir {
     // ordered set, because we want deterministic graph output
     std::set<std::string> mutated_variables;
 
+    // var is only defined in one branch save error in case it's used later
+    auto err = [&](const std::string& v, const std::string& branch) {
+      ErrorReport error(stmt);
+      error << v << " is not defined in the " << branch;
+      environment_stack->setVariableTypeError(v, error.what());
+    };
+
     for (auto& v : save_true->definedVariables()) {
       if (save_false->findInAnyFrame(v)) {
         mutated_variables.insert(v);
+      } else {
+        err(v, "false branch");
       }
     }
     for (auto& v : save_false->definedVariables()) {
       if (save_true->findInAnyFrame(v)) {
         mutated_variables.insert(v);
+      } else {
+        err(v, "true branch");
       }
     }
 
@@ -1232,10 +1255,7 @@ struct to_ir {
             save_false->findInParentFrame(x)) {
           throw error;
         } else {
-          // error gets saved in the lowest environment because all
-          // variables are scoped to the function. doesn't matter if this
-          // accessed through save_true or save_false
-          save_true->setVariableTypeError(x, error.what());
+          environment_stack->setVariableTypeError(x, error.what());
           continue;
         }
       }
@@ -1396,17 +1416,85 @@ struct to_ir {
       const Ident& target,
       const List<Expr>& args,
       const List<Stmt>& body) {
-    // TODO: start, stop, step loop
-    if (args.size() != 1) {
-      throw ErrorReport(range)
-          << "range() expects 1 argument but got " << args.size();
+    Value *end_val = nullptr, *start_val = nullptr, *step_val = nullptr;
+    bool isSimpleRange = (args.size() == 1);
+    std::vector<Value*> argVals;
+    for (auto i : args) {
+      argVals.push_back(ensureInt(range, emitExpr(i)));
     }
-    auto max_trip_count_val = ensureInt(range, emitExpr(args[0]));
+    if (isSimpleRange) {
+      end_val = argVals[0];
+      start_val = end_val->owningGraph()->insertConstant(0);
+      step_val = end_val->owningGraph()->insertConstant(1);
+      start_val->node()->setSourceRange(range);
+      end_val->node()->setSourceRange(range);
+    } else if (args.size() == 2 || args.size() == 3) {
+      start_val = argVals[0];
+      end_val = argVals[1];
+      if (args.size() == 3) {
+        step_val = argVals[2];
+      } else {
+        step_val = end_val->owningGraph()->insertConstant(1);
+        step_val->node()->setSourceRange(range);
+      }
+    } else if (args.size() == 0) {
+      throw ErrorReport(range) << "range expected 1 arguments, got 0";
+    } else {
+      throw ErrorReport(range)
+          << "range expected at most 3 arguments, got " << args.size();
+    }
     const auto& ident_name = target.name();
-    auto assigner = [ident_name, range](
-                        Value* index, std::shared_ptr<Environment> env) {
-      env->setVar(range, ident_name, index);
+    TORCH_CHECK(
+        end_val != nullptr && start_val != nullptr && step_val != nullptr,
+        "Expected non-null pointers for range() arguments");
+    auto addOp = [end_val, range](
+                     Graph* g, NodeKind kind, ArrayRef<Value*> inputs) {
+      return g->insertNode(g->create(kind, inputs, 1))
+          ->setSourceRange(range)
+          ->output()
+          ->setType(IntType::get());
     };
+    auto assigner =
+        [addOp, ident_name, range, start_val, step_val, isSimpleRange](
+            Value* index, std::shared_ptr<Environment> env) {
+          Value* derived_index;
+          if (isSimpleRange) {
+            derived_index = index;
+          } else {
+            auto g = index->owningGraph();
+            derived_index =
+                addOp(g, aten::__derive_index, {index, start_val, step_val});
+          }
+          env->setVar(range, ident_name, derived_index);
+        };
+    Value* max_trip_count_val;
+    if (isSimpleRange) {
+      max_trip_count_val = end_val;
+    } else {
+      auto g = start_val->owningGraph();
+      Value* cond_value = emitBuiltinCall(
+          range,
+          *g,
+          aten::eq,
+          c10::nullopt,
+          {step_val, g->insertConstant(0)},
+          {},
+          /*required=*/true);
+      Node* n = g->insertNode(create(prim::If, range, 0));
+      n->addInput(cond_value);
+      auto true_block = n->addBlock();
+      n->addBlock();
+      {
+        WithInsertPoint guard(true_block);
+        g->insert(
+            prim::RaiseException,
+            {std::string("range() arg 3 must not be zero")},
+            {},
+            range);
+      }
+      max_trip_count_val =
+          addOp(g, aten::__range_length, {start_val, end_val, step_val});
+    }
     emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
@@ -2156,7 +2244,6 @@ struct to_ir {
       if (trees.size() < 1) {
         throw ErrorReport(loc) << "Expected at least one argument to fork()";
       }
-
       auto forked = emitSugaredExpr(Expr(trees[0]), 1);
       TreeList sliced_trees(trees.begin() + 1, trees.end());
       auto inputs = getNamedValues(sliced_trees, true);
@@ -2219,7 +2306,7 @@ struct to_ir {
               << "type must be a type identifier";
         }
         auto val = emitExpr(obj);
-        // Special casing for list and tuple since isintance(x, list) and
+        // Special casing for list and tuple since isinstance(x, list) and
         // isinstance(x, tuple) does not accept List[int] / Tuple[int] like
         // subscript type annotation in python
         if (*type_name == "list" && val->type()->cast<ListType>()) {
@@ -2376,10 +2463,9 @@ struct to_ir {
                      std::make_shared<BuiltinFunction>(aten::neg, at::nullopt))
                      ->call(tree->range(), method, named_values, {}, 0));
 
-    // constant fold the input if possible
-
-    // can occur with desugared class type __neg__ function
-    if (neg_val->node()->inputs().size() == 0) {
+    // if we emitted a aten::neg and not some other overloaded function,
+    // then try to constantfold
+    if (neg_val->node()->kind() != aten::neg) {
       return neg_val;
     }
     auto maybe_constant_input = toIValue(neg_val->node()->input());
@@ -3061,7 +3147,7 @@ void CompilationUnit::define(
     const std::string& source,
     const ResolverPtr& resolver,
     const Self& self) {
-  Parser p(source);
+  Parser p(std::make_shared<Source>(source, "<string>", 1));
   std::vector<Def> definitions;
   std::vector<ResolverPtr> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {

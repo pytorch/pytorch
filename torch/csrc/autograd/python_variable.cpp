@@ -163,7 +163,7 @@ PyObject *THPVariable_get_T(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  return THPVariable_Wrap(var.T());
+  return THPVariable_Wrap(var.numpy_T());
   END_HANDLE_TH_ERRORS
 }
 
