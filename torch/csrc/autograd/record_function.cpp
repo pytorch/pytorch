@@ -15,14 +15,13 @@ thread_local RecordFunction* thread_local_func_ = nullptr;
 
 bool sampling_prop_set = false;
 double sampling_prob = 1.0;
-constexpr double kEps = 1e-10;
 }
 
 void setSamplingProbability(double prob) {
-  if (std::abs(prob - 1.0) < kEps) {
+  if (prob == 1.0) {
     sampling_prop_set = false;
   } else {
-    TORCH_CHECK(prob > -kEps && prob < 1.0);
+    TORCH_CHECK(prob >= 0.0 && prob < 1.0);
     sampling_prop_set = true;
   }
   sampling_prob = prob;
