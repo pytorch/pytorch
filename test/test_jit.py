@@ -14183,12 +14183,21 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
         kwargs_str = ''
         for k, v in kwargs.items():
             kwargs_str += ', ' + k + '=' + str(v)
+        kwargs_str = ', '.join([k + '=' + str(v) for k, v in kwargs.items()])
+        self_arg = actuals[0]
+        if(func_type == 'method'):
+            actuals = actuals[1:]
+
+        argument_str = ', '.join(actuals)
+        argument_str += ', ' if len(actuals) != 0 and len(kwargs) != 0 else ''
+        argument_str += kwargs_str
+
         if func_type == 'functional':
-            call = 'torch.{}({}{})'.format(method_name, ', '.join(actuals), kwargs_str)
+            call = 'torch.{}({})'.format(method_name, argument_str)
         elif func_type == 'method':
-            call = '{}.{}({}{})'.format(actuals[0], method_name, ', '.join(actuals[1:]), kwargs_str)
+            call = '{}.{}({})'.format(self_arg, method_name, argument_str)
         elif func_type == 'nn_functional':
-            call = 'torch.nn.functional.{}({}{})'.format(method_name, ', '.join(actuals), kwargs_str)
+            call = 'torch.nn.functional.{}({})'.format(method_name, argument_str)
         else:
             raise 'Unsupported function type'
 
@@ -14204,9 +14213,7 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
 
 def check_alias_annotation(method_name, args, kwargs):
     formals, tensors, actuals = get_script_args(args)
-    kwargs_str = ''
-    for k, v in kwargs.items():
-        kwargs_str += ', ' + k + '=' + str(v)
+    kwargs_str = ', '.join([k + '=' + str(v) for k, v in kwargs.items()])
     call = '{}.{}({}{})'.format(actuals[0], method_name, ', '.join(actuals[1:]), kwargs_str)
     script = script_template.format(', '.join(formals), call)
     CU = torch.jit.CompilationUnit(script)
