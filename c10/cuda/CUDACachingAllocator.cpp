@@ -376,7 +376,7 @@ struct THCCachingAllocator
     cacheInfoAux(small_blocks, dev_id, total, largest);
   }
 
-  void recordStream(void* ptr, cuda::CUDAStream stream)
+  void recordStream(void* ptr, cuda::CUDAStream stream, bool suppressError=false)
   {
     // Empty tensor's storage().data() might be a null ptr. As there is no
     // blocks associated with those tensors, it is fine to do nothing here.
@@ -384,14 +384,25 @@ struct THCCachingAllocator
       std::lock_guard<std::recursive_mutex> lock(mutex);
       Block* block = find_allocated_block(ptr);
       if (!block) {
-        AT_ERROR("invalid device pointer: ", ptr);
+        // In some cases (e.g., tensor loaded from blob, or shared by another
+        // process), this CUDACachingAllocator does not know about the ptr,
+        // and the caller of this function might not have enough context to
+        // check where the tensor is originated. One option is to expose a new
+        // API from CUDACachingAllocator to check whether it knows about the
+        // ptr, but it would force other use cases to unnecessarily do two
+        // map look up (one check + one recordStream). Hence, we provide a
+        // suppressError argument to avoid error and two lookups.
+        if (!suppressError) {
+          AT_ERROR("invalid device pointer: ", ptr);
+        }
+      } else {
+        if (stream.stream() == block->stream) {
+          // ignore uses on the allocation stream, since those don't require any
+          // special synchronization
+          return;
+        }
+        block->stream_uses.insert(stream);
       }
-      if (stream.stream() == block->stream) {
-        // ignore uses on the allocation stream, since those don't require any
-        // special synchronization
-        return;
-      }
-      block->stream_uses.insert(stream);
     }
   }
 
@@ -651,9 +662,9 @@ void* getBaseAllocation(void *ptr, size_t *size)
   return caching_allocator.getBaseAllocation(ptr, size);
 }
 
-void recordStream(void *ptr, cuda::CUDAStream stream)
+void recordStream(void *ptr, cuda::CUDAStream stream, bool suppressError)
 {
-  caching_allocator.recordStream(ptr, stream);
+  caching_allocator.recordStream(ptr, stream, suppressError);
 }
 
 std::mutex* getFreeMutex()

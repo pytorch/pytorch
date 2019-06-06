@@ -20,9 +20,10 @@ from torch import nn
 import torch.nn.functional as F
 import torch.distributed as c10d
 import torch.distributed as dist
+import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel
 
-from common_utils import TestCase, load_tests, run_tests
+from common_utils import TestCase, load_tests, run_tests, PY3
 from common_utils import retry_on_address_already_in_use_error
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1605,6 +1606,54 @@ class ProcessGroupNCCLTest(TestCase):
                     torch.Tensor([float(i * (i + 1) / 2)]),
                     tensors_list[i - 2][j])
 
+
+class ProcessGroupShareTensorTest(TestCase):
+
+    @property
+    def world_size(self):
+        return 2
+
+    def opts(threads=2):
+        opts = c10d.ProcessGroupGloo.Options()
+        opts.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        opts.timeout = 5.0
+        opts.threads = threads
+        return opts
+
+    def _test_allreduce_gloo_process(rank, filename, shared_tensors, world_size):
+        store = c10d.FileStore(filename, world_size)
+        pg = c10d.ProcessGroupGloo(
+            store, rank, world_size, ProcessGroupShareTensorTest.opts())
+        xs = [shared_tensors[rank]]
+        pg.allreduce(xs, op=c10d.ReduceOp.SUM).wait()
+        xs[0].to('cpu').allclose(torch.ones(2, 2))
+
+    @unittest.skipIf(not PY3, "Python 3 needed")
+    @skip_if_not_multigpu
+    def test_allreduce_gloo(self):
+        file = tempfile.NamedTemporaryFile(delete=False)
+        shared_tensors = [torch.ones(2, 2).to(i).share_memory_() for i in range(2)]
+        mp.spawn(ProcessGroupShareTensorTest._test_allreduce_gloo_process,
+                 args=(file.name, shared_tensors, self.world_size),
+                 nprocs=self.world_size,
+                 join=True)
+
+    def _test_allreduce_nccl_process(rank, filename, shared_tensors, world_size):
+        store = c10d.FileStore(filename, world_size)
+        pg = c10d.ProcessGroupNCCL(store, rank, world_size)
+        xs = [shared_tensors[rank]]
+        pg.allreduce(xs, op=c10d.ReduceOp.SUM).wait()
+        xs[0].to('cpu').allclose(torch.ones(2, 2))
+
+    @unittest.skipIf(not PY3, "Python 3 needed")
+    @skip_if_not_multigpu
+    def test_allreduce_nccl(self):
+        file = tempfile.NamedTemporaryFile(delete=False)
+        shared_tensors = [torch.ones(2, 2).to(i).share_memory_() for i in range(2)]
+        mp.spawn(ProcessGroupShareTensorTest._test_allreduce_gloo_process,
+                 args=(file.name, shared_tensors, self.world_size),
+                 nprocs=self.world_size,
+                 join=True)
 
 class Net(nn.Module):
     def __init__(self):
