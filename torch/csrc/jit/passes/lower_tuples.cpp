@@ -2,6 +2,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/range_utils.h>
 
 namespace torch {
 namespace jit {
@@ -48,12 +49,18 @@ void removeTupleNodes(Node* n, bool must_remove_tuples) {
       }
       return;
     }
-    n->output()->replaceAllUsesWith(construct->inputs().at(*maybe_int));
+    auto tuple = n->inputs().at(0);
+    const size_t tuple_len = tuple->type()->containedTypes().size();
+    const size_t normalized_idx = normalizeIndex(*maybe_int, tuple_len);
+    n->output()->replaceAllUsesWith(construct->inputs().at(normalized_idx));
   } else if (n->kind() == prim::TupleSlice) {
     std::vector<Value*> values;
-    int64_t beg = n->i(attr::beg);
-    int64_t end = n->i(attr::end);
-    for (int64_t i = beg; i < end; i += 1) {
+    const size_t tuple_len = n->inputs().at(0)->type()->containedTypes().size();
+    int64_t beg;
+    int64_t end;
+    std::tie(beg, end) =
+        clamp_bounds(n->i(attr::beg), n->i(attr::end), tuple_len);
+    for (int64_t i = beg; i < end; i++) {
       values.push_back(construct->inputs().at(i));
     }
     auto graph = n->owningGraph();

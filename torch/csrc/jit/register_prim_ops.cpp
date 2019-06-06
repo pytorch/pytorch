@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/pickler.h>
 #include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/range_utils.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/jit_exception.h>
@@ -143,16 +144,6 @@ static at::Tensor to_dispatch(
   } else {
     return self.to(*device, *scalarType, non_blocking, copy);
   }
-}
-
-// Convert an python index (which may be negative) into an index usable for a
-// C++ container
-int64_t normalizeIndex(int64_t idx, int64_t list_size) {
-  if (idx < 0) {
-    // Handle negative indexing
-    idx = list_size + idx;
-  }
-  return idx;
 }
 
 RegisterOperators reg(
@@ -718,8 +709,12 @@ RegisterOperators reg(
      Operator(
          prim::TupleSlice,
          [](const Node* node) {
-           int64_t beg_ind = node->i(attr::beg);
-           int64_t end_ind = node->i(attr::end);
+           size_t tuple_len =
+               node->inputs().at(0)->type()->containedTypes().size();
+           int64_t beg_ind;
+           int64_t end_ind;
+           std::tie(beg_ind, end_ind) =
+               clamp_bounds(node->i(attr::beg), node->i(attr::end), tuple_len);
            return [=](Stack& stack) {
              auto t = pop(stack).toTuple();
              const auto& elems = t->elements();
@@ -1138,8 +1133,7 @@ int stringSlice(Stack& stack) {
   const int64_t size = string.size();
 
   // Clamp start and end to the bounds of the list
-  start = std::max(int64_t(0), normalizeIndex(start, size));
-  end = std::min(size, normalizeIndex(end, size));
+  std::tie(start, end) = clamp_bounds(start, end, size);
 
   if (end <= start) {
     // Slice is empty
@@ -1573,13 +1567,13 @@ int listSlice(Stack& stack) {
   int64_t step;
 
   pop(stack, list, start, end, step);
-  const int64_t list_size = list->elements().size();
+  const size_t list_size = list->elements().size();
 
   // clamp start and end to the bounds of the list
-  const auto normalized_start =
-      std::max((int64_t)0, normalizeIndex(start, list_size));
-  const auto normalized_end =
-      std::min(list_size, normalizeIndex(end, list_size));
+  size_t normalized_start;
+  size_t normalized_end;
+  std::tie(normalized_start, normalized_end) =
+      clamp_bounds(start, end, list_size);
 
   std::vector<TElement> sliced_list;
   if (normalized_end <= normalized_start) {
