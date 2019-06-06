@@ -13,6 +13,7 @@
 
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
+#include <thrust/iterator/constant_iterator.h>
 
 const int WARP_SIZE = 32;
 const int MODE_SUM = 0;
