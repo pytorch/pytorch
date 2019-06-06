@@ -361,29 +361,29 @@ class TestCase(expecttest.TestCase):
         # Wraps the tested method if we should do CUDA memory check.
         self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
         # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
-        self.wrap_with_cuda_policy_if(
-            method_name, self._do_cuda_memory_leak_check and not IS_WINDOWS, self.assertLeaksNoCudaTensors());
+        if self._do_cuda_memory_leak_check and not IS_WINDOWS:
+            self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors())
 
         # Wraps the tested method if we should enforce non default CUDA stream.
         self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
-        self.wrap_with_cuda_policy_if(
-            method_name, self._do_cuda_non_default_stream and not IS_WINDOWS, CudaNonDefaultStream());
+        if self._do_cuda_non_default_stream and not IS_WINDOWS:
+            self.wrap_with_cuda_policy(method_name, CudaNonDefaultStream())
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
         return CudaMemoryLeakCheck(self, name)
 
-    def wrap_with_cuda_policy_if(self, method_name, condition, policy):
-        if condition:
-            test_method = getattr(self, method_name)
-            # the import below may initialize CUDA context, so we do it only if
-            # self._do_cuda_memory_leak_check is True.
-            from common_cuda import TEST_CUDA
-            fullname = self.id().lower()  # class_name.method_name
-            if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
-                setattr(self, method_name, self.wrap_with_cuda_policy(test_method, policy))
+    def wrap_with_cuda_policy(self, method_name, policy):
+        test_method = getattr(self, method_name)
+        # the import below may initialize CUDA context, so we do it only if
+        # self._do_cuda_memory_leak_check or self._do_cuda_non_default_stream
+        # is True.
+        from common_cuda import TEST_CUDA
+        fullname = self.id().lower()  # class_name.method_name
+        if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
+            setattr(self, method_name, self.wrap_method_with_cuda_policy(test_method, policy))
 
-    def wrap_with_cuda_policy(self, method, policy):
+    def wrap_method_with_cuda_policy(self, method, policy):
         # Assumes that `method` is the tested function in `self`.
         # NOTE: Python Exceptions (e.g., unittest.Skip) keeps objects in scope
         #       alive, so this cannot be done in setUp and tearDown because
