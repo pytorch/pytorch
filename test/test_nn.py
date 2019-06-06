@@ -5329,9 +5329,11 @@ class TestNN(NNTestCase):
                 if l < 10:
                     self.assertEqual(padded.grad.data[l:, i].abs().sum(), 0)
 
-        # test error message
+        # test error messages
         with self.assertRaisesRegex(RuntimeError, 'You can pass `enforce_sorted=False`'):
             packed = rnn_utils.pack_padded_sequence(torch.randn(3, 3), [1, 3, 2])
+        with self.assertRaisesRegex(RuntimeError, 'empty tensor'):
+            packed = rnn_utils.pack_padded_sequence(torch.randn(0, 0), [])
 
     def _test_variable_sequence(self, device="cpu", dtype=torch.float):
         def pad(var, length):
