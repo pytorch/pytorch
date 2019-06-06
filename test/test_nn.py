@@ -3326,13 +3326,16 @@ class TestNN(NNTestCase):
             return (src_indices < src_lengths).int().detach()
 
         def _multihead_attn_test_helper(add_key_padding_mask=False, add_bias_kv=False, add_zero_attn=False,
-                                        saved_kv=False):
+                                        saved_kv=False, same_embed_dim=False):
             for _ in range(100):
                 batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
                 d_head = random.randint(3, 10)
                 nheads = random.randint(3, 10)
                 d_model = d_head * nheads
-                kv_dim = random.randint(5, 20)
+                if same_embed_dim:
+                    kv_dim = d_model
+                else:
+                    kv_dim = random.randint(5, 20)
                 dims = [batch_sz, seq_len, kv_dim]
 
                 saved_k = None
@@ -3501,6 +3504,10 @@ class TestNN(NNTestCase):
             _multihead_attn_test_helper(add_key_padding_mask=True, add_bias_kv=True,
                                         add_zero_attn=True, saved_kv=True)
 
+        def test_multihead_attn_all_arguments3():
+            _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True, 
+                                        saved_kv=True, same_embed_dim=True)
+
         test_multihead_attn_add_zero_attn()  # Test MultiheadAttention with add_zero_attn
         test_multihead_attn_add_bias_kv()  # Test MultiheadAttention with add_bias_kv
         test_multihead_attn_no_masking()   # Test MultiheadAttention without masking
@@ -3510,6 +3517,7 @@ class TestNN(NNTestCase):
         test_multihead_attn_all_arguments1()  # Test MultiheadAttention with all the argument.
         with self.assertRaisesRegex(AssertionError, "bias cannot be added to static key."):
             test_multihead_attn_all_arguments2()  # Test MultiheadAttention with all the argument.
+        test_multihead_attn_all_arguments3()  # Test MultiheadAttention with all the argument.
 
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
