@@ -27,7 +27,7 @@
 #include <sstream>
 #include <queue>
 #include <TH/TH.h>
-#include <cuda_runtime_api.h>
+// #include <cuda_runtime_api.h>
 
 namespace torch { namespace autograd {
 
@@ -260,7 +260,12 @@ auto Engine::thread_init(int device) -> void {
   // Don't use DeviceGuard here because its destructor may be called before the
   // device is reset. This is fine because the device is thread local.
   if (device != -1) {
-    cudaSetDevice(device);
+    for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+      auto* impl = c10::impl::device_guard_impl_registry[i].load();
+      if (impl && device < impl->deviceCount()) {
+        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
+      }
+    }
   }
   worker_device = device;
   thread_main(nullptr);
