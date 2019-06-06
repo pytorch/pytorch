@@ -12431,6 +12431,26 @@ a")
         self.checkScript(round_float, (1.5,))
         self.checkScript(round_int, (2,))
 
+    @unittest.skipIf(PY2, "oct() format changed from PY2 to PY3")
+    def test_convert_base(self):
+        def test_hex(x):
+            # type: (int) -> str
+            return hex(x)
+
+        def test_oct(x):
+            # type: (int) -> str
+            return oct(x)
+
+        def test_bin(x):
+            # type: (int) -> str
+            return bin(x)
+
+        numbers = [-1000, -10, 0, 1, 10, 2343]
+        for n in numbers:
+            self.checkScript(test_bin, (n,))
+            self.checkScript(test_oct, (n,))
+            self.checkScript(test_hex, (n,))
+
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
     def test_get_set_state(self):
         class M(torch.jit.ScriptModule):
