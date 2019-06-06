@@ -3212,20 +3212,22 @@ def multi_head_attention_forward(query,                        # type: Tensor
                 _b = _b[_start:]
             v = linear(value, _w, _b)
     else:
-        assert q_proj_weight is not None
-        q_embed_dim = query.size(-1)
-        assert tuple(q_proj_weight.size()) == (embed_dim, q_embed_dim)
+        q_proj_weight_non_opt = torch.jit._unwrap_optional(q_proj_weight)
+        k_proj_weight_non_opt = torch.jit._unwrap_optional(k_proj_weight)
+        v_proj_weight_non_opt = torch.jit._unwrap_optional(v_proj_weight)
 
-        assert k_proj_weight is not None
-        k_embed_dim = key.size(-1)
-        assert tuple(k_proj_weight.size()) == (embed_dim, k_embed_dim)
+#        q_embed_dim = query.size(-1)
+#        assert tuple(q_proj_weight_non_opt.size()) == (embed_dim, q_embed_dim)
 
-        assert v_proj_weight is not None
-        q = linear(query, q_proj_weight, in_proj_bias[0:embed_dim])
-        k = linear(key, k_proj_weight, in_proj_bias[embed_dim:(embed_dim * 2)])
-        v = linear(value, v_proj_weight, in_proj_bias[(embed_dim * 2):])
-        v_embed_dim = value.size(-1)
-        assert tuple(v_proj_weight.size()) == (embed_dim, v_embed_dim)
+#        k_embed_dim = key.size(-1)
+#        assert tuple(k_proj_weight_non_opt.size()) == (embed_dim, k_embed_dim)
+
+#        v_embed_dim = value.size(-1)
+#        assert tuple(v_proj_weight_non_opt.size()) == (embed_dim, v_embed_dim)
+
+        q = linear(query, q_proj_weight_non_opt, in_proj_bias[0:embed_dim])
+        k = linear(key, k_proj_weight_non_opt, in_proj_bias[embed_dim:(embed_dim * 2)])
+        v = linear(value, v_proj_weight_non_opt, in_proj_bias[(embed_dim * 2):])
 
     q *= scaling
 
