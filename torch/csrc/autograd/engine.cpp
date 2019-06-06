@@ -27,6 +27,7 @@
 #include <sstream>
 #include <queue>
 #include <TH/TH.h>
+#include <cuda_runtime_api.h>
 
 namespace torch { namespace autograd {
 
@@ -58,6 +59,8 @@ struct FunctionTask {
   // gradients flowing here.  Once all the dependencies are finished, we
   // use the contents of this buffer to run the function.
   InputBuffer inputs_;
+  // When worker receives a task with isShutdownTask = true, it will immediately
+  // exit. The engine sends a shutdown task to every queue upon its destruction.
   bool isShutdownTask_;
 
   FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs, bool isShutdownTask = false)
@@ -255,7 +258,10 @@ auto Engine::thread_init(int device) -> void {
   // are movable.
 
   // Don't use DeviceGuard here because its destructor may be called before the
-  // device is reset. This is fine because worker_device is thread local.
+  // device is reset. This is fine because the device is thread local.
+  if (device != -1) {
+    cudaSetDevice(device);
+  }
   worker_device = device;
   thread_main(nullptr);
 }
@@ -280,8 +286,10 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
   // Note [Reentrant backwards]
   while (!graph_task || graph_task->outstanding_tasks_ > 0) {
     FunctionTask task = queue->pop();
+    // This will only work if the worker is running a non backward task
+    // TODO Needs to be fixed this to work in all cases
     if (task.isShutdownTask_) {
-      C10_LOG_API_USAGE_ONCE("worker shutting down");
+      C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
       break;
     }
     if (task.fn_ && !task.base_->has_error_.load()) {
