@@ -14,7 +14,9 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/List.h>
+#endif
 
 #include "caffe2/core/operator_c10wrapper.h"
 
