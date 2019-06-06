@@ -6,7 +6,10 @@ from itertools import repeat
 import os
 from contextlib import contextmanager
 import threading
-import queue
+if sys.version_info[0] == 3:
+    import queue
+else:
+    import Queue as queue
 
 import torch
 import torch.cuda
