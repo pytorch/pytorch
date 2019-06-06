@@ -3773,7 +3773,9 @@ class _TestTorchMixin(object):
                 torch._multinomial_alias_draw(p_t.view(2, 2), a_t.view(2, 2))
 
         MAX_SAMPLES = 100000
-        for probs in [get_probs(4, True), torch.tensor([0.8, 0.2]), torch.tensor([0.7, 0.2, 0.1])]:
+        for probs in [get_probs(4, True),
+                      cast(torch.tensor([0.8, 0.2])),
+                      cast(torch.tensor([0.7, 0.2, 0.1]))]:
             # Check how different the alias distribution and the original distribution are
             n_samples = 0
             alias_dist = torch.zeros_like(probs)
@@ -3787,15 +3789,15 @@ class _TestTorchMixin(object):
             self.assertTrue(torch.allclose(alias_dist / n_samples, probs, rtol=0.02, atol=0.0),
                             "Actual: {}\nExpected: {}".format(alias_dist, probs))
 
-        for probs in [torch.tensor([0.2501, 0.25, 0.2499, 0.25]),
-                      torch.tensor([0.8, 0.199, 0.001]),
-                      torch.tensor([0.25001, 0.25, 0.24999, 0.25]),
-                      torch.tensor([0.33, 0.34, 0.33]),
-                      torch.tensor([0.8, 0.1999, 0.0001])]:
+        for probs in [cast(torch.tensor([0.2501, 0.25, 0.2499, 0.25])),
+                      cast(torch.tensor([0.8, 0.199, 0.001])),
+                      cast(torch.tensor([0.25001, 0.25, 0.24999, 0.25])),
+                      cast(torch.tensor([0.33, 0.34, 0.33])),
+                      cast(torch.tensor([0.8, 0.1999, 0.0001]))]:
             # Check the difference between the original probabilities and the reconstructed
             # probabilities from the alias and probability tables output by _multinomial_alias_setup
             alias_table, prob_table = torch._multinomial_alias_setup(probs)
-            actual = torch.zeros(probs.shape)
+            actual = torch.zeros_like(probs)
             for i, vals in enumerate(zip(alias_table, prob_table)):
                 idx, p = vals
                 actual[i] += p
