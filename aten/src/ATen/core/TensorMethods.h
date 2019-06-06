@@ -7,7 +7,7 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #ifdef NAMEDTENSOR_ENABLED
-#include <ATen/core/NamedTensor.h>
+#include <ATen/NamedTensor.h>
 #endif
 
 
