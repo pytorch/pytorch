@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.functional import _Reduction
 from common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    TEST_WITH_ROCM
+    TEST_WITH_ROCM, skipCUDANonDefaultStreamIf
 from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 from torch.autograd import Variable
@@ -1528,6 +1528,7 @@ new_module_tests = [
         constructor_args=(2, 3, (2, 3, 2)),
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -1535,6 +1536,7 @@ new_module_tests = [
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         module_name='MaxPool3d',
@@ -2796,6 +2798,7 @@ criterion_tests = [
         desc="1d",
         check_sum_reduction=True,
         check_gradgrad=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         module_name='MultiLabelMarginLoss',
@@ -2805,6 +2808,7 @@ criterion_tests = [
             multilabelmarginloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         check_gradgrad=False,
+        decorator=skipCUDANonDefaultStreamIf(True),
     ),
     dict(
         module_name='MultiLabelSoftMarginLoss',
