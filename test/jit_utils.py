@@ -19,10 +19,13 @@ from common_utils import TestCase, IS_WINDOWS, \
 from contextlib import contextmanager
 from functools import reduce
 from itertools import chain
+import errno
+import fcntl
 import inspect
 import io
 import math
 import os
+import sys
 import tempfile
 import textwrap
 
@@ -402,6 +405,43 @@ class JitTestCase(TestCase):
                 self.assertTrue(torch.allclose(g2, g2_ge, atol=8e-4, rtol=8e-4))
 
         return ge
+
+    @contextmanager
+    def capture_stdout(self):
+        # No idea how to capture stdout from C++ on Windows
+        if IS_WINDOWS:
+            yield ['']
+            return
+        sys.stdout.flush()
+        stdout_fd = os.dup(1)
+        r, w = os.pipe()
+        try:
+            # Override stdout with r - dup is guaranteed to return the lowest free fd
+            os.close(1)
+            os.dup(w)
+
+            captured_stdout = ['']
+            yield captured_stdout
+            sys.stdout.flush()  # Make sure that Python hasn't buffered anything
+
+            # Do the ugly dance to read all the data that was written into the pipe
+            fcntl.fcntl(r, fcntl.F_SETFL, os.O_NONBLOCK)
+            total_stdout = ''
+            while True:
+                try:
+                    total_stdout += os.read(r, 1000).decode('ascii')
+                except OSError as e:
+                    if e.errno != errno.EAGAIN:
+                        raise
+                    break
+            captured_stdout[0] = total_stdout
+        finally:
+            # Revert the change, and clean up all fds
+            os.close(1)
+            os.dup(stdout_fd)
+            os.close(stdout_fd)
+            os.close(r)
+            os.close(w)
 
     def createFunctionFromGraph(self, trace):
         graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
