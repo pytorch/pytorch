@@ -20,9 +20,12 @@ from torch import nn
 import torch.nn.functional as F
 import torch.distributed as c10d
 import torch.distributed as dist
+import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel
 
+from common_cuda import TEST_MULTIGPU
 from common_utils import TestCase, load_tests, run_tests
+from common_utils import NO_MULTIPROCESSING_SPAWN
 from common_utils import retry_on_address_already_in_use_error
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -67,6 +70,9 @@ def skip_if_lt_x_gpu(x):
         return wrapper
 
     return decorator
+
+
+NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 
 
 def skip_if_not_nccl(func):
@@ -2668,6 +2674,55 @@ class ComputeBucketAssignmentTest(TestCase):
         ]
         result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
+
+class ProcessGroupShareTensorTest(TestCase):
+
+    @property
+    def world_size(self):
+        return 2
+
+    @classmethod
+    def opts(cls, threads=2):
+        opts = c10d.ProcessGroupGloo.Options()
+        opts.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        opts.timeout = 5.0
+        opts.threads = threads
+        return opts
+
+    @classmethod
+    def _init_pg_gloo(cls, rank, filename, world_size):
+        store = c10d.FileStore(filename, world_size)
+        return c10d.ProcessGroupGloo(
+            store, rank, world_size, ProcessGroupShareTensorTest.opts())
+
+    @classmethod
+    def assert_equal(cls, expected, value):
+        assert (expected == value).all().item() == 1, (
+            "Expecting tensor value {} but got {}."
+        ).format(expected, value)
+
+    @classmethod
+    def _test_allgather_chunk_process(
+            cls, rank, filename, shared_tensor, world_size, init_pg):
+        pg = init_pg(rank, filename, world_size)
+        x = torch.chunk(shared_tensor, world_size, dim=0)[rank]
+        ys = [torch.zeros_like(x) for _ in range(world_size)]
+        pg.allgather(ys, x).wait()
+        cls.assert_equal(shared_tensor[0].to("cpu"), ys[0].to("cpu"))
+        cls.assert_equal(shared_tensor[1].to("cpu"), ys[1].to("cpu"))
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+    def test_shared_allgather_chunk_gloo(self):
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            shared_tensor = torch.tensor(range(4)).reshape(2, 2)
+            mp.spawn(ProcessGroupShareTensorTest._test_allgather_chunk_process,
+                     args=(file.name,
+                           shared_tensor,
+                           self.world_size,
+                           ProcessGroupShareTensorTest._init_pg_gloo),
+                     nprocs=self.world_size,
+                     join=True)
 
 
 class CommTest(MultiProcessTestCase):
