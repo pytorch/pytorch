@@ -60,8 +60,6 @@ TORCH_API std::function<void()> pauseTracing();
 
 TORCH_API Value* getValueTrace(const IValue& var);
 
-TORCH_API Value* getNestedValueTrace(const IValue& v);
-
 TORCH_API Value* getOutputTrace(
     const std::shared_ptr<TracingState>& state,
     const Variable& var);

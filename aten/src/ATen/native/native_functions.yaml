@@ -688,6 +688,7 @@
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
+    MkldnnCPU: empty_mkldnn
     SparseCPU: empty_sparse
     SparseCUDA: empty_sparse
 
@@ -945,6 +946,9 @@
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   variants: function, method
 
+- func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
+  variants: function
+
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
   variants: function
 
@@ -1006,6 +1010,18 @@
     CUDA: kthvalue_out_cuda
 
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
+
+- func: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: layer_norm_cpu
+
+- func: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: layer_norm_backward_cpu
+
+- func: native_layer_norm_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: layer_norm_double_backward_cpu
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -1405,6 +1421,16 @@
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
+# Only exposed from C++ -- in Python,
+# we expose it as an attribute `T`, not a function.
+#
+# I'd like to name this "T" in C++ too, but
+# calling a native function "T" causes undefined
+# behavior on Windows, for reasons I don't understand
+# (maybe related to capital letter collation somehow...)
+- func: numpy_T(Tensor(a) self) -> Tensor(a)
+  variants: method
+
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
 
 - func: pin_memory(Tensor self) -> Tensor
@@ -1586,6 +1612,18 @@
   dispatch:
     CPU: prelu_backward_cpu
     CUDA: prelu_backward_cuda
+
+- func: gelu(Tensor self) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: gelu_cpu
+    CUDA: gelu_cuda
+
+- func: gelu_backward(Tensor grad, Tensor self) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: gelu_backward_cpu
+    CUDA: gelu_backward_cuda
 
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   variants: function, method
@@ -2084,6 +2122,11 @@
     CPU: _s_gamma_cpu
     CUDA: _s_gamma_cuda
 
+- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
+  dispatch:
+    CPU: _dirichlet_grad_cpu
+    CUDA: _dirichlet_grad_cuda
+
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
   variants: function
   dispatch:
@@ -2561,7 +2604,7 @@
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 
 - func: quantize_linear(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
-  variants: function, method
+  variants: function
   dispatch:
     CPU: quantize_linear_cpu
 
@@ -3193,19 +3236,19 @@
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_log_normal_
-    CUDA: legacy::cuda::_th_log_normal_
+    CUDA: log_normal_cuda_
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_exponential_
-    CUDA: legacy::cuda::_th_exponential_
+    CUDA: exponential_cuda_
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_geometric_
-    CUDA: legacy::cuda::_th_geometric_
+    CUDA: geometric_cuda_
 
 # wrappers for TH functions
 
@@ -3955,14 +3998,6 @@
   dispatch:
     CPU: legacy::cpu::_th_alias
     CUDA: legacy::cuda::_th_alias
-
-- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_dirichlet_grad_out
-
-- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
-  dispatch:
-    CPU: legacy::cpu::_th_dirichlet_grad
 
 - func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
