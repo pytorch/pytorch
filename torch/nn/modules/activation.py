@@ -759,26 +759,6 @@ class MultiheadAttention(Module):
         if self.bias_v is not None:
             xavier_normal_(self.bias_v)
 
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        in_proj_weight_key = prefix + 'in_proj_weight'
-
-        if in_proj_weight_key in state_dict.keys():
-            # In the early version of torch.nn.MultiheadAttention, q_proj_weight, k_proj_weight,
-            # and v_proj_weight are saved as in_proj_weight. If so, this call will split and delete
-            #  in_proj_weight.
-            in_proj_weight_val = state_dict[in_proj_weight_key]
-            assert in_proj_weight_val.dim() == 2
-            assert in_proj_weight_val.size() == (self.embed_dim * 3, self.embed_dim)
-            state_dict[prefix + 'q_proj_weight'] = in_proj_weight_val[:self.embed_dim, :]
-            state_dict[prefix + 'k_proj_weight'] = in_proj_weight_val[self.embed_dim:(self.embed_dim * 2), :]
-            state_dict[prefix + 'v_proj_weight'] = in_proj_weight_val[(self.embed_dim * 2):, :]
-            del state_dict[in_proj_weight_key]
-        
-        super(MultiheadAttention, self)._load_from_state_dict(
-            state_dict, prefix, local_metadata, strict,
-            missing_keys, unexpected_keys, error_msgs)
-
     @weak_script_method
     def forward(self, query, key, value, key_padding_mask=None,
                 need_weights=True, attn_mask=None):
@@ -809,16 +789,7 @@ class MultiheadAttention(Module):
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
         """
-        if self._qkv_same_embed_dim:
-            return F.multi_head_attention_forward(
-                query, key, value, self.embed_dim, self.num_heads,
-                self.in_proj_weight, self.in_proj_bias,
-                self.bias_k, self.bias_v, self.add_zero_attn,
-                self.dropout, self.out_proj.weight, self.out_proj.bias, 
-                training=self.training,
-                key_padding_mask=key_padding_mask, need_weights=need_weights, 
-                attn_mask=attn_mask)
-        else:
+        if hasattr(self, '_qkv_same_embed_dim') and self._qkv_same_embed_dim is False:
             return F.multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
                 self.in_proj_weight, self.in_proj_bias,
@@ -829,6 +800,15 @@ class MultiheadAttention(Module):
                 attn_mask=attn_mask, use_chunk_proj_weight=False,
                 q_proj_weight=self.q_proj_weight, k_proj_weight=self.k_proj_weight,
                 v_proj_weight=self.v_proj_weight)
+        else:
+            return F.multi_head_attention_forward(
+                query, key, value, self.embed_dim, self.num_heads,
+                self.in_proj_weight, self.in_proj_bias,
+                self.bias_k, self.bias_v, self.add_zero_attn,
+                self.dropout, self.out_proj.weight, self.out_proj.bias, 
+                training=self.training,
+                key_padding_mask=key_padding_mask, need_weights=need_weights, 
+                attn_mask=attn_mask)
 
 
 @weak_module
