@@ -149,7 +149,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
 
   for (i = 0; i < inputsize; i++)
     {
-      THLongTensor_fastSet1d(J, i, 0L);
+      THLongTensor_fastSet1d(J, i, -1L);
       scalar_t val = THTensor_(fastGet1d)(probs, i);
       THTensor_(fastSet1d)(q, i, inputsize*val);
 

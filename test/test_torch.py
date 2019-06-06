@@ -3778,7 +3778,24 @@ class _TestTorchMixin(object):
             alias_table, prob_table = torch._multinomial_alias_setup(probs)
             alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, n_samples)
             alias_dist = torch.unique(alias_samples, return_counts=True)[1].to(dtype=probs.dtype) / n_samples
-            self.assertTrue(torch.allclose(alias_dist, probs, rtol=0.05, atol=0.0))
+            rtol = 0.1 if IS_WINDOWS else 0.02
+            self.assertTrue(torch.allclose(alias_dist, probs, rtol=rtol, atol=0.0))
+
+        for probs in [torch.tensor([0.2501, 0.25, 0.2499, 0.25]),
+                      torch.tensor([0.8, 0.199, 0.001]),
+                      torch.tensor([0.25001, 0.25, 0.24999, 0.25]),
+                      torch.tensor([0.33, 0.34, 0.33]),
+                      torch.tensor([0.8, 0.1999, 0.0001])]:
+            # Check the difference between the original probabilities and the reconstructed
+            # probabilities from the alias and probability tables output by _multinomial_alias_setup
+            alias_table, prob_table = torch._multinomial_alias_setup(probs)
+            actual = torch.zeros(probs.shape)
+            for i, vals in enumerate(zip(alias_table, prob_table)):
+                idx, p = vals
+                actual[i] += p
+                actual[idx] += 1. - p
+            actual = actual / len(probs)
+            self.assertEqual(actual, probs, 1e-6)
 
     def test_multinomial_alias(self):
         self._test_multinomial_alias(self, lambda t: t)
