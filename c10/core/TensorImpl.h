@@ -852,6 +852,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Set the pointer to named tensor metadata.
    */
   void set_named_tensor_meta(std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
+#ifdef DEBUG
+    if (named_tensor_meta) {
+      TORCH_INTERNAL_ASSERT(dim() == named_tensor_meta->names.size());
+    }
+#endif
     named_tensor_meta_ = std::move(named_tensor_meta);
   }
 

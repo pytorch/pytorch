@@ -58,5 +58,9 @@ TEST(NamedTensorTest, attachMetadata) {
     ASSERT_EQ(retrieved_name.type(), expected_name.type());
     ASSERT_EQ(retrieved_name.name(), expected_name.name());
   }
+
+  // Test dropping metadata
+  tensor.unsafeGetTensorImpl()->set_named_tensor_meta(nullptr);
+  ASSERT_FALSE(tensor.is_named());
 }
 #endif
