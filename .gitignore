@@ -72,6 +72,7 @@ torch/lib/cmake
 torch/lib/include
 torch/lib/pkgconfig
 torch/lib/protoc
+torch/lib/protobuf/
 torch/lib/tmp_install
 torch/lib/torch_shm_manager
 torch/lib/site-packages/
@@ -84,6 +85,7 @@ torch/version.py
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml
 env
+.circleci/scripts/COMMIT_MSG
 
 # IPython notebook checkpoints
 .ipynb_checkpoints
@@ -203,7 +205,6 @@ docs/dev
 *.sst
 *.ldb
 LOCK
-LOG*
 CURRENT
 MANIFEST-*
 

@@ -7,7 +7,6 @@
 
 // ${generated_comment}
 
-$th_headers
 $storage_tensor_headers
 #include <ATen/${Generator}.h>
 #include <c10/core/Allocator.h>
@@ -15,6 +14,7 @@ $storage_tensor_headers
 #include <ATen/NativeFunctions.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/Dispatch.h>
 #include <c10/util/Half.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
@@ -27,19 +27,12 @@ $storage_tensor_headers
 
 #include <ATen/Config.h>
 $extra_cuda_headers
+$legacy_th_headers
 
 namespace at {
 
 ${Type}::${Type}()
-  : ${DenseBackend}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
-
-ScalarType ${Type}::scalarType() const {
-  return ScalarType::${ScalarName};
-}
-
-caffe2::TypeMeta ${Type}::typeMeta() const {
-    return caffe2::TypeMeta::Make<${ScalarType}>();
-}
+  : ${DeviceType}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 
 Backend ${Type}::backend() const {
   return Backend::${Backend};
@@ -51,10 +44,6 @@ const char * ${Type}::toString() const {
 
 TypeID ${Type}::ID() const {
   return ${TypeID};
-}
-
-size_t ${Type}::elementSizeInBytes() const {
-  return sizeof(${ScalarType});
 }
 
 /* example

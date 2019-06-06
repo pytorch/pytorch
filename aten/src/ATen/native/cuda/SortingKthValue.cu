@@ -145,11 +145,11 @@ void kthvalue_cuda_template(
   // FIXME: This seems bogus, I only do this because it was the old behaviour.
   //        The reductions are fine, as long as the axis being reduced along
   //        isn't of 0 elements (and the output has elements).
-  AT_CHECK(
+  TORCH_CHECK(
       self.numel() > 0,
       "cannot perform reduction function kthvalue",
       " on tensor with no elements because the operation does not have an identity");
-  AT_CHECK(k >= 1 && k <= slicesize, "selected number k out of range");
+  TORCH_CHECK(k >= 1 && k <= slicesize, "selected number k out of range");
 
   _reduction_with_indices_allocate_or_resize_output(
       values, indices, self, dim, keepdim);
@@ -159,7 +159,7 @@ void kthvalue_cuda_template(
     return;
   }
 
-  AT_CHECK(
+  TORCH_CHECK(
       self.dim() <= MAX_TENSORINFO_DIMS,
       "cannot operate on more than ",
       MAX_TENSORINFO_DIMS,
@@ -188,14 +188,14 @@ void kthvalue_cuda_template(
 // this does not reduce to median with dim beause we don't want to copy twice
 template <typename scalar_t>
 Tensor median_cuda_template(const Tensor& self) {
-  AT_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
+  TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
   if (self.dim() == 0 && self.numel() == 1) {
     return self.clone();
   }
   auto self_copy = self.clone().view(-1);
   auto values = at::empty({1}, self.options());
   auto indices = at::empty({1}, self.options().dtype(kLong));
-  AT_CHECK(
+  TORCH_CHECK(
       self.dim() <= MAX_TENSORINFO_DIMS,
       "cannot operate on more than ",
       MAX_TENSORINFO_DIMS,

@@ -3,6 +3,10 @@
 #include "caffe2/ideep/operators/operator_fallback_ideep.h"
 #include <vector>
 
+using namespace caffe2;
+
+namespace {
+
 // TODO: The code below works around correctness issues with particular input shapes
 // in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
 bool need_type_zero_pad(const mkldnn_memory_desc_t *pd) {
@@ -16,8 +20,6 @@ bool need_type_zero_pad(const mkldnn_memory_desc_t *pd) {
   }
   return (p1 != p2);
 }
-
-namespace caffe2 {
 
 class IDEEPConvTransposeOp final : public IDEEPConvTransposeUnpoolBase {
  public:
@@ -77,7 +79,7 @@ class IDEEPConvTransposeOp final : public IDEEPConvTransposeUnpoolBase {
         // we have to do explicit conversion here.
         filter_in.set_public_format(ideep::format::iohw);
         filter_.init(expected_descriptor);
-        ideep::reorder::compute(filter_in, filter_);
+        filter_.feed_from(filter_in);
       }
 
       // TODO: The code below works around correctness issues with particular input shapes
@@ -178,7 +180,7 @@ class IDEEPConvTransposeGradientOp final : public IDEEPConvTransposeUnpoolBase {
       // we have to do explicit conversion here.
       filter_in.set_public_format(ideep::format::iohw);
       filter_.init(expected_descriptor);
-      ideep::reorder::compute(filter_in, filter_);
+      filter_.feed_from(filter_in);
 
       // TODO: The code below works around correctness issues with particular input shapes
       // in MKL-DNN v0.17, will be removed with the fixes in MKL-DNN 0.18.
@@ -244,4 +246,4 @@ class IDEEPConvTransposeGradientOp final : public IDEEPConvTransposeUnpoolBase {
 REGISTER_IDEEP_OPERATOR(ConvTranspose, IDEEPConvTransposeOp);
 REGISTER_IDEEP_OPERATOR(ConvTransposeGradient, IDEEPConvTransposeGradientOp);
 
-} // namespace caffe2
+} // namespace

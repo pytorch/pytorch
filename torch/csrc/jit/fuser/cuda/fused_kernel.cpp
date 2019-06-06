@@ -39,29 +39,16 @@ namespace cuda {
 // INSTEAD USE, e.g. nvrtc().cuLoadModule(...)
 // If a function is missing add it to the list in thnvrtc.
 
-void checkCUDAVersion(const cudaDeviceProp& prop) {
-  if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
-      (prop.major >= 7 && CUDA_VERSION < 9000)) {
-    std::stringstream err_string;
-    err_string
-        << "In CUDAFusedKernel, PyTorch compiled with insufficient CUDA version: "
-        << CUDA_VERSION << " for the current GPU device " << prop.name
-        << " with device capability " << prop.major << "." << prop.minor;
-    throw std::runtime_error(err_string.str());
-  }
-}
-
 #ifdef USE_DIRECT_NVRTC
 std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
   return std::make_pair(nullptr, torch_load_nvrtc());
 }
 #else
 std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
-  std::string path = cpu::DynamicLibrary::directoryOf((void*)checkCUDAVersion);
 #ifdef __APPLE__
-  std::string libthnvrtc = path + "/libthnvrtc.dylib";
+  std::string libthnvrtc = "libthnvrtc.dylib";
 #else
-  std::string libthnvrtc = path + "/libthnvrtc.so";
+  std::string libthnvrtc = "libthnvrtc.so";
 #endif
   std::unique_ptr<cpu::DynamicLibrary> libnvrtc_stub(
       new cpu::DynamicLibrary(libthnvrtc.c_str()));
@@ -185,9 +172,9 @@ FusedKernelCUDA::FusedKernelCUDA(
       nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
   if (result == NVRTC_ERROR_COMPILATION) {
     size_t logsize;
-    nvrtcGetProgramLogSize(program, &logsize);
+    nvrtc().nvrtcGetProgramLogSize(program, &logsize);
     std::vector<char> log(logsize);
-    nvrtcGetProgramLog(program, log.data());
+    nvrtc().nvrtcGetProgramLog(program, log.data());
     std::stringstream cu;
     cu << log.data();
     throw std::runtime_error(cu.str());

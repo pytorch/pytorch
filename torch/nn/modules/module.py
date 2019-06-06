@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 import functools
 import itertools
 
@@ -6,6 +6,9 @@ import torch
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
+
+
+_IncompatibleKeys = namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])
 
 
 def _addindent(s_, numSpaces):
@@ -60,6 +63,7 @@ class Module(object):
     _version = 1
 
     def __init__(self):
+        torch._C._log_api_usage_once("python.nn_module")
         self._backend = thnn_backend
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
@@ -130,7 +134,7 @@ class Module(object):
         Args:
             name (string): name of the parameter. The parameter can be accessed
                 from this module using the given name
-            parameter (Parameter): parameter to be added to the module.
+            param (Parameter): parameter to be added to the module.
         """
         if '_parameters' not in self.__dict__:
             raise AttributeError(
@@ -169,7 +173,7 @@ class Module(object):
         Args:
             name (string): name of the child module. The child module can be
                 accessed from this module using the given name
-            parameter (Module): child module to be added to the module.
+            module (Module): child module to be added to the module.
         """
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
@@ -217,11 +221,10 @@ class Module(object):
         Example::
 
             >>> def init_weights(m):
-                    print(m)
-                    if type(m) == nn.Linear:
-                        m.weight.data.fill_(1.0)
-                        print(m.weight)
-
+            >>>     print(m)
+            >>>     if type(m) == nn.Linear:
+            >>>         m.weight.data.fill_(1.0)
+            >>>         print(m.weight)
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
             >>> net.apply(init_weights)
             Linear(in_features=2, out_features=2, bias=True)
@@ -666,7 +669,7 @@ class Module(object):
                 persistent buffers.
             prefix (str): the prefix for parameters and buffers used in this
                 module
-            local_metadata (dict): a dict containing the metadata for this moodule.
+            local_metadata (dict): a dict containing the metadata for this module.
                 See
             strict (bool): whether to strictly enforce that the keys in
                 :attr:`state_dict` with :attr:`prefix` match the names of
@@ -734,6 +737,11 @@ class Module(object):
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
+
+        Returns:
+            ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
+                * **missing_keys** is a list of str containing the missing keys
+                * **unexpected_keys** is a list of str containing the unexpected keys
         """
         missing_keys = []
         unexpected_keys = []
@@ -748,15 +756,15 @@ class Module(object):
         def load(module, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
             module._load_from_state_dict(
-                state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+                state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
             for name, child in module._modules.items():
                 if child is not None:
                     load(child, prefix + name + '.')
 
         load(self)
+        load = None  # break load->load reference cycle
 
         if strict:
-            error_msg = ''
             if len(unexpected_keys) > 0:
                 error_msgs.insert(
                     0, 'Unexpected key(s) in state_dict: {}. '.format(
@@ -769,6 +777,7 @@ class Module(object):
         if len(error_msgs) > 0:
             raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
                                self.__class__.__name__, "\n\t".join(error_msgs)))
+        return _IncompatibleKeys(missing_keys, unexpected_keys)
 
     def _named_members(self, get_members_fn, prefix='', recurse=True):
         r"""Helper method for yielding various names + members of modules."""

@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 
+class Workspace;
 namespace {
 
 void enforceIsTensor(Workspace* ws, const std::string& name) {

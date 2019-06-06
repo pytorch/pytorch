@@ -4,10 +4,15 @@
 namespace at { namespace native {
 
 void checkLongTensor(const Tensor& tensor) {
-  AT_CHECK(tensor.dim() == 1 && tensor.type().device_type() == at::kCPU && tensor.scalar_type() == at::kLong,
+  TORCH_CHECK(tensor.dim() == 1 && tensor.type().device_type() == at::kCPU && tensor.scalar_type() == at::kLong,
            "'lengths' argument should be a 1D CPU int64 tensor");
 }
 
+// This method returns `(data, batch_sizes)`, which are then passed into a
+// `PackedSequence` constructor.
+// `data` can be on arbitrary device and of arbitrary dtype, but `batch_sizes`
+// must be a CPU int64 tensor.
+// See NOTE [ device and dtype of a PackedSequence ]
 std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Tensor& _lengths, bool batch_first) {
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   auto lengths_t = _lengths.contiguous();
@@ -15,10 +20,10 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
 
   int64_t batch_size = input.size(1);
   int64_t * lengths = lengths_t.data<int64_t>();
-  AT_CHECK(lengths_t.size(0) == batch_size,
+  TORCH_CHECK(lengths_t.size(0) == batch_size,
            "Expected `len(lengths)` to be equal to batch_size, but got ", lengths_t.size(0),
            " (batch_size=", batch_size, ")");
-  AT_CHECK(lengths[batch_size - 1] > 0,
+  TORCH_CHECK(lengths[batch_size - 1] > 0,
            "Length of all samples has to be greater than 0, but found an element "
            "in 'lengths' that is <= 0");
   for(auto i = 0; i < batch_size - 1; i++) {
@@ -78,16 +83,19 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
       }
       prev_l = l;
     }
-    AT_CHECK(l >= prev_l);
+    TORCH_CHECK(l >= prev_l);
   }
 
   return std::make_tuple(at::cat(steps), batch_sizes_t);
 }
 
+// `grad` could be on arbitrary device and of arbitrary dtype, but `_batch_sizes`
+// is guaranteed to be a CPU int64 tensor.
+// See NOTE [ device and dtype of a PackedSequence ]
 Tensor _pack_padded_sequence_backward(const Tensor& grad, at::IntArrayRef input_size, const Tensor& _batch_sizes, bool batch_first) {
   std::vector<int64_t> input_size_after_t = input_size.vec();
   if (batch_first) {
-    AT_CHECK(input_size.size() >= 2);
+    TORCH_CHECK(input_size.size() >= 2);
     std::swap(input_size_after_t[0], input_size_after_t[1]);
   }
   auto grad_input = at::zeros(input_size_after_t, grad.options());
@@ -118,7 +126,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   int64_t max_real_seq_length = batch_sizes_t.size(0);
   int64_t max_seq_length = max_real_seq_length;
   if (total_length > 0) {
-    AT_CHECK(total_length >= max_seq_length,
+    TORCH_CHECK(total_length >= max_seq_length,
              "Expected total_length to be at least the length of the longest "
              "sequence in input, but got total_length=", total_length, " and "
              "max sequence length being ", max_seq_length);

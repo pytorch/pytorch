@@ -1,10 +1,11 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -35,7 +36,11 @@ std::vector<IValue> runNode(Node* n) {
     if (v.isTensor()) {
       auto t = std::move(v).toTensor();
       if (t.defined()) {
-        return IValue(autograd::as_variable_ref(t).data());
+        if (t.requires_grad()) {
+          // error gets caught within propagateNode()
+          throw c10::Error("Can't insert requires grad as constant", "");
+        }
+        return IValue(t);
       } else {
         return t;
       }
@@ -58,17 +63,16 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-    try {
-      auto new_output = graph->insertConstant(outputs[i]);
+
+    auto new_output = tryInsertConstant(*graph, outputs[i]);
+    if (new_output) {
       if (outputs[i].isNone()) {
-        new_output->setType(n->outputs()[i]->type());
+        (*new_output)->setType(n->outputs()[i]->type());
       }
-      n->outputs()[i]->replaceAllUsesWith(new_output);
-    } catch (constant_not_supported_error& err) {
-      // we cannot actually represent the IValue as a constant node,
-      // so we give up replacing it
+      n->outputs()[i]->replaceAllUsesWith(*new_output);
     }
-    // let dce elimination remove n
+    // If we cannot insert the IValue as a constant, give up replacing the node
+    // and let DCE remove it
   }
 }
 
@@ -119,22 +123,41 @@ void inlineIf(Node* n, const AliasDb& aliasDb) {
   inlineIfBody(n->blocks().at(block_index));
 }
 
+void replaceAndRemoveIfOutput(Node* n, size_t i, Value* replacement) {
+  n->outputs().at(i)->replaceAllUsesWith(replacement);
+  n->eraseOutput(i);
+  n->blocks().at(0)->eraseOutput(i);
+  n->blocks().at(1)->eraseOutput(i);
+}
+
 // remove extra outputs from the node
 bool removeExtraIfOutputs(Node* n) {
-  AT_CHECK(n->kind() == prim::If, "Only supported for If nodes");
+  TORCH_CHECK(n->kind() == prim::If, "Only supported for If nodes");
   auto true_block = n->blocks()[0];
   auto false_block = n->blocks()[1];
+  auto graph = n->owningGraph();
   auto initial_outputs = true_block->outputs().size();
+  WithInsertPoint guard(n);
   for (size_t i = 0; i < true_block->outputs().size();) {
+    auto t_out = true_block->outputs().at(i);
+    auto f_out = false_block->outputs().at(i);
+
     // neither block changes the output value
     if (true_block->outputs()[i] == false_block->outputs()[i]) {
-      n->outputs().at(i)->replaceAllUsesWith(true_block->outputs()[i]);
-      n->eraseOutput(i);
-      true_block->eraseOutput(i);
-      false_block->eraseOutput(i);
-    } else {
-      i++; // increment bc we didn't remove current index
+      replaceAndRemoveIfOutput(n, i, true_block->outputs()[i]);
+      continue;
     }
+
+    // true block output is constant and constant matches false block output
+    auto maybe_const = toIValue(t_out);
+    auto eq = EqualNode();
+    if (maybe_const && eq(t_out->node(), f_out->node())) {
+      auto new_const = graph->insertConstant(*maybe_const, t_out->type());
+      replaceAndRemoveIfOutput(n, i, new_const);
+      continue;
+    }
+
+    i++; // increment bc we didn't remove current index
   }
   // an output was removed
   return initial_outputs != true_block->outputs().size();
@@ -213,6 +236,5 @@ void ConstantPropagation(std::shared_ptr<Graph>& graph) {
   ConstantPropagation(graph->block(), aliasDb);
   EliminateDeadCode(graph);
 }
-
 } // namespace jit
 } // namespace torch

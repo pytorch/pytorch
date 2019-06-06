@@ -112,13 +112,26 @@ bool SpatialBNDNNLowPOp<T>::RunOnDevice() {
       }
     }
   } else {
-    for (int i = 0; i < N * HxW; ++i) {
-      for (int c = 0; c < C; ++c) {
-        long quantized_down = out_qparams_.zero_point +
-            std::lrintf(alpha_data[c] *
-                            (X_data[i * C + c] - in_qparams_[0].zero_point) +
-                        beta_data[c]);
-        Y_data[i * C + c] = fbgemm::clamp<long, T>(quantized_down, 8);
+    if (GetCpuId().avx2()) {
+      internal::SpatialBNNHWCAVX2<T>(
+          N,
+          C,
+          HxW,
+          in_qparams_[0].zero_point,
+          out_qparams_.zero_point,
+          X_data,
+          alpha_data,
+          beta_data,
+          Y_data);
+    } else {
+      for (int i = 0; i < N * HxW; ++i) {
+        for (int c = 0; c < C; ++c) {
+          long quantized_down = out_qparams_.zero_point +
+              std::lrintf(alpha_data[c] *
+                              (X_data[i * C + c] - in_qparams_[0].zero_point) +
+                          beta_data[c]);
+          Y_data[i * C + c] = fbgemm::clamp<long, T>(quantized_down, 8);
+        }
       }
     }
   }
@@ -137,5 +150,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8SpatialBN,
     DNNLOWP,
     SpatialBNDNNLowPOp<uint8_t>);
+
+OPERATOR_SCHEMA(Int8SpatialBN).NumInputs(5).NumOutputs(1);
 
 } // namespace caffe2

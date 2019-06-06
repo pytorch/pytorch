@@ -230,6 +230,8 @@ void testNetDefConverter() {
     Graph graph;
     std::unordered_map<std::string, Value*> vmap;
     convertNetDefToIR(net, &graph, &vmap, "caffe2::");
+    // Sanity check that value map is returned and it works.
+    AT_ASSERT(vmap["a"]->uniqueName() == "a");
 
     caffe2::NetDef net2;
     convertIRToNetDef(&net2, graph, "caffe2::");
@@ -246,6 +248,10 @@ void testNetDefConverter() {
     AT_ASSERT(net2.external_input(0) == "a");
     AT_ASSERT(net2.external_output(0) == "c");
     AT_ASSERT(net3.external_input(0) == "a");
+
+    Graph graph2;
+    // Test that conversion works without passing in a valueMap.
+    convertNetDefToIR(net, &graph2, nullptr, "caffe2::");
   }
 }
 

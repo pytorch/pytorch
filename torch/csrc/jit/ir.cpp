@@ -10,7 +10,6 @@
 #include <iostream>
 #include <set>
 #include <sstream>
-#include <stack>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -27,15 +26,12 @@ void printQuotedString(std::ostream& stmt, const std::string& str);
 static constexpr topo_position_t kLowerBound = INT64_MIN;
 static constexpr topo_position_t kUpperBound = INT64_MAX;
 static constexpr topo_position_t kMidPoint = 0;
+
 // How far away to space nodes that are appended to the graph.
 // should be 2^n, where:
 //   - n is the maximum number of repeated insertions without a re-index
 //   - 2^(64-n) is the maximum number of appends to the end without reindex
 static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
-
-// Sigh, see
-// https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-constexpr Symbol PythonOp::Kind;
 
 static void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->uniqueName();
@@ -81,8 +77,8 @@ struct const_value_list_with_types {
   std::string delim;
   const_value_list_with_types(
       ArrayRef<const Value*> values,
-      const std::string& delim = ", ")
-      : values(values), delim(delim) {}
+      std::string delim_ = ", ")
+      : values(values), delim(std::move(delim_)) {}
 };
 
 std::ostream& operator<<(std::ostream& out, const_value_list_with_types l) {
@@ -204,6 +200,14 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
   out << "]";
 }
 
+SourceRange Node::sourceRange() const {
+  if (source_range_) {
+    return *source_range_;
+  }
+  std::stringstream ss;
+  return SourceRange(ss.str());
+}
+
 static std::ostream& indent(std::ostream& out, size_t level) {
   for (size_t i = 0; i < level; ++i) {
     out << "  ";
@@ -214,7 +218,8 @@ static std::ostream& indent(std::ostream& out, size_t level) {
 std::ostream& Node::print(
     std::ostream& out,
     size_t level,
-    std::vector<const Node*>* groups) const {
+    std::vector<const Node*>* groups,
+    bool print_source_locations) const {
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
@@ -228,6 +233,7 @@ std::ostream& Node::print(
       if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
         printAttributes(out, /*ignore_subgraph=*/true);
       }
+
       groups->push_back(this);
     } else {
       out << kind().toQualString();
@@ -239,12 +245,24 @@ std::ostream& Node::print(
 
   out << "(" << inputs() << ")";
   std::string scName = scopeName();
-  if (scName.empty()) {
-    out << "\n";
-  } else {
+  if (!scName.empty()) {
     out << ", ";
-    out << "scope: " << scName << "\n";
+    out << "scope: " << scName;
   }
+
+  // In debug print, append file:line:col as a comment after each node
+  if (print_source_locations && source_range_ &&
+      source_range_->source()->filename()) {
+    const auto& range = sourceRange();
+    const auto& source = range.source();
+    auto lineno = source->lineno_for_offset(range.start());
+    auto col_offset = (int)range.start() - (int)source->offset_for_line(lineno);
+    out << " # " << source->filename().value() << ":"
+        << source->lineno_to_source_lineno(lineno) << ":" << col_offset;
+  }
+
+  out << "\n";
+
   for (size_t i = 0; i < blocks().size(); ++i) {
     auto b = blocks()[i];
     indent(out, level + 1) << "block" << i << "("
@@ -255,6 +273,7 @@ std::ostream& Node::print(
     }
     indent(out, level + 2) << "-> (" << b->outputs() << ")\n";
   }
+
   return out;
 }
 
@@ -262,14 +281,15 @@ std::ostream& operator<<(std::ostream& out, const Node& n) {
   return n.print(out, 0, nullptr);
 }
 
-std::ostream& operator<<(std::ostream& out, const Graph& g) {
-  out << "graph(" << const_value_list_with_types(g.inputs(), ",\n      ")
+std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
+    const {
+  out << "graph(" << const_value_list_with_types(inputs(), ",\n      ")
       << "):\n";
   std::vector<const Node*> groups;
-  for (auto n : g.nodes()) {
-    n->print(out, 1, &groups);
+  for (auto n : nodes()) {
+    n->print(out, 1, &groups, print_source_locations);
   }
-  out << "  return (" << g.outputs() << ")\n";
+  out << "  return (" << outputs() << ")\n";
   size_t i = 0;
   for (auto fg : groups) {
     out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
@@ -280,7 +300,7 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
   {
     out << "\n";
     out << "all_nodes:\n";
-    for (auto& n : g.all_nodes) {
+    for (auto& n : all_nodes) {
       printNode(out, const_cast<Node*>(n), nullptr);
     }
   }
@@ -288,15 +308,8 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
   return out;
 }
 
-std::ostream& Graph::prettyPrint(std::ostream& out) {
-  std::vector<at::Tensor> tensor_table;
-  PythonPrint(out, *this, tensor_table);
-  return out;
-}
-
-void Graph::dumpPretty() {
-  std::vector<at::Tensor> tensor_table;
-  PythonPrint(std::cout, *this, tensor_table);
+std::ostream& operator<<(std::ostream& out, const Graph& g) {
+  return g.print(out, true);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -380,20 +393,8 @@ void Node::lint() const {
       break;
     case prim::PythonOp: {
       // Python operator cconv is correct
-      size_t n_scalars = 0, n_tensors = 0;
       auto* value = static_cast<const PythonOp*>(this);
-      for (auto c : value->cconv) {
-        if (c == 'c') {
-          n_scalars++;
-        } else if (c == 'd') {
-          n_tensors++;
-        } else {
-          AT_ASSERT(0);
-        }
-        AT_ASSERT(static_cast<bool>(value->pyobj));
-      }
-      AT_ASSERT(n_scalars == value->scalar_args.size());
-      AT_ASSERT(n_tensors == inputs_.size());
+      value->lint_python();
       break;
     }
     case prim::Eval:
@@ -563,9 +564,14 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
 
 Block::Block(Graph* graph_, Node* node_)
     : graph_(graph_),
-      output_(initOutput(graph_->create(prim::Return, 0))),
+      output_(graph_->create(prim::Return, 0)),
       input_(graph_->create(prim::Param, 0)),
       owning_node_(node_) {
+  input_->next() = output_;
+  input_->prev() = output_;
+  output_->next() = input_;
+  output_->prev() = input_;
+
   graph_->all_blocks.emplace(this);
   output_->owning_block_ = this;
   output_->topo_position_ = kUpperBound;
@@ -636,8 +642,49 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
+void Block::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
+  for (Value* input : inputs()) {
+    input->setType(type_map(input->type()));
+  }
+  for (Node* node : nodes()) {
+    for (Value* output : node->outputs()) {
+      output->setType(type_map(output->type()));
+    }
+    for (Block* sub_block : node->blocks()) {
+      sub_block->remapTypes(type_map);
+    }
+    for (Symbol name : node->attributeNames()) {
+      if (node->kindOf(name) == AttributeKind::g) {
+        node->g(name)->remapTypes(type_map);
+      } else if (node->kindOf(name) == AttributeKind::gs) {
+        for (const auto& g : node->gs(name)) {
+          g->remapTypes(type_map);
+        }
+      }
+    }
+  }
+}
+
+void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
+  block()->remapTypes(type_map);
+}
+
+void Value::inferTypeFrom(const at::Tensor& output) {
+  if (output.is_mkldnn()) {
+    // mkldnn tensor as opaque tensor doesn't have strides, so we can
+    // not create a CompleteTensorType
+    setType(DimensionedTensorType::create(output));
+    return;
+  }
+  setType(CompleteTensorType::create(output));
+}
+
 bool Value::mustBeNone() const {
   return node_->mustBeNone();
+}
+bool Value::mustNotBeNone() const {
+  return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
+      !type()->cast<OptionalType>();
 }
 
 std::string Value::uniqueNameBase() const {
@@ -769,9 +816,10 @@ bool Node::matches(
 }
 
 bool Node::mustBeNone() const {
-  return kind_ == prim::Constant && !this->hasAttributes() &&
-      (output()->type()->cast<OptionalType>() ||
-       output()->type() == NoneType::get());
+  return kind_ == prim::AutogradZero ||
+      (kind_ == prim::Constant && !this->hasAttributes() &&
+       (output()->type()->cast<OptionalType>() ||
+        output()->type() == NoneType::get()));
 }
 
 void Node::dump() const {
@@ -805,19 +853,19 @@ bool Node::isNondeterministic() const {
       "aten::poisson(Tensor self, Generator? generator) -> Tensor",
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
-      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
+      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::rand_like(Tensor self) -> Tensor",
-      "aten::rand_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
-      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
+      "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::randint_like(Tensor self, int high) -> Tensor",
       "aten::randint_like(Tensor self, int low, int high) -> Tensor",
-      "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device) -> Tensor",
+      "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::randn_like(Tensor self) -> Tensor",
-      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device) -> Tensor",
-      "aten::randperm(int n, *, int? dtype, int? layout, Device? device) -> Tensor"};
+      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
 
   if (nondeterministic_ops.find(this) == nullptr) {
     return false;
@@ -838,9 +886,21 @@ bool Node::hasSideEffects() const {
     case prim::RaiseException:
     case prim::SetAttr:
     case aten::warn:
+    case aten::save:
+    case aten::manual_seed:
+    case prim::AddStatValue:
+    case prim::TimePoint:
+    case prim::CallFunction:
       return true;
   }
-  return false;
+  // All other builtin ops are known to be safe.
+  // see [custom operator aliasing]
+  if (kind_.is_aten() || kind_.is_prim() || kind_.is_onnx()) {
+    return false;
+  }
+
+  // Custom ops may have arbitrary side effects
+  return true;
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
@@ -856,13 +916,15 @@ bool Node::hasSideEffects() const {
 // If we ever run out of space (by, e.g. inserting too much in place), we
 // reindex by spreading out all the nodes again.
 void Node::assignTopoPosition() {
-  auto returnNode = owningBlock()->return_node();
+  bool is_first = prev() == owningBlock()->param_node();
+  bool is_last = next() == owningBlock()->return_node();
+
   const auto prevPos = prev()->topo_position_;
   const auto nextPos = next()->topo_position_;
 
   // Append to the end of the graph
-  if (next() == returnNode) {
-    if (next() == prev()) {
+  if (is_last) {
+    if (is_first) {
       // the node list is empty, assign the first position
       topo_position_ = kMidPoint;
       return;
@@ -877,14 +939,13 @@ void Node::assignTopoPosition() {
     topo_position_ = prevPos + kAppendInterval;
 
     // Prepend to the graph
-  } else if (prev() == returnNode) {
+  } else if (is_first) {
     // next() is the first element in the block list
     if (nextPos <= (kLowerBound + kAppendInterval)) {
       // we're running off the edge
       owningBlock()->reIndexTopology();
       return;
     }
-
     topo_position_ = nextPos - kAppendInterval;
 
     // insert between two existing nodes
@@ -950,7 +1011,7 @@ void Node::destroy() {
 }
 
 void Node::cloneFrom(Node* s) {
-  setSourceLocation(s->getSourceLocation());
+  source_range_ = s->source_range_;
   if (s->scope_ && !s->scope_->isBlank()) {
     scope_ = s->scope_;
   }
@@ -1084,6 +1145,9 @@ Node* Node::insertBefore(Node* n) {
 Node* Node::insertAfter(Node* n) {
   AT_ASSERT(!inBlockList() && n->inBlockList());
   AT_ASSERT(n->owningBlock());
+  AT_ASSERTM(
+      n->kind() != prim::Return,
+      "Attempting to insert a Node after the Return node or before the Param node");
   this->owning_block_ = n->owningBlock();
   Node* next = n->next();
   n->next() = this;
@@ -1124,6 +1188,35 @@ void Node::removeAllInputs() {
   inputs_.clear();
 }
 
+void Node::permuteInputs(const std::vector<size_t>& new_order) {
+  schema_ = nullptr;
+  AT_ASSERT(new_order.size() == inputs_.size());
+  std::vector<Value*> new_inputs;
+  new_inputs.reserve(new_order.size());
+  for (size_t i = 0; i < new_order.size(); ++i) {
+    AT_ASSERTM(inputs_.at(new_order[i]) != nullptr, "Repeated index");
+    new_inputs.push_back(inputs_.at(new_order[i]));
+    auto it = findUseForInput(new_order[i]);
+    it->offset = i;
+    inputs_.at(new_order[i]) = nullptr;
+  }
+  inputs_ = std::move(new_inputs);
+}
+
+void Node::permuteOutputs(const std::vector<size_t>& new_order) {
+  schema_ = nullptr;
+  AT_ASSERT(new_order.size() == outputs_.size());
+  std::vector<Value*> new_outputs;
+  new_outputs.reserve(new_order.size());
+  for (size_t i = 0; i < new_order.size(); ++i) {
+    AT_ASSERTM(outputs_.at(new_order[i]) != nullptr, "Repeated index");
+    new_outputs.push_back(outputs_.at(new_order[i]));
+    outputs_.at(new_order[i])->setOffset(i);
+    outputs_.at(new_order[i]) = nullptr;
+  }
+  outputs_ = std::move(new_outputs);
+}
+
 use_list::iterator Node::findUseForInput(size_t i) {
   auto& input_uses = inputs_[i]->uses_;
   // O(N) on the use list, but unless we get nodes with +100 uses
@@ -1154,8 +1247,7 @@ void Node::removeFromList() {
 }
 
 inline const SourceRange& fakeRange() {
-  static SourceRange range(
-      std::make_shared<std::string>("<internally-created-node>"), 0, 1);
+  static SourceRange range(std::make_shared<Source>(""), 0, 1);
   return range;
 }
 
@@ -1204,8 +1296,8 @@ Node* Graph::createNone(TypePtr typ) {
   return n;
 }
 
-Node* Graph::createFusionGroup() {
-  auto n = create(prim::FusionGroup, 0);
+Node* Graph::createWithSubgraph(Symbol kind) {
+  auto n = create(kind, 0);
   n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope()));
   return n;
 }
@@ -1229,11 +1321,12 @@ Node* Graph::createTupleUnpack(Value* v) {
   return n;
 }
 
-Node* Graph::createTupleIndex(Value* tup, int64_t index) {
-  auto n = create(prim::TupleIndex, {tup});
-  n->i_(attr::index, index);
-  auto tuple_type = tup->type()->expect<TupleType>();
-  n->output()->setType(tuple_type->elements().at(index));
+Node* Graph::createTupleIndex(
+    Value* tup,
+    Value* idx,
+    const TypePtr& output_type) {
+  auto n = create(prim::TupleIndex, {tup, idx});
+  n->output()->setType(output_type);
   return n;
 }
 
@@ -1335,6 +1428,30 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
   return n;
 }
 
+Value* Graph::insertFunctionCall(
+    std::shared_ptr<script::Function> callee,
+    script::MatchedSchema& matched) {
+  Value* fn_constant = insertNode(create(prim::Constant))
+                           ->output()
+                           ->setType(FunctionType::create(std::move(callee)));
+  std::vector<Value*> inputs = {fn_constant};
+  inputs.insert(inputs.end(), matched.inputs.begin(), matched.inputs.end());
+  Value* result = insertNode(create(prim::CallFunction, inputs))
+                      ->output()
+                      ->setType(matched.return_types.at(0));
+  return result;
+}
+
+Value* Graph::insertMethodCall(
+    std::string method_name,
+    script::MatchedSchema& matched) {
+  Value* result = insertNode(create(prim::CallMethod, matched.inputs))
+                      ->s_(attr::name, std::move(method_name))
+                      ->output()
+                      ->setType(matched.return_types.at(0));
+  return result;
+}
+
 Node* Graph::createClone(
     Node* n,
     const std::function<Value*(Value*)>& value_map,
@@ -1365,9 +1482,9 @@ Value* Graph::insertConstant(
       *this, std::move(val), result_type, std::move(loc), std::move(scope));
 }
 
-std::string Graph::toString() const {
+std::string Graph::toString(bool print_source_locations) const {
   std::ostringstream oss;
-  oss << *this;
+  print(oss, print_source_locations);
   return oss.str();
 }
 
@@ -1454,19 +1571,15 @@ std::vector<Value*> inlineCallTo(
   return outputs;
 }
 
-PythonOp* defaultAllocPythonOp(Graph* g) {
-  throw std::runtime_error(
-      "Trying to allocate a Python object without python bindings loaded");
+void ProfileOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<ProfileOp>();
+  this->callback_ = other->getCallback();
 }
-std::atomic<decltype(&defaultAllocPythonOp)> alloc_python_op;
-
-// patched in when python bindings are loaded
-PythonOp* allocPythonOp(Graph* g) {
-  return alloc_python_op.load()(g);
-}
-void setAllocPythonOp(PythonOp* (*v)(Graph* g)) {
-  alloc_python_op.store(v);
+Node* ProfileOp::allocNewInstance(Graph* g) {
+  return new ProfileOp(g, {nullptr});
 }
 
+constexpr Symbol ProfileOp::Kind;
 } // namespace jit
 } // namespace torch

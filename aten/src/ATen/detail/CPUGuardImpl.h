@@ -34,7 +34,7 @@ struct CPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // no-op
     return Stream(Stream::DEFAULT, Device(DeviceType::CPU, -1));
   }
-  DeviceIndex deviceCount() const override {
+  DeviceIndex deviceCount() const noexcept override {
     return 1;
   }
 };

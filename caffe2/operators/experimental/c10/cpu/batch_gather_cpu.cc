@@ -1,7 +1,7 @@
-#include <ATen/core/dispatch/KernelRegistration.h>
-#include "caffe2/operators/experimental/c10/schemas/batch_gather.h"
-#include "caffe2/utils/math.h"
+#include <ATen/core/op_registration/op_registration.h>
+#include "caffe2/core/operator_c10wrapper.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/utils/math.h"
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
@@ -15,9 +15,9 @@ void batch_gather_op_cpu_impl(
     const at::Tensor& data_,
     const at::Tensor& indices_,
     const at::Tensor& output_) {
-  Tensor data{C10Tensor(data_)};
-  Tensor indices{C10Tensor(indices_)};
-  Tensor output{C10Tensor(output_)};
+  Tensor data(data_);
+  Tensor indices(indices_);
+  Tensor output(output_);
   CPUContext context;
 
   CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
@@ -63,11 +63,16 @@ void batch_gather_op_cpu(const at::Tensor& data,
     default: throw std::runtime_error(string() + "Unsupported dtype: " + toString(data.scalar_type()));
   }
 }
-} // namespace
-} // namespace caffe2
 
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::BatchGather)
-    .kernel<decltype(caffe2::batch_gather_op_cpu), &caffe2::batch_gather_op_cpu>()
-    .dispatchKey(CPUTensorId());
-} // namespace c10
+static auto registry = c10::RegisterOperators().op(
+    "_c10_experimental::BatchGather",
+    c10::RegisterOperators::options()
+      .kernel<decltype(batch_gather_op_cpu), &batch_gather_op_cpu>(CPUTensorId()));
+
+} // namespace
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::BatchGather",
+    C10BatchGather_DontUseThisOpYet)
+
+} // namespace caffe2

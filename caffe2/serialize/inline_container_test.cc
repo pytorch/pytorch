@@ -39,6 +39,9 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
 
   // read records through readers
   PyTorchStreamReader reader(&iss);
+  ASSERT_TRUE(reader.hasFile("key1"));
+  ASSERT_TRUE(reader.hasFile("key2"));
+  ASSERT_FALSE(reader.hasFile("key2000"));
   at::DataPtr data_ptr;
   int64_t size;
   std::tie(data_ptr, size) = reader.getRecord("key1");
@@ -47,7 +50,6 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(memcmp(data_ptr.get(), data1.data(), data1.size()), 0);
   ASSERT_EQ(memcmp(the_file.c_str() + off1, data1.data(), data1.size()), 0);
   ASSERT_EQ(off1 % kFieldAlignment, 0);
-
 
   std::tie(data_ptr, size) = reader.getRecord("key2");
   size_t off2 = reader.getRecordOffset("key2");

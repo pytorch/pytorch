@@ -16,7 +16,7 @@ public:
   explicit HIPStreamMasqueradingAsCUDA(Stream stream)
     : HIPStreamMasqueradingAsCUDA(UNCHECKED, stream) {
     // We did the coercion unchecked; check that it was right.
-    AT_CHECK(stream.device().type() == DeviceType::CUDA /* !!! */);
+    TORCH_CHECK(stream.device().type() == DeviceType::CUDA /* !!! */);
   }
 
   explicit HIPStreamMasqueradingAsCUDA(Unchecked, Stream stream)
@@ -104,6 +104,7 @@ inline void setCurrentHIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA st
 
 inline std::ostream& operator<<(std::ostream& stream, const HIPStreamMasqueradingAsCUDA& s) {
   stream << s.hip_stream() << " (masquerading as CUDA)";
+  return stream;
 }
 
 }} // namespace c10::hip

@@ -37,7 +37,8 @@ Patterns = collections.namedtuple("Patterns", "positive, negative")
 DEFAULT_FILE_PATTERN = re.compile(r".*\.c(c|pp)?")
 
 # @@ -start,count +start,count @@
-CHUNK_PATTERN = r"^@@\s+-\d+,\d+\s+\+(\d+)(?:,(\d+))?\s+@@"
+CHUNK_PATTERN = r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@"
+
 
 # Set from command line arguments in main().
 VERBOSE = False

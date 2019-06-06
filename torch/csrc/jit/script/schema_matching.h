@@ -26,10 +26,21 @@ TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
     const SourceRange& loc,
     Graph& graph,
     c10::optional<NamedValue> self,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    std::ostream& failure_messages,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    std::ostream* failure_messages,
     bool allow_conversions);
+
+TORCH_API MatchedSchema matchSchema(
+    const ::c10::FunctionSchema& schema,
+    const SourceRange& loc,
+    Graph& graph,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwarg);
+
+TORCH_API bool convertibleToList(
+    const TypePtr& type,
+    const TypePtr& list_type_);
 
 TORCH_API Value* emitBuiltinCall(
     const SourceRange& loc,
@@ -40,7 +51,9 @@ TORCH_API Value* emitBuiltinCall(
     at::ArrayRef<NamedValue> attributes,
     // if true, emitBuiltinCall will throw an exception if this builtin does not
     // exist, otherwise it will return nullptr if the builtin is not found.
-    bool required);
+    bool required,
+    // should error strings be eager materialized?
+    bool render_errors = false);
 
 TORCH_API c10::optional<size_t> findInputWithName(
     const std::string& name,
@@ -54,7 +67,6 @@ TORCH_API Value* tryConvertToType(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions);
-
 } // namespace script
 } // namespace jit
 } // namespace torch

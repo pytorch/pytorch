@@ -1,5 +1,5 @@
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
+#include <c10/util/Exception.h>
 
 #include <c10/util/Optional.h>
 
@@ -77,7 +77,9 @@ const std::vector<size_t>& getBroadcastPositions(Node* node) {
 // Determine whether `from` can broadcast to `to`, and if so at which
 // position. `from` must be a suffix of `to`, except that any
 // occurences of 1 in `from` are treated as wildcards.
-c10::optional<size_t> fusibleExpandTo(at::IntArrayRef from, at::IntArrayRef to) {
+c10::optional<size_t> fusibleExpandTo(
+    at::IntArrayRef from,
+    at::IntArrayRef to) {
   if (from.size() > to.size()) {
     return c10::nullopt;
   }
@@ -120,7 +122,8 @@ void fuseBroadcast(Block* b) {
       // always have this information (because expands are only ever traced,
       // not generated from symbolic), but if for some reason we don't
       // have it, we need to skip.
-      if (!unexpanded_input->isTensor() || !n->output()->isTensor())
+      if (!unexpanded_input->isCompleteTensor() ||
+          !n->output()->isCompleteTensor())
         continue;
 
       // Not all broadcasts are supported by ONNX broadcast.
@@ -372,7 +375,9 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
 
   Node* gather_indices = graph->create(onnx::Constant, 1);
   gather_indices->insertBefore(n);
-  gather_indices->t_(attr::value, autograd::make_variable(at::scalar_to_tensor(at::Scalar(1))));
+  gather_indices->t_(
+      attr::value,
+      autograd::make_variable(at::scalar_to_tensor(at::Scalar(1))));
 
   Node* batch_size = graph->create(onnx::Gather, 1);
   batch_size->insertBefore(n);
@@ -563,16 +568,18 @@ static void eraseListConstruct(Block* block) {
   }
 }
 
-static void fuseSplitListUnpack(Block *b) {
-  for(auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
-    for (auto *child_block : it->blocks()) {
+static void fuseSplitListUnpack(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
       fuseSplitListUnpack(child_block);
     }
-    if (it->kind() == prim::ListUnpack && it->input()->node()->kind() == onnx::Split) {
+    if (it->kind() == prim::ListUnpack &&
+        it->input()->node()->kind() == onnx::Split) {
       auto origSplitNode = it->input()->node();
 
-      Node * splitNode = b->owningGraph()->create(onnx::Split, it->outputs().size());
-      for (size_t i=0; i<splitNode->outputs().size(); ++i) {
+      Node* splitNode =
+          b->owningGraph()->create(onnx::Split, it->outputs().size());
+      for (size_t i = 0; i < splitNode->outputs().size(); ++i) {
         splitNode->outputs()[i]->copyMetadata(it->outputs()[i]);
       }
       splitNode->copyAttributes(*origSplitNode);
@@ -588,7 +595,7 @@ static void fuseSplitListUnpack(Block *b) {
 }
 
 void removeMaxPoolUnusedOutput(Block* b) {
-    for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     auto n = *it;
     for (auto* child_block : n->blocks()) {
       removeMaxPoolUnusedOutput(child_block);

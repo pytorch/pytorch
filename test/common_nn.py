@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.functional import _Reduction
 from common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    TEST_WITH_ROCM, skipIfRocm
+    TEST_WITH_ROCM
 from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 from torch.autograd import Variable
@@ -923,7 +923,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine',
-        skip_double=TEST_WITH_ROCM,
         test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
@@ -933,7 +932,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm1d',
@@ -942,7 +940,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine_simple_average',
-        skip_double=TEST_WITH_ROCM,
         test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
@@ -952,7 +949,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm1d',
@@ -961,7 +957,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        skip_double=TEST_WITH_ROCM,
         test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
@@ -971,7 +966,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input_not_affine',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -979,7 +973,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -988,7 +981,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='2d_simple_average',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -997,7 +989,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -1006,7 +997,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm2d',
@@ -1015,7 +1005,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='BatchNorm3d',
@@ -1186,7 +1175,6 @@ new_module_tests = [
         constructor_args=(4, 5, 3),
         input_size=(2, 4, 10),
         cudnn=True,
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1194,7 +1182,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         desc='stride',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1202,7 +1189,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         desc='pad1',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1210,7 +1196,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         desc='pad2',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1218,7 +1203,6 @@ new_module_tests = [
         input_size=(1, 4, 1),
         cudnn=True,
         desc='pad1size1',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         module_name='Conv1d',
@@ -1226,13 +1210,11 @@ new_module_tests = [
         input_size=(1, 4, 1),
         cudnn=True,
         desc='pad2size1',
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         fullname='Conv1d_dilated',
         constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2),
         input_size=(2, 4, 10),
-        skip_double=TEST_WITH_ROCM,
     ),
     dict(
         fullname='Conv1d_groups',
@@ -2260,6 +2242,107 @@ new_module_tests = [
         input_size=(),
         desc='scalar',
     ),
+    dict(
+        fullname='Padding12_1dcircular',
+        constructor=wrap_functional(F.pad, pad=(1, 2), mode='circular'),
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
+        reference_fn=lambda i, _: padding1d_circular(i, (1, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding31_1dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 1), mode='circular'),
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
+        reference_fn=lambda i, _: padding1d_circular(i, (3, 1)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding33_1dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 3), mode='circular'),
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 2, 3]),
+        reference_fn=lambda i, _: padding1d_circular(i, (3, 3)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding1221_2dcircular',
+        constructor=wrap_functional(F.pad, pad=(1, 2, 2, 1), mode='circular'),
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 1, 2, 3]),
+        reference_fn=lambda i, _: padding2d_circular(i, (1, 2, 2, 1)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding2322_2dcircular',
+        constructor=wrap_functional(F.pad, pad=(2, 3, 2, 2), mode='circular'),
+        input_fn=lambda: torch.arange(6, out=torch.DoubleTensor()).reshape([1, 1, 2, 3]),
+        reference_fn=lambda i, _: padding2d_circular(i, (2, 3, 2, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding3331_2dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 3, 3, 1), mode='circular'),
+        input_fn=lambda: torch.arange(9, out=torch.DoubleTensor()).reshape([1, 1, 3, 3]),
+        reference_fn=lambda i, _: padding2d_circular(i, (3, 3, 3, 1)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding122112_3dcircular',
+        constructor=wrap_functional(F.pad, pad=(1, 2, 2, 1, 1, 2), mode='circular'),
+        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
+        reference_fn=lambda i, _: padding3d_circular(i, (1, 2, 2, 1, 1, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding322112_3dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 2, 2, 1, 1, 2), mode='circular'),
+        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
+        reference_fn=lambda i, _: padding3d_circular(i, (3, 2, 2, 1, 1, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+    dict(
+        fullname='Padding332122_3dcircular',
+        constructor=wrap_functional(F.pad, pad=(3, 3, 2, 1, 2, 2), mode='circular'),
+        input_fn=lambda: torch.arange(12, out=torch.DoubleTensor()).reshape([1, 1, 2, 2, 3]),
+        reference_fn=lambda i, _: padding3d_circular(i, (3, 3, 2, 1, 2, 2)),
+        skip_double=TEST_WITH_ROCM,
+        pickle=False,
+    ),
+
+    dict(
+        module_name='Conv1d',
+        constructor_args=(3, 4, 2, 2, (1,), 1, 1, True, 'circular'),
+        input_size=(2, 3, 5,),
+        cudnn=True,
+        desc='stride1_pad1circular',
+    ),
+    dict(
+        module_name='Conv1d',
+        constructor_args=(3, 4, 2, 2, (2,), 1, 1, True, 'circular'),
+        input_size=(2, 3, 5,),
+        cudnn=True,
+        desc='stride1_pad2circular',
+    ),
+    dict(
+        module_name='Conv2d',
+        constructor_args=(3, 4, (3, 3), (2, 2), (1, 2), 1, 1, True, 'circular'),
+        input_size=(2, 3, 3, 3),
+        cudnn=True,
+        desc='pad2circular'
+    ),
+    dict(
+        module_name='Conv3d',
+        constructor_args=(3, 4, 2, 2, (1, 2, 3), 1, 1, True, 'circular'),
+        input_size=(2, 3, 3, 3, 3),
+        cudnn=True,
+        desc='stride_pad1circular',
+    ),
 ]
 
 
@@ -2500,6 +2583,78 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
         return output.sum()
     output = output.to(dt)
     return output
+
+
+def padding1d_circular(input, pad):
+    r""" input:
+            [[[0., 1., 2.],
+              [3., 4., 5.]]]
+          pad: (1, 2)
+          output:
+            [[[2., 0., 1., 2., 0., 1.],
+              [5., 3., 4., 5., 3., 4.]]]
+    """
+    return torch.cat([input[:, :, -pad[0]:], input,
+                      input[:, :, 0:pad[1]]], dim=2)
+
+
+def padding2d_circular(input, pad):
+    r"""input:
+             [[[[0., 1., 2],
+                [3., 4., 5.]]]]
+            pad: (1, 2, 2, 1)
+    output:
+        [[[[2., 0., 1., 2., 0., 1.],
+           [5., 3., 4., 5., 3., 4.],
+           [2., 0., 1., 2., 0., 1.],
+           [5., 3., 4., 5., 3., 4.],
+           [2., 0., 1., 2., 0., 1.]]]]
+    """
+    input = torch.cat([input[:, :, -pad[2]:], input, input[:, :, 0:pad[3]]], dim=2)
+    return torch.cat([input[:, :, :, -pad[0]:], input, input[:, :, :, 0:pad[1]]], dim=3)
+
+
+def padding3d_circular(input, pad):
+    r"""input:
+            [[[[[ 0.,  1.,  2.],
+                [ 3.,  4.,  5.]],
+               [[ 6.,  7.,  8.],
+                [ 9., 10., 11.]]]]]
+        pad: (1, 2, 2, 1, 1, 2)
+        output: [[[[[ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.]],
+
+              [[ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.]],
+
+              [[ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.]],
+
+              [[ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.],
+               [ 5.,  3.,  4.,  5.,  3.,  4.],
+               [ 2.,  0.,  1.,  2.,  0.,  1.]],
+
+              [[ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.],
+               [11.,  9., 10., 11.,  9., 10.],
+               [ 8.,  6.,  7.,  8.,  6.,  7.]]]]]
+    """
+    input = torch.cat([input[:, :, -pad[4]:], input, input[:, :, 0:pad[5]]], dim=2)
+    input = torch.cat([input[:, :, :, -pad[2]:], input, input[:, :, :, 0:pad[3]]], dim=3)
+    return torch.cat([input[:, :, :, :, -pad[0]:], input, input[:, :, :, :, 0:pad[1]]], dim=4)
+
 
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,

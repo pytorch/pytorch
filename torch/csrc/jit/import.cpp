@@ -4,9 +4,11 @@
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/import_method.h>
+#include <torch/csrc/jit/import_export_helpers.h>
+#include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
@@ -56,6 +58,11 @@ class ScriptModuleDeserializer final {
   void convertModule(const torch::ModuleDef& module_def);
 
   void loadTensorTable(torch::ModelDef* model_def);
+  std::vector<IValue> loadPickleArchive(const std::string& name);
+  void importCallback(const std::string& qualifier);
+  void moduleSetState(
+      const std::shared_ptr<script::Module>& module,
+      IValue state);
 
   caffe2::serialize::PyTorchStreamReader reader_;
   // this is a hack to make sure the script module created in C++ is the
@@ -65,6 +72,11 @@ class ScriptModuleDeserializer final {
   std::vector<std::string> moduleStack_;
 
   std::vector<at::Tensor> tensor_table_;
+  std::vector<IValue> pickled_ivalues_;
+
+  std::unordered_set<std::string> imported_libs_;
+
+  std::shared_ptr<script::Module> main_module_;
 };
 
 ScriptModuleDeserializer::ScriptModuleDeserializer(const std::string& filename)
@@ -83,6 +95,7 @@ void ScriptModuleDeserializer::deserialize(
     script::ModuleLookup module_lookup,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
+  C10_LOG_API_USAGE_ONCE("torch.script.load");
   torch::ModelDef model_def;
   at::DataPtr data_ptr;
   size_t data_size;
@@ -97,11 +110,14 @@ void ScriptModuleDeserializer::deserialize(
       static_cast<char*>(data_ptr.get()),
       static_cast<char*>(data_ptr.get()) + data_size);
   std::string binary_string;
+  ::google::protobuf::util::JsonParseOptions opts;
+  opts.ignore_unknown_fields = true;
   auto convert_result = ::google::protobuf::util::JsonToBinaryString(
       resolver.get(),
       url_prefix + "/" + model_def.GetDescriptor()->full_name(),
       json_string,
-      &binary_string);
+      &binary_string,
+      opts);
   if (!convert_result.ok()) {
     std::stringstream ss;
     ss << convert_result;
@@ -112,20 +128,27 @@ void ScriptModuleDeserializer::deserialize(
       "JSON transcoder produced invalid protobuf output.");
   moduleLookup_ = module_lookup;
   device_ = device;
+  main_module_ = module_lookup({});
 
   const auto& module_def = model_def.main_module();
 
   // Load extra files.
   for (const auto& kv : extra_files) {
     const std::string& key = "extra/" + kv.first;
-    at::DataPtr meta_ptr;
-    size_t meta_size;
-    std::tie(meta_ptr, meta_size) = reader_.getRecord(key);
-    extra_files[kv.first] =
-        std::string(static_cast<char*>(meta_ptr.get()), meta_size);
+    if (reader_.hasFile(key)) {
+      at::DataPtr meta_ptr;
+      size_t meta_size;
+      std::tie(meta_ptr, meta_size) = reader_.getRecord(key);
+      extra_files[kv.first] =
+          std::string(static_cast<char*>(meta_ptr.get()), meta_size);
+    }
   }
 
   loadTensorTable(&model_def);
+  if (model_def.proto_version() >= 2) {
+    pickled_ivalues_ = loadPickleArchive("attributes.pkl");
+  }
+
   // TODO: this can be simplified when C++/Python interop lands,
   // and the submodules would be created as the same in either C++ or Python
   convertModule(module_def);
@@ -136,6 +159,15 @@ void ScriptModuleDeserializer::loadTensorTable(torch::ModelDef* model_def) {
   for (const torch::TensorDef& tensor : model_def->tensors()) {
     tensor_table_.emplace_back(loadTensor(tensor, storageMap));
   }
+}
+
+std::vector<IValue> ScriptModuleDeserializer::loadPickleArchive(const std::string& name) {
+  at::DataPtr attributes_ptr;
+  size_t attributes_size;
+  std::tie(attributes_ptr, attributes_size) =
+      reader_.getRecord(name);
+  Unpickler unpickler(attributes_ptr.get(), attributes_size, &tensor_table_);
+  return unpickler.parse_ivalue_list();
 }
 
 at::Tensor ScriptModuleDeserializer::loadTensor(
@@ -199,7 +231,8 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
             .set_(storage_it->second, tensor_proto.offset(), dims, strides);
   } else if (device.type() == at::DeviceType::CUDA) {
     result =
-        at::empty({0}, at::CUDA(type).options())
+        at::empty(
+            {0}, c10::TensorOptions(type).device(storage_it->second.device()))
             .set_(storage_it->second, tensor_proto.offset(), dims, strides);
   }
   AT_ASSERT(result.defined());
@@ -207,6 +240,42 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
   result = autograd::make_variable(result, tensor_proto.requires_grad());
 
   return result;
+}
+
+void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
+  if (imported_libs_.count(qualifier)) {
+    return;
+  }
+  imported_libs_.insert(qualifier);
+  std::function<void(const std::string&)> import_callback =
+      [this](const std::string& qualifier) { importCallback(qualifier); };
+  const std::string path = ImportExportHelpers::qualifierToPath(qualifier);
+  at::DataPtr data;
+  size_t size;
+  std::tie(data, size) = reader_.getRecord(path);
+  auto src = std::make_shared<Source>(
+      std::string(static_cast<const char*>(data.get()), size), path, 0);
+  script::import_libs(
+      main_module_->class_compilation_unit(),
+      qualifier,
+      src,
+      tensor_table_,
+      import_callback);
+}
+
+void ScriptModuleDeserializer::moduleSetState(
+    const std::shared_ptr<script::Module>& module,
+    IValue state) {
+  auto setstate = module->class_compilation_unit().find_function("__setstate__");
+
+  TORCH_CHECK(
+      setstate != nullptr,
+      "Cannot call '__setstate__' method because"
+      " it does not exist");
+
+  // TODO: once modules are first class in the interpreter and methods are not
+  // lowered, change this to `module->run_method("__setstate__", {state});`
+  setstate->run({module->module_object(), state});
 }
 
 void ScriptModuleDeserializer::convertModule(
@@ -228,13 +297,64 @@ void ScriptModuleDeserializer::convertModule(
       module->register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
     }
   }
+  script::ScriptTypeParser typeParser;
+  for (int i = 0; i < module_def.attributes_size(); ++i) {
+    const torch::AttributeDef& attr_def = module_def.attributes(i);
+    if (module->find_buffer(attr_def.name())) {
+      // TODO: handle this above so this can be removed
+      continue;
+    }
+
+    IValue ivalue;
+    if (attr_def.id() >= 0) {
+      // attribute has no value in the table, set it to None for now. After
+      // __getstate__, check that all the attributes that are not Optional
+      // can't be None
+      ivalue = pickled_ivalues_.at(attr_def.id());
+    }
+
+    module->register_attribute(
+        attr_def.name(), typeParser.parseType(attr_def.type()), ivalue);
+  }
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
     size_t size;
     std::tie(data, size) =
         reader_.getRecord(module_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
-    import_methods(module, data_str, tensor_table_);
+    auto src = std::make_shared<Source>(
+        std::string(static_cast<const char*>(data.get()), size),
+        module_def.torchscript_arena().key(),
+        1);
+
+    std::function<void(const std::string&)> import_callback =
+        [this](const std::string& qualifier) { importCallback(qualifier); };
+    script::import_methods(
+        main_module_->class_compilation_unit(),
+        module,
+        src,
+        tensor_table_,
+        import_callback);
+  }
+
+  if (module_def.has_get_state_attribute_id()) {
+    moduleSetState(
+        module, pickled_ivalues_.at(module_def.get_state_attribute_id()));
+  }
+
+  for (const auto& slot : module->get_attributes()) {
+    // Verify that all the non-optional attributes have been initialized
+    // TODO: Issue #20497
+    if (slot.type()->kind() != TypeKind::OptionalType) {
+      TORCH_CHECK(
+          !slot.value().isNone(),
+          "The field '",
+          slot.name(),
+          "' was left unitialized after __setstate__, but expected a ",
+          "value of type '",
+          slot.type()->python_str(),
+          "'");
+    }
   }
 }
 

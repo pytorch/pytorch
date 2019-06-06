@@ -15,65 +15,74 @@ type_map = {
         'Short',
         'Int',
         'Long',
-        'Bool'
+        'Bool',
     ],
+    'quantized': [
+        'QInt8',
+        'QUInt8',
+        'QInt32',
+    ]
 }
 
-all_types = type_map['floating_point'] + type_map['integral']
+all_types = type_map['floating_point'] + type_map['integral'] + type_map['quantized']
 type_map['all'] = all_types
 
-all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA']
+all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA', 'MkldnnCPU', 'QuantizedCPU']
 default_backends = ['CPU', 'CUDA']
-
-sparse_map = {
-    'CPU': 'SparseCPU',
-    'CUDA': 'SparseCUDA',
-}
 
 
 def process_types_and_backends(option):
     # if specific pairs were not listed, then enumerate them
     # based on the backend and type attributes
     # if backend or type is not defined, it is assumed to be all of them
-    if 'backend_type_pairs' not in option:
+    if 'backend_types' not in option:
         backends = option.get('backends', default_backends)
-        if option.get('aten_sparse', False):
-            backends.extend([sparse_map[p] for p in backends if p in sparse_map])
+        if isinstance(option.get('type_method_definition_dispatch'), dict):
+            backends = option.get('type_method_definition_dispatch').keys()
         backends = set(backends)
 
-        types = option.get('types', all_types)
-
-        pairs = [[p, t] for p in backends for t in types]
+        backend_types = {}
+        for backend in backends:
+            if backend == 'QuantizedCPU':
+                backend_types[backend] = type_map['quantized']
+            else:
+                backend_types[backend] = option.get('types', all_types)
     else:
-        pairs = option['backend_type_pairs']
+        backend_types = option['backend_types']
 
     # expand type alias (integral, floating_point, all)
-    def expand(pair):
-        p, t = pair
-        assert(p in all_backends)
-        if t in type_map:
-            return [(p, tt) for tt in type_map[t]]
-        assert(t in all_types)
-        return [(p, t)]
-    pairs = set(p for pair in pairs for p in expand(pair))
+    def expand(types):
+        ret = []
+        for t in types:
+            if t in type_map:
+                ret.extend(type_map[t])
+            else:
+                assert(t in all_types)
+                ret.append(t)
+        return ret
 
-    # disable CUDA Half if there is a Sparse argument
-    for arg in option.get('arguments', []):
-        if arg['type'] == 'THSTensor*':
-            pairs.discard(('CUDA', 'Half'))
+    for backend in backend_types.keys():
+        assert(backend in all_backends)
+        backend_types[backend] = set(expand(backend_types[backend]))
 
-    # special case remove Half and Bool for cpu unless it is explicitly enabled,
+    # special case remove Half for cpu unless it is explicitly enabled
     if not option.get('cpu_half', False):
-        pairs.discard(('CPU', 'Half'))
+        if 'CPU' in backend_types:
+            backend_types['CPU'].discard('Half')
 
+    # special cases remove bool for cpu and cuda unless it is explicitly enabled
     if not option.get('cpu_bool', False):
-        pairs.discard(('CPU', 'Bool'))
+        if 'CPU' in backend_types:
+            backend_types['CPU'].discard('Bool')
 
-    # TODO: remove this hack once support for a bool tensor for CUDA is enabled
-    pairs.discard(('CUDA', 'Bool'))
+    if not option.get('cuda_bool', False):
+        if 'CUDA' in backend_types:
+            backend_types['CUDA'].discard('Bool')
 
     # sort the result for easy reading
-    option['backend_type_pairs'] = sorted([p for p in pairs])
+    for backend in backend_types.keys():
+        backend_types[backend] = sorted([type for type in backend_types[backend]])
+    option['backend_types'] = backend_types
 
 
 def exclude(declaration):
@@ -198,30 +207,6 @@ def discover_sparse_tensor_operations(declaration):
                     for j, arg in enumerate(option['arguments'])
                     if not exclude(arg)]
         return '#'.join(elements)
-
-    # Determine if any options have the 'aten_dense_sparse' flag
-    dense_sparse_options = [option
-                            for option in declaration['options']
-                            if option.get('aten_dense_sparse', False)]
-    if len(dense_sparse_options) > 0:
-        signature_to_option = {signature(option): option
-                               for option in declaration['options']}
-
-        for option in declaration['options']:
-            for i, arg in enumerate(option['arguments']):
-                if (arg['type'] == 'THSTensor*' and
-                        option.get('aten_dense_sparse', False)):
-                    signature_of_tensor_version = signature(
-                        option, i, 'Tensor &')
-                    if signature_of_tensor_version in signature_to_option:
-                        tensor_version = \
-                            signature_to_option[signature_of_tensor_version]
-                        raw_args = len(tensor_version['arguments'])
-                        names = [arg['name'] for arg in tensor_version['arguments']
-                                 if not exclude(arg)]
-                        filtered_args = len(names)
-                        tensor_version['when_sparse_dispatch'] = names[i -
-                                                                       (raw_args - filtered_args)]
 
 
 def is_extended_method(option):

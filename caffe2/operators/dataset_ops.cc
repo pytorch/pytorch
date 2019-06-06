@@ -30,7 +30,7 @@ TreeIterator::TreeIterator(const std::vector<std::string>& fields) {
   // populate field vector and split field names
   fields_.resize(fields.size());
   std::vector<std::vector<std::string>> nameParts(fields_.size());
-  for (int i = 0; i < fields.size(); ++i) {
+  for (size_t i = 0; i < fields.size(); ++i) {
     auto& field = fields_.at(i);
     field.name = fields[i];
     field.id = i;
@@ -49,7 +49,7 @@ TreeIterator::TreeIterator(const std::vector<std::string>& fields) {
   // find length-field with maximum prefix matching for each field
   for (auto& field : fields_) {
     // by default, we are matching against the root domain
-    int maxMatchLevel = 1;
+    size_t maxMatchLevel = 1;
     int maxMatchLengthFieldId = -1;
     for (int j = 0; j < numLengthFields(); ++j) {
       const auto& lenField = lengthField(j);
@@ -260,12 +260,12 @@ class CheckDatasetConsistencyOp : public Operator<CPUContext> {
     sizes.resize(iterator_.numOffsetFields());
     // gather length data
     lengths.resize(iterator_.numLengthFields());
-    for (int i = 0; i < lengths.size(); ++i) {
+    for (size_t i = 0; i < lengths.size(); ++i) {
       lengths[i] = Input(iterator_.lengthField(i).id).data<TLength>();
     }
     // gather size limits
     limits.assign(sizes.size(), std::numeric_limits<TOffset>::max());
-    for (int i = 0; i < iterator_.fields().size(); ++i) {
+    for (size_t i = 0; i < iterator_.fields().size(); ++i) {
       int lengthIdx = iterator_.fields()[i].lengthFieldId + 1;
       CAFFE_ENFORCE_GT(Input(i).dim(), 0);
       TOffset size = (TOffset)Input(i).sizes()[0];
@@ -290,7 +290,7 @@ class CheckDatasetConsistencyOp : public Operator<CPUContext> {
     // advance to the end
     offsets.assign(sizes.size(), 0);
     iterator_.advance(lengths, offsets, sizes, limits, limits[0]);
-    for (int i = 0; i < limits.size(); ++i) {
+    for (size_t i = 0; i < limits.size(); ++i) {
       CAFFE_ENFORCE(limits[i] == offsets[i]);
     }
     return true;

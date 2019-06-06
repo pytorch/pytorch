@@ -45,7 +45,9 @@ __device__ __forceinline__ void reduce_block_into_lanes
     __syncthreads();
   }
 
+#ifndef __HIP_PLATFORM_HCC__
   #pragma unroll
+#endif
   for(int i = (blockSize >> 1); i >= 64; i >>= 1)
   {
     if(tid < i)
@@ -62,7 +64,9 @@ __device__ __forceinline__ void reduce_block_into_lanes
       final = val;
     // __SYNCWARP();
 
+#ifndef __HIP_PLATFORM_HCC__
     #pragma unroll
+#endif
     for(int i = 16; i >= lanes; i >>= 1)
       final = reduceOp(final, WARP_SHFL_DOWN(final, i));
 
@@ -411,10 +415,10 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
 {
   // These checks should always succeed, because weight_norm_fused_backward should only
   // ever be recorded in the autograd graph via weight_norm, which passes contiguous v and g.
-  AT_CHECK(saved_v.is_contiguous(), "saved_v must be contiguous");
-  AT_CHECK(saved_g.is_contiguous(), "saved_g must be contiguous");
-  AT_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
-  AT_CHECK(dim == 0 || dim == saved_v.dim() - 1, "fused kernels can only be applied for first or last dim")
+  TORCH_CHECK(saved_v.is_contiguous(), "saved_v must be contiguous");
+  TORCH_CHECK(saved_g.is_contiguous(), "saved_g must be contiguous");
+  TORCH_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
+  TORCH_CHECK(dim == 0 || dim == saved_v.dim() - 1, "fused kernels can only be applied for first or last dim")
 
   auto grad_v = at::empty_like(saved_v);
   auto grad_g = at::empty_like(saved_g);
@@ -437,18 +441,18 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
        {
          using accscalar_t = acc_type<scalar_t, true>;
 
-	 weight_norm_bwd_first_dim_kernel<scalar_t, accscalar_t>
-	   <<<grad_w.size(0),
-	      BLOCK,
-	      BLOCK*sizeof(accscalar_t),
+         weight_norm_bwd_first_dim_kernel<scalar_t, accscalar_t>
+           <<<grad_w.size(0),
+              BLOCK,
+              BLOCK*sizeof(accscalar_t),
               stream>>>
-	   (grad_v.data<scalar_t>(),
-	    grad_g.data<scalar_t>(),
-	    grad_w.data<scalar_t>(),
-	    saved_v.data<scalar_t>(),
-	    saved_g.data<scalar_t>(),
-	    saved_norms.data<accscalar_t>(),
-	    rowSize);
+           (grad_v.data<scalar_t>(),
+            grad_g.data<scalar_t>(),
+            grad_w.data<scalar_t>(),
+            saved_v.data<scalar_t>(),
+            saved_g.data<scalar_t>(),
+            saved_norms.data<accscalar_t>(),
+            rowSize);
        });
   }
   else if(dim == ndims - 1)

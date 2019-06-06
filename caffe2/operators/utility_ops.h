@@ -43,6 +43,30 @@ struct GetNanCheckGradient : public GradientMakerBase {
 };
 
 template <class Context>
+class IsNanOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  IsNanOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<float, double>>::call(this, Input(0));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
+    auto& X = Input(0);
+    auto* Y = Output(0, X.sizes(), at::dtype<uint8_t>());
+    const auto* X_data = X.template data<T>();
+    uint8_t* Y_data = Y->template mutable_data<uint8_t>();
+    for (size_t i = 0; i < X.numel(); i++) {
+      Y_data[i] = (uint8_t)(std::isnan(X_data[i]));
+    }
+    return true;
+  }
+};
+
+template <class Context>
 class WallClockTimeOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -390,7 +414,7 @@ class WeightedSumOp : public Operator<Context> {
       const auto& weighti = Input(i + 1);
       CAFFE_ENFORCE_EQ(Xi.numel(), size);
       CAFFE_ENFORCE_EQ(weighti.numel(), 1);
-      math::Axpy<T, Context>(
+      math::Axpy<float, T, Context>(
           size,
           weighti.template data<float>(),
           Xi.template data<T>(),
@@ -712,6 +736,106 @@ class ScatterAssignOp : public Operator<Context> {
   }
 
   INPUT_TAGS(DATA, INDICES, SLICES);
+};
+
+template <class Context>
+class ScatterOp : public Operator<CPUContext> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  template <class... Args>
+  explicit ScatterOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
+        OP_SINGLE_ARG(int, "axis", axis_, 1) {
+  }
+
+  virtual ~ScatterOp() noexcept override {}
+
+  bool RunOnDevice() override {
+    
+    TORCH_CHECK(Context::GetDeviceType() == kCPU, "ScatterOp currently only supports CPU.")
+
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+        this, this->template Input<Tensor>(INDICES, CPU));
+  }
+
+  template <typename IndexType>
+  bool DoRunWithType() {
+    const Tensor& data = Input(DATA);
+    const Tensor& indices = Input(INDICES);
+    const Tensor& updates = Input(UPDATES);
+    const TypeMeta dataType = data.dtype();
+    size_t item_bytesize = dataType.itemsize();
+
+    // ONNX allows negative axis to index from the back, valid range: [-r, r].
+    axis_ = data.canonical_axis_index(axis_);
+    
+    CAFFE_ENFORCE_GE(data.dim(), axis_ + 1, "DATA should be at least [axis+1]-D");
+    CAFFE_ENFORCE_GE(axis_, 0, "Axis should be non-negative");
+    CAFFE_ENFORCE_LT(axis_, data.dim(), "Axis out of range");
+
+    Tensor* output = Output(0, data.sizes().vec(), at::dtype(dataType));
+    output->CopyFrom(data);
+    char* out = static_cast<char*>(output->raw_mutable_data(dataType));
+
+    // Succeed if size of output is zero, which can happen for empty batch which
+    // would have data dimension size of 0.
+    // This *must* be done AFTER output->raw_mutable_data() above as that has
+    // important allocation side effect that we must see.
+    if (output->numel() == 0) {
+      return true;
+    }
+
+    const IndexType* idxs = indices.template data<IndexType>();
+    const char* src_base = static_cast<const char*>(updates.raw_data());
+
+    const int64_t outer_dims_product = updates.size_to_dim(axis_);
+    const int64_t block_size = updates.size_from_dim(axis_ + 1);
+    const int64_t block_bytesize = block_size * item_bytesize;
+
+    const int64_t src_indexing_axis_dim = updates.size(axis_);
+    const int64_t src_batch_bytesize = updates.size_from_dim(axis_) * item_bytesize;
+    const int64_t dst_batch_size = data.size_from_dim(axis_) * item_bytesize;
+    
+    const int64_t N = indices.size(axis_);
+
+    check_indexarray_range<IndexType>(idxs, N, src_indexing_axis_dim);
+
+    int64_t i = 0;
+    for (int64_t batch = 0; batch < outer_dims_product; ++batch) {
+      int64_t i_max = i + N;
+      for (; i < i_max && i < indices.numel(); ++i) {
+        auto idx = idxs[i];
+
+        auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
+        auto dst = out + batch * dst_batch_size + (i - i_max + N) * block_bytesize;
+        context_.CopyItemsSameDevice(dataType, block_size, src, dst);
+      }
+    }
+    return true;
+  }
+
+  INPUT_TAGS(DATA, INDICES, UPDATES);
+
+  // Check that indices fall within dimension array size with CAFFE_ENFORCE.
+  template <typename IndexType>
+  static void check_indexarray_range(
+      const IndexType* indices,
+      int64_t n,
+      IndexType indexing_axis_dim) {
+    for (auto i = 0; i < n; ++i) {
+      auto idx = indices[i];
+      CAFFE_ENFORCE(
+          0 <= idx && idx < indexing_axis_dim,
+          "INDICES element is out of DATA bounds, id=",
+          idx,
+          " axis_dim=",
+          indexing_axis_dim);
+    }
+  }
+
+ protected:
+  int axis_;
 };
 
 template <class Context>
@@ -1083,7 +1207,7 @@ class GatherRangesOp : public Operator<Context> {
   template <typename Index>
   size_t accumulate(Index* ranges, size_t start, size_t end) {
     size_t result = 0;
-    for (int i = start + 1; i < end; i += 2) {
+    for (size_t i = start + 1; i < end; i += 2) {
       result += ranges[i];
     }
     return result;

@@ -87,8 +87,12 @@ class TestGradientCalculation(test_util.TestCase):
     def assertOperatorListEqual(self, operatorDefList1, operatorDefList2):
         for op in operatorDefList1:
             op.debug_info = ""
+            if op.device_option:
+                del op.device_option.extra_info[:]
         for op in operatorDefList2:
             op.debug_info = ""
+            if op.device_option:
+                del op.device_option.extra_info[:]
         self.assertEqual(operatorDefList1, operatorDefList2)
 
     @given(device_option=st.sampled_from([

@@ -5,12 +5,6 @@ namespace at {
 
 UndefinedType::UndefinedType()
     : TypeDefault(UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
-ScalarType UndefinedType::scalarType() const {
-  return ScalarType::Undefined;
-}
-caffe2::TypeMeta UndefinedType::typeMeta() const {
-  return scalarTypeToTypeMeta(scalarType());
-}
 Backend UndefinedType::backend() const {
   return Backend::Undefined;
 }
@@ -23,14 +17,8 @@ Device UndefinedType::getDeviceFromPtr(void*) const {
   AT_ERROR("getDeviceFromPtr not defined for UndefinedType");
 }
 
-Storage UndefinedType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-  AT_ERROR("storageFromBlob not defined for UndefinedType");
-}
 Storage UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeStorageFromTH not defined for UndefinedType");
-}
-Storage UndefinedType::storageWithAllocator(int64_t size, Allocator* allocator) const {
-  AT_ERROR("storageWithAllocator not defined for UndefinedType");
 }
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeTensorFromTH not defined for UndefinedType");
@@ -45,10 +33,6 @@ const char * UndefinedType::toString() const {
 
 TypeID UndefinedType::ID() const {
   return TypeID::Undefined;
-}
-
-size_t UndefinedType::elementSizeInBytes() const {
-  AT_ERROR("elementSizeInBytes not defined for UndefinedType");
 }
 
 Type & UndefinedType::toBackend(Backend b) const {

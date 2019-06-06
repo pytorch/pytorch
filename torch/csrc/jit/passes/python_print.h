@@ -14,18 +14,25 @@ struct Module;
 
 TORCH_API void PythonPrint(
     std::ostream& out,
-    const Graph& graph,
+    const script::Function& callee,
+    bool is_method,
     std::vector<at::Tensor>& tensor_table,
+    std::vector<ClassTypePtr>& class_table,
     bool enforce_importable = false);
+
 TORCH_API void PythonPrint(
     std::ostream& out,
-    const script::Method& graph,
+    const script::CompilationUnit& cu,
+    bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    bool enforce_importable = false);
+    std::vector<ClassTypePtr>& class_table,
+    bool enforce_importable);
+
 TORCH_API void PythonPrint(
     std::ostream& out,
-    const script::Module& module,
+    const ClassTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
+    std::vector<ClassTypePtr>& class_table,
     bool enforce_importable = false);
 
 TORCH_API bool printerHasSpecialCaseFor(c10::Symbol sym);

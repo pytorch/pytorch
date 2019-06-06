@@ -56,8 +56,7 @@ THTensor *THTensor_(new)(void)
 {
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId(),
-    false
+    at::CPUTensorId()
   ).release();
 }
 
@@ -66,8 +65,7 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 {
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId(),
-    false
+    at::CPUTensorId()
   ).release();
   THTensor_(setStorageNd)(self,
                           THTensor_getStoragePtr(tensor),
@@ -81,12 +79,11 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 /* Storage init */
 THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, at::IntArrayRef sizes, at::IntArrayRef strides) {
   if (strides.data()) {
-    AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
+    TORCH_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::CPUTensorId(),
-    false
+    at::CPUTensorId()
   ).release();
   THTensor_(setStorageNd)(self, storage, storageOffset, sizes.size(),
                           const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
@@ -157,7 +154,7 @@ THTensor *THTensor_(newClone)(THTensor *self)
   THTensor_(resizeAs)(tensor, self);
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);
-  at::_copy_same_type_(tensor_wrap, self_wrap);
+  at::native::copy_(tensor_wrap, self_wrap, false);
   return tensor;
 }
 
@@ -193,13 +190,6 @@ THTensor *THTensor_(newTranspose)(THTensor *tensor, int dimension1_, int dimensi
   return self;
 }
 
-THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, int64_t size_, int64_t step_)
-{
-  THTensor *self = THTensor_(newWithTensor)(tensor);
-  THTensor_(unfold)(self, NULL, dimension_, size_, step_);
-  return self;
-}
-
 THTensor *THTensor_(newView)(THTensor *tensor, at::IntArrayRef size)
 {
   ptrdiff_t numel = THTensor_(nElement)(tensor);
@@ -210,7 +200,7 @@ THTensor *THTensor_(newView)(THTensor *tensor, at::IntArrayRef size)
                                         inferred_size);
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
-    "across two contiguous subspaces). Call .contiguous() before .view().");
+    "across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
   THTensor_setStorage(self, THTensor_getStoragePtr(tensor), tensor->storage_offset(), inferred_size, stride_value);
   return self;
@@ -430,28 +420,23 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
 /* we have to handle the case where the result is a number */
 void THTensor_(squeeze)(THTensor *self, THTensor *src)
 {
-  int ndim = 0;
-  int d;
-
   if(!src)
     src = self;
 
   THTensor_(set)(self, src);
 
-  for(d = 0; d < src->dim(); d++)
+  std::vector<int64_t> newSize;
+  std::vector<int64_t> newStride;
+  for(int d = 0; d < src->dim(); ++d)
   {
     if(src->size(d) != 1)
     {
-      if(d != ndim)
-      {
-        self->set_size(ndim, src->size(d));
-        self->set_stride(ndim, src->stride(d));
-      }
-      ndim++;
+      newSize.push_back(src->size(d));
+      newStride.push_back(src->stride(d));
     }
   }
 
-  self->resize_dim(ndim);
+  self->set_sizes_and_strides(newSize, newStride);
 }
 
 void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
@@ -611,7 +596,7 @@ void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
   if(self != dst) {
     at::Tensor dst_wrap = THTensor_wrap(dst);
     at::Tensor self_wrap = THTensor_wrap(self);
-    at::_copy_same_type_(dst_wrap, self_wrap);
+    at::native::copy_(dst_wrap, self_wrap, false);
   }
 
   THTensor_(free)(self);
@@ -831,7 +816,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
         at::Tensor nt__wrap = THTensor_wrap(nt);
         at::Tensor inputs_wrap = THTensor_wrap(inputs[j]);
-        at::_copy_same_type_(nt__wrap, inputs_wrap);
+        at::native::copy_(nt__wrap, inputs_wrap, false);
         c10::raw::intrusive_ptr::decref(nt);
         offset += dimSize;
       }

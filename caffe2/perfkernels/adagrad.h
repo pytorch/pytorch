@@ -289,7 +289,7 @@ int sparse_adagrad(
       float epsilon,                                                     \
       float lr) {                                                        \
     for (int i = 0; i < num_rows; ++i) {                                 \
-      auto idx = indices[i];                                             \
+      std::uint64_t idx = indices[i];                                    \
       auto offsetI = i * block_size;                                     \
       auto offsetIdx = idx * block_size;                                 \
                                                                          \
@@ -304,7 +304,7 @@ int sparse_adagrad(
       } else {                                                           \
         const int prefdist_T0 = 16;                                      \
         int i_pref = (i < num_rows - prefdist_T0) ? i + prefdist_T0 : i; \
-        auto idx_pref = indices[i_pref];                                 \
+        std::uint64_t idx_pref = indices[i_pref];                        \
                                                                          \
         adagrad_update_prefetch__##ISA(                                  \
             block_size,                                                  \

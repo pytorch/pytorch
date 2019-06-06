@@ -20,6 +20,9 @@ void Tensor::enforce_invariants() {
           impl_->dtype_initialized(),
           "Partially-initialized tensor not supported by at::Tensor");
       AT_ASSERTM(
+          !impl_->is_sparse(),
+          "Sparse Tensors are supported by at::Tensor, but invariant checking isn't implemented.  Please file a bug.");
+      AT_ASSERTM(
           impl_->storage_initialized(),
           "Partially-initialized tensor not supported by at::Tensor");
     }
@@ -38,7 +41,7 @@ void Tensor::print() const {
   }
 }
 
-const char * Tensor::toString() const {
+std::string Tensor::toString() const {
   return type().toString();
 }
 

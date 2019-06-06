@@ -35,9 +35,9 @@ class ConvDNNLowPAcc16Op final : public ConvDNNLowPOp<std::uint8_t, ReluFused> {
 
   bool GetQuantizationParameters_();
 
-  template <fbgemm::QuantizationGranularity Q_GRAN>
+  template <typename PackAMatrix, fbgemm::QuantizationGranularity Q_GRAN>
   void DispatchFBGEMM_(
-      fbgemm::PackAWithRowOffset<std::uint8_t, std::int16_t>& packA,
+      PackAMatrix& packA,
       const std::uint8_t* col_buffer_data,
       vector<std::int32_t>* Y_int32,
       uint8_t* Y_uint8_data);

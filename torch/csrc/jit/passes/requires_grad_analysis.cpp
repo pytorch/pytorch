@@ -1,7 +1,8 @@
-#include <torch/csrc/jit/argument_spec.h>
+#include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
-#include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/passes/requires_grad_analysis.h>
 
 #include <vector>
 
@@ -64,6 +65,17 @@ void PropagateRequiresGradSimpleNode(Node* node) {
     return setRequiresGrad(node->output(), node->input(0)->requires_grad());
   } else if (node->matches("aten::detach(Tensor self) -> Tensor")) {
     return setRequiresGrad(node->output(), false);
+  } else if (node->kind() == aten::tensor) {
+    if (auto grad_index =
+            node->schema().argumentIndexWithName("requires_grad")) {
+      if (auto const_arg = constant_as<bool>(node->inputs().at(*grad_index))) {
+        return setRequiresGrad(node->output(), *const_arg);
+      }
+    }
+    if (auto type = node->output()->type()->cast<DimensionedTensorType>()) {
+      setRequiresGrad(node->output(), at::isFloatingType(type->scalarType()));
+    }
+    return;
   }
 
   auto inputs = node->inputs();
@@ -99,15 +111,23 @@ void PropagateRequiresGrad(Node* node) {
         fmap(node->inputs().slice(2), getRequiresGrad);
     std::vector<bool> body_outputs_require(node->outputs().size(), false);
 
-    while (body_inputs_require != body_outputs_require) {
-      body_inputs_require =
+    std::vector<bool> new_body_inputs_require = body_inputs_require;
+    std::vector<bool> new_body_outputs_require = body_outputs_require;
+
+    // continue iterating until the results have converged
+    do {
+      body_inputs_require = new_body_inputs_require;
+      body_outputs_require = new_body_outputs_require;
+
+      new_body_inputs_require =
           bitwiseOr(body_inputs_require, body_outputs_require);
       setRequiresGrad(
-          body->param_node()->outputs().slice(1), body_inputs_require);
+          body->param_node()->outputs().slice(1), new_body_inputs_require);
       PropagateRequiresGrad(body);
-      body_outputs_require =
+      new_body_outputs_require =
           fmap(body->return_node()->inputs().slice(1), getRequiresGrad);
-    }
+    } while (new_body_inputs_require != body_inputs_require &&
+             new_body_outputs_require != body_outputs_require);
 
     setRequiresGrad(node, body_outputs_require);
   } else {
@@ -120,12 +140,10 @@ void PropagateRequiresGrad(Block* block) {
     PropagateRequiresGrad(node);
   }
 }
-
 } // anonymous namespace
 
 void PropagateRequiresGrad(std::shared_ptr<Graph>& graph) {
   PropagateRequiresGrad(graph->block());
 }
-
 } // namespace jit
 } // namespace torch

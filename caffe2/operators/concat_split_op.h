@@ -5,23 +5,9 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
-
-namespace {
-inline int GetDimFromOrderString(const string& str) {
-  auto order = StringToStorageOrder(str);
-  switch (order) {
-    case StorageOrder::NHWC:
-      return 3;
-    case StorageOrder::NCHW:
-      return 1;
-    default:
-      CAFFE_THROW("Unsupported storage order: ", str);
-      return -1;
-  }
-}
-} // namespace
 
 template <class Context>
 class SplitOp final : public Operator<Context> {

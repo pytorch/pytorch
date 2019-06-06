@@ -22,11 +22,6 @@ class AliasInfo {
     static const Symbol wc = Symbol::fromQualString("alias::*");
     return wc;
   }
-  static AliasInfo createWildcard() {
-    AliasInfo ret;
-    ret.addBeforeSet(wildcardSet());
-    return ret;
-  }
 
   void setIsWrite(bool isWrite) {
     isWrite_ = isWrite;
@@ -57,8 +52,12 @@ class AliasInfo {
     return *beforeSets_.begin();
   }
 
-  bool isWildcard() const {
+  bool isWildcardBefore() const {
     return beforeSets_.count(wildcardSet()) != 0;
+  }
+
+  bool isWildcardAfter() const {
+    return afterSets_.count(wildcardSet()) != 0;
   }
 
   // the alias info for the contained types of the type
@@ -79,6 +78,13 @@ class AliasInfo {
   std::vector<AliasInfo> containedTypes_;
   bool isWrite_ = false;
 };
+
+inline bool operator==(const AliasInfo& lhs, const AliasInfo& rhs) {
+  return lhs.isWrite() == rhs.isWrite()
+      && lhs.beforeSets() == rhs.beforeSets()
+      && lhs.afterSets() == rhs.afterSets()
+      && lhs.containedTypes() == rhs.containedTypes();
+}
 
 // DEBUG ONLY; this does not match the way things are represented in the schema
 inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {

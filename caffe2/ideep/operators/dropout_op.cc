@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPDropoutOp final : public IDEEPOperator {
  public:
@@ -85,4 +87,4 @@ class IDEEPDropoutGradientOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(Dropout, IDEEPDropoutOp);
 REGISTER_IDEEP_OPERATOR(DropoutGrad, IDEEPDropoutGradientOp);
 
-} // namespace caffe2
+} // namespace

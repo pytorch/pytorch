@@ -36,7 +36,7 @@ static std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
       // works yet
       //   empty_tensor.view(-1, 0)
       // doesn't.
-      AT_CHECK(newsize != 0, "cannot reshape tensor of 0 elements into shape ",
+      TORCH_CHECK(newsize != 0, "cannot reshape tensor of 0 elements into shape ",
                shape, " because the unspecified dimension size -1 can be any "
                "value and is ambiguous");
       res[*infer_dim] = numel / newsize;

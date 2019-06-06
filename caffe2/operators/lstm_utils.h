@@ -299,13 +299,13 @@ Tensor transpose(const Tensor& X, int dim0, int dim1, CPUContext* context) {
   std::vector<int> axes(ndim);
   std::iota(axes.begin(), axes.end(), 0);
   std::swap(axes[dim0], axes[dim1]);
-  std::vector<int> Y_dims(ndim);
-  std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
+  const std::vector<std::int64_t> X_dims = X.sizes().vec();
+  std::vector<std::int64_t> Y_dims(ndim);
   for (int i = 0; i < ndim; ++i) {
     Y_dims[i] = X_dims[axes[i]];
   }
   Tensor Y(Y_dims, CPU);
-  math::Transpose<float, CPUContext>(
+  math::Transpose<std::int64_t, float, CPUContext>(
       ndim,
       X_dims.data(),
       axes.data(),

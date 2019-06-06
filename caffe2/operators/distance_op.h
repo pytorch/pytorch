@@ -259,7 +259,8 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
               DS, dDot_data[i], S_data, dL_data + j * DS, &context_);
           math::Scale<T, T, Context>(
               DS, dDot_data[i], L_data + j * DS, tmp_data.data(), &context_);
-          math::Axpy<T, Context>(DS, 1.0, tmp_data.data(), dS_data, &context_);
+          math::Axpy<float, T, Context>(
+              DS, 1.0, tmp_data.data(), dS_data, &context_);
         }
       } else {
         math::Scale<T, T, Context>(
