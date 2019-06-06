@@ -5098,25 +5098,8 @@ a")
         ast = torch.jit.frontend.get_jit_def(fn)
         self.assertExpected(str(ast))
 
-    @unittest.skipIf(PY2, "Requires python 3")
-    def test_python_frontend_py3(self):
-        def fn():
-            raise Exception("hello")
-        ast = torch.jit.frontend.get_jit_def(fn)
-        self.assertExpected(str(ast))
-
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
-
-
-    @unittest.skipIf(PY2, "tuple printing in py2 is different than torchscript")
-    def test_string_print(self):
-        def func(a):
-            print(a, "a" 'b' '''c''' """d""", 2, 1.5)
-            return a
-
-        inputs = self._make_scalar_vars([1], torch.int64)
-        self.checkScript(func, inputs, capture_output=True)
 
     def test_while(self):
         def func(a, b, max):
@@ -8325,48 +8308,6 @@ a")
         self.checkScript(fn1, (x, y, z), optimize=True)
         self.checkScript(fn2, (x, y, z), optimize=True)
         self.checkScript(fn3, (x, y, z), optimize=True)
-
-    @unittest.skipIf(not PY35, "Python 3.5 needed")
-    def test_type_annotation_py3(self):
-        code = dedent("""
-        import torch
-        from torch import Tensor
-        from typing import Tuple
-
-        def fn(x : torch.Tensor, y : Tensor, z) -> Tuple[Tensor, Tensor, Tensor]:
-            return (x, y + z, z)
-        """)
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            script_path = os.path.join(tmp_dir, 'script.py')
-            with open(script_path, 'w') as f:
-                f.write(code)
-            fn = get_fn('test_type_annotation_py3', script_path)
-
-            with self.assertRaisesRegex(RuntimeError, r"expected a value of type 'Tensor' for argument"
-                                                      r" '0' but instead found type 'Tuple\[Tensor,"):
-                @torch.jit.script
-                def bad_fn(x):
-                    x, y = fn((x, x), x, x)
-                    return y
-
-            with self.assertRaisesRegex(RuntimeError, r"too many values .* need 2 but found 3"):
-                @torch.jit.script
-                def bad_fn2(x):
-                    x, y = fn(x, x, x)
-                    return y
-
-            with self.assertRaisesRegex(RuntimeError, r"need 4 values .* found only 3"):
-                @torch.jit.script
-                def bad_fn3(x):
-                    x, y, z, w = fn(x, x, x)
-                    return y
-
-            def good_fn(x):
-                y, z, w = fn(x, x, x)
-                return y, z, w
-
-            self.checkScript(good_fn, (torch.ones(2, 2),), optimize=True)
 
     def test_tensor_with_grad_as_constant(self):
         param = torch.randn(3).requires_grad_()
