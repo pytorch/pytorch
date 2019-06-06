@@ -211,6 +211,8 @@
 ]]
 [[
   name: _th_index_select
+  cpu_bool: True
+  cuda_bool: True
   cname: indexSelect
   variants:
     - function
@@ -226,6 +228,8 @@
 [[
   name: _th_index_copy_
   cname: indexCopy
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   return: argument 0
   arguments:
@@ -237,6 +241,8 @@
 ]]
 [[
   name: _th_take
+  cpu_bool: True
+  cuda_bool: True
   cname: take
   variants:
     - function
@@ -250,6 +256,8 @@
 ]]
 [[
   name: _th_put_
+  cpu_bool: True
+  cuda_bool: True
   cname: put
   variants: function
   backends:
@@ -277,6 +285,8 @@
 ]]
 [[
   name: _th_index_fill_
+  cpu_bool: True
+  cuda_bool: True
   cname: indexFill
   variants: function
   return: argument 0
