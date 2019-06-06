@@ -16,6 +16,7 @@ from .cuda import USE_CUDA
 from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .nccl import (USE_SYSTEM_NCCL, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR,
                    NCCL_SYSTEM_LIB, USE_NCCL)
+from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
 from .rocm import USE_ROCM
 from .nnpack import USE_NNPACK
 from .qnnpack import USE_QNNPACK
@@ -110,14 +111,6 @@ def run(version,
         if IS_64BIT:
             cmake_args.append('-Ax64')
             cmake_args.append('-Thost=x64')
-    try:
-        import numpy as np
-    except ImportError:
-        USE_NUMPY = False
-        NUMPY_INCLUDE_DIR = None
-    else:
-        NUMPY_INCLUDE_DIR = np.get_include()
-        USE_NUMPY = True
 
     cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
     ldflags = os.getenv('LDFLAGS', "")
