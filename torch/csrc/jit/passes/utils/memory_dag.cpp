@@ -96,7 +96,7 @@ void MemoryDAG::makePointerTo(Element* from, Element* to) {
     auto contained = fromIndex(containedIdx);
     auto el = makeFreshValue(contained->value);
     makePointerTo(el, contained);
-    from->containedElements.set(contained->index);
+    from->containedElements.set(el->index);
   }
 }
 
