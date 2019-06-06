@@ -79,6 +79,9 @@ if not "%USE_CUDA%"=="1" (
 )
 
 if not "%USE_CUDA%"=="0" (
+  :: sccache will fail for CUDA builds if all cores are used for compiling
+  if not defined MAX_JOBS set /A MAX_JOBS=%NUMBER_OF_PROCESSORS%-1
+
   if "%REBUILD%"=="" (
     sccache --show-stats
     sccache --zero-stats
@@ -99,7 +102,6 @@ if not "%USE_CUDA%"=="0" (
     if "%BUILD_ENVIRONMENT%"=="" (
       echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
     ) else (
-      mv %CD%\build\bin\test_api.exe %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch\lib
       7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && python %SCRIPT_HELPERS_DIR%\upload_image.py %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z
     )
   )

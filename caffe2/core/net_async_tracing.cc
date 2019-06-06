@@ -288,8 +288,13 @@ Tracer::~Tracer() {
   dumpTracingResultAndClearEvents("final_batch");
 }
 
+thread_local TracerGuard* current_tracer_guard;
+
 void TracerGuard::init(Tracer* tracer) {
-  enabled_ = true;
+  enabled_ = tracer && tracer->isEnabled();
+  if (enabled_) {
+    current_tracer_guard = this;
+  }
   tracer_ = tracer;
 }
 
@@ -351,7 +356,18 @@ TracerGuard::~TracerGuard() {
     event_.is_beginning_ = false;
     event_.timestamp_ = (long)caffe2::round(tracer_->timer_.MicroSeconds());
     tracer_->recordEvent(event_);
+    if (current_tracer_guard == this) {
+      current_tracer_guard = nullptr;
+    }
   }
+}
+
+void TracerGuard::disable() {
+  enabled_ = false;
+}
+
+TracerGuard* TracerGuard::getCurrentTracerGuard() {
+  return current_tracer_guard;
 }
 
 int extractShardId(const std::string& name) {

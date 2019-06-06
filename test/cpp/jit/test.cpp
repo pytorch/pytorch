@@ -29,6 +29,7 @@
 #include <test/cpp/jit/test_netdef_converter.h>
 #include <test/cpp/jit/test_peephole_optimize.h>
 #include <test/cpp/jit/test_qualified_name.h>
+#include <test/cpp/jit/test_save_load.h>
 #include <test/cpp/jit/test_subgraph_matcher.h>
 #include <test/cpp/jit/test_subgraph_utils.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -76,14 +77,15 @@ namespace jit {
   _(NoneSchemaMatch)               \
   _(ClassParser)                   \
   _(Profiler)                      \
-  _(InsertGuards)                  \
+  _(InsertAndEliminateGuards)      \
   _(PeepholeOptimize)              \
   _(RecordFunction)                \
   _(SubgraphMatching)              \
   _(ModuleDefine)                  \
   _(QualifiedName)                 \
   _(ClassImport)                   \
-  _(ScriptObject)
+  _(ScriptObject)                  \
+  _(SaveExtraFilesHook)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

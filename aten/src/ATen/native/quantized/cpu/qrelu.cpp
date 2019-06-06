@@ -10,17 +10,20 @@
 namespace at { namespace native {
 namespace {
 
-class QReluInt8 final : public c10::OperatorKernel {
+class QRelu final : public c10::OperatorKernel {
  public:
   Tensor operator()(Tensor qx) {
-    Tensor qy = at::_empty_affine_quantized(qx.sizes(),
-                                            at::device(kCPU).dtype(kQUInt8),
-                                            qx.q_scale().toDouble(),
-                                            qx.q_zero_point().toLong());
-    auto iter = TensorIterator::unary_op(qy, qx);
-    const auto zero_point = qx.q_zero_point().toByte();
-    unary_kernel(*iter, [&](c10::quint8 value) -> c10::quint8 {
-      return c10::quint8(std::max(value.val_, zero_point));
+    Tensor qy;
+    const auto zero_point = qx.q_zero_point().toInt();
+    AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
+      qy = at::_empty_affine_quantized(qx.sizes(),
+                                       at::device(kCPU).dtype(SCALAR_TYPE),
+                                       qx.q_scale().toDouble(),
+                                       qx.q_zero_point().toLong());
+      auto iter = TensorIterator::unary_op(qy, qx);
+      unary_kernel(*iter, [&](scalar_t value) -> scalar_t {
+        return scalar_t(std::max<underlying_t>(value.val_, zero_point));
+      });
     });
     return qy;
   }
@@ -29,7 +32,6 @@ class QReluInt8 final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "quantized::relu(Tensor qx) -> Tensor",
     c10::RegisterOperators::options()
-      .kernel<QReluInt8>(QuantizedCPUTensorId()));
-
+      .kernel<QRelu>(QuantizedCPUTensorId()));
 }  // namespace
 }}  // namespace at::native
