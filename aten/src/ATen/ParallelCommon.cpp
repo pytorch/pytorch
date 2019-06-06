@@ -18,7 +18,7 @@ namespace at {
 
 namespace {
 
-const char* get_env_var(const char* var_name) {
+static const char* get_env_var(const char* var_name) {
   const char* value = std::getenv(var_name);
   return value ? value : "[not set]";
 }
