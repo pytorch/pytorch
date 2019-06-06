@@ -6140,7 +6140,7 @@ a")
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
                            "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
-                           "asinh", "atanh", "acosh", "sinh", "cosh", "tanh"]
+                           "asinh", "atanh", "acosh", "sinh", "cosh", "tanh", "degrees", "radians"]
         binary_float_ops = ["atan2", "fmod", "copysign"]
         for op in unary_float_ops:
             checkMathWrap(op, 1)
@@ -6151,6 +6151,8 @@ a")
         checkMath("frexp", 1, ret_type="Tuple[float, int]")
         checkMath("isnan", 1, ret_type="bool")
         checkMath("isinf", 1, ret_type="bool")
+        checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
+                  vals=[(i, j) for i in float_vals for j in range(-10, 10)])
         checkMath("pow", 2, is_float=False, ret_type="int")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
@@ -6160,20 +6162,7 @@ a")
             checkMath("isfinite", 1, ret_type="bool")
         if PY37:
             checkMathWrap("remainder", 2)
-        checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, i) for i in range(-2, 10)])
-
-    @unittest.skipIf(PY2, "Requires python 3")
-    def test_math_gcd(self):
-        def test_gcd(x, y):
-            # type: (int, int) -> int
-            return math.gcd(x, y)
-
-        max_int = 2147483647
-        min_int = -2147483647 - 1
-        int_vals = list(range(-5, 5, 1)) + [max_int + 5, max_int * 2, min_int - 5, min_int * 2]
-        vals = [(i, j) for i in int_vals for j in int_vals]
-        for inputs in vals:
-            self.checkScript(test_gcd, inputs)
+        checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
 
     def test_if_nest_while(self):
         def func(a, b):
