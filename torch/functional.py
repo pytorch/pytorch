@@ -297,6 +297,7 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
 
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
          center=True, pad_mode='reflect', normalized=False, onesided=True):
+    # type: (Tensor, int, Optional[int], Optional[int], Optional[Tensor], bool, str, bool, bool) -> Tensor
     r"""Short-time Fourier transform (STFT).
 
     Ignoring the optional batch dimension, this method computes the following

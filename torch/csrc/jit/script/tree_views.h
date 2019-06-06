@@ -21,7 +21,7 @@ namespace script {
 // - Maybe<T> is really a Tree with kind TK_OPTION that has 0 or 1 subtree of type T
 // - Builtin types are: Ident (TK_IDENT), String (TK_STRING)
 //
-// Param = Param(Expr type, Ident name)                                 TK_PARAM
+// Param = Param(Maybe<Expr> type, Ident name)                          TK_PARAM
 //
 // Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
@@ -336,7 +336,7 @@ struct Param : public TreeView {
   static Param create(
       const SourceRange& range,
       const Ident& ident,
-      const Expr& type,
+      const Maybe<Expr>& type,
       const Maybe<Expr>& def,
       bool kwarg_only) {
     TreeRef kwarg_only_tree =
@@ -347,8 +347,8 @@ struct Param : public TreeView {
   Ident ident() const {
     return Ident(subtree(0));
   }
-  Expr type() const {
-    return Expr(subtree(1));
+  Maybe<Expr> type() const {
+    return Maybe<Expr>(subtree(1));
   }
   Maybe<Expr> defaultValue() const {
     return Maybe<Expr>(subtree(2));
@@ -356,7 +356,7 @@ struct Param : public TreeView {
   bool kwarg_only() const {
     return TK_TRUE == subtree(3)->kind();
   }
-  Param withType(const Expr& typ) const {
+  Param withType(const Maybe<Expr>& typ) const {
     return Param::create(range(), ident(), typ, defaultValue(), kwarg_only());
   }
 };

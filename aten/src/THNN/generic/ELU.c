@@ -11,8 +11,17 @@ void THNN_(ELU_updateOutput)(
           accreal input_scale,
           bool inplace)
 {
+  // https://pytorch.org/docs/stable/nn.html#id30
+  // This elu function is used to implement selu and celu.
+  // elu(x, alpha, scale, input_scale) =
+  //    x <= 0:        (exp(input * input_scale)-1) * alpha * scale
+  //     x > 0:        x * scale
+  // elu: scale = 1, input_scale = 1. default alpha = 1
+  // selu: input scale = 1. default alpha=1.6732.., scale=1.0507...
+  // celu: scale = 1, input_scale = 1/alpha. default alpha = 1
+
   scalar_t negcoef = TH_CONVERT_ACCREAL_TO_REAL(alpha_ * scale);
-  scalar_t poscoef = TH_CONVERT_ACCREAL_TO_REAL(scale * input_scale);
+  scalar_t poscoef = TH_CONVERT_ACCREAL_TO_REAL(scale);
   scalar_t negiptcoef = TH_CONVERT_ACCREAL_TO_REAL(input_scale);
   if (inplace) {
     TH_TENSOR_APPLY(scalar_t, input,
@@ -37,7 +46,7 @@ void THNN_(ELU_updateGradInput)(
           accreal input_scale)
 {
   scalar_t negcoef = TH_CONVERT_ACCREAL_TO_REAL(alpha_ * scale);
-  scalar_t poscoef = TH_CONVERT_ACCREAL_TO_REAL(scale * input_scale);
+  scalar_t poscoef = TH_CONVERT_ACCREAL_TO_REAL(scale);
   scalar_t negiptcoef = TH_CONVERT_ACCREAL_TO_REAL(input_scale);
   THNN_CHECK_NELEMENT(output, gradOutput);
   THTensor_(resizeAs)(gradInput, output);

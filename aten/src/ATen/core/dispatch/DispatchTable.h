@@ -62,7 +62,7 @@ class KernelTable_ final {
     if (!emplaced.second) {
       // Element already existed. Overwrite it.
       emplaced.first->second = value;
-      AT_WARN("Registered a kernel for operator ", operator_name," with dispatch key ", detail::dispatch_key_to_string(key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
+      TORCH_WARN("Registered a kernel for operator ", operator_name," with dispatch key ", detail::dispatch_key_to_string(key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
     }
   }
 
@@ -125,9 +125,9 @@ class DispatchTable final {
   void setKernel(
       TensorTypeId dispatch_key,
       const DispatchTableEntry& kernel) {
-    AT_ASSERTM(dispatch_key != TensorTypeIds::undefined());
-    AT_ASSERTM(dispatch_strategy_.is_valid_, "Tried to register a kernel with dispatch key ", detail::dispatch_key_to_string(dispatch_key), " for operator ", operator_name_, " that doesn't have tensor arguments.");
-    AT_ASSERTM(kernels_.is_left(), "Tried to register a kernel with dispatch key ", detail::dispatch_key_to_string(dispatch_key)," for operator ", operator_name_, ", which already has a catch-all kernel registered. An operator can only have either a catch-all kernel or kernels with dispatch keys.");
+    TORCH_INTERNAL_ASSERT(dispatch_key != TensorTypeIds::undefined());
+    TORCH_CHECK(dispatch_strategy_.is_valid_, "Tried to register a kernel with dispatch key ", detail::dispatch_key_to_string(dispatch_key), " for operator ", operator_name_, " that doesn't have tensor arguments.");
+    TORCH_CHECK(kernels_.is_left(), "Tried to register a kernel with dispatch key ", detail::dispatch_key_to_string(dispatch_key)," for operator ", operator_name_, ", which already has a catch-all kernel registered. An operator can only have either a catch-all kernel or kernels with dispatch keys.");
     kernels_.left().set(dispatch_key, kernel, operator_name_);
   }
 
@@ -137,7 +137,7 @@ class DispatchTable final {
    * @param dispatch_key Dispatch key to unregister.
    */
   void removeKernelIfExists(TensorTypeId dispatch_key) {
-    AT_ASSERTM(kernels_.is_left(), "Tried to remove the kernel for dispatch key ", detail::dispatch_key_to_string(dispatch_key), " for operator ", operator_name_, ", which only has a catch-all kernel.");
+    TORCH_INTERNAL_ASSERT(kernels_.is_left(), "Tried to remove the kernel for dispatch key ", detail::dispatch_key_to_string(dispatch_key), " for operator ", operator_name_, ", which only has a catch-all kernel.");
     kernels_.left().removeIfExists(dispatch_key, operator_name_);
   }
 
@@ -149,9 +149,9 @@ class DispatchTable final {
    */
   void setCatchallKernel(const DispatchTableEntry& kernel) {
     if (kernels_.is_right()) {
-      AT_WARN("Registered a catch-all kernel for operator ", operator_name_," that overwrote a previously registered catch-all kernel for the same operator.");
+      TORCH_WARN("Registered a catch-all kernel for operator ", operator_name_," that overwrote a previously registered catch-all kernel for the same operator.");
     } else {
-      AT_ASSERTM(0 == kernels_.left().size(), "Tried to register a catch-all kernel for operator ", operator_name_, " which already has kernels with dispatch keys. An operator can only have either a catch-all kernel or kernels with dispatch keys.");
+      TORCH_CHECK(0 == kernels_.left().size(), "Tried to register a catch-all kernel for operator ", operator_name_, " which already has kernels with dispatch keys. An operator can only have either a catch-all kernel or kernels with dispatch keys.");
     }
     kernels_ = make_right<detail::KernelTable_, DispatchTableEntry>(kernel);
   }
@@ -160,7 +160,7 @@ class DispatchTable final {
    * Remove the catch-all kernel.
    */
   void removeCatchallKernel() {
-    AT_ASSERTM(kernels_.is_right(), "Tried to remove the catch-all kernel for operator ", operator_name_," but there is no catch-all kernel registered.");
+    TORCH_INTERNAL_ASSERT(kernels_.is_right(), "Tried to remove the catch-all kernel for operator ", operator_name_," but there is no catch-all kernel registered.");
     kernels_ = make_left<detail::KernelTable_, DispatchTableEntry>();
   }
 
@@ -176,12 +176,12 @@ class DispatchTable final {
        [&] (const detail::KernelTable_& table) -> const DispatchTableEntry& {
          // We have a dispatch table. Find the correct kernel for the inputs and return it.
 
-         AT_ASSERTM(dispatch_strategy_.is_valid_, "Operator ", operator_name_, " has an invalid dispatch key but kernels registered.");
+         TORCH_INTERNAL_ASSERT(dispatch_strategy_.is_valid_, "Operator ", operator_name_, " has an invalid dispatch key but kernels registered.");
 
          TensorTypeId dispatch_key = dispatch_strategy_.get_dispatch_key(stack, operator_name_);
          auto found = table.lookup(dispatch_key);
 
-         AT_ASSERTM(nullptr != found, "Didn't find kernel to dispatch to for operator '", operator_name_,
+         TORCH_CHECK(nullptr != found, "Didn't find kernel to dispatch to for operator '", operator_name_,
                   "'. Tried to look up kernel for dispatch key '", detail::dispatch_key_to_string(dispatch_key),
                   "'. Registered dispatch keys are: ", listAllDispatchKeys());
 

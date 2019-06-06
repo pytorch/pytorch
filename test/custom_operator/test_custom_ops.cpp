@@ -81,8 +81,8 @@ void test_argument_checking_for_serialized_modules(
   } catch (const c10::Error& error) {
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("Expected value of type Tensor for argument 'input' in "
-                  "position 0, but instead got value of type int") == 0);
+            .find("forward() expected a value of type 'Tensor' "
+                  "for argument 'input' but instead found type 'int'") == 0);
   }
 
   try {

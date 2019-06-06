@@ -252,6 +252,10 @@ class CAFFE2_API Tensor {
   /// TensorOptions.h.
   TensorOptions options() const;
 
+  void* data_ptr() const {
+    return this->unsafeGetTensorImpl()->data();
+  }
+
   template<typename T>
   T * data() const;
 
@@ -465,6 +469,7 @@ class CAFFE2_API Tensor {
   Tensor narrow_copy(int64_t dim, int64_t start, int64_t length) const;
   Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
   Tensor permute(IntArrayRef dims) const;
+  Tensor numpy_T() const;
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
   Tensor reciprocal() const;
@@ -580,7 +585,6 @@ class CAFFE2_API Tensor {
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
-  Tensor quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const;
   Tensor dequantize() const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;
@@ -590,7 +594,6 @@ class CAFFE2_API Tensor {
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar item() const;
-  void* data_ptr() const;
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride={});
   Tensor & set_(const Tensor & source);

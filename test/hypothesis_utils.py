@@ -8,6 +8,7 @@ import torch
 
 from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
+from hypothesis.searchstrategy import SearchStrategy
 
 # Setup for the hypothesis tests.
 # The tuples are (torch_type, np_type, zero_point_enforce), where the last
@@ -32,7 +33,7 @@ Generates:
     (qmin, qmax): Valid quantization ranges derived from the dtypes.
     (torch_type, np_type): Data types (torch and numpy) for conversion in test.
 Note:
-    The `dtypes` argument is used to infer the ranges. The elements should be
+    - The `dtypes` argument is used to infer the ranges. The elements should be
     of length 1, 2, or 3:
         If the length is 1 -- the torch_type is assumed to be the same as
             np_type. The zero_point is not enforced.
@@ -43,6 +44,11 @@ Note:
 """
 @st.composite
 def qtensor(draw, shapes, dtypes=None, float_min=-1e6, float_max=1e6):
+    # In case shape is a strategy
+    if isinstance(shapes, SearchStrategy):
+        shape = draw(shapes)
+    else:
+        shape = draw(st.sampled_from(shapes))
     # Resolve types
     if dtypes is None:
         dtypes = ALL_QINT_AND_NP_TYPES
@@ -68,5 +74,25 @@ def qtensor(draw, shapes, dtypes=None, float_min=-1e6, float_max=1e6):
     # Resolve the tensor
     Xhy = draw(stnp.arrays(dtype=np.float32,
                            elements=st.floats(float_min, float_max),
-                           shape=draw(st.sampled_from(shapes))))
+                           shape=shape))
     return Xhy, (scale, zero_point), (qmin, qmax), (torch_type, np_type)
+
+"""Strategy to create different shapes.
+
+Example:
+    # Generates 3D and 4D tensors.
+    @given(Q = qtensor(shapes=array_shapes(min_dims=3, max_dims=4))
+    some_test(self, Q):...
+"""
+@st.composite
+def array_shapes(draw, min_dims=1, max_dims=None, min_side=1, max_side=None):
+    """Return a strategy for array shapes (tuples of int >= 1)."""
+    assert(min_dims < 32)
+    if max_dims is None:
+        max_dims = min(min_dims + 2, 32)
+    assert(max_dims < 32)
+    if max_side is None:
+        max_side = min_side + 5
+    return draw(st.lists(
+        st.integers(min_side, max_side), min_size=min_dims, max_size=max_dims
+    ).map(tuple))
