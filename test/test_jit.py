@@ -14098,6 +14098,8 @@ EXCLUDE_TRACED = {
     'test___getitem___adv_index_sub_3',
     'test___getitem___adv_index_var',
 
+    # jit doesn't support sparse tensors.
+    'test_to_sparse',
 }
 
 EXCLUDE_TYPE_CHECK = {
@@ -14127,6 +14129,9 @@ EXCLUDE_SCRIPT = {
 
     # unknown builtin op
     'test_nn_fold',
+
+    # jit doesn't support sparse tensors.
+    'test_to_sparse'
 }
 
 # chunk returns a list in scripting and we don't unpack the list,
@@ -14935,7 +14940,8 @@ def add_autograd_test(
                 args_tensor = deepcopy(unpack_variables(args_variable))
 
                 def fn(*inputs, **kwargs):
-                    output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
+                    attr = getattr(inputs[0], name)
+                    output = attr(*inputs[1:], **kwargs)
                     return output_process_fn(output)
 
                 check_types = test_name not in EXCLUDE_TYPE_CHECK
