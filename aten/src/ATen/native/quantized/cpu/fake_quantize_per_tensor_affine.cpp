@@ -10,7 +10,8 @@ Args:
   dY: Backward input tensor (_backward op only).
   scale: scale of per tensor affine quantization
   zero_point: zero_point of per tensor affine quantization
-  num_bits: Number of quantization bits.
+  quant_min: minimum quantized value
+  quant_max: maximum quantized value
   quant_delay: Count of global steps for which to delay the quantization.
                See note below.
   iter: The current quantization iteration used for `quant_delay`.
@@ -29,13 +30,14 @@ class FakeQuantizePerTensorAffineOp_forward : public c10::OperatorKernel {
       at::Tensor X,
       double scale,
       int64_t zero_point,
-      int64_t num_bits = 8,
+      int64_t quant_min = 0,
+      int64_t quant_max = 255,
       int64_t quant_delay = 0,
       int64_t iter = 0
     ) {
     // Sanity checks.
-    if (num_bits > 32 || num_bits < 1) {
-      throw std::invalid_argument("`num_bits` should be in the [1, 32] range.");
+    if (quant_min > quant_max) {
+      throw std::invalid_argument("`quant_min` should be less than or equal to `quant_max`.");
     }
     if (zero_point < 0) {
       throw std::invalid_argument("`zero_point` must be a positive integer.");
@@ -57,8 +59,6 @@ class FakeQuantizePerTensorAffineOp_forward : public c10::OperatorKernel {
     }
 
     double inv_scale = 1.0f / scale;
-    const auto quant_min = 0;
-    const auto quant_max = (1 << num_bits) - 1;
     Y = (((X * inv_scale + 0.5f).floor() + zero_point)
       .clamp_min(quant_min).clamp_max(quant_max) - zero_point) * scale;
     return Y;
@@ -72,7 +72,8 @@ Args:
   dY: Backward input tensor.
   scale: scale of per tensor affine quantization
   zero_point: zero_point of per tensor affine quantization
-  num_bits: Number of quantization bits.
+  quant_min: minimum quantized value
+  quant_max: maximum quantized value
   quant_delay: Count of global steps for which to delay the quantization.
                See note in forward.
   iter: The current quantization iteration used for `quant_delay`.
@@ -91,12 +92,13 @@ class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
       at::Tensor dY,
       double scale,
       int64_t zero_point,
-      int64_t num_bits = 8,
+      int64_t quant_min = 0,
+      int64_t quant_max = 255,
       int64_t quant_delay = 0,
       int64_t iter = 0) {
     // Sanity checks.
-    if (num_bits > 32 || num_bits < 1) {
-      throw std::invalid_argument("`num_bits` should be in the [1, 32] range.");
+    if (quant_min > quant_max) {
+      throw std::invalid_argument("`quant_min` should be less than or equal to `quant_max`.");
     }
     if (zero_point < 0) {
       throw std::invalid_argument("`zero_point` must be a positive integer.");
@@ -123,8 +125,6 @@ class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
     }
 
     double inv_scale = 1.0f / scale;
-    const auto quant_min = 0;
-    const auto quant_max = (1 << num_bits) - 1;
     at::Tensor Xq = (X * inv_scale + 0.5).floor() + zero_point;
     at::Tensor mask_min = (Xq >= quant_min);
     at::Tensor mask_max = (Xq <= quant_max);
@@ -135,10 +135,10 @@ class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators()
-.op("quantized::fake_quantize_per_tensor_affine_forward(Tensor X, float scale, int zero_point, int num_bits = 8, int quant_delay = 0, int iter = 0) -> Tensor",
+.op("quantized::fake_quantize_per_tensor_affine_forward(Tensor X, float scale, int zero_point, int quant_min = 0, int quant_max = 255, int quant_delay = 0, int iter = 0) -> Tensor",
     c10::RegisterOperators::options()
       .kernel<FakeQuantizePerTensorAffineOp_forward>(CPUTensorId()))
-.op("quantized::fake_quantize_per_tensor_affine_backward(Tensor X, Tensor dY, float scale, int zero_point, int num_bits=8, int quant_delay=0, int iter = 0) -> Tensor",
+.op("quantized::fake_quantize_per_tensor_affine_backward(Tensor X, Tensor dY, float scale, int zero_point, int quant_min = 0, int quant_max = 255, int quant_delay=0, int iter = 0) -> Tensor",
     c10::RegisterOperators::options()
       .kernel<FakeQuantizePerTensorAffineOp_backward>(CPUTensorId()));
 

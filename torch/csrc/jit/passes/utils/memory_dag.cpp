@@ -7,18 +7,13 @@
 
 namespace torch {
 namespace jit {
-namespace {
-std::vector<const Element*> indexToElementMap;
-} // namespace
-unsigned Element::indexCount = 0;
-Element::Element(const Value* value_) : value(value_), index(indexCount++) {
-  indexToElementMap.push_back(this);
-}
 
-const Element* Element::fromIndex(unsigned x) {
+Element::Element(MemoryDAG& dag_, const Value* value_, unsigned index_)
+  : dag(dag_), value(value_), index(index_) { }
+
+const Element* MemoryDAG::fromIndex(unsigned x) const {
   TORCH_INTERNAL_ASSERT(x < indexToElementMap.size());
-  auto res = indexToElementMap[x];
-  return res;
+  return indexToElementMap[x].get();
 }
 
 bool MemoryDAG::mayAlias(Element* a, Element* b) const {
@@ -44,9 +39,9 @@ bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
   return mayContainAliasImpl(a, b);
 }
 
-void collectAllContainedMemoryLocations(
+void MemoryDAG::collectAllContainedMemoryLocations(
     const Element* elem,
-    MemoryLocations& cont) {
+    MemoryLocations& cont) const {
   // we have already recursed on this element
   unsigned compIdx = elem->index;
   if (cont.test(compIdx)) {
@@ -55,11 +50,11 @@ void collectAllContainedMemoryLocations(
   cont.set(compIdx);
 
   for (const auto& mem_loc : elem->getMemoryLocations()) {
-    collectAllContainedMemoryLocations(Element::fromIndex(mem_loc), cont);
+    collectAllContainedMemoryLocations(fromIndex(mem_loc), cont);
   }
 
   for (const auto& contained : elem->contained_elements) {
-    collectAllContainedMemoryLocations(Element::fromIndex(contained), cont);
+    collectAllContainedMemoryLocations(fromIndex(contained), cont);
   }
 }
 
@@ -105,11 +100,9 @@ void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
 
 // Give `v` a fresh alias (i.e. it does not point to any value)
 Element* MemoryDAG::makeFreshValue(const Value* v) {
-  auto el = torch::make_unique<Element>(v);
-
-  auto rawPtr = el.get();
-  elements_.emplace(rawPtr, std::move(el));
-  return rawPtr;
+  indexToElementMap.emplace_back(
+    torch::make_unique<Element>(*this, v, indexToElementMap.size()));
+  return indexToElementMap.back().get();
 }
 
 const MemoryLocations& Element::getMemoryLocations() const {
@@ -134,7 +127,7 @@ void Element::bfs(BfsDirection dir, MemoryLocations& res) const {
     const auto index = queue.front();
     queue.pop();
     seen.insert(index);
-    auto el = Element::fromIndex(index);
+    auto el = dag.fromIndex(index);
     if (el->pointsTo.empty()) {
       res.set(index);
     }

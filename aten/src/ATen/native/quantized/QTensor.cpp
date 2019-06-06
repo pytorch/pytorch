@@ -96,5 +96,13 @@ Tensor per_tensor_affine_qtensor_cpu(const Tensor& self, double scale, int64_t z
   return dst;
 }
 
+Tensor& set_storage_cpu(Tensor& self, Storage storage, int64_t storage_offset, IntArrayRef sizes, IntArrayRef strides) {
+  auto* self_ = self.unsafeGetTensorImpl();
+  self_->set_storage(storage);
+  self_->set_storage_offset(storage_offset);
+  self_->set_sizes_and_strides(sizes, strides);
+  return self;
+}
+
 } // namespace native
 } // namespace at

@@ -600,6 +600,27 @@ class ExprBuilder(Builder):
         return StringLiteral(r, value)
 
     @staticmethod
+    def build_JoinedStr(ctx, expr):
+        s = ''
+        args = []
+        for value in expr.values:
+            r = ctx.make_range(value.lineno, value.col_offset, value.col_offset + 1)
+            if isinstance(value, ast.FormattedValue):
+                if value.conversion != -1:
+                    raise NotSupportedError(r, 'Don\'t support conversion in JoinedStr')
+                if value.format_spec is not None:
+                    raise NotSupportedError(r, 'Don\'t support formatting in JoinedStr')
+                s += '{}'
+                args.append(build_expr(ctx, value.value))
+            elif isinstance(value, ast.Str):
+                s += value.s
+            else:
+                raise NotSupportedError(r, 'Unsupported value in JoinedStr')
+
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        return Apply(Select(StringLiteral(r, s), Ident(r, 'format')), args, [])
+
+    @staticmethod
     def build_ListComp(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
         if (len(stmt.generators) > 1):

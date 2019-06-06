@@ -100,6 +100,22 @@ static void neg_kernel(TensorIterator& iter) {
   });
 }
 
+static void sinh_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinh_cpu", [&]() {
+    unary_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::sinh(a); });
+  });
+}
+
+static void cosh_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cosh_cpu", [&]() {
+    unary_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::cosh(a); });
+  });
+}
+
 #if !AT_MKL_ENABLED()
 void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
@@ -212,6 +228,8 @@ REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(fill_stub, &fill_kernel);
+REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
+REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)

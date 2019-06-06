@@ -211,6 +211,8 @@
 ]]
 [[
   name: _th_index_select
+  cpu_bool: True
+  cuda_bool: True
   cname: indexSelect
   variants:
     - function
@@ -226,6 +228,8 @@
 [[
   name: _th_index_copy_
   cname: indexCopy
+  cpu_bool: True
+  cuda_bool: True
   variants: function
   return: argument 0
   arguments:
@@ -237,6 +241,8 @@
 ]]
 [[
   name: _th_take
+  cpu_bool: True
+  cuda_bool: True
   cname: take
   variants:
     - function
@@ -250,6 +256,8 @@
 ]]
 [[
   name: _th_put_
+  cpu_bool: True
+  cuda_bool: True
   cname: put
   variants: function
   backends:
@@ -277,6 +285,8 @@
 ]]
 [[
   name: _th_index_fill_
+  cpu_bool: True
+  cuda_bool: True
   cname: indexFill
   variants: function
   return: argument 0
@@ -365,6 +375,7 @@
   name: _th_equal
   cpu_bool: True
   cname: equal
+  cpu_bool: True
   variants:
     - function
   return: bool
@@ -1201,7 +1212,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants: function
   return: argument 0
@@ -1244,7 +1254,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants: function
   return: argument 0
@@ -2625,7 +2634,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   return: argument 0
   variants:
     - function
@@ -2665,7 +2673,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: normal
   variants: function
   return: self
@@ -2685,7 +2692,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: cauchy
   variants: function
   return: self
@@ -2707,7 +2713,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   return: self
   arguments:
     - THTensor* self
@@ -2725,7 +2730,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: exponential
   variants: function
   return: self
@@ -2741,7 +2745,6 @@
   name: _th_geometric_
   backends:
     - CPU
-    - CUDA
   cname: geometric
   variants: function
   return: self
@@ -2751,24 +2754,6 @@
       default: nullptr
       kwarg_only: True
     - double p
-]]
-[[
-  name: _th_dirichlet_grad
-  types:
-    - floating_point
-  backends:
-    - CPU
-  return: argument 0
-  variants:
-    - function
-  options:
-    - cname: dirichlet_grad
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - THTensor* x
-        - THTensor* alpha
-        - THTensor* total
 ]]
 
 # In theory, this could be a part of the above declaration. But in
