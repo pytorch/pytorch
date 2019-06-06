@@ -6481,6 +6481,10 @@ class _TestTorchMixin(object):
         x = torch.tensor([1, 2, 3])
         self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 1, 1]))
 
+    def test_isfinite_type(self):
+        with self.assertRaises(TypeError):
+            torch.isfinite(1)  # Parameter must be a tensor
+
     @staticmethod
     def _test_isinf(self, cast):
         t1 = cast(torch.Tensor([1, inf, 2, -inf, nan]))
@@ -6498,6 +6502,10 @@ class _TestTorchMixin(object):
 
     def test_isinf(self):
         self._test_isinf(self, lambda t: t)
+
+    def test_isinf_type(self):
+        with self.assertRaises(TypeError):
+            torch.isinf(1)  # Parameter must be a tensor
 
     def test_isnan(self):
         x = torch.Tensor([1, nan, 2])
