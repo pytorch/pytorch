@@ -3576,6 +3576,15 @@ def foo(x):
 
             self.checkScript(fn, ())
 
+        code = dedent("""
+        def wrong_type():
+            wrong : List[int] = [0.5]
+            return wrong
+        """)
+
+        with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
+            cu = torch.jit.CompilationUnit(code)
+
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
 
