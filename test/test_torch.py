@@ -7538,24 +7538,32 @@ class _TestTorchMixin(object):
             reference[0.0, :, 0.0] = 1
 
     def test_index_copy(self):
-        num_copy, num_dest = 3, 20
-        dest = torch.randn(num_dest, 4, 5)
-        src = torch.randn(num_copy, 4, 5)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
-        dest2 = dest.clone()
-        dest.index_copy_(0, idx, src)
-        for i in range(idx.size(0)):
-            dest2[idx[i]] = src[i]
-        self.assertEqual(dest, dest2, 0)
+        for device in torch.testing.get_all_device_types():
+            num_copy, num_dest = 3, 20
+            dest = torch.randn(num_dest, 4, 5, device=device)
+            src = torch.randn(num_copy, 4, 5, device=device)
+            idx = torch.randperm(num_dest, device=device).narrow(0, 0, num_copy)
+            dest2 = dest.clone()
+            dest.index_copy_(0, idx, src)
+            for i in range(idx.size(0)):
+                dest2[idx[i]] = src[i]
+            self.assertEqual(dest, dest2, 0)
 
-        dest = torch.randn(num_dest)
-        src = torch.randn(num_copy)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
-        dest2 = dest.clone()
-        dest.index_copy_(0, idx, src)
-        for i in range(idx.size(0)):
-            dest2[idx[i]] = src[i]
-        self.assertEqual(dest, dest2, 0)
+            dest = torch.randn(num_dest, device=device)
+            src = torch.randn(num_copy, device=device)
+            idx = torch.randperm(num_dest, device=device).narrow(0, 0, num_copy)
+            dest2 = dest.clone()
+            dest.index_copy_(0, idx, src)
+            for i in range(idx.size(0)):
+                dest2[idx[i]] = src[i]
+            self.assertEqual(dest, dest2, 0)
+
+            # Bool tensor
+            dest = torch.zeros(2, 2, dtype=torch.bool, device=device)
+            src = torch.tensor([[True, True], [True, True]], device=device)
+            index = torch.tensor([0, 1], device=device)
+            dest.index_copy_(0, index, src)
+            self.assertEqual(dest, torch.tensor([[True, True], [True, True]], device=device))
 
     def test_index_add(self):
         num_copy, num_dest = 3, 3
@@ -7577,23 +7585,41 @@ class _TestTorchMixin(object):
             dest2[idx[i]] = dest2[idx[i]] + src[i]
         self.assertEqual(dest, dest2)
 
-    def test_index_select(self):
-        src = torch.randn(3, 4, 5)
-        # Index can be duplicated.
-        idx = torch.LongTensor([2, 1, 0, 1, 2])
-        dest = torch.index_select(src, 0, idx)
-        self.assertEqual(dest.shape, (5, 4, 5))
-        for i in range(idx.size(0)):
-            self.assertEqual(dest[i], src[idx[i]])
+    def test_index_fill(self):
+        for device in torch.testing.get_all_device_types():
+            for dt in torch.testing.get_all_dtypes():
+                if dt == torch.half:
+                    continue
 
-        # Check that 'out' is used correctly.
-        out = torch.randn(5 * 4 * 5)
-        dest = torch.index_select(src, 0, idx, out=out.view(5, 4, 5))
-        self.assertEqual(dest.shape, (5, 4, 5))
-        for i in range(idx.size(0)):
-            self.assertEqual(dest[i], src[idx[i]])
-        out.fill_(0.123)
-        self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
+                x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
+                index = torch.tensor([0], device=device)
+                x.index_fill_(1, index, 0)
+                self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dt, device=device))
+
+    def test_index_select(self):
+        for device in torch.testing.get_all_device_types():
+            src = torch.randn(3, 4, 5, device=device)
+            # Index can be duplicated.
+            idx = torch.tensor([2, 1, 0, 1, 2], dtype=torch.long, device=device)
+            dest = torch.index_select(src, 0, idx)
+            self.assertEqual(dest.shape, (5, 4, 5))
+            for i in range(idx.size(0)):
+                self.assertEqual(dest[i], src[idx[i]])
+
+            # Check that 'out' is used correctly.
+            out = torch.randn(5 * 4 * 5, device=device)
+            dest = torch.index_select(src, 0, idx, out=out.view(5, 4, 5))
+            self.assertEqual(dest.shape, (5, 4, 5))
+            for i in range(idx.size(0)):
+                self.assertEqual(dest[i], src[idx[i]])
+            out.fill_(0.123)
+            self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
+
+            # Bool tensor
+            src = torch.tensor([False, True, False, False], device=device, dtype=torch.bool)
+            idx = torch.tensor([1], dtype=torch.long, device=device)
+            dest = torch.index_select(src, 0, idx)
+            self.assertEqual(torch.tensor([True]), dest)
 
     def test_t(self):
         # Test 0D tensors
@@ -7634,6 +7660,7 @@ class _TestTorchMixin(object):
         idx = torch.LongTensor([[0, 2], [3, 4]])
         check(src, idx)
         check(src.transpose(1, 2), idx)
+        check(src.bool(), idx)
 
     def test_take_empty(self):
         for device in torch.testing.get_all_device_types():
@@ -7656,6 +7683,9 @@ class _TestTorchMixin(object):
         values = torch.randn(2, 2)
         check(dst, idx, values)
         check(dst.transpose(1, 2), idx, values)
+
+        values = torch.tensor([[False, False], [False, False]])
+        check(dst.bool(), idx, values)
 
     def test_put_accumulate(self):
         dst = torch.ones(2, 2)
