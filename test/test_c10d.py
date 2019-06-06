@@ -1613,47 +1613,161 @@ class ProcessGroupShareTensorTest(TestCase):
     def world_size(self):
         return 2
 
-    def opts(threads=2):
+    @classmethod
+    def opts(cls, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
         opts.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
         opts.timeout = 5.0
         opts.threads = threads
         return opts
 
-    def _test_allreduce_gloo_process(rank, filename, shared_tensors, world_size):
+    @classmethod
+    def _init_pg_gloo(cls, rank, filename, world_size):
         store = c10d.FileStore(filename, world_size)
-        pg = c10d.ProcessGroupGloo(
+        return c10d.ProcessGroupGloo(
             store, rank, world_size, ProcessGroupShareTensorTest.opts())
+
+    @classmethod
+    def _init_pg_nccl(cls, rank, filename, world_size):
+        store = c10d.FileStore(filename, world_size)
+        return c10d.ProcessGroupNCCL(store, rank, world_size)
+
+    @classmethod
+    def assert_equal(cls, expected, value):
+        assert (expected == value).all().item() == 1, (
+            "Expecting tensor value {} but got {}."
+        ).format(expected, value)
+
+    # Why classmethod? multiprocessing cannot pickle TestCase subclass when in
+    # spawn mode. See https://bugs.python.org/issue33884.
+    @classmethod
+    def _test_broadcast_process(
+            cls, rank, filename, shared_tensors, world_size, init_pg):
+        pg = init_pg(rank, filename, world_size)
+        xs = [shared_tensors[rank]]
+        pg.broadcast(xs).wait()
+        cls.assert_equal(torch.zeros(2, 2), xs[0].to("cpu"))
+
+    @unittest.skipIf(not PY3, "Python 3 needed")
+    @skip_if_not_multigpu
+    def test_broadcast_gloo(self):
+        file = tempfile.NamedTemporaryFile(delete=False)
+        shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
+        mp.spawn(ProcessGroupShareTensorTest._test_broadcast_process,
+                 args=(file.name,
+                       shared_tensors,
+                       self.world_size,
+                       ProcessGroupShareTensorTest._init_pg_gloo),
+                 nprocs=self.world_size,
+                 join=True)
+
+    @unittest.skipIf(not PY3, "Python 3 needed")
+    @skip_if_not_multigpu
+    def test_broadcast_nccl(self):
+        file = tempfile.NamedTemporaryFile(delete=False)
+        shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
+        mp.spawn(ProcessGroupShareTensorTest._test_broadcast_process,
+                 args=(file.name,
+                       shared_tensors,
+                       self.world_size,
+                       ProcessGroupShareTensorTest._init_pg_nccl),
+                 nprocs=self.world_size,
+                 join=True)
+
+    @classmethod
+    def _test_allreduce_process(
+            cls, rank, filename, shared_tensors, world_size, init_pg):
+        pg = init_pg(rank, filename, world_size)
         xs = [shared_tensors[rank]]
         pg.allreduce(xs, op=c10d.ReduceOp.SUM).wait()
-        xs[0].to('cpu').allclose(torch.ones(2, 2))
+        cls.assert_equal(torch.ones(2, 2) * 2, xs[0].to("cpu"))
 
     @unittest.skipIf(not PY3, "Python 3 needed")
     @skip_if_not_multigpu
     def test_allreduce_gloo(self):
         file = tempfile.NamedTemporaryFile(delete=False)
-        shared_tensors = [torch.ones(2, 2).to(i).share_memory_() for i in range(2)]
-        mp.spawn(ProcessGroupShareTensorTest._test_allreduce_gloo_process,
-                 args=(file.name, shared_tensors, self.world_size),
+        shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
+        mp.spawn(ProcessGroupShareTensorTest._test_allreduce_process,
+                 args=(file.name,
+                       shared_tensors,
+                       self.world_size,
+                       ProcessGroupShareTensorTest._init_pg_gloo),
                  nprocs=self.world_size,
                  join=True)
-
-    def _test_allreduce_nccl_process(rank, filename, shared_tensors, world_size):
-        store = c10d.FileStore(filename, world_size)
-        pg = c10d.ProcessGroupNCCL(store, rank, world_size)
-        xs = [shared_tensors[rank]]
-        pg.allreduce(xs, op=c10d.ReduceOp.SUM).wait()
-        xs[0].to('cpu').allclose(torch.ones(2, 2))
 
     @unittest.skipIf(not PY3, "Python 3 needed")
     @skip_if_not_multigpu
     def test_allreduce_nccl(self):
         file = tempfile.NamedTemporaryFile(delete=False)
-        shared_tensors = [torch.ones(2, 2).to(i).share_memory_() for i in range(2)]
-        mp.spawn(ProcessGroupShareTensorTest._test_allreduce_gloo_process,
-                 args=(file.name, shared_tensors, self.world_size),
+        shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
+        mp.spawn(ProcessGroupShareTensorTest._test_allreduce_process,
+                 args=(file.name,
+                       shared_tensors,
+                       self.world_size,
+                       ProcessGroupShareTensorTest._init_pg_nccl),
                  nprocs=self.world_size,
                  join=True)
+
+    @classmethod
+    def _test_reduce_process(
+            cls, rank, filename, shared_tensors, world_size, init_pg):
+        pg = init_pg(rank, filename, world_size)
+        x = shared_tensors[rank]
+        pg.reduce(x, root=0, op=c10d.ReduceOp.SUM).wait()
+        if rank == 0:
+            cls.assert_equal(torch.ones(2, 2) * 2, x.to("cpu"))
+        else:
+            cls.assert_equal(torch.ones(2, 2), x.to("cpu"))
+
+    @unittest.skipIf(not PY3, "Python 3 needed")
+    @skip_if_not_multigpu
+    def test_reduce_nccl(self):
+        file = tempfile.NamedTemporaryFile(delete=False)
+        shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
+        mp.spawn(ProcessGroupShareTensorTest._test_reduce_process,
+                 args=(file.name,
+                       shared_tensors,
+                       self.world_size,
+                       ProcessGroupShareTensorTest._init_pg_nccl),
+                 nprocs=self.world_size,
+                 join=True)
+
+    @classmethod
+    def _test_allgather_process(
+            cls, rank, filename, shared_tensors, world_size, init_pg):
+        pg = init_pg(rank, filename, world_size)
+        xs = [shared_tensors[rank]]
+        ys = [[torch.zeros_like(xs[0]) for i in range(world_size)]]
+        pg.allgather(ys, xs).wait()
+        for i in range(world_size):
+            cls.assert_equal(torch.ones(2, 2) * i, ys[0][i].to("cpu"))
+
+    @unittest.skipIf(not PY3, "Python 3 needed")
+    @skip_if_not_multigpu
+    def test_allgather_gloo(self):
+        file = tempfile.NamedTemporaryFile(delete=False)
+        shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
+        mp.spawn(ProcessGroupShareTensorTest._test_allgather_process,
+                 args=(file.name,
+                       shared_tensors,
+                       self.world_size,
+                       ProcessGroupShareTensorTest._init_pg_gloo),
+                 nprocs=self.world_size,
+                 join=True)
+
+    @unittest.skipIf(not PY3, "Python 3 needed")
+    @skip_if_not_multigpu
+    def test_allgather_nccl(self):
+        file = tempfile.NamedTemporaryFile(delete=False)
+        shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
+        mp.spawn(ProcessGroupShareTensorTest._test_allgather_process,
+                 args=(file.name,
+                       shared_tensors,
+                       self.world_size,
+                       ProcessGroupShareTensorTest._init_pg_nccl),
+                 nprocs=self.world_size,
+                 join=True)
+
 
 class Net(nn.Module):
     def __init__(self):
