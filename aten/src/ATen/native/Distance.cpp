@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-
+#include <ATen/ExpandUtils.h>
 #include <ATen/native/Distance.h>
 
 namespace at { namespace native {
@@ -25,11 +25,11 @@ Tensor pdist(const Tensor& self, const double p) {
 }
 
 Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
-  TORCH_CHECK(x1.dim() == 2, "cdist only supports 2D tensors, X1 got: ", x1.dim(), "D");
+  TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
   auto device1 = x1.type().device_type();
   TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device1);
-  TORCH_CHECK(x2.dim() == 2, "cdist only supports 2D tensors, X2 got: ", x2.dim(), "D");
+  TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
   auto device2 = x2.type().device_type();
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device2);
@@ -42,12 +42,34 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p) {
 
   int64_t r1 = x1.size(-2);
   int64_t r2 = x2.size(-2);
-  Tensor result = at::empty({r1, r2}, x1.options());
+  auto dim1 = x1.dim();
+  auto dim2 = x2.dim();
+
+  //For batch calculation we expand all dimensions(except the last two) to one, with size that equals to product of them.
+  //The last two dimensions will stay the same
+  IntArrayRef batch_tensor1(x1.sizes().data(), dim1 - 2);
+  IntArrayRef batch_tensor2(x2.sizes().data(), dim2 - 2);
+  std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
+  std::vector<int64_t> tensor1_expand_size(expand_batch_portion);
+  tensor1_expand_size.insert(tensor1_expand_size.end(), {r1, c1});
+  std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
+  tensor2_expand_size.insert(tensor2_expand_size.end(), {r2, c2});
+
+  int expand_batch_product = std::accumulate(expand_batch_portion.begin(), expand_batch_portion.end(), 1, std::multiplies<int64_t>());
+  std::vector<int64_t> tensor1_view{expand_batch_product, r1, c1};
+  std::vector<int64_t> tensor2_view{expand_batch_product, r2, c2};
+
+  Tensor tensor1_expanded = x1.expand(tensor1_expand_size).contiguous().view(tensor1_view);
+  Tensor tensor2_expanded = x2.expand(tensor2_expand_size).contiguous().view(tensor2_view);
+
+  std::vector<int64_t> output_shape(expand_batch_portion);
+  output_shape.insert(output_shape.end(), {r1, r2});
+  Tensor result = at::empty(output_shape, x1.options());
   if (r1 > 0 && r2 > 0) {
     if (c1 == 0) {
       result.fill_(0);
     } else {
-      cdist_stub(device1, result, x1.contiguous(), x2.contiguous(), p);
+      cdist_stub(device1, result, tensor1_expanded, tensor2_expanded, p);
     }
   }
   return result;
@@ -63,7 +85,9 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& x1, const Tensor& x2, c
   TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X1 got: ", device1);
   auto device2 = x2.type().device_type();
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X2 got: ", device2);
-  Tensor grad_x1 = at::empty({n, m}, x1.options());
+  IntArrayRef batch_tensor1(x1.sizes().data(), std::max<int64_t>(x1.dim() - 2, 0));
+  int batch_product = std::accumulate(batch_tensor1.begin(), batch_tensor1.end(), 1, std::multiplies<int64_t>());
+  Tensor grad_x1 = at::empty_like(x1, x1.options()).view({batch_product, n, m});
   cdist_backward_stub(device1, grad_x1, grad, x1, x2, p, cdist);
   return grad_x1;
 }

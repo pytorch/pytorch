@@ -1254,7 +1254,7 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   } else if (type == IntType::get()) {
     return at::ScalarType::Long;
   } else if (type == BoolType::get()) {
-    return at::ScalarType::Byte;
+    return at::ScalarType::Bool;
   }
   AT_ASSERTM(
       0,

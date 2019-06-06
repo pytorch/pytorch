@@ -107,8 +107,7 @@ typename ListPtr<T>::value_type ListPtr<T>::get(size_type pos) const {
 }
 
 template<class T>
-impl::ListElementReference<T, typename detail::ListImpl<typename ListPtr<T>::StorageT>::list_type::iterator, typename ListPtr<T>::StorageT>
-ListPtr<T>::operator[](size_type pos) const {
+typename ListPtr<T>::internal_reference_type ListPtr<T>::operator[](size_type pos) const {
   impl_->list.at(pos); // Throw the exception if it is out of range.
   return {impl_->list.begin() + pos};
 }

@@ -672,6 +672,12 @@ def method_tests():
          'tall_all', (), NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0][:, :(S - 2)], usv[1], usv[2])),
         ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
          'large', (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (S, S), (False,), 'square_single', (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (S, S - 2), (True,), 'tall_single' , (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (3, S, S), (False,), 'square_batched', (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (3, S, S - 2), (True,), 'tall_batched', (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (3, 2, S, S), (False,), 'square_many_batched', (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (3, 2, S, S - 2), (True,), 'tall_many_batched', (), NO_ARGS, [skipIfNoLapack]),
         ('solve', (S, S), (random_fullrank_matrix_distinct_singular_value(
             S, silent=True),), '', (), NO_ARGS, [skipIfNoLapack]),
         ('solve', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S, silent=True),),

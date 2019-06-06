@@ -214,6 +214,8 @@ private:
   // ListImpl.
   c10::intrusive_ptr<detail::ListImpl<StorageT>> impl_;
 
+  using internal_reference_type = impl::ListElementReference<T, typename detail::ListImpl<typename ListPtr<T>::StorageT>::list_type::iterator, typename ListPtr<T>::StorageT>;
+
 public:
   using value_type = T;
   using size_type = typename detail::ListImpl<StorageT>::list_type::size_type;
@@ -270,7 +272,7 @@ public:
    *   list[2] = 5;
    *   int64_t v = list[1];
    */
-  impl::ListElementReference<T, typename detail::ListImpl<typename ListPtr<T>::StorageT>::list_type::iterator, typename ListPtr<T>::StorageT> operator[](size_type pos) const;
+  internal_reference_type operator[](size_type pos) const;
 
   /**
    * Assigns a new value to the element at location pos.
