@@ -1003,6 +1003,10 @@ class _TestTorchMixin(object):
                     x = torch.randn(n, 2 * m)[:, ::2]
                     self.check_single_nuclear_norm(x, axes)
 
+                    # 2d, all dimensions non-contiguous
+                    x = torch.randn(7 * n, 2 * m)[::7, ::2]
+                    self.check_single_nuclear_norm(x, axes)
+
                 for o in range(1, 3):
                     for axes in permutations([0, 1, 2], 2):
                         # 3d, inner dimensions C
@@ -1017,6 +1021,10 @@ class _TestTorchMixin(object):
                         x = torch.randn(o, n, 2 * m)[:, :, ::2]
                         self.check_single_nuclear_norm(x, axes)
 
+                        # 3d, all dimensions non-contiguous
+                        x = torch.randn(7 * o, 5 * n, 2 * m)[::7, ::5, ::2]
+                        self.check_single_nuclear_norm(x, axes)
+
                     for r in range(1, 3):
                         for axes in permutations([0, 1, 2, 3], 2):
                             # 4d, inner dimensions C
@@ -1029,6 +1037,10 @@ class _TestTorchMixin(object):
 
                             # 4d, inner dimensions non-contiguous
                             x = torch.randn(r, o, n, 2 * m)[:, :, :, ::2]
+                            self.check_single_nuclear_norm(x, axes)
+
+                            # 4d, all dimensions non-contiguous
+                            x = torch.randn(7 * r, 5 * o, 11 * n, 2 * m)[::7, ::5, ::11, ::2]
                             self.check_single_nuclear_norm(x, axes)
 
     def test_nuclear_norm_exceptions(self):
