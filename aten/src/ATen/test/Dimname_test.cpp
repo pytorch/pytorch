@@ -1,7 +1,7 @@
 #ifdef NAMEDTENSOR_ENABLED
 #include <gtest/gtest.h>
 
-#include <ATen/core/Dimname.h>
+#include <ATen/Dimname.h>
 #include <c10/util/Exception.h>
 
 using at::is_valid_identifier;
