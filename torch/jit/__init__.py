@@ -940,17 +940,47 @@ def createResolutionCallbackFromClosure(fn):
 
     return env
 
+def _create_constant_iterable_module(module):
+    modules = OrderedDict()
+
+    for key, submodule in module._modules.items():
+        if isinstance(submodule, (ModuleList, Sequential)):
+            # Make each item in the module a constant
+            modules[key] = _create_constant_iterable_module(submodule)
+        else:
+            modules[key] = _convert_to_script_module(submodule)
+
+    if isinstance(module, Sequential):
+        return _ConstSequential(Sequential(modules))
+    elif isinstance(module, ModuleList):
+        return _ConstModuleList(modules)
+    else:
+        raise RuntimeError("Only nn.ModuleList and nn.Sequential can be made "
+                           "into constant modules, found {}".format(module))
+
 
 def _make_strong_submodule(field, module, parent):
     if field not in parent._modules:
         # It's not a submodule, don't do anything
         return None
-    return _convert_to_script_module(module)
+
+    # Convert the module to a ScriptModule
+    new_strong_submodule = _convert_to_script_module(module)
+
+    # Install the ScriptModule on the python side
+    parent._modules._python_modules[field] = new_strong_submodule
+
+    return new_strong_submodule
 
 
 def _try_compile_fn(fn):
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
+        return None
+
+    if isinstance(fn, torch.nn.Module):
+        # Since modules are callable pybind recognizes them as functions, but
+        # don't do anything for them
         return None
 
     # We don't have the actual scope where the function was defined, but we can
@@ -1153,7 +1183,8 @@ class OrderedModuleDict(OrderedDictWrapper):
 
     def __setitem__(self, k, v):
         if k in self._python_modules:
-            raise RuntimeError("cannot re-assign modules in a ScriptModule")
+            raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
+                               "tried to replace existing module '{}': {}".format(k, v))
         if isinstance(v, ScriptModule):
             self.module._register_module(k, v._c)
 
@@ -1536,6 +1567,11 @@ if _enabled:
             return self.forward.graph_for(*args, **kwargs)
 
     class WeakScriptModuleProxy(ScriptModule):
+        # TODO: [weak script refactor]
+        # WeakScriptModule proxy should be deleted since its functionality is
+        # subsumed by recursive scripting, and the copying code in init moved
+        # to a function to create a ScriptModule from an nn.Module without
+        # making a WeakScriptModuleProxy
         """
         Copies the parameters, buffers, constants, attributes, and submodules
         of an nn.Module into itself.
@@ -1567,7 +1603,13 @@ if _enabled:
                 elif isinstance(item, (Parameter, Module, Attribute)):
                     if isinstance(item, (ModuleList, Sequential)):
                         # These are in __constants__, so ignore them here
-                        continue
+
+                        if not torch._C._jit_recursive_script():
+                            # For recursive script, these are constantified after
+                            # they are used, so they don't need to be in constants.
+                            # The `continue` here should be deleted along with
+                            # [weak script refactor]
+                            continue
                     ScriptModule.__setattr__(self, name, item)
 
             # Copy buffers
@@ -1650,6 +1692,10 @@ def _convert_to_script_module(mod, methods=None):
     `('forward',)`. Methods accessed in forward are scripted on demand if
     `_enable_recursive_script()` is used.
     """
+    if isinstance(mod, (ModuleList, Sequential)):
+        # Create constant versions for the iterable modules
+        return _create_constant_iterable_module(mod)
+
     if methods is None:
         methods = ('forward',)
     exported = []
@@ -1784,6 +1830,7 @@ if _enabled:
 class _ConstModuleList(ScriptModule):
     def __init__(self, modules):
         super(_ConstModuleList, self).__init__()
+
         if isinstance(modules, OrderedDict):
             for key, module in modules.items():
                 if _is_weak_type(type(module)):
