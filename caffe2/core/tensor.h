@@ -6,7 +6,9 @@
 
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
-#include "ATen/core/Tensor.h"
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <ATen/Tensor.h>
+#endif
 #include <c10/core/TensorOptions.h>
 
 namespace caffe2 {
@@ -115,6 +117,7 @@ class CAFFE2_API Tensor final {
    * The tensor will share the same instance (data, strides, sizes, etc) but
    * a different subset of APIs would be available
    */
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
   explicit Tensor(at::Tensor tensor)
       : impl_(std::move(tensor.impl_)) {
     enforce_invariants();
@@ -127,6 +130,7 @@ class CAFFE2_API Tensor final {
   explicit operator at::Tensor() && {
     return at::Tensor::wrap_tensor_impl(std::move(impl_));
   }
+#endif
 
   bool is_same(const Tensor& other) const noexcept {
     return impl_ == other.impl_;

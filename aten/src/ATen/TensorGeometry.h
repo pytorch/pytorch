@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Type.h>
+#include <ATen/Tensor.h>
 #include <ATen/WrapDimUtils.h>
 
 namespace at {

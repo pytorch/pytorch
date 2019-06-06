@@ -45,15 +45,9 @@ parser.add_argument(
     help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
 options = parser.parse_args()
 gen_to_source = os.environ.get('GEN_TO_SOURCE')  # update source directly as part of gen
-if not gen_to_source:
-    core_install_dir = os.path.join(options.install_dir, 'core_tmp') if options.install_dir is not None else None
-else:
-    core_install_dir = os.path.join(options.source_path, 'core')
 
 if options.install_dir is not None and not os.path.exists(options.install_dir):
     os.makedirs(options.install_dir)
-if core_install_dir is not None and not os.path.exists(core_install_dir):
-    os.makedirs(core_install_dir)
 
 
 class FileManager(object):
@@ -158,7 +152,6 @@ case Backend::${Backend}:
     break;
 """)
 
-core_file_manager = FileManager(core_install_dir)
 file_manager = FileManager()
 cuda_file_manager = FileManager()
 
@@ -431,12 +424,10 @@ def iterate_types():
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['Type.h', 'Tensor.h', 'TensorMethods.h']
-    for f in core_files:
-        core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
              'LegacyTHDispatcher.h', 'LegacyTHDispatcher.cpp', 'Functions.h', 'NativeFunctions.h',
-             'RegisterCPU.cpp', 'RegisterCPU.h', 'ExtensionBackendRegistration.h']
+             'RegisterCPU.cpp', 'RegisterCPU.h', 'ExtensionBackendRegistration.h',
+             'Type.h', 'Tensor.h', 'TensorMethods.h']
     for f in files:
         file_manager.will_write(f)
     cuda_files = ['RegisterCUDA.cpp', 'RegisterCUDA.h']
@@ -536,14 +527,9 @@ def generate_outputs():
         if density == 'Dense':
             generate_legacy_th_dispatcher(backend, density, scalar_type, [])
 
-    core_files = {
-        'Type.h': TYPE_H,
-        'Tensor.h': TENSOR_H,
-        'TensorMethods.h': TENSOR_METHODS_H
-    }
-
-    for core_file, core_template_file in core_files.items():
-        core_file_manager.write(core_file, core_template_file, top_env)
+    file_manager.write('Type.h', TYPE_H, top_env)
+    file_manager.write('Tensor.h', TENSOR_H, top_env)
+    file_manager.write('TensorMethods.h', TENSOR_METHODS_H, top_env)
 
     file_manager.write('TypeExtendedInterface.h', TYPE_EXTENDED_INTERFACE_H, top_env)
     file_manager.write('TypeDefault.h', TYPE_DEFAULT_H, top_env)
@@ -567,25 +553,9 @@ def generate_outputs():
     file_manager.check_all_files_written()
     cuda_file_manager.check_all_files_written()
 
-    # check that generated files match source files
-    core_source_path = os.path.join(options.source_path, 'core')
-    match, mismatch, errors = cmpfiles_with_eol_normalization(core_install_dir, core_source_path, core_files.keys())
-    if errors:
-        raise RuntimeError("Error while trying to compare source and generated files for {}. "
-                           "Source directory: {}.  Generated directory: {}."
-                           .format(errors, core_source_path, core_install_dir))
-    if mismatch:
-        file_component = '{}'.format(','.join(mismatch))
-        if len(mismatch) > 1:
-            file_component = '{' + file_component + '}'
-        update_cmd = "cp {}/{} {}".format(core_install_dir, file_component, core_source_path)
-        raise RuntimeError("Source files: {} did not match generated files.  To update the source files, "
-                           "set environment variable GEN_TO_SOURCE or run \"{}\"".format(mismatch, update_cmd))
-
 declare_outputs()
 if options.output_dependencies is not None:
     file_manager.write_outputs(options.output_dependencies)
-    core_file_manager.write_outputs(options.output_dependencies + "-core")
     cuda_file_manager.write_outputs(options.output_dependencies + "-cuda")
 else:
     generate_outputs()

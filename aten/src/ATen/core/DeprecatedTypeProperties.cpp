@@ -1,7 +1,7 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/Tensor.h>
+#include <ATen/Tensor.h>
 
 namespace at {
 

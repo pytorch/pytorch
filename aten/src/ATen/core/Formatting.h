@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/core/Type.h>
+#include <ATen/Tensor.h>
+#include <ATen/Type.h>
 #include <iostream>
 
 

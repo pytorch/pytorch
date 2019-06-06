@@ -2,7 +2,7 @@
 #include <ATen/core/op_registration/test_helpers.h>
 
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/Tensor.h>
+#include <ATen/Tensor.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
 
 /**

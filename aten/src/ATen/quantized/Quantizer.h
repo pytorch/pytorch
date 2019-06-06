@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
+#include <ATen/Tensor.h>
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>

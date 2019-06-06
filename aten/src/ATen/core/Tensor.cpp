@@ -1,6 +1,6 @@
-#include <ATen/core/Tensor.h>
+#include <ATen/Tensor.h>
 #include <ATen/core/Formatting.h>
-#include <ATen/core/Type.h>
+#include <ATen/Type.h>
 
 #include <iostream>
 

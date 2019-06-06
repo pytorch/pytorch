@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Type.h>
+#include <ATen/Type.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -405,4 +405,4 @@ Tensor make_tensor(Args&&... args) {
 
 } // namespace at
 
-#include <ATen/core/TensorMethods.h>
+#include <ATen/TensorMethods.h>
