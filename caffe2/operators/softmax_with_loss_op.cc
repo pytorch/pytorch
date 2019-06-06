@@ -14,7 +14,7 @@ REGISTER_CPU_OPERATOR(
 // Input: X (logits), T (labels); Output: P (probs), Y
 OPERATOR_SCHEMA(SoftmaxWithLoss)
     .NumInputs(2, 3)
-    .NumOutputs(2)
+    .NumOutputs({2, 3})
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);

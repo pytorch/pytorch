@@ -23,14 +23,13 @@
 #     differentiable subcomponents.
 #
 from __future__ import print_function
-import sys
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 's_copy_', '_s_copy_from'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -137,7 +136,7 @@ for (size_t i=0; i<${tensorlist_name}.size(); i++) {
 # The following list contains functions that we don't enforce the invariant on.
 DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
-    '_th_set_', '_cudnn_rnn_flatten_weight',
+    'set_', '_cudnn_rnn_flatten_weight',
 }
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
@@ -197,7 +196,9 @@ DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
 """)
 
 SET_HISTORY = CodeTemplate("""\
-${fn}_history(${differentiable_outputs}, grad_fn);
+if (grad_fn) {
+    ${fn}_history(${differentiable_outputs}, grad_fn);
+}
 """)
 
 CONDITIONAL = CodeTemplate("""\
@@ -479,18 +480,12 @@ def emit_body(declaration):
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)
 
-    # These exclude things like BoolTensor, int64_t, and Scalar
     def is_differentiable(arg):
         if 'TensorOptions' in arg['type']:
             return False
         if 'Tensor' not in arg['type']:
             return False
-        if arg['dynamic_type'] in {'IndexTensor', 'BoolTensor'}:
-            # TODO: Enable this after native_functions.yaml schema unification.
-            # These are necessary for legacy code and should be
-            # used by legacy code only!
-            # assert name.startswith('_th_'), \
-            # "IndexTensor and BoolTensor are restricted to legacy _th_ functions only.
+        if arg['name'] in declaration.get('non_differentiable_arg_names', []):
             return False
         return True
 
@@ -508,12 +503,14 @@ def emit_body(declaration):
     inputs = [arg for arg in arguments if not arg.get('output', False)]
     differentiable_inputs = list(filter(is_differentiable, inputs))
     args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
-    not_differentiable_args_names = func['not_differentiable_args_names'] if func else []
+    non_differentiable_arg_names = declaration.get('non_differentiable_arg_names', [])
     candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
-    if func is not None and func.get('output_differentiability') is not None:
+    if declaration['output_differentiability'] is not None:
         differentiable_outputs = []
-        output_differentiability = func.get('output_differentiability')
+        output_differentiability = declaration['output_differentiability']
+        if False in output_differentiability and inplace:
+            raise RuntimeError("output_differentiability=False for inplace operation (version_counter won't get updated)")
         for differentiable, output in zip(output_differentiability, returns):
             if differentiable:
                 differentiable_outputs.append(output)
@@ -528,7 +525,8 @@ def emit_body(declaration):
         strategy == 'use_derived')
 
     if func is not None and not requires_derivative:
-        print('WARNING: derivative ignored for {}'.format(name), file=sys.stderr)
+        raise RuntimeError('ERROR: derivative ignored for {} -- specified an autograd function without derivative'
+                           .format(name))
 
     def emit_save_inputs():
         setup = []
@@ -592,7 +590,7 @@ def emit_body(declaration):
     def setup_derivative(differentiable_inputs):
 
         env = {}
-        env['args_with_derivatives'] = reference_args(args_with_derivatives)
+        env['args_with_derivatives'] = [arg['name'] for arg in args_with_derivatives]
         env['op'] = func['op'] if func is not None else 'NotImplemented'
         env['op_ctor'] = '' if func is not None else '"{}"'.format(declaration['api_name'])
 
@@ -602,10 +600,10 @@ def emit_body(declaration):
             body.append(DECLARE_GRAD_FN.substitute(op='Function'))
             body.append(SETUP_DERIVATIVE.substitute(
                 setup=setup,
-                args_with_derivatives=reference_args(differentiable_inputs)))
+                args_with_derivatives=[arg['name'] for arg in differentiable_inputs]))
             body.append(SETUP_DERIVATIVE.substitute(
                 setup=setup,
-                args_with_derivatives=reference_args(differentiable_outputs)))
+                args_with_derivatives=[arg['name'] for arg in differentiable_outputs]))
             return body
 
         setup = []
@@ -625,13 +623,13 @@ def emit_body(declaration):
             if arg in args_with_derivatives:
                 continue
             name = arg['name']
-            if name in not_differentiable_args_names:
+            if name in non_differentiable_arg_names:
                 continue
             if name == 'output':
                 # Double-backwards definitions sometimes take in 'input' and
                 # 'output', but only define the derivative for input.
                 continue
-            if arg['dynamic_type'] in {'IndexTensor', 'BoolTensor'}:
+            if arg['dynamic_type'] in {'IndexTensor', 'ByteTensor', 'BoolTensor'}:
                 continue
             body.append('check_no_requires_grad({}, "{}");'.format(name, name))
         return body
@@ -664,15 +662,6 @@ def emit_body(declaration):
                 stmts.append('  grad_fn->{} = {};'.format(name, expr))
                 stmts.append('}')
         return stmts
-
-    def reference_args(args):
-        res = []
-        for arg in args:
-            if arg['type'] == 'SparseTensorRef':
-                res.append('{}.tref'.format(arg['name']))
-            else:
-                res.append(arg['name'])
-        return res
 
     def emit_record_trace(env):
         if not should_trace(declaration):
@@ -906,7 +895,7 @@ def unpack_args(env, declaration):
         dynamic_type = arg['dynamic_type']
         if 'TensorOptions' not in dynamic_type:
             is_nullable = arg.get('is_nullable', False)
-            ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensorRef']
+            ref = (not is_nullable) and dynamic_type not in ['TensorList']
             suffix = '_opt' if is_nullable and dynamic_type != 'TensorList' else ''
 
             body.append(UNPACK_TENSOR.substitute(

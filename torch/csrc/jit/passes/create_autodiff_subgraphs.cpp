@@ -110,18 +110,12 @@ class SubgraphSlicer {
     return result;
   }
 
-  bool shouldConsiderForMerge(Node* node, const AliasDb& aliasDb) {
+  bool shouldConsiderForMerge(Node* node) {
     // if we're already in the process of merging
     if (node->kind() == prim::DifferentiableGraph) {
       return true;
     }
     if (node->kind() == prim::Constant) {
-      return false;
-    }
-    // when a node which has writers is moved into a subgraph it may lose
-    // context and CSE could merge it with another node that has writers
-    // TODO: @eellison Fix problem more generally in CSE, land PR #18500
-    if (aliasDb.hasWriters(node)) {
       return false;
     }
     return isDifferentiable(node);
@@ -130,7 +124,7 @@ class SubgraphSlicer {
   std::pair<graph_node_list::iterator, bool> scanNode(
       Node* consumer,
       AliasDb& aliasDb) {
-    if (shouldConsiderForMerge(consumer, aliasDb)) {
+    if (shouldConsiderForMerge(consumer)) {
       if (consumer->kind() != prim::DifferentiableGraph) {
         consumer = SubgraphUtils::createSingletonSubgraph(
             consumer, prim::DifferentiableGraph);
@@ -155,7 +149,7 @@ class SubgraphSlicer {
       Node* producer,
       AliasDb& aliasDb) {
     AT_ASSERT(consumer->kind() == prim::DifferentiableGraph);
-    bool canMerge = shouldConsiderForMerge(producer, aliasDb) &&
+    bool canMerge = shouldConsiderForMerge(producer) &&
         aliasDb.moveBeforeTopologicallyValid(producer, consumer);
 
     if (!canMerge) {

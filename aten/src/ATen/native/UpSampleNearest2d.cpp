@@ -119,7 +119,7 @@ static void upsample_nearest2d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size) {
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
       output_size.size());
@@ -170,12 +170,12 @@ static void upsample_nearest2d_backward_out_cpu_template(
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size) {
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
       output_size.size());
 
-  AT_CHECK(
+  TORCH_CHECK(
       input_size.size() == 4,
       "It is expected input_size equals to 4, but got size ",
       input_size.size());

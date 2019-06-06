@@ -1,8 +1,9 @@
 #include "c10/util/Logging.h"
-#include "c10/util/Flags.h"
 #include "c10/util/Backtrace.h"
+#include "c10/util/Flags.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <numeric>
@@ -24,7 +25,9 @@ namespace enforce_detail {
 
 namespace {
 std::function<string(void)>* GetFetchStackTrace() {
-  static std::function<string(void)> func = []() { return get_backtrace(/*frames_to_skip=*/ 1); };
+  static std::function<string(void)> func = []() {
+    return get_backtrace(/*frames_to_skip=*/1);
+  };
   return &func;
 };
 } // namespace
@@ -49,12 +52,44 @@ void ThrowEnforceNotMet(
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
 Error::Error(SourceLocation source_location, const std::string& msg)
-    : Error(
-          msg,
-          str(" (",
-              source_location,
-              ")\n",
-              (*GetFetchStackTrace())())) {}
+    : Error(msg, str(" (", source_location, ")\n", (*GetFetchStackTrace())())) {
+}
+
+using APIUsageLoggerType = std::function<void(const std::string&)>;
+
+namespace {
+bool IsAPIUsageDebugMode() {
+  const char* val = getenv("PYTORCH_API_USAGE_STDERR");
+  return val && *val; // any non-empty value
+}
+
+void APIUsageDebug(const string& event) {
+  // use stderr to avoid messing with glog
+  std::cerr << "PYTORCH_API_USAGE " << event << std::endl;
+}
+
+APIUsageLoggerType* GetAPIUsageLogger() {
+  static APIUsageLoggerType func =
+      IsAPIUsageDebugMode() ? &APIUsageDebug : [](const string&) {};
+  return &func;
+};
+} // namespace
+
+void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
+  TORCH_CHECK(logger);
+  *GetAPIUsageLogger() = logger;
+}
+
+void LogAPIUsage(const std::string& event) {
+  (*GetAPIUsageLogger())(event);
+}
+
+namespace detail {
+bool LogAPIUsageFakeReturn(const std::string& event) {
+  (*GetAPIUsageLogger())(event);
+  return true;
+}
+} // namespace detail
 
 } // namespace c10
 

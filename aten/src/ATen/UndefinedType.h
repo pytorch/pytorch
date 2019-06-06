@@ -13,8 +13,6 @@ namespace at {
 
 struct UndefinedType final : public TypeDefault {
   explicit UndefinedType();
-  virtual ScalarType scalarType() const override;
-  virtual caffe2::TypeMeta typeMeta() const override;
   virtual Backend backend() const override;
   virtual Allocator* allocator() const override;
   virtual Device getDeviceFromPtr(void* data) const override;

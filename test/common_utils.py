@@ -20,10 +20,12 @@ import contextlib
 import socket
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from functools import wraps
 from itertools import product
 from copy import deepcopy
 from numbers import Number
+import tempfile
 
 import __main__
 import errno
@@ -65,6 +67,24 @@ IS_PPC = platform.machine() == "ppc64le"
 
 # Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
 IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI', 0))
+
+if IS_WINDOWS:
+    @contextmanager
+    def TemporaryFileName():
+        # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
+        # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
+        # close the file after creation and try to remove it manually
+        f = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            f.close()
+            yield f.name
+        finally:
+            os.unlink(f.name)
+else:
+    @contextmanager  # noqa: T484
+    def TemporaryFileName():
+        with tempfile.NamedTemporaryFile() as f:
+            yield f.name
 
 
 def _check_module_exists(name):
@@ -138,6 +158,26 @@ def skipIfNoLapack(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
+
+
+def skipIfNotRegistered(op_name, message):
+    """Wraps the decorator to hide the import of the `core`.
+
+    Args:
+        op_name: Check if this op is registered in `core._REGISTERED_OPERATORS`.
+        message: mesasge to fail with.
+
+    Usage:
+        @skipIfNotRegistered('MyOp', 'MyOp is not linked!')
+            This will check if 'MyOp' is in the caffe2.python.core
+    """
+    try:
+        from caffe2.python import core
+        skipper = unittest.skipIf(op_name not in core._REGISTERED_OPERATORS,
+                                  message)
+    except ImportError:
+        skipper = unittest.skip("Cannot import `caffe2.python.core`")
+    return skipper
 
 
 def slowTest(fn):
@@ -554,7 +594,7 @@ class TestCase(expecttest.TestCase):
         r"""
         Test if :attr:`callable` raises a warning.
         """
-        with warnings.catch_warnings(record=True) as ws:
+        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             callable()
             self.assertTrue(len(ws) > 0, msg)
@@ -564,12 +604,52 @@ class TestCase(expecttest.TestCase):
         Test if :attr:`callable` raises any warning with message that contains
         the regex pattern :attr:`regex`.
         """
-        with warnings.catch_warnings(record=True) as ws:
+        with self._reset_warning_registry(), warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             callable()
             self.assertTrue(len(ws) > 0, msg)
             found = any(re.search(regex, str(w.message)) is not None for w in ws)
             self.assertTrue(found, msg)
+
+    @contextmanager
+    def _reset_warning_registry(self):
+        r"""
+        warnings.catch_warnings() in Python 2 misses already registered
+        warnings. We need to manually clear the existing warning registries to
+        ensure catching warnings in a scope.
+        """
+        # Python 3 has no problem.
+        if sys.version_info >= (3,):
+            yield
+            return
+
+        # Backup and clear all existing warning registries.
+        backup = {}
+        for name, mod in list(sys.modules.items()):
+            try:
+                reg = mod.__warningregistry__
+            except AttributeError:
+                continue
+            else:
+                backup[name] = reg.copy()
+                reg.clear()
+
+        yield
+
+        # Restore backed up warning registries.
+        for name, reg_orig in backup.items():
+            try:
+                mod = sys.modules[name]
+            except KeyError:
+                continue
+
+            try:
+                reg = mod.__warningregistry__
+            except AttributeError:
+                mod.__warningregistry__ = reg_orig
+            else:
+                reg.clear()
+                reg.update(reg_orig)
 
     def assertExpected(self, s, subname=None):
         r"""
@@ -899,11 +979,6 @@ def set_running_script_path():
 
 def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
-        return
-    if TEST_WITH_ROCM:
-        # In ROCm CI, to avoid forking after HIP is initialized, we
-        # indeed load test module from test/run_test.py and run all
-        # tests in the same process.
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
     assert test_case_class_file == running_script_path, "Class of loaded TestCase \"{}\" " \

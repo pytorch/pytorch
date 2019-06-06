@@ -8,8 +8,6 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 
-#include <ATen/native/cuda/Normalization.cuh>
-
 namespace at { namespace native {
 
 #if defined(__HIP_PLATFORM_HCC__)

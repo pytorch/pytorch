@@ -1,20 +1,23 @@
 #pragma once
 
+#include <ATen/core/Type.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <c10/core/Tensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 
+namespace caffe2 {
+class Tensor;
+}
 namespace c10{
 struct TensorOptions;
 }
@@ -71,18 +74,6 @@ class CAFFE2_API Tensor {
     Tensor r(std::move(tensor_impl));
     r.enforce_invariants();
     return r;
-  }
-
-  explicit Tensor(C10Tensor tensor) : impl_(std::move(tensor).impl()) {
-    enforce_invariants();
-  }
-
-  explicit operator C10Tensor() const & {
-    return C10Tensor(impl_);
-  }
-
-  explicit operator C10Tensor() && {
-    return C10Tensor(std::move(impl_));
   }
 
   int64_t dim() const {
@@ -163,7 +154,7 @@ class CAFFE2_API Tensor {
     return impl_.weak_use_count();
   }
 
-  const char * toString() const;
+  std::string toString() const;
 
   IntArrayRef sizes() const {
     return impl_->sizes();
@@ -174,8 +165,8 @@ class CAFFE2_API Tensor {
   int64_t ndimension() const {
     return dim();
   }
-  bool is_contiguous() const {
-    return impl_->is_contiguous();
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const {
+    return impl_->is_contiguous(memory_format);
   }
 
   // Total bytes consumed by the "view" of elements of the array.  Does not
@@ -202,7 +193,7 @@ class CAFFE2_API Tensor {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         tensorTypeIdToBackend(type_id()),
         scalar_type(),
-        is_variable() && !at::NonVariableTypeMode::is_enabled());
+        is_variable());
   }
   Type & dispatch_type() const {
     return legacyTensorType(*impl_);
@@ -222,7 +213,6 @@ class CAFFE2_API Tensor {
   bool is_alias_of(const at::Tensor& other) const{
     return impl_->storage().is_alias_of(other.storage());
   }
-  Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor toType(const DeprecatedTypeProperties & t, bool non_blocking=false) const;
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
@@ -252,12 +242,19 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
 
+  /// Returns if a `Tensor` is mkldnn tensor.
+  bool is_mkldnn() const;
+
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
   TensorOptions options() const;
+
+  void* data_ptr() const {
+    return this->unsafeGetTensorImpl()->data();
+  }
 
   template<typename T>
   T * data() const;
@@ -273,7 +270,7 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
-    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
   template<typename T, size_t N>
@@ -287,7 +284,7 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
-    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
   }
   template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
@@ -362,6 +359,8 @@ class CAFFE2_API Tensor {
   friend struct WeakTensor;
 
 protected:
+  friend class ::caffe2::Tensor;
+
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };

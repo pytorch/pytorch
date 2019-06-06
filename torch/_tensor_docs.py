@@ -17,6 +17,8 @@ new_common_args = parse_kwargs("""
         Default: if None, same :class:`torch.device` as this tensor.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
+    pin_memory (bool, optional): If set, returned tensor would be allocated in
+        the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
 add_docstr_all('new_tensor',
@@ -525,6 +527,13 @@ cholesky_solve(input2, upper=False) -> Tensor
 See :func:`torch.cholesky_solve`
 """)
 
+add_docstr_all('cholesky_inverse',
+               r"""
+cholesky_inverse(upper=False) -> Tensor
+
+See :func:`torch.cholesky_inverse`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -987,7 +996,7 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    f(X=k) = (1 - p)^{k - 1} p
+    f(X=k) = p^{k - 1} (1 - p)
 
 """)
 
@@ -1719,13 +1728,6 @@ Example:
     torch.Size([5, 2, 3])
 """)
 
-add_docstr_all('potri',
-               r"""
-potri(upper=True) -> Tensor
-
-See :func:`torch.potri`
-""")
-
 add_docstr_all('pow',
                r"""
 pow(exponent) -> Tensor
@@ -1775,18 +1777,9 @@ Example::
 
 add_docstr_all('qr',
                r"""
-qr() -> (Tensor, Tensor)
+qr(some=True) -> (Tensor, Tensor)
 
 See :func:`torch.qr`
-""")
-
-add_docstr_all('quantize_linear',
-               r"""
-quantize_linear(scale, zero_point) -> Tensor
-
-Quantize a float Tensor using affine quantization scheme with given scale and
-zero_point.
-returns the quantized Tensor.
 """)
 
 add_docstr_all('q_scale',
@@ -2496,6 +2489,13 @@ byte() -> Tensor
 ``self.byte()`` is equivalent to ``self.to(torch.uint8)``. See :func:`to`.
 """)
 
+add_docstr_all('bool',
+               r"""
+bool() -> Tensor
+
+``self.bool()`` is equivalent to ``self.to(torch.bool)``. See :func:`to`.
+""")
+
 add_docstr_all('char',
                r"""
 char() -> Tensor
@@ -2530,6 +2530,16 @@ int() -> Tensor
 
 ``self.int()`` is equivalent to ``self.to(torch.int32)``. See :func:`to`.
 """)
+
+add_docstr_all('int_repr',
+               r"""
+int_repr() -> Tensor
+
+Given a quantized Tensor,
+``self.int_repr()`` returns a CPU Tensor with uint8_t as data type that stores the
+underlying uint8_t values of the given Tensor.
+""")
+
 
 add_docstr_all('long',
                r"""
@@ -3171,4 +3181,17 @@ Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.
+""")
+
+add_docstr_all('ndim',
+               r"""
+Alias for :meth:`~Tensor.dim()`
+""")
+
+add_docstr_all('T',
+               r"""
+Is this Tensor with its dimensions reversed.
+
+If ``n`` is the number of dimensions in ``x``,
+``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 """)

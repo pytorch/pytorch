@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <libshm.h>
 #include <TH/TH.h>
+#include <c10/util/Logging.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/dlpack.h>
@@ -25,6 +26,7 @@
 #include <torch/csrc/DataLoader.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/autograd/generated/python_nn_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
@@ -34,6 +36,7 @@
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_layouts.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/init.h>
@@ -97,6 +100,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
     return nullptr;
   }
   torch::utils::initializeLayouts();
+  torch::utils::initializeMemoryFormats();
   torch::utils::initializeDtypes();
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
@@ -114,6 +118,9 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   THPCharStorage_postInit(module);
   THPByteStorage_postInit(module);
   THPBoolStorage_postInit(module);
+  THPQUInt8Storage_postInit(module);
+  THPQInt8Storage_postInit(module);
+  THPQInt32Storage_postInit(module);
   THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -155,7 +162,24 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 {
   THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
           "but got %s", THPUtils_typename(arg));
-  at::set_num_threads((int)THPUtils_unpackLong(arg));
+  int nthreads = (int)THPUtils_unpackLong(arg);
+  THPUtils_assert(nthreads > 0, "set_num_threads expects a positive integer");
+  at::set_num_threads(nthreads);
+  Py_RETURN_NONE;
+}
+
+static PyObject * THPModule_getNumInteropThreads(PyObject *module)
+{
+  return PyLong_FromLong(at::get_num_interop_threads());
+}
+
+static PyObject * THPModule_setNumInteropThreads(PyObject *module, PyObject *arg)
+{
+  THPUtils_assert(THPUtils_checkLong(arg), "set_num_interop_threads expects an int, "
+          "but got %s", THPUtils_typename(arg));
+  int nthreads = (int)THPUtils_unpackLong(arg);
+  THPUtils_assert(nthreads > 0, "set_num_interop_threads expects a positive integer");
+  at::set_num_interop_threads(nthreads);
   Py_RETURN_NONE;
 }
 
@@ -306,6 +330,13 @@ static PyObject *THPModule_showConfig(PyObject *module)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject *THPModule_parallelInfo(PyObject *module)
+{
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(at::get_parallel_info());
+  END_HANDLE_TH_ERRORS
+}
+
 void DLPack_Capsule_Destructor(PyObject* data) {
   HANDLE_TH_ERRORS
   DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
@@ -325,7 +356,7 @@ PyObject *THPModule_toDLPack(PyObject *_unused, PyObject *data)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPVariable_Check(data), "data must be a Tensor");
-  DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_UnpackData(data));
+  DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_Unpack(data));
   return PyCapsule_New(dlMTensor, "dltensor", DLPack_Capsule_Destructor);
   END_HANDLE_TH_ERRORS
 }
@@ -411,8 +442,8 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
 
 PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  auto& type = torch::tensors::get_default_tensor_type();
-  auto dtype = (PyObject*)torch::getDtype(type.scalarType());
+  auto scalar_type = torch::tensors::get_default_scalar_type();
+  auto dtype = (PyObject*)torch::getDtype(scalar_type);
   Py_INCREF(dtype);
   return dtype;
   END_HANDLE_TH_ERRORS
@@ -441,12 +472,15 @@ static PyMethodDef TorchMethods[] = {
   {"_crash_if_csrc_ubsan", (PyCFunction)THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
   {"_crash_if_aten_asan", (PyCFunction)THPModule_crashIfATenASAN, METH_O, nullptr},
   {"_show_config",    (PyCFunction)THPModule_showConfig, METH_NOARGS, nullptr},
+  {"_parallel_info",    (PyCFunction)THPModule_parallelInfo, METH_NOARGS, nullptr},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, nullptr},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, nullptr},
   {"_set_backcompat_keepdim_warn", (PyCFunction)THPModule_setBackcompatKeepdimWarn, METH_O, nullptr},
   {"_get_backcompat_keepdim_warn", (PyCFunction)THPModule_getBackcompatKeepdimWarn, METH_NOARGS, nullptr},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  nullptr},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       nullptr},
+  {"get_num_interop_threads", (PyCFunction)THPModule_getNumInteropThreads,     METH_NOARGS,  nullptr},
+  {"set_num_interop_threads", (PyCFunction)THPModule_setNumInteropThreads,     METH_O,       nullptr},
   {"_get_cudnn_enabled", (PyCFunction)THPModule_userEnabledCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_enabled", (PyCFunction)THPModule_setUserEnabledCuDNN, METH_O,  nullptr},
   {"_get_cudnn_benchmark", (PyCFunction)THPModule_benchmarkCuDNN, METH_NOARGS,     nullptr},
@@ -530,8 +564,30 @@ static void warning_handler(
     const c10::SourceLocation& source_location,
     const char* msg) {
   AutoGIL gil;
-  if (PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1) < 0) {
+  auto result = -1;
+  if (source_location.file == nullptr) {
+    result = PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1);
+  } else {
+    result = PyErr_WarnExplicit(
+        /*category=*/PyExc_UserWarning,
+        /*message=*/msg,
+        /*filename=*/source_location.file,
+        /*lineno=*/source_location.line,
+        /*module=*/nullptr,
+        /*registry=*/nullptr);
+  }
+  if (result < 0) {
     throw python_error();
+  }
+}
+
+// In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
+// Guaranteed to be invoked from Python under GIL, no locking on map needed
+static void LogAPIUsageOnceFromPython(const std::string& event) {
+  static std::unordered_set<std::string> seen;
+  if (!seen.count(event)) {
+    seen.insert(event);
+    c10::LogAPIUsage(event);
   }
 }
 
@@ -542,6 +598,8 @@ __declspec(dllexport)
 PyObject* initModule() {
   HANDLE_TH_ERRORS
   at::init_num_threads();
+
+  C10_LOG_API_USAGE_ONCE("torch.python.import");
 
 #define ASSERT_TRUE(cmd) if (!(cmd)) return nullptr
 
@@ -581,6 +639,7 @@ PyObject* initModule() {
   THPDtype_init(module);
   THPDTypeInfo_init(module);
   THPLayout_init(module);
+  THPMemoryFormat_init(module);
   THPDevice_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
@@ -605,6 +664,9 @@ PyObject* initModule() {
   ASSERT_TRUE(THPCharStorage_init(module));
   ASSERT_TRUE(THPByteStorage_init(module));
   ASSERT_TRUE(THPBoolStorage_init(module));
+  ASSERT_TRUE(THPQUInt8Storage_init(module));
+  ASSERT_TRUE(THPQInt8Storage_init(module));
+  ASSERT_TRUE(THPQInt32Storage_init(module));
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
@@ -644,7 +706,9 @@ PyObject* initModule() {
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
 
-  py::reinterpret_borrow<py::module>(module).def("_demangle", &c10::demangle);
+  auto py_module = py::reinterpret_borrow<py::module>(module);
+  py_module.def("_demangle", &c10::demangle);
+  py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
 
   // Set ATen warnings to issue Python warnings
   ::c10::Warning::set_warning_handler(&warning_handler);

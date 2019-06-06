@@ -43,6 +43,24 @@ class TestActivations(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
+    @given(N=st.integers(1, 10), M=st.integers(1, 10), in_place=st.booleans(),
+           **hu.gcs)
+    def test_relu_empty_input(self, N, M, in_place, gc, dc):
+        op = core.CreateOperator(
+            "Relu",
+            ["X"],
+            ["X"] if in_place else ["Y"],
+        )
+
+        def relu_ref(X):
+            return [np.maximum(X, 0.0)]
+
+        X = np.random.randn(0, N, M).astype(np.float32)
+
+        self.assertReferenceChecks(gc, op, [X], relu_ref)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
     @unittest.skipIf(not workspace.has_gpu_support,
                      "Relu for float16 can only run on GPU now.")
     @given(X=hu.tensor(dtype=np.float16), in_place=st.booleans(),

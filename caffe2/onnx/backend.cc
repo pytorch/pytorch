@@ -304,7 +304,8 @@ Caffe2Backend::get_renamed_operators() const {
       {"Tile", "NumpyTile"},
       {"DynamicSlice", "Slice"},
       {"ConstantOfShape", "ConstantFill"},
-      {"RandomNormal", "GaussianFill"}};
+      {"RandomNormal", "GaussianFill"},
+      {"RandomNormalLike", "GaussianFill"}};
   return kRenamedOperators;
 }
 
@@ -363,6 +364,7 @@ Caffe2Backend::get_special_operators() const {
               {"LRN", &Caffe2Backend::CreateLRN},
               {"DynamicSlice", &Caffe2Backend::CreateDynamicSlice},
               {"RandomNormal", &Caffe2Backend::CreateRandomNormal},
+              {"RandomNormalLike", &Caffe2Backend::CreateRandomNormal},
               {"Where", &Caffe2Backend::CreateWhereOp}};
   return kSpecialOperators;
 }

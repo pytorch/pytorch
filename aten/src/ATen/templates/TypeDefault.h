@@ -31,9 +31,6 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   Type & toBackend(Backend b) const override;
   Type & toScalarType(ScalarType s) const override;
 
-  Tensor copy(const Tensor & src, bool non_blocking=false, optional<Device> to_device={}) const override;
-  Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const override;
-
   void backward(
       Tensor& self,
       c10::optional<Tensor> gradient,

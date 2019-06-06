@@ -1,2 +1,2 @@
 #pragma once
-#include <ATen/core/Type.h>
+#include <ATen/core/Tensor.h>

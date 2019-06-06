@@ -308,6 +308,11 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: LogSigmoid
     :members:
 
+:hidden:`MultiheadAttention`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autoclass:: MultiheadAttention
+    :members:
+
 :hidden:`PReLU`
 ~~~~~~~~~~~~~~~
 
@@ -523,6 +528,12 @@ Recurrent layers
 
 Linear layers
 ----------------------------------
+
+:hidden:`Identity`
+~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Identity
+    :members:
 
 :hidden:`Linear`
 ~~~~~~~~~~~~~~~~
@@ -1034,6 +1045,11 @@ Non-linear activation functions
 ~~~~~~~~~~~~~~~
 
 .. autofunction:: glu
+
+:hidden:`gelu`
+~~~~~~~~~~~~~~~
+
+.. autofunction:: gelu
 
 :hidden:`logsigmoid`
 ~~~~~~~~~~~~~~~~~~~~

@@ -469,9 +469,10 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
     const Tensor& grad,
     const Tensor& weight,  // NB: embedding table, not per_sample_weights
     const Tensor& indices,
+    const Tensor& offsets,
     const Tensor& offset2bag,
     int64_t mode) {
-  AT_CHECK(
+  TORCH_CHECK(
       mode == MODE_SUM,
       "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
 
@@ -491,7 +492,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
   dim3 grid((num_samples + warps_per_block - 1) / warps_per_block);
 
   auto output = at::empty({num_samples}, grad.options());
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     grad.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
       _embedding_bag_per_sample_weights_backward_kernel<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(

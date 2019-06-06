@@ -124,8 +124,8 @@ def f(a, b):
 
 The frontend, described later in this document will turn into a `Graph`:
 ```
-graph(%0 : Double(2)
-      %1 : Double(2)) {
+graph(%0 : Double(2),
+      %1 : Double(2)):
   %2 : int = prim::Constant[value=1]()
   %3 : Double(2) = aten::add(%0, %1, %2)
   %4 : Double(2) = aten::mul(%3, %3)
@@ -133,15 +133,14 @@ graph(%0 : Double(2)
   %6 : Double(2) = aten::tanh(%5)
   %7 : Double(2) = aten::add(%6, %6, %2)
   %8 : Double(2) = aten::add(%5, %7, %2)
-  return (%8);
-}
+  return (%8)
 ```
 
 This is the canonical textual representation of the IR. You should be able to easily find (almost all) of the elements we discussed above.
 - `graph` is the `Graph`
 - `%x` are `Value`s
 - `%x : Double(2)` is a type annotation of `Value` `%x` (see below for a list of supported types).
-- `%x : T1, %y : T2 = namespace::name(%z, %w)` is a `Node` which represents the `namespace::name`operator (this name is usually refered to as the `Node`s _kind_). It takes `%z` and `%w` `Value`s as inputs, and returns two outputs (`%x`, `%y`) of types `T1` and `T2` respectively.
+- `%x : T1, %y : T2 = namespace::name(%z, %w)` is a `Node` which represents the `namespace::name`operator (this name is usually referred to as the `Node`s _kind_). It takes `%z` and `%w` `Value`s as inputs, and returns two outputs (`%x`, `%y`) of types `T1` and `T2` respectively.
 
 Finally, nodes can have extra pieces of information assigned to them, which are called _attributes_. You can see that it's used in the `prim::Constant` node, which returns the `value` attribute when it's called. There's a fixed list of types you can attach:
 - `int64_t`
@@ -167,7 +166,7 @@ A node represents a single built-in instruction such as a matrix multiply or a c
 
 This reflects the reality of the PyTorch operator library where there are already several hundred valid operators.
 
-Nodes produces output Values and take input Values as arguments. For instance, a matrix-multiply will take two input tensors and produce one output tensor. Nodes can produce multiple outputs. For instance `prim::UnpackTuple` splits a tuple into its components, so it has a number of outputs equal to the number of members of the tuple. Though Nodes may have multiple outputs, the number of outputs is _statically known_ for each Node. Operations which may produce a dynamic amount of results, e.g. splitting a tensor into chunks of size 2, will be represented as a operator that results a list object.
+Nodes produce output Values and take input Values as arguments. For instance, a matrix-multiply will take two input tensors and produce one output tensor. Nodes can produce multiple outputs. For instance `prim::UnpackTuple` splits a tuple into its components, so it has a number of outputs equal to the number of members of the tuple. Though Nodes may have multiple outputs, the number of outputs is _statically known_ for each Node. Operations which may produce a dynamic amount of results, e.g. splitting a tensor into chunks of size 2, will be represented as an operator that results a list object.
 
 Because Nodes are not subclassed per-operator, it is very easy to construct invalid Nodes, e.g. by forgetting an input or an output, or by passing Values of the wrong Type. To help avoid this, Graph provides the method (`Graph::insert`) for constructing Nodes that guarantees Nodes have the correct setup. This method uses the database of registered Operators and their FunctionSchema to construct Nodes using that schema.
 
@@ -186,15 +185,15 @@ All of the strings correspond to different `FunctionSchema` objects. A `Node` ca
 Note that the chosen overload is not shown in any way in the textual output. If you're unsure which function does a node resolve to, you might need to check the type annotations of its input values.
 
 
-Each node also has a set of of attributes which are named integers, strings, floats, Tensors, and subgraphs, or lists of these types. These are used by special primitive operators to encode additional data in the Node. For instance `prim::Constant` defines a compile-time constant value. For Tensor constants, it will have a single Tensor attribute with the name `attr::value` which contains the value of the constant.
+Each node also has a set of attributes which are named integers, strings, floats, Tensors, and subgraphs, or lists of these types. These are used by special primitive operators to encode additional data in the Node. For instance `prim::Constant` defines a compile-time constant value. For Tensor constants, it will have a single Tensor attribute with the name `attr::value` which contains the value of the constant.
 
-Attributes are _rarely used_. Operators like convolution or matrix-multiply have no attributes and take of their arguments through the input list. This includes things that might be typically through of as constants, like the stride of the convolution. In PyTorch, any of this information is potentially a dynamic property of the program so Nodes are always encoded in a way that allows these values to be dynamically determined. However, we recognize that many inputs are almost always constants, so we make it easy to quickly check if an input is constant and get its value with `c10::optional<IValue> Node::get(Symbol name)`, which returns an IValue (a concrete value for the input) in the case the node is constant and `nullopt` otherwise.
+Attributes are _rarely used_. Operators like convolution or matrix-multiply have no attributes and take of their arguments through the input list. This includes things that might be typically thought of as constants, like the stride of the convolution. In PyTorch, any of this information is potentially a dynamic property of the program so Nodes are always encoded in a way that allows these values to be dynamically determined. However, we recognize that many inputs are almost always constants, so we make it easy to quickly check if an input is constant and get its value with `c10::optional<IValue> Node::get(Symbol name)`, which returns an IValue (a concrete value for the input) in the case the node is constant and `nullopt` otherwise.
 
 ## Block ##
 
 [ir.h](ir.h)
 
-Nodes are organized into sequentially executed lists inside a Block. A Node is a member of precisely one Block. The Graph itself has a top-level `graph.block()`, and control-flow nodes (`prim::If` and `prim::Loop`) also also have sub-blocks. While it is possible to design a Graph representation that does not have a sequential order for nodes (i.e. a sea-of-nodes representation), we find it is much easier to debug and understand Blocks when there is a specific canonical order for all of the nodes. This does not preclude optimization passes from changing the order when it would improve performance, and the interpreter is potentially allowed to execute the block out-of-order if the re-ordering preserves the semantics much like an out-of-order processor. Having the ordering ensure that graphs can always be easily printed, and that we can easily step through the execution of a graph.
+Nodes are organized into sequentially executed lists inside a Block. A Node is a member of precisely one Block. The Graph itself has a top-level `graph.block()`, and control-flow nodes (`prim::If` and `prim::Loop`) also have sub-blocks. While it is possible to design a Graph representation that does not have a sequential order for nodes (i.e. a sea-of-nodes representation), we find it is much easier to debug and understand Blocks when there is a specific canonical order for all of the nodes. This does not preclude optimization passes from changing the order when it would improve performance, and the interpreter is potentially allowed to execute the block out-of-order if the re-ordering preserves the semantics much like an out-of-order processor. Having the ordering ensure that graphs can always be easily printed, and that we can easily step through the execution of a graph.
 
 Values are Block-scoped. A Value is in scope for the remainder of the Block it is defined in, including in the sub-blocks of any Node defined after it. Values go out of scope at the end of the block in which they are defined.
 
@@ -205,7 +204,7 @@ The list of Nodes in a block is implemented as a circular linked list with the `
 
 Iterators for the `nodes()` list are invalided when the current Node they point to is moved or deleted. Otherwise iterators remain valid.
 
-Block also contain a list if input and output values. The meaning of these values depends on where the block is used. For the Graph's top-level block, these are inputs and outputs to the Graph, and line up with the FunctionSchema associated with a Method.
+Block also contain a list of input and output values. The meaning of these values depends on where the block is used. For the Graph's top-level block, these are inputs and outputs to the Graph, and line up with the FunctionSchema associated with a Method.
 
 **Control-flow** is represented with using sub-blocks rather than a control-flow graph representation. A `prim::If` has one block for the true branch and one block for the else.A `prim:Loop` has a block for the loop body (there is no condition block, instead the end of the loop body computes whether to re-enter the loop body). This representation ensures we have structured control-flow. Currently TorchScript does not allow for early returns, breaking out of loops early. This limitation makes a lot of optimizations easier and is true for the vast majority of networks. Our frontend permits certain forms of syntax sugar that allow a limited amount of re-writing of if statements to avoid needing to support early returns. A Node can lookup what Block it is in, and a Block and can look up its parent (either the Node that has it as a subblock, or `nullptr` for the main Block).
 
@@ -214,14 +213,12 @@ For if-statements (`prim::If`) the Blocks have no inputs, and the outputs are th
 Example IR for an if-statement looks like:
 ```
 %y_1, ..., %y_r = prim::If(%condition)
-  block0() { # TRUE BRANCH, never takes arguments, has to return r outputs
+  block0():  # TRUE BRANCH, never takes arguments, has to return r outputs
     %t_1, ..., %t_k = some::node(%a_value_from_outer_block)
     -> (%t_1, ..., %t_r)
-  }
-  block1() { # FALSE BRANCH, never takes arguments, has to return r outputs
+  block1():  # FALSE BRANCH, never takes arguments, has to return r outputs
     %f_1, ..., %f_m = some::node(%a_value_from_outer_block)
     -> (%f_1, ..., %f_r)
-  }
 ```
 
 Values corresponding to `%y_1, ..., %y_r` will become either `%t_1, ..., %t_r`, or `%f_1, ..., %f_r` depending on the value of `%condition` at runtime (you can see that the node kind of acts as a Phi node in conventional SSA).
@@ -239,24 +236,22 @@ def f(a, b, c):
 ```
 
 ```
-graph(%a : Dynamic
-      %b : Dynamic
-      %c : Dynamic) {
+graph(%a : Dynamic,
+      %b : Dynamic,
+      %c : Dynamic):
   %2 : int = prim::Constant[value=1]()
   %3 : Dynamic = aten::add(%a, %b, %2)
   %5 : Dynamic = prim::If(%c)
-    block0() {
+    block0():
       %6 : int = prim::Constant[value=1]()
       %7 : Dynamic = aten::add(%3, %3, %6)
       -> (%7)
     }
-    block1() {
+    block1():
       %8 : int = prim::Constant[value=1]()
       %9 : Dynamic = aten::add(%b, %3, %8)
       -> (%9)
-    }
-  return (%5);
-}
+  return (%5)
 ```
 
 The outputs of the if-statement serve a role similar to "phi" nodes in traditional SSA control-flow graphs.
@@ -265,11 +260,10 @@ The outputs of the if-statement serve a role similar to "phi" nodes in tradition
 Loops are implemented with `prim::Loop` which covers both `while` and `for` loops. A valid instantiation of this node always looks like this:
 ```
 %y_1, ..., %y_r = prim::Loop(%max_trip_count, %initial_condition, %x_1, ..., %x_r)
-  block0(%i, %a_1, ..., %a_r) {
+  block0(%i, %a_1, ..., %a_r):
     %b_1, ..., %b_m = some::node(%a_value_from_outer_block, %a_1)
     %iter_condition = some::other_node(%a_2)
     -> (%iter_condition, %b_1, ..., %b_r)
-  }
 ```
 
 The simplest way to explain the semantics is to consider this Python-like pseudo-code:
@@ -306,17 +300,15 @@ def f(x):
 can be translated as:
 
 ```
-graph(%z.1 : Dynamic) {
+graph(%z.1 : Dynamic):
   %3 : bool = prim::Constant[value=1]()
   %1 : int = prim::Constant[value=0]()
   %2 : int = aten::size(%z.1, %1)
   %z : Dynamic = prim::Loop(%2, %3, %z.1)
-    block0(%i : int, %5 : Dynamic) {
+    block0(%i : int, %5 : Dynamic):
       %z.2 : Dynamic = aten::mul(%5, %5)
       -> (%3, %z.2)
-    }
-  return (%z);
-}
+  return (%z)
 ```
 
 ## Value ##
@@ -517,7 +509,7 @@ Multi-character token kinds are defined in a list, `TC_FORALL_TOKEN_KINDS`. Toke
 
 [script/parser.h](script/parser.h)
 
-The Parser uses the Lexer to build a the AST for function definitions. `parseFunction` is the entrypoint for parsing a single `def ...` and will return a `Def` tree view.
+The Parser uses the Lexer to build the AST for function definitions. `parseFunction` is the entrypoint for parsing a single `def ...` and will return a `Def` tree view.
 
 The Parser is written as a [top-down precedence parser](https://eli.thegreenplace.net/2010/01/02/top-down-operator-precedence-parsing), or "Pratt" parser.  They are simpler and easier to understand than typical parser generators, while still being flexible enough to parse programming languages. For the most part parsing is done by recursive decent. To resolve operator precedence issues, the function to parse an expression is augmented with a precedent _p_ such that calling the function means _parse an expression whose operators all have precedence higher than p_.
 
@@ -525,7 +517,7 @@ The Parser is written as a [top-down precedence parser](https://eli.thegreenplac
 
 [script/compiler.h](script/compiler.h)
 
-The file compiler.cpp translates Trees into Modules. Its name is slightly ambiguous because there are other compiler-like things in the system such as the FusionCompiler. The main entrypoint is `defineMethodsInModule` which takes a list of Def Tree Views representing function definitions and adds them as Methods to the module. During the lowering processing _semantic checking_ occurs. The compiler checks that all used variables are defined (sometimes called scope checking), and that all values have compatible types (type-checking). During this process it also emits the graph nodes corresponding to each statment in the Tree and generates a FunctionSchema for the whole definition.
+The file compiler.cpp translates Trees into Modules. Its name is slightly ambiguous because there are other compiler-like things in the system such as the FusionCompiler. The main entrypoint is `defineMethodsInModule` which takes a list of Def Tree Views representing function definitions and adds them as Methods to the module. During the lowering processing _semantic checking_ occurs. The compiler checks that all used variables are defined (sometimes called scope checking), and that all values have compatible types (type-checking). During this process it also emits the graph nodes corresponding to each statement in the Tree and generates a FunctionSchema for the whole definition.
 
 A few helper objects exist in the lowering process.  SugaredValues are special values that represent objects that can appear during compilation but that are not first class values. For instance, in TorchScript methods `self` refers to the module, and `self.weight` refers to a Parameter of the module. Neither are first-class Types and have no corresponding Value in a graph. Resolver objects are std::functions that resolve externally-defined variables to SugaredValues. For instance, the identifier `torch` which contains most of our built-in ops is looked up through Resolver objects which interact with the python state of the program.
 
@@ -566,7 +558,7 @@ A set of special SugaredValues are used to translate between objects in the Pyth
 
 # Executing Programs #
 
-TorchScript is executed using a interpreter attached to a JIT-optimizer and compiler. The entry-point for execution is the GraphExecutor object that is created on demand inside a Method when the method is first called. This section first goes over the semantics of graphs, i.e. what does it mean to execute a graph? And then details how the implementation works.
+TorchScript is executed using an interpreter attached to a JIT-optimizer and compiler. The entry-point for execution is the GraphExecutor object that is created on demand inside a Method when the method is first called. This section first goes over the semantics of graphs, i.e. what does it mean to execute a graph? And then details how the implementation works.
 
 
 ## Evaluation Semantics ##
@@ -592,14 +584,14 @@ t = torch.rand(3, 4)
 t2 =  t[0] # view of one slice of t
 ```
 
-Some builtin operators also mutably write to the underlying tensor. In the standard library these operators are always named with a training underscore, or take a named `out` tensor where the result is written:
+Some builtin operators also mutably write to the underlying tensor. In the standard library these operators are always named with a trailing underscore, or take a named `out` tensor where the result is written:
 
 ```python
 t2.relu_() # inplace relu operator, note t is modified as well!
 torch.add(t, t, out=t) # update t, without using temporary memory if possible
 ```
 
-The combination of reference semantics and mutable operators can be more difficult to optimize, but it gives program writers powerful control of the memory usage of their programs. For instance, DenseNets use a concat operation instead of the the addition found in a ResNet. Rather than compute a concat of existing tensors, many implementations use Tensor indexing and `out` keywords to avoid allocating addition memory for the activations. Ideally a compiler would always be able to do these optimizations, but in practice new ideas are tried all the time that exist outside what compiler writers expect and these manual operators allows users to get decent behavior before the compilers catch up.
+The combination of reference semantics and mutable operators can be more difficult to optimize, but it gives program writers powerful control of the memory usage of their programs. For instance, DenseNets use a concat operation instead of the addition found in a ResNet. Rather than compute a concat of existing tensors, many implementations use Tensor indexing and `out` keywords to avoid allocating addition memory for the activations. Ideally a compiler would always be able to do these optimizations, but in practice new ideas are tried all the time that exist outside what compiler writers expect and these manual operators allow users to get decent behavior before the compilers catch up.
 
 In addition to being mutable, tensors also have a set of dynamically determined properties (i.e. properties that can vary from run to run) this includes:
 
@@ -612,7 +604,7 @@ In addition to being mutable, tensors also have a set of dynamically determined 
 Changes in these properties change how operators on tensor will evaluate and would make certain optimization invalid. For instance, if we have fuser capable of generating new cuda kernels but not cpu kernels, it is only valid to fuse operations where the inputs are known to run only on CUDA devices. The GraphExecutor's job is to still enable optimization even when certains combinations of properties prevent optimizations for occurring.
 
 Nodes in a graph are executed *serially* in the order they appear in a block. Nodes may be reordered either during optimization or by the interpreter itself if it can be proven that
-it is not distinguishable from the original serial execution order. These semantics are necessary since the combination of mutable tensors an potential alias between tensors makes it unsafe to perform arbitrary reordering otherwise. However, the AliasInfo object can accurately track how alias propagate through builtin operators so optimization passes can query when certain reorders or optimizations are safe.
+it is not distinguishable from the original serial execution order. These semantics are necessary since the combination of mutable tensors and potential alias between tensors makes it unsafe to perform arbitrary reordering otherwise. However, the AliasInfo object can accurately track how alias propagate through builtin operators so optimization passes can query when certain reorders or optimizations are safe.
 
 We also provide user-accessible parallel execution through the `fork` and `wait` primitives. The `fork` primitive begins execution of `fn` in parallel with the current thread of execution, immediately returning a Future object that will hold the result of the forked function. The `wait` method of the future then causes the invoking task to wait for the value being computed on the forked task.
 
@@ -650,10 +642,10 @@ using Operation = std::function<int(Stack&)>;
 
 // schema: example_add(Tensor a, Tensor b) -> Tensor
 int example_add(Stack& stack) {
-        Tensor a, b;
-        // stack before: ? ? ? a b <- back
-        pop(stack, a, b); //Templated helper function
-                          // that pops a, b and converts them to tensor
+    Tensor a, b;
+    // stack before: ? ? ? a b <- back
+    pop(stack, a, b); //Templated helper function
+                      // that pops a, b and converts them to tensor
     push(stack, a + b);
     // stack after:
     // ? ? ? c <- back
@@ -688,16 +680,16 @@ Instructions in the interpreter have three parts: a list of registers from which
 
 Unlike typical interpreters, we not attempt to do careful register allocation. Since Tensors are reference types, saving registers would only save a few hundred bytes of space in typical applications by cutting down on the number of places a reference could be saved. The data in single a Tensor is likely significantly bigger than that, so we forgo register allocation to make debugging easier.
 
-However, we do need to ensure that values are destructed immediately after their last use. Because Torch reference counts Tensors, they will be deallocated immediately when their last reference is gone. To ensure we use a minimum amount of memory we want to ensure that the interpreter releases the reference as soon as it is no longer used. To do this, each Instruction also has set of flags which indicate the inputs to the operation which will no longer be used after the operation. For these inputs, the IValue is moved rather than copied from the register file, ensuring the reference will go dead as soon as the Operation no longer needs it.  extra instructions may be inserted into the program to explicitly drop references for values whose last use depends on the control flow of the program.
+However, we do need to ensure that values are destructed immediately after their last use. Because Torch reference counts Tensors, they will be deallocated immediately when their last reference is gone. To ensure we use a minimum amount of memory we want to ensure that the interpreter releases the reference as soon as it is no longer used. To do this, each Instruction also has a set of flags which indicate the inputs to the operation which will no longer be used after the operation. For these inputs, the IValue is moved rather than copied from the register file, ensuring the reference will go dead as soon as the Operation no longer needs it.  extra instructions may be inserted into the program to explicitly drop references for values whose last use depends on the control flow of the program.
 
 ```
-graph(%x : Tensor
-      %hx : Tensor
-      %cx : Tensor
-      %w_ih : Tensor
-      %w_hh : Tensor
-      %b_ih : Tensor
-      %b_hh : Tensor) {
+graph(%x : Tensor,
+      %hx : Tensor,
+      %cx : Tensor,
+      %w_ih : Tensor,
+      %w_hh : Tensor,
+      %b_ih : Tensor,
+      %b_hh : Tensor):
   %7 : int = prim::Constant[value=4]()
   %8 : int = prim::Constant[value=1]()
   %9 : Tensor = aten::t(%w_ih)
@@ -719,8 +711,7 @@ graph(%x : Tensor
   %28 : Tensor = aten::tanh(%cy)
   %hy : Tensor = aten::mul(%outgate, %28)
   %30 : (Tensor, Tensor) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
+  return (%30)
 ```
 
 ```
@@ -775,13 +766,13 @@ def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
 After going through the the frontend, we get start with this unoptimized graph:
 
 ```
-graph(%x : Tensor
-      %hx : Tensor
-      %cx : Tensor
-      %w_ih : Tensor
-      %w_hh : Tensor
-      %b_ih : Tensor
-      %b_hh : Tensor) {
+graph(%x : Tensor,
+      %hx : Tensor,
+      %cx : Tensor,
+      %w_ih : Tensor,
+      %w_hh : Tensor,
+      %b_ih : Tensor,
+      %b_hh : Tensor):
   %7 : int = prim::Constant[value=4]()
   %8 : int = prim::Constant[value=1]()
   %9 : Tensor = aten::t(%w_ih)
@@ -803,8 +794,7 @@ graph(%x : Tensor
   %28 : Tensor = aten::tanh(%cy)
   %hy : Tensor = aten::mul(%outgate, %28)
   %30 : (Tensor, Tensor) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
+  return (%30)
 ```
 
 Execution starts in `GraphExecutor::run`, which takes takes a Stack of inputs.
@@ -824,13 +814,13 @@ The ArgumentSpec object is used as a key into a cache that holds pre-optimized C
 
 ```
 # post specialization, inputs are now specialized types
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %b_ih : Float(*)
-      %b_hh : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %b_ih : Float(*),
+      %b_hh : Float(*)):
   %7 : int = prim::Constant[value=4]()
   %8 : int = prim::Constant[value=1]()
   %9 : Tensor = aten::t(%w_ih)
@@ -852,8 +842,7 @@ graph(%x : Float(*, *)
   %28 : Tensor = aten::tanh(%cy)
   %hy : Tensor = aten::mul(%outgate, %28)
   %30 : (Tensor, Tensor) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
+  return (%30)
 ```
 
 It then runs "required passes", which are graph transformations necessary to generate legal graphs for the interpreter. (Some passes such as differentiation will introduce Nodes that are not defined by operators and require passes to clean up. The combination of `specializeUndef` and `LowerGradOf` clean up these operations.) These passes also remove broadcasting "expand" nodes that get implicitly inserted by the tracer but are not valid for all sizes.
@@ -864,13 +853,13 @@ It then runs inference passes to calculate properties of the graph given this pa
 * It propagates the input ranks, dtypes, devices, and requires_grad information to the rest of the graph where possible.
 
 ```
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %b_ih : Float(*)
-      %b_hh : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %b_ih : Float(*),
+      %b_hh : Float(*)):
   %8 : int = prim::Constant[value=1]()
   %9 : Float(*, *) = aten::t(%w_ih)
   %10 : Float(*, *) = aten::mm(%x, %9)
@@ -890,8 +879,7 @@ graph(%x : Float(*, *)
   %28 : Float(*, *) = aten::tanh(%cy)
   %hy : Float(*, *) = aten::mul(%outgate, %28)
   %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
+  return (%30)
 ```
 
 
@@ -905,13 +893,13 @@ It then runs a number of *derivative preserving* optimization passes. If a compu
 * Batching matrix multiplications that result from unrolling loops.
 
 ```
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %b_ih : Float(*)
-      %b_hh : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %b_ih : Float(*),
+      %b_hh : Float(*)):
   %8 : int = prim::Constant[value=1]()
   %9 : Float(*, *) = aten::t(%w_ih)
   %10 : Float(*, *) = aten::mm(%x, %9)
@@ -931,8 +919,7 @@ graph(%x : Float(*, *)
   %28 : Float(*, *) = aten::tanh(%cy)
   %hy : Float(*, *) = aten::mul(%outgate, %28)
   %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
+  return (%30)
 ```
 
 *Post-derivative optimization* The next optimization depends on whether any part of the graph actual requires a gradient to be calculated, which is determined by `needsGradient`. In the case where no gradients are required (i.e. for inference graphs), then we can directly apply optimizations that generate graphs that may not have valid gradients defined. For now this is the `FuseGraph` pass, which looks for adjacent point-wise operations along with reviewing operations such as `split` and `concat`, and creates `prim::FusionGroup` Nodes in the graph to replace these operations. The Operator registered to execute `prim:FusionGroup` nodes will generate a new CUDA kernel for each unique Node, which replaces the original separate execution.
@@ -942,13 +929,13 @@ Note the two phases for compilation of fusion groups: First, the `FuseGraph` pas
 In the case where no gradients are required, the optimization process is finished, a Code object is constructed from the Graph, it is added to the code cache, and then an InterpreterState is constructed and run.
 
 ```
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %b_ih : Float(*)
-      %b_hh : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %b_ih : Float(*),
+      %b_hh : Float(*)):
   %9 : Float(*, *) = aten::t(%w_ih)
   %10 : Float(*, *) = aten::mm(%x, %9)
   %11 : Float(*, *) = aten::t(%w_hh)
@@ -959,12 +946,12 @@ graph(%x : Float(*, *)
   %hy : Float(*, *), %cy : Float(*, *) = prim::FusionGroup_0(%cx, %82, %81, %80, %79)
   %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
   return (%30);
-}
-with prim::FusionGroup_0 = graph(%13 : Float(*, *)
-      %71 : Tensor
-      %76 : Tensor
-      %81 : Tensor
-      %86 : Tensor) {
+
+with prim::FusionGroup_0 = graph(%13 : Float(*, *),
+      %71 : Tensor,
+      %76 : Tensor,
+      %81 : Tensor,
+      %86 : Tensor):
   %87 : Float(*, *), %88 : Float(*, *), %89 : Float(*, *), %90 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%86)
   %82 : Float(*, *), %83 : Float(*, *), %84 : Float(*, *), %85 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%81)
   %77 : Float(*, *), %78 : Float(*, *), %79 : Float(*, *), %80 : Float(*, *) = prim::ConstantChunk[chunks=4, dim=1](%76)
@@ -991,8 +978,7 @@ with prim::FusionGroup_0 = graph(%13 : Float(*, *)
   %cy : Float(*, *) = aten::add(%14, %11, %69)
   %4 : Float(*, *) = aten::tanh(%cy)
   %hy : Float(*, *) = aten::mul(%outgate, %4)
-  return (%hy, %cy);
-}
+  return (%hy, %cy)
 ```
 
 
@@ -1001,25 +987,24 @@ with prim::FusionGroup_0 = graph(%13 : Float(*, *)
 The creating of derivative subgraphs is done using a similar approach to finding fusion groups: adjacent operations with known gradient formulas are grouped together into `prim::DifferentiableGraph` nodes. We only generate these nodes if we can find a large enough subgraph where optimization is likely to be profitable since there is some overhead involved in entering and exiting a differentiable subgraph.
 
 ```
-graph(%x : Float(*, *)
-      %hx : Float(*, *)
-      %cx : Float(*, *)
-      %w_ih : Float(*, *)
-      %w_hh : Float(*, *)
-      %b_ih : Float(*)
-      %b_hh : Float(*)) {
+graph(%x : Float(*, *),
+      %hx : Float(*, *),
+      %cx : Float(*, *),
+      %w_ih : Float(*, *),
+      %w_hh : Float(*, *),
+      %b_ih : Float(*),
+      %b_hh : Float(*)):
   %8 : int = prim::Constant[value=1]()
   %hy : Float(*, *), %cy : Float(*, *) = prim::DifferentiableGraph_0(%cx, %b_hh, %b_ih, %hx, %w_hh, %x, %w_ih)
   %30 : (Float(*, *), Float(*, *)) = prim::TupleConstruct(%hy, %cy)
-  return (%30);
-}
-with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *)
-      %29 : Float(*)
-      %33 : Float(*)
-      %40 : Float(*, *)
-      %43 : Float(*, *)
-      %45 : Float(*, *)
-      %48 : Float(*, *)) {
+  return (%30)
+with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *),
+      %29 : Float(*),
+      %33 : Float(*),
+      %40 : Float(*, *),
+      %43 : Float(*, *),
+      %45 : Float(*, *),
+      %48 : Float(*, *)):
   %49 : Float(*, *) = aten::t(%48)
   %47 : Float(*, *) = aten::mm(%45, %49)
   %44 : Float(*, *) = aten::t(%43)
@@ -1038,8 +1023,7 @@ with prim::DifferentiableGraph_0 = graph(%13 : Float(*, *)
   %cy : Float(*, *) = aten::add(%14, %11, %38)
   %4 : Float(*, *) = aten::tanh(%cy)
   %hy : Float(*, *) = aten::mul(%outgate, %4)
-  return (%hy, %cy);
-}
+  return (%hy, %cy)
 ```
 
 ## DifferentiableGraphOp ##
@@ -1150,7 +1134,7 @@ So to determine whether  `a` and `b` may alias, we traverse the `AliasTracker` D
 ### Writing optimization passes with `AliasDb`
 `AliasDb` provides a high-level interface to help people write mutability-safe optimization passes.
 
-In particular, `moveAfterTopologicallyValid()` (and it's `moveBefore` variant) will reorder nodes in a way that preserves data dependencies and avoids any data hazards.  The rules for this are that all mutable *writes* to a give memory location must occur in the same order (avoid WAW hazards), and that no reads can be reordered before or after any write (WAR, RAW hazards).
+In particular, `moveAfterTopologicallyValid()` (and it's `moveBefore` variant) will reorder nodes in a way that preserves data dependencies and avoids any data hazards.  The rules for this are that all mutable *writes* to a given memory location must occur in the same order (avoid WAW hazards), and that no reads can be reordered before or after any write (WAR, RAW hazards).
 
 However, reordering of reads across writes *is allowed* if we can prove that the read cannot alias the thing being written. This happens whenever we have tensors that come from functions that produce fresh results (common) inside of the function. It also happens whenever the creation of the mutable tensor is seen in the function (so it gets assigned a fresh variable), and all of its writes occur in that function.
 
@@ -1306,20 +1290,17 @@ During export a list of all the tensors in a model is created. Tensors can come 
 
 ### `attributes.pkl`
 
-Attributes are all module properties that are not parameters or constants. Attributes are saved in a list in the order they were defined on the module. The list is stored as a Python `pickle` archive. `pickle`'s format was chosen due to:
-* **user friendliness** - the attributes file can be loaded in Python with `pickle` without having PyTorch installed
-* **size limits** - formats such as Protobuf empose size limits on total message size, whereas pickle limits are on individual values (e.g. strings cannot be longer than 4 GB)
-* **standard format** - `pickle` is a standard Python module with a reasonably simple format. The format is a program to be consumed by a stack machine that is detailed in Python's [`pickletools.py`](https://svn.python.org/projects/python/trunk/Lib/pickletools.py)
-* **built-in memoization** - for shared reference types (e.g. Tensor, string, lists, dicts)
-* **self describing** - a separate definition file is not needed to understand the pickled data
-* **eager mode save** - `torch.save()` already produces a `pickle` archive, so doing the same with attributes may ease unification of these formats in the future
+[pickler.h](pickler.h),
+[pickler.cpp](pickler.cpp),
+[torch/jit/_pickle.py](../../../torch/jit/_pickle.py)
+[caffe2/proto/torch.proto](../../../caffe2/proto/torch.proto)
 
-A given module may have many attributes of different types and many submodules, each with their own attributes. Attributes are recorded in `model.json`:
+Attributes are all module properties that are not parameters or constants. Attributes are saved in a list in the order they were defined on the module. A given module may have many attributes of different types and many submodules, each with their own attributes. Attribute metadata is recorded in `model.json`:
 * `type` - the full type of the attribute (in [Mypy syntax](https://mypy.readthedocs.io/en/latest/cheat_sheet_py3.html))
 * `name` - the attribute's name
 * `id` - the offset into the saved list of all model attributes
 
-`model.json`
+In `model.json`:
 ```json
 {
   "mainModule": {
@@ -1360,41 +1341,61 @@ A given module may have many attributes of different types and many submodules, 
 }
 ```
 
-Attributes of the main module and its submodules are saved to a single file in the `zip` archive of a `.pt` file named `attributes.pkl`. A single file is used so that attributes can reference each other and shared values. Unpickling this will return a list of values corresponding to the attributes.
+Attributes of the main module and its submodules are saved to a single file in the `zip` archive of a `.pt` file named `attributes.pkl`. Attributes are stored as a Python `pickle` archive. `pickle`'s format was chosen due to:
+* **user friendliness** - the attributes file can be loaded in Python with `pickle`
+* **size limits** - formats such as Protobuf empose size limits on total message size, whereas pickle limits are on individual values (e.g. strings cannot be longer than 4 GB)
+* **standard format** - `pickle` is a standard Python module with a reasonably simple format. The format is a program to be consumed by a stack machine that is detailed in Python's [`pickletools.py`](https://svn.python.org/projects/python/trunk/Lib/pickletools.py)
+* **built-in memoization** - for shared reference types (e.g. Tensor, string, lists, dicts)
+* **self describing** - a separate definition file is not needed to understand the pickled data
+* **eager mode save** - `torch.save()` already produces a `pickle` archive, so doing the same with attributes avoids introducing yet another format
 
-All attributes are written into the `attributes.pkl` file with the exception of tensors, which store only a tensor table index (see "tensors" above). Classes are used to mark special data types, such as this tensor table index or specialized lists. To load the `attributes.pkl` file without PyTorch for inspection or manual editing, these classes must be defined, so a custom [`Unpickler`](https://docs.python.org/3/library/pickle.html#pickle.Unpickler) is necessary:
+[pickler.cpp](pickler.cpp) implements a subset of the Pickle format necessary for TorchScript models.
+
+
+A single file is used for the top level module and all submodules so that attributes can reference each other and share values. Unpickling `attributes.pkl`  will return a tuple of values corresponding to the attributes.
+
+All attributes are written into the `attributes.pkl` file with the exception of tensors, which store only a tensor table index (see "tensors" above). PyTorch functions defined in [torch/jit/_pickle.py](../../../torch/jit/_pickle.py) are used to mark special data types, such as this tensor table index or specialized lists. To load the `attributes.pkl` file, use the `pickle` module in Python:
+
+```python
+import pickle
+# attributes.pkl include references to functions in torch.jit._pickle
+import torch
+
+pickle.load(open("attributes.pkl", "rb"))
+```
+
+If for some reason you don't have PyTorch installed, you can still load `attributes.pkl` with a custom [`Unpickler`](https://docs.python.org/3/library/pickle.html#pickle.Unpickler):
 
 ```python
 import pickle
 
-# Tensor objects are stored as instances of this class
-class TensorID(object):
-    def __setstate__(self, id):
-        self.id = id
-
-# List[int] has internal specializations, and these are indicated with this class
-class IntList(object):
-    def __setstate__(self, data):
-        self.data = data
-
 class JitUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
-        if not module == '__main__':
-            return None
+        if module != 'torch.jit._pickle':
+            raise RuntimeError("Unknown module")
 
-        if name == 'TensorID':
-            return TensorID
-        elif name == 'IntList':
-            return IntList
+        identity = lambda x: x
+        if name == 'build_tensor_from_id':
+            # Without the tensor table we can't do anything other than
+            # return the tensor ID
+            return identity
+        elif name == 'build_intlist':
+            return identity
 
-JitUnpickler(open("my_model/attributes.pkl", "rb")).load()
+print(JitUnpickler(open("out_dir/out/attributes.pkl", "rb")).load())
 ```
 
 #### Binary Format
 
 Running the following snippet produces a `ScriptModule` with several attributes.
+Python's `pickletools` module can be used to decode the binary blob of `attributes.pkl` into a human readable format.
 
 ```python
+import pickletools
+import zipfile
+import torch
+from typing import Tuple, List
+
 class M(torch.jit.ScriptModule):
     def __init__(self):
         super(M, self).__init__()
@@ -1407,50 +1408,46 @@ class M(torch.jit.ScriptModule):
     def forward(self):
         return (self.float, self.tuple, self.tensor, self.int_list)
 
-M().save("out.pt")
+M().save("out.zip")
+model_zip = zipfile.ZipFile("out.zip", 'r')
+model_zip.extractall("out_dir")
+pickletools.dis(open("out_dir/out/attributes.pkl", "rb"))
 ```
 
-In a terminal, Python's `pickletools` module can be used to decode the binary blob of `attributes.pkl` into a human readable format.
 
-```bash
-unzip -o out.pt
-python -m pickletools out/attributes.pkl
+The output of the above commands demonstrates the concepts described earlier. Attributes are wrapped in with `2: EMPTY_LIST` and appear in the order they are defined on the module. Functions for certain special types (e.g. `List[int]`, `Tensor`) can be seen at `37: GLOBAL` and `66: GLOBAL`, followed by data specific to that type, then finally by an instruction to build the object at `65: BUILD` and `113: BUILD` respectively.
 ```
-
-The output of the above commands demonstrates the concepts described earlier. Attributes are wrapped in with `2: EMPTY_LIST` and appear in the order they are defined on the module. Classes for certain special types (`List[int]`, `Tensor`) can be seen at `37: GLOBAL` and `66: GLOBAL`, followed by data specific to that type, then finally by an instruction to build the object at `65: BUILD` and `113: BUILD` respectively.
-```
-    0: \x80 PROTO      2
-    2: ]    EMPTY_LIST
-    3: (    MARK
-    4: G        BINFLOAT   2.3
-   13: (        MARK
-   14: J            BININT     1
-   19: J            BININT     2
-   24: J            BININT     3
-   29: J            BININT     4
-   34: t            TUPLE      (MARK at 13)
-   35: q        BINPUT     0
-   37: c        GLOBAL     '__main__ TensorID'
-   56: q        BINPUT     1
-   58: )        EMPTY_TUPLE
-   59: \x81     NEWOBJ
-   60: J        BININT     0
-   65: b        BUILD
-   66: c        GLOBAL     '__main__ IntList'
-   84: q        BINPUT     2
-   86: )        EMPTY_TUPLE
-   87: \x81     NEWOBJ
-   88: ]        EMPTY_LIST
-   89: q        BINPUT     3
-   91: (        MARK
-   92: J            BININT     1
-   97: J            BININT     2
-  102: J            BININT     3
-  107: J            BININT     4
-  112: e            APPENDS    (MARK at 91)
-  113: b        BUILD
-  114: e        APPENDS    (MARK at 3)
-  115: .    STOP
+  0: \x80 PROTO      2
+  2: (    MARK
+  3: G        BINFLOAT   2.3
+ 12: (        MARK
+ 13: K            BININT1    1
+ 15: K            BININT1    2
+ 17: K            BININT1    3
+ 19: K            BININT1    4
+ 21: t            TUPLE      (MARK at 12)
+ 22: q        BINPUT     0
+ 24: c        GLOBAL     'torch.jit._pickle build_tensor_from_id'
+ 64: q        BINPUT     1
+ 66: (        MARK
+ 67: K            BININT1    0
+ 69: t            TUPLE      (MARK at 66)
+ 70: R        REDUCE
+ 71: c        GLOBAL     'torch.jit._pickle build_intlist'
+104: q        BINPUT     2
+106: (        MARK
+107: ]            EMPTY_LIST
+108: (            MARK
+109: K                BININT1    1
+111: K                BININT1    2
+113: K                BININT1    3
+115: K                BININT1    4
+117: e                APPENDS    (MARK at 108)
+118: t            TUPLE      (MARK at 106)
+119: R        REDUCE
+120: q        BINPUT     3
+122: t        TUPLE      (MARK at 2)
+123: .    STOP
 highest protocol among opcodes = 2
 ```
 

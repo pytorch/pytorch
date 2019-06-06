@@ -12,24 +12,19 @@ template <class DataType>
 void stop_gradient_op_cpu_impl(
     const at::Tensor& input_,
     const at::Tensor& output_) {
-  Tensor input{C10Tensor(input_)};
-  Tensor output{C10Tensor(output_)};
+  Tensor input(input_);
+  Tensor output(output_);
   if (!output.is_same(input)) {
     output.CopyFrom(input);
   }
 }
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::StopGradient",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("input"),
-                                    c10::Argument("output")}),
-        (std::vector<c10::Argument>{})),
-    c10::kernel<
+    "_c10_experimental::StopGradient",
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(stop_gradient_op_cpu_impl<float>),
-        &stop_gradient_op_cpu_impl<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+        &stop_gradient_op_cpu_impl<float>>(CPUTensorId()));
 
 } // namespace
 

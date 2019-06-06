@@ -1,10 +1,8 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
 #include <c10/core/Scalar.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/macros/Macros.h>
-#include <ATen/core/SparseTensorRef.h>
-#include <ATen/core/Type.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 
@@ -16,7 +14,7 @@ inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocki
   return to(
       at::device(t.device_type()).layout(t.layout()).dtype(t.scalarType()),
       non_blocking,
-      /*copy*/ true);
+      /*copy=*/ true);
 }
 
 inline Tensor Tensor::cpu() const {
@@ -29,10 +27,6 @@ inline Tensor Tensor::cuda() const {
 
 inline Tensor Tensor::hip() const {
   return toType(type().hip());
-}
-
-inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
-  return dispatch_type().copy_(*this, src, non_blocking);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
@@ -116,6 +110,15 @@ inline bool is_sparse(Tensor self) {
   return self.is_sparse();
 }
 
+inline bool Tensor::is_mkldnn() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_mkldnn();
+}
+
+inline bool is_mkldnn(Tensor self) {
+  return self.is_mkldnn();
+}
+
 inline bool Tensor::is_quantized() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_quantized();
@@ -128,7 +131,7 @@ inline bool is_quantized(Tensor self) {
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \
-    AT_CHECK(                                    \
+    TORCH_CHECK(                                    \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \

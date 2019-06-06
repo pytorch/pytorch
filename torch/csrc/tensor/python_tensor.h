@@ -20,7 +20,7 @@ void initialize_python_bindings();
 
 // Sets the concrete type constructed by calls to torch.Tensor() and most
 // factory methods on the torch module.
-void set_default_tensor_type(const at::Type& type);
+void set_default_tensor_type(const at::Type& type, const at::ScalarType scalar_type);
 
 // Same as set_default_tensor_type() but takes a PyObject*
 void py_set_default_tensor_type(PyObject* type_obj);

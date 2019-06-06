@@ -60,13 +60,6 @@ __device__ __forceinline__ unsigned int WARP_BALLOT(int predicate, unsigned int 
 }
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
-//To handle ambiguity, add a type double version.
-__device__ __forceinline__ double WARP_SHFL_XOR(double value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff) {
-  //(HIP doesn't support double)
-  return (double) __shfl_xor((float) value, laneMask, width);
-}
-#endif
 template <typename T>
 __device__ __forceinline__ T WARP_SHFL_XOR(T value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff)
 {

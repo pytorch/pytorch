@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/irparser.h>
 #include "test/cpp/jit/test_base.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
@@ -451,6 +452,27 @@ void testAliasAnalysis() {
     AliasDb aliasDb(graph);
     ASSERT_FALSE(aliasDb.moveBeforeTopologicallyValid(d->node(), wait));
   }
+
+  // test none value does not have writers
+  {
+    {
+      auto graph = std::make_shared<Graph>();
+      std::unordered_map<std::string, Value*> vmap;
+      script::parseIR(
+          R"IR(
+    graph():
+      %opt : Tensor? = prim::Constant()
+      %out : Tensor = prim::unchecked_unwrap_optional(%opt)
+      %ret.2 : Tensor = aten::div(%out, %out, %out)
+      return (%opt, %out, %ret.2)
+      )IR",
+          &*graph,
+          vmap);
+
+      AliasDb aliasDb(graph);
+      AT_ASSERT(!aliasDb.hasWriters(vmap["opt"]->node()));
+    }
+  }
 }
 
 void testWriteTracking() {
@@ -490,6 +512,247 @@ void testWriteTracking() {
   }
 }
 
+void testContainerAliasing() {
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph():
+    %x : str = prim::Constant[value="a"]()
+    %y : Tensor = prim::Constant()
+    %a : (Tensor) = prim::TupleConstruct(%y)
+    %b : Dict(str, Tensor) = prim::DictConstruct(%x, %y)
+    %c : Tensor[] = prim::ListConstruct(%y)
+    return (%a, %b, %c)
+    )IR",
+        &*graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    auto str_node = node_iter++; // string
+    Node* ten_node = *node_iter++;
+    AliasDb aliasDb(graph);
+
+    AT_ASSERT(graph->outputs().size() == 3);
+    for (auto out : graph->outputs()) {
+      AT_ASSERT(aliasDb.mayContainAlias(ten_node->output(), out));
+    }
+    AT_ASSERT(aliasDb.mayContainAlias({ten_node->output()}, graph->outputs()));
+    AT_ASSERT(!aliasDb.mayContainAlias(str_node->output(), graph->outputs()));
+  }
+
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph():
+    %x : str = prim::Constant[value="a"]()
+    %y : int = prim::Constant[value=1]()
+    %a : (int) = prim::TupleConstruct(%y)
+    %b : Dict(str, int) = prim::DictConstruct(%x, %y)
+    %c : int[] = prim::ListConstruct(%y)
+    return (%a, %b, %c)
+    )IR",
+        &*graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    node_iter++; // string
+    Node* int_node = *node_iter++;
+    AliasDb aliasDb(graph);
+
+    AT_ASSERT(graph->outputs().size() == 3);
+    // primitive values don't need to alias container
+    for (auto out : graph->outputs()) {
+      AT_ASSERT(!aliasDb.mayContainAlias(int_node->output(), out));
+    }
+  }
+
+  // Test input aliasing
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+  graph(%x: Tensor, %y: Tensor):
+    %a : (Tensor) = prim::TupleConstruct(%x)
+    return (%a)
+    )IR",
+        &*graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    auto tuple_node = *node_iter;
+    AliasDb aliasDb(graph);
+
+    for (auto input : graph->inputs()) {
+      AT_ASSERT(aliasDb.mayContainAlias(input, tuple_node->output()));
+    }
+    AT_ASSERT(aliasDb.mayContainAlias(graph->inputs(), graph->outputs()));
+  }
+
+  // Test tuple that doesn't come from construct
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+graph(%x : int,
+      %y : Tensor,
+      %z : Tensor):
+  %3 : int = prim::Constant[value=1]()
+  %4 : bool = aten::eq(%x, %3)
+  %a : (Tensor) = prim::If(%4)
+    block0():
+      %a.1 : (Tensor) = prim::TupleConstruct(%y)
+      -> (%a.1)
+    block1():
+      %a.2 : (Tensor) = prim::TupleConstruct(%z)
+      -> (%a.2)
+  return (%a)
+ )IR",
+        &*graph);
+
+    AliasDb aliasDb(graph);
+
+    for (auto input : graph->inputs()) {
+      if (input->type() == IntType::get()) {
+        continue;
+      }
+
+      AT_ASSERT(aliasDb.mayContainAlias(input, graph->outputs().at(0)));
+    }
+  }
+
+  // test nested types
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+graph():
+  %4 : Device? = prim::Constant()
+  %2 : int? = prim::Constant()
+  %0 : float = prim::Constant[value=1]()
+  %20 : bool = prim::Constant[value=0]()
+  %a : Tensor = aten::tensor(%0, %2, %4, %20)
+  %a_list : Tensor[] = prim::ListConstruct(%a)
+  %b : Tensor = aten::tensor(%0, %2, %4, %20)
+  %b_list : Tensor[] = prim::ListConstruct(%b)
+  %13 : (Tensor[], Tensor[]) = prim::TupleConstruct(%a_list, %b_list)
+  return (%13)
+)IR",
+        &*graph);
+    AliasDb aliasDb(graph);
+    auto g_output = graph->outputs().at(0);
+    auto list_2 = g_output->node()->inputs().at(0);
+    auto list_1 = g_output->node()->inputs().at(1);
+
+    // TODO FIX assume conservatively for now
+    AT_ASSERT(aliasDb.mayContainAlias(list_1, list_2));
+    AT_ASSERT(aliasDb.mayContainAlias(list_2, list_1));
+
+    AT_ASSERT(aliasDb.mayContainAlias(list_1, g_output));
+    AT_ASSERT(aliasDb.mayContainAlias(list_2, g_output));
+  }
+
+  // simple example
+  {
+    auto graph = std::make_shared<Graph>();
+    script::parseIR(
+        R"IR(
+graph():
+  %0 : Tensor = prim::Constant()
+  %1 : Tensor = prim::Constant()
+  %13 : (Tensor) = prim::TupleConstruct(%0)
+  return (%13)
+)IR",
+        &*graph);
+    AliasDb aliasDb(graph);
+
+    auto node_iter = graph->block()->nodes().begin();
+    auto first_ten = *node_iter++;
+    auto second_ten = *node_iter++;
+    auto tup_node = *node_iter;
+
+    AT_ASSERT(aliasDb.mayContainAlias(first_ten->output(), tup_node->output()));
+    AT_ASSERT(
+        !aliasDb.mayContainAlias(second_ten->output(), tup_node->output()));
+
+    std::vector<Value*> first_st = {first_ten->output()};
+    std::vector<Value*> second_st = {second_ten->output()};
+    std::vector<Value*> tup_st = {tup_node->output()};
+    AT_ASSERT(aliasDb.mayContainAlias(first_st, tup_st));
+    AT_ASSERT(!aliasDb.mayContainAlias(first_st, second_st));
+    AT_ASSERT(!aliasDb.mayContainAlias(second_st, tup_st));
+  }
+  {
+    // Test list container aliasing
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+graph():
+  %10 : bool? = prim::Constant()
+  %8 : Device? = prim::Constant()
+  %4 : int? = prim::Constant()
+  %0 : int = prim::Constant[value=2]()
+  %1 : int = prim::Constant[value=3]()
+  %2 : int[] = prim::ListConstruct(%0, %1)
+  %x : Tensor = aten::rand(%2, %4, %4, %8, %10)
+  %12 : int[] = prim::ListConstruct(%0, %1)
+  %y : Tensor = aten::rand(%12, %4, %4, %8, %10)
+  %22 : int[] = prim::ListConstruct(%0, %1)
+  %z : Tensor = aten::rand(%22, %4, %4, %8, %10)
+  %32 : int[] = prim::ListConstruct(%0, %1)
+  %fresh : Tensor = aten::rand(%32, %4, %4, %8, %10)
+  %foo : Tensor[] = prim::ListConstruct(%x, %y)
+  %43 : Tensor[] = aten::append(%foo, %z)
+  return ()
+)IR",
+        graph.get(),
+        vmap);
+    AliasDb aliasDb(graph);
+    auto x = vmap["x"];
+    auto y = vmap["y"];
+    auto z = vmap["z"];
+    // Tensors x, y, and z went into a list, so they all may alias each other.
+    ASSERT_TRUE(aliasDb.mayAlias(x, y));
+    ASSERT_TRUE(aliasDb.mayAlias(y, z));
+    ASSERT_TRUE(aliasDb.mayAlias(x, z));
+
+    // But we know `fresh` didn't go into a list, so x, y, and z should not
+    // alias it.
+    auto fresh = vmap["fresh"];
+    ASSERT_FALSE(aliasDb.mayAlias(x, fresh));
+    ASSERT_FALSE(aliasDb.mayAlias(y, fresh));
+    ASSERT_FALSE(aliasDb.mayAlias(z, fresh));
+  }
+  {
+    // test "conservative" analysis writes to the inside of a container.
+    auto ops = torch::RegisterOperators(
+        "custom::conservative", [](std::vector<at::Tensor> in) { return in; });
+
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+graph():
+  %10 : bool? = prim::Constant()
+  %8 : Device? = prim::Constant()
+  %4 : int? = prim::Constant()
+  %0 : int = prim::Constant[value=2]()
+  %1 : int = prim::Constant[value=3]()
+  %2 : int[] = prim::ListConstruct(%0, %1)
+  %11 : Tensor = aten::rand(%2, %4, %4, %8, %10)
+  %12 : Tensor[] = prim::ListConstruct(%11)
+  %out : Tensor[] = custom::conservative(%12)
+  %ret.2 : Tensor = aten::div(%11, %11)
+  return ()
+)IR",
+        graph.get(),
+        vmap);
+    AliasDb aliasDb(graph);
+    auto conservativeOp = vmap["out"]->node();
+    auto tensor = vmap["11"];
+    ASSERT_TRUE(aliasDb.writesToAlias(conservativeOp, ValueSet{tensor}));
+  }
+}
+
 void testWildcards() {
   RegisterOperators reg(
       {Operator(
@@ -515,11 +778,9 @@ void testWildcards() {
     AliasDb aliasDb(graph);
 
     ASSERT_FALSE(aliasDb.mayAlias(a, fresh));
-    ASSERT_TRUE(aliasDb.mayAlias(wildcard, fresh));
+    ASSERT_FALSE(aliasDb.mayAlias(wildcard, fresh));
     ASSERT_TRUE(aliasDb.mayAlias(wildcard, a));
-    ASSERT_FALSE(aliasDb.mayAlias(
-        std::unordered_set<const Value*>({wildcard}),
-        std::unordered_set<const Value*>()));
+    ASSERT_FALSE(aliasDb.mayAlias(ValueSet{wildcard}, ValueSet{}));
     ASSERT_FALSE(aliasDb.hasWriters(wildcard->node()));
   }
 
@@ -527,8 +788,7 @@ void testWildcards() {
   {
     graph->lint();
     AliasDb aliasDb(graph);
-    // Any write should be considered a write to the wildcard
-    ASSERT_TRUE(aliasDb.hasWriters(wildcard->node()));
+    ASSERT_FALSE(aliasDb.hasWriters(wildcard->node()));
   }
 
   const auto wildcardWrite = graph->insert(writes, {wildcard})->node();
@@ -536,9 +796,9 @@ void testWildcards() {
     graph->lint();
     AliasDb aliasDb(graph);
     // Test writes to wildcards
-    ASSERT_TRUE(aliasDb.writesToAlias(
+    ASSERT_FALSE(aliasDb.writesToAlias(
         wildcardWrite, std::unordered_set<const Value*>{fresh}));
-    ASSERT_TRUE(aliasDb.writesToAlias(
+    ASSERT_FALSE(aliasDb.writesToAlias(
         wildcardWrite, std::unordered_set<const Value*>{fresh2}));
     ASSERT_TRUE(aliasDb.writesToAlias(
         wildcardWrite, std::unordered_set<const Value*>{a}));
@@ -593,17 +853,90 @@ void testMemoryDAG() {
     ASSERT_TRUE(t.mayAlias(e, f));
     // But a and f don't alias
     ASSERT_FALSE(t.mayAlias(a, f));
+  }
 
-    /**
-     * Test mayAlias() set interface
-     */
-    std::multiset<const Element*> foo{c, c, d};
-    std::multiset<const Element*> bar{e, f};
-    std::unordered_set<const Element*> baz{f, g};
-    ASSERT_TRUE(t.mayAlias(foo, bar));
-    ASSERT_TRUE(t.mayAlias(bar, baz));
-    ASSERT_FALSE(t.mayAlias(foo, baz));
+  {
+    // x(y) -> x contains y
+
+    // b(a)
+    // c(a)
+    MemoryDAG t;
+    auto a = t.makeFreshValue(aValue);
+    auto b = t.makeFreshValue(bValue);
+    t.addToContainedElements(a, b);
+
+    auto c = t.makeFreshValue(cValue);
+    t.addToContainedElements(a, c);
+
+    AT_ASSERT(t.mayContainAlias(a, b));
+    AT_ASSERT(t.mayContainAlias(b, a));
+
+    AT_ASSERT(t.mayContainAlias(a, c))
+    AT_ASSERT(t.mayContainAlias(c, a));
+
+    AT_ASSERT(t.mayContainAlias(b, c));
+    AT_ASSERT(t.mayContainAlias(c, b));
+
+    // containers contain an element in themselves
+    AT_ASSERT(t.mayContainAlias(b, b));
+    AT_ASSERT(t.mayContainAlias(c, c));
+    AT_ASSERT(t.mayContainAlias(a, a));
+
+    auto d = t.makeFreshValue(dValue);
+
+    // b(a)
+    // c(a)
+    // d(b(a))
+    t.addToContainedElements(b, d);
+    AT_ASSERT(t.mayContainAlias(b, d));
+    AT_ASSERT(t.mayContainAlias(d, b));
+
+    AT_ASSERT(t.mayContainAlias(c, d));
+    AT_ASSERT(t.mayContainAlias(d, c));
+
+    AT_ASSERT(t.mayContainAlias(a, d));
+
+    // f(e)
+    auto f = t.makeFreshValue(aValue);
+    auto e = t.makeFreshValue(bValue);
+
+    t.addToContainedElements(f, e);
+
+    for (auto elem : {a, b, c, d}) {
+      AT_ASSERT(!t.mayContainAlias(f, elem));
+      AT_ASSERT(!t.mayContainAlias(e, elem));
+    }
   }
 }
+
+void testAliasRegistration() {
+  {
+    auto registry = torch::RegisterOperators()
+      .op("foo::rand", torch::RegisterOperators::options()
+        .catchAllKernel([](at::Tensor) -> at::Tensor { return at::rand({2, 2}); })
+        .aliasAnalysis(AliasAnalysisKind::DEFAULT));
+    const auto rand_op = Symbol::fromQualString("foo::rand");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->insert(rand_op, {a});
+    AliasDb aliasDb(graph);
+    // Conservatively we assume there is a reference
+    ASSERT_TRUE(aliasDb.mayAlias(a, b));
+  }
+  {
+    auto registry = torch::RegisterOperators()
+      .op("foo::pure", torch::RegisterOperators::options()
+        .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
+        .aliasAnalysis(AliasAnalysisKind::PURE));
+    const auto rand_op = Symbol::fromQualString("foo::pure");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    auto b = graph->insert(rand_op, {a});
+    AliasDb aliasDb(graph);
+    // PURE means there is no reference
+    ASSERT_FALSE(aliasDb.mayAlias(a, b));
+  }
+}
+
 } // namespace jit
 } // namespace torch

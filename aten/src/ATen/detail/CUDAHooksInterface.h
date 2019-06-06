@@ -111,19 +111,19 @@ struct CAFFE2_API CUDAHooksInterface {
         "Cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheMaxSize() const {
+  virtual int64_t cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
+  virtual void cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheSize() const {
+  virtual int64_t cuFFTGetPlanCacheSize(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTClearPlanCache() const {
+  virtual void cuFFTClearPlanCache(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 

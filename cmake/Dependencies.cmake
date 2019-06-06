@@ -73,6 +73,27 @@ else()
       "Cannot find threading library. Caffe2 requires Threads to compile.")
 endif()
 
+if (USE_TBB)
+  message(STATUS "Compiling TBB from source")
+  # Unset our restrictive C++ flags here and reset them later.
+  # Remove this once we use proper target_compile_options.
+  set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  set(CMAKE_CXX_FLAGS)
+
+  set(TBB_ROOT_DIR "${CMAKE_SOURCE_DIR}/third_party/tbb")
+  set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
+  set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
+
+  install(TARGETS tbb EXPORT Caffe2Targets DESTINATION lib)
+
+  set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
+endif()
+
 # ---[ protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_LITE_PROTO)
@@ -81,10 +102,12 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # ---[ BLAS
-if(NOT BUILD_ATEN_MOBILE)
+if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
 else()
   set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
+  set(AT_MKLDNN_ENABLED 0)
+  set(AT_MKL_ENABLED 0)
 endif()
 set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
@@ -113,7 +136,7 @@ elseif(BLAS STREQUAL "MKL")
     message(STATUS "MKL include directory: ${MKL_INCLUDE_DIR}")
     message(STATUS "MKL OpenMP type: ${MKL_OPENMP_TYPE}")
     message(STATUS "MKL OpenMP library: ${MKL_OPENMP_LIBRARY}")
-    include_directories(SYSTEM ${MKL_INCLUDE_DIR})
+    include_directories(AFTER SYSTEM ${MKL_INCLUDE_DIR})
     list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
     set(CAFFE2_USE_MKL ON)
   else()
@@ -131,7 +154,7 @@ else()
 endif()
 
 
-if (NOT BUILD_ATEN_MOBILE)
+if (NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
   set(AT_MKL_MT 0)
   set(USE_BLAS 1)
@@ -338,6 +361,22 @@ if(BUILD_TEST)
   if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
       set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
   endif()
+  # We need to replace googletest cmake scripts too.
+  # Otherwise, it will sometimes break the build.
+  # To make the git clean after the build, we make a backup first.
+  if (MSVC AND MSVC_Z7_OVERRIDE)
+    execute_process(
+      COMMAND ${CMAKE_COMMAND}
+              "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
+              "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
+              "-DREVERT=0"
+              "-P"
+              "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
+      RESULT_VARIABLE _exitcode)
+    if(NOT ${_exitcode} EQUAL 0)
+      message(WARNING "Patching failed for Google Test. The build may fail.")
+    endif()
+  endif()
 
   # Add googletest subdirectory but make sure our INCLUDE_DIRECTORIES
   # don't bleed into it. This is because libraries installed into the root conda
@@ -363,6 +402,21 @@ if(BUILD_TEST)
 
   # Recover build options.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+
+  # To make the git clean after the build, we revert the changes here.
+  if (MSVC AND MSVC_Z7_OVERRIDE)
+    execute_process(
+      COMMAND ${CMAKE_COMMAND}
+              "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
+              "-DBACKUP=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake.bak"
+              "-DREVERT=1"
+              "-P"
+              "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
+      RESULT_VARIABLE _exitcode)
+    if(NOT ${_exitcode} EQUAL 0)
+      message(WARNING "Reverting changes failed for Google Test. The build may fail.")
+    endif()
+  endif()
 endif()
 
 # ---[ FBGEMM
@@ -620,8 +674,11 @@ if(BUILD_PYTHON)
   # don't want to overwrite it because we trust python more than cmake
   if (NUMPY_INCLUDE_DIR)
     set(NUMPY_FOUND ON)
-  else()
+  elseif(USE_NUMPY)
     find_package(NumPy)
+    if(NOT NUMPY_FOUND)
+      message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
+    endif()
   endif()
 
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
@@ -917,6 +974,8 @@ if(USE_GLOO)
     list(APPEND Caffe2_DEPENDENCY_LIBS gloo)
     if(USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS gloo_cuda)
+    elseif(USE_ROCM)
+      list(APPEND Caffe2_HIP_DEPENDENCY_LIBS gloo_hip)
     endif()
     add_compile_options(-DCAFFE2_USE_GLOO)
   endif()
@@ -957,7 +1016,7 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-if (NOT BUILD_ATEN_MOBILE AND BUILD_CAFFE2_OPS)
+if (NOT INTERN_BUILD_MOBILE AND BUILD_CAFFE2_OPS)
   if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
     if (USE_CUDA)
@@ -1034,7 +1093,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # --[ ATen checks
-if (NOT BUILD_ATEN_MOBILE)
+if (NOT INTERN_BUILD_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -1065,15 +1124,6 @@ if (NOT BUILD_ATEN_MOBILE)
       SET(CMAKE_C_STANDARD 11)
     ENDIF ()
   ENDIF()
-
-  if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
-      if (CUDA_VERSION VERSION_LESS "8.0")
-        MESSAGE(STATUS "Found gcc >=5 and CUDA <= 7.5, adding workaround C++ flags")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORCE_INLINES -D_MWAITXINTRIN_H_INCLUDED -D__STRICT_ANSI__")
-      endif()
-    endif()
-  endif()
 
   LIST(APPEND CUDA_NVCC_FLAGS -Wno-deprecated-gpu-targets)
   LIST(APPEND CUDA_NVCC_FLAGS --expt-extended-lambda)
@@ -1302,7 +1352,7 @@ if (NOT BUILD_ATEN_MOBILE)
     INCLUDE(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
     IF(MKLDNN_FOUND)
       SET(AT_MKLDNN_ENABLED 1)
-      INCLUDE_DIRECTORIES(BEFORE SYSTEM ${MKLDNN_INCLUDE_DIR})
+      INCLUDE_DIRECTORIES(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
       IF(BUILD_CAFFE2_OPS)
         SET(CAFFE2_USE_MKLDNN ON)
         LIST(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkldnn)

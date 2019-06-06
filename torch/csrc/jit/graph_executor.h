@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
@@ -11,6 +10,7 @@ namespace torch {
 namespace jit {
 
 struct GraphExecutorState;
+struct Code;
 
 // Notice that those structs don't manage lifetime of their members.
 // They is only valid only right after you call getDebugState() and should never
@@ -26,7 +26,7 @@ struct GraphExecutorState {
   std::unordered_map<ArgumentSpec, ExecutionPlanState> execution_plans;
 };
 
-struct GraphExecutorImpl;
+struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
@@ -35,11 +35,10 @@ struct TORCH_API GraphExecutor {
     return pImpl != nullptr;
   }
   std::shared_ptr<Graph> graph() const;
-  std::shared_ptr<Graph> graphFor(const Stack& inputs) const;
   GraphExecutorState getDebugState();
 
  private:
-  std::shared_ptr<GraphExecutorImpl> pImpl;
+  std::shared_ptr<GraphExecutorImplBase> pImpl;
 };
 
 // These passes need to run before it is valid to pass to the interpreter
@@ -47,11 +46,20 @@ struct TORCH_API GraphExecutor {
 TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
 
 TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
+TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
+
+TORCH_API bool& getProfilingMode();
 
 namespace detail {
 
 GraphExecutor* getGradExecutor(Operation& op);
 
+// for debugging information we expose a way to get the last actually
+// run graph. Previous approaches allowed querying the GraphExecutor
+// for what graph it would run in certain circumstances (graphFor), but
+// this is fragile because we sometimes change how these decisions are made.
+// This interface still allows our tests to look at optimized graphs, but
+// with less plumbing.
 } // namespace detail
 
 } // namespace jit

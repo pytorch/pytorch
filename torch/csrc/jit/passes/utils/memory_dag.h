@@ -1,9 +1,16 @@
 #pragma once
 
-#include <unordered_set>
-#include <unordered_map>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/sparse_bitset.h>
 #include <memory>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
+// Uses a compressed index representation for faster comparisons
+typedef c10::SparseBitVector<256> MemoryLocations;
 namespace torch {
 namespace jit {
 
@@ -25,10 +32,19 @@ struct Value;
 //
 // So, by traversing the "points-to" graph to the leaves, you can determine
 // which memory locations an element may point to.
-class MemoryDAG {
+class TORCH_API MemoryDAG {
  public:
+  // explicitly delete copy constructor because otherwise windows build is
+  // confused for an exported class see
+  // https://stackoverflow.com/a/51033485/105137
+  MemoryDAG() {}
+  MemoryDAG(const MemoryDAG&) = delete;
+  MemoryDAG& operator=(const MemoryDAG&) = delete;
+
   // Make `from` point at `to`.
   void makePointerTo(Element* from, Element* to);
+
+  void addToContainedElements(Element* contained, Element* container);
 
   // Make a fresh element (i.e. an element that doesn't point to anything) and
   // return it.
@@ -38,51 +54,27 @@ class MemoryDAG {
   bool mayAlias(const Element* a, const Element* b) const;
   bool mayAlias(Element* a, Element* b) const;
 
-  // Do any values in group `a` potentially share a memory location with any
-  // value in group `b`?
-  //
-  // This is written so that either of the inputs could be a multiset
-  template <typename T, typename U>
-  bool mayAlias(const T& a, const U& b) const {
-    if (a.empty() || b.empty()) {
-      return false;
-    }
+  // Does a hold reference to any memory that is stored in elem, or vice versa?
+  bool mayContainAlias(const Element* a, const Element* b) const;
+  bool mayContainAlias(Element* a, Element* b) const;
 
-    // Record all memory locations from group `a`
-    std::unordered_set<const Element*> memoryLocations;
-    for (auto it = a.cbegin(); it != a.cend();) {
-      const auto element = *it;
+  bool mayContainAlias(
+      const at::ArrayRef<Element*>& a,
+      const at::ArrayRef<Element*>& b) const;
 
-      for (const auto loc : element->getMemoryLocations()) {
-        memoryLocations.insert(loc);
-      }
-
-      const auto cnt = a.count(*it);
-      std::advance(it, cnt);
-    }
-
-    // If any of group `b`s memory locations overlap, return true.
-    for (auto it = b.cbegin(); it != b.cend();) {
-      const auto element = *it;
-
-      for (const auto loc : element->getMemoryLocations()) {
-        if (memoryLocations.count(loc)) {
-          return true;
-        }
-      }
-
-      const auto cnt = b.count(*it);
-      std::advance(it, cnt);
-    }
-    // No overlap, so group `a` and `b` do not share a memory location
-    return false;
-  }
+  // Converts from the compressed index representation
+  const Element* fromIndex(unsigned x) const;
 
  private:
-   bool mayAliasImpl(const Element* a, const Element* b) const;
-  // Structure that owns all the element pointers. It's a map of
-  //  raw pointer -> unique_ptr to facilitate easy queries
-  std::unordered_map<Element*, std::unique_ptr<Element>> elements_;
+  bool mayAliasImpl(const Element* a, const Element* b) const;
+  bool mayContainAliasImpl(const Element* contained, const Element* container)
+      const;
+  void collectAllContainedMemoryLocations(
+    const Element* elem, MemoryLocations& cont) const;
+
+  std::vector<std::unique_ptr<Element>> indexToElementMap;
+
+  friend class AliasDB;
 };
 
 enum class BfsDirection {
@@ -94,28 +86,32 @@ enum class BfsDirection {
 // anything that could have an aliasing relationship, mostly IR `Value`s, but
 // also the "inside of a list", or wildcards.
 struct Element {
+  MemoryDAG& dag;
+
   // The value that this element corresponds to. May be null if this element
   // doesn't represent a first-class value.
   const Value* value = nullptr;
 
   // All elements that this element *may* point to. It's possible to have
   // multiple elements that you might point to due to control flow/complex ops
-  std::unordered_set<Element*> pointsTo;
+  MemoryLocations pointsTo;
   // Backreference for points-to.
-  std::unordered_set<Element*> pointedFrom;
+  MemoryLocations pointedFrom;
+
+  MemoryLocations contained_elements;
+  unsigned index;
+  Element(MemoryDAG& dag_, const Value* value_, unsigned index_);
 
   // Return the unique memory locations that `Element` might represent.
-  std::unordered_set<const Element*> getMemoryLocations() const;
+  TORCH_API const MemoryLocations& getMemoryLocations() const;
   // We do path compression to make repeated memory location queries faster.
   // An empty cache means it is invalidated (it can never be empty otherwise,
   // since every element must point to at least one memory location).
-  mutable std::unordered_set<const Element*> cachedMemoryLocations_;
+  mutable MemoryLocations cachedMemoryLocations_;
 
   // Do a breadth-first search over the graph, starting at `this` and
   // traversing in the direction `dir`.`fn` will be run on each element.
-  template <typename Fn>
-  bool bfs(Fn fn, BfsDirection dir) const;
+  void bfs(BfsDirection dir, MemoryLocations& res) const;
 };
-
 } // namespace jit
 } // namespace torch

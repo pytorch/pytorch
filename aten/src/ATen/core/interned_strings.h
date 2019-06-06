@@ -5,12 +5,15 @@
 #include <unordered_map>
 #include <algorithm>
 
-#include <ATen/core/aten_interned_strings.h>
 #include <c10/macros/Macros.h>
+
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
+#include <ATen/core/aten_interned_strings.h>
+#endif
 
 namespace c10 {
 
-#ifndef C10_MOBILE
+#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 #define FORALL_NS_SYMBOLS(_)       \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
@@ -63,12 +66,14 @@ namespace c10 {
   _(prim, Bool)                    \
   _(prim, Int)                     \
   _(prim, Float)                   \
+  _(prim, str)                     \
   _(prim, device)                  \
   _(prim, dtype)                   \
   _(prim, shape)                   \
   _(prim, requires_grad)           \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
+  _(prim, Guard)                   \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
   _(prim, MMTreeReduce)            \
@@ -78,9 +83,12 @@ namespace c10 {
   _(prim, abs)                     \
   _(prim, rangelist)               \
   _(aten, _grad_sum_to_size)       \
+  _(aten, _size_if_not_equal)      \
   _(aten, _ncf_unsqueeze)          \
   _(aten, warn)                    \
   _(aten, floordiv)                \
+  _(aten, __range_length)          \
+  _(aten, __derive_index)          \
   _(aten, __round_to_zero_floordiv)\
   _(aten, _unwrap_optional)        \
   _(prim, fork)                    \
@@ -89,8 +97,11 @@ namespace c10 {
   _(prim, CreateObject)            \
   _(prim, SetAttr)                 \
   _(prim, GetAttr)                 \
+  _(prim, profile)                 \
   _(prim, AddStatValue)            \
   _(prim, TimePoint)               \
+  _(prim, CallFunction)            \
+  _(prim, CallMethod)              \
   _(aten, append)                  \
   _(aten, item)                    \
   _(aten, format)                  \
@@ -114,6 +125,7 @@ namespace c10 {
   _(aten, transpose_)              \
   _(aten, unsqueeze_)              \
   _(aten, _set_item)               \
+  _(aten, manual_seed)             \
   _(aten, set_)                    \
   _(aten, index_put_)              \
   _(aten, device)                  \
@@ -121,6 +133,7 @@ namespace c10 {
   _(aten, len)                     \
   _(aten, list)                    \
   _(aten, wait)                    \
+  _(aten, save)                    \
   _(aten, ord)                     \
   _(prim, unchecked_unwrap_optional)\
   FORALL_ATEN_BASE_SYMBOLS(_)      \
@@ -153,6 +166,7 @@ namespace c10 {
   _(onnx, ATen)                    \
   _(onnx, Split)                   \
   _(onnx, ConstantOfShape)         \
+  _(onnx, Cast)         \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
   _(attr, Subgraph)                \
   _(attr, ReverseSubgraph)         \
@@ -199,7 +213,7 @@ namespace c10 {
 // 'onnx' symbols correspond to ONNX operators.  Their semantics
 // are defined in https://github.com/onnx/onnx/blob/master/docs/Operators.md
 // The particular version we are targeting is specified by '_onnx_opset_version'
-// in torch.onnx.symbolic
+// in torch.onnx.symbolic_helper
 //
 // In general, most ONNX operators won't get an entry here, because they
 // are handled from the Python end.  However, you may occasionally need

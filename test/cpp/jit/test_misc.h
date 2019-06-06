@@ -23,6 +23,8 @@
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
+#include "torch/csrc/jit/passes/guard_elimination.h"
+#include "torch/csrc/jit/passes/insert_guards.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
@@ -39,6 +41,7 @@
 
 #include <torch/csrc/jit/testing/file_check.h>
 #include "ATen/core/ivalue.h"
+#include "torch/csrc/jit/profiling_record.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/jit.h"
@@ -349,6 +352,39 @@ void testATenNativeBatchNorm() {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
+void testCustomFusion() {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto c = a * b;
+  auto d = c * a;
+  graph->registerOutput(d.value());
+
+  torch::jit::overrideCanFuseOnCPU(true);
+  CustomFuseGraph(
+      graph,
+      [](Node* n) { return n->kind() != prim::Param; },
+      Symbol::fromQualString("prim::FusionGroup"));
+  torch::jit::overrideCanFuseOnCPU(false);
+
+  const auto& nodes = graph->nodes();
+  auto fusion_group =
+      std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
+        return node->kind() == Symbol::fromQualString("prim::FusionGroup");
+      });
+  AT_ASSERT(fusion_group != nodes.end());
+
+  auto subgraph = fusion_group->g(attr::Subgraph);
+  auto hits = 0;
+  // two multiplications
+  for (const auto& n : subgraph->nodes()) {
+    hits++;
+  }
+  AT_ASSERT(hits == 2);
+}
+
 static const auto cf_examples = R"JIT(
   def if_test(a, b):
       # FIXME: use 0 instead of a.
@@ -608,22 +644,22 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
     const auto& sizes = std::get<1>(input);
     if (fn == "test") {
       found_test = true;
-      AT_CHECK(sizes.size() == 1);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes.size() == 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
     } else if (fn == "test::pow") {
       found_pow = true;
-      AT_CHECK(sizes.size() == 2);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
-      AT_CHECK(sizes[1].empty());
+      TORCH_CHECK(sizes.size() == 2);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes[1].empty());
     } else if (fn.find("::mul") != std::string::npos) {
       found_mul = true;
-      AT_CHECK(sizes.size() > 1);
-      AT_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes.size() > 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
     }
   }
-  AT_CHECK(found_test);
-  AT_CHECK(found_pow);
-  AT_CHECK(found_mul);
+  TORCH_CHECK(found_test);
+  TORCH_CHECK(found_pow);
+  TORCH_CHECK(found_mul);
 }
 
 std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
@@ -649,13 +685,17 @@ void testRecordFunction() {
         for (const auto& input : inputs) {
           if (input.isTensor()) {
             sizes.push_back(input.toTensor().sizes().vec());
-          } else if (input.isScalar()){
+          } else if (input.isScalar()) {
             sizes.push_back(std::vector<int64_t>());
           }
         }
         traced_inputs.push_back(
             std::make_tuple(std::string(getFullName(&fn)), sizes));
-      }, [](const autograd::profiler::RecordFunction&) {}, true);
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      true);
+
+  autograd::profiler::setSamplingProbability(1.0);
 
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
@@ -702,7 +742,7 @@ void testAutogradProfiler() {
   for (size_t pos = 0; (pos = result.find("tanh", pos)) != std::string::npos;
        count++, pos++) {
   }
-  AT_CHECK(count == 200);
+  TORCH_CHECK(count == 200);
 }
 
 void testNoneSchemaMatch() {
@@ -757,6 +797,29 @@ void testModuleDefine() {
   AT_ASSERT(result.toTensor().item<float>() == 6)
 }
 
+void testModuleConversion() {
+  auto m = std::make_shared<script::Module>();
+  {
+    // test cuda to cpu for params and buffers
+    m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
+    m->register_buffer("bar", torch::ones({}, at::kCUDA));
+
+    m->to(at::kCUDA);
+    m->to(at::kCPU);
+    AT_ASSERT(m->get_parameter("foo").device().is_cpu());
+    AT_ASSERT(m->get_buffer("bar").device().is_cpu());
+  }
+  {
+    // test cpu to cuda for params and buffers
+    m->register_parameter("foo", torch::ones({}), false);
+    m->register_buffer("bar", torch::ones({}));
+
+    m->to(at::kCUDA);
+    AT_ASSERT(m->get_parameter("foo").device().is_cuda());
+    AT_ASSERT(m->get_buffer("bar").device().is_cuda());
+  }
+}
+
 static int testPassValue = 0;
 void fakePass(std::shared_ptr<Graph>& g) {
   testPassValue++;
@@ -781,6 +844,101 @@ graph(%a):
   };
   run(graph, stack);
   AT_ASSERT(testPassValue);
+}
+
+static void checkShape(
+    Node* n,
+    std::vector<int64_t> expected,
+    bool prev = true) {
+  auto profile = (prev) ? n->inputs().at(0)->node() : n;
+  auto tp = profile->output()->type();
+  auto ptp = tp->expect<ProfiledTensorType>();
+  ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
+void testInsertAndEliminateGuards() {
+  static const auto basic_example = R"JIT(
+  def basic(x, y):
+    a = x + y
+    b = x * y
+    c = x + 1
+    d = a - c
+    e = b - c
+    return d + e
+  )JIT";
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("basic");
+  auto pr = ProfilingRecord::instrumentGraph(fun.graph());
+  auto x = at::randn({2, 3}, at::kCPU);
+  auto y = at::randn({2, 3}, at::kCPU);
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+  auto stack = createStack({v(x), v(y)});
+  // introduce some profiling information
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+  auto copy = pr->profiled_graph_->copy();
+  InsertGuards(copy);
+  auto nodes = copy->block()->nodes();
+  auto guard = std::find_if(nodes.begin(), nodes.end(), [](Node* n) {
+    return n->kind() == prim::Guard;
+  });
+  ASSERT_NE(guard, nodes.end());
+  ASSERT_EQ(guard->input()->type()->cast<ProfiledTensorType>(), nullptr);
+  checkShape(*guard, {2, 3}, false);
+  auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
+  int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 11);
+  // now eliminate as many guards as possible
+  // we should be left with two guards on x and y's defs
+  EliminateGuards(copy);
+  num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 2);
+}
+
+void testProfiler() {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2 * input_size;
+
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+
+  auto input = at::randn({batch_size, input_size}, at::kCPU);
+  auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(at::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  auto g = build_lstm();
+  auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
+
+  auto& opt_graph = *g.get();
+  ArgumentSpecCreator arg_spec_creator(opt_graph);
+  ArgumentSpec spec =
+      arg_spec_creator.create(autograd::GradMode::is_enabled(), stack);
+  arg_spec_creator.specializeTypes(opt_graph, spec);
+  auto pr = ProfilingRecord::instrumentGraph(g);
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+
+  auto begin = pr->profiled_graph_->block()->nodes().begin();
+  auto end = pr->profiled_graph_->block()->nodes().end();
+  auto mm =
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mm; });
+  ASSERT_NE(mm, end);
+  std::vector<int64_t> mm_expected{4, 256};
+  std::vector<int64_t> eltwise{4, 512};
+  checkShape(*mm, mm_expected);
+  auto sigmoid_n = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::sigmoid; });
+  ASSERT_NE(sigmoid_n, end);
+  checkShape(*sigmoid_n, eltwise);
+  auto tanh_n =
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
+  checkShape(*tanh_n, eltwise);
 }
 
 } // namespace test

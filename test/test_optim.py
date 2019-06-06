@@ -12,8 +12,9 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
     ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler, \
-    CyclicLR
-from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
+    CyclicLR, CosineAnnealingWarmRestarts
+from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
+    skipIfRocm
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -67,10 +68,11 @@ class TestOptim(TestCase):
                 y = grad[1]
                 v = torch.DoubleTensor([y - y / 4., y / 4.])
             x = sparse.DoubleTensor(i, v, torch.Size([2]))
-            if sparse_grad:
-                params.grad.data = x
-            else:
-                params.grad.data = x.to_dense()
+            with torch.no_grad():
+                if sparse_grad:
+                    params.grad = x
+                else:
+                    params.grad = x.to_dense()
             return loss
 
         for i in range(2000):
@@ -180,6 +182,11 @@ class TestOptim(TestCase):
             self.assertEqual(weight, weight_cuda)
             self.assertEqual(bias, bias_cuda)
 
+        # validate deepcopy() copies all public attributes
+        def getPublicAttr(obj):
+            return set(k for k in obj.__dict__ if not k.startswith('_'))
+        self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
+
     def _test_basic_cases(self, constructor, scheduler_constructors=None,
                           ignore_multidevice=False):
         if scheduler_constructors is None:
@@ -277,6 +284,7 @@ class TestOptim(TestCase):
             [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
         )
 
+    @skipIfRocm
     def test_adam(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Adam([weight, bias], lr=1e-3)
@@ -382,6 +390,7 @@ class TestOptim(TestCase):
              lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
         )
 
+    @skipIfRocm
     def test_adamax(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
@@ -406,6 +415,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
             optim.RMSprop(None, lr=1e-2, momentum=-1.0)
 
+    @skipIfRocm
     def test_asgd(self):
         self._test_basic_cases(
             lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
@@ -430,6 +440,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
             optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
+    @skipIfRocm
     def test_lbfgs(self):
         self._test_basic_cases(
             lambda weight, bias: optim.LBFGS([weight, bias]),
@@ -516,6 +527,82 @@ class TestLRScheduler(TestCase):
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
 
+    def test_old_pattern_warning(self):
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        def old_pattern():
+            for e in range(epochs):
+                scheduler.step()
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_with_arg(self):
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_resuming(self):
+        epochs = 35
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+
+        def old_pattern():
+            for e in range(epochs):
+                scheduler.step()
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_resuming_with_arg(self):
+        epochs = 35
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+
+    def test_new_pattern_no_warning(self):
+        import warnings
+
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            for e in range(epochs):                
+                self.opt.step()
+                scheduler.step()
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+    def test_new_pattern_no_warning_with_arg(self):
+        import warnings
+
+        epochs = 35
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            for e in range(epochs):                
+                self.opt.step()
+                scheduler.step(e)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3
         # lr = 0.005    if 30 <= epoch < 6
@@ -572,8 +659,9 @@ class TestLRScheduler(TestCase):
     def test_legacy_cos_anneal_lr(self):
         eta_min = 1e-10
         epochs = 20
-        scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        legacy_scheduler = LegacyCosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
+        T_max = 5
+        scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
+        legacy_scheduler = LegacyCosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min)
         self._test_against_legacy(scheduler, legacy_scheduler, epochs)
 
     def test_reduce_lr_on_plateau1(self):
@@ -959,6 +1047,62 @@ class TestLRScheduler(TestCase):
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         self._test(scheduler, targets, epochs)
 
+    def test_CosineAnnealingWarmRestarts_lr1(self):
+        iters = 100
+        eta_min = 1e-10
+        T_mults = [1, 2, 4]
+        for T_mult in T_mults:
+            T_i = 10
+            T_cur = 0
+            targets = [[0.05], [0.5]]
+            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
+            for _ in range(1, iters, 1):
+                T_cur += 1
+                if T_cur >= T_i:
+                    T_cur = T_cur - T_i
+                    T_i = int(T_mult) * T_i
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            self._test(scheduler, targets, iters)
+
+    def test_CosineAnnealingWarmRestarts_lr2(self):
+        iters = 30
+        eta_min = 1e-10
+        T_mults = [1, 2, 4]
+        for T_mult in T_mults:
+            T_i = 10
+            T_cur = 0
+            targets = [[0.05], [0.5]]
+            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
+            for _ in torch.arange(0.1, iters, 0.1):
+                T_cur = round(T_cur + 0.1, 1)
+                if T_cur >= T_i:
+                    T_cur = T_cur - T_i
+                    T_i = int(T_mult) * T_i
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            self._test_CosineAnnealingWarmRestarts(scheduler, targets, iters)
+
+    def test_CosineAnnealingWarmRestarts_lr3(self):
+        epochs_for_T_mults = [[0, 1, 2, 3, 4, 5, 12, 27, 3, 4, 5, 6, 13],
+                              [0, 1, 2, 3, 4, 5, 25, 32, 33, 34, 80, 81, 3],
+                              [0, 0.1, 0.2, 0.3, 1.3, 2.3, 17.5, 18.5, 19.5, 29.5, 30.5, 31.5, 50]]
+        T_curs_for_T_mults = [[1, 2, 3, 4, 5, 2, 7, 3, 4, 5, 6, 3],
+                              [1, 2, 3, 4, 5, 15, 2, 3, 4, 10, 11, 3],
+                              [0.1, 0.2, 0.3, 1.3, 2.3, 7.5, 8.5, 9.5, 19.5, 20.5, 21.5, 10]]
+        T_is_for_T_mults = [[10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10],
+                            [10, 10, 10, 10, 10, 20, 40, 40, 40, 80, 80, 10],
+                            [10, 10, 10, 10, 10, 30, 30, 30, 30, 30, 30, 90]]
+        eta_min = 1e-10
+        T_mults = [1, 2, 3]
+        for epochs, T_mult, T_curs, T_is in zip(epochs_for_T_mults, T_mults, T_curs_for_T_mults, T_is_for_T_mults):
+            targets = [[0.05], [0.5]]
+            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=T_mult, eta_min=eta_min)
+            for T_cur, T_i in zip(T_curs, T_is):
+                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            self._test_interleaved_CosineAnnealingWarmRestarts(scheduler, targets, epochs)
+
     def test_step_lr_state_dict(self):
         self._check_scheduler_state_dict(
             lambda: StepLR(self.opt, gamma=0.1, step_size=3),
@@ -1014,6 +1158,11 @@ class TestLRScheduler(TestCase):
             if key not in {'optimizer'}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)
 
+    def test_CosineAnnealingWarmRestarts_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=2),
+            lambda: CosineAnnealingWarmRestarts(self.opt, T_0=100))
+
     def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
         scheduler = constr()
         for _ in range(epochs):
@@ -1034,6 +1183,23 @@ class TestLRScheduler(TestCase):
                 self.assertAlmostEqual(target[epoch], param_group['lr'],
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
+
+    def _test_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs=10):
+        for index, epoch in enumerate(torch.arange(0, epochs, 0.1)):
+            epoch = round(epoch.item(), 1)
+            scheduler.step(epoch)
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[index], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[index], param_group['lr']), delta=1e-5)
+
+    def _test_interleaved_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs):
+        for index, epoch in enumerate(epochs):
+            scheduler.step(epoch)
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertAlmostEqual(target[index], param_group['lr'],
+                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                           epoch, target[index], param_group['lr']), delta=1e-5)
 
     def _test_against_legacy(self, scheduler, legacy_scheduler, epochs=10):
         self.setUp()

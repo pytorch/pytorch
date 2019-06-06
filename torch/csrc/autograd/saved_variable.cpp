@@ -22,7 +22,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
     has_grad_fn_ = !variable.is_leaf();
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
-    data_ = variable.data();
+    data_ = variable.tensor_data();
     if (variable.is_leaf()) {
       grad_accumulator_ = variable.grad_accumulator();
     } else if (!is_output) {

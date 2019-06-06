@@ -21,6 +21,11 @@
 
 namespace torch {
 namespace jit {
+
+namespace script {
+  struct Module;
+}
+
 namespace tracer {
 
 using ::c10::ivalue::List;
@@ -55,8 +60,6 @@ TORCH_API std::function<void()> pauseTracing();
 
 TORCH_API Value* getValueTrace(const IValue& var);
 
-TORCH_API Value* getNestedValueTrace(const IValue& v);
-
 TORCH_API Value* getOutputTrace(
     const std::shared_ptr<TracingState>& state,
     const Variable& var);
@@ -65,7 +68,30 @@ TORCH_API Value* getNestedOutputTrace(
     const std::shared_ptr<TracingState>& state,
     const IValue& iv);
 
-TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs);
+struct TypedStack : public std::pair<Stack, TupleTypePtr>
+{
+  using pair::pair;
+
+  // NB: The inherited default constructor gives nullptr for |type|,
+  //     so we provide a saner one.
+  TypedStack()
+    : pair({}, TupleType::create({}))
+  {}
+
+  Stack& stack() {
+    return this->first;
+  }
+  TupleTypePtr& types() {
+    return this->second;
+  }
+  size_t size() {
+    auto s = stack().size();
+    AT_ASSERT(s == types()->elements().size());
+    return s;
+  }
+};
+
+TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs, const std::shared_ptr<script::Module>& self=nullptr);
 
 TORCH_API void exit(const Stack& outputs);
 
@@ -79,6 +105,10 @@ TORCH_API void addInputs(
     const char* name,
     c10::optional<int64_t> value);
 TORCH_API void addInputs(Node* n, const char* name, bool value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<bool>& value);
 TORCH_API void addInputs(Node* n, const char* name, double value);
 TORCH_API void addInputs(Node* n, const char* name, const at::Scalar& value);
 TORCH_API void addInputs(
@@ -104,10 +134,6 @@ TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const at::SparseTensorRef& value);
-TORCH_API void addInputs(
-    Node* n,
-    const char* name,
     const at::TensorOptions& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Device value);
 TORCH_API void addInputs(Node* n, const char* name, at::Layout value);
@@ -116,6 +142,7 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::optional<at::ScalarType>& value);
+TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
 TORCH_API void addInputs(Node* n, const char* name, at::Generator* value);
 
 template<typename T>

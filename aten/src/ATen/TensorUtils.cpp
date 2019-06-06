@@ -20,13 +20,13 @@ std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
 }
 
 void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim) {
-  AT_CHECK(t->dim() == dim,
+  TORCH_CHECK(t->dim() == dim,
     "Expected ", dim, "-dimensional tensor, but got ", t->dim(),
     "-dimensional tensor for ", t," (while checking arguments for ", c, ")");
 }
 
 void checkDimRange(CheckedFrom c, const TensorGeometryArg& t, int64_t dim_start, int64_t dim_end) {
-  AT_CHECK(
+  TORCH_CHECK(
     t->dim() >= dim_start && t->dim() < dim_end,
     "Expected ", dim_start, " to ", (dim_end - 1), " dimensions, but got ",
     t->dim(), "-dimensional tensor for ", t, " (while checking arguments for ",
@@ -34,7 +34,7 @@ void checkDimRange(CheckedFrom c, const TensorGeometryArg& t, int64_t dim_start,
 }
 
 void checkContiguous(CheckedFrom c, const TensorGeometryArg& t) {
-  AT_CHECK(
+  TORCH_CHECK(
     t->is_contiguous(),
     "Expected contiguous tensor, but got non-contiguous tensor for ", t,
      " (while checking arguments for ", c, ")");
@@ -49,14 +49,14 @@ void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts) {
 
 void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
   checkDim(c, t, sizes.size());
-  AT_CHECK(
+  TORCH_CHECK(
     t->sizes().equals(sizes),
     "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),
     " for ", t, " (while checking arguments for ", c, ")");
 }
 
 void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t size) {
-  AT_CHECK(
+  TORCH_CHECK(
     t->size(dim) == size,
     "Expected tensor to have size ", size, " at dimension ", dim,
     ", but got size ", t->size(dim), " for ", t,
@@ -76,7 +76,7 @@ void checkAllSame(CheckedFrom c, ArrayRef<TensorArg> tensors, void(*fn)(CheckedF
 }
 
 void checkSameSize(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
-  AT_CHECK(
+  TORCH_CHECK(
     t1->sizes().equals(t2->sizes()),
     "Expected tensor for ", t1, " to have same size as tensor for ", t2,
     "; but ", t1->sizes(), " does not equal ", t2->sizes(),
@@ -88,7 +88,7 @@ void checkAllSameSize(CheckedFrom c, ArrayRef<TensorArg> tensors) {
 }
 
 void checkNumel(CheckedFrom c, const TensorGeometryArg& t, int64_t numel) {
-  AT_CHECK(
+  TORCH_CHECK(
     t->numel() == numel,
     "Expected tensor for ", t, " to have ", numel,
     " elements; but it actually has ", t->numel(), " elements",
@@ -96,7 +96,7 @@ void checkNumel(CheckedFrom c, const TensorGeometryArg& t, int64_t numel) {
 }
 
 void checkSameNumel(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
-  AT_CHECK(
+  TORCH_CHECK(
     t1->numel() == t2->numel(),
     "Expected tensor for ", t1,
     " to have same number of elements as tensor for ", t2, "; but ",
@@ -121,7 +121,7 @@ void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
         << " to be on GPU (while checking arguments for " << c << ")";
     AT_ERROR(oss.str());
   }
-  AT_CHECK(
+  TORCH_CHECK(
     t1->get_device() == t2->get_device(),
     "Expected tensor for ", t1, " to have the same device as tensor for ", t2,
     "; but device ", t1->get_device(), " does not equal ", t2->get_device(),
@@ -133,7 +133,7 @@ void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors) {
 }
 
 void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
-  AT_CHECK(
+  TORCH_CHECK(
     t1->type() == t2->type(),
     "Expected tensor for ", t1, " to have the same type as tensor for ", t2,
     "; but type ", t1->toString(), " does not equal ", t2->toString(),
@@ -141,7 +141,7 @@ void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
 }
 
 void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType ty) {
-  AT_CHECK(
+  TORCH_CHECK(
     t->scalar_type() == ty,
     "Expected tensor for ", t, " to have scalar type ", toString(ty),
     "; but got ", t->toString(), " instead (while checking arguments for ", c,
@@ -173,7 +173,7 @@ void checkAllSameType(CheckedFrom c, ArrayRef<TensorArg> tensors) {
 }
 
 void checkSameDim(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2) {
-  AT_CHECK(
+  TORCH_CHECK(
     t1->dim() == t2->dim(),
     "Expected tensor for ", t1, " to have the same dimension as tensor for ",
     t2, "; but ", t1->dim(), " does not equal ", t2->dim(),
@@ -181,7 +181,7 @@ void checkSameDim(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeomet
 }
 
 void checkDefined(CheckedFrom c, const TensorArg& t) {
-  AT_CHECK(
+  TORCH_CHECK(
     t->defined(),
     "Expected tensor for ", t, " to be non-null, but it was undefined ",
     " (while checking arguments for ", c, ")");
@@ -195,16 +195,44 @@ void checkAllDefined(CheckedFrom c, ArrayRef<TensorArg> ts) {
 }
 
 void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
-  AT_CHECK(
+  TORCH_CHECK(
     !t.defined() || t.type().backend() == backend,
     "Expected tensor to have ", toString(backend),
     " Backend, but got tensor with ", toString(t.type().backend()), " Backend ",
     "(while checking arguments for ", c, ")");
 }
 
-void checkBackend(CheckedFrom c, ArrayRef<Tensor> tensors, at::Backend backend) {
+void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Backend backend) {
   for (auto &t : tensors) {
     checkBackend(c, t, backend);
+  }
+}
+
+void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_type) {
+  TORCH_CHECK(
+      !t.defined() || t.type().device_type() == device_type,
+      "Expected tensor to have ", device_type,
+      " DeviceType, but got tensor with ", t.type().device_type(), " DeviceType ",
+      "(while checking arguments for ", c, ")");
+}
+
+void checkDeviceType(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::DeviceType device_type) {
+  for (auto &t : tensors) {
+    checkDeviceType(c, t, device_type);
+  }
+}
+
+void checkLayout(CheckedFrom c, const Tensor& t, Layout layout) {
+  TORCH_CHECK(
+    !t.defined() || t.layout() == layout,
+    "Expected tensor to have ", layout,
+    " Layout, but got tensor with ", t.layout(), " Layout ",
+    "(while checking arguments for ", c, ")");
+}
+
+void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout) {
+  for (auto &t : tensors) {
+    checkLayout(c, t, layout);
   }
 }
 
@@ -235,6 +263,29 @@ bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
   return contig_if_nonempty;
 }
 
+// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
+void check_dim_size(
+    const Tensor& tensor,
+    int64_t dim,
+    int64_t dim_size,
+    int64_t size) {
+  /* Check dimension size of a tensor */
+  TORCH_CHECK(
+      tensor.dim() == dim && tensor.size(dim_size) == size,
+      "Expected a tensor of dimension ",
+      dim,
+      " and tensor.size[",
+      dim_size,
+      "] == ",
+      size,
+      " but got: dimension ",
+      tensor.dim(),
+      " and tensor.size[",
+      dim_size,
+      "] = ",
+      tensor.size(dim_size));
+}
+
 namespace detail {
 
 std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
@@ -259,5 +310,6 @@ int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
   }
   return size;
 }
+
 }  // namespace detail
 }  // namespace at

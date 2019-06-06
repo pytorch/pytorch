@@ -12,17 +12,17 @@ namespace torch { namespace autograd {
 struct InputMetadata {
   InputMetadata() = default;
 
-  InputMetadata(const at::Type& type, at::IntArrayRef shape, at::Device device)
+  InputMetadata(const at::DeprecatedTypeProperties& type, at::IntArrayRef shape, at::Device device)
   : type_{&type} , shape_{shape}, device_{device} { }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.dispatch_type(), t.sizes(), t.device()) { }
+  : InputMetadata(t.type(), t.sizes(), t.device()) { }
 
   bool is_valid() const {
     return type_ != nullptr;
   }
 
-  const at::Type& type() const {
+  const at::DeprecatedTypeProperties& type() const {
     AT_ASSERT(type_);
     return *type_;
   }
@@ -40,7 +40,7 @@ struct InputMetadata {
   }
 
 private:
-  const at::Type* type_ = nullptr;
+  const at::DeprecatedTypeProperties* type_ = nullptr;
   at::DimVector shape_;
   at::Device device_ = at::kCPU;
 };
