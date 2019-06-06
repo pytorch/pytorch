@@ -404,7 +404,7 @@ public:
 
 private:
   explicit ListPtr(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
-  friend class IValue;
+  friend struct IValue;
   template<class T_> friend ListPtr<T_> impl::toTypedList(ListPtr<IValue>);
   template<class T_> friend ListPtr<IValue> impl::toGenericList(ListPtr<T_>);
   friend const IValue* impl::ptr_to_first_element(const ListPtr<IValue>& list);

@@ -1550,10 +1550,8 @@ int listSlice(Stack& stack) {
 
 template <typename T>
 int listSort(Stack& stack) {
-  c10::ListPtr<T> list = c10::make_list<T>();
-
-  pop(stack, list);
-  std::sort(list.begin(), list.end());
+  c10::ListPtr<T> list = pop(stack).to<c10::ListPtr<T>>();
+  std::sort(list.begin(), list.end(), [] (T a, T b) {return a < b;});
   return 0;
 }
 
@@ -1564,7 +1562,7 @@ int listSort<at::Tensor>(Stack& stack) {
   std::sort(
       list.begin(),
       list.end(),
-      [](const at::Tensor& a, const at::Tensor& b) {
+      [](at::Tensor a, at::Tensor b) {
         return a.lt(b).is_nonzero();
       });
   return 0;
@@ -2268,7 +2266,7 @@ RegisterOperators regSort({
                 g_list.begin(),
                 g_list.end(),
                 [func, reverse, &sort_stack](
-                    const IValue& a, const IValue& b) -> bool {
+                    IValue a, IValue b) -> bool {
                   // FBCode errors without this check - "strict weak ordering"
                   // TODO: remove when possible, since it just slows down
                   // sorting and doesn't do anything useful

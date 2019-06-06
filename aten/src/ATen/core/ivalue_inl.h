@@ -536,15 +536,15 @@ inline c10::DictPtr<IValue, IValue> IValue::toGenericDict() const & {
 }
 inline ivalue::TuplePtr IValue::toTuple() && {
   AT_ASSERT(isTuple());
-  return ivalue::TuplePtr::create(std::move(*this).toGenericList());
+  return ivalue::TuplePtr::create(c10::ListPtr<IValue>(moveToIntrusivePtr<c10::detail::ListImpl<IValue>>()));
 }
 inline ivalue::TuplePtr IValue::toTuple() const & {
   AT_ASSERT(isTuple());
-  return ivalue::TuplePtr::create(toGenericList());
+  return ivalue::TuplePtr::create(c10::ListPtr<IValue>(toIntrusivePtr<c10::detail::ListImpl<IValue>>()));
 }
 inline c10::ArrayRef<IValue> IValue::toTupleRef() const {
   AT_ASSERT(isTuple());
-  return toGenericListRef();
+  return static_cast<const c10::detail::ListImpl<IValue>*>(payload.as_intrusive_ptr)->list;
 }
 
 inline IValue::IValue(ivalue::TuplePtr v)
