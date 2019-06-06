@@ -11723,8 +11723,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(scalar, scalar.T)
 
     def test_python_types(self):
-        a1 = torch.randn((1,2), dtype=torch.float64)
-        a2 = torch.randn((1,2), dtype=float)
+        a1 = torch.randn((1, 2), dtype=torch.float64)
+        a2 = torch.randn((1, 2), dtype=float)
         self.assertEqual(a1.dtype, a2.dtype)
 
         b1 = torch.arange(10, 20, dtype=torch.int64)
