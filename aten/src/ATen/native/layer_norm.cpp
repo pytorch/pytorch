@@ -1,5 +1,6 @@
 #include <ATen/NativeFunctions.h>
 
+#include <array>
 #include <functional>
 #include <numeric>
 #include <tuple>
@@ -15,9 +16,7 @@
 namespace at {
 namespace native {
 
-namespace {
-
-std::tuple<Tensor, Tensor, Tensor> layer_norm_forward_cpu(
+std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     const Tensor& X,
     const Tensor& gamma /* optional */,
     const Tensor& beta /* optional */,
@@ -31,7 +30,75 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_forward_cpu(
   return std::make_tuple(Y, mean, rstd);
 }
 
-} // namespace
+std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
+    const Tensor& dY,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    std::array<bool, 3> grad_input_mask) {
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+  if (grad_input_mask[0]) {
+    dX = at::native::empty_like(X);
+  }
+  if (grad_input_mask[1]) {
+    dgamma = at::native::empty_like(gamma);
+  }
+  if (grad_input_mask[2]) {
+    dbeta = at::native::empty_like(gamma);
+  }
+  LayerNormBackwardKernel(
+      kCPU, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
+  return std::make_tuple(dX, dgamma, dbeta);
+}
+
+// TODO(yangxm): Change this function to Aten impl so that we can support higher
+// order gradients.
+std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward_cpu(
+    const Tensor& ddX,
+    const Tensor& ddgamma,
+    const Tensor& ddbeta,
+    const Tensor& dY,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    std::array<bool, 3> grad_input_mask) {
+  Tensor ddY;
+  Tensor dX;
+  Tensor dgamma;
+  if (grad_input_mask[0]) {
+    ddY = at::native::empty_like(dY);
+  }
+  if (grad_input_mask[1]) {
+    dX = at::native::empty_like(X);
+  }
+  if (grad_input_mask[2]) {
+    dgamma = at::native::empty_like(gamma);
+  }
+  LayerNormDoubleBackwardKernel(
+      kCPU,
+      ddX,
+      ddgamma,
+      ddbeta,
+      dY,
+      X,
+      mean,
+      rstd,
+      gamma,
+      M,
+      N,
+      &ddY,
+      &dX,
+      &dgamma);
+  return std::make_tuple(ddY, dX, dgamma);
+}
 
 Tensor layer_norm(
     const Tensor& input,
@@ -89,13 +156,8 @@ Tensor layer_norm(
       1LL,
       std::multiplies<int64_t>());
 
-  // TODO(yangxm): Remove this check after backward pass landed.
-  const auto is_forward = [](const Tensor& tensor) {
-    return tensor.is_variable() && !tensor.requires_grad();
-  };
-  if (input.device().is_cpu() && is_forward(input) && is_forward(weight) &&
-      is_forward(bias)) {
-    return std::get<0>(layer_norm_forward_cpu(
+  if (input.device().is_cpu()) {
+    return std::get<0>(native_layer_norm(
         input.contiguous(), weight.contiguous(), bias.contiguous(), M, N, eps));
   }
 
@@ -117,6 +179,8 @@ Tensor layer_norm(
 }
 
 DEFINE_DISPATCH(LayerNormKernel);
+DEFINE_DISPATCH(LayerNormBackwardKernel);
+DEFINE_DISPATCH(LayerNormDoubleBackwardKernel);
 
 } // namespace native
 } // namespace at

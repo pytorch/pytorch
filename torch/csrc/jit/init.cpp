@@ -159,7 +159,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quantdequant",
-          [](std::shared_ptr<Graph>& g, py::dict& pyQParamDict) {
+          [](std::shared_ptr<script::Module>& moduleObj,
+             const std::string& methodName,
+             py::dict& pyQParamDict) {
             if (!pyQParamDict.size()) {
               return;
             }
@@ -167,7 +169,7 @@ void initJITBindings(PyObject* module) {
             auto qparam_dict = py::cast<std::unordered_map<
                 std::string,
                 std::tuple<std::string, float, int>>>(pyQParamDict);
-            return InsertQuantDequantNodes(g, qparam_dict);
+            return InsertQuantDequantNodes(moduleObj, methodName, qparam_dict);
           })
       .def(
           "_jit_pass_insert_quantdequant_for_weight_bias",
@@ -518,7 +520,7 @@ void initJITBindings(PyObject* module) {
         // information of this IValue is used both to record the correct type in
         // the trace.
         output_ivalue = toIValue(py_func_output);
-        Value* out_val = jit::tracer::getNestedValueTrace(output_ivalue);
+        Value* out_val = jit::tracer::getValueTrace(output_ivalue);
         body_block->registerOutput(out_val);
         node_output =
             fork_node->output()->setType(FutureType::create(out_val->type()));

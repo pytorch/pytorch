@@ -76,7 +76,7 @@ IValue wrap(IValue&& ivalue) {
 // TODO This currently only handles tensors with requires_grad==False correctly.
 //      It should also handle autograd.
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
-  return Operator(op.schema(), [op](Stack& stack) {
+  return Operator(op, [op](Stack& stack) {
       RECORD_FUNCTION(op.schema().name(), stack);
 
       const auto input_size = op.schema().arguments().size();
@@ -144,7 +144,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
               // in the list are constants
               const std::vector<double>& value = iter->toDoubleListRef();
               std::vector<Value*> info(value.size());
-              for (int value_index = 0; value_index < value.size(); ++value_index) {
+              for (size_t value_index = 0; value_index < value.size(); ++value_index) {
                 info[value_index] = graph->insertConstant(value[value_index]);
                 tracer::recordSourceLocation(info[value_index]->node());
               }
