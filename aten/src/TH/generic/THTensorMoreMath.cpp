@@ -83,60 +83,10 @@ TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,
 #endif
 }
 
-#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
-
-void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
-{
-  int64_t batch;
-
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch1) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch1));
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch2) == 3, 2, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch2));
-  THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
-             "equal number of batches expected, got %d, %d",
-             THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
-  THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
-             "wrong matrix size, batch1: %dx%d, batch2: %dx%d",
-             THTensor_(size)(batch1, 1), THTensor_(size)(batch1, 2),
-             THTensor_(size)(batch2, 1), THTensor_(size)(batch2, 2));
-
-  int64_t bs = THTensor_(size)(batch1, 0);
-  int64_t dim1 = THTensor_(size)(batch1, 1);
-  int64_t dim2 = THTensor_(size)(batch2, 2);
-  THArgCheck(THTensor_(size)(t, 0) == bs, 1,   "output tensor of incorrect size");
-  THArgCheck(THTensor_(size)(t, 1) == dim1, 1, "output tensor of incorrect size");
-  THArgCheck(THTensor_(size)(t, 2) == dim2, 1, "output tensor of incorrect size");
-
-  if (t != result) {
-    THTensor_(resizeAs)(result, t);
-    if (beta != 0.0) {
-      at::Tensor result_wrap = THTensor_wrap(result);
-      at::Tensor t_wrap = THTensor_wrap(t);
-      at::native::copy_(result_wrap, t_wrap);
-    }
-  }
-
-  THTensor *matrix1 = THTensor_(new)();
-  THTensor *matrix2 = THTensor_(new)();
-  THTensor *result_matrix = THTensor_(new)();
-
-  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
-    THTensor_(select)(matrix1, batch1, 0, batch);
-    THTensor_(select)(matrix2, batch2, 0, batch);
-    THTensor_(select)(result_matrix, result, 0, batch);
-
-    THTensor_(addmm)(result_matrix, beta, result_matrix, alpha, matrix1, matrix2);
-  }
-
-  c10::raw::intrusive_ptr::decref(matrix1);
-  c10::raw::intrusive_ptr::decref(matrix2);
-  c10::raw::intrusive_ptr::decref(result_matrix);
-}
-
 ptrdiff_t THTensor_(numel)(THTensor *t)
 {
   return THTensor_(nElement)(t);
 }
-
 
 // Helper function to be used in a reduction operation.
 // Due to resize semantics of outputs, if the specified output tensor r_ has
@@ -322,6 +272,79 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   }
 }
 
+void THTensor_(cmax)(THTensor *r, THTensor *t, THTensor *src) {
+  THTensor_(resizeAs)(r, t);
+  TH_TENSOR_APPLY3(scalar_t, r, scalar_t, t, scalar_t, src,
+                   *r_data = *t_data > *src_data ? *t_data : *src_data;);
+}
+
+void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src) {
+  THTensor_(resizeAs)(r, t);
+  TH_TENSOR_APPLY3(scalar_t, r, scalar_t, t, scalar_t, src,
+                   *r_data = *t_data < *src_data ? *t_data : *src_data;);
+}
+
+void THTensor_(cmaxValue)(THTensor *r, THTensor *t, scalar_t value) {
+  THTensor_(resizeAs)(r, t);
+  TH_TENSOR_APPLY2(scalar_t, r, scalar_t, t,
+                   *r_data = *t_data < value ? value : *t_data;);  // this order propagates NaN
+}
+
+void THTensor_(cminValue)(THTensor *r, THTensor *t, scalar_t value) {
+  THTensor_(resizeAs)(r, t);
+  TH_TENSOR_APPLY2(scalar_t, r, scalar_t, t,
+                   *r_data = *t_data > value ? value : *t_data;);  // this order propagates NaN
+}
+
+#if !defined(TH_REAL_IS_BOOL) /* non bool only part */
+
+void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
+{
+  int64_t batch;
+
+  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch1) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch1));
+  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch2) == 3, 2, "expected 3D tensor, got %dD", THTensor_(nDimensionLegacyNoScalars)(batch2));
+  THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
+             "equal number of batches expected, got %d, %d",
+             THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
+  THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
+             "wrong matrix size, batch1: %dx%d, batch2: %dx%d",
+             THTensor_(size)(batch1, 1), THTensor_(size)(batch1, 2),
+             THTensor_(size)(batch2, 1), THTensor_(size)(batch2, 2));
+
+  int64_t bs = THTensor_(size)(batch1, 0);
+  int64_t dim1 = THTensor_(size)(batch1, 1);
+  int64_t dim2 = THTensor_(size)(batch2, 2);
+  THArgCheck(THTensor_(size)(t, 0) == bs, 1,   "output tensor of incorrect size");
+  THArgCheck(THTensor_(size)(t, 1) == dim1, 1, "output tensor of incorrect size");
+  THArgCheck(THTensor_(size)(t, 2) == dim2, 1, "output tensor of incorrect size");
+
+  if (t != result) {
+    THTensor_(resizeAs)(result, t);
+    if (beta != 0.0) {
+      at::Tensor result_wrap = THTensor_wrap(result);
+      at::Tensor t_wrap = THTensor_wrap(t);
+      at::native::copy_(result_wrap, t_wrap);
+    }
+  }
+
+  THTensor *matrix1 = THTensor_(new)();
+  THTensor *matrix2 = THTensor_(new)();
+  THTensor *result_matrix = THTensor_(new)();
+
+  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
+    THTensor_(select)(matrix1, batch1, 0, batch);
+    THTensor_(select)(matrix2, batch2, 0, batch);
+    THTensor_(select)(result_matrix, result, 0, batch);
+
+    THTensor_(addmm)(result_matrix, beta, result_matrix, alpha, matrix1, matrix2);
+  }
+
+  c10::raw::intrusive_ptr::decref(matrix1);
+  c10::raw::intrusive_ptr::decref(matrix2);
+  c10::raw::intrusive_ptr::decref(result_matrix);
+}
+
 void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 {
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 2, "dimension %d out of range",
@@ -439,30 +462,6 @@ accreal THTensor_(trace)(THTensor *t)
   }
 
   return sum;
-}
-
-void THTensor_(cmax)(THTensor *r, THTensor *t, THTensor *src) {
-  THTensor_(resizeAs)(r, t);
-  TH_TENSOR_APPLY3(scalar_t, r, scalar_t, t, scalar_t, src,
-                   *r_data = *t_data > *src_data ? *t_data : *src_data;);
-}
-
-void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src) {
-  THTensor_(resizeAs)(r, t);
-  TH_TENSOR_APPLY3(scalar_t, r, scalar_t, t, scalar_t, src,
-                   *r_data = *t_data < *src_data ? *t_data : *src_data;);
-}
-
-void THTensor_(cmaxValue)(THTensor *r, THTensor *t, scalar_t value) {
-  THTensor_(resizeAs)(r, t);
-  TH_TENSOR_APPLY2(scalar_t, r, scalar_t, t,
-                   *r_data = *t_data < value ? value : *t_data;);  // this order propagates NaN
-}
-
-void THTensor_(cminValue)(THTensor *r, THTensor *t, scalar_t value) {
-  THTensor_(resizeAs)(r, t);
-  TH_TENSOR_APPLY2(scalar_t, r, scalar_t, t,
-                   *r_data = *t_data > value ? value : *t_data;);  // this order propagates NaN
 }
 
 void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
@@ -1467,167 +1466,6 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t
                           }
                         }
   );
-}
-
-// Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
-// Assumes x is close to zero and uses a Taylor expansion.
-static inline scalar_t THTensor_(beta_grad_alpha_small)(scalar_t x, scalar_t alpha, scalar_t beta) {
-  const scalar_t factor = TH_MATH_NAME(TH_digamma)(alpha) - TH_MATH_NAME(TH_digamma)(alpha + beta) - TH_MATH_NAME(log)(x);
-  scalar_t numer = 1;
-  scalar_t series = numer / alpha * (factor + 1 / alpha);
-  for (int i = 1; i <= 10; ++i) {
-    numer *= (i - beta) * x / i;
-    const scalar_t denom = alpha + i;
-    series += numer / denom * (factor + 1 / denom);
-  }
-  const scalar_t result = x * TH_MATH_NAME(pow)(1 - x, -beta) * series;
-  return th_isnan(result) ? 0.0 : result;
-}
-
-// Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
-// Assumes x is close to zero and uses a Taylor expansion.
-static inline scalar_t THTensor_(beta_grad_beta_small)(scalar_t x, scalar_t alpha, scalar_t beta) {
-  const scalar_t factor = TH_MATH_NAME(TH_digamma)(alpha+beta) - TH_MATH_NAME(TH_digamma)(beta);
-  scalar_t numer = 1;
-  scalar_t betas = 1;
-  scalar_t dbetas = 0;
-  scalar_t series = factor / alpha;
-  for (int i = 1; i <= 8; ++i) {
-    numer *= -x / i;
-    dbetas = dbetas * (beta - i) + betas;
-    betas = betas * (beta - i);
-    series += numer / (alpha + i) * (dbetas + factor * betas);
-  }
-  const scalar_t result = -TH_MATH_NAME(pow)(1 - x, 1 - beta) * series;
-  return th_isnan(result) ? 0.0 : result;
-}
-
-// Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
-// Assumes alpha and beta are both large and uses a Rice saddle point expansion.
-// To ensure numerical stability, this computation is performed at higher precision.
-static inline scalar_t THTensor_(beta_grad_alpha_mid)(double x, double alpha, double beta) {
-  const double total = alpha + beta;
-  const double mean = alpha / total;
-  const double std = sqrt(alpha * beta / (total + 1)) / total;
-  if (mean - 0.1 * std <= x && x <= mean + 0.1 * std) {
-    // Avoid the singularity at x = mean.
-    const double poly = 47 * x * (beta*beta)*(beta*beta) + alpha * (
-                      (43 + 20 * (16 + 27 * beta) * x) * (beta*beta)*beta + alpha * (
-                      3 * (59 + 180 * beta - 90 * x) * (beta*beta) + alpha * (
-                      (453 + 1620 * beta * (1 - x) - 455 * x) * beta + alpha * (
-                      8 * (1 - x) * (135 * beta - 11)))));
-    const double prefactor_num = (1 + 12 * alpha) * (1 + 12 * beta) / (total * total);
-    const double prefactor_den = 12960 * alpha * alpha * alpha * beta * beta * (1 + 12 * total);
-    return prefactor_num / (1 - x) * poly / prefactor_den;
-  }
-  const double prefactor = -x / sqrt(2 * alpha * beta / total);
-  const double stirling = (1 + 1 / (12 * alpha) + 1 / (288 * alpha*alpha))
-                        * (1 + 1 / (12 * beta) + 1 / (288 * beta*beta))
-                        / (1 + 1 / (12 * total) + 1 / (288 * total*total));
-  const double term1_num = 2 * (alpha*alpha) * (x - 1) + alpha * beta * (x - 1) - x * (beta*beta);
-  const double axbx = alpha * (x-1) + beta * x;
-  const double term1_den = sqrt(2 * alpha / beta) * pow(total, 1.5f) * axbx*axbx;
-  const double term1 = term1_num / term1_den;
-  const double term2 = 0.5f * log(alpha / (total * x));
-  const double term3_num = sqrt(8 * alpha * beta / total);
-  const double term3_den = beta * x + alpha * (x - 1);
-  const double term3 = term3_num / term3_den;
-  const double term4_base = beta * log(beta / (total * (1 - x))) +
-                          alpha * log(alpha / (total * x));
-  const double term4 = pow(term4_base, -1.5f);
-  const double term1234 = term1 + term2 * (term3 + (x < mean ? term4 : -term4));
-  return stirling * prefactor * term1234;
-}
-
-// Computes a scaled reparameterized gradient
-//   -(d/dalpha cdf(x;alpha,beta)) / pdf(x;alpha,beta) / (1-x)
-// for random number x drawn from a Beta distribution Beta(alpha,beta).
-// This function inputs total=alpha+beta to make it easy to implement
-// Dirichlet reparameterized gradients in terms of Betas.
-static inline scalar_t THTensor_(dirichlet_grad_one)(scalar_t x, scalar_t alpha, scalar_t total) {
-  const scalar_t beta = total - alpha;
-  const scalar_t boundary = total * x * (1 - x);
-
-  // Use an asymptotic approximation for x close to 0.
-  if (x <= 0.5f && boundary < 2.5f) {
-    return THTensor_(beta_grad_alpha_small)(x, alpha, beta);
-  }
-
-  // Use an asymptotic approximation for x close to 1.
-  if (x >= 0.5f && boundary < 0.75f) {
-    return -THTensor_(beta_grad_beta_small)(1 - x, beta, alpha);
-  }
-
-  // Use an asymptotic approximation when alpha and (total - alpha) are both large.
-  if (alpha > 6 && beta > 6) {
-    return THTensor_(beta_grad_alpha_mid)(x, alpha, beta);
-  }
-
-  // Use a rational correction to an analytic approximation.
-  static const scalar_t c[2][3][3][4] = {
-    {{{1.003668233, -0.01061107488, -0.0657888334, 0.01201642863},
-      {0.6336835991, -0.3557432599, 0.05486251648, -0.001465281033},
-      {-0.03276231906, 0.004474107445, 0.002429354597, -0.0001557569013}},
-     {{0.221950385, -0.3187676331, 0.01799915743, 0.01074823814},
-      {-0.2951249643, 0.06219954479, 0.01535556598, 0.001550077057},
-      {0.02155310298, 0.004170831599, 0.001292462449, 6.976601077e-05}},
-     {{-0.05980841433, 0.008441916499, 0.01085618172, 0.002319392565},
-      {0.02911413504, 0.01400243777, -0.002721828457, 0.000751041181},
-      {0.005900514878, -0.001936558688, -9.495446725e-06, 5.385558597e-05}}},
-    {{{1, -0.02924021934, -0.04438342661, 0.007285809825},
-      {0.6357567472, -0.3473456711, 0.05454656494, -0.002407477521},
-      {-0.03301322327, 0.004845219414, 0.00231480583, -0.0002307248149}},
-     {{0.5925320577, -0.1757678135, 0.01505928619, 0.000564515273},
-      {0.1014815858, -0.06589186703, 0.01272886114, -0.0007316646956},
-      {-0.007258481865, 0.001096195486, 0.0003934994223, -4.12701925e-05}},
-     {{0.06469649321, -0.0236701437, 0.002902096474, -5.896963079e-05},
-      {0.001925008108, -0.002869809258, 0.0008000589141, -6.063713228e-05},
-      {-0.0003477407336, 6.959756487e-05, 1.097287507e-05, -1.650964693e-06}}},
-  };
-  const scalar_t u = TH_MATH_NAME(log)(x);
-  const scalar_t a = TH_MATH_NAME(log)(alpha) - u;
-  const scalar_t b = TH_MATH_NAME(log)(total) - a;
-  const scalar_t pow_u[3] = {1, u, u * u};
-  const scalar_t pow_a[3] = {1, a, a * a};
-  scalar_t p = 0.0;
-  scalar_t q = 0.0;
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      const scalar_t ua = pow_u[i] * pow_a[j];
-      p += ua * (c[0][i][j][0] + b * (c[0][i][j][1] + b * (c[0][i][j][2] + b * c[0][i][j][3])));
-      q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * (c[1][i][j][2] + b * c[1][i][j][3])));
-    }
-  }
-  const scalar_t approx = x * (TH_MATH_NAME(TH_digamma)(total) - TH_MATH_NAME(TH_digamma)(alpha)) / beta;
-  return p / q * approx;
-}
-
-void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THTensor *total)
-{
-  x = THTensor_(newContiguous)(x);
-  alpha = THTensor_(newContiguous)(alpha);
-  total = THTensor_(newContiguous)(total);
-  TH_CHECK_SAME_SIZE(alpha, x);
-  TH_CHECK_SAME_SIZE(total, x);
-  THTensor_(resizeAs)(self, x);
-  THTensor* grad = THTensor_(newContiguous)(self);
-
-  scalar_t*const grad_data = grad->data<scalar_t>();
-  scalar_t*const x_data = x->data<scalar_t>();
-  scalar_t*const alpha_data = alpha->data<scalar_t>();
-  scalar_t*const total_data = total->data<scalar_t>();
-  const int64_t numel = THTensor_(nElement)(x);
-  at::parallel_for(0, numel, TH_OMP_OVERHEAD_THRESHOLD,
-      [&](int64_t begin, int64_t end) {
-    for (auto i = begin; i < end; ++i) {
-      grad_data[i] = THTensor_(dirichlet_grad_one)(x_data[i], alpha_data[i], total_data[i]);
-    }
-  });
-
-  c10::raw::intrusive_ptr::decref(x);
-  c10::raw::intrusive_ptr::decref(alpha);
-  c10::raw::intrusive_ptr::decref(total);
-  THTensor_(freeCopyTo)(grad, self);
 }
 
 #undef TH_MATH_NAME

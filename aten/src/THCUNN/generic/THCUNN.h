@@ -1078,29 +1078,6 @@ THC_API void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
                   int adjT, int adjW, int adjH,
                   accreal scale);
 
-THC_API void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCIndexTensor *indices,
-                  int kT, int kW, int kH,
-                  int dT, int dW, int dH,
-                  int padT, int padW, int padH,
-                  int dilationT, int dilationW, int dilationH,
-                  bool ceilMode);
-
-THC_API void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCIndexTensor *indices,
-                  int kT, int kW, int kH,
-                  int dT, int dW, int dH,
-                  int padT, int padW, int padH,
-                  int dilationT, int dilationW, int dilationH,
-                  bool ceilMode);
-
 THC_API void THNN_(VolumetricFullConvolution_updateOutput)(
                   THCState *state,
                   THCTensor  *input,
@@ -1140,27 +1117,6 @@ THC_API void THNN_(VolumetricFullConvolution_accGradParameters)(
                   int padT, int padW, int padH,
                   int adjT, int adjW, int adjH,
                   accreal scale);
-
-THC_API void THNN_(VolumetricMaxPooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCIndexTensor *indices,
-                  int kT, int kW, int kH,
-                  int dT, int dW, int dH,
-                  int padT, int padW, int padH,
-                  bool ceilMode);
-
-THC_API void THNN_(VolumetricMaxPooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCIndexTensor *indices,
-                  int kT, int kW, int kH,
-                  int dT, int dW, int dH,
-                  int padT, int padW, int padH,
-                  bool ceilMode);
 
 THC_API void THNN_(VolumetricMaxUnpooling_updateOutput)(
                   THCState *state,

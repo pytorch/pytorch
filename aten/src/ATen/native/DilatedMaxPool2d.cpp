@@ -403,7 +403,7 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
 
 } // namespace
 
-std::tuple<Tensor& ,Tensor&> max_pool2d_with_indices_out_cpu(
+std::tuple<Tensor&, Tensor&> max_pool2d_with_indices_out_cpu(
   Tensor& output,
   Tensor& indices,
   const Tensor& input,
@@ -425,7 +425,7 @@ std::tuple<Tensor& ,Tensor&> max_pool2d_with_indices_out_cpu(
   return std::tuple<Tensor&, Tensor&>(output, indices);
 }
 
-std::tuple<Tensor ,Tensor> max_pool2d_with_indices_cpu(
+std::tuple<Tensor, Tensor> max_pool2d_with_indices_cpu(
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
@@ -439,12 +439,12 @@ std::tuple<Tensor ,Tensor> max_pool2d_with_indices_cpu(
     output,
     indices,
     input,
-    kernel_size, 
+    kernel_size,
     stride,
     padding,
-    dilation, 
+    dilation,
     ceil_mode);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
+  return std::tuple<Tensor, Tensor>(output, indices);
 }
 
 Tensor& max_pool2d_with_indices_backward_out_cpu(
