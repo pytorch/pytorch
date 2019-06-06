@@ -1482,7 +1482,7 @@ class _TestTorchMixin(object):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_rshift_same_as_numpy(self):
         for val in [-100, -2, -1, 0, 1, 2, 100]:
-            for shift in [0, 1, 2, 100]:
+            for shift in [0, 1, 2, 5, 10]:
                 for device in torch.testing.get_all_device_types():
                     x = torch.tensor([val, val, val], device=device)
                     y = np.array([val, val, val])
