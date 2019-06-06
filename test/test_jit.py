@@ -3556,14 +3556,25 @@ def foo(x):
         self.checkScript(annotate_none, ())
         self.checkScript(annotate_none_no_optional, ())
 
-        def annotated_assignment():
+    @unittest.skipIf(PY2 or sys.platform == "win32", "TODO: need to fix this test case for Windows")
+    def test_type_annotate_py3(self):
+        code = dedent("""
+        import torch
+        def fn():
             a : List[int] = []
             b : torch.Tensor = torch.ones(2, 2)
             for _ in range(10):
                 a.append(4)
             return a, b
+        """)
 
-        self.checkScript(annotated_assignment, ())
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            script_path = os.path.join(tmp_dir, 'script.py')
+            with open(script_path, 'w') as f:
+                f.write(code)
+            fn = get_fn('test_type_annotate_py3', script_path)
+
+            self.checkScript(fn, ())
 
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
