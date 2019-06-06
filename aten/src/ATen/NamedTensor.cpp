@@ -1,5 +1,5 @@
 #ifdef NAMEDTENSOR_ENABLED
-#include <ATen/core/NamedTensor.h>
+#include <ATen/NamedTensor.h>
 
 namespace at {
 

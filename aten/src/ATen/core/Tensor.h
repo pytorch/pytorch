@@ -16,7 +16,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #ifdef NAMEDTENSOR_ENABLED
-#include <ATen/core/NamedTensor.h>
+#include <ATen/NamedTensor.h>
 #endif
 
 namespace caffe2 {
