@@ -1151,6 +1151,9 @@ inline Tensor Tensor::masked_select(const Tensor & mask) const {
 inline Tensor Tensor::nonzero() const {
     return dispatch_type().nonzero(*this);
 }
+inline std::vector<Tensor> Tensor::nonzero_numpy() const {
+    return dispatch_type().nonzero_numpy(*this);
+}
 inline Tensor Tensor::gather(int64_t dim, const Tensor & index, bool sparse_grad) const {
     return dispatch_type().gather(*this, dim, index, sparse_grad);
 }
