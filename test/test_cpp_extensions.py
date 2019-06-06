@@ -15,7 +15,7 @@ try:
     import torch_test_cpp_extension.cpp as cpp_extension
     import torch_test_cpp_extension.msnpu as msnpu_extension
 except ImportError:
-    warnings.warn(
+    raise RuntimeError(
         "test_cpp_extensions.py cannot be invoked directly. Run "
         "`python run_test.py -i cpp_extensions` instead."
     )
@@ -672,6 +672,16 @@ class TestMSNPUTensor(common.TestCase):
 
         d.backward(torch.zeros(0, device='msnpu'))
         self.assertEqual(msnpu_extension.get_test_int(), 4)
+
+    def test_optional_arg(self):
+        a = torch.zeros(5, 5, device='msnpu')
+        self.assertEqual(msnpu_extension.get_test_int(), 0)
+
+        a.clamp()
+        self.assertEqual(msnpu_extension.get_test_int(), 5)
+
+        a.clamp(1, 2)
+        self.assertEqual(msnpu_extension.get_test_int(), 6)
 
 
 if __name__ == "__main__":

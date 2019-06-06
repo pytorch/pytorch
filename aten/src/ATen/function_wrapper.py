@@ -1582,6 +1582,9 @@ def create_derived(backend_type_env, declarations):
                     pass
     return type_object_declarations, type_object_definitions, legacy_th_declarations, legacy_th_definitions
 
+def format_schema_args(type, nullable, name):
+    type = type + '?' if nullable else type
+    return "{} {}".format(type, name)
 
 def create_extension_backend(backend_type_env, declarations):
     # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
@@ -1595,7 +1598,7 @@ def create_extension_backend(backend_type_env, declarations):
                     option['formals_types'] = [f['type'] for f in option['formals_list']]
                     option['native_actuals'] = [f['name'] for f in option['formals_list']]
                     schema_args = ", ".join(
-                        ["{} {}".format(f['dynamic_type'], f['name']) for f in option['formals_list']])
+                        [format_schema_args(f['dynamic_type'], f['is_nullable'], f['name']) for f in option['formals_list']])
                     return_type = NATIVE_DYNAMIC_TYPE.get(option['return_type'], option['return_type'])
                     option['schema'] = "{}({}) -> {}".format(option['api_name'], schema_args, return_type)
                     env = nested_dict(option, backend_type_env)

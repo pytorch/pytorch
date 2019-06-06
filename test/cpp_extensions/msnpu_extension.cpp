@@ -55,6 +55,15 @@ Tensor ones_like_override(const Tensor & self, const TensorOptions & options) {
   return get_dtype_tensor(options.dtype());
 }
 
+Tensor clamp_override(const Tensor & self, c10::optional<Scalar> min, c10::optional<Scalar> max) {
+  if( min == c10::nullopt ) {
+    test_int = 5;
+  } else {
+    test_int = 6;
+  }
+  return get_dtype_tensor(self.dtype());
+}
+
 void init_msnpu_extension() {
   register_extension_backend_op(
     Backend::MSNPU,
@@ -81,6 +90,9 @@ void init_msnpu_extension() {
     Backend::MSNPU,
     "ones_like(Tensor self, TensorOptions options) -> Tensor",
     &ones_like_override);
+  register_extension_backend_op(
+    Backend::MSNPU,
+    "clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor", &clamp_override);
 }
 
 // TODO: Extend this to exercise multi-device setting.  In that case,
