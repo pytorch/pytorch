@@ -621,9 +621,9 @@ void THTensor_(addcdiv)(THTensor *r_, THTensor *t, scalar_t value, THTensor *src
 
 void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *mat, THTensor *vec)
 {
-  if( (mat->dim() != 2) || (THTensor_nDimensionLegacyNoScalars(vec) != 1) )
+  if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
     THError("matrix and vector expected, got %dD, %dD",
-      mat->dim(), THTensor_nDimensionLegacyNoScalars(vec));
+      mat->dim(), THTensor_nDimension(vec));
 
   if( mat->size(1) != THTensor_sizeLegacyNoScalars(vec, 0) ) {
     THDescBuff bm = THTensor_(sizeDesc)(mat);
@@ -631,7 +631,7 @@ void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
     THError("size mismatch, %s, %s", bm.str, bv.str);
   }
 
-  if(THTensor_nDimensionLegacyNoScalars(t) != 1)
+  if(THTensor_nDimension(t) != 1)
     THError("vector expected, got t: %dD", t->dim());
 
   if(THTensor_sizeLegacyNoScalars(t, 0) != mat->size(0)) {
@@ -881,9 +881,9 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
 
 void THTensor_(addr)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *vec1, THTensor *vec2)
 {
-  if( (THTensor_nDimensionLegacyNoScalars(vec1) != 1) || (THTensor_nDimensionLegacyNoScalars(vec2) != 1) )
+  if( (THTensor_nDimension(vec1) != 1) || (THTensor_nDimension(vec2) != 1) )
     THError("vector and vector expected, got %dD, %dD tensors",
-        THTensor_nDimensionLegacyNoScalars(vec1), THTensor_nDimensionLegacyNoScalars(vec2));
+        THTensor_nDimension(vec1), THTensor_nDimension(vec2));
 
   if(t->dim() != 2)
     THError("expected matrix, got %dD tensor for t", t->dim());
