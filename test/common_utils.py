@@ -362,16 +362,19 @@ class TestCase(expecttest.TestCase):
         self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
         # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
         if self._do_cuda_memory_leak_check and not IS_WINDOWS:
-            self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors())
+            self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
 
         # Wraps the tested method if we should enforce non default CUDA stream.
         self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
         if self._do_cuda_non_default_stream and not IS_WINDOWS:
-            self.wrap_with_cuda_policy(method_name, CudaNonDefaultStream())
+            self.wrap_with_cuda_policy(method_name, self.enforceNonDefaultStream)
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
         return CudaMemoryLeakCheck(self, name)
+
+    def enforceNonDefaultStream(self):
+        return CudaNonDefaultStream()
 
     def wrap_with_cuda_policy(self, method_name, policy):
         test_method = getattr(self, method_name)
@@ -392,12 +395,12 @@ class TestCase(expecttest.TestCase):
         #       call in try-finally and always do the check.
         @wraps(method)
         def wrapper(self, *args, **kwargs):
-            with policy:
+            with policy():
                 method(*args, **kwargs)
         return types.MethodType(wrapper, self)
 
     def wrap_with_cuda_memory_check(self, method):
-        return self.wrap_with_cuda_policy(method, self.assertLeaksNoCudaTensors())
+        return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
 
     def setUp(self):
         if TEST_SKIP_FAST:
