@@ -11789,6 +11789,19 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         scalar = torch.tensor(5)
         self.assertEqual(scalar, scalar.T)
 
+    def test_python_types(self):
+        a1 = torch.randn((1, 2), dtype=torch.float64)
+        a2 = torch.randn((1, 2), dtype=float)
+        self.assertEqual(a1.dtype, a2.dtype)
+
+        b1 = torch.arange(10, 20, dtype=torch.int64)
+        b2 = torch.arange(10, 20, dtype=int)
+        self.assertEqual(b1.dtype, b2.dtype)
+
+        c1 = torch.tensor([True, False], dtype=torch.bool)
+        c2 = torch.tensor([True, False], dtype=bool)
+        self.assertEqual(c1.dtype, c2.dtype)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
