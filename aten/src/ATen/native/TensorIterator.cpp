@@ -346,8 +346,8 @@ int TensorIterator::num_reduce_dims() const {
   return count;
 }
 
-static loop2d_t loop_wrapper(int ntensor, const loop_t& loop) {
-  return [&](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
+static inline loop2d_t loop_wrapper(int ntensor, const loop_t* loop) {
+  return [=](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
     auto data = PtrVector(base, base + ntensor);
     const int64_t* outer_strides = &strides[ntensor];
 
@@ -357,13 +357,13 @@ static loop2d_t loop_wrapper(int ntensor, const loop_t& loop) {
           data[arg] += outer_strides[arg];
         }
       }
-      loop(data.data(), strides, size0);
+      (*loop)(data.data(), strides, size0);
     }
   };
 }
 
 void TensorIterator::for_each(const loop_t& loop) {
-  for_each(loop_wrapper(ntensors(), loop));
+  for_each(loop_wrapper(ntensors(), &loop));
 }
 
 void TensorIterator::for_each(const loop2d_t& loop) {
@@ -390,7 +390,7 @@ DimVector TensorIterator::get_strides() const {
 }
 
 void TensorIterator::serial_for_each(const loop_t& loop, Range range) const {
-  serial_for_each(loop_wrapper(ntensors(), loop), range);
+  serial_for_each(loop_wrapper(ntensors(), &loop), range);
 }
 
 void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
