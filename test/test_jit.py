@@ -288,6 +288,7 @@ def _helper_generate_qparam(script_module, input_data):
 
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
     _restored_warnings = False
 
     def setHooks(self):
