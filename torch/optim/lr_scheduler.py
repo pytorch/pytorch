@@ -1,7 +1,6 @@
 import types
 import math
 from torch._six import inf
-from collections import Counter
 from functools import partial, wraps
 import warnings
 from bisect import bisect_right
@@ -180,7 +179,7 @@ class StepLR(_LRScheduler):
 
     def get_lr(self):
         return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
-                        for base_lr in self.base_lrs]
+                for base_lr in self.base_lrs]
 
 
 class MultiStepLR(_LRScheduler):
