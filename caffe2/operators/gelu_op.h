@@ -1,10 +1,10 @@
 #ifndef CAFFE2_OPERATORS_GELU_OP_H_
 #define CAFFE2_OPERATORS_GELU_OP_H_
 
+#include "caffe2/core/c10_operator.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/c10_operator.h"
 #include "caffe2/operators/elementwise_ops.h"
 
 C10_DECLARE_CAFFE2_OPERATOR(Gelu);
@@ -13,8 +13,6 @@ namespace caffe2 {
 
 namespace gelu_utils {
 
-constexpr float kSqrt2 = 1.4142135623730951f;
-constexpr float kSqrtPi = 1.7724538509055159f;
 constexpr float kFastCoeff = 0.044715f;
 
 } // namespace gelu_utils
