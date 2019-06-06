@@ -3772,14 +3772,20 @@ class _TestTorchMixin(object):
                 a_t, p_t = torch._multinomial_alias_setup(probs)
                 torch._multinomial_alias_draw(p_t.view(2, 2), a_t.view(2, 2))
 
+        MAX_SAMPLES = 100000
         for probs in [get_probs(4, True), torch.tensor([0.8, 0.2]), torch.tensor([0.7, 0.2, 0.1])]:
             # Check how different the alias distribution and the original distribution are
-            n_samples = 50000
+            n_samples = 0
+            alias_dist = torch.zeros_like(probs)
             alias_table, prob_table = torch._multinomial_alias_setup(probs)
-            alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, n_samples)
-            alias_dist = torch.unique(alias_samples, return_counts=True)[1].to(dtype=probs.dtype) / n_samples
-            rtol = 0.1 if IS_WINDOWS else 0.02
-            self.assertTrue(torch.allclose(alias_dist, probs, rtol=rtol, atol=0.0))
+            while n_samples < MAX_SAMPLES:
+                n_samples += 10000
+                alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, 10000)
+                alias_dist += torch.unique(alias_samples, return_counts=True)[1].to(dtype=probs.dtype)
+                if torch.allclose(alias_dist / n_samples, probs, rtol=0.02, atol=0.0):
+                    break
+            self.assertTrue(torch.allclose(alias_dist / n_samples, probs, rtol=0.02, atol=0.0),
+                            "Actual: {}\nExpected: {}".format(alias_dist, probs))
 
         for probs in [torch.tensor([0.2501, 0.25, 0.2499, 0.25]),
                       torch.tensor([0.8, 0.199, 0.001]),
