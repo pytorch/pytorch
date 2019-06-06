@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import multiprocessing
 import os
 from subprocess import check_call, check_output
 import sys
@@ -93,13 +94,24 @@ def get_build_type():
         return "Release"
 
 
-def run(version,
-        cmake_python_library,
-        build_python,
-        build_test,
-        build_dir,
-        my_env):
-    "Run cmake."
+def generate(version,
+             cmake_python_library,
+             build_python,
+             build_test,
+             build_dir,
+             my_env,
+             rerun):
+    "Run cmake to generate native build files."
+
+    cmake_cache_file = os.path.join(build_dir, 'CMakeCache.txt')
+
+    if rerun and os.path.isfile(cmake_cache_file):
+        os.remove(cmake_cache_file)
+    ninja_build_file = os.path.join(build_dir, 'build.ninja')
+    if os.path.exists(cmake_cache_file) and not (
+            USE_NINJA and not os.path.exists(ninja_build_file)):
+        # Everything's in place. Do not rerun.
+        return
 
     cmake_args = [
         get_command()
@@ -113,7 +125,7 @@ def run(version,
             print('Unsupported `CMAKE_GENERATOR`: ' + generator)
             print('Please set it to one of the following values: ')
             print('\n'.join(supported))
-            exit(1)
+            sys.exit(1)
         cmake_args.append('-G' + generator)
         toolset_dict = {}
         toolset_version = os.getenv('CMAKE_GENERATOR_TOOLSET_VERSION')
@@ -124,7 +136,7 @@ def run(version,
                 print('When you specify `CMAKE_GENERATOR_TOOLSET_VERSION`, you must also '
                       'activate the vs environment of this version. Please read the notes '
                       'in the build steps carefully.')
-                exit(1)
+                sys.exit(1)
         if IS_64BIT:
             cmake_args.append('-Ax64')
             toolset_dict['host'] = 'x64'
@@ -257,3 +269,33 @@ def run(version,
     cmake_args.append(base_dir)
     pprint(cmake_args)
     check_call(cmake_args, cwd=build_dir, env=my_env)
+
+def build(build_dir, my_env):
+    "Run cmake to build binaries."
+    max_jobs = os.getenv('MAX_JOBS', str(multiprocessing.cpu_count()))
+    build_cmd = [get_command(), '--build', '.',
+                 '--target', 'install', '--config', get_build_type()]
+    # This ``if-else'' clause would be unnecessary when cmake 3.12 becomes
+    # minimum, which provides a '-j' option: build_cmd += ['-j', max_jobs]
+    # would be sufficient by then.
+    if IS_WINDOWS and not USE_NINJA:  # We are likely using msbuild here
+        build_cmd += ['--', '/maxcpucount:{}'.format(max_jobs)]
+    else:
+        build_cmd += ['--', '-j', max_jobs]
+    check_call(build_cmd, cwd=build_dir, env=my_env)
+
+    # in cmake, .cu compilation involves generating certain intermediates
+    # such as .cu.o and .cu.depend, and these intermediates finally get compiled
+    # into the final .so.
+    # Ninja updates build.ninja's timestamp after all dependent files have been built,
+    # and re-kicks cmake on incremental builds if any of the dependent files
+    # have a timestamp newer than build.ninja's timestamp.
+    # There is a cmake bug with the Ninja backend, where the .cu.depend files
+    # are still compiling by the time the build.ninja timestamp is updated,
+    # so the .cu.depend file's newer timestamp is screwing with ninja's incremental
+    # build detector.
+    # This line works around that bug by manually updating the build.ninja timestamp
+    # after the entire build is finished.
+    ninja_build_file = os.path.join(build_dir, 'build.ninja')
+    if os.path.exists(ninja_build_file):
+        os.utime(ninja_build_file, None)
