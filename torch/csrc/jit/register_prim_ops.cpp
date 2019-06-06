@@ -2218,6 +2218,26 @@ RegisterOperators reg2({
           push(stack, (a - rem)/b, rem);
           return 0;
         }),
+#define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                                 \
+      Operator(                                 \
+        "aten::divmod(" #type_a " x," #type_b " y) -> (float, float)",                                 \
+        [](Stack& stack) {                                 \
+          type_a a;                                 \
+          type_b b;                                 \
+          pop(stack, a, b);                                 \
+          if (b == 0) {                                 \
+            throw std::runtime_error("division by 0");                                 \
+          }                                 \
+          double quot = floor(a / b);                                 \
+          double rem = a - (quot * b);                                 \
+          push(stack, quot, rem);                                 \
+          return 0;                                 \
+        })
+
+    DEFINE_DIVMOD_MIXED_OP(int, float),
+    DEFINE_DIVMOD_MIXED_OP(float, int),
+
+#undef DEFINE_DIVMOD_MIXED_OP
 
     Operator(
         "aten::__range_length(int lo, int hi, int step) -> int",
