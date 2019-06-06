@@ -1310,7 +1310,8 @@ graph(%x : Tensor,
         torch._C._jit_pass_constant_propagation(scriptM.graph)
         # TODO: Build the qparam_dict from parse_ir directly for this pass
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
+        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
+                                               qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # both conv and relu nodes and at external output since relu
@@ -1341,7 +1342,8 @@ graph(%x : Tensor,
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
         if not len(qparam_dict):
             return
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
+        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
+                                               qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # both conv and relu nodes and at external output since relu
@@ -1377,7 +1379,8 @@ graph(%x : Tensor,
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
+        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
+                                               qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # both conv and no quant-dequant after add. Constant nodes correspond
@@ -1411,7 +1414,8 @@ graph(%x : Tensor,
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
+        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
+                                               qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # conv, relu and add. Constant nodes correspond to params for the
@@ -6136,7 +6140,7 @@ a")
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
                            "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
-                           "asinh", "atanh", "acosh", "sinh", "cosh", "tanh"]
+                           "asinh", "atanh", "acosh", "sinh", "cosh", "tanh", "degrees", "radians"]
         binary_float_ops = ["atan2", "fmod", "copysign"]
         for op in unary_float_ops:
             checkMathWrap(op, 1)
@@ -6144,28 +6148,21 @@ a")
             checkMathWrap(op, 2)
 
         checkMath("modf", 1, ret_type="Tuple[float, float]")
+        checkMath("frexp", 1, ret_type="Tuple[float, int]")
+        checkMath("isnan", 1, ret_type="bool")
+        checkMath("isinf", 1, ret_type="bool")
+        checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
+                  vals=[(i, j) for i in float_vals for j in range(-10, 10)])
         checkMath("pow", 2, is_float=False, ret_type="int")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
             checkMathWrap("floor", ret_type="int")
             checkMathWrap("ceil", ret_type="int")
             checkMathWrap("gcd", 2, is_float=False, ret_type="int")
+            checkMath("isfinite", 1, ret_type="bool")
         if PY37:
             checkMathWrap("remainder", 2)
-        checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, i) for i in range(-2, 10)])
-
-    @unittest.skipIf(PY2, "Requires python 3")
-    def test_math_gcd(self):
-        def test_gcd(x, y):
-            # type: (int, int) -> int
-            return math.gcd(x, y)
-
-        max_int = 2147483647
-        min_int = -2147483647 - 1
-        int_vals = list(range(-5, 5, 1)) + [max_int + 5, max_int * 2, min_int - 5, min_int * 2]
-        vals = [(i, j) for i in int_vals for j in int_vals]
-        for inputs in vals:
-            self.checkScript(test_gcd, inputs)
+        checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
 
     def test_if_nest_while(self):
         def func(a, b):
