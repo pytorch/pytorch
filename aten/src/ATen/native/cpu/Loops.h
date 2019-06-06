@@ -60,7 +60,7 @@ dereference(char* C10_RESTRICT data[], const int64_t* strides, int64_t i) {
 
 template <typename traits, std::size_t... I>
 typename traits::ArgsTuple
-dereference_vec_impl(const char* C10_RESTRICT data[],
+dereference_vec_impl(char* C10_RESTRICT data[],
                      const typename traits::result_type& opt_scalar,
                      size_t S,
                      int64_t i,
@@ -75,7 +75,7 @@ dereference_vec_impl(const char* C10_RESTRICT data[],
 
 template <typename traits>
 typename traits::ArgsTuple
-dereference_vec(const char* C10_RESTRICT data[], const typename traits::result_type& opt_scalar, size_t S, int64_t i) {
+dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& opt_scalar, size_t S, int64_t i) {
   using Indices = c10::guts::make_index_sequence<traits::arity>;
   return dereference_vec_impl<traits>(data, opt_scalar, S, i, Indices{});
 }
@@ -87,11 +87,12 @@ static inline void
 basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t op) {
   using traits = function_traits<func_t>;
   using result_type = typename traits::result_type;
+  constexpr int ntensors = traits::arity + 1;
 
   // Copying strides to temporary array helps auto vectorization in older GCC
   // versions.
-  int64_t strides[traits::arity + 1];
-  for (int arg = 0; arg < traits::arity + 1; arg++) {
+  int64_t strides[ntensors];
+  for (int arg = 0; arg < ntensors; arg++) {
     strides[arg] = strides_[arg];
   }
 
@@ -110,30 +111,30 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
 // is 0, then there are no scalar inputs.
 template <typename func_t, typename vec_func_t>
 static inline void
-vectorized_loop(char** C10_RESTRICT data, int64_t n, size_t S, func_t op, vec_func_t vop) {
-  using scalar_t = typename function_traits<func_t>::result_type;
+vectorized_loop(char** C10_RESTRICT data_, int64_t n, size_t S, func_t op, vec_func_t vop) {
   using traits = function_traits<vec_func_t>;
+  using scalar_t = typename function_traits<func_t>::result_type;
   using Vec = Vec256<scalar_t>;
+  constexpr int ntensors = traits::arity + 1;
 
-  char* C10_RESTRICT out_ptr = data[0];
-  const char* C10_RESTRICT in_ptrs[traits::arity];
-  for (int arg = 0; arg < traits::arity; arg++) {
-    in_ptrs[arg] = data[arg + 1];
+  char* C10_RESTRICT data[ntensors];
+  for (int arg = 0; arg < ntensors; arg++) {
+    data[arg] = data_[arg];
   }
 
   Vec opt_scalar = Vec(S > 0 ? *(scalar_t*)data[S] : scalar_t(0));
   int64_t i = 0;
   for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
-    auto args1 = dereference_vec<traits>(in_ptrs, opt_scalar, S, i);
-    auto args2 = dereference_vec<traits>(in_ptrs, opt_scalar, S, i + Vec::size());
+    auto args1 = dereference_vec<traits>(&data[1], opt_scalar, S, i);
+    auto args2 = dereference_vec<traits>(&data[1], opt_scalar, S, i + Vec::size());
     auto out1 = c10::guts::apply(vop, std::move(args1));
     auto out2 = c10::guts::apply(vop, std::move(args2));
-    out1.store(out_ptr + i * sizeof(scalar_t));
-    out2.store(out_ptr + (i + Vec::size()) * sizeof(scalar_t));
+    out1.store(data[0] + i * sizeof(scalar_t));
+    out2.store(data[0] + (i + Vec::size()) * sizeof(scalar_t));
   }
   if (i < n) {
-    int64_t strides[traits::arity + 1];
-    for (int arg = 0; arg < traits::arity + 1; arg++) {
+    int64_t strides[ntensors];
+    for (int arg = 0; arg < ntensors; arg++) {
       strides[arg] = (S > 0 && arg == S) ? 0 : sizeof(scalar_t);
     }
     basic_loop(data, strides, i, n, op);
