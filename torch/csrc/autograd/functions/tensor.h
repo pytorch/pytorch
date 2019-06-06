@@ -5,7 +5,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/TensorGeometry.h>
-#include <ATen/core/DeprecatedTypeProperties.h>
+#include <ATen/DeprecatedTypeProperties.h>
 #include <c10/util/Optional.h>
 
 #include <cstdint>

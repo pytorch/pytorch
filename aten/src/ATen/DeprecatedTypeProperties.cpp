@@ -1,4 +1,4 @@
-#include <ATen/core/DeprecatedTypeProperties.h>
+#include <ATen/DeprecatedTypeProperties.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/Tensor.h>

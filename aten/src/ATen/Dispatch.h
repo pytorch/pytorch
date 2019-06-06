@@ -4,7 +4,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Half.h>
 #include <c10/util/Exception.h>
-#include <ATen/core/DeprecatedTypeProperties.h>
+#include <ATen/DeprecatedTypeProperties.h>
 
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
   case enum_type: {                                \

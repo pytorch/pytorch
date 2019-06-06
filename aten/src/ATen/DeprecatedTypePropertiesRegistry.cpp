@@ -1,6 +1,6 @@
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 
-#include <ATen/core/DeprecatedTypeProperties.h>
+#include <ATen/DeprecatedTypeProperties.h>
 
 namespace at {
 

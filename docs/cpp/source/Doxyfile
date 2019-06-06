@@ -33,7 +33,7 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/Backend.h \
                          ../../../aten/src/ATen/core/ivalue.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
-                         ../../../aten/src/ATen/core/Tensor.h \
+                         ../../../aten/src/ATen/Tensor.h \
                          ../../../aten/src/ATen/cuda/CUDAContext.h \
                          ../../../aten/src/ATen/cudnn/Descriptors.h \
                          ../../../aten/src/ATen/cudnn/Handles.h \
