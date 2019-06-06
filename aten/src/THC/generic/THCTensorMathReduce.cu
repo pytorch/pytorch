@@ -303,7 +303,7 @@ accreal THCTensor_(meanall)(THCState *state, THCTensor *self)
 scalar_t THCTensor_(minall)(THCState *state, THCTensor *self) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
   THArgCheck(
-      THTensor_(nElement)(tensor) > 0,
+      THTensor_(nElement)(self) > 0,
       1,
       "cannot perform reduction function min "
       "on tensor with no elements because the "
@@ -324,7 +324,7 @@ scalar_t THCTensor_(minall)(THCState *state, THCTensor *self) {
 scalar_t THCTensor_(maxall)(THCState *state, THCTensor *self) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
   THArgCheck(
-      THTensor_(nElement)(tensor) > 0,
+      THTensor_(nElement)(self) > 0,
       1,
       "cannot perform reduction function max "
       "on tensor with no elements because the "
