@@ -1480,12 +1480,12 @@ class _TestTorchMixin(object):
         self.assertFalse(x.any())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    #potentially >> can execute differently for shifts greater then number of bits for different OS
-    #for example:
+    # potentially >> can execute differently for shifts greater then number of bits for different OS
+    # for example:
     #   Mac: np.array([-100]) >> 100 = array([-1])
     #   Win: np.array([-100]) >> 100 = array([-7])
-    #Also >> can execute differently for shifts less then zero
-    #But the results should be same for "normal" shifts
+    # Also >> can execute differently for shifts less then zero
+    # But the results should be same for "normal" shifts
     def test_rshift_same_as_numpy(self):
         for val in [-100, -2, -1, 0, 1, 2, 100]:
             for shift in [0, 1, 2, 5, 10]:
@@ -1499,7 +1499,7 @@ class _TestTorchMixin(object):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_irshift_same_as_numpy(self):
         for val in [-100, -2, -1, 0, 1, 2, 100]:
-            for shift in [0, 1, 2, 100]:
+            for shift in [0, 1, 2, 5, 10]:
                 for device in torch.testing.get_all_device_types():
                     x = torch.tensor([val, val, val], device=device)
                     y = np.array([val, val, val])
