@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/TensorUtils.h>
 #include <limits>
 #include <sstream>
 
@@ -185,6 +186,32 @@ static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tenso
   Tensor arg1_broadcasted  = arg1.expand(arg1_expand_size);
   Tensor arg2_broadcasted = arg2.expand(arg2_expand_size);
   return std::make_tuple(arg1_broadcasted, arg2_broadcasted);
+}
+
+// Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition
+static inline std::tuple<std::vector<int64_t>,
+                         std::vector<int64_t>,
+                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool some) {
+  int64_t m = input.size(-2), n = input.size(-1);
+  int64_t n_columns_q;
+
+  // We need to compute the required size of Q based on the `some` option
+  auto q_sizes = input.sizes().vec();
+  if (!some && m > n) {
+    q_sizes[input.dim() - 1] = m;
+    n_columns_q = m;
+  } else {
+    q_sizes[input.dim() - 1] = n;
+    n_columns_q = std::min(m, n);
+  }
+  auto q_strides = at::detail::defaultStrides(q_sizes);
+
+  // Q should be a column-major or a batch of column-major matrices
+  // ... x m x n will have strides: ...., n, 1
+  // We require: ...., 1, m
+  q_strides[input.dim() - 1] = m;
+  q_strides[input.dim() - 2] = 1;
+  return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
 }}  // namespace at::native

@@ -148,6 +148,42 @@ void THTensor_(bitand)(THTensor *r_, THTensor *t, scalar_t value)
 #endif
 }
 
+scalar_t THTensor_(minall)(THTensor *tensor)
+{
+  scalar_t theMin;
+  scalar_t value;
+
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
+  theMin = tensor->data<scalar_t>()[0];
+  TH_TENSOR_APPLY(scalar_t, tensor,
+                  value = *tensor_data;
+                  /* This is not the same as value<theMin in the case of NaNs */
+                  if(!(value >= theMin))
+                  {
+                    theMin = value;
+                    th_isnan_break(value)
+                  });
+  return theMin;
+}
+
+scalar_t THTensor_(maxall)(THTensor *tensor)
+{
+  scalar_t theMax;
+  scalar_t value;
+
+  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
+  theMax = tensor->data<scalar_t>()[0];
+  TH_TENSOR_APPLY(scalar_t, tensor,
+                  value = *tensor_data;
+                  /* This is not the same as value>theMax in the case of NaNs */
+                  if(!(value <= theMax))
+                  {
+                    theMax = value;
+                    th_isnan_break(value)
+                  });
+  return theMax;
+}
+
 #if !defined(TH_REAL_IS_BOOL)
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
@@ -681,42 +717,6 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
                    src_data += sz*src_stride;
                    break;);
   return sum;
-}
-
-scalar_t THTensor_(minall)(THTensor *tensor)
-{
-  scalar_t theMin;
-  scalar_t value;
-
-  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
-  theMin = tensor->data<scalar_t>()[0];
-  TH_TENSOR_APPLY(scalar_t, tensor,
-                  value = *tensor_data;
-                  /* This is not the same as value<theMin in the case of NaNs */
-                  if(!(value >= theMin))
-                  {
-                    theMin = value;
-                    th_isnan_break(value)
-                  });
-  return theMin;
-}
-
-scalar_t THTensor_(maxall)(THTensor *tensor)
-{
-  scalar_t theMax;
-  scalar_t value;
-
-  THArgCheck(THTensor_nDimensionLegacyAll(tensor) > 0, 1, "tensor must have one dimension");
-  theMax = tensor->data<scalar_t>()[0];
-  TH_TENSOR_APPLY(scalar_t, tensor,
-                  value = *tensor_data;
-                  /* This is not the same as value>theMax in the case of NaNs */
-                  if(!(value <= theMax))
-                  {
-                    theMax = value;
-                    th_isnan_break(value)
-                  });
-  return theMax;
 }
 
 void THTensor_(add)(THTensor *r_, THTensor *t, scalar_t value)

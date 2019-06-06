@@ -228,7 +228,7 @@ endif()
 
 
 
-if (NOT INTERN_BUILD_MOBILE)
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -390,12 +390,14 @@ if (NOT INTERN_BUILD_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/insert_guards.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/inliner.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
@@ -555,7 +557,7 @@ target_link_libraries(torch caffe2)
 # formerly-libtorch flags
 # ==========================================================
 
-if (NOT INTERN_BUILD_MOBILE)
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   # Forces caffe2.pb.h to be generated before its dependents are compiled.
   # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
@@ -691,13 +693,6 @@ ENDIF()
 
   set_property(TARGET caffe2 PROPERTY CXX_STANDARD 11)
 
-
-  # Prevent the unused functions being optimized away
-  # Otherwise torch.dll will be linked without caffe2_gpu.dll
-  if (MSVC)
-    # TODO What to do with this line?
-    set_target_properties(caffe2 PROPERTIES LINK_FLAGS "/OPT:NOREF")
-  endif()
 
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
