@@ -23,7 +23,9 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel
 
-from common_utils import TestCase, load_tests, run_tests, PY3
+from common_cuda import TEST_MULTIGPU
+from common_utils import TestCase, load_tests, run_tests
+from common_utils import NO_MULTIPROCESSING_SPAWN
 from common_utils import retry_on_address_already_in_use_error
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -69,6 +71,7 @@ def skip_if_lt_x_gpu(x):
 
     return decorator
 
+NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 
 def skip_if_not_nccl(func):
     """Skips a test if NCCL is not available (for c10d)."""
@@ -1648,8 +1651,8 @@ class ProcessGroupShareTensorTest(TestCase):
         pg.broadcast(xs).wait()
         cls.assert_equal(torch.zeros(2, 2), xs[0].to("cpu"))
 
-    @unittest.skipIf(not PY3, "Python 3 needed")
-    @skip_if_not_multigpu
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
     def test_broadcast_gloo(self):
         file = tempfile.NamedTemporaryFile(delete=False)
         shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
@@ -1661,8 +1664,9 @@ class ProcessGroupShareTensorTest(TestCase):
                  nprocs=self.world_size,
                  join=True)
 
-    @unittest.skipIf(not PY3, "Python 3 needed")
-    @skip_if_not_multigpu
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+    @unittest.skipIf(NO_NCCL, "NCCL needed")
     def test_broadcast_nccl(self):
         file = tempfile.NamedTemporaryFile(delete=False)
         shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
@@ -1682,8 +1686,8 @@ class ProcessGroupShareTensorTest(TestCase):
         pg.allreduce(xs, op=c10d.ReduceOp.SUM).wait()
         cls.assert_equal(torch.ones(2, 2) * 2, xs[0].to("cpu"))
 
-    @unittest.skipIf(not PY3, "Python 3 needed")
-    @skip_if_not_multigpu
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
     def test_allreduce_gloo(self):
         file = tempfile.NamedTemporaryFile(delete=False)
         shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
@@ -1695,8 +1699,9 @@ class ProcessGroupShareTensorTest(TestCase):
                  nprocs=self.world_size,
                  join=True)
 
-    @unittest.skipIf(not PY3, "Python 3 needed")
-    @skip_if_not_multigpu
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+    @unittest.skipIf(NO_NCCL, "NCCL needed")
     def test_allreduce_nccl(self):
         file = tempfile.NamedTemporaryFile(delete=False)
         shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
@@ -1719,8 +1724,9 @@ class ProcessGroupShareTensorTest(TestCase):
         else:
             cls.assert_equal(torch.ones(2, 2), x.to("cpu"))
 
-    @unittest.skipIf(not PY3, "Python 3 needed")
-    @skip_if_not_multigpu
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+    @unittest.skipIf(NO_NCCL, "NCCL needed")
     def test_reduce_nccl(self):
         file = tempfile.NamedTemporaryFile(delete=False)
         shared_tensors = [torch.ones(2, 2).to(i) for i in range(2)]
@@ -1742,8 +1748,8 @@ class ProcessGroupShareTensorTest(TestCase):
         for i in range(world_size):
             cls.assert_equal(torch.ones(2, 2) * i, ys[0][i].to("cpu"))
 
-    @unittest.skipIf(not PY3, "Python 3 needed")
-    @skip_if_not_multigpu
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
     def test_allgather_gloo(self):
         file = tempfile.NamedTemporaryFile(delete=False)
         shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
@@ -1755,8 +1761,9 @@ class ProcessGroupShareTensorTest(TestCase):
                  nprocs=self.world_size,
                  join=True)
 
-    @unittest.skipIf(not PY3, "Python 3 needed")
-    @skip_if_not_multigpu
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Python 3 needed")
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+    @unittest.skipIf(NO_NCCL, "NCCL needed")
     def test_allgather_nccl(self):
         file = tempfile.NamedTemporaryFile(delete=False)
         shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
