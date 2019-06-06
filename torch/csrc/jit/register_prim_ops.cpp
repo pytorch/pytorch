@@ -2224,6 +2224,9 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
     DEFINE_UNARY_INT_OP(aten::factorial, factorial(a), int),
+    DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
+    DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
+    DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
     Operator(
         "aten::modf(float a) -> (float, float)",
         [](Stack& stack) {
@@ -2232,6 +2235,17 @@ RegisterOperators reg2({
           double b, c;
           b = modf(a, &c);
           push(stack, b, c);
+          return 0;
+        }),
+    Operator(
+        "aten::frexp(float a) -> (float, int)",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          double m;
+          int e;
+          m = std::frexp(a, &e);
+          push(stack, m, e);
           return 0;
         }),
     DEFINE_BINARY_FLOAT_OP(aten::mathremainder, std::remainder(a, b)),
