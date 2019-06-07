@@ -730,18 +730,17 @@ AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ choice ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t>
 void generate_keys(
-  scalar_t *keys,
-  scalar_t *weights,
+  float *keys,
+  float *weights,
   int n,
   THGenerator* generator
 ){
   std::lock_guard<std::mutex> lock(generator->mutex);
 
   for(int i = 0; i < n; i++){
-    scalar_t u = THRandom_standard_uniform(generator);
-    keys[i] = weights[i] > 0? (scalar_t) std::pow(u, 1/weights[i]):-1;
+    float u = THRandom_standard_uniform(generator);
+    keys[i] = weights[i] > 0? (float) std::pow(u, 1/weights[i]):-1;
   }
 
 }
@@ -815,9 +814,8 @@ Tensor reservoir_sampling_cpu(
   } else {
 
 		// If the weights are contiguous floating points, then
-		// the two next steps won't generate copies.
-	  Tensor weights_contiguous = weights.contiguous();
-		weights_contiguous = weights_contiguous.to(at::kFloat);
+		// the next step won't generate a copy.
+	  Tensor weights_contiguous = weights.contiguous().to(at::kFloat);
 
 	  AT_CHECK(
 	    weights_contiguous.device() == x.device(),
@@ -846,13 +844,11 @@ Tensor reservoir_sampling_cpu(
 
 	  Tensor keys = at::empty({n}, weights_contiguous.options());
 
-	  AT_DISPATCH_FLOATING_TYPES(weights_contiguous.scalar_type(), "generate keys", [&] {
-	    generate_keys<scalar_t>(
-	      keys.data<scalar_t>(),
-	      weights_contiguous.data<scalar_t>(),
-	      n,
-	      generator);
-	  });
+    generate_keys(
+      keys.data<float>(),
+      weights_contiguous.data<float>(),
+      n,
+      generator);
 
 	  return x.index_select(0, std::get<1>(keys.topk(k)));
   }
@@ -885,18 +881,15 @@ Tensor sampling_with_replacement_cpu(
     samples = at::empty({k}, x.options().dtype(at::kLong));
     int64_t *samples_ptr = samples.data<int64_t>();
 
-    Tensor cdf = weights.cumsum(0);
-		cdf = cdf.to(at::kFloat);
+    Tensor cdf = weights.cumsum(0).to(at::kFloat);
     cdf /= cdf[-1];
 
-    AT_DISPATCH_FLOATING_TYPES(cdf.scalar_type(), "Sampling with replacement", [&] {
-      scalar_t *cdf_ptr = cdf.data<scalar_t>();
-      for(int i = 0; i < k; i++){
-        scalar_t u = THRandom_standard_uniform(generator);
-        auto ptr = std::lower_bound(cdf_ptr, cdf_ptr + n, u);
-        samples_ptr[i] = std::distance(cdf_ptr, ptr);
-      }
-    });
+    float *cdf_ptr = cdf.data<float>();
+    for(int i = 0; i < k; i++){
+      float u = THRandom_standard_uniform(generator);
+      auto ptr = std::lower_bound(cdf_ptr, cdf_ptr + n, u);
+      samples_ptr[i] = std::distance(cdf_ptr, ptr);
+    }
 
   }
 

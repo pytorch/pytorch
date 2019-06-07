@@ -433,30 +433,28 @@ __global__ void generate_samples(
   }
 }
 
-template <typename scalar_t>
 __global__ void generate_keys(
-  scalar_t *keys,
-  scalar_t *weights,
+  float *keys,
+  float *weights,
   int64_t n,
   curandStateMtgp32 *state
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
   float u = curand_uniform(state);
   if(thread_id < n){
-    keys[thread_id] = weights[thread_id] > 0? (scalar_t) __powf(u, (float) 1/weights[thread_id]):-1;
+    keys[thread_id] = weights[thread_id] > 0? (float) __powf(u, (float) 1/weights[thread_id]):-1;
   }
 }
 
-template <typename scalar_t>
 __global__ void sampling_with_replacement_kernel(
   int64_t *samples,
-  scalar_t *cdf,
+  float *cdf,
   int64_t n,
   int64_t k,
   curandStateMtgp32 *state
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-  scalar_t u = curand_uniform(state);
+  float u = curand_uniform(state);
   if(thread_id < k){
     auto ptr = thrust::lower_bound(thrust::device, cdf, cdf + n, u);
     samples[thread_id] = thrust::distance(cdf, ptr);
@@ -550,9 +548,8 @@ Tensor reservoir_sampling_cuda(
   } else {
 
     // If the weights are contiguous floating points, then
-		// the two next steps won't generate copies.
-    Tensor weights_contiguous = weights.contiguous();
-    weights_contiguous = weights_contiguous.to(at::kFloat);
+		// the next step won't generate a copy.
+	  Tensor weights_contiguous = weights.contiguous().to(at::kFloat);
 
 	  AT_CHECK(
 	    weights_contiguous.device() == x.device(),
@@ -582,14 +579,12 @@ Tensor reservoir_sampling_cuda(
     Tensor keys = at::empty({n}, weights_contiguous.options());
     dim3 all_blocks((n + threadsPerBlock - 1)/threadsPerBlock);
 
-    AT_DISPATCH_FLOATING_TYPES(weights_contiguous.scalar_type(), "generate keys", [&] {
-      generate_keys<scalar_t><<<all_blocks, threads>>>(
-        keys.data<scalar_t>(),
-        weights_contiguous.data<scalar_t>(),
-        n,
-        gen_states
-      );
-    });
+    generate_keys<<<all_blocks, threads>>>(
+      keys.data<float>(),
+      weights_contiguous.data<float>(),
+      n,
+      gen_states
+    );
 
     AT_CUDA_CHECK(cudaGetLastError());
 
@@ -625,21 +620,20 @@ Tensor sampling_with_replacement_cuda(
     curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
 
     samples = at::empty({k}, x.options().dtype(at::kLong));
-    Tensor cdf = weights.cumsum(0);
+    Tensor cdf = weights.cumsum(0).to(at::kFloat);
     cdf /= cdf[-1];
 
     dim3 threads(threadsPerBlock);
     dim3 blocks((k + threadsPerBlock - 1)/threadsPerBlock);
 
-    AT_DISPATCH_ALL_TYPES(weights.scalar_type(), "Sampling with replacement", [&] {
-      sampling_with_replacement_kernel<scalar_t><<<blocks, threads>>>(
-        samples.data<int64_t>(),
-        cdf.data<scalar_t>(),
-        n,
-        k,
-        gen_states
-      );
-    });
+    sampling_with_replacement_kernel<<<blocks, threads>>>(
+      samples.data<int64_t>(),
+      cdf.data<float>(),
+      n,
+      k,
+      gen_states
+    );
+
     AT_CUDA_CHECK(cudaGetLastError());
   }
 
