@@ -29,7 +29,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, load_tests, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf
+    get_function_arglist, load_tests, skipCUDAMemoryLeakCheckIf
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, loss_reference_fns, get_reduction, \
@@ -497,7 +497,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
-    _do_cuda_non_default_stream = True
+    _do_cuda_non_default_stream = False
 
     def _forward(self, module, input):
         with freeze_rng_state():
@@ -2764,7 +2764,6 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag_per_sample_weights_and_no_offsets(self)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipCUDANonDefaultStreamIf(True)
     def test_EmbeddingBag_per_sample_weights_and_no_offsets_cuda(self):
         self._test_EmbeddingBag_per_sample_weights_and_no_offsets(self, device='cuda')
 
@@ -3564,7 +3563,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @skipCUDANonDefaultStreamIf(True)
     def test_Conv2d_naive_groups_cuda(self, dtype=torch.float):
         self._test_Conv2d_naive_groups("cuda", dtype)
 
@@ -5403,7 +5401,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @skipCUDANonDefaultStreamIf(True)
     @skipCUDAMemoryLeakCheckIf(True)
     def test_variable_sequence_cuda(self, dtype=torch.float):
         self._test_variable_sequence("cuda", dtype)
@@ -5715,7 +5712,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @skipCUDANonDefaultStreamIf(True)
     def test_rnn_retain_variables_cuda(self, dtype=torch.float):
         with torch.backends.cudnn.flags(enabled=False):
             self._test_rnn_retain_variables("cuda", dtype)
@@ -6038,7 +6034,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @skipCUDANonDefaultStreamIf(True)
     def test_noncontig_conv_grad_cuda(self, dtype=torch.float):
         # FIXME: remove after adding non-contiguous grad tests for all modules
         module = nn.Conv2d(3, 5, kernel_size=3, padding=1).to("cuda", dtype)
@@ -7678,7 +7673,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(DOUBLE_TENSORTYPES)
-    @skipCUDANonDefaultStreamIf(True)
     def test_conv_double_backward_cuda(self, dtype=torch.double):
         # Double backward only runs with DoubleTensor due to precison reason
         batch_size = 1
@@ -8481,7 +8475,6 @@ new_criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        decorator=skipCUDANonDefaultStreamIf(True)
     ),
     dict(
         module_name='CTCLoss',
@@ -8495,7 +8488,6 @@ new_criterion_tests = [
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
-        decorator=skipCUDANonDefaultStreamIf(True)
     ),
     dict(
         module_name='CTCLoss',
@@ -8510,7 +8502,6 @@ new_criterion_tests = [
         check_gradgrad=False,
         check_half=False,
         convert_target=False,
-        decorator=skipCUDANonDefaultStreamIf(True)
     ),
     dict(
         module_name='CTCLoss',
@@ -8525,7 +8516,6 @@ new_criterion_tests = [
         check_gradgrad=False,
         check_half=False,
         convert_target=False,
-        decorator=skipCUDANonDefaultStreamIf(True)
     ),
 ]
 
@@ -8616,8 +8606,7 @@ class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
 add_test(NewModuleTest(
     constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
     input_size=(4, 16),
-    fullname='AdaptiveLogSoftmax',
-    decorator=skipCUDANonDefaultStreamIf(True)))
+    fullname='AdaptiveLogSoftmax'))
 
 
 # The following are helpers for TestNN.test_affine_*

@@ -18,7 +18,7 @@ from torch.onnx import OperatorExportTypes
 from torch._six import inf, PY2, PY37, builtins, StringIO
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipCUDANonDefaultStreamIf
+    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from common_nn import module_tests, new_module_tests, criterion_tests
 from textwrap import dedent
 from functools import wraps, reduce
@@ -288,7 +288,7 @@ def _helper_generate_qparam(script_module, input_data):
 
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
-    _do_cuda_non_default_stream = True
+    _do_cuda_non_default_stream = False
     _restored_warnings = False
 
     def setHooks(self):
@@ -13526,7 +13526,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_dcgan_models(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
-    @skipCUDANonDefaultStreamIf(True)
     def test_dcgan_models_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_dcgan_models(self, device='cuda', check_export_import=False)
@@ -13649,7 +13648,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_mnist(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
-    @skipCUDANonDefaultStreamIf(True)
     def test_mnist_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_mnist(self, device='cuda', check_export_import=False)
@@ -13699,7 +13697,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_reinforcement_learning(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
-    @skipCUDANonDefaultStreamIf(True)
     def test_reinforcement_learning_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_reinforcement_learning(self, device='cuda', test_export_import=False)
@@ -13811,7 +13808,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             self._test_snli(self, device='cpu', quantized=True)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
-    @skipCUDANonDefaultStreamIf(True)
     def test_snli_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_snli(self, device='cuda', check_export_import=False)
@@ -13845,7 +13841,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_super_resolution(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, 'no CUDA')
-    @skipCUDANonDefaultStreamIf(True)
     def test_super_resolution_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_super_resolution(self, device='cuda', check_export_import=False)
@@ -13962,7 +13957,6 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             self._test_vae(self, device='cpu', quantized=True)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
-    @skipCUDANonDefaultStreamIf(True)
     def test_vae_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_vae(self, device='cuda', check_export_import=False)
