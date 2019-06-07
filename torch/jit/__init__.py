@@ -1696,6 +1696,9 @@ def _convert_to_script_module(mod, methods=None):
         # Create constant versions for the iterable modules
         return _create_constant_iterable_module(mod)
 
+    if mod.__class__.forward is torch.nn.Module.forward:
+        raise Exception("nn.Module must implement forward(self, ...) to be scripted")
+
     if methods is None:
         methods = ('forward',)
     exported = []
