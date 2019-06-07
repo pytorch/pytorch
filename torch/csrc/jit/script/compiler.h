@@ -18,6 +18,8 @@ void runCleanupPasses(
     std::shared_ptr<Graph>& to_clean,
     bool convert_ssa = true);
 
+bool meaningfulName(const std::string& name);
+
 } // namespace script
 } // namespace jit
 } // namespace torch

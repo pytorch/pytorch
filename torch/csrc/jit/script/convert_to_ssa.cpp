@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/script/convert_to_ssa.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/mini_environment.h>
 
 namespace torch {
@@ -46,7 +47,10 @@ struct ControlFlowLoadStores {
       Node* n,
       const TypePtr& type,
       const std::string& name) {
-    auto out = n->addOutput()->setType(type)->setUniqueName(name);
+    auto out = n->addOutput()->setType(type);
+    if (meaningfulName(name)) {
+      out->setUniqueName(name);
+    }
     auto g = n->owningGraph();
     g->createStore(name, out)->insertAfter(n);
   }

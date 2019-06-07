@@ -1437,7 +1437,7 @@ Node* Graph::createStore(const std::string& name, Value* v) {
 Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
   auto n = create(prim::Load, {}, /*num_outputs*/ 1);
   n->s_(attr::name, name);
-  n->output()->setType(type)->setUniqueName(name);
+  n->output()->setType(type);
   return n;
 }
 

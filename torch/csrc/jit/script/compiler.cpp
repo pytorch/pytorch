@@ -157,23 +157,6 @@ static std::shared_ptr<MagicMethod> makeMagic(
   return std::make_shared<MagicMethod>(name, base);
 }
 
-// we consider _N where N is a number, to be a non-meaningful name
-// and do not record it as a unique name. This allows python printing to
-// be able to export and import more consistently named graphs
-static bool meaningfulName(const std::string& name) {
-  if (name.size() == 0)
-    return false;
-  if (name[0] == '$')
-    return false;
-  if (name[0] != '_')
-    return true;
-  for (size_t i = 1; i < name.size(); ++i) {
-    if (!isdigit(name[i]))
-      return true;
-  }
-  return false;
-}
-
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down nested control structures in
 // the frontend (which themselves don't introduce scopes)
@@ -237,6 +220,9 @@ struct Environment {
   SugaredValuePtr insertLoad(const std::string& name, TypePtr type) {
     auto g = b->owningGraph();
     auto load = g->insertNode(g->createLoad(name, type));
+    if (meaningfulName(name)) {
+      load->output()->setUniqueName(name);
+    }
     return std::make_shared<SimpleValue>(load->output());
   }
 
@@ -3040,6 +3026,23 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
   ConstantPooling(to_clean);
   // For jitter
   CanonicalizeOutputs(to_clean);
+}
+
+// we consider _N where N is a number, to be a non-meaningful name
+// and do not record it as a unique name. This allows python printing to
+// be able to export and import more consistently named graphs
+bool meaningfulName(const std::string& name) {
+  if (name.size() == 0)
+    return false;
+  if (name[0] == '$')
+    return false;
+  if (name[0] != '_')
+    return true;
+  for (size_t i = 1; i < name.size(); ++i) {
+    if (!isdigit(name[i]))
+      return true;
+  }
+  return false;
 }
 
 } // namespace script
