@@ -104,16 +104,23 @@ void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) const {
 
 // Does `n` write to an alias of one of the values in `vs`?
 bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
+  const auto writtenTo = getWrites(n);
+  if (writtenTo.empty()) {
+    return false;
+  }
+
   MemoryLocations locs;
   for (const auto v : vs) {
     auto it = elementMap_.find(v);
     if (it != elementMap_.end()) {
-      locs |= it->second->getMemoryLocations();
+      const auto& vlocs = it->second->getMemoryLocations();
+      if (writtenTo.intersects(vlocs)) {
+        return true;
+      }
     }
   }
 
-  const auto writtenTo = getWrites(n);
-  return writtenTo.intersects(locs);
+  return false;
 }
 
 MemoryLocations AliasDb::getWrites(Node* n) const {
@@ -131,8 +138,10 @@ void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
       ret |= el->getMemoryLocations();
 
       // We also consider memory locations of contained values to be "read".
-      for (auto contained : el->containedElements) {
-        ret |= memoryDAG_->fromIndex(contained)->getMemoryLocations();
+      for (auto type : input->type()->containedTypes()) {
+        if (auto wildcard = getWildcard(type)) {
+          ret |= wildcard->getMemoryLocations();
+        }
       }
     }
   }
@@ -195,35 +204,9 @@ void AliasDb::dump() const {
   std::cout << "\n";
 }
 
-void AliasDb::assignWildcardToContained(const Value* v) {
-  if (!shouldAnnotate(v)) {
-    return;
-  }
-  auto it = elementMap_.find(v);
-  TORCH_INTERNAL_ASSERT(it != elementMap_.end());
-  assignWildcardToContained(it->second, v->type());
-}
-
-void AliasDb::assignWildcardToContained(Element* e, const TypePtr& type) {
-  TORCH_INTERNAL_ASSERT(shouldAnnotate(type));
-  // Assign wildcards to contained types
-  for (const auto& containedType : type->containedTypes()) {
-    if (shouldAnnotate(containedType)) {
-      auto containedElement = memoryDAG_->makeFreshValue(nullptr);
-      auto wildcard = getOrCreateWildcard(containedType);
-      memoryDAG_->makePointerTo(containedElement, wildcard);
-      memoryDAG_->addToContainedElements(containedElement, e);
-
-      // Handle nested containers
-      assignWildcardToContained(containedElement, containedType);
-    }
-  }
-}
-
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   for (auto input : graph->inputs()) {
     setWildcard(input);
-    assignWildcardToContained(input);
   }
   analyze(graph->block());
 }
@@ -630,9 +613,6 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
   TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
   auto container = node->output();
   giveFreshAlias(container);
-
-  // Register contained types
-  assignWildcardToContained(container);
 }
 
 // BroadcastingChunk: all inputs are broadcasted, and then individually chunked.
@@ -1196,10 +1176,8 @@ Element* AliasDb::getOrCreateWildcard(const TypePtr& type) {
 // Search the wildcard index for an element that corresponds to the given type.
 // Const version returns nullptr
 Element* AliasDb::getWildcard(const TypePtr& type) const {
-  TORCH_INTERNAL_ASSERT(shouldAnnotate(type));
   const auto kind = getMutableTypeKind(type);
-  TORCH_INTERNAL_ASSERT(kind);
-  if (!wildcardIndex_.count(*kind)) {
+  if (!kind || !wildcardIndex_.count(*kind)) {
     return nullptr;
   }
   return wildcardIndex_.at(*kind);

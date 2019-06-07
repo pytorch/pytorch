@@ -11,7 +11,7 @@ namespace jit {
 Element::Element(MemoryDAG& dag_, const Value* value_, unsigned index_)
     : dag(dag_), index(index_), value(value_) {}
 
-Element* MemoryDAG::fromIndex(unsigned x) const {
+const Element* MemoryDAG::fromIndex(unsigned x) const {
   TORCH_INTERNAL_ASSERT(x < indexToElementMap.size());
   return indexToElementMap[x].get();
 }
@@ -91,13 +91,6 @@ bool MemoryDAG::mayContainAlias(
 void MemoryDAG::makePointerTo(Element* from, Element* to) {
   from->pointsTo.set(to->index);
   to->pointedFrom.set(from->index);
-
-  for (auto containedIdx : to->containedElements) {
-    auto contained = fromIndex(containedIdx);
-    auto el = makeFreshValue(contained->value);
-    makePointerTo(el, contained);
-    from->containedElements.set(el->index);
-  }
 }
 
 void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
