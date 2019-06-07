@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/jit_type.h>
+#include <ATen/core/type_conversion.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/alias_info.h>

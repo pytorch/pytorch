@@ -63,7 +63,7 @@ using ::c10::Type;
 using ::c10::TypeEnv;
 using ::c10::TypePtr;
 
-using ::c10::getTypePtr;
+// using ::c10::getTypePtr;
 using ::c10::MatchTypeReturn;
 using ::c10::TypeKind;
 

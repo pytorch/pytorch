@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/op_registration/infer_schema.h>
+#include <ATen/core/type_conversion.h>
 
 namespace c10 {
 /**
@@ -43,7 +44,7 @@ namespace detail {
   template<class T, class Enable = void> struct ivalue_to_arg_type {
     // This base case is hit whenever a type does not have a specialisation below.
     static T call(IValue&& v) {
-      return reinterpret_cast<T>(&v);
+      return reinterpret_cast<T>(v.toObject()->getSlot(0).toBlob()->GetRaw());
     }
     // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
   };
@@ -133,7 +134,19 @@ namespace detail {
 
   template<class T, class Enable = void>
   struct return_type_to_ivalue {
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type.");
+    // This base case is hit whenever a type does not have a specialisation below.
+    template<class T_>
+    static IValue call(T_&& v) {
+      auto res = tmap.find<T_>();
+      if (res == tmap.end()) {
+        throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
+      }
+      auto retObject = ivalue::Object(res->second, 1);
+      auto blob = caffe2::Blob();
+      retObject.setSlot(0, IValue(c10::make_intrusive<caffe2::Blob>(std::move(blob))));
+      return IValue(c10::make_intrusive<ivalue::Object>(std::move(retObject)));
+    }
+    // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
   };
   template<class T>
   struct return_type_to_ivalue<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {

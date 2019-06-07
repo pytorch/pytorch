@@ -475,8 +475,10 @@ const char * typeKindToString(TypeKind kind) {
 
 bool Type::isSubtypeOf(const TypePtr rhs) const {
   if(auto rhs_ = rhs->cast<OptionalType>()) {
+    // std::cout<<"branch"<<std::endl;
     return this->isSubtypeOf(rhs_->getElementType());
   }
+  // std::cout<<"not branch?"<<std::endl;
   return *this == *rhs;
 }
 

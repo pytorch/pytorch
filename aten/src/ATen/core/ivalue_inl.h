@@ -116,7 +116,7 @@ inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
   return toIntrusivePtr<ivalue::Object>();
 }
 inline at::Tensor IValue::toTensor() && {
-  AT_ASSERT(isTensor());
+  TORCH_INTERNAL_ASSERT(isTensor());
   return at::Tensor(moveToIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
 }
 inline at::Tensor IValue::toTensor() const & {
