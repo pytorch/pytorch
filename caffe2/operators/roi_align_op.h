@@ -6,6 +6,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/c10_operator.h"
 
 C10_DECLARE_CAFFE2_OPERATOR(RoIAlign)
 

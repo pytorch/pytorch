@@ -49,14 +49,14 @@ __global__ void cunn_LookupTableBag_updateOutputKernel(
       for (int64_t emb = begin; emb < end; emb++) {
         const int weightRow = ((int) input[emb]) * stride;
         weightFeatSum += ScalarConvert<Dtype, Acctype>::to(weightFeat[weightRow]);
-	bag_size_ ++;
+        bag_size_ ++;
         if (featureDim == 0) {
           offset2bag[emb] = bag;
         }
       }
       if (mode == MODE_MEAN) {
-	weightFeatSum = weightFeatSum / ScalarConvert<int64_t, Acctype>::to(bag_size_);
-	bag_size[bag] = bag_size_;
+        weightFeatSum = weightFeatSum / ScalarConvert<int64_t, Acctype>::to(bag_size_);
+        bag_size[bag] = bag_size_;
       }
       (void) MODE_SUM; //silence warnings about unused MODE_SUM;
       output[bag * stride + featureDim] = ScalarConvert<Acctype, Dtype>::to(weightFeatSum);
@@ -114,9 +114,9 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
         if (featureDim < stride)
         {
           gradient[ii] = ScalarConvert<Dtype, Acctype>::to(gradOutput[gradOutputRow + featureDim]);
-	  if (mode == MODE_MEAN) {
-	    gradient[ii] /= bag_size[seq_number];
-	  }
+          if (mode == MODE_MEAN) {
+            gradient[ii] /= bag_size[seq_number];
+          }
           weight[ii] = ScalarConvert<Dtype, Acctype>::to(gradWeight[weightRow + featureDim]);
         }
       }

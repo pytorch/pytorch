@@ -39,6 +39,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_.*pool_.*same.*'  # Does not support pool same.
                      '|test_.*pool_.*ceil.*'  # Does not support pool same.
                      '|test_maxpool_with_argmax.*'  # MaxPool outputs indices in different format.
+                     '|test_maxpool.*dilation.*'  # MaxPool doesn't support dilation yet
                      '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
                      '|test_mvn.*'  # MeanVarianceNormalization is experimental and not supported.
                      '|test_dynamic_slice.*'  # MeanVarianceNormalization is experimental and not supported.
@@ -52,7 +53,6 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_isnan.*'  # Needs implementation
                      '|test_scatter.*'  # Should be similar to ScatterAssign
                      '|test_constantofshape_int.*'  # Needs implementation
-                     '|test_where.*'  # Needs implementation
                      '|test_shrink.*'  # Needs implementation
                      '|test_strnorm.*'  # Needs implementation
                      '|test_nonzero.*'  # Needs implementation
@@ -60,6 +60,16 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_top_k.*'  # opset 10 is not supported yet
                      '|test_resize.*'  # opset 10 is not supported yet
                      '|test_slice.*'  # opset 10 is not supported yet
+                     '|test_.*qlinear.*'  # Skip quantized op test
+                     '|test_.*quantize.*'  # Skip quantized op test
+                     '|test_.*matmulinteger.*'  # Skip quantized op test
+                     '|test_.*convinteger.*'  # Skip quantized op test
+                     '|test_isinf.*'  # Needs implementation
+                     '|test_mod.*'  # Needs implementation
+                     '|test_nonmaxsuppression.*'  # Needs implementation
+                     '|test_reversesequence.*'  # Needs implementation
+                     '|test_roialign.*'  # Needs implementation
+                     '|test_bitshift.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
@@ -80,11 +90,6 @@ backend_test.exclude('(test_pow_bcast'
 # Skip vgg to speed up CI
 if 'JENKINS_URL' in os.environ:
     backend_test.exclude(r'(test_vgg19|test_vgg)')
-
-if workspace.has_hip_support:
-    # TODO: Investigate flakiness in ROCM Softmax (it sometimes give NaN).
-    backend_test.exclude(r'test_softmax_.*_cuda')
-    backend_test.exclude(r'test_logsoftmax_.*_cuda')
 
 # import all test cases at global scope to make them visible to python.unittest
 globals().update(backend_test

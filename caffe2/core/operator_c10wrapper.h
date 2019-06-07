@@ -1,10 +1,14 @@
 #pragma once
 
+// TODO Also register c10 operators on mobile
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/dispatch/Dispatcher.h>
-#include "caffe2/core/operator.h"
-#include <c10/util/ArrayRef.h>
-#include <c10/util/Metaprogramming.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/ArrayRef.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Metaprogramming.h>
+#include "caffe2/core/operator.h"
+#include "caffe2/core/c10_operator.h"
 
 namespace caffe2 {
 
@@ -91,7 +95,12 @@ class C10OperatorWrapper final : public Operator<Context> {
             InputSize(),
             "), operator schema expected more.");
         stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
-
+      } else if (argument.type()->isSubtypeOf(OptionalType::ofTensor())) {
+        if (input_tensor_index < InputSize()) {
+          stack_.emplace_back(at::Tensor(Input(input_tensor_index++)));
+        } else {
+          stack_.emplace_back(IValue());
+        }
       } else if (argument.type()->isSubtypeOf(ListType::ofTensors())) {
         AT_ASSERTM(
             input_tensor_index == 0,
@@ -102,15 +111,14 @@ class C10OperatorWrapper final : public Operator<Context> {
       } else {
         stack_.emplace_back(get_nontensor_argument_(argument));
       }
-
-      AT_ASSERTM(
-          input_tensor_index == InputSize(),
-          "Error in caffe2->c10 wrapper: Number of caffe2 operator inputs (",
-          InputSize(),
-          ") doesn't match number of tensor arguments (",
-          input_tensor_index,
-          ") in the c10 operator schema.");
     }
+    AT_ASSERTM(
+        input_tensor_index == InputSize(),
+        "Error in caffe2->c10 wrapper: Number of caffe2 operator inputs (",
+        InputSize(),
+        ") doesn't match number of tensor arguments (",
+        input_tensor_index,
+        ") in the c10 operator schema.");
   }
 
   void callKernel_() {
@@ -125,7 +133,7 @@ class C10OperatorWrapper final : public Operator<Context> {
   void popOutputs_() {
     AT_ASSERT(stack_.size() == op_.schema().returns().size());
     for (size_t i = 0; i < op_.schema().returns().size(); ++i) {
-      OperatorBase::SetOutputTensor(i, Tensor(C10Tensor(std::move(stack_[i]).toTensor())));
+      OperatorBase::SetOutputTensor(i, Tensor(std::move(stack_[i]).toTensor()));
     }
     stack_.clear();
   }
@@ -174,7 +182,7 @@ class C10OperatorWrapper final : public Operator<Context> {
     if (default_value.has_value()) {
       return this->template GetSingleArgument<T>(name, default_value->to<T>());
     } else {
-      AT_CHECK(
+      TORCH_CHECK(
           this->template HasSingleArgumentOfType<T>(name),
           "Error in caffe2->c10 wrapper: Expected argument '",
           name,
@@ -202,31 +210,50 @@ class C10OperatorWrapper final : public Operator<Context> {
 template <class Context>
 inline std::function<
     std::unique_ptr<OperatorBase>(const OperatorDef&, Workspace*)>
-createC10OperatorWrapper(const c10::OperatorHandle& op_handle) {
-  return [op_handle](const OperatorDef& op_def, Workspace* ws) {
+createC10OperatorWrapper(const char* op_name, const char* overload_name) {
+  return [op_name, overload_name](const OperatorDef& op_def, Workspace* ws) {
+    auto op_handle =
+        c10::Dispatcher::singleton().findSchema(op_name, overload_name);
+    AT_ASSERTM(
+        op_handle.has_value(),
+        "Tried to register c10 operator ",
+        op_name,
+        ".",
+        overload_name,
+        " with caffe2, but didn't find the c10 operator.");
     return c10::guts::make_unique<C10OperatorWrapper<Context>>(
-        op_handle, op_def, ws);
+        *op_handle, op_def, ws);
   };
 }
 
 } // namespace detail
+} // namespace caffe2
 
-// TODO Also register c10 operators on mobile
-#ifndef C10_MOBILE
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(OperatorHandle, Name) \
-  REGISTER_CPU_OPERATOR_CREATOR(                                            \
-      Name, detail::createC10OperatorWrapper<CPUContext>(OperatorHandle))
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(OperatorHandle, Name) \
-  REGISTER_CUDA_OPERATOR_CREATOR(                                            \
-      Name, detail::createC10OperatorWrapper<CUDAContext>(OperatorHandle))
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(OperatorHandle, Name) \
-  REGISTER_HIP_OPERATOR_CREATOR(                                            \
-      Name, detail::createC10OperatorWrapper<HIPContext>(OperatorHandle))
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(        \
+    OperatorName, Name)                                       \
+  REGISTER_CPU_OPERATOR_CREATOR(                              \
+      Name,                                                   \
+      ::caffe2::detail::createC10OperatorWrapper<CPUContext>( \
+          OperatorName, ""))
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(        \
+    OperatorName, Name)                                        \
+  REGISTER_CUDA_OPERATOR_CREATOR(                              \
+      Name,                                                    \
+      ::caffe2::detail::createC10OperatorWrapper<CUDAContext>( \
+          OperatorName, ""))
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(        \
+    OperatorName, Name)                                       \
+  REGISTER_HIP_OPERATOR_CREATOR(                              \
+      Name,                                                   \
+      ::caffe2::detail::createC10OperatorWrapper<HIPContext>( \
+          OperatorName, ""))
 #else
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(OperatorHandle, Name)
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(OperatorHandle, Name)
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(OperatorHandle, Name)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU( \
+    OperatorName, Name)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA( \
+    OperatorName, Name)
+#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP( \
+    OperatorName, Name)
 #endif
-} // namespace caffe2

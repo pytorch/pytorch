@@ -1,6 +1,3 @@
-from numbers import Integral
-import warnings
-
 from .module import Module
 from .. import functional as F
 from ..._jit_internal import weak_module, weak_script_method
@@ -22,11 +19,10 @@ class Upsample(Module):
     calculate the output size. (You cannot give both, as it is ambiguous)
 
     Args:
-        size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int],
-            optional): output spatial sizes
-        scale_factor (float or Tuple[float] or Tuple[float, float] or
-            Tuple[float, float, float], optional): multiplier for spatial size.
-            Has to match input size if it is a tuple.
+        size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int], optional):
+            output spatial sizes
+        scale_factor (float or Tuple[float] or Tuple[float, float] or Tuple[float, float, float], optional):
+            multiplier for spatial size. Has to match input size if it is a tuple.
         mode (str, optional): the upsampling algorithm: one of ``'nearest'``,
             ``'linear'``, ``'bilinear'``, ``'bicubic'`` and ``'trilinear'``.
             Default: ``'nearest'``
@@ -126,7 +122,10 @@ class Upsample(Module):
         super(Upsample, self).__init__()
         self.name = type(self).__name__
         self.size = size
-        self.scale_factor = float(scale_factor) if scale_factor else None
+        if isinstance(scale_factor, tuple):
+            self.scale_factor = tuple(float(factor) for factor in scale_factor)
+        else:
+            self.scale_factor = float(scale_factor) if scale_factor else None
         self.mode = mode
         self.align_corners = align_corners
 

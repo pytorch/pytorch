@@ -128,6 +128,9 @@ class CAFFE2_API TracerGuard {
 
   virtual ~TracerGuard();
 
+  static TracerGuard* getCurrentTracerGuard();
+  void disable();
+
  private:
   bool enabled_ = false;
   TracerEvent event_;

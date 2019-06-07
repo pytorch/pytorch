@@ -126,7 +126,7 @@ void _check_inputs(
 
   device_set devices;
   int64_t numel = inputs[0].numel();
-  auto& type = inputs[0].type();
+  auto type = inputs[0].type();
 
   for (size_t i = 0; i < len; i++) {
     auto input = inputs[i];
@@ -178,7 +178,7 @@ bool is_available(TensorList tensors) {
 #ifdef USE_NCCL
   device_set devices;
   for (auto& tensor : tensors) {
-    auto& type = tensor.type();
+    auto type = tensor.type();
     if (!type.is_cuda() || type.is_sparse())
       return false;
     if (!tensor.is_contiguous())
@@ -250,7 +250,7 @@ void broadcast(
     const auto stream = (streams.empty() || !streams[i])
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
-    AT_CHECK(
+    TORCH_CHECK(
         static_cast<uint64_t>(numel) <= static_cast<uint64_t>(count_max),
         "Broadcast tensor has ",
         numel,
@@ -275,7 +275,7 @@ void reduce(
     const comm_list& user_comms) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
-  AT_CHECK(
+  TORCH_CHECK(
       root >= 0 && static_cast<size_t>(root) < inputs.size(), "invalid root");
 
   _check_inputs(inputs, outputs, 1, 1);

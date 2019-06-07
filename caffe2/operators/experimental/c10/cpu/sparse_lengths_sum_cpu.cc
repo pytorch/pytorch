@@ -1,8 +1,8 @@
-#include <ATen/core/dispatch/KernelRegistration.h>
-#include "caffe2/operators/experimental/c10/schemas/sparse_lengths_sum.h"
+#include <ATen/core/op_registration/op_registration.h>
+#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/perfkernels/embedding_lookup.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/core/tensor.h"
 
 using caffe2::Tensor;
 
@@ -15,10 +15,10 @@ void sparse_lengths_sum_op_cpu_impl_(
     const at::Tensor& indicesInput_,
     const at::Tensor& lengthsInput_,
     const at::Tensor& output_) {
-  Tensor dataInput{C10Tensor(dataInput_)};
-  Tensor indicesInput{C10Tensor(indicesInput_)};
-  Tensor lengthsInput{C10Tensor(lengthsInput_)};
-  Tensor output{C10Tensor(output_)};
+  Tensor dataInput(dataInput_);
+  Tensor indicesInput(indicesInput_);
+  Tensor lengthsInput(lengthsInput_);
+  Tensor output(output_);
 
   using T = float;
   constexpr bool USE_MEAN = false;
@@ -81,11 +81,17 @@ void sparse_lengths_sum_op_cpu(
   }
 }
 
-} // namespace
-} // namespace caffe2
+static auto registry = c10::RegisterOperators().op(
+    "_c10_experimental::SparseLengthsSum",
+    c10::RegisterOperators::options()
+      .kernel<
+        decltype(sparse_lengths_sum_op_cpu),
+        &sparse_lengths_sum_op_cpu>(CPUTensorId()));
 
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::SparseLengthsSum)
-    .kernel<decltype(caffe2::sparse_lengths_sum_op_cpu), &caffe2::sparse_lengths_sum_op_cpu>()
-    .dispatchKey(CPUTensorId());
-} // namespace c10
+} // namespace
+
+REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+    "_c10_experimental::SparseLengthsSum",
+    C10SparseLengthsSum_DontUseThisOpYet)
+
+} // namespace caffe2

@@ -7,10 +7,10 @@ import numpy as np
 
 import unittest
 from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace, core, model_helper, brew
+from caffe2.python import workspace, core, model_helper, brew, test_util
 
 
-class CopyOpsTest(unittest.TestCase):
+class CopyOpsTest(test_util.TestCase):
 
     def tearDown(self):
         # Reset workspace after each test

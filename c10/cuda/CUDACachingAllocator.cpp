@@ -2,6 +2,7 @@
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAException.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/UniqueVoidPtr.h>
 
 #include <cuda_runtime_api.h>
@@ -327,6 +328,7 @@ struct THCCachingAllocator
   void emptyCache()
   {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    synchronize_and_free_events(nullopt);
     free_blocks(large_blocks, large_blocks.begin(), large_blocks.end());
     free_blocks(small_blocks, small_blocks.begin(), small_blocks.end());
   }
@@ -336,7 +338,7 @@ struct THCCachingAllocator
     std::lock_guard<std::recursive_mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
-      AT_ERROR("invalid device pointer: %p", ptr);
+      AT_ERROR("invalid device pointer: ", ptr);
     }
     while (block->prev) {
       block = block->prev;
@@ -376,17 +378,21 @@ struct THCCachingAllocator
 
   void recordStream(void* ptr, cuda::CUDAStream stream)
   {
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    Block* block = find_allocated_block(ptr);
-    if (!block) {
-      AT_ERROR("invalid device pointer: %p", ptr);
+    // Empty tensor's storage().data() might be a null ptr. As there is no
+    // blocks associated with those tensors, it is fine to do nothing here.
+    if (ptr) {
+      std::lock_guard<std::recursive_mutex> lock(mutex);
+      Block* block = find_allocated_block(ptr);
+      if (!block) {
+        AT_ERROR("invalid device pointer: ", ptr);
+      }
+      if (stream.stream() == block->stream) {
+        // ignore uses on the allocation stream, since those don't require any
+        // special synchronization
+        return;
+      }
+      block->stream_uses.insert(stream);
     }
-    if (stream.stream() == block->stream) {
-      // ignore uses on the allocation stream, since those don't require any
-      // special synchronization
-      return;
-    }
-    block->stream_uses.insert(stream);
   }
 
   /** moves a block into a pool of cached free blocks */
@@ -477,6 +483,10 @@ struct THCCachingAllocator
 
   void free_cached_blocks(int device)
   {
+    // First ensure that all blocks that can't currently be allocated due to
+    // outstanding events are returned to the pool.
+    synchronize_and_free_events(device);
+
     // Free all non-split cached blocks on device
     Block lower_bound(device, nullptr, 0);
     Block upper_bound(device + 1, nullptr, 0);
@@ -508,6 +518,32 @@ struct THCCachingAllocator
         ++it;
       }
     }
+  }
+
+  void synchronize_and_free_events(optional<int> device) {
+    // Synchronize on outstanding events and then free associated blocks.
+    // Limited to blocks on the given device if specified.
+
+    auto remaining_events = decltype(cuda_events)();
+
+    for (auto& e : cuda_events) {
+      cudaEvent_t event = e.first;
+      Block* block = e.second;
+      if (device.has_value() && block->device != *device) {
+        remaining_events.push_back(e);
+        continue;
+      }
+
+      C10_CUDA_CHECK(cudaEventSynchronize(event));
+      C10_CUDA_CHECK(cudaEventDestroy(event));
+
+      block->event_count--;
+      if (block->event_count == 0) {
+        free_block(block);
+      }
+    }
+
+    std::swap(cuda_events, remaining_events);
   }
 
   Block* find_allocated_block(void *ptr) {
@@ -553,6 +589,8 @@ struct THCCachingAllocator
 
       cudaError_t err = cudaEventQuery(event);
       if (err == cudaErrorNotReady) {
+        // ignore and clear the error if not ready
+        cudaGetLastError();
         break;
       } else if (err != cudaSuccess) {
         C10_CUDA_CHECK(err);
@@ -624,9 +662,8 @@ std::mutex* getFreeMutex()
 }
 
 static inline void assertValidDevice(int device) {
-  int device_count;
-  C10_CUDA_CHECK(cudaGetDeviceCount(&device_count));
-  AT_ASSERTM(0 <= device && device < device_count, "Invalid device argument.");
+  int device_num = device_count();
+  AT_ASSERTM(0 <= device && device < device_num, "Invalid device argument.");
 }
 
 uint64_t currentMemoryAllocated(int device)

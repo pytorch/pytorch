@@ -1,4 +1,4 @@
-#include <torch/csrc/python_headers.h>
+#include <torch/csrc/jit/python_ir.h>
 
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/export.h>
@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/pybind.h>
 #include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -17,6 +18,8 @@
 
 namespace torch {
 namespace jit {
+
+Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
 using c10::Type;
 
@@ -121,76 +124,89 @@ Node* findNode(Block* block, Symbol kind, bool recurse = true) {
   return findNode(blocks, kind, recurse);
 }
 
-// execute a Python function, used for Ops we can't optimize but that we want to
-// optimize around
-struct ConcretePythonOp : public PythonOp {
-  ConcretePythonOp(Graph* graph) : PythonOp(graph) {}
-  std::string name() const override {
-    AutoGIL gil;
-    if (auto autograd = autogradFunction()) {
-      return getPythonName(autograd->get());
+std::string ConcretePythonOp::name() const {
+  AutoGIL gil;
+  if (auto autograd = autogradFunction()) {
+    return getPythonName(autograd->get());
+  } else {
+    return getPythonName(pyobj.get());
+  }
+}
+
+void ConcretePythonOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<ConcretePythonOp>();
+  this->cconv = other->cconv;
+  Py_INCREF(other->pyobj.get());
+  this->pyobj = THPObjectPtr(other->pyobj.get());
+  this->ignore_on_export = other->ignore_on_export;
+  for (auto& sa : other->scalar_args) {
+    Py_INCREF(sa.get());
+    this->scalar_args.emplace_back(sa.get());
+  }
+}
+
+// recover the autograd.Function instance, if this PythonOp's function
+// was originally SomeFunction.apply
+// used in ONNX for discovering symbolics
+c10::optional<THPObjectPtr> ConcretePythonOp::autogradFunction() const {
+  AutoGIL gil;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  py::handle obj = const_cast<PyObject*>(pyobj.get());
+
+  auto r = py::getattr(obj, "__self__", py::none());
+  if (r.is_none())
+    return c10::nullopt;
+
+  auto apply = py::getattr(r, "apply", py::none());
+  if (apply.is_none())
+    return c10::nullopt;
+
+  auto c = PyObject_RichCompareBool(apply.ptr(), obj.ptr(), Py_NE);
+  if (PyErr_Occurred())
+    throw py::error_already_set();
+  if (c)
+    return c10::nullopt;
+
+  return THPObjectPtr(r.release().ptr());
+}
+
+void ConcretePythonOp::writeScalars(std::ostream& out) const {
+  out << "(";
+  int i = 0;
+  for (auto& scalar : scalar_args) {
+    if (i++ > 0)
+      out << ", ";
+    printPyObject(out, scalar);
+  }
+  out << ")";
+}
+
+void ConcretePythonOp::lint_python() const {
+  size_t n_scalars = 0, n_tensors = 0;
+  for (auto c : cconv) {
+    if (c == 'c') {
+      n_scalars++;
+    } else if (c == 'd') {
+      n_tensors++;
     } else {
-      return getPythonName(pyobj.get());
+      AT_ASSERT(0);
     }
+    AT_ASSERT(static_cast<bool>(pyobj));
   }
-  void cloneFrom(Node* other_) override {
-    Node::cloneFrom(other_);
-    auto other = other_->cast<PythonOp>();
-    this->cconv = other->cconv;
-    Py_INCREF(other->pyobj.get());
-    this->pyobj = THPObjectPtr(other->pyobj.get());
-    for (auto& sa : other->scalar_args) {
-      Py_INCREF(sa.get());
-      this->scalar_args.emplace_back(sa.get());
-    }
-  }
-  Node* allocNewInstance(Graph* g) override {
-    return new ConcretePythonOp(g);
-  }
-  // recover the autograd.Function instance, if this PythonOp's function
-  // was originally SomeFunction.apply
-  // used in ONNX for discovering symbolics
-  c10::optional<THPObjectPtr> autogradFunction() const override {
-    AutoGIL gil;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    py::handle obj = const_cast<PyObject*>(pyobj.get());
+  AT_ASSERT(n_scalars == scalar_args.size());
+  AT_ASSERT(n_tensors == inputs().size());
+}
 
-    auto r = py::getattr(obj, "__self__", py::none());
-    if (r.is_none())
-      return c10::nullopt;
-
-    auto apply = py::getattr(r, "apply", py::none());
-    if (apply.is_none())
-      return c10::nullopt;
-
-    auto c = PyObject_RichCompareBool(apply.ptr(), obj.ptr(), Py_NE);
-    if (PyErr_Occurred())
-      throw py::error_already_set();
-    if (c)
-      return c10::nullopt;
-
-    return THPObjectPtr(r.release().ptr());
-  }
-
-  void writeScalars(std::ostream& out) const override {
-    out << "(";
-    int i = 0;
-    for (auto& scalar : scalar_args) {
-      if (i++ > 0)
-        out << ", ";
-      printPyObject(out, scalar);
-    }
-    out << ")";
-  }
-};
-
-PythonOp* pythonAllocPythonOp(Graph* g) {
-  return new ConcretePythonOp(g);
+Node* Graph::createPythonOp(
+    THPObjectPtr&& pyobj,
+    const std::string& cconv,
+    pyobj_list&& scalar_args) {
+  ConcretePythonOp* op = new ConcretePythonOp(this);
+  return op->init(std::move(pyobj), cconv, std::move(scalar_args));
 }
 
 void initPythonIRBindings(PyObject* module_) {
-  setAllocPythonOp(pythonAllocPythonOp);
-
   auto m = py::handle(module_).cast<py::module>();
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
@@ -198,10 +214,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "__repr__",
           [](Graph& g) {
-            std::stringstream ss;
-            ss << g;
-            return ss.str();
+            return g.toString();
           })
+      .def(
+          "str",
+          &Graph::toString,
+          py::arg("print_source_ranges") = true)
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
@@ -209,30 +227,24 @@ void initPythonIRBindings(PyObject* module_) {
             db.dump();
           })
       .def(
-          "propagate_shapes",
-          [](std::shared_ptr<Graph> g,
-             std::vector<at::Tensor> inputs,
-             bool with_grad) {
-            setInputTypes(
-                *g,
-                ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
-            PropagateInputShapes(g);
-          })
-      .def(
           "_export_onnx",
           [](const std::shared_ptr<Graph> g,
-             const std::vector<at::Tensor>& initializers,
+             const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
+             const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
              bool defer_weight_export,
-             ::torch::onnx::OperatorExportTypes operator_export_type) {
+             ::torch::onnx::OperatorExportTypes operator_export_type,
+             bool strip_doc_string) {
             std::string graph;
             RawDataExportMap export_map;
             std::tie(graph, export_map) = export_onnx(
                 g,
                 initializers,
                 onnx_opset_version,
+                dynamic_axes,
                 defer_weight_export,
-                operator_export_type);
+                operator_export_type,
+                strip_doc_string);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -249,13 +261,15 @@ void initPythonIRBindings(PyObject* module_) {
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,
+          py::arg("dynamic_axes"),
           py::arg("defer_weight_export") = false,
           py::arg("operator_export_type") =
-              ::torch::onnx::OperatorExportTypes::ONNX)
+              ::torch::onnx::OperatorExportTypes::ONNX,
+          py::arg("strip_doc_string") = true)
       .def(
           "_pretty_print_onnx",
           [](const std::shared_ptr<Graph> g,
-             const std::vector<at::Tensor>& initializers,
+             const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
              bool defer_weight_export,
              ::torch::onnx::OperatorExportTypes operator_export_type,
@@ -337,13 +351,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def("param_node", [](Graph& g) { return g.block()->param_node(); })
       .def("return_node", [](Graph& g) { return g.block()->return_node(); })
       .def(
-          "pretty_print",
-          [](Graph& g) {
-            std::ostringstream oss;
-            g.prettyPrint(oss);
-            return oss.str();
-          })
-      .GS(createFusionGroup)
+          "createFusionGroup",
+          [](Graph& g) { return g.createWithSubgraph(prim::FusionGroup); })
       .def(
           "createClone",
           [](Graph& g, Node* n, py::object fn) {
@@ -384,7 +393,7 @@ void initPythonIRBindings(PyObject* module_) {
             return node;
           })
       .VS(copyMetadata)
-      .VS(isTensor)
+      .VS(isCompleteTensor)
       .VS(requires_grad)
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
@@ -422,16 +431,8 @@ void initPythonIRBindings(PyObject* module_) {
           [](Block& b) {
             return py::make_iterator(b.outputs().begin(), b.outputs().end());
           })
-      .def(
-          "returnNode",
-          [](Block& b) {
-            return b.return_node();
-          })
-      .def(
-          "paramNode",
-          [](Block& b) {
-            return b.param_node();
-          });
+      .def("returnNode", [](Block& b) { return b.return_node(); })
+      .def("paramNode", [](Block& b) { return b.param_node(); });
 
 #define NS(name) def(#name, &Node ::name)
   py::class_<Node, std::unique_ptr<Node, py::nodelete>>(m, "Node")
@@ -443,15 +444,9 @@ void initPythonIRBindings(PyObject* module_) {
             return ss.str();
           })
       .def(
-          "getSourceLocation",
-          [](Node& n) -> py::object {
-            std::stringstream ss;
-            if (auto sl = n.getSourceLocation()) {
-              sl->highlight(ss);
-              return py::str(ss.str());
-            } else {
-              return py::none();
-            }
+          "sourceRange",
+          [](Node& n) {
+            return n.sourceRange().str();
           })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
@@ -601,13 +596,13 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "pyobj",
           [](Node& n) {
-            return py::handle(n.expect<PythonOp>()->pyobj.get())
+            return py::handle(n.expect<ConcretePythonOp>()->pyobj.get())
                 .cast<py::object>();
           })
-      .def("cconv", [](Node& n) { return n.expect<PythonOp>()->cconv; })
-      .def("pyname", [](Node& n) { return n.expect<PythonOp>()->name(); })
+      .def("cconv", [](Node& n) { return n.expect<ConcretePythonOp>()->cconv; })
+      .def("pyname", [](Node& n) { return n.expect<ConcretePythonOp>()->name(); })
       .def("scalar_args", [](Node& n) {
-        auto op = n.expect<PythonOp>();
+        auto op = n.expect<ConcretePythonOp>();
         auto scalars = py::list();
         auto append = scalars.attr("append");
         for (auto& arg : op->scalar_args) {
@@ -691,7 +686,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
         return DictType::create(key, value);
-      }));
+      }))
+      .def("getKeyType", &DictType::getKeyType)
+      .def("getValueType", &DictType::getValueType);
   py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
       m, "OptionalType")
       .def(py::init([](TypePtr a) { return OptionalType::create(a); }))

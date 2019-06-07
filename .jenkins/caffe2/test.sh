@@ -92,7 +92,6 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
 
   # Unknown reasons, need to debug
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/piecewise_linear_transform_test.py")
-  rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/softmax_ops_test.py")
 
   # On ROCm, RCCL (distributed) development isn't complete.
   # https://github.com/ROCmSoftwarePlatform/rccl
@@ -121,6 +120,6 @@ pip install --user pytest-sugar
 # torchvision tests #
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  pip install --user torchvision
+  pip install -q --user git+https://github.com/pytorch/vision.git
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

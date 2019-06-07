@@ -94,14 +94,14 @@ class FunctionMeta(type):
                 has_static_forward = isinstance(forward, staticmethod) or isinstance(forward, classmethod)
                 break
 
-        setattr(cls, '_is_legacy', not has_static_forward)
+        cls._is_legacy = not has_static_forward
 
         # old-style functions
         if not has_static_forward:
             return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
         backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
-        setattr(cls, '_backward_cls', backward_fn)
+        cls._backward_cls = backward_fn
 
         return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
@@ -255,6 +255,8 @@ def _nested_map(condition, fn, condition_msg=None):
             return None
         elif isinstance(obj, (list, tuple)):
             return type(obj)(_map(x) for x in obj)
+        elif isinstance(obj, dict):
+            return {x : _map(obj[x]) for x in obj}
         else:
             raise ValueError("Auto nesting doesn't know how to process "
                              "an input object of type " + torch.typename(obj) +
@@ -282,6 +284,11 @@ def _iter_filter(condition, allow_unknown=False, condition_msg=None,
             return
         elif isinstance(obj, (list, tuple)):
             for o in obj:
+                for var in _iter(o):
+                    yield var
+        elif isinstance(obj, dict):
+            # We only accept primitive key types, so we needn't inspect them
+            for o in obj.values():
                 for var in _iter(o):
                     yield var
         elif allow_unknown:

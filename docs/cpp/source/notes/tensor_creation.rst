@@ -145,10 +145,10 @@ allowed values for these axes at the moment are:
 
 .. tip::
 
-	There exist "Rust-style" shorthands for dtypes, like ``kF32`` instead of
-	``kFloat32``. See `here
-	<https://github.com/pytorch/pytorch/blob/master/torch/csrc/api/include/torch/types.h>`_
-	for the full list.
+        There exist "Rust-style" shorthands for dtypes, like ``kF32`` instead of
+        ``kFloat32``. See `here
+        <https://github.com/pytorch/pytorch/blob/master/torch/csrc/api/include/torch/types.h>`_
+        for the full list.
 
 
 An instance of ``TensorOptions`` stores a concrete value for each of these
@@ -314,8 +314,8 @@ we can convert it from ``int64`` to ``float32``:
 
 .. attention::
 
-	The result of the conversion, ``float_tensor``, is a new tensor pointing to
-	new memory, unrelated to the source ``source_tensor``.
+        The result of the conversion, ``float_tensor``, is a new tensor pointing to
+        new memory, unrelated to the source ``source_tensor``.
 
 We can then move it from CPU memory to GPU memory:
 

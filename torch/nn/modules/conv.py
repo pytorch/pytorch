@@ -12,7 +12,9 @@ from ..._jit_internal import weak_module, weak_script_method, List
 @weak_module
 class _ConvNd(Module):
 
-    __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias', 'padding_mode']
+    __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias',
+                     'padding_mode', 'output_padding', 'in_channels',
+                     'out_channels', 'kernel_size']
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
@@ -45,7 +47,6 @@ class _ConvNd(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        n = self.in_channels
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
@@ -289,8 +290,8 @@ class Conv2d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},
-                               \text{kernel\_size[0]}, \text{kernel\_size[1]})`.
+                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},`
+                         :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
@@ -393,9 +394,9 @@ class Conv3d(_ConvNd):
         where `K` is a positive integer, this operation is also termed in
         literature as depthwise convolution.
 
-         In other words, for an input of size :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`,
-         a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
-         :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
+        In other words, for an input of size :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`,
+        a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
+        :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
 
     .. include:: cudnn_deterministic.rst
 
@@ -428,8 +429,8 @@ class Conv3d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},
-                               \text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
+                         :math:`(\text{out\_channels}, \frac{\text{in\_channels}}{\text{groups}},`
+                         :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`
@@ -479,10 +480,6 @@ class Conv3d(_ConvNd):
 
 @weak_module
 class _ConvTransposeMixin(object):
-    __constants__ = ['stride', 'padding', 'kernel_size', 'dim_size',
-                     'output_padding', 'groups', 'dilation', 'transposed',
-                     'bias', 'padding_mode']
-
     @weak_script_method
     def forward(self, input, output_size=None):
         # type(Tensor, Optional[List[int]]) -> Tensor
@@ -613,8 +610,9 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},
-                               \text{kernel\_size})`. The values of these weights are sampled from
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},`
+                         :math:`\text{kernel\_size})`.
+                         The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \text{kernel\_size}}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels).
@@ -735,8 +733,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},
-                               \text{kernel\_size[0]}, \text{kernel\_size[1]})`.
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},`
+                         :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{1}\text{kernel\_size}[i]}`
@@ -890,8 +888,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},
-                               \text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
+                         :math:`(\text{in\_channels}, \frac{\text{out\_channels}}{\text{groups}},`
+                         :math:`\text{kernel\_size[0]}, \text{kernel\_size[1]}, \text{kernel\_size[2]})`.
                          The values of these weights are sampled from
                          :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                          :math:`k = \frac{1}{C_\text{in} * \prod_{i=0}^{2}\text{kernel\_size}[i]}`

@@ -10,7 +10,7 @@ bool is_cuda(const Tensor& self) {
 }
 
 bool is_distributed(const Tensor& self) {
-  return self.type().is_distributed();
+  return self.dispatch_type().is_distributed();
 }
 
 bool is_complex(const Tensor& self) {
@@ -32,6 +32,10 @@ bool is_signed(const Tensor &self) {
 
 bool is_sparse(const Tensor& self) {
   return self.is_sparse();
+}
+
+bool is_quantized(const Tensor& self) {
+  return self.is_quantized();
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {

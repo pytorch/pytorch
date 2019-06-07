@@ -153,7 +153,7 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
 DEFINE_DISPATCH(bernoulli_mkl_stub);
 
 Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
-  AT_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
+  TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
 #if AT_MKL_ENABLED()
   if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
     bernoulli_mkl_stub(kCPU, self, p, gen);
@@ -178,6 +178,18 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
     CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, self, output,
       [](scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {
         ret_val = standard_gamma_grad_one<scalar_t, double>(self_val, output_val);
+      }
+    );
+  });
+  return ret;
+}
+
+Tensor _dirichlet_grad_cpu(const Tensor& x, const Tensor& alpha, const Tensor& total) {
+  Tensor ret = at::empty(x.sizes(), x.options());
+  AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "_dirichlet_grad_cpu", [&] {
+    CPU_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(ret, x, alpha, total,
+      [](scalar_t& ret_val, const scalar_t& x_val, const scalar_t& alpha_val, const scalar_t& total_val) {
+        ret_val = dirichlet_grad_one<scalar_t, double>(x_val, alpha_val, total_val);
       }
     );
   });

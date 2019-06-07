@@ -14,9 +14,9 @@ into two categories:
 Once you finish implementing a feature or bug-fix, please send a Pull Request to
 https://github.com/pytorch/pytorch
 
-If you are not familiar with creating a Pull Request, here are some guides:
-- http://stackoverflow.com/questions/14680711/how-to-do-a-github-pull-request
-- https://help.github.com/articles/creating-a-pull-request/
+This document covers some of the more technical aspects of contributing
+to PyTorch.  For more non-technical guidance about how to contribute to
+PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.rst).
 
 ## Developing PyTorch
 
@@ -35,6 +35,17 @@ pip uninstall torch # run this command twice
 git clone https://github.com/pytorch/pytorch
 cd pytorch
 ```
+
+2.1. If you already have PyTorch from source, update it:
+
+```bash
+git pull --rebase
+git submodule sync --recursive
+git submodule update --init --recursive
+```
+
+If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
+
 
 3. Install PyTorch in `develop` mode:
 
@@ -319,6 +330,36 @@ be on your `PATH`, otherwise `ccache` will emit the following error:
 
     ccache: error: Could not find compiler "nvcc" in PATH
 
+For example, here is how to install/configure `ccache` on Ubuntu:
+
+```bash
+# install ccache
+sudo apt install ccache
+
+# update symlinks and create/re-create nvcc link
+sudo /usr/sbin/update-ccache-symlinks
+sudo ln -s /usr/bin/ccache /usr/lib/ccache/nvcc
+
+# config: cache dir is ~/.ccache, conf file ~/.ccache/ccache.conf
+# max size of cache
+ccache -M 25Gi  # -M 0 for unlimited
+# unlimited number of files
+ccache -F 0
+
+# deploy (and add to ~/.bashrc for later)
+export PATH="/usr/lib/ccache:$PATH"
+```
+#### Use a faster linker
+If you are editing a single file and rebuilding in a tight loop, the time spent 
+linking will dominate. The system linker available in most Linux distributions 
+(GNU `ld`) is quite slow. Use a faster linker, like [lld](https://lld.llvm.org/).
+
+The easiest way to use `lld` this is download the 
+[latest LLVM binaries](http://releases.llvm.org/download.html#8.0.0) and run:
+```
+ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
+```
+
 ## CUDA Development tips
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
@@ -328,6 +369,39 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
     slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
 2. `cuda-gdb` and `cuda-memcheck` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
+3. CUDA supports a lot of C++11 features such as, `std::numeric_limits`, `std::nextafter`,
+   `std::tuple` etc. in device code. Many of such features are possible because of the
+   [--expt-relaxed-constexpr](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#constexpr-functions)
+   nvcc flag. There is a known [issue](https://github.com/ROCm-Developer-Tools/HIP/issues/374)
+   that ROCm errors out on device code, which uses such stl functions.
+4. A good performance metric for a CUDA kernel is the
+   [Effective Memory Bandwidth](https://devblogs.nvidia.com/how-implement-performance-metrics-cuda-cc/).
+   It is useful for you to measure this metric whenever you are writing/optimizing a CUDA
+   kernel. Following script shows how we can measure the effective bandwidth of CUDA `uniform_`
+   kernel.
+   ```python
+   import torch
+   import time
+   size = 128*512
+   nrep = 100
+   nbytes_read_write = 4 # this is number of bytes read + written by a kernel. Change this to fit your kernel.
+
+   for i in range(10):
+       a=torch.Tensor(size).cuda().uniform_()
+       torch.cuda.synchronize()
+       start = time.time()
+       # dry run to alloc
+       out = a.uniform_()
+       torch.cuda.synchronize()
+       start = time.time()
+       for i in range(nrep):
+         out = a.uniform_()
+       torch.cuda.synchronize()
+       end = time.time()
+       timec = (end-start)/nrep
+       print("uniform, size, elements", size, "forward", timec, "bandwidth (GB/s)", size*(nbytes_read_write)*1e-9/timec)
+       size *=2
+   ```
 
 
 Hope this helps, and thanks for considering to contribute.
@@ -479,9 +553,12 @@ formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
   ```bash
-  pip install flake8-mypy
   ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
+
+You'll need to install an appropriately configured flake8; see
+[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
+for documentation on how to do this.
 
 ## Caffe2 notes
 

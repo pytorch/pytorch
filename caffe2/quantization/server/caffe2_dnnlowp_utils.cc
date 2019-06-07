@@ -306,19 +306,18 @@ static unique_ptr<QuantizationFactory> GetQuantizationFactoryOf_(
           "weight_quantization_kind",
           FLAGS_caffe2_dnnlowp_weight_quantization_kind);
 
-  LOG(WARNING) << "Quantization method for op with output " << op_def.output(0)
-               << " engine " << op_def.engine() << " activation_precision "
-               << activation_precision << " weight_precision "
-               << weight_precision << " requantization_multiplier_precision "
-               << requantization_multiplier_precision
-               << " eltwise_quantization_precision "
-               << eltwise_quantization_precision
-               << " preserve_activation_sparsity "
-               << preserve_activation_sparsity << " preserve_weight_sparsity "
-               << preserve_weight_sparsity << " force_scale_power_of_two "
-               << force_scale_power_of_two << " activation_quantization_kind "
-               << activation_quantization_kind << " weight_quantization_kind "
-               << weight_quantization_kind;
+  VLOG(2) << "Quantization method for op with output " << op_def.output(0)
+          << " engine " << op_def.engine() << " activation_precision "
+          << activation_precision << " weight_precision " << weight_precision
+          << " requantization_multiplier_precision "
+          << requantization_multiplier_precision
+          << " eltwise_quantization_precision "
+          << eltwise_quantization_precision << " preserve_activation_sparsity "
+          << preserve_activation_sparsity << " preserve_weight_sparsity "
+          << preserve_weight_sparsity << " force_scale_power_of_two "
+          << force_scale_power_of_two << " activation_quantization_kind "
+          << activation_quantization_kind << " weight_quantization_kind "
+          << weight_quantization_kind;
 
   return unique_ptr<QuantizationFactory>(new QuantizationFactory(
       activation_precision,

@@ -4,9 +4,6 @@ from ..._jit_internal import weak_module, weak_script_method
 
 
 class _InstanceNorm(_BatchNorm):
-    __constants__ = ['running_mean', 'running_var', 'weight', 'bias',
-                     'track_running_stats', 'momentum', 'eps']
-
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False,
                  track_running_stats=False):
         super(_InstanceNorm, self).__init__(
@@ -57,7 +54,7 @@ class _InstanceNorm(_BatchNorm):
 
 @weak_module
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 2D or 3D input (a mini-batch of 1D
+    r"""Applies Instance Normalization over a 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
@@ -126,8 +123,15 @@ class InstanceNorm1d(_InstanceNorm):
 
     @weak_script_method
     def _check_input_dim(self, input):
-        if input.dim() != 2 and input.dim() != 3:
-            raise ValueError('expected 2D or 3D input (got {}D input)'
+        if input.dim() == 2:
+            raise ValueError(
+                'InstanceNorm1d returns 0-filled tensor to 2D tensor.'
+                'This is because InstanceNorm1d reshapes inputs to'
+                '(1, N * C, ...) from (N, C,...) and this makes'
+                'variances 0.'
+            )
+        if input.dim() != 3:
+            raise ValueError('expected 3D input (got {}D input)'
                              .format(input.dim()))
 
 

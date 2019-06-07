@@ -29,6 +29,37 @@ struct ThrustLTOp {
   }
 };
 
+template <typename T, typename IndT, bool handleNaN = true>
+struct ThrustSliceGTOp {
+ThrustSliceGTOp(int64_t size) : sliceSize(size) {}
+  __device__ bool operator()(const thrust::tuple<int64_t, T>& lhs, const thrust::tuple<int64_t, T>& rhs) const {
+    IndT segA = (IndT)thrust::get<0>(lhs) / sliceSize;
+    IndT segB = (IndT)thrust::get<0>(rhs) / sliceSize;
+    if (segA != segB)
+        return segA < segB;
+    else
+        return (handleNaN && THCNumerics<T>::isnan(thrust::get<1>(lhs)) && !THCNumerics<T>::isnan(thrust::get<1>(rhs))) || THCNumerics<T>::gt(thrust::get<1>(lhs), thrust::get<1>(rhs));
+  }
+  const IndT sliceSize;
+};
+
+template <typename T, typename IndT, bool handleNaN = true>
+struct ThrustSliceLTOp {
+ThrustSliceLTOp(int64_t size) : sliceSize(size) {}
+  __device__ bool operator()(const thrust::tuple<int64_t, T>& lhs, const thrust::tuple<int64_t, T>& rhs) const {
+    IndT segA = (IndT)thrust::get<0>(lhs) / sliceSize;
+    IndT segB = (IndT)thrust::get<0>(rhs) / sliceSize;
+    if (segA != segB)
+        return segA < segB;
+    else
+        return (handleNaN && THCNumerics<T>::isnan(thrust::get<1>(rhs)) && !THCNumerics<T>::isnan(thrust::get<1>(lhs))) || THCNumerics<T>::lt(thrust::get<1>(lhs), thrust::get<1>(rhs));
+  }
+  const IndT sliceSize;
+};
+
+
+
+
 // `base` is the base address of a tensor
 // For each slice (defined as a linear point of `out`, from 0 ->
 // (sliceSize - 1) * sliceStride, we fill that slice from `0` to
@@ -54,22 +85,6 @@ fillSliceWithIndex(TensorInfo<int64_t, IndexType> out,
     base[i * sliceStride] = i;
   }
 }
-
-// For slice sorting in Thrust; extracts a slice index from a linear
-// index and uses that for comparison
-struct SliceComp {
-  SliceComp(int64_t size) : sliceSize(size) {}
-
-  __device__ bool operator()(const int64_t& a, const int64_t& b) const {
-    // Since the slices are guaranteed to be innermost,
-    // the segment is just via int64_t division
-    int64_t segA = a / sliceSize;
-    int64_t segB = b / sliceSize;
-    return segA < segB;
-  }
-
-  const int64_t sliceSize;
-};
 
 // For sorting in Thurst; extracts a within-slice index from a linear index
 struct GlobalIndexToPerSliceIndex {

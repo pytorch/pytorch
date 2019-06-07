@@ -1,38 +1,59 @@
-#include <ATen/native/cpu/CopyKernel.h>
-
 #include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
+
 #include <ATen/Dispatch.h>
-#include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 
 namespace at {
 namespace native {
 namespace {
 
-// TODO: this number was copied from TH, test to see if it's the right number
-constexpr int64_t COPY_GRAIN_SIZE = 20000;
+template <typename self_T>
+void copy_kernel_cast(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::Bool,
+      iter.dtype(1),
+      "copy_kernel_cast",
+      [&] {
+        at::native::unary_kernel(iter, [=](scalar_t a) -> self_T {
+          return static_cast<self_T>(
+              static_cast<at::native::inter_copy_type_t<self_T>>(a));
+        });
+      });
+}
 
-static void copy_kernel_impl(Tensor& dst, const Tensor& src) {
-  AT_DISPATCH_ALL_TYPES_AND(
-    at::ScalarType::Half, dst.scalar_type(), "copy_kernel_impl", [&]() {
-      scalar_t* self_ptr = dst.data<scalar_t>();
-      scalar_t* src_ptr = src.data<scalar_t>();
-
-      auto sample = [&](int64_t begin, int64_t end) {
-        int64_t len = end - begin;
-        scalar_t* self_seg = self_ptr + begin;
-        scalar_t* src_seg = src_ptr + begin;
-        at::vec256::convert<scalar_t, scalar_t>(src_seg, self_seg, len);
-    };
-
-    parallel_for(0, dst.numel(), COPY_GRAIN_SIZE, sample);
-  });
+static void copy_kernel(TensorIterator& iter, bool non_blocking) {
+  ScalarType dtype = iter.dtype(0);
+  if (dtype == iter.dtype(1)) {
+    if (dtype == ScalarType::Half) {
+      unary_kernel(iter, [=](at::Half a) -> at::Half { return a; });
+    } else if (isQIntType(dtype)) {
+      AT_DISPATCH_QINT_TYPES(dtype, "copy_kernel", [&] {
+        unary_kernel(
+            iter,
+            [=](scalar_t a) -> scalar_t {return a; });
+      });
+    } else {
+      AT_DISPATCH_ALL_TYPES_AND(
+          ScalarType::Bool, dtype, "copy_kernel", [&] {
+            unary_kernel_vec(
+                iter,
+                [=](scalar_t a) -> scalar_t { return a; },
+                [=](Vec256<scalar_t> a) { return a; });
+          });
+    }
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::Bool, dtype, "copy_", [&] {
+      copy_kernel_cast<scalar_t>(iter);
+    });
+  }
 }
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(copy_kernel, &copy_kernel_impl);
+REGISTER_DISPATCH(copy_stub, &copy_kernel);
 
 } // namespace native
 } // namespace at
