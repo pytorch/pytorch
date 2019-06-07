@@ -13,6 +13,10 @@ if (NOT BUILD_PYTHON)
   return()
 endif()
 
+if (USE_TBB)
+include_directories(${TBB_ROOT_DIR}/include)
+endif()
+
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
 
@@ -243,10 +247,6 @@ if (USE_NCCL)
     endif()
 endif()
 
-
-
-
-
 add_custom_target(torch_python_stubs DEPENDS "${TORCH_SRC_DIR}/__init__.pyi")
 # For Declarations.yaml dependency
 add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
@@ -262,8 +262,6 @@ add_custom_command(
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
     )
-
-
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 

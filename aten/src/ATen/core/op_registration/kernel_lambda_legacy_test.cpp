@@ -24,7 +24,8 @@ using c10::guts::make_unique;
 using c10::ivalue::TensorList;
 using c10::ivalue::IntList;
 using c10::intrusive_ptr;
-using c10::Dict;
+using c10::DictPtr;
+using c10::make_dict;
 using at::Tensor;
 using std::string;
 using std::unique_ptr;
@@ -192,11 +193,11 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListOut
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-     .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", [] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> {
-       Dict<string, Tensor> dict;
+     .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", [] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>> {
+       DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
        dict.insert("first", dummyTensor(TensorType1()));
        dict.insert("second", dummyTensor(TensorType2()));
-       return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
+       return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>>(
          dummyTensor(TensorType2()),
          5,
          {dummyTensor(TensorType1()), dummyTensor(TensorType2())},
@@ -468,7 +469,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_
   int captured_dict_size = 0;
 
   auto registrar = RegisterOperators()
-      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", [&] (Dict<string, Tensor> input1) {
+      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", [&] (DictPtr<string, Tensor> input1) {
         captured_dict_size = input1.size();
       });
 
@@ -476,7 +477,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
-  Dict<string, Tensor> dict;
+  DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
   dict.insert("key1", dummyTensor(TensorType1()));
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
@@ -486,14 +487,14 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .op("_test::dict_input(Dict(str, str) input) -> str", [&] (Dict<string, string> input1) {
+      .op("_test::dict_input(Dict(str, str) input) -> str", [&] (DictPtr<string, string> input1) {
         return input1.at("key2");
       });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict;
+  DictPtr<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -503,14 +504,14 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-    .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", [] (Dict<string, string> input) {
+    .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", [] (DictPtr<string, string> input) {
       return input;
     });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
   ASSERT_TRUE(op.has_value());
 
-  Dict<string, string> dict;
+  DictPtr<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -831,7 +832,8 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegistere
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_schema_specified", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::assertSchemasHaveSameSignature(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
+  c10::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());
+  EXPECT_FALSE(differences.has_value());
 }
 
 TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentNumArguments_whenRegistering_thenFails) {
@@ -843,7 +845,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg, Tensor arg2) -> int", [] (Tensor) -> int64_t {return 0;});
-    }, "The number of arguments is different. Specified 2 but inferred 1"
+    }, "The number of arguments is different. 2 vs 1"
   );
 
   // assert this does not fail because it matches
@@ -854,19 +856,19 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch() -> ()", [] (Tensor, Tensor) -> void {});
-    }, "The number of arguments is different. Specified 0 but inferred 2"
+    }, "The number of arguments is different. 0 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> ()", [] (Tensor, Tensor) -> void {});
-    }, "The number of arguments is different. Specified 1 but inferred 2"
+    }, "The number of arguments is different. 1 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg, Tensor arg2, Tensor arg3) -> ()", [] (Tensor, Tensor) -> void {});
-    }, "The number of arguments is different. Specified 3 but inferred 2"
+    }, "The number of arguments is different. 3 vs 2"
   );
 }
 
@@ -879,13 +881,13 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg1, float arg2) -> int", [] (Tensor, int64_t) -> int64_t {return 0;});
-    }, "Type mismatch in argument 2: specified float but inferred int"
+    }, "Type mismatch in argument 2: float vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(int arg1, int arg2) -> int", [] (Tensor, int64_t) -> int64_t {return 0;});
-    }, "Type mismatch in argument 1: specified int but inferred Tensor"
+    }, "Type mismatch in argument 1: int vs Tensor"
   );
 }
 
@@ -898,13 +900,13 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> ()", [] (Tensor) -> int64_t {return 0;});
-    }, "The number of returns is different. Specified 0 but inferred 1"
+    }, "The number of returns is different. 0 vs 1"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> (int, int)", [] (Tensor) -> int64_t {return 0;});
-    }, "The number of returns is different. Specified 2 but inferred 1"
+    }, "The number of returns is different. 2 vs 1"
   );
 
   // assert this does not fail because it matches
@@ -915,13 +917,13 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> Tensor", [] (Tensor) -> void {});
-    }, "The number of returns is different. Specified 1 but inferred 0"
+    }, "The number of returns is different. 1 vs 0"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor)", [] (Tensor) -> void {});
-    }, "The number of returns is different. Specified 2 but inferred 0"
+    }, "The number of returns is different. 2 vs 0"
   );
 
   // assert this does not fail because it matches
@@ -932,19 +934,19 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> ()", [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
-    }, "The number of returns is different. Specified 0 but inferred 2"
+    }, "The number of returns is different. 0 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> Tensor", [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
-    }, "The number of returns is different. Specified 1 but inferred 2"
+    }, "The number of returns is different. 1 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor, Tensor)", [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
-    }, "The number of returns is different. Specified 3 but inferred 2"
+    }, "The number of returns is different. 3 vs 2"
   );
 }
 
@@ -957,13 +959,13 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> Tensor", [] (Tensor) -> int64_t {return 0;});
-    }, "Type mismatch in return 1: specified Tensor but inferred int"
+    }, "Type mismatch in return 1: Tensor vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> float", [] (Tensor) -> int64_t {return 0;});
-    }, "Type mismatch in return 1: specified float but inferred int"
+    }, "Type mismatch in return 1: float vs int"
   );
 
   // assert this does not fail because it matches
@@ -974,7 +976,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> float", [] (Tensor) -> Tensor {return {};});
-    }, "Type mismatch in return 1: specified float but inferred Tensor"
+    }, "Type mismatch in return 1: float vs Tensor"
   );
 
   // assert this does not fail because it matches
@@ -985,13 +987,13 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_wit
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> (Tensor, float)", [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};});
-    }, "Type mismatch in return 2: specified float but inferred int"
+    }, "Type mismatch in return 2: float vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
         .op("_test::mismatch(Tensor arg) -> (int, int)", [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};});
-    }, "Type mismatch in return 1: specified int but inferred Tensor"
+    }, "Type mismatch in return 1: int vs Tensor"
   );
 }
 

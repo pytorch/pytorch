@@ -31,52 +31,7 @@ void Function::ensure_defined() {
         << " method '" << name() << "' is called recursively. "
         << "Recursive calls are not supported";
   }
-}
-
-Value* Function::try_emit_call(
-    Graph& graph,
-    const SourceRange& loc,
-    c10::optional<NamedValue> self,
-    ArrayRef<NamedValue> args,
-    ArrayRef<NamedValue> kwargs,
-    std::stringstream& failure_messages,
-    bool conv_tensors_to_nums) {
-  ensure_defined();
-  auto fn = this->graph();
-
-  auto matched_schema = tryMatchSchema(
-      getSchema(),
-      loc,
-      graph,
-      std::move(self),
-      args,
-      kwargs,
-      failure_messages,
-      conv_tensors_to_nums);
-  if (!matched_schema)
-    return nullptr;
-
   check_single_output();
-  return inlineCallTo(graph, *fn, matched_schema->inputs).at(0);
-}
-
-Value* Function::emit_call(
-    Graph& graph,
-    const SourceRange& loc,
-    ArrayRef<NamedValue> args,
-    ArrayRef<NamedValue> kwargs) {
-  std::stringstream failure_messages;
-  if (auto result = try_emit_call(
-          graph,
-          loc,
-          c10::nullopt,
-          args,
-          kwargs,
-          failure_messages,
-          /*conv_tensors_to_nums=*/true)) {
-    return result;
-  }
-  throw ErrorReport(loc) << failure_messages.str();
 }
 
 void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
@@ -108,11 +63,10 @@ void module_state_to(
     bool non_blocking) {
   // Need to access the `at::Tensor` as a `Variable` here.
   autograd::Variable variable = s.value().toTensor();
-  at::Tensor data = variable.data();
   // Use the data's original device or dtype if not supplied here.
-  auto new_data = data.to(
-      device.value_or(data.device()),
-      dtype.value_or(data.scalar_type()),
+  auto new_data = variable.to(
+      device.value_or(variable.device()),
+      dtype.value_or(variable.scalar_type()),
       non_blocking);
   variable.set_data(new_data);
 }
@@ -352,7 +306,11 @@ void Module::train(bool on) {
   for (auto& submod : get_modules()) {
     submod->train(on);
   }
-  register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
+  if (auto slot = find_attribute("training")) {
+    slot->setValue(on);
+  } else {
+    register_attribute("training", BoolType::get(), on);
+  }
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {

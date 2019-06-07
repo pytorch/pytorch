@@ -21,17 +21,17 @@ void init_num_threads() {
     set_num_threads(nthreads);
   } else {
 #if defined(_OPENMP) && defined(TH_BLAS_MKL)
-  // If we are using MKL an OpenMP make sure the number of threads match.
-  // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
-  // size of the OpenMP thread pool, resulting in worse performance (and memory
-  // leaks in GCC 5.4)
-  omp_set_num_threads(mkl_get_max_threads());
+    // If we are using MKL an OpenMP make sure the number of threads match.
+    // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
+    // size of the OpenMP thread pool, resulting in worse performance (and memory
+    // leaks in GCC 5.4)
+    omp_set_num_threads(mkl_get_max_threads());
 #endif
   }
 }
 
 void set_num_threads(int nthreads) {
-  AT_CHECK(nthreads > 0, "Expected positive number of threads");
+  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
   num_threads.store(nthreads);
 #ifdef _OPENMP
   omp_set_num_threads(nthreads);
@@ -74,6 +74,11 @@ bool in_parallel_region() {
 #else
   return false;
 #endif
+}
+
+void intraop_launch(std::function<void()> func) {
+  // execute inline in openmp case
+  func();
 }
 
 } // namespace at

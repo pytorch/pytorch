@@ -6,7 +6,6 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
@@ -253,6 +252,10 @@ class CAFFE2_API Tensor {
   /// TensorOptions.h.
   TensorOptions options() const;
 
+  void* data_ptr() const {
+    return this->unsafeGetTensorImpl()->data();
+  }
+
   template<typename T>
   T * data() const;
 
@@ -466,6 +469,7 @@ class CAFFE2_API Tensor {
   Tensor narrow_copy(int64_t dim, int64_t start, int64_t length) const;
   Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
   Tensor permute(IntArrayRef dims) const;
+  Tensor numpy_T() const;
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
   Tensor reciprocal() const;
@@ -562,7 +566,7 @@ class CAFFE2_API Tensor {
   Tensor & addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1);
   Tensor & sparse_resize_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim);
   Tensor & sparse_resize_and_clear_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim);
-  Tensor sparse_mask(SparseTensorRef mask) const;
+  Tensor sparse_mask(const Tensor & mask) const;
   Tensor to_dense() const;
   int64_t sparse_dim() const;
   int64_t _dimI() const;
@@ -581,9 +585,7 @@ class CAFFE2_API Tensor {
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
-  Tensor quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const;
   Tensor dequantize() const;
-  Tensor dequantize_linear(double scale, int64_t zero_point, ScalarType dtype) const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;
   Tensor int_repr() const;
@@ -592,7 +594,6 @@ class CAFFE2_API Tensor {
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar item() const;
-  void* data_ptr() const;
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride={});
   Tensor & set_(const Tensor & source);
@@ -701,6 +702,7 @@ class CAFFE2_API Tensor {
   Tensor index_select(int64_t dim, const Tensor & index) const;
   Tensor masked_select(const Tensor & mask) const;
   Tensor nonzero() const;
+  std::vector<Tensor> nonzero_numpy() const;
   Tensor gather(int64_t dim, const Tensor & index, bool sparse_grad=false) const;
   Tensor addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
@@ -714,7 +716,7 @@ class CAFFE2_API Tensor {
   std::tuple<Tensor,Tensor> solve(const Tensor & A) const;
   Tensor cholesky_inverse(bool upper=false) const;
   std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
-  std::tuple<Tensor,Tensor> qr() const;
+  std::tuple<Tensor,Tensor> qr(bool some=true) const;
   std::tuple<Tensor,Tensor> geqrf() const;
   Tensor orgqr(const Tensor & input2) const;
   Tensor ormqr(const Tensor & input2, const Tensor & input3, bool left=true, bool transpose=false) const;

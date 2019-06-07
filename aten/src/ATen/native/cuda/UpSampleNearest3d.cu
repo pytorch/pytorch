@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
+#include <ATen/LegacyTHFunctionsCUDA.h>
 
 namespace at {
 namespace native {
