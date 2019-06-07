@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/script/convert_to_ssa.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/mini_environment.h>
 
@@ -141,8 +142,7 @@ struct ControlFlowLoadStores {
         case prim::Loop: {
           addLoopLoadStores(n);
         } break;
-        case prim::Function:
-        case prim::fork: {
+        case prim::Function: {
           for (auto b : n->blocks()) {
             addControlFlowLoadStores(b);
           }
@@ -183,7 +183,6 @@ struct SSATransformer {
       switch (n->kind()) {
         case prim::If:
         case prim::Loop:
-        case prim::fork:
         case prim::Function: {
           for (auto b : n->blocks()) {
             convertBlockToSSA(b);

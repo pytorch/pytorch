@@ -8,8 +8,9 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/lift_forks_closures.h>
+#include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/script/convert_to_ssa.h>
 #include <torch/csrc/jit/script/final_returns.h>
@@ -718,7 +719,8 @@ struct to_ir {
   //    the changes to those variables will just get forgotten.
   // 4. There is no parsing support in frontend.py, this is intentional since it
   //    prevents people from accidentally using this feature.
-  void emitClosure(const Def& def) {
+  std::shared_ptr<ClosureValue> emitClosure(
+      std::function<void(Block*)> emit_body) {
     Node* closure_node = graph->insertNode(graph->create(prim::Function, 1));
     // it is not a real thing yet, so just say the type is None
     closure_node->output()->setType(NoneType::get());
@@ -726,14 +728,22 @@ struct to_ir {
     {
       WithInsertPoint guard(block);
       pushFrame(block, /*starts_def=*/true);
+      emit_body(block);
+      popFrame(/*ends_def=*/true);
+    }
+    return std::make_shared<ClosureValue>(closure_node->output());
+  }
+
+  void emitClosure(const Def& def) {
+    // invoked once the closure block is set as the enviroment
+    auto emit_body = [&](Block* closure_block) {
       emitDef(
           def,
           nullptr,
-          block); // ignore schema return, we just wont use it for now since we
-                  // never create a Method for the closure
-      popFrame(/*ends_def=*/true);
-    }
-    auto closure_value = std::make_shared<ClosureValue>(closure_node->output());
+          closure_block); // ignore schema return, we just wont use it for now
+                          // since we never create a Method for the closure
+    };
+    auto closure_value = emitClosure(emit_body);
     environment_stack->setSugaredVar(
         def.name().range(), def.name().name(), closure_value);
   }
@@ -2335,26 +2345,29 @@ struct to_ir {
     Node* fork_node;
     TypePtr out_type;
 
-    // Build a template of the graph to be executed
-    fork_node = g->insertNode(method.graph()->create(prim::fork, 1))
+    fork_node = g->insertNode(method.graph()->create(prim::forkClosure, 1))
                     ->setSourceRange(loc);
-    auto body_block = fork_node->addBlock();
+
+    // We create a fork by emitting a closure and setting the closure output
+    // into the fork input. If a closure doesn't already exist, we create one.
     {
-      // If we are forking a closure, we inline the closure into the fork
-      // body, if we are forking a builtin or function we emit the call
-      // in the fork body. Closures need special handling because  they are not
-      // first class yet.
-      std::shared_ptr<SugaredValue> fn_sugared_output;
-      WithInsertPoint guard(body_block);
+      WithInsertPoint insert(fork_node);
       if (ClosureValue* sv = dynamic_cast<ClosureValue*>(forked.get())) {
-        fn_sugared_output = sv->inlineInto(body_block);
-        AT_ASSERT(body_block->outputs().size() == 1);
-        out_type = body_block->outputs().at(0)->type();
+        Value* closure_output = sv->asValue(loc, method);
+        Block* closure_block = closure_output->node()->blocks().at(0);
+        TORCH_INTERNAL_ASSERT(closure_block->outputs().size() == 1);
+        out_type = closure_block->outputs().at(0)->type();
+        fork_node->addInput(closure_output);
       } else {
-        fn_sugared_output = forked->call(loc, method, inputs, attributes, 1);
-        auto fn_simple_output = fn_sugared_output->asValue(loc, method);
-        body_block->registerOutput(fn_simple_output);
-        out_type = fn_simple_output->type();
+        auto emit_closure_body = [&](Block* closure_block) {
+          auto fn_sugared_output =
+              forked->call(loc, method, inputs, attributes, 1);
+          auto fn_simple_output = fn_sugared_output->asValue(loc, method);
+          closure_block->registerOutput(fn_simple_output);
+          out_type = fn_simple_output->type();
+        };
+        auto closure_value = emitClosure(emit_closure_body);
+        fork_node->addInput(closure_value->asValue(loc, method));
       }
     }
     Value* node_output =
@@ -3017,9 +3030,11 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
     ConvertToSSA(to_clean);
   }
   // NB ORDERING: SSA conversion has to occur before
-  // lifting of closures and forks, this way closures & forks are converted
-  // to SSA while part of their original graph
-  liftClosuresAndForks(to_clean);
+  // lifting of closures and forks, this way closures are converted
+  // to SSA while part of their original graph, and closures are ready to
+  // be inlined into forked closures
+  liftClosures(to_clean);
+  inlineForkedClosures(to_clean);
   // remove any uses of tuples that we inserted that are not needed
   Inline(*to_clean);
   LowerSimpleTuples(to_clean);
@@ -3043,6 +3058,29 @@ bool meaningfulName(const std::string& name) {
       return true;
   }
   return false;
+}
+
+void lambdaLiftFork(Node* fork_node) {
+  // Fork a new graph from its orignal owning graph
+  auto forked_graph = std::make_shared<Graph>();
+  auto body_block = fork_node->blocks()[0];
+
+  // Make sure we capture everything in the new graph.
+  // The uncaptured values will be added to the fork signature.
+  std::unordered_map<Value*, Value*> uncaptures_map;
+  auto env = [&](Value* v) -> Value* {
+    if (!uncaptures_map.count(v)) {
+      // Capture values for both graphs
+      uncaptures_map[v] = forked_graph->addInput()->copyMetadata(v);
+      fork_node->addInput(v);
+    }
+    return uncaptures_map[v];
+  };
+  forked_graph->block()->cloneFrom(body_block, env);
+
+  // Separate the subgraph and clean up the orignal one
+  fork_node->g_(attr::Subgraph, forked_graph);
+  fork_node->eraseBlock(0);
 }
 
 } // namespace script

@@ -4,7 +4,6 @@
 #include "test/cpp/jit/test_base.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
-#include "torch/csrc/jit/passes/lift_forks_closures.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/utils/memory.h"
 
