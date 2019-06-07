@@ -21,6 +21,7 @@ struct TORCH_API ${op} : public ${superclass} {
   ${will_release_variables}
   ${saved_variables}
   ${saved_list_sizes}
+  bool released = false;
 };
 """)
 
@@ -33,6 +34,7 @@ void will_release_variables() override {
 
 FUNCTION_DEFINITION = CodeTemplate("""\
 variable_list ${op}::apply(variable_list&& grads) {
+  TORCH_CHECK(!released, ERR_BACKWARD_TWICE);
   IndexRangeGenerator gen;
   ${compute_index_ranges}
   variable_list grad_inputs(gen.size());
@@ -146,7 +148,12 @@ def process_function(func):
             unpack.append('auto {} = {}_.unpack({});'.format(name, name, ptr))
         elif arg['type'] == 'TensorList':
             saved_variables.append('std::vector<SavedVariable> {}_;'.format(name))
-            release_variables.append('{}_.clear();'.format(name))
+            release_variables.append('for (auto& sv : {}_)'.format(name));
+            release_variables.append('{');
+            release_variables.append('  sv.reset_data();'.format(name));
+            release_variables.append('  sv.reset_grad_function();'.format(name));
+            release_variables.append('}');
+            release_variables.append('{}_.clear();'.format(name));
             unpack.append('auto {} = unpack_list({}_);'.format(name, name))
         elif arg['type'] == 'IntArrayRef':
             saved_variables.append('std::vector<int64_t> {};'.format(name))
@@ -159,6 +166,9 @@ def process_function(func):
         save_arg(arg, is_output=False)
     for arg in func['saved_outputs']:
         save_arg(arg, is_output=True)
+    # To save BC we add release=true only for those functions that have, at least, one saved variable
+    if release_variables:
+        release_variables.append('released = true;');
     env['saved_variables'] = saved_variables
     env['release_variables'] = release_variables
     env['saved_list_sizes'] = saved_list_sizes

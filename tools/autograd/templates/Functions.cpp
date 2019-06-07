@@ -2139,6 +2139,11 @@ Tensor index_backward(const Tensor & self, TensorList indices, const Tensor& gra
    return at::_index_put_impl_(zeros, indices, grad, true, true);
 }
 
+const char* ERR_BACKWARD_TWICE =
+    "Trying to backward through the graph a second time, but the buffers have "
+    "already been freed. Specify retain_graph=True when calling backward "
+    "the first time.";
+
 
 } // anonymous namespace
 
