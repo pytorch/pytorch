@@ -3594,6 +3594,16 @@ a")
 
         self.checkScript(func2, [x], optimize=True)
 
+        def func3(x):
+            return x[:8:2]
+
+        self.checkScript(func3, [x], optimize=True)
+
+        def func4(x):
+            return x[1::4]
+
+        self.checkScript(func4, [x], optimize=True)
+
     def test_gather(self):
         def func(x):
             return x[0]
