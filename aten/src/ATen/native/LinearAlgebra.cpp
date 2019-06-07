@@ -567,9 +567,13 @@ _batch_svd(const Tensor& self, bool some, bool compute_uv)
   const int64_t p = batchCount(self);
 
   Tensor t = self.reshape({p, n, m});
-  Tensor u = at::zeros({p, n, nn}, self.options());
-  Tensor s = at::zeros({p, k}, self.options());
-  Tensor v = at::zeros({p, m, mm}, self.options());
+
+  Tensor s = at::empty({p, k}, self.options());
+  Tensor u, v;
+  if (compute_uv) {
+    u = at::empty({p, n, nn}, self.options());
+    v = at::empty({p, m, mm}, self.options());
+  }
 
   for (int64_t i = 0; i < p; i++) {
     auto tuple = at::svd(t[i], some, compute_uv);
@@ -586,11 +590,11 @@ _batch_svd(const Tensor& self, bool some, bool compute_uv)
 
   shape[ndim-2] = n;
   shape.push_back(nn);
-  u = u.reshape(shape);
+  u = compute_uv ? u.reshape(shape) : at::zeros(shape, self.options());
 
   shape[ndim-2] = m;
   shape[ndim-1] = mm;
-  v = v.reshape(shape);
+  v = compute_uv ? v.reshape(shape) : at::zeros(shape, self.options());
 
   return std::tuple<Tensor, Tensor, Tensor>(u, s, v);
 }
