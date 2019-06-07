@@ -6138,8 +6138,8 @@ a")
 
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                    mx_val = max(abs(res_python), abs(res_script))
-                    if isinstance(mx_val, numbers.Number):
+                    if isinstance(res_python, numbers.Number) and isinstance(res_script, numbers.Number):
+                        mx_val = max(abs(res_python), abs(res_script))
                         prec = 1e-4 * mx_val
                     else:
                         prec = (1e-4)
