@@ -95,7 +95,7 @@ class CAFFE2_API ATenDispatch {
   template<class FuncType>
   ATenDispatch& registerOp(Backend backend, const char* schema, FuncType* fn) {
    if (op_tables_.find(schema) == op_tables_.end()) {
-     op_tables_[schema] = c10::guts::make_unique<ATenOpTable>(schema);
+     op_tables_.insert(std::make_pair(schema, c10::guts::make_unique<ATenOpTable>(schema)));
    }
    op_tables_[schema]->registerOp(backend, reinterpret_cast<void*>(fn));
    return *this;
@@ -107,7 +107,7 @@ class CAFFE2_API ATenDispatch {
   template <class FuncType, class Return, class... Parameters>
   ATenDispatch& registerVariableWrapper(const char* schema, Return (*fn)(FuncType*, Parameters...)) {
     if (op_tables_.find(schema) == op_tables_.end()) {
-      op_tables_[schema] = c10::guts::make_unique<ATenOpTable>(schema);
+      op_tables_.insert(std::make_pair(schema, c10::guts::make_unique<ATenOpTable>(schema)));
     }
     op_tables_[schema]->registerVariableWrapper(reinterpret_cast<void*>(fn));
     return *this;
@@ -121,8 +121,7 @@ class CAFFE2_API ATenDispatch {
   }
 
  private:
-  std::unordered_map<std::string, std::unique_ptr<ATenOpTable>> op_tables_ =
-      std::unordered_map<std::string, std::unique_ptr<ATenOpTable>>();
+  std::unordered_map<std::string, std::unique_ptr<ATenOpTable>> op_tables_;
 };
 
 CAFFE2_API ATenDispatch& globalATenDispatch();
