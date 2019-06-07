@@ -1444,7 +1444,7 @@ struct to_ir {
           << "range expected at most 3 arguments, got " << args.size();
     }
     const auto& ident_name = target.name();
-    AT_CHECK(
+    TORCH_CHECK(
         end_val != nullptr && start_val != nullptr && step_val != nullptr,
         "Expected non-null pointers for range() arguments");
     auto addOp = [end_val, range](

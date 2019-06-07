@@ -268,7 +268,7 @@ void ScriptModuleDeserializer::moduleSetState(
     IValue state) {
   auto setstate = module->class_compilation_unit().find_function("__setstate__");
 
-  AT_CHECK(
+  TORCH_CHECK(
       setstate != nullptr,
       "Cannot call '__setstate__' method because"
       " it does not exist");
@@ -346,7 +346,7 @@ void ScriptModuleDeserializer::convertModule(
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
     if (slot.type()->kind() != TypeKind::OptionalType) {
-      AT_CHECK(
+      TORCH_CHECK(
           !slot.value().isNone(),
           "The field '",
           slot.name(),
