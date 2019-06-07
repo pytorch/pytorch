@@ -194,7 +194,7 @@ def sign(g, self):
     return g.op("Sign", self)
 
 
-def _slice_op(g, input, axes, starts, ends):
+def _slice(g, input, axes, starts, ends):
     assert len(starts) == len(ends)
     if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
         return input
@@ -360,8 +360,8 @@ def select(g, self, dim, index):
         # of Gather in caffe2. We need to change this as soon as possible.
         # TODO: this breaks if index == -1
         index_val = _parse_arg(index, 'i')
-        slice_node = _slice_op(g, self, axes=[dim],
-                               starts=[index_val], ends=[index_val + 1])
+        slice_node = sym_help._slice_helper(g, self, axes=[dim],
+                                            starts=[index_val], ends=[index_val + 1])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
@@ -538,8 +538,8 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
                                         kernel_shape_i=[1 for _ in range(ndims)],
                                         strides_i=[1 for _ in range(ndims)])
             # convert indices to have non-flattened indices values
-            s = _slice_op(g, flattened_indices, axes=[2 + i for i in range(ndims)],
-                          starts=tuple_fn(0), ends=tuple_fn(1))
+            s = sym_help._slice_helper(g, flattened_indices, axes=[2 + i for i in range(ndims)],
+                                       starts=tuple_fn(0), ends=tuple_fn(1))
             indices = sub(g, indices, s)
             return r, indices
         else:
@@ -678,7 +678,7 @@ def _interpolate(name, dim, interpolate_mode):
             offset = 2
             offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
             dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-            divisor = _slice_op(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
+            divisor = sym_help._slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
             divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
             scale_dims = g.op("Div", dividend, divisor)
             scales = g.op("Concat", offsets, scale_dims, axis_i=0)
@@ -694,7 +694,6 @@ def _interpolate(name, dim, interpolate_mode):
 upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
 upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
 upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
-upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 
 
 def wrap_logical_op_with_cast_to(to_type):
@@ -1136,7 +1135,7 @@ def slice(g, self, dim, start, end, step):
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
         dim = _parse_arg(dim, 'i')
-        return _slice_op(g, self, axes=[dim], starts=[start], ends=[end])
+        return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
 
 
 @parse_args('v', 'f', 'f')
@@ -1281,7 +1280,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         reform_permutation = [(0, 1), (3, 4), (1, 3)]
 
     def reform_weights(g, w, n, intervals):
-        slices = [g.op('Slice', w, axes_i=[0], starts_i=[x * n], ends_i=[y * n]) for x, y in intervals]
+        slices = [sym_help._slice_helper(g, w, axes=[0], starts=[x * n], ends=[y * n]) for x, y in intervals]
         return g.op('Concat', *slices, axis_i=0)
 
     def transform_weights(layer_index):
@@ -1295,7 +1294,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh, bias_concat))
 
     def retrieve_state(x, start, end):
-        return x if num_layers == 1 else g.op('Slice', x, axes_i=[0], starts_i=[start], ends_i=[end])
+        return x if num_layers == 1 else sym_help._slice_helper(g, x, axes=[0], starts=[start], ends=[end])
 
     for i in range(num_layers):
         if unidirectional:
@@ -1461,6 +1460,12 @@ def randn(g, *shapes):
     return g.op('RandomNormal', shape_i=shape)
 
 
+def rand(g, *shapes):
+    shapes_list = list(shapes)
+    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    return g.op('RandomUniform', shape_i=shape)
+
+
 def randn_like(g, self, *others):
     return g.op('RandomNormalLike', self)
 
@@ -1521,7 +1526,7 @@ def isnan(g, input):
 
 @parse_args('v', 'i', 'i', 'i')
 def narrow(g, input, dim, start, length):
-    return _slice_op(g, input, axes=[dim], starts=[start], ends=[start + length])
+    return sym_help._slice_helper(g, input, axes=[dim], starts=[start], ends=[start + length])
 
 
 def argmax(g, input, dim, keepdim):
@@ -1569,3 +1574,15 @@ def log2(g, self):
 
 def prim_shape(g, self):
     return g.op('Shape', self)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def gather(g, self, dim, index, sparse_grad=False):
+    # NOTE: Update this workaround if ONNX has native Gather support.
+    #       The current Gather in ONNX is not the same as torch.gather.
+    dtype = self.type().scalarType()
+    values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
+    depth = size(g, self, g.op("Constant", value_t=torch.LongTensor([dim])))
+    index = g.op("Cast", g.op("OneHot", index, depth, values, axis_i=dim), to_i=sym_help.cast_pytorch_to_onnx[dtype])
+    mul = g.op("Mul", g.op("Unsqueeze", self, axes_i=[dim + 1]), index)
+    return g.op("ReduceSum", mul, axes_i=[dim], keepdims_i=0)

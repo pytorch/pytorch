@@ -1280,7 +1280,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     # type: (Tensor, float, bool, float, int) -> Tensor
     r"""
-    Samples from the `Gumbel-Softmax distribution`_ and optionally discretizes.
+    Samples from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretizes.
 
     Args:
       logits: `[..., num_features]` unnormalized log probabilities
@@ -1313,8 +1313,9 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
         >>> # Sample hard categorical using "Straight-through" trick:
         >>> F.gumbel_softmax(logits, tau=1, hard=True)
 
-    .. _Gumbel-Softmax distribution:
+    .. _Link 1:
         https://arxiv.org/abs/1611.00712
+    .. _Link 2:
         https://arxiv.org/abs/1611.01144
     """
 
