@@ -77,7 +77,7 @@ namespace jit {
   _(NoneSchemaMatch)               \
   _(ClassParser)                   \
   _(Profiler)                      \
-  _(InsertGuards)                  \
+  _(InsertAndEliminateGuards)      \
   _(PeepholeOptimize)              \
   _(RecordFunction)                \
   _(SubgraphMatching)              \
