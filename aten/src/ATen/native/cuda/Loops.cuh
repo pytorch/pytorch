@@ -122,38 +122,37 @@ template <typename func_t>
 void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
+  constexpr int ntensors = traits::arity + 1;
 
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity + 1);
 
-  char* out_ptr = (char*)iter.data_ptr(0);
-  cuda::Array<char*, traits::arity> in_ptrs;
-  for (int i = 1; i < iter.ntensors(); i++) {
-    in_ptrs[i - 1] = (char*)iter.data_ptr(i);
+  cuda::Array<char*, ntensors> data;
+  for (int i = 0; i < ntensors; i++) {
+    data[i] = (char*)iter.data_ptr(i);
   }
 
   int64_t numel = iter.numel();
   if (iter.is_trivial_1d()) {
-    auto strides = iter.get_inner_strides();
-    int out_stride = strides[0];
-    cuda::Array<int, traits::arity> in_strides;
-    for (int i = 1; i < iter.ntensors(); i++) {
-      in_strides[i - 1] = strides[i];
+    auto inner_strides = iter.get_inner_strides();
+    cuda::Array<int, ntensors> strides;
+    for (int i = 0; i < ntensors; i++) {
+      strides[i] = inner_strides[i];
     }
     launch_kernel<launch_size_1d, 1>(numel, [=]__device__(int idx) {
-      arg0_t* out = (arg0_t*)&out_ptr[out_stride * idx];
+      arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
       *out = c10::guts::apply(f, dereference<traits>(
-          in_ptrs.data,
-          in_strides.data,
+          &data.data[1],
+          &strides.data[1],
           idx));
     });
   } else {
     auto offset_calc = make_offset_calculator<traits::arity + 1>(iter);
     launch_kernel<launch_size_nd, launch_bound2>(numel, [=]__device__(int idx) {
       auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)&out_ptr[offsets[0]];
+      arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
       *out = c10::guts::apply(f, dereference<traits>(
-          in_ptrs.data,
+          &data.data[1],
           &offsets.data[1],
           1));
     });
