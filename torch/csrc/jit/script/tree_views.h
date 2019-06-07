@@ -584,29 +584,21 @@ struct Assign : public Stmt {
   static Assign create(
       const SourceRange& range,
       const Expr& lhs,
-      const Expr& rhs) {
-    return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs}));
-  }
-  static Assign create(
-      const SourceRange& range,
-      const Expr& lhs,
       const Expr& rhs,
-      const Expr& type) {
+      const Maybe<Expr>& type) {
     return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs, type}));
   }
+
   Expr lhs() const {
     return Expr(subtree(0));
   }
+
   Expr rhs() const {
     return Expr(subtree(1));
   }
 
-  bool has_type() const {
-    return tree()->trees().size() == 3;
-  }
-
-  Expr type() const {
-    return Expr(subtree(2));
+  Maybe<Expr> type() const {
+    return Maybe<Expr>(subtree(2));
   }
 };
 

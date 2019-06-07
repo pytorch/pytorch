@@ -3556,7 +3556,7 @@ def foo(x):
         self.checkScript(annotate_none, ())
         self.checkScript(annotate_none_no_optional, ())
 
-    @unittest.skipIf(PY2 or sys.platform == "win32", "TODO: need to fix this test case for Windows")
+    @unittest.skipIf(PY2, "Python 3 required")
     def test_type_annotate_py3(self):
         code = dedent("""
         import torch

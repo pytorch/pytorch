@@ -359,14 +359,17 @@ struct ParserImpl {
     return Subscript::create(range, Expr(value), subscript_exprs);
   }
 
+  Maybe<Expr> maybeParseTypeAnnotation() {
+    if (L.nextIf(':')) {
+      return Maybe<Expr>::create(L.cur().range, parseExp());
+    } else {
+      return Maybe<Expr>::create(L.cur().range);
+    }
+  }
+
   TreeRef parseFormalParam(bool kwarg_only) {
     auto ident = parseIdent();
-    TreeRef type;
-    if (L.nextIf(':')) {
-      type = Maybe<Expr>::create(L.cur().range, parseExp());
-    } else {
-      type = Maybe<Expr>::create(L.cur().range);
-    }
+    TreeRef type = maybeParseTypeAnnotation();
     TreeRef def;
     if (L.nextIf('=')) {
       def = Maybe<Expr>::create(L.cur().range, parseExp());
@@ -406,19 +409,12 @@ struct ParserImpl {
   // alone on a line:
   // first[,other,lhs] = rhs
   TreeRef parseAssign(const Expr& lhs) {
-    c10::optional<Expr> type;
-    if (L.cur().kind == ':') {
-      L.next();
-      type = parseExp();
-    }
+    auto type = maybeParseTypeAnnotation();
     auto op = parseAssignmentOp();
     auto rhs = parseExpOrExpTuple();
     L.expect(TK_NEWLINE);
     if (op->kind() == '=') {
-      if (type) {
-        return Assign::create(lhs.range(), lhs, Expr(rhs), *type);
-      }
-      return Assign::create(lhs.range(), lhs, Expr(rhs));
+      return Assign::create(lhs.range(), lhs, Expr(rhs), type);
     } else {
       // this is an augmented assignment
       if (lhs.kind() == TK_TUPLE_LITERAL) {

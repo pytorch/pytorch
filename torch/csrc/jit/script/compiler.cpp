@@ -2042,8 +2042,8 @@ struct to_ir {
       case TK_VAR: {
         auto v = Var(stmt.lhs());
         TypePtr type = nullptr;
-        if (stmt.has_type()) {
-          type = typeParser_.parseTypeFromExpr(stmt.type());
+        if (stmt.type().present()) {
+          type = typeParser_.parseTypeFromExpr(stmt.type().get());
         }
         environment_stack->setSugaredVar(
             v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1, type));
