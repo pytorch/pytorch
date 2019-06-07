@@ -2356,12 +2356,6 @@ struct to_ir {
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
-      if (sv->kind() == "python value of type \'builtin_function_or_method\'") {
-          throw ErrorReport(loc)
-              << "You are calling a python builtin_function_or_method "
-              << "which is currently not supported in Torchscript."
-              << "Please open a feature request to add it.";
-      }
       return sv->call(loc, method, inputs, attributes, n_binders);
     }
   }
