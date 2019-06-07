@@ -3,6 +3,7 @@
 #include <ATen/TensorUtils.h>
 #include <limits>
 #include <sstream>
+#include <cstring>
 
 namespace at { namespace native {
 
@@ -145,7 +146,11 @@ static inline void batchCheckErrors(const Tensor& infos, const char* name) {
     if (info < 0) {
       AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
     } else if (info > 0) {
-      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+      if (strstr(name, "svd")) {
+        AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")")
+      } else {
+        AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
+      }
     }
   }
 }
@@ -158,7 +163,11 @@ static inline void singleCheckErrors(int64_t info, const char* name) {
   if (info < 0) {
     AT_ERROR(name, ": Argument ", -info, " has illegal value");
   } else if (info > 0) {
-    AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
+    if (strstr(name, "svd")) {
+      AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")")
+    } else {
+      AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
+    }
   }
 }
 
@@ -212,6 +221,32 @@ static inline std::tuple<std::vector<int64_t>,
   q_strides[input.dim() - 1] = m;
   q_strides[input.dim() - 2] = 1;
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
+}
+
+// Function to generate empty tensors of required size, strides and dtype
+static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv) {
+  auto sizes = input.sizes().vec();
+  int64_t m = input.size(-2), n = input.size(-1);
+
+  sizes[input.dim() - 1] = (compute_uv && some) ? std::min(m, n) : m;
+  auto strides = at::detail::defaultStrides(sizes);
+  // U should be a column-major or a batch of column-major matrices
+  // ... x m x ucol will have strides: ...., ucol, 1
+  // We require: ...., 1, m
+  strides[input.dim() - 1] = m;
+  strides[input.dim() - 2] = 1;
+
+  auto U_empty = at::empty_strided(sizes, strides, input.options());
+
+  sizes[input.dim() - 2] = n;
+  sizes[input.dim() - 1] = n;
+  // VT should be a row-major or a batch of row-major matrices
+  auto VT_empty = at::empty(sizes, input.options());
+
+  sizes.pop_back();
+  sizes[input.dim() - 2] = std::min(m, n);
+  auto S_empty = at::empty(sizes, input.options());
+  return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);  
 }
 
 }}  // namespace at::native

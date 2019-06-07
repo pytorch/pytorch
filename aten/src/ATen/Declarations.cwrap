@@ -2357,7 +2357,6 @@
     - Float
     - Double
   backends:
-    - CPU
     - CUDA
   variants:
     - function

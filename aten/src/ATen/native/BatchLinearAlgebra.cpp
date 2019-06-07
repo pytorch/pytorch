@@ -46,6 +46,12 @@ extern "C" void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *w
 // orgqr
 extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
+
+// gesdd
+extern "C" void dgesdd_(char *jobz, int *m, int *n, double *a, int *lda,
+                        double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *iwork, int *info);
+extern "C" void sgesdd_(char *jobz, int *m, int *n, float *a, int *lda,
+                        float *s, float *u, int *ldu, float *vt, int *ldvt, float *work, int *lwork, int *iwork, int *info);
 #endif
 
 namespace at {
@@ -91,6 +97,12 @@ void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *wo
 template<class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info) {
   AT_ERROR("orgqr only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
+               scalar_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, int *iwork, int *info) {
+  AT_ERROR("svd only takes float or double Tensors");
 }
 
 #ifdef USE_LAPACK
@@ -156,6 +168,16 @@ template<> void lapackOrgqr<double>(int m, int n, int k, double *a, int lda, dou
 
 template<> void lapackOrgqr<float>(int m, int n, int k, float *a, int lda, float *tau, float *work, int lwork, int *info) {
   sorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
+}
+
+template<> void lapackSvd<double>(char jobz, int m, int n, double *a, int lda,
+                                  double *s, double *u, int ldu, double *vt, int ldvt, double *work, int lwork, int *iwork, int *info) {
+  dgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
+}
+
+template<> void lapackSvd<float>(char jobz, int m, int n, float *a, int lda,
+                                 float *s, float *u, int ldu, float *vt, int ldvt, float *work, int lwork, int *iwork, int *info) {
+  sgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
 }
 #endif
 
@@ -831,6 +853,88 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
   Q.resize_as_(Q_tmp).copy_(Q_tmp);
   R.resize_as_(R_tmp).copy_(R_tmp);
   return std::tuple<Tensor&, Tensor&>(Q, R);
+}
+
+template <typename scalar_t>
+static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
+                      char jobz, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("svd: LAPACK library not found in compilation");
+#else
+  auto self_data = self.data<scalar_t>();
+  auto U_data = U.data<scalar_t>();
+  auto S_data = S.data<scalar_t>();
+  auto VT_data = VT.data<scalar_t>();
+  auto self_stride = matrixStride(self);
+  auto U_stride = matrixStride(U);
+  auto S_stride = S.size(-1);
+  auto VT_stride = matrixStride(VT);
+  auto batchsize = batchCount(self);
+
+  int info;
+  auto m = self.size(-2);
+  auto n = self.size(-1);
+  auto k = std::min(m, n);
+  Tensor iwork = at::empty({8 * k}, at::kInt);
+  auto iwork_data = iwork.data<int>();
+  // Run once, first to get the optimum work size.
+  // Since we deal with batches of matrices with the same dimensions, doing this outside
+  // the loop saves (batch_size - 1) workspace queries which would provide the same result
+  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
+  int lwork = -1;
+  scalar_t wkopt;
+  lapackSvd<scalar_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, iwork_data, &info);
+  lwork = static_cast<int>(wkopt);
+  Tensor work = at::empty({lwork}, self.options());
+  auto work_data = work.data<scalar_t>();
+
+  for (int64_t i = 0; i < batchsize; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_stride];
+    scalar_t* S_working_ptr = &S_data[i * S_stride];
+    scalar_t* U_working_ptr = &U_data[i * U_stride];
+    scalar_t* VT_working_ptr = &VT_data[i * VT_stride];
+    
+    // Compute S, U (optionally) and V (optionally)
+    lapackSvd<scalar_t>(jobz, m, n, self_working_ptr, m,
+                        S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work_data, lwork, iwork_data, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some, bool compute_uv) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+  int64_t m = self.size(-2), n = self.size(-1);
+  int64_t k = std::min(m, n);
+  
+  char jobz = compute_uv ? (some ? 'S' : 'A') : 'N';
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+
+  Tensor U_working_copy, S_working_copy, VT_working_copy;
+  std::tie(U_working_copy, S_working_copy, VT_working_copy) = _create_U_S_VT(self, some, compute_uv);
+
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "svd_cpu", [&]{
+    apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobz, infos);
+  });
+
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "svd_cpu");
+  } else {
+    singleCheckErrors(infos[0], "svd_cpu");
+  }
+
+  if (compute_uv) {
+    if (some) {
+      VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+    }
+  } else {
+    VT_working_copy.zero_();
+    U_working_copy.zero_();
+  }
+  return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
 }}  // namespace at::native

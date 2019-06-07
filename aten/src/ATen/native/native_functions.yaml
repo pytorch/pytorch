@@ -3561,14 +3561,17 @@
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
   dispatch:
-    CPU: legacy::cpu::_th_svd_out
     CUDA: legacy::cuda::_th_svd_out
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_svd
     CUDA: legacy::cuda::_th_svd
+
+- func: _svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: _svd_helper_cpu
 
 - func: cholesky(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
 
