@@ -2159,7 +2159,7 @@ RegisterOperators reg2({
           auto i = pop(stack).toInt();
           TORCH_CHECK(
               i >= 0 && i < 1114111,
-              "chr() arg not in range(0x110000), found ",
+              "chr() arg not in range(256), found ",
               i);
           char c = i;
           push(stack, std::string(c, 1));

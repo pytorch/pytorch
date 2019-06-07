@@ -555,6 +555,8 @@ class JitTestCase(TestCase):
             if not WINDOWS:
                 self.assertExpected(captured[0], subname='stdout')
         else:
+            import pdb
+            pdb.set_trace()
             outputs_ge = ge(*inputs)
         self.assertEqual(outputs, outputs_ge)
 
@@ -12408,16 +12410,16 @@ a")
         s = u'\u00a3'.encode('utf8')[:1]
         self.checkScript(index_str_to_tensor, (s,))
 
-    @unittest.skipIf(PY2, "chr() range has changed from PY2 to PY3")
+    @unittest.skipIf(PY3, "We don't support returning wstring")
     def test_chr(self):
         def fn(x):
             # type: (int) -> str
             return chr(x)
 
         self.checkScript(fn, (1,))
-        self.checkScript(fn, (257,))
+        self.checkScript(fn, (255,))
 
-        self.checkScriptRaisesRegex(fn, (1114112,), Exception, 'not in range(0x110000)')
+        self.checkScriptRaisesRegex(fn, (256,), Exception, 'not in range(256)')
 
     def test_round(self):
         def round_float(x):
