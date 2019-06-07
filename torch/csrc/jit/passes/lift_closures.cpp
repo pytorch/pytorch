@@ -1,5 +1,5 @@
+#include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/passes/lift_forks_closures.h>
 #include <torch/csrc/jit/script/compiler.h>
 
 namespace torch {
