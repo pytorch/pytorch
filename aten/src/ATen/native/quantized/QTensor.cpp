@@ -90,7 +90,7 @@ Tensor per_tensor_affine_qtensor_cpu(const Tensor& self, double scale, int64_t z
     underlying_t* self_data = self.data<underlying_t>();
     underlying_t* dst_data = reinterpret_cast<underlying_t *>(dst.data<scalar_t>());
     if (self.numel() > 0) {
-      memcpy(dst_data, self_data, self.numel());
+      memcpy(dst_data, self_data, self.nbytes());
     }
   });
   return dst;
