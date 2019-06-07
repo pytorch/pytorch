@@ -6154,7 +6154,7 @@ a")
                 checkMath("modf", 1, ret_type="Tuple[float, float]")
             elif op in ["isnan", "isinf", "isfinite"]:
                 checkMath(op, 1, ret_type="bool")
-            elif op in ["floor", "ceil"]:
+            elif op in ["floor", "ceil"] and not PY3:
                 checkMathWrap(op, ret_type="int")
             elif op == "factorial":
                 checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
@@ -6172,16 +6172,12 @@ a")
                 checkMath("pow", 2, is_float=True, ret_type="float")
             else:
                 func = getattr(math, op)
-                param_count = 0
 
                 def num_args(f):  # Parses the docstring for builtin functions
                     spec = f.__doc__.split('\n')[0]
                     args = spec[spec.find('(') + 1 : spec.find(')')]
                     return args.count(',') + 1 if args else 0
-                if PY2:
-                    param_count = num_args(func)
-                else:
-                    param_count = len(inspect.signature(func).parameters)
+                param_count = num_args(func)
                 if param_count == 1:
                     checkMathWrap(op, 1)
                 else:
