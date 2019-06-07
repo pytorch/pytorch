@@ -63,15 +63,3 @@ def generate_c2_gradient_test(configs, c2_bench_op):
     """ This function creates Caffe2 op test based on the given operator 
     """
     generate_test(configs, c2_bench_op, register_caffe2_op_test_case, run_backward=True)
-
-
-def map_pt_config_intraop(test_name, N, M, contig, dtype):
-    if test_name in ['bitor', 'cbitor']:
-        if dtype.is_floating_point:
-            return None
-    if test_name in ['tanh', 'sigmoid', 'sumall']:
-        if not dtype.is_floating_point:
-            return None
-    input_shapes = [(N, M), (N, M)]
-    args = {'contig': contig, 'dtype': dtype}
-    return (input_shapes, args)

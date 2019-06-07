@@ -339,7 +339,21 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
     return (scalartype == at::ScalarType::Undefined) ?
             torch::tensors::get_default_scalar_type() : scalartype;
   }
-  return reinterpret_cast<THPDtype*>(args[i])->scalar_type;
+  PyObject *obj = args[i];
+  if (obj == (PyObject*)&PyFloat_Type) {
+    return at::ScalarType::Double;
+  }
+  if (obj == (PyObject*)&PyBool_Type) {
+    return at::ScalarType::Bool;
+  }
+  if (obj == (PyObject*)&PyLong_Type
+#if PY_MAJOR_VERSION == 2
+      || obj == (PyObject*)&PyInt_Type
+#endif
+  ) {
+    return at::ScalarType::Long;
+  }
+  return reinterpret_cast<THPDtype*>(obj)->scalar_type;
 }
 
 inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
@@ -394,7 +408,7 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
 
 inline at::MemoryFormat PythonArgs::toMemoryFormat(int i) {
   if (!args[i]) return at::MemoryFormat::Any;
-  AT_CHECK(THPMemoryFormat_Check(args[i]), "memory_format arg must be an instance of the torch.memory_format");
+  TORCH_CHECK(THPMemoryFormat_Check(args[i]), "memory_format arg must be an instance of the torch.memory_format");
   const auto memory_format = reinterpret_cast<THPMemoryFormat*>(args[i]);
   return memory_format->memory_format;
 }
