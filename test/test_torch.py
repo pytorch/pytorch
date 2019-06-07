@@ -4948,6 +4948,7 @@ class _TestTorchMixin(object):
     def test_cat_empty(self):
         self._test_cat_empty(self)
 
+    @slowTest
     def test_cat_big(self):
         SIZE1 = 6500
         SIZE2 = 4500
