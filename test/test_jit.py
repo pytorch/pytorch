@@ -6129,15 +6129,16 @@ a")
                 if res_python != res_script:
                     if isinstance(res_python, Exception):
                         continue
-
                     if type(res_python) == type(res_script):
                         if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
                             continue
                         if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
                             continue
+
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
                     self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
+
         unimplemented = ["fsum", "isclose", "trunc"]
         ops = [x for x in dir(math) if callable(getattr(math, x))]
         for op in ops:
@@ -6166,10 +6167,11 @@ a")
             else:
                 func = getattr(math, op)
                 param_count = 0
+
                 def num_args(f):  # Parses the docstring for builtin functions
                     spec = f.__doc__.split('\n')[0]
-                    args = spec[spec.find('(')+1:spec.find(')')]
-                    return args.count(',')+1 if args else 0
+                    args = spec[spec.find('(') + 1 : spec.find(')')]
+                    return args.count(',') + 1 if args else 0
                 if PY2:
                     param_count = num_args(func)
                 else:
