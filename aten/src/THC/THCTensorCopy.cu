@@ -28,3 +28,6 @@ struct CopyOp <bool> {
 
 #include <THC/generic/THCTensorCopy.cu>
 #include <THC/THCGenerateBoolType.h>
+
+#include <THC/generic/THCTensorCopy.cu>
+#include <THC/THCGenerateBFloat16Type.h>

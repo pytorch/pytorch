@@ -174,6 +174,8 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   THP_decodeInt64Buffer((int64_t*) THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_HALF)
   THP_decodeHalfBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
+#elif defined(TH_REAL_IS_BFLOAT16)
+  THP_decodeBFloat16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_FLOAT)
   THP_decodeFloatBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_DOUBLE)
