@@ -230,6 +230,7 @@ def _sum_of_list(tensorlist):
         s += t.sum()
     return s
 
+@contextmanager
 def enable_first_class_mode():
     torch._C._jit_set_first_class_mode(True)
     yield
