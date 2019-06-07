@@ -1,6 +1,3 @@
-import os
-import sys
-import subprocess
 import torch
 from common_utils import TestCase, run_tests
 
