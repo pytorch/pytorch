@@ -1,11 +1,9 @@
 import logging
-import numpy as np
-import time
 from collections import OrderedDict
 
 from tensorboard.compat.proto.config_pb2 import RunMetadata
 from tensorboard.compat.proto.graph_pb2 import GraphDef
-from tensorboard.compat.proto.step_stats_pb2 import StepStats, DeviceStepStats, NodeExecStats, AllocatorMemoryUsed
+from tensorboard.compat.proto.step_stats_pb2 import StepStats, DeviceStepStats
 from tensorboard.compat.proto.versions_pb2 import VersionDef
 
 import torch
@@ -177,23 +175,13 @@ class GraphPy(object):
         # TODO: compute correct memory usage and CPU time once
         # PyTorch supports it
         nodes = []
-        node_stats = []
         for v in self.nodes_io.values():
             nodes.append(node_proto(v.uniqueName,
                                     input=v.inputs,
                                     outputsize=v.tensor_size,
                                     op=v.kind,
                                     attributes=v.attributes))
-
-            if v.tensor_size and len(v.tensor_size) > 0:  # assume data is float32, only parameter is counted
-                node_stats.append(
-                    NodeExecStats(node_name=v.uniqueName,
-                                  all_start_micros=int(time.time() * 1e7),
-                                  all_end_rel_micros=42,
-                                  memory=[AllocatorMemoryUsed(allocator_name="cpu",
-                                                              total_bytes=int(np.prod(v.tensor_size)) * 4)]))
-
-        return nodes, node_stats
+        return nodes
 
 
 def parse(graph, args=None, omit_useless_nodes=True):
@@ -281,7 +269,7 @@ def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_
     graph = trace.graph()
     if verbose:
         print(graph)
-    list_of_nodes, node_stats = parse(graph, args, omit_useless_nodes)
+    list_of_nodes = parse(graph, args, omit_useless_nodes)
     # We are hardcoding that this was run on CPU even though it might have actually
     # run on GPU. Note this is what is shown in TensorBoard and has no bearing
     # on actual execution.
@@ -292,6 +280,5 @@ def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_
     # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/graph/tf_graph_common/test/graph-test.ts
     # and
     # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/step_stats.proto
-    stepstats = RunMetadata(step_stats=StepStats(dev_stats=[DeviceStepStats(device="/device:CPU:0",
-                                                                            node_stats=node_stats)]))
+    stepstats = RunMetadata(step_stats=StepStats(dev_stats=[DeviceStepStats(device="/device:CPU:0")]))
     return GraphDef(node=list_of_nodes, versions=VersionDef(producer=22)), stepstats
