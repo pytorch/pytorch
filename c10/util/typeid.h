@@ -27,7 +27,7 @@
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
-#include <c10/util/bfloat16.h>
+#include <c10/util/BFloat16.h>
 
 /*
  * TypeIdentifier is a small type containing an id.
@@ -630,7 +630,7 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(28, at::Half*)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(29, c10::qint8)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(30, c10::quint8)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(31, c10::qint32)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(32, c10::bfloat16)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(32, c10::BFloat16)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(33, _CaffeHighestPreallocatedTypeId)
 
 } // namespace caffe2

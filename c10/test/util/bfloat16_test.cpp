@@ -1,4 +1,4 @@
-#include <c10/util/bfloat16.h>
+#include <c10/util/BFloat16.h>
 #include <gtest/gtest.h>
 
 namespace {
@@ -8,7 +8,7 @@ namespace {
       in[i] = i + 1.25;
     }
 
-    c10::bfloat16 bfloats[100];
+    c10::BFloat16 bfloats[100];
     float out[100];
 
     for (int i = 0; i < 100; ++i) {
