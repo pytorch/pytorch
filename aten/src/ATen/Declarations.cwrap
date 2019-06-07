@@ -2725,23 +2725,6 @@
       default: 2
 ]]
 [[
-  name: _th_exponential_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: exponential
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
-    - arg: double lambd
-      default: 1
-]]
-[[
   name: _th_geometric_
   backends:
     - CPU

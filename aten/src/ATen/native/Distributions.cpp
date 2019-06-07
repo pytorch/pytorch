@@ -172,6 +172,18 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
 }
 
 
+Tensor& exponential_cpu_(Tensor& self, double lambda, Generator* gen) {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "exponential_cpu_", [&] {
+    THGenerator* generator = get_generator(gen);
+    std::lock_guard<std::mutex> lock(generator->mutex);
+    CPU_tensor_apply1<scalar_t>(
+        self, [generator, lambda](scalar_t& ret_val) {
+          ret_val = static_cast<scalar_t>(THRandom_bernoulli(generator, lambda));
+        });
+  });
+  return self;
+}
+
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "_standard_gamma_grad_cpu", [&] {
