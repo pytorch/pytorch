@@ -2262,7 +2262,7 @@ def _ssim(input, target, max_val, k1, k2, channel, kernel):
     c1 = (k1 * max_val) ** 2
     c2 = (k2 * max_val) ** 2
 
-    mu1 = conv2d(input, kernel,  groups=channel)
+    mu1 = conv2d(input, kernel, groups=channel)
     mu2 = conv2d(target, kernel, groups=channel)
 
     mu1_sq = mu1 ** 2
