@@ -3,6 +3,7 @@ import numbers
 import weakref
 
 import torch
+import torch.nn.functional as F
 from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        lazy_property)
@@ -369,7 +370,7 @@ class SigmoidTransform(Transform):
         return y.log() - (-y).log1p()
 
     def log_abs_det_jacobian(self, x, y):
-        return (y * (1 - y)).log()
+        return -F.softplus(-x) - F.softplus(x)
 
 
 class AbsTransform(Transform):

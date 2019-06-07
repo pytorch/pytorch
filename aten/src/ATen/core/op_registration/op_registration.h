@@ -158,7 +158,7 @@ public:
      * > namespace { Tensor my_kernel_cpu(Tensor a, Tensor b) {...} }
      * >
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators()
+     * >     .op("my_op", c10::RegisterOperators::options()
      * >         .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()));
      */
     template<class FuncType, FuncType* kernel_func>
@@ -179,7 +179,7 @@ public:
      * > namespace { Tensor my_kernel_cpu(Tensor a, Tensor b) {...} }
      * >
      * > static auto registry = c10::RegisterOperators()
-     * >     .op("my_op", c10::RegisterOperators()
+     * >     .op("my_op", c10::RegisterOperators::options()
      * >         .catchAllKernel<decltype(my_kernel_cpu), &my_kernel_cpu>());
      */
     template<class FuncType, FuncType* kernel_func>
@@ -385,7 +385,7 @@ public:
     *
     * > static auto registry = c10::RegisterOperators()
     * >     .op("my_op", c10::RegisterOperators::options()
-    * >         .kernel([] (Tensor a, Tensor b) {...}));
+    * >         .catchAllKernel([] (Tensor a, Tensor b) {...}));
     *
     */
     template<class FuncType>
