@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
@@ -9,6 +8,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -210,14 +210,14 @@ struct Environment {
   Function& method;
   ResolverPtr resolver;
   std::vector<std::string> captured_inputs;
-  std::unordered_map<std::string, std::string> error_messages;
+  std::unordered_map<std::string, std::function<std::string()>> error_messages;
   Block* b;
 
   std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
   // error has been set, then we will use the more informative error message
-  void setVariableTypeError(const std::string& name, const std::string& msg) {
+  void setVariableTypeError(const std::string& name, std::function<std::string()> msg) {
     auto runner = this;
     while (runner->next) {
       runner = runner->next.get();
@@ -233,7 +233,7 @@ struct Environment {
     }
     auto msg = runner->error_messages.find(name);
     if (msg != runner->error_messages.end()) {
-      return msg->second;
+      return msg->second();
     } else {
       return c10::nullopt;
     }
@@ -501,6 +501,24 @@ struct Environment {
   ValueTable value_table;
 };
 
+template <class T>
+static Value* materializeConstant(
+    T val,
+    Graph& graph,
+    const SourceRange& r,
+    std::unordered_map<T, Value*>& map) {
+  auto existing_constant = map.find(val);
+  if (existing_constant != map.end()) {
+    return existing_constant->second;
+  }
+
+  WithInsertPoint guard(graph.block()->nodes().front());
+  auto new_constant = graph.insertConstant(val, nullptr, r);
+  map[val] = new_constant;
+
+  return new_constant;
+}
+
 static Value* ensureInt(const SourceRange& range, Value* v) {
   if (!v->type()->isSubtypeOf(IntType::get())) {
     throw ErrorReport(range)
@@ -551,6 +569,8 @@ struct to_ir {
   Function& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
+  std::unordered_map<int64_t, Value*> integral_constants;
+  std::unordered_map<double, Value*> fp_constants;
   ScriptTypeParser typeParser_;
 
   // Singly-linked list of environments. This top element contains a member
@@ -1186,25 +1206,26 @@ struct to_ir {
     // ordered set, because we want deterministic graph output
     std::set<std::string> mutated_variables;
 
-    // var is only defined in one branch save error in case it's used later
-    auto err = [&](const std::string& v, const std::string& branch) {
-      ErrorReport error(stmt);
-      error << v << " is not defined in the " << branch;
-      environment_stack->setVariableTypeError(v, error.what());
-    };
-
     for (auto& v : save_true->definedVariables()) {
       if (save_false->findInAnyFrame(v)) {
         mutated_variables.insert(v);
       } else {
-        err(v, "false branch");
+        ErrorReport error(stmt);
+        environment_stack->setVariableTypeError(v, [=]() -> std::string {
+          error << v << " is not defined in the false branch";
+          return error.what();
+        });
       }
     }
     for (auto& v : save_false->definedVariables()) {
       if (save_true->findInAnyFrame(v)) {
         mutated_variables.insert(v);
       } else {
-        err(v, "true branch");
+        ErrorReport error(stmt);
+        environment_stack->setVariableTypeError(v, [=]() -> std::string {
+          error << v << " is not defined in the true branch";
+          return error.what();
+        });
       }
     }
 
@@ -1235,7 +1256,9 @@ struct to_ir {
             save_false->findInParentFrame(x)) {
           throw error;
         } else {
-          environment_stack->setVariableTypeError(x, error.what());
+          environment_stack->setVariableTypeError(x, [=]() -> std::string {
+            return error.what();
+          });
           continue;
         }
       }
@@ -1334,8 +1357,11 @@ struct to_ir {
     WithInsertPoint guard(n);
 
     if (!max_trip_count_val) {
-      max_trip_count_val = insertConstant(
-          *graph, std::numeric_limits<int64_t>::max(), nullptr, range);
+      max_trip_count_val = materializeConstant(
+          std::numeric_limits<int64_t>::max(),
+          *graph,
+          range,
+          integral_constants);
     }
 
     cond_val = (cond) ? emitCond(cond.value())
@@ -1421,7 +1447,7 @@ struct to_ir {
           << "range expected at most 3 arguments, got " << args.size();
     }
     const auto& ident_name = target.name();
-    AT_CHECK(
+    TORCH_CHECK(
         end_val != nullptr && start_val != nullptr && step_val != nullptr,
         "Expected non-null pointers for range() arguments");
     auto addOp = [end_val, range](
@@ -2651,9 +2677,11 @@ struct to_ir {
 
   Value* emitConst(const Const& c) {
     if (c.isFloatingPoint())
-      return insertConstant(*graph, c.asFloatingPoint(), nullptr, c.range());
+      return materializeConstant(
+          c.asFloatingPoint(), *graph, c.range(), fp_constants);
     else
-      return insertConstant(*graph, c.asIntegral(), nullptr, c.range());
+      return materializeConstant(
+          c.asIntegral(), *graph, c.range(), integral_constants);
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
