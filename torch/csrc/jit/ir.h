@@ -79,8 +79,8 @@ namespace aten {
 using namespace ::c10::aten;
 }
 
-namespace script {
 struct Function;
+namespace script {
 struct MatchedSchema;
 } // namespace script
 
@@ -1099,7 +1099,7 @@ struct Graph {
   }
 
   TORCH_API Value* insertFunctionCall(
-      std::shared_ptr<script::Function> callee,
+      std::shared_ptr<Function> callee,
       script::MatchedSchema& matched);
   TORCH_API Value* insertMethodCall(
       std::string method_name,

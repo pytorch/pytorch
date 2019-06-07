@@ -145,7 +145,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<script::Function>& function_var,
+          [](std::shared_ptr<Function>& function_var,
              py::function pyObserverFunction) {
             // Overloaded jit pass for pure functions instead of modules.
             // Create a new node that would be used in the insert observer pass:

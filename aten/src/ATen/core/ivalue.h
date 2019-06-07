@@ -6,9 +6,7 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 struct Function;
-}
 } // namespace jit
 } // namespace torch
 namespace c10 {
