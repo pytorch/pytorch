@@ -2706,25 +2706,6 @@
       default: 1
 ]]
 [[
-  name: _th_log_normal_
-  cname: logNormal
-  variants: function
-  types:
-    - floating_point
-  backends:
-    - CPU
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
-    - arg: double mean
-      default: 1
-    - arg: double std
-      default: 2
-]]
-[[
   name: _th_exponential_
   types:
     - floating_point
