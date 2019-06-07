@@ -6138,7 +6138,7 @@ a")
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
                     self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
-        unimplemented = ["fsum", "hypot", "isclose", "log2", "trunc"]
+        unimplemented = ["fsum", "isclose", "trunc"]
         ops = [x for x in dir(math) if callable(getattr(math, x))]
         for op in ops:
             if op in unimplemented:
