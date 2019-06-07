@@ -95,7 +95,7 @@ Value* getValueTrace(const IValue& var) {
         ->insertNode(state->graph->createTuple(fmap(
             var.toTuple()->elements(),
             [](const IValue& val) { return getValueTrace(val); })))
-        ->output(); 
+        ->output();
   } if (var.isTensor()) {
     auto ten = var.toTensor();
     if (!ten.defined()) {
@@ -149,7 +149,7 @@ Value* getValueTrace(const IValue& var) {
     oss << "Tried to trace Future that the tracer was not aware of.";
     throw std::runtime_error(oss.str());
   } else {
-    // If the values are non-tensors, we try to create constants 
+    // If the values are non-tensors, we try to create constants
     // and bake those constants into the traced graph
     auto constant = tryInsertConstant(*state->graph, var);
     if (constant) {
@@ -269,7 +269,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
   } else {
     AT_ERROR(
         "Only tensors or (possibly nested) dict or tuples of tensors can be "
-        "inputs to traced functions. Got ", type);
+        "inputs to traced functions. Got ", type->python_str());
   }
 }
 

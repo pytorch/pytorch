@@ -4,6 +4,8 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/tracer.h>
@@ -37,14 +39,20 @@ namespace jit {
 // locations in libtorch code rather than user code.
 
 using tracer::TypedStack;
-struct TypedIValue : public std::pair<IValue, TypePtr> {
+struct TypedIValue : public std::pair<IValue, MatchTypeReturn> {
   using pair::pair;
+
+  TypedIValue(IValue value, TypePtr type)
+      : std::pair<IValue, MatchTypeReturn>(value, MatchTypeReturn(type)) {}
 
   IValue& ivalue() {
     return this->first;
   }
   TypePtr& type() {
-    return this->second;
+    return *this->second.type;
+  }
+  std::string error() {
+    return this->second.errMsg;
   }
 };
 
@@ -54,7 +62,8 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
         ConstantString::create(py::cast<std::string>(key)),
         StringType::create());
   } else if (py::isinstance<py::int_>(key)) {
-    return TypedIValue(py::cast<int64_t>(key), IntType::create());
+    return TypedIValue(
+        py::cast<int64_t>(key), IntType::create());
   } else if (py::isinstance<py::float_>(key)) {
     return TypedIValue(py::cast<double>(key), FloatType::create());
   } else {
@@ -88,82 +97,146 @@ inline c10::optional<TypePtr> unifyOrInitializeType(
   return unifyTypes(accum, unify);
 }
 
-inline TypedIValue toTypedIValue(py::handle input) {
+MatchTypeReturn tryToInferContainerType(py::handle input);
+
+// Try to infer the type of a Python object
+// The type cannot be inferred if:
+//   input is a None
+//   input is an empty container (list, dict, tuple)
+//   input is an empty container
+//   input is an dict with more than one type of key or value
+//   input is an list with more than one type of element
+inline MatchTypeReturn tryToInferType(py::handle input) {
+  // Try tensor types
   if (THPVariable_Check(input.ptr())) {
-    auto ten = py::cast<at::Tensor>(input);
-    if (ten.is_sparse()) {
-      AT_ERROR("sparse tensors not supported");
+    auto tensor = py::cast<at::Tensor>(input);
+    if (tensor.is_sparse()) {
+      return MatchTypeReturn("Sparse tensors not supported");
     }
-    if (ten.is_mkldnn()) {
+    if (tensor.is_mkldnn()) {
       // mkldnn tensor as opaque tensor doesn't have strides, so we can
       // not create a CompleteTensorType
-      return TypedIValue(ten, DimensionedTensorType::create(ten));
+      return MatchTypeReturn(DimensionedTensorType::create(tensor));
     }
-    return TypedIValue(ten, CompleteTensorType::create(ten));
+    return MatchTypeReturn(CompleteTensorType::create(tensor));
+  }
+
+  if (input.is(py::none())) {
+    return MatchTypeReturn("Cannot infer type of a None value");
+  }
+
+  // Try basic types first
+  if (py::isinstance<py::bool_>(input)) {
+    return MatchTypeReturn(BoolType::get());
+  } else if (py::isinstance<py::int_>(input)) {
+    return MatchTypeReturn(IntType::get());
+  } else if (py::isinstance<py::float_>(input)) {
+    return MatchTypeReturn(FloatType::get());
+  } else if (py::isinstance<py::str>(input)) {
+    return MatchTypeReturn(StringType::get());
+  } else if (THPLayout_Check(input.ptr())) {
+    return MatchTypeReturn(IntType::get());
+  } else if (THPDevice_Check(input.ptr())) {
+    return MatchTypeReturn(DeviceObjType::get());
+  } else if (THPDtype_Check(input.ptr())) {
+    return MatchTypeReturn(IntType::get());
+  }
+
+  // Try container types
+  return tryToInferContainerType(input);
+}
+
+inline MatchTypeReturn tryToInferContainerType(py::handle input) {
+  if (THPVariable_Check(input.ptr())) {
+    auto tensor = py::cast<at::Tensor>(input);
+    if (tensor.is_sparse()) {
+      return MatchTypeReturn("Sparse tensors not supported");
+    }
+    if (tensor.is_mkldnn()) {
+      // mkldnn tensor as opaque tensor doesn't have strides, so we can
+      // not create a CompleteTensorType
+      return MatchTypeReturn(DimensionedTensorType::create(tensor));
+    }
+    return MatchTypeReturn(CompleteTensorType::create(tensor));
   } else if (six::isTuple(input)) {
-    py::tuple input_tuple = py::cast<py::tuple>(input);
-    Stack s;
-    std::vector<TypePtr> t;
-    s.reserve(input_tuple.size());
-    t.reserve(input_tuple.size());
-    for (py::handle elem : input_tuple) {
-      auto info = toTypedIValue(elem);
-      s.push_back(info.first);
-      t.push_back(info.second);
+    py::tuple tuple = py::cast<py::tuple>(input);
+    std::vector<TypePtr> element_types;
+    element_types.reserve(tuple.size());
+
+    for (py::handle elem : tuple) {
+      auto type_match = tryToInferType(elem);
+      if (type_match.type) {
+        element_types.push_back(*type_match.type);
+      } else {
+        // Forward error message along
+        return type_match.errMsg;
+      }
     }
-    return TypedIValue(Tuple::create(s), TupleType::create(t));
+    return MatchTypeReturn(TupleType::create(element_types));
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
-    c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
-
     size_t len = py::len(dict);
     if (!len) {
-      AT_ERROR("Dictionary inputs must have entries.");
+      return MatchTypeReturn("Dictionary inputs must have entries");
     }
-    elems.reserve(len);
 
-    TypePtr keyType = nullptr;
-    TypePtr valueType = nullptr;
+    TypePtr key_type = nullptr;
+    TypePtr value_type = nullptr;
+
     for (auto entry : dict) {
-      auto keyInfo = toDictKeyIValue(entry.first);
-      auto valInfo = toTypedIValue(entry.second);
-      auto unifiedKey = unifyOrInitializeType(keyType, keyInfo.second);
-      auto unifiedValue = unifyOrInitializeType(valueType, valInfo.second);
-      if (!unifiedKey || !unifiedValue) {
-        AT_ERROR(
+      // Try to infer the key type and unify it with the existing one
+      auto entry_key_type_match = tryToInferType(entry.first);
+      if (!entry_key_type_match.type) {
+        return entry_key_type_match.errMsg;
+      }
+      auto unified_key =
+          unifyOrInitializeType(key_type, *entry_key_type_match.type);
+      if (!unified_key) {
+        return MatchTypeReturn(
             "Dictionary inputs to traced functions must have consistent type");
       }
-      keyType = *unifiedKey;
-      valueType = *unifiedValue;
-      elems.insert(keyInfo.first, valInfo.first);
+
+      // Try to infer the value type and unify it with the existing one
+      auto entry_value_type_match = tryToInferType(entry.second);
+      if (!entry_value_type_match.type) {
+        return entry_value_type_match.errMsg;
+      }
+      auto unified_value =
+          unifyOrInitializeType(value_type, *entry_value_type_match.type);
+      if (!unified_value) {
+        return MatchTypeReturn(
+            "Dictionary inputs to traced functions must have consistent type");
+      }
+
+      key_type = *unified_key;
+      value_type = *unified_value;
     }
-    return TypedIValue(
-        at::ivalue::GenericDict::create(std::move(elems)),
-        DictType::create(keyType, valueType));
+    return MatchTypeReturn(DictType::create(key_type, value_type));
   } else if (PyList_Check(input.ptr())) {
     auto list = py::cast<py::list>(input);
-    std::vector<IValue> elems;
     size_t len = py::len(list);
     if (!len) {
-      AT_ERROR("List trace inputs must have elements");
+      return MatchTypeReturn("List trace inputs must have elements");
     }
-    elems.reserve(len);
 
-    TypePtr listType = nullptr;
+    TypePtr element_type = nullptr;
     for (auto elem : list) {
-      TypedIValue typedVal = toTypedIValue(elem);
-      elems.push_back(typedVal.ivalue());
-      auto unify = unifyOrInitializeType(listType, typedVal.type());
+      auto element_type_match = tryToInferType(elem);
+      if (!element_type_match.type) {
+        return MatchTypeReturn("Could not infer type of list element");
+      }
+      auto unify =
+          unifyOrInitializeType(element_type, *element_type_match.type);
       if (!unify) {
-        AT_ERROR(
+        return MatchTypeReturn(
             "List inputs to traced functions must have consistent element type");
       }
-      listType = *unify;
+      element_type = *unify;
     }
-    return trySpecializeTensorList(elems, listType);
+    return MatchTypeReturn(ListType::create(element_type));
   } else {
-    throw std::runtime_error(c10::str(
+    return MatchTypeReturn(c10::str(
         "Only tensors and (possibly nested) tuples of tensors or dicts are supported ",
         "as inputs or outputs of traced functions",
         ", but instead got value of type ",
@@ -174,8 +247,34 @@ inline TypedIValue toTypedIValue(py::handle input) {
   }
 }
 
+inline IValue toIValue(
+    py::handle obj,
+    const TypePtr& type,
+    c10::optional<int32_t> N = c10::nullopt);
+
+inline TypedIValue toTraceableIValue(py::handle input) {
+  auto match = tryToInferType(input);
+  if (!match.type) {
+    throw std::runtime_error(match.errMsg);
+  }
+  auto type = *match.type;
+
+  if (type->kind() != TypeKind::ListType ||
+      type->kind() != TypeKind::DictType ||
+      type->kind() != TypeKind::TupleType ||
+      type->isSubtypeOf(TensorType::get())) {
+    return TypedIValue(toIValue(input, type), type);
+  }
+
+  throw std::runtime_error(c10::str(
+      "Type '",
+      type->python_str(),
+      "' cannot be traced. Only Tensors and Lists, Dicts, and"
+      " Tuples of Tensors can be traced."));
+}
+
 inline IValue toIValue(py::handle input) {
-  return toTypedIValue(input).ivalue();
+  return toTraceableIValue(input).ivalue();
 }
 
 inline Stack toStack(const py::tuple& inputs) {
@@ -183,15 +282,10 @@ inline Stack toStack(const py::tuple& inputs) {
 }
 
 inline TypedStack toTypedStack(const py::tuple& inputs) {
-  auto info = toTypedIValue(inputs);
+  auto info = toTraceableIValue(inputs);
   return TypedStack(
       info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
 }
-
-inline IValue toIValue(
-    py::handle obj,
-    const TypePtr& type,
-    c10::optional<int32_t> N = c10::nullopt);
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   std::vector<IValue> elems;
@@ -298,7 +392,7 @@ inline IValue toIValue(
     }
     case TypeKind::OptionalType: {
       // check if it's a none obj since optional accepts NoneType
-      if (obj == Py_None) {
+      if (obj.is_none()) {
         // check if it's a none obj since optional accepts NoneType
         // return an IValue() to denote a NoneType
         return {};
