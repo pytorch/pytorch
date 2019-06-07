@@ -4,10 +4,36 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/SmallVector.h>
+#include <cmath>
 
 namespace at {
 namespace native {
 namespace {
+
+SmallVector<int64_t, 4> convOutputShape(
+    int N, // mini-batch
+    int H, // input height
+    int W, // input width
+    int K, // output channels
+    const std::vector<int64_t>& kernel,
+    const std::vector<int64_t>& stride,
+    const std::vector<int64_t>& padding,
+    const std::vector<int64_t>& dilation) {
+  SmallVector<int64_t, 4> out_shape;
+  out_shape.push_back(N);
+
+  int H_out = std::floor(
+      (H + 2 * padding[0] - dilation[0] * (kernel[0] - 1) - 1) / stride[0] + 1);
+  int W_out = std::floor(
+      (W + 2 * padding[1] - dilation[1] * (kernel[1] - 1) - 1) / stride[1] + 1);
+  out_shape.push_back(H_out);
+  out_shape.push_back(W_out);
+  out_shape.push_back(K);
+
+  return out_shape;
+}
+
 class QConv2dInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
@@ -18,7 +44,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       const std::vector<int64_t>& stride,
       const std::vector<int64_t>& padding,
       const std::vector<int64_t>& dilation,
-      const std::vector<int64_t>& output_padding,
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
@@ -30,13 +55,9 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     TORCH_CHECK(stride.size() == 2, "2D convolution only");
     TORCH_CHECK(padding.size() == 2, "2D convolution only");
     TORCH_CHECK(dilation.size() == 2, "2D convolution only");
-    TORCH_CHECK(output_padding.size() == 2, "2D convolution only");
     TORCH_CHECK(
         (dilation[0] == 1 && dilation[1] == 1),
         "Currently dilation should be 1");
-    TORCH_CHECK(
-        (output_padding[0] == 0 && output_padding[1] == 0),
-        "Currently output padding should be 0");
 
     // inputs are in NHWC format
     int N = act.size(0);
@@ -110,11 +131,15 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         K,
         groups);
 
+    auto outShape =
+        convOutputShape(N, H, W, K, kernel, stride, padding, dilation);
+    TORCH_CHECK(
+        std::all_of(
+            outShape.begin(), outShape.end(), [](int64_t i) { return i > 0; }),
+        "[QConv2D] each dimension of output tensor should be greater than 0")
+
     Tensor output = _empty_affine_quantized(
-        {N, H, W, K},
-        device(kCPU).dtype(kQUInt8),
-        output_scale,
-        output_zero_point);
+        outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point);
     auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
 
     // Do the GEMM
@@ -150,7 +175,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::fbgemm_conv2d",
-    c10::RegisterOperators::options().kernel<QConv2dInt8>(QuantizedCPUTensorId()));
+    c10::RegisterOperators::options().kernel<QConv2dInt8>(
+        QuantizedCPUTensorId()));
 
 } // namespace
 } // namespace native

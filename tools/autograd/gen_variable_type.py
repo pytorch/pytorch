@@ -509,6 +509,8 @@ def emit_body(declaration):
     if declaration['output_differentiability'] is not None:
         differentiable_outputs = []
         output_differentiability = declaration['output_differentiability']
+        if False in output_differentiability and inplace:
+            raise RuntimeError("output_differentiability=False for inplace operation (version_counter won't get updated)")
         for differentiable, output in zip(output_differentiability, returns):
             if differentiable:
                 differentiable_outputs.append(output)
