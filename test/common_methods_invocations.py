@@ -107,6 +107,7 @@ def ident(x):
 #   (True, nonfusible_nodes, fusible_nodes) for autodiff,    // optional
 #   indices for possible dim arg,                            // optional
 #   fn mapping output to part that should be gradcheck'ed,   // optional
+#   kwargs                                                   // optional
 # )
 # Note: some functions have separate schema for (Tensor other) and (Scalar other),
 #       and it's possible that we only support AD for Scalar version but not Tensor
