@@ -1507,6 +1507,31 @@ class _TestTorchMixin(object):
                     y >>= shift
                     self.assertTrue(np.allclose(y, x.cpu().numpy()))
 
+    def test_rshift_same_for_all_devices(self):
+        for val in [-100, -2, -1, 0, 1, 2, 100]:
+            for shift in [-100, -10, 0, 1, 2, 10, 100]:
+                base = torch.tensor([val, val, val], device="cpu")
+                r1 = base >> shift
+                for device in torch.testing.get_all_device_types():
+                    if device == "cpu":
+                        continue
+                    other = torch.tensor([val, val, val], device=device)
+                    r2 = other >> shift
+                    self.assertTrue(torch.allclose(r1, r2.cpu()))
+
+    def test_irshift_same_for_all_devices(self):
+        for val in [-100, -2, -1, 0, 1, 2, 100]:
+            for shift in [-100, -10, 0, 1, 2, 10, 100]:
+                base = torch.tensor([val, val, val], device="cpu")
+                base >>= shift
+                for device in torch.testing.get_all_device_types():
+                    if device == "cpu":
+                        continue
+                    other = torch.tensor([val, val, val], device=device)
+                    other >>= shift
+                    self.assertTrue(torch.allclose(base, other.cpu()))
+
+
     def test_all_any_with_dim(self):
         def test(x):
             r1 = x.prod(dim=0, keepdim=False).byte()
