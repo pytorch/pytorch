@@ -767,10 +767,11 @@ class MultiheadAttention(Module):
         query, key, value: map a query and a set of key-value pairs to an output.
             See "Attention Is All You Need" for more details.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention.
+            be ignored by the attention. This is an binary mask. When the value is True,
+            the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
-        attn_mask: mask that prevents attention to certain positions.
-
+        attn_mask: mask that prevents attention to certain positions. This is an additive mask
+            (i.e. the values will be added to the attention layer).  
 
     Shape:
         - Inputs:

@@ -3116,10 +3116,14 @@ def multi_head_attention_forward(query,                        # type: Tensor
         out_proj_weight, out_proj_bias: the output projection weight and bias.
         training: apply dropout if is ``True``.
         key_padding_mask: if provided, specified padding elements in the key will
-            be ignored by the attention.
+            be ignored by the attention. This is an binary mask. When the value is True,
+            the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
-        attn_mask: mask that prevents attention to certain positions.
-        use_chunk_proj_weight: use in_proj_weight insteady of q_proj_weight, k_proj_weight, v_proj_weight.
+        attn_mask: mask that prevents attention to certain positions. This is an additive mask
+            (i.e. the values will be added to the attention layer).
+        use_chunk_proj_weight: the function accept the proj. weights for query, key, and value
+            in differnt forms. If true, in_proj_weight will be used, which is a combination of
+            q_proj_weight, k_proj_weight, v_proj_weight.
         q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         static_k, static_v: static key and value used for attention operators.
 
