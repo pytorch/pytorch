@@ -1224,7 +1224,7 @@ class TestAutograd(TestCase):
     def test_backward_twice_with_saved_values(self):
         b = torch.randn(3, requires_grad=True, dtype=torch.double)
         c = torch.zeros(3, dtype=torch.double)
-        c[[1,2]] = b[[1,1]]
+        c[[1, 2]] = b[[1, 1]]
         c.backward(torch.tensor([1, 1, 1], dtype=torch.double))
         self.assertRaisesRegex(RuntimeError, 'Specify retain_graph=True',
                                lambda: c.backward(torch.tensor([1, 1, 1], dtype=torch.double)))
@@ -1232,7 +1232,7 @@ class TestAutograd(TestCase):
     def test_backward_twice_retained_graph_with_saved_values(self):
         b = torch.randn(3, requires_grad=True, dtype=torch.double)
         c = torch.zeros(3, dtype=torch.double)
-        c[[1,2]] = b[[1,1]]
+        c[[1, 2]] = b[[1, 1]]
         c.backward(torch.tensor([1, 1, 1], dtype=torch.double), retain_graph=True)
         c.backward(torch.tensor([1, 1, 1], dtype=torch.double))
 
@@ -1245,7 +1245,7 @@ class TestAutograd(TestCase):
     def test_backward_twice_retained_graph_without_saved_values(self):
         b = torch.randn(3, requires_grad=True, dtype=torch.double)
         c = torch.zeros(3, dtype=torch.double)
-        c[[1,2]] = b[[1,1]]
+        c[[1, 2]] = b[[1, 1]]
         c.backward(torch.tensor([1, 1, 1], dtype=torch.double), retain_graph=True)
         c.backward(torch.tensor([1, 1, 1], dtype=torch.double))
 
