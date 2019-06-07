@@ -117,6 +117,7 @@ class PackedSequenceTest(TestCase):
         ordered = self._ordered_sequence(tensor_type)
         lengths = list(map(len, ordered))
         padded_tensor = rnn_utils.pad_sequence(ordered)
+        x = torch.randn(1)
         return padded_tensor, lengths
 
     def test_type_casts(self):
