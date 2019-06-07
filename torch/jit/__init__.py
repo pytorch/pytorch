@@ -1711,7 +1711,11 @@ def _convert_to_script_module(mod, methods=None):
 
     def make_stub(method):
         func = get_function_from_type(type(mod), method)
-        return script_method(func, createResolutionCallbackFromClosure(func))
+        try:
+            sm = script_method(func, createResolutionCallbackFromClosure(func))
+        except Exception as e:
+            raise Exception(f"Error scripting method {func.__name__} in module {mod.__class__.__name__}: {str(e)}")
+        return sm
 
     stubs = list(map(make_stub, methods))
     return WeakScriptModuleProxy(mod, stubs)
