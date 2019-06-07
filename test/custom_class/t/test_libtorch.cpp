@@ -21,6 +21,9 @@ struct Foo {
   void display() {
     cout<<"x: "<<x<<' '<<"y: "<<y<<endl;
   }
+  ~Foo() {
+    std::cout<<"Deleting?????"<<std::endl;
+  }
 };
 // static auto registry2 = c10::RegisterOperators()
 //          .op("my_op", [](torch::Tensor a) {return x;});

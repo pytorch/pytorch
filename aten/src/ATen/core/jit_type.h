@@ -54,6 +54,7 @@ _(DeviceObjType) \
 _(FunctionType) \
 _(ClassType) \
 _(BlobType) \
+_(CapsuleType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1250,6 +1251,31 @@ struct CAFFE2_API BlobType : public Type {
 private:
   BlobType()
   : Type(TypeKind::BlobType) {}
+};
+
+struct CapsuleType;
+using CapsuleTypePtr = std::shared_ptr<CapsuleType>;
+// This type represents a Python Capsule
+struct CAFFE2_API CapsuleType : public Type {
+  static CapsuleTypePtr create() {
+    return CapsuleTypePtr(new CapsuleType()); // NOLINT(modernize-make-shared)
+  }
+  DEFINE_IS_SUBCLASS(CapsuleType);
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return rhs->kind() == TypeKind::CapsuleType;
+  }
+  std::string str() const override {
+    return "Capsule";
+  }
+  static const TypeKind Kind = TypeKind::CapsuleType;
+  // global singleton
+  static CapsuleTypePtr get();
+private:
+  CapsuleType()
+  : Type(TypeKind::CapsuleType) {}
 };
 
 CAFFE2_API std::ostream& operator<<(std::ostream & out, const Type & t);

@@ -976,6 +976,14 @@ RegisterOperators reg(
            };
          }),
      Operator(
+         "prim::CreateCapsule() -> Capsule",
+         [](Stack& stack) {
+            auto userObj = Capsule();
+            auto res = IValue(c10::make_intrusive<Capsule>(std::move(userObj)));
+            push(stack, std::move(res));
+            return 0;
+         }),
+     Operator(
          prim::GetAttr,
          [](const Node* node) {
            const auto type = node->input()->type()->expect<ClassType>();
@@ -991,10 +999,15 @@ RegisterOperators reg(
      Operator(prim::SetAttr, [](const Node* node) {
        const auto type = node->inputs().at(0)->type()->expect<ClassType>();
        const auto& field = node->s(attr::name);
+       std::cout<<"995"<<std::endl;
        const auto slot = type->getAttributeSlot(field);
+       std::cout<<"997"<<std::endl;
        return [slot](Stack& stack) {
          auto v = pop(stack);
+         std::cout<<"added object: "<<v.tagKind()<<std::endl;
          auto userObj = pop(stack).toObject();
+         std::cout<<"Setting attribute: 1005"<<std::endl;
+         std::cout<<"for address: "<<&userObj<<std::endl;
          userObj->setSlot(slot, std::move(v));
          return 0;
        };

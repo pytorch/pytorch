@@ -1,6 +1,6 @@
 cd ./t/build
 pwd
-cmake -DCMAKE_PREFIX_PATH=/Users/$USER/pytorch/ ..
+cmake -DCMAKE_PREFIX_PATH=/Users/$USER/pytorch ..
 cd .
 make
 

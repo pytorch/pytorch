@@ -2,6 +2,7 @@
 
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/type_conversion.h>
+#include <ATen/core/Capsule.h>
 
 namespace c10 {
 /**
@@ -44,7 +45,24 @@ namespace detail {
   template<class T, class Enable = void> struct ivalue_to_arg_type {
     // This base case is hit whenever a type does not have a specialisation below.
     static T call(IValue&& v) {
-      return reinterpret_cast<T>(v.toObject()->getSlot(0).toBlob()->GetRaw());
+      // std::cout<<"Starting 47"<<std::endl;
+      auto obj = v.toObject();
+      // std::cout<<"obj type: "<<obj->type()->str()<<std::endl;
+      // std::cout<<"For address: "<<&obj<<std::endl;
+      // std::cout<<"slot size: "<<obj->slots().size()<<std::endl;
+      auto capsule = obj->getAttr("capsule");
+      // std::cout<<"Type: "<<capsule.tagKind()<<std::endl;
+      // std::cout<<"got capsule"<<&capsule<<std::endl;
+      // std::cout<<"capsule raw: "<<capsule.toCapsule()->ptr<<std::endl;
+      auto &capsulePtr = capsule.toCapsule()->ptr;
+      if (capsulePtr == nullptr) {
+        // std::cout<<"Currently a nullptr 58"<<std::endl;
+        capsulePtr = malloc(sizeof(typename std::remove_pointer<T>::type));
+      } else {
+        // std::cout<<"display invocation 60: ";
+      }
+      // std::cout<<"after initializing: "<<capsule.toCapsule()->ptr<<std::endl;
+      return reinterpret_cast<T>(capsule.toCapsule()->ptr);
     }
     // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
   };
@@ -137,14 +155,26 @@ namespace detail {
     // This base case is hit whenever a type does not have a specialisation below.
     template<class T_>
     static IValue call(T_&& v) {
+      v->display();
       auto res = tmap.find<T_>();
       if (res == tmap.end()) {
         throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
       }
       auto retObject = ivalue::Object(res->second, 1);
-      auto blob = caffe2::Blob();
-      retObject.setSlot(0, IValue(c10::make_intrusive<caffe2::Blob>(std::move(blob))));
-      return IValue(c10::make_intrusive<ivalue::Object>(std::move(retObject)));
+      auto capsule = Capsule();
+      std::cout<<"capsule address: "<<(capsule.ptr)<<std::endl;
+      capsule.ptr = (void*)v;
+      std::cout<<"new capsule address: "<<capsule.ptr<<std::endl;
+      std::cout<<"ret object type: "<<retObject.type()->str()<<std::endl;
+      retObject.setAttr("capsule", IValue(c10::make_intrusive<Capsule>(std::move(capsule))));
+      std::cout<<"display invocation 167: ";
+      ((T_)retObject.getAttr("capsule").toCapsule()->ptr)->display();
+      std::cout<<"set slot"<<std::endl;
+      auto resIVal = IValue(c10::make_intrusive<ivalue::Object>(std::move(retObject)));
+      std::cout<<"constructed result"<<std::endl;
+      std::cout<<"display invocation 173: ";
+      ((T_)resIVal.toObject()->getAttr("capsule").toCapsule()->ptr)->display();
+      return resIVal;
     }
     // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
   };

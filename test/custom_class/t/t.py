@@ -7,12 +7,14 @@ class Bar:
     def __init__(self):
         self.x = 1
         self.y = 2
-
+    def display(self):
+        print(self.x, self.y)
 
 @torch.jit.script
 def f():
     val = torch._C.Foo()
     val.display()
+    print(val)
 
 print(f.graph)
 f()

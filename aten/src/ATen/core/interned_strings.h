@@ -95,6 +95,7 @@ namespace c10 {
   _(prim, RaiseException)          \
   _(prim, Function)                \
   _(prim, CreateObject)            \
+  _(prim, CreateCapsule)           \
   _(prim, SetAttr)                 \
   _(prim, GetAttr)                 \
   _(prim, profile)                 \

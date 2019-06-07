@@ -5,6 +5,7 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/core/Capsule.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
@@ -36,83 +37,83 @@ c10::intrusive_ptr<T, NullType> IValue::toIntrusivePtr() const {
 }
 
 inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() && {
-  AT_ASSERT(isTuple());
+  TORCH_INTERNAL_ASSERT(isTuple());
   return moveToIntrusivePtr<ivalue::Tuple>();
 }
 inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const & {
-  AT_ASSERT(isTuple());
+  TORCH_INTERNAL_ASSERT(isTuple());
   return toIntrusivePtr<ivalue::Tuple>();
 }
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() && {
-  AT_ASSERT(isFuture());
+  TORCH_INTERNAL_ASSERT(isFuture());
   return moveToIntrusivePtr<ivalue::Future>();
 }
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() const & {
-  AT_ASSERT(isFuture());
+  TORCH_INTERNAL_ASSERT(isFuture());
   return toIntrusivePtr<ivalue::Future>();
 }
 inline c10::intrusive_ptr<ivalue::IntList> IValue::toIntList() && {
-  AT_ASSERT(isIntList());
+  TORCH_INTERNAL_ASSERT(isIntList());
   return moveToIntrusivePtr<ivalue::IntList>();
 }
 inline c10::intrusive_ptr<ivalue::IntList> IValue::toIntList() const & {
-  AT_ASSERT(isIntList());
+  TORCH_INTERNAL_ASSERT(isIntList());
   return toIntrusivePtr<ivalue::IntList>();
 }
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() && {
-  AT_ASSERT(isString());
+  TORCH_INTERNAL_ASSERT(isString());
   return moveToIntrusivePtr<ivalue::ConstantString>();
 }
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() const & {
-  AT_ASSERT(isString());
+  TORCH_INTERNAL_ASSERT(isString());
   return toIntrusivePtr<ivalue::ConstantString>();
 }
 inline c10::intrusive_ptr<ivalue::DoubleList> IValue::toDoubleList() && {
-  AT_ASSERT(isDoubleList());
+  TORCH_INTERNAL_ASSERT(isDoubleList());
   return moveToIntrusivePtr<ivalue::DoubleList>();
 }
 inline c10::intrusive_ptr<ivalue::DoubleList> IValue::toDoubleList() const & {
-  AT_ASSERT(isDoubleList());
+  TORCH_INTERNAL_ASSERT(isDoubleList());
   return toIntrusivePtr<ivalue::DoubleList>();
 }
 inline c10::intrusive_ptr<ivalue::BoolList> IValue::toBoolList() && {
-  AT_ASSERT(isBoolList());
+  TORCH_INTERNAL_ASSERT(isBoolList());
   return moveToIntrusivePtr<ivalue::BoolList>();
 }
 inline c10::intrusive_ptr<ivalue::BoolList> IValue::toBoolList() const & {
-  AT_ASSERT(isBoolList());
+  TORCH_INTERNAL_ASSERT(isBoolList());
   return toIntrusivePtr<ivalue::BoolList>();
 }
 inline c10::intrusive_ptr<ivalue::TensorList> IValue::toTensorList() && {
-  AT_ASSERT(isTensorList());
+  TORCH_INTERNAL_ASSERT(isTensorList());
   return moveToIntrusivePtr<ivalue::TensorList>();
 }
 inline c10::intrusive_ptr<ivalue::TensorList> IValue::toTensorList() const & {
-  AT_ASSERT(isTensorList());
+  TORCH_INTERNAL_ASSERT(isTensorList());
   return toIntrusivePtr<ivalue::TensorList>();
 }
 inline c10::intrusive_ptr<ivalue::GenericList> IValue::toGenericList() && {
-  AT_ASSERT(isGenericList());
+  TORCH_INTERNAL_ASSERT(isGenericList());
   return moveToIntrusivePtr<ivalue::GenericList>();
 }
 inline c10::intrusive_ptr<ivalue::GenericList> IValue::toGenericList() const & {
-  AT_ASSERT(isGenericList());
+  TORCH_INTERNAL_ASSERT(isGenericList());
   return toIntrusivePtr<ivalue::GenericList>();
 }
 inline c10::intrusive_ptr<ivalue::GenericDict> IValue::toGenericDict() && {
-  AT_ASSERT(isGenericDict());
+  TORCH_INTERNAL_ASSERT(isGenericDict());
   return moveToIntrusivePtr<ivalue::GenericDict>();
 }
 inline c10::intrusive_ptr<ivalue::GenericDict> IValue::toGenericDict() const & {
-  AT_ASSERT(isGenericDict());
+  TORCH_INTERNAL_ASSERT(isGenericDict());
   return toIntrusivePtr<ivalue::GenericDict>();
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() && {
-  AT_ASSERT(isObject());
+  TORCH_INTERNAL_ASSERT(isObject());
   return toIntrusivePtr<ivalue::Object>();
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
-  AT_ASSERT(isObject());
+  TORCH_INTERNAL_ASSERT(isObject());
   return toIntrusivePtr<ivalue::Object>();
 }
 inline at::Tensor IValue::toTensor() && {
@@ -120,16 +121,24 @@ inline at::Tensor IValue::toTensor() && {
   return at::Tensor(moveToIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
 }
 inline at::Tensor IValue::toTensor() const & {
-  AT_ASSERT(isTensor());
+  TORCH_INTERNAL_ASSERT(isTensor());
   return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
-  AT_ASSERT(isBlob());
+  TORCH_INTERNAL_ASSERT(isBlob());
   return moveToIntrusivePtr<caffe2::Blob>();
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() const & {
-  AT_ASSERT(isBlob());
+  TORCH_INTERNAL_ASSERT(isBlob());
   return toIntrusivePtr<caffe2::Blob>();;
+}
+inline c10::intrusive_ptr<Capsule> IValue::toCapsule() && {
+  TORCH_INTERNAL_ASSERT(isCapsule());
+  return moveToIntrusivePtr<Capsule>();
+}
+inline c10::intrusive_ptr<Capsule> IValue::toCapsule() const & {
+  TORCH_INTERNAL_ASSERT(isCapsule());
+  return toIntrusivePtr<Capsule>();
 }
 
 namespace ivalue {
@@ -575,6 +584,10 @@ inline IValue::IValue(c10::impl::GenericDictPtr v)
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(c10::intrusive_ptr<Capsule> v)
+: tag(Tag::Capsule), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)

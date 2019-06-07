@@ -116,6 +116,10 @@ BlobTypePtr BlobType::get() {
   static auto value = BlobType::create();
   return value;
 }
+CapsuleTypePtr CapsuleType::get() {
+  static auto value = CapsuleType::create();
+  return value;
+}
 ListTypePtr ListType::ofTensors() {
   static auto value = ListType::create(TensorType::get());
   return value;

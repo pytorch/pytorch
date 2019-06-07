@@ -31,12 +31,14 @@ struct class_ {
   class_(string className_) : className(className_) {
     auto obj = py::module::import(parentModule.c_str());
     pyClass = std::make_shared<py::class_<CurClass>>(obj, className.c_str());
+    auto newClass = py::module::import("torch.jit").attr("_add_script_class")(*pyClass, ("__torch__."+parentModule+"."+ className_).c_str());
 
     classCu = std::make_shared<script::CompilationUnit>();
     tmap.put<CurClass*>(ClassType::create(
         c10::QualifiedName("__torch__." + parentModule + "." + className),
         classCu));
     classTypePtr = tmap.find<CurClass*>()->second;
+    classTypePtr->addAttribute("capsule", CapsuleType::get());
     script::CompilationUnit::_get_python_cu().register_class(classTypePtr);
   }
   class_& init() {
@@ -45,15 +47,18 @@ struct class_ {
     auto qualFuncName = className + "::__init__";
     static auto classRegistry = c10::RegisterOperators().op(
         qualFuncName, [](CurClass* cur) {
-              cur = new CurClass();
-              return cur;
+              // std::cout<<"initial class ptr: " <<&cur<<std::endl;
+              *cur = CurClass();
             });
     auto input = graph->addInput()->setType(classTypePtr);
+    auto capsuleNode = graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))->output()->setType(CapsuleType::get());
+    // auto capsuleNode = graph->insertConstant(5);
+    auto n = graph->insertNode(graph->create(prim::SetAttr, {input, capsuleNode}, 0));
+    n->s_(attr::name, "capsule");
     auto res = graph
                    ->insertNode(graph->create(
-                       Symbol::fromQualString(qualFuncName), {input}))
-                   ->output();
-    graph->registerOutput(res);
+                       Symbol::fromQualString(qualFuncName), {input}, 0));
+    graph->registerOutput(input);
     classCu->create_function("__init__", graph);
     return *this;
   }
@@ -63,15 +68,14 @@ struct class_ {
     auto qualFuncName = className + "::" + name;
     static auto classRegistry = c10::RegisterOperators().op(
         qualFuncName, [f](CurClass* cur) {
-              return std::invoke(f, *cur);
+              std::invoke(f, *cur);
             });
     auto graph = std::make_shared<Graph>();
     auto input = graph->addInput()->setType(classTypePtr);
     auto res = graph
                    ->insertNode(graph->create(
-                       Symbol::fromQualString(qualFuncName), {input}))
-                   ->output();
-    graph->registerOutput(res);
+                       Symbol::fromQualString(qualFuncName), {input}, 0));
+    graph->registerOutput(input);
     classCu->create_function(name, graph);
     return *this;
   }
