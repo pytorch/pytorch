@@ -29,7 +29,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, load_tests, skipCUDAMemoryLeakCheckIf
+    get_function_arglist, load_tests
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, loss_reference_fns, get_reduction, \
@@ -5401,7 +5401,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @skipCUDAMemoryLeakCheckIf(True)
     def test_variable_sequence_cuda(self, dtype=torch.float):
         self._test_variable_sequence("cuda", dtype)
 
