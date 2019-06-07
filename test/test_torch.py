@@ -3772,7 +3772,7 @@ class _TestTorchMixin(object):
                 a_t, p_t = torch._multinomial_alias_setup(probs)
                 torch._multinomial_alias_draw(p_t.view(2, 2), a_t.view(2, 2))
 
-        MAX_SAMPLES = 100000
+        MAX_SAMPLES = 200000
         for probs in [get_probs(4, True),
                       cast(torch.tensor([0.8, 0.2])),
                       cast(torch.tensor([0.7, 0.2, 0.1]))]:
@@ -3799,6 +3799,13 @@ class _TestTorchMixin(object):
                 actual[idx] += 1. - p
             actual = actual / len(probs)
             self.assertEqual(actual, probs, 1e-6)
+
+        # Some special cases
+        test_cases = [cast(torch.tensor([1.0, 0.0, 0.0])), cast(torch.tensor([0.0, 1.0]))]
+        for probs in test_cases:
+            alias_table, prob_table = torch._multinomial_alias_setup(probs)
+            alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, MAX_SAMPLES)
+            self.assertEqual(alias_samples.unique(), probs.nonzero().squeeze(-1))
 
     def test_multinomial_alias(self):
         self._test_multinomial_alias(self, lambda t: t)

@@ -2349,8 +2349,6 @@ class TestCuda(TestCase):
         samples = probs.multinomial(1000000, replacement=True)
         self.assertGreater(probs[samples].min().item(), 0)
 
-    @unittest.skipIf(TEST_CUDA, "Multinomial sampling using alias method works incorrectly on GPUs")
-    @skipIfRocm  # Multinomial sampling using alias method works incorrectly on GPUs
     def test_multinomial_alias(self):
         _TestTorchMixin._test_multinomial_alias(self, lambda t: t.cuda())
 

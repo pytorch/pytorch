@@ -200,7 +200,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
       else if (q_temp > q_max)
         q_max = q_temp;
     }
-  THArgCheckWithCleanup((q_min > 0),
+  THArgCheckWithCleanup((q_min >= 0),
                         THCleanup(THLongTensor_free(smaller); THLongTensor_free(larger);), 2,
                         "q_min is less than 0");
 
