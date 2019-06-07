@@ -674,8 +674,11 @@ if(BUILD_PYTHON)
   # don't want to overwrite it because we trust python more than cmake
   if (NUMPY_INCLUDE_DIR)
     set(NUMPY_FOUND ON)
-  else()
+  elseif(USE_NUMPY)
     find_package(NumPy)
+    if(NOT NUMPY_FOUND)
+      message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
+    endif()
   endif()
 
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
