@@ -163,6 +163,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THIndexTensor* result
       output: True
@@ -1961,6 +1962,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -1973,6 +1975,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -1992,6 +1995,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   options:
     - arguments:
       - arg: THTensor* result
@@ -2066,6 +2070,7 @@
   cname: addr
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2102,7 +2107,7 @@
   cname: addr
   variants: function
   return: argument 0
-  scalar_check: False
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2119,6 +2124,7 @@
   cname: addmv
   variants: function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2136,6 +2142,7 @@
   return: argument 0
   options:
     - cname: addmm
+      scalar_check: false
       arguments:
         - arg: THTensor* result
           output: True
@@ -2155,6 +2162,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2172,6 +2180,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2211,6 +2220,7 @@
   backends:
     - CUDA
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
