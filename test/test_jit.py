@@ -6130,12 +6130,12 @@ a")
                 if res_python != res_script:
                     if isinstance(res_python, Exception):
                         continue
+
                     if type(res_python) == type(res_script):
                         if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
                             continue
                         if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
                             continue
-
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
                     if isinstance(res_python, numbers.Number) and isinstance(res_script, numbers.Number):
@@ -6143,7 +6143,7 @@ a")
                         prec = 1e-4 * mx_val
                     else:
                         prec = (1e-4)
-                    self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * mx_val)
+                    self.assertEqual(res_python, res_script, message=msg, prec=prec)
 
         unimplemented = ["fsum", "isclose", "trunc"]
         ops = [x for x in dir(math) if callable(getattr(math, x))]
