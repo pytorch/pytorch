@@ -150,7 +150,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     auto offset_calc = make_offset_calculator<traits::arity + 1>(iter);
     launch_kernel<launch_size_nd, launch_bound2>(numel, [=]__device__(int idx) {
       auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
+      arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
       *out = c10::guts::apply(f, dereference<traits>(
           &data.data[1],
           &offsets.data[1],
