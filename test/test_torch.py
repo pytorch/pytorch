@@ -3777,16 +3777,11 @@ class _TestTorchMixin(object):
                       cast(torch.tensor([0.8, 0.2])),
                       cast(torch.tensor([0.7, 0.2, 0.1]))]:
             # Check how different the alias distribution and the original distribution are
-            n_samples = 0
             alias_dist = torch.zeros_like(probs)
             alias_table, prob_table = torch._multinomial_alias_setup(probs)
-            while n_samples < MAX_SAMPLES:
-                n_samples += 10000
-                alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, 10000)
-                alias_dist += torch.unique(alias_samples, return_counts=True)[1].to(dtype=probs.dtype)
-                if torch.allclose(alias_dist / n_samples, probs, rtol=0.02, atol=0.0):
-                    break
-            self.assertTrue(torch.allclose(alias_dist / n_samples, probs, rtol=0.02, atol=0.0),
+            alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, MAX_SAMPLES)
+            alias_dist = torch.unique(alias_samples, return_counts=True)[1].to(dtype=probs.dtype) / MAX_SAMPLES
+            self.assertTrue(torch.allclose(alias_dist, probs, rtol=0.02, atol=0.0),
                             "Actual: {}\nExpected: {}".format(alias_dist, probs))
 
         for probs in [cast(torch.tensor([0.2501, 0.25, 0.2499, 0.25])),
