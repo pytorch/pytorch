@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 #cmake_policy(SET CMP0022 NEW)
 #cmake_policy(SET CMP0023 NEW)
 
+# Use compiler ID "AppleClang" instead of "Clang" for XCode.
+# Not setting this sometimes makes XCode C compiler gets detected as "Clang",
+# even when the C++ one is detected as "AppleClang".
+cmake_policy(SET CMP0025 NEW)
+
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
@@ -10,6 +15,11 @@ set(CMAKE_INSTALL_MESSAGE NEVER)
 set(CMAKE_CXX_STANDARD 11)
 if (NOT MSVC)
   set(CMAKE_C_STANDARD 11)
+endif()
+if (DEFINED GLIBCXX_USE_CXX11_ABI)
+  if (${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
+    set(CXX_STANDARD_REQUIRED ON)
+  endif()
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -56,9 +66,7 @@ endif()
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
-option(BUILD_TORCH "Build Torch" OFF)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
-option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
 option(BUILD_ATEN_ONLY "Build only a subset focused on ATen only" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
@@ -66,6 +74,7 @@ option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_pa
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
+option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
@@ -74,25 +83,25 @@ cmake_dependent_option(
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 cmake_dependent_option(
-    INSTALL_TEST "Install test binaries if BUILD_TEST is on" OFF
+    INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
-option(USE_ACL "Use ARM Compute Library" OFF)
+option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
-option(USE_ROCM "Use ROCm" OFF)
+option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
-option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
+option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" OFF)
+option(NAMEDTENSOR_ENABLED "Experimental: compile with namedtensor support" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
-option(USE_GFLAGS "Use GFLAGS" ON)
-option(USE_GLOG "Use GLOG" ON)
-option(USE_LEVELDB "Use LEVELDB" ON)
+option(USE_GFLAGS "Use GFLAGS" OFF)
+option(USE_GLOG "Use GLOG" OFF)
+option(USE_LEVELDB "Use LEVELDB" OFF)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
-option(USE_LMDB "Use LMDB" ON)
+option(USE_LMDB "Use LMDB" OFF)
 option(USE_METAL "Use Metal for iOS build" ON)
-option(USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 option(USE_NCCL "Use NCCL" ON)
 option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
@@ -105,8 +114,8 @@ cmake_dependent_option(
 option(USE_NUMPY "Use NumPy" ON)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
-option(USE_OPENCV "Use OpenCV" ON)
-option(USE_OPENMP "Use OpenMP for parallel code" OFF)
+option(USE_OPENCV "Use OpenCV" OFF)
+option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
 option(USE_REDIS "Use Redis" OFF)
@@ -128,14 +137,66 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
     "USE_GLOO" OFF)
+option(USE_TBB "Use TBB" OFF)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
 
+# /Z7 override option
+# When generating debug symbols, CMake default to use the flag /Zi.
+# However, it is not compatible with sccache. So we rewrite it off.
+# But some users don't use sccache; this override is for them.
+option(MSVC_Z7_OVERRIDE "Work around sccache bug by replacing /Zi and /ZI with /Z7 when using MSVC (if you are not using sccache, you can turn this OFF)" ON)
+
 SET(ONNX_NAMESPACE "onnx_c2" CACHE STRING "onnx namespace")
 
+# For MSVC,
+# 1. Replace /Zi and /ZI with /Z7
+# 2. Switch off incremental linking in debug builds
+if (MSVC)
+  if(MSVC_Z7_OVERRIDE)
+    foreach(flag_var
+        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      if(${flag_var} MATCHES "/Z[iI]")
+        string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
+      endif(${flag_var} MATCHES "/Z[iI]")
+    endforeach(flag_var)
+  endif(MSVC_Z7_OVERRIDE)
+  foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
+      CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
+    if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
+      string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
+    endif()
+  endforeach(flag_var)
+  # Turning off USE_DISTRIBUTED on default
+  set(USE_DISTRIBUTED OFF)
+endif(MSVC)
+
+# Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
+# applicable to mobile are disabled by this variable.
 if (ANDROID OR IOS)
-  set(BUILD_ATEN_MOBILE ON)
+  set(INTERN_BUILD_MOBILE ON)
+endif()
+
+# INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
+# It's disabled for caffe2 mobile library.
+if (INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
+  set(INTERN_BUILD_ATEN_OPS OFF)
+else()
+  set(INTERN_BUILD_ATEN_OPS ON)
+endif()
+
+# BUILD_CAFFE2_MOBILE is the master switch to choose between libcaffe2 v.s. libtorch mobile build.
+# When it's enabled it builds original libcaffe2 mobile library without ATen/TH ops nor TorchScript support;
+# When it's disabled it builds libtorch mobile library, which contains ATen/TH ops and native support for
+# TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
+if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+  set(BUILD_PYTHON OFF)
+  set(BUILD_CAFFE2_OPS OFF)
+  set(USE_DISTRIBUTED OFF)
+  set(FEATURE_TORCH_MOBILE ON)
 endif()
 
 if (BUILD_ATEN_ONLY)
@@ -160,8 +221,12 @@ include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
-set(TORCH_DEFAULT_VERSION "1.0.0")
+set(TORCH_DEFAULT_VERSION "1.1.0")
 set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}" CACHE STRING "Torch build version")
+if (DEFINED ENV{PYTORCH_BUILD_VERSION})
+  set(TORCH_BUILD_VERSION "$ENV{PYTORCH_BUILD_VERSION}"
+    CACHE STRING "Torch build version" FORCE)
+endif()
 if (NOT TORCH_BUILD_VERSION)
   # An empty string was specified so force version to the default
   set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}"
@@ -197,7 +262,20 @@ include(cmake/MiscCheck.cmake)
 include(ExternalProject)
 
 # ---[ Dependencies
+# ---[ FBGEMM doesn't work on x86 32bit and CMAKE_SYSTEM_PROCESSOR thinks its 64bit
+if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR CMAKE_SYSTEM_PROCESSOR STREQUAL "x86"))
+  set(USE_FBGEMM OFF)
+endif()
+
 include(cmake/Dependencies.cmake)
+
+if(USE_FBGEMM)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
+endif()
+
+if(NAMEDTENSOR_ENABLED)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNAMEDTENSOR_ENABLED")
+endif()
 
 # ---[ Whitelist file if whitelist is specified
 include(cmake/Whitelist.cmake)
@@ -249,23 +327,42 @@ if(NOT MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-constexpr-not-const")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Qunused-arguments")
+    if (${COLORIZE_OUTPUT})
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fcolor-diagnostics")
+    endif()
+  endif()
+  if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9)
+    if (${COLORIZE_OUTPUT})
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fdiagnostics-color=always")
+    endif()
   endif()
   if ((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
     OR (CMAKE_COMPILER_IS_GNUCXX
     AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faligned-new")
   endif()
-  if ($ENV{WERROR})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
-  endif($ENV{WERROR})
+  if (WERROR)
+    check_cxx_compiler_flag("-Werror" COMPILER_SUPPORT_WERROR)
+    if (NOT COMPILER_SUPPORT_WERROR)
+      set(WERROR FALSE)
+    else()
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+    endif()
+  endif(WERROR)
   if (NOT APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-but-set-variable")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-maybe-uninitialized")
   endif()
+  set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
+  set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
+  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-math-errno")
+  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-trapping-math")
 else()
   foreach(flag_var
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO
+      CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+      CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO)
     if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
         string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
@@ -281,8 +378,6 @@ else()
   endforeach(flag_var)
 endif()
 
-set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
-set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
 if (USE_ASAN)
     set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
     set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fsanitize=address")
@@ -422,6 +517,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/mkldnn.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
@@ -431,6 +527,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
+
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake
       COMPONENT dev)

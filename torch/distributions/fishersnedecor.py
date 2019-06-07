@@ -1,11 +1,10 @@
 from numbers import Number
 import torch
-import math
 from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
-from torch.distributions.utils import broadcast_all, _finfo
+from torch.distributions.utils import broadcast_all
 
 
 class FisherSnedecor(Distribution):
@@ -66,9 +65,10 @@ class FisherSnedecor(Distribution):
         #   Y = df2 * df1 * X1 / (df1 * df2 * X2) = X1 / X2 ~ F(df1, df2)
         X1 = self._gamma1.rsample(sample_shape).view(shape)
         X2 = self._gamma2.rsample(sample_shape).view(shape)
-        X2.clamp_(min=_finfo(X2).tiny)
+        tiny = torch.finfo(X2.dtype).tiny
+        X2.clamp_(min=tiny)
         Y = X1 / X2
-        Y.clamp_(min=_finfo(X2).tiny)
+        Y.clamp_(min=tiny)
         return Y
 
     def log_prob(self, value):

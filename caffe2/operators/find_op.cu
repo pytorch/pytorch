@@ -33,17 +33,17 @@ template <typename T>
 bool FindOp<CUDAContext>::DoRunWithType() {
   auto& idx = Input(0);
   auto& needles = Input(1);
-  auto* res_indices = Output(0);
-  res_indices->ResizeLike(needles);
+
+  auto* res_indices = Output(0, needles.sizes(), at::dtype<int>());
 
   const T* idx_data = idx.data<T>();
   const T* needles_data = needles.data<T>();
   int* res_data = res_indices->template mutable_data<int>();
 
   FindKernel<
-      T><<<needles.size(), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
-      needles.size(),
-      idx.size(),
+      T><<<needles.numel(), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+      needles.numel(),
+      idx.numel(),
       idx_data,
       needles_data,
       res_data,

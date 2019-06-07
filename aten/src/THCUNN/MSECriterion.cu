@@ -1,16 +1,16 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCThrustAllocator.cuh"
-#include "THCApply.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCThrustAllocator.cuh>
+#include <THC/THCApply.cuh>
 
 #include <thrust/fill.h>
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
 #include <thrust/reduce.h>
 #include <thrust/inner_product.h>
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
@@ -58,5 +58,5 @@ struct mse_updateGradInput_functor
   }
 };
 
-#include "generic/MSECriterion.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/MSECriterion.cu>
+#include <THC/THCGenerateFloatTypes.h>

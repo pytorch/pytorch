@@ -1,15 +1,18 @@
-#include "THCGeneral.h"
-#include "THCTensor.hpp"
-#include "THCTensorCopy.h"
+#include <THC/THCGeneral.h>
+#include <THC/THCTensor.hpp>
+#include <THC/THCTensorCopy.h>
 
 #include <new>
 
-#include "generic/THCTensor.cpp"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensor.cpp>
+#include <THC/THCGenerateAllTypes.h>
 
-#include "THCTensorInfo.cuh"
+#include <THC/generic/THCTensor.cpp>
+#include <THC/THCGenerateBoolType.h>
 
-#include "ATen/native/cuda/Resize.cuh"
+#include <THC/THCTensorInfo.cuh>
+
+#include <ATen/native/cuda/Resize.cuh>
 
 int THCTensor_nDimension(THCState *state, const THCTensor *self) {
   return THTensor_nDimension(self);
@@ -61,12 +64,14 @@ THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta) {
       return THCudaTensor_new(state);
     case at::ScalarType::Double:
       return THCudaDoubleTensor_new(state);
+    case at::ScalarType::Bool:
+      return THCudaBoolTensor_new(state);
     default:
-      AT_ERROR("unexpected ScalarType: ", at::toString(scalar_type));
+      AT_ERROR("unexpected ScalarType: ", toString(scalar_type));
   }
 }
 
-void THCTensor_resize(THCState *state, THCTensor *self, at::IntList size, at::IntList stride) {
+void THCTensor_resize(THCState *state, THCTensor *self, at::IntArrayRef size, at::IntArrayRef stride) {
   if(stride.data()) {
     THArgCheck(stride.size() == size.size(), 3, "invalid stride");
   }
@@ -99,11 +104,11 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
 
 void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
-  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
-  at::IntList sizes(size, nDimension);
-  at::optional<at::IntList> strides;
+  TORCH_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
+  at::IntArrayRef sizes(size, nDimension);
+  at::optional<at::IntArrayRef> strides;
   if (stride) {
-    strides = at::IntList(stride, nDimension);
+    strides = at::IntArrayRef(stride, nDimension);
   }
   at::native::resize_impl_cuda_(self, sizes, strides, /*device_guard=*/false);
 }
@@ -120,7 +125,7 @@ void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
                            THTensor_getStridePtr(src));
 }
 
-void THCTensor_setStorage(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_)
+void THCTensor_setStorage(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_)
 {
   if (stride_.data()) {
     THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");

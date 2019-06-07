@@ -11,10 +11,9 @@ class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeSingleScalarFeatureTensorsOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeSingleScalarFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
@@ -40,13 +39,9 @@ class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
       }
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValues = Output(2);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValues->Resize(totalNumFeatures);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValues = Output(2, {totalNumFeatures}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -82,10 +77,9 @@ class MergeSingleScalarFeatureTensorsGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeSingleScalarFeatureTensorsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeSingleScalarFeatureTensorsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = InputSize() - 1; // Everything other than values_grad
   }
   virtual ~MergeSingleScalarFeatureTensorsGradientOp() noexcept {}
@@ -131,10 +125,9 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeSingleListFeatureTensorsOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeSingleListFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inValuesOffset_.resize(numInputs_);
     featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
@@ -165,15 +158,11 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
       }
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesValues = Output(3);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesValues = Output(3, {totalNumValues}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -224,10 +213,9 @@ class MergeSingleListOrMapFeatureTensorsGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeSingleListOrMapFeatureTensorsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeSingleListOrMapFeatureTensorsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = (InputSize() - 1) / kNumTensorsPerInput;
   }
   virtual ~MergeSingleListOrMapFeatureTensorsGradientOp() noexcept {}
@@ -291,8 +279,9 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeSingleMapFeatureTensorsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeSingleMapFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inValuesOffset_.resize(numInputs_);
     featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
@@ -330,17 +319,12 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
       }
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesKeys = Output(3);
-    auto* outValuesValues = Output(4);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesKeys->Resize(totalNumValues);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesKeys = Output(3, {totalNumValues}, at::dtype<K>());
+    auto* outValuesValues = Output(4, {totalNumValues}, at::dtype<V>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -398,10 +382,9 @@ class MergeMultiScalarFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeMultiScalarFeatureTensorsOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeMultiScalarFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inKeysOffset_.resize(numInputs_);
   }
@@ -421,13 +404,9 @@ class MergeMultiScalarFeatureTensorsOp : public Operator<Context> {
       totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).numel();
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValues = Output(2);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValues->Resize(totalNumFeatures);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValues = Output(2, {totalNumFeatures}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -472,10 +451,9 @@ class MergeMultiScalarFeatureTensorsGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeMultiScalarFeatureTensorsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeMultiScalarFeatureTensorsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = (InputSize() - 1) / kNumTensorsPerInput;
   }
   virtual ~MergeMultiScalarFeatureTensorsGradientOp() noexcept {}
@@ -533,8 +511,9 @@ class MergeMultiListFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeMultiListFeatureTensorsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeMultiListFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inKeysOffset_.resize(numInputs_);
     inValuesValuesOffset_.resize(numInputs_);
@@ -557,15 +536,11 @@ class MergeMultiListFeatureTensorsOp : public Operator<Context> {
       totalNumValues += Input(kNumTensorsPerInput * inputIndex + 3).numel();
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesValues = Output(3);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesValues = Output(3, {totalNumValues}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -628,8 +603,9 @@ class MergeMultiMapFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeMultiMapFeatureTensorsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeMultiMapFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inKeysOffset_.resize(numInputs_);
     inValuesValuesOffset_.resize(numInputs_);
@@ -659,17 +635,12 @@ class MergeMultiMapFeatureTensorsOp : public Operator<Context> {
       totalNumValues += Input(kNumTensorsPerInput * inputIndex + 4).numel();
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesKeys = Output(3);
-    auto* outValuesValues = Output(4);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesKeys->Resize(totalNumValues);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesKeys = Output(3, {totalNumValues}, at::dtype<K>());
+    auto* outValuesValues = Output(4, {totalNumValues}, at::dtype<V>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -740,10 +711,9 @@ class MergeMultiListOrMapFeatureTensorsGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeMultiListOrMapFeatureTensorsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeMultiListOrMapFeatureTensorsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = (InputSize() - 1) / kNumTensorsPerInput;
   }
   virtual ~MergeMultiListOrMapFeatureTensorsGradientOp() noexcept {}

@@ -13,8 +13,10 @@ class CuDNNActivationOpBase : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
 
-  CuDNNActivationOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws), cudnn_wrapper_(&context_) {
+  template <class... Args>
+  explicit CuDNNActivationOpBase(Args&&... args)
+      : Operator<CUDAContext>(std::forward<Args>(args)...),
+        cudnn_wrapper_(&context_) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_ENFORCE(cudnnCreateActivationDescriptor(&act_desc_));
   }
@@ -55,8 +57,9 @@ class CuDNNActivationOp final : public CuDNNActivationOpBase {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
 
-  CuDNNActivationOp(const OperatorDef& operator_def, Workspace* ws)
-      : CuDNNActivationOpBase(operator_def, ws) {
+  template <class... Args>
+  explicit CuDNNActivationOp(Args&&... args)
+      : CuDNNActivationOpBase(std::forward<Args>(args)...) {
     CUDNN_ENFORCE(cudnnSetActivationDescriptor(
         act_desc_, kCuDNNActivationMode, CUDNN_PROPAGATE_NAN, 0.0));
   }
@@ -68,8 +71,8 @@ class CuDNNActivationOp final : public CuDNNActivationOpBase {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-    auto* Y = Output(0);
-    Y->ResizeLike(X);
+
+    auto* Y = Output(0, X.sizes(), at::dtype<T>());
     if (X.numel() == 0) {
       Y->template mutable_data<T>();
       return true;
@@ -93,8 +96,9 @@ class CuDNNActivationGradientOp final : public CuDNNActivationOpBase {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
 
-  CuDNNActivationGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : CuDNNActivationOpBase(operator_def, ws) {
+  template <class... Args>
+  explicit CuDNNActivationGradientOp(Args&&... args)
+      : CuDNNActivationOpBase(std::forward<Args>(args)...) {
     CUDNN_ENFORCE(cudnnSetActivationDescriptor(
         act_desc_, kCuDNNActivationMode, CUDNN_PROPAGATE_NAN, 0.0));
   }
@@ -107,8 +111,8 @@ class CuDNNActivationGradientOp final : public CuDNNActivationOpBase {
   bool DoRunWithType() {
     const auto& Y = Input(0);
     const auto& dY = Input(1);
-    auto* dX = Output(0);
-    dX->ResizeLike(Y);
+
+    auto* dX = Output(0, Y.sizes(), at::dtype<T>());
     if (Y.numel() == 0) {
       dX->template mutable_data<T>();
       return true;

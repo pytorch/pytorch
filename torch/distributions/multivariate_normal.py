@@ -20,33 +20,6 @@ def _batch_mv(bmat, bvec):
     return torch.matmul(bmat, bvec.unsqueeze(-1)).squeeze(-1)
 
 
-def _batch_potrf_lower(bmat):
-    r"""
-    Applies a Cholesky decomposition to all matrices in a batch of arbitrary shape.
-    """
-    n = bmat.size(-1)
-    cholesky_ = torch.stack([m.cholesky(upper=False) for m in bmat.reshape(-1, n, n)])
-    return cholesky_.reshape(bmat.shape)
-
-
-def _batch_diag(bmat):
-    r"""
-    Returns the diagonals of a batch of square matrices.
-    """
-    return torch.diagonal(bmat, dim1=-2, dim2=-1)
-
-
-def _batch_trtrs_lower(bb, bA):
-    """
-    Applies `torch.trtrs` for batches of matrices. `bb` and `bA` should have
-    the same batch shape.
-    """
-    flat_b = bb.reshape((-1,) + bb.shape[-2:])
-    flat_A = bA.reshape((-1,) + bA.shape[-2:])
-    flat_X = torch.stack([torch.trtrs(b, A, upper=False)[0] for b, A in zip(flat_b, flat_A)])
-    return flat_X.reshape(bb.shape)
-
-
 def _batch_mahalanobis(bL, bx):
     r"""
     Computes the squared Mahalanobis distance :math:`\mathbf{x}^\top\mathbf{M}^{-1}\mathbf{x}`
@@ -56,12 +29,50 @@ def _batch_mahalanobis(bL, bx):
     shape, but `bL` one should be able to broadcasted to `bx` one.
     """
     n = bx.size(-1)
-    bL = bL.expand(bx.shape[bx.dim() - bL.dim() + 1:] + (n,))
+    bx_batch_shape = bx.shape[:-1]
+
+    # Assume that bL.shape = (i, 1, n, n), bx.shape = (..., i, j, n),
+    # we are going to make bx have shape (..., 1, j,  i, 1, n) to apply batched tri.solve
+    bx_batch_dims = len(bx_batch_shape)
+    bL_batch_dims = bL.dim() - 2
+    outer_batch_dims = bx_batch_dims - bL_batch_dims
+    old_batch_dims = outer_batch_dims + bL_batch_dims
+    new_batch_dims = outer_batch_dims + 2 * bL_batch_dims
+    # Reshape bx with the shape (..., 1, i, j, 1, n)
+    bx_new_shape = bx.shape[:outer_batch_dims]
+    for (sL, sx) in zip(bL.shape[:-2], bx.shape[outer_batch_dims:-1]):
+        bx_new_shape += (sx // sL, sL)
+    bx_new_shape += (n,)
+    bx = bx.reshape(bx_new_shape)
+    # Permute bx to make it have shape (..., 1, j, i, 1, n)
+    permute_dims = (list(range(outer_batch_dims)) +
+                    list(range(outer_batch_dims, new_batch_dims, 2)) +
+                    list(range(outer_batch_dims + 1, new_batch_dims, 2)) +
+                    [new_batch_dims])
+    bx = bx.permute(permute_dims)
+
     flat_L = bL.reshape(-1, n, n)  # shape = b x n x n
     flat_x = bx.reshape(-1, flat_L.size(0), n)  # shape = c x b x n
     flat_x_swap = flat_x.permute(1, 2, 0)  # shape = b x n x c
-    M_swap = _batch_trtrs_lower(flat_x_swap, flat_L).pow(2).sum(-2)  # shape = b x c
-    return M_swap.t().reshape(bx.shape[:-1])
+    M_swap = torch.triangular_solve(flat_x_swap, flat_L, upper=False)[0].pow(2).sum(-2)  # shape = b x c
+    M = M_swap.t()  # shape = c x b
+
+    # Now we revert the above reshape and permute operators.
+    permuted_M = M.reshape(bx.shape[:-1])  # shape = (..., 1, j, i, 1)
+    permute_inv_dims = list(range(outer_batch_dims))
+    for i in range(bL_batch_dims):
+        permute_inv_dims += [outer_batch_dims + i, old_batch_dims + i]
+    reshaped_M = permuted_M.permute(permute_inv_dims)  # shape = (..., 1, i, j, 1)
+    return reshaped_M.reshape(bx_batch_shape)
+
+
+def _precision_to_scale_tril(P):
+    # Ref: https://nbviewer.jupyter.org/gist/fehiepsi/5ef8e09e61604f10607380467eb82006#Precision-to-scale_tril
+    Lf = torch.cholesky(torch.flip(P, (-2, -1)))
+    L_inv = torch.transpose(torch.flip(Lf, (-2, -1)), -2, -1)
+    L = torch.triangular_solve(torch.eye(P.shape[-1], dtype=P.dtype, device=P.device),
+                               L_inv, upper=False)[0]
+    return L
 
 
 class MultivariateNormal(Distribution):
@@ -134,10 +145,10 @@ class MultivariateNormal(Distribution):
 
         if scale_tril is not None:
             self._unbroadcasted_scale_tril = scale_tril
-        else:
-            if precision_matrix is not None:
-                self.covariance_matrix = torch.inverse(precision_matrix).expand_as(loc_)
-            self._unbroadcasted_scale_tril = _batch_potrf_lower(self.covariance_matrix)
+        elif covariance_matrix is not None:
+            self._unbroadcasted_scale_tril = torch.cholesky(covariance_matrix)
+        else:  # precision_matrix is not None
+            self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(MultivariateNormal, _instance)
@@ -145,7 +156,7 @@ class MultivariateNormal(Distribution):
         loc_shape = batch_shape + self.event_shape
         cov_shape = batch_shape + self.event_shape + self.event_shape
         new.loc = self.loc.expand(loc_shape)
-        new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(cov_shape)
+        new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril
         if 'covariance_matrix' in self.__dict__:
             new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
         if 'scale_tril' in self.__dict__:
@@ -195,11 +206,11 @@ class MultivariateNormal(Distribution):
             self._validate_sample(value)
         diff = value - self.loc
         M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
-        half_log_det = _batch_diag(self._unbroadcasted_scale_tril).log().sum(-1)
+        half_log_det = self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
         return -0.5 * (self._event_shape[0] * math.log(2 * math.pi) + M) - half_log_det
 
     def entropy(self):
-        half_log_det = _batch_diag(self._unbroadcasted_scale_tril).log().sum(-1)
+        half_log_det = self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
         H = 0.5 * self._event_shape[0] * (1.0 + math.log(2 * math.pi)) + half_log_det
         if len(self._batch_shape) == 0:
             return H

@@ -1,8 +1,7 @@
-def script(c2, c1):
-  t2 = aten::lt(c2, c1)
-  t3 = prim::TensorToBool(t2)
-  if t3:
-    c = c2
+def if_one(a: Tensor,
+    b: Tensor) -> Tensor:
+  if bool(torch.lt(a, b)):
+    c = a
   else:
-    c = c1
+    c = b
   return c

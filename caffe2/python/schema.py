@@ -502,6 +502,12 @@ class Struct(Field):
                 children[name] = right_field
                 continue
             left_field = children[name]
+            if not (isinstance(left_field, Struct) and isinstance(right_field, Struct)):
+                raise TypeError(
+                    "Type of left_field, " + str(type(left_field)) +
+                    ", and type of right_field, " +
+                    str(type(right_field)) +
+                    ", must both the Struct to allow merging of the field, " + name)
             children[name] = left_field + right_field
 
         return Struct(*(viewitems(children)))
@@ -731,6 +737,13 @@ class Scalar(Field):
         if dtype is not None and isinstance(dtype, tuple) and dtype[1] == 1:
             dtype = (dtype[0], (1,))
         if dtype is not None:
+            if isinstance(dtype, tuple) and dtype[0] == np.void:
+                raise TypeError(
+                    "Cannot set the Scalar with type {} for blob {}."
+                    "If this blob is the output of some operation, "
+                    "please verify the input of that operation has "
+                    "proper type.".format(dtype, blob)
+                )
             dtype = np.dtype(dtype)
         # If blob is not None and it is not a BlobReference, we assume that
         # it is actual tensor data, so we will try to cast it to a numpy array.

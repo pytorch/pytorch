@@ -1,5 +1,7 @@
 #include "caffe2/operators/quantized/int8_flatten_op.h"
 
+#include "caffe2/operators/flatten_op.h"
+
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(Int8Flatten, int8::Int8FlattenOp);
@@ -7,6 +9,7 @@ REGISTER_CPU_OPERATOR(Int8Flatten, int8::Int8FlattenOp);
 OPERATOR_SCHEMA(Int8Flatten)
     .NumInputs(1)
     .NumOutputs(1)
+    .TensorInferenceFunction(TensorInferenceForFlatten)
     .SetDoc(R"DOC(
 Flattens the input tensor into a 2D matrix. If input tensor has shape
 (d_0, d_1, ... d_n) then the output will have shape

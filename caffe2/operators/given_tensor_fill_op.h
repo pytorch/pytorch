@@ -13,7 +13,7 @@ template <typename T, class Context>
 class GivenTensorFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  GivenTensorFillOp(const OperatorDef& operator_def, Workspace* ws)
+  explicit GivenTensorFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {
     const ArgumentHelper helper(operator_def);
     // GivenTensorFillOp can be provided with a "dtype" arg if float is
@@ -33,6 +33,9 @@ class GivenTensorFillOp final : public FillerOp<Context> {
           break;
         case TensorProto_DataType_BOOL:
           ExtractValues<bool>();
+          break;
+        case TensorProto_DataType_INT16:
+          ExtractValues<int16_t>();
           break;
         case TensorProto_DataType_INT32:
           ExtractValues<int>();
@@ -60,7 +63,7 @@ class GivenTensorFillOp final : public FillerOp<Context> {
   void ExtractValues() {
     auto source_values =
         this->template GetRepeatedArgument<Type>("values");
-    values_.Resize(source_values.size());
+    ReinitializeTensor(&values_, {static_cast<int64_t>(source_values.size())}, at::dtype<Type>().device(CPU));
     Type* values_data = values_.template mutable_data<Type>();
     for (int i = 0; i < source_values.size(); i++) {
       values_data[i] = static_cast<Type>(source_values[i]);
@@ -83,6 +86,6 @@ class GivenTensorFillOp final : public FillerOp<Context> {
   }
 
   bool (GivenTensorFillOp::*body_)(Tensor* output);
-  Tensor values_{CPU};
+  Tensor values_;
 };
 } // namespace caffe2

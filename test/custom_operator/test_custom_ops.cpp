@@ -1,4 +1,5 @@
 #include <torch/script.h>
+#include <torch/cuda.h>
 
 #include "op.h"
 
@@ -14,10 +15,10 @@ void check_all_parameters(
     const torch::jit::script::Module& module,
     Predicate predicate) {
   for (const auto& parameter : module.get_parameters()) {
-    AT_ASSERT(predicate(*parameter->slot()));
+    AT_ASSERT(predicate(parameter.value().toTensor()));
   }
   for (const auto& child : module.get_modules()) {
-    check_all_parameters(*child->module, predicate);
+    check_all_parameters(*child, predicate);
   }
 }
 } // namespace helpers
@@ -80,8 +81,8 @@ void test_argument_checking_for_serialized_modules(
   } catch (const c10::Error& error) {
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("Expected value of type Dynamic for argument 'input' in "
-                  "position 0, but instead got value of type int") == 0);
+            .find("forward() expected a value of type 'Tensor' "
+                  "for argument 'input' but instead found type 'int'") == 0);
   }
 
   try {
@@ -147,7 +148,7 @@ int main(int argc, const char* argv[]) {
   test_argument_checking_for_serialized_modules(path_to_exported_script_module);
   test_move_to_dtype(path_to_exported_script_module);
 
-  if (torch::globalContext().getNumGPUs() > 0) {
+  if (torch::cuda::device_count() > 0) {
     test_move_to_device(path_to_exported_script_module);
   }
 

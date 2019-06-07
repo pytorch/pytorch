@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPSpatialBNOp final : public IDEEPOperator {
  public:
@@ -19,7 +21,7 @@ class IDEEPSpatialBNOp final : public IDEEPOperator {
     CAFFE_ENFORCE_GE(momentum_, 0);
     CAFFE_ENFORCE_LE(momentum_, 1);
   }
-  virtual ~IDEEPSpatialBNOp() {}
+  ~IDEEPSpatialBNOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
@@ -70,7 +72,7 @@ class IDEEPSpatialBNGradientOp final : public IDEEPOperator {
     CAFFE_ENFORCE(InputSize() > SAVED_VAR);
     CAFFE_ENFORCE(OutputSize() > BIAS_GRAD);
   }
-  virtual ~IDEEPSpatialBNGradientOp() {}
+  ~IDEEPSpatialBNGradientOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
@@ -99,4 +101,4 @@ class IDEEPSpatialBNGradientOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(SpatialBN, IDEEPSpatialBNOp);
 REGISTER_IDEEP_OPERATOR(SpatialBNGradient, IDEEPSpatialBNGradientOp)
 
-}  // namespace caffe2
+}  // namespace

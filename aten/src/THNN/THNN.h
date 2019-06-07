@@ -2,10 +2,7 @@
 #define THNN_H
 
 #include <stdbool.h>
-#include <TH.h>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
+#include <TH/TH.h>
 
 #define THNN_(NAME) TH_CONCAT_3(THNN_, Real, NAME)
 
@@ -19,7 +16,7 @@ typedef int64_t THIndex_t;
 typedef int32_t THInteger_t;
 typedef void THNNState;
 
-#include "generic/THNN.h"
+#include <THNN/generic/THNN.h>
 #include <THGenerateFloatTypes.h>
 
 #endif

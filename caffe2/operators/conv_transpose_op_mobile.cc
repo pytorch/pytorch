@@ -3,11 +3,7 @@
 
 namespace caffe2 {
 
-#ifndef CAFFE2_MOBILE
-#error "mobile build state not defined"
-#endif
-
-#if CAFFE2_MOBILE
+#ifdef C10_MOBILE
 // mobile-only implementation (tiled + vectorized + multithreaded)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     ConvTranspose,

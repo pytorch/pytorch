@@ -10,7 +10,7 @@ one specific platform and PyTorch release, there are a couple of steps to take.
 
 There are two pseudorandom number generators involved in PyTorch, which you will
 need to seed manually to make runs reproducible. Furthermore, you should ensure
-that all other libraries your code relies on an which use random numbers also
+that all other libraries your code relies on and which use random numbers also
 use a fixed seed.
 
 PyTorch
@@ -45,7 +45,7 @@ When running on the CuDNN backend, two further options must be set::
 
 .. warning::
 
-    Deterministic mode can have a performance impact, depending on your model.
+    Deterministic mode can have a performance impact, depending on your model. This means that due to the deterministic nature of the model, the processing speed (i.e. processed batch items per second) can be lower than when the model is non-deterministic.
 
 Numpy
 .....

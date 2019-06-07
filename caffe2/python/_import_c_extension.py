@@ -5,25 +5,34 @@ import logging
 import sys
 from caffe2.python import extension_loader
 
+# NOTE: we have to import python protobuf here **before** we load cpp extension.
+# Otherwise it breaks under certain build conditions if cpp implementation of
+# protobuf is used. Presumably there's some registry in protobuf library and
+# python side has to initialize the dictionary first, before static
+# initialization in python extension does so. Otherwise, duplicated protobuf
+# descriptors will be created and it can lead to obscure errors like
+#   "Parameter to MergeFrom() must be instance of same class:
+#    expected caffe2.NetDef got caffe2.NetDef."
+import caffe2.proto
+
 # We will first try to load the gpu-enabled caffe2. If it fails, we will then
 # attempt to load the cpu version. The cpu backend is the minimum required, so
 # if that still fails, we will exit loud.
 with extension_loader.DlopenGuard():
     has_hip_support = False
+    has_cuda_support = False
     has_gpu_support = False
 
     try:
         from caffe2.python.caffe2_pybind11_state_gpu import *  # noqa
         if num_cuda_devices():  # noqa
-            has_gpu_support = True
+            has_gpu_support = has_cuda_support = True
     except ImportError as gpu_e:
         logging.info('Failed to import cuda module: {}'.format(gpu_e))
         try:
-            RTLD_LAZY = 1
-            with extension_loader.DlopenGuard(RTLD_LAZY):
-                from caffe2.python.caffe2_pybind11_state_hip import *  # noqa
+            from caffe2.python.caffe2_pybind11_state_hip import *  # noqa
             if num_hip_devices():
-                has_hip_support = True
+                has_gpu_support = has_hip_support = True
                 logging.info('This caffe2 python run has AMD GPU support!')
         except ImportError as hip_e:
             logging.info('Failed to import AMD hip module: {}'.format(hip_e))

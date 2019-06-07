@@ -13,8 +13,9 @@ class SparseToDenseOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
 
-  SparseToDenseOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SparseToDenseOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         output_first_dim_(
             this->template GetSingleArgument<int>("output_first_dim", 0)) {}
 
@@ -43,7 +44,7 @@ class SparseToDenseOp final : public Operator<Context> {
 
     // Awkward way to get the max element to make it work with both CUDA
     // and CPU.
-    max_element_.Resize(1);
+    ReinitializeTensor(&max_element_, {1}, at::dtype<TInd>().device(Context::GetDeviceType()));
     TInd* max_element_ptr = max_element_.template mutable_data<TInd>();
     math::ReduceMax<TInd>(sparse_indices_len, sparse_indices_vec, max_element_ptr,
           &scratch_, &context_);
@@ -77,8 +78,8 @@ class SparseToDenseOp final : public Operator<Context> {
 
     auto shape = sparse_values.sizes().vec();
     shape[0] = output_first_dim;
-    auto* output = Output(0);
-    output->Resize(shape);
+
+    auto* output = Output(0, shape, at::dtype<TData>());
 
     TData* output_data = output->template mutable_data<TData>();
     if (!output_first_dim) {
@@ -107,15 +108,16 @@ class SparseToDenseOp final : public Operator<Context> {
     CAFFE_THROW(
         "SparseToDense is not implemented on tensor of type ",
         Input(VALUES).dtype().name(),
-        "Consider adding it a type in the list DispatchHelper or implementing "
-        "a generic version (which won't work for duplicated indices though)");
+        "consider adding it as a type in the DispatchHelper list or "
+        "implementing a generic version (which won't work for "
+        "duplicated indices though)");
   }
 
  private:
   int output_first_dim_;
   Tensor scratch_{Context::GetDeviceType()};
   Tensor max_element_host_{CPU};
-  Tensor max_element_{Context::GetDeviceType()};
+  Tensor max_element_;
 
   INPUT_TAGS(INDICES, VALUES, DATA_TO_INFER_DIM);
 };

@@ -26,20 +26,30 @@ TESTS = [
     'dataloader',
     'distributed',
     'distributions',
+    'docs_coverage',
     'expecttest',
     'indexing',
+    'indexing_cuda',
     'jit',
+    'logging',
+    'mkldnn',
     'multiprocessing',
     'multiprocessing_spawn',
     'nccl',
     'nn',
     'numba_integration',
     'optim',
+    'quantized',
     'sparse',
     'thd_distributed',
     'torch',
     'type_info',
+    'type_hints',
     'utils',
+    'namedtuple_return_api',
+    'jit_fuser',
+    'tensorboard',
+    'namedtensor',
 ]
 
 WINDOWS_BLACKLIST = [
@@ -51,11 +61,9 @@ ROCM_BLACKLIST = [
     'c10d',
     'cpp_extensions',
     'distributed',
-    'distributions',
     'multiprocessing',
     'nccl',
     'thd_distributed',
-    'utils',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {
@@ -87,8 +95,15 @@ THD_DISTRIBUTED_TESTS_CONFIG = {
 }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
-SIGNALS_TO_NAMES_DICT = dict((getattr(signal, n), n) for n in dir(signal)
-                             if n.startswith('SIG') and '_' not in n)
+SIGNALS_TO_NAMES_DICT = {getattr(signal, n): n for n in dir(signal)
+                         if n.startswith('SIG') and '_' not in n}
+
+CPP_EXTENSIONS_ERROR = """
+Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
+but it could not be found. Install ninja with `pip install ninja`
+or `conda install ninja`. Alternatively, disable C++ extensions test with
+`run_test.py --exclude cpp_extensions`.
+"""
 
 
 def print_to_stderr(message):
@@ -132,7 +147,9 @@ def run_test(executable, test_module, test_directory, options):
         unittest_args.append('--verbose')
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    command = executable + [test_module + '.py'] + unittest_args
+    argv = [test_module + '.py'] + unittest_args
+
+    command = executable + argv
     return shell(command, test_directory)
 
 
@@ -140,14 +157,18 @@ def test_cpp_extensions(executable, test_module, test_directory, options):
     try:
         cpp_extension.verify_ninja_availability()
     except RuntimeError:
-        print(
-            'Ninja is not available. Skipping C++ extensions test. '
-            "Install ninja with 'pip install ninja' or 'conda install ninja'.")
-        return 0
+        print(CPP_EXTENSIONS_ERROR)
+        return 1
+    cpp_extensions_test_dir = os.path.join(test_directory, 'cpp_extensions')
     return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
-                        os.path.join(test_directory, 'cpp_extensions'))
+                        cwd=cpp_extensions_test_dir)
     if return_code != 0:
         return return_code
+    if sys.platform != 'win32':
+        return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
+                            cwd=os.path.join(cpp_extensions_test_dir, 'no_python_abi_suffix_test'))
+        if return_code != 0:
+            return return_code
 
     python_path = os.environ.get('PYTHONPATH', '')
     try:
@@ -199,10 +220,10 @@ def test_distributed(executable, test_module, test_directory, options):
                 os.mkdir(os.path.join(tmp_dir, 'test_dir'))
                 if backend == 'mpi':
                     # test mpiexec for --noprefix option
-                    devnull = open(os.devnull, 'w')
-                    noprefix_opt = '--noprefix' if subprocess.call(
-                        'mpiexec -n 1 --noprefix bash -c ""', shell=True,
-                        stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
+                    with open(os.devnull, 'w') as devnull:
+                        noprefix_opt = '--noprefix' if subprocess.call(
+                            'mpiexec -n 1 --noprefix bash -c ""', shell=True,
+                            stdout=devnull, stderr=subprocess.STDOUT) == 0 else ''
 
                     mpiexec = ['mpiexec', '-n', '3', noprefix_opt] + executable
 
@@ -246,6 +267,11 @@ def parse_args():
         '--verbose',
         action='store_true',
         help='print verbose information and test-by-test results')
+    parser.add_argument(
+        '--jit',
+        '--jit',
+        action='store_true',
+        help='run all jit tests')
     parser.add_argument(
         '-pt', '--pytest', action='store_true',
         help='If true, use `pytest` to execute the tests. E.g., this runs '
@@ -301,14 +327,14 @@ def get_executable_command(options):
     else:
         executable = [sys.executable]
     if options.pytest:
-        executable += ['-m', 'pytest']
+        executable += ['-m', 'pytest', '--durations=10']
     return executable
 
 
 def find_test_index(test, selected_tests, find_last_index=False):
-    """Find the index of the first or last occurrence of a given test/test module in the list of seleceted tests.
+    """Find the index of the first or last occurrence of a given test/test module in the list of selected tests.
 
-    This function is used to determine the indexes when slicing the list of selected tests when
+    This function is used to determine the indices when slicing the list of selected tests when
     ``options.first``(:attr:`find_last_index`=False) and/or ``options.last``(:attr:`find_last_index`=True) are used.
 
     :attr:`selected_tests` can be a list that contains multiple consequent occurrences of tests
@@ -367,9 +393,8 @@ def get_selected_tests(options):
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
     if sys.platform == 'win32' and not options.ignore_win_blacklist:
-        ostype = os.environ.get('MSYSTEM')
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
-        if ostype != 'MINGW64' or target_arch != 'x64':
+        if target_arch != 'x64':
             WINDOWS_BLACKLIST.append('cpp_extensions')
 
         selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
@@ -392,6 +417,9 @@ def main():
 
     if options.coverage:
         shell(['coverage', 'erase'])
+
+    if options.jit:
+        selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     for test in selected_tests:
         test_name = 'test_{}'.format(test)

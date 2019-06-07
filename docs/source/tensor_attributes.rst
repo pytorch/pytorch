@@ -30,6 +30,9 @@ Data type                  dtype                                         Tensor 
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             ``torch.*.LongTensor``
 ========================   ===========================================   ===========================
 
+To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
+can be used, which returns ``True`` if the data type is a floating point data type.
+
 .. _device-doc:
 
 torch.device
@@ -80,7 +83,7 @@ Via a string and device ordinal:
    >>> torch.randn((2,3), device=cuda1)
 
    >>> # You can substitute the torch.device with a string
-   >>> torch.randn((2,3), 'cuda:1')
+   >>> torch.randn((2,3), device='cuda:1')
 
 .. note::
    For legacy reasons, a device can be constructed via a single device ordinal, which is treated

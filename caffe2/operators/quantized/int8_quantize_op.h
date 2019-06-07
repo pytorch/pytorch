@@ -21,6 +21,7 @@ void Int8Quantize(
     const int32_t Y_offset) {
   const float inv_scale = 1.0f / Y_scale;
   uint32_t i = 0;
+
 #ifdef INT8_NEON_SIMD
   const float32x4_t vinv_scale = vdupq_n_f32(inv_scale);
   // magic float and magic int to take care of rounding

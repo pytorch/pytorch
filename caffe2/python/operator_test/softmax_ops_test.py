@@ -626,7 +626,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
                 "SpatialSoftmaxWithLoss",
                 ["X_gpu", "label_gpu"],
                 ["probs_gpu", "avgloss_gpu"],
-                device_option=core.DeviceOption(caffe2_pb2.CUDA, 0)
+                device_option=core.DeviceOption(workspace.GpuDeviceType, 0)
             )
 
             cpuop = core.CreateOperator(
@@ -649,7 +649,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
             # Initialize label. Some of the labels are (-1), i.e "DONT CARE"
             label = (np.random.rand(n, H, W) * (D + 1)).astype(np.int32) - 1
 
-            gpu0 = core.DeviceOption(caffe2_pb2.CUDA, 0)
+            gpu0 = core.DeviceOption(workspace.GpuDeviceType, 0)
             workspace.FeedBlob("X_cpu", X)
             workspace.FeedBlob("label_cpu", label)
             workspace.FeedBlob("X_gpu", X, device_option=gpu0)

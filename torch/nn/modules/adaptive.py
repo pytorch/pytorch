@@ -45,7 +45,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
       assigned to the first cluster, and targets `101, 102, ..., 1000` will be
       assigned to the second cluster, while targets
       `1001, 1002, ..., n_classes - 1` will be assigned
-      to the last, third cluster
+      to the last, third cluster.
 
     * :attr:`div_value` is used to compute the size of each additional cluster,
       which is given as
@@ -74,10 +74,12 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     Args:
         in_features (int): Number of features in the input tensor
-        n_classes (int): Number of classes in the dataset.
-        cutoffs (Sequence): Cutoffs used to assign targets to their buckets.
+        n_classes (int): Number of classes in the dataset
+        cutoffs (Sequence): Cutoffs used to assign targets to their buckets
         div_value (float, optional): value used as an exponent to compute sizes
             of the clusters. Default: 4.0
+        head_bias (bool, optional): If ``True``, adds a bias term to the 'head' of the
+            adaptive softmax. Default: ``False``
 
     Returns:
         ``NamedTuple`` with ``output`` and ``loss`` fields:
@@ -89,8 +91,8 @@ class AdaptiveLogSoftmaxWithLoss(Module):
     Shape:
         - input: :math:`(N, in\_features)`
         - target: :math:`(N)` where each value satisfies :math:`0 <= target[i] <= n\_classes`
-        - output: :math:`(N)`
-        - loss: ``Scalar``
+        - output1: :math:`(N)`
+        - output2: ``Scalar``
 
 
     .. _Efficient softmax approximation for GPUs:
@@ -107,7 +109,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         if (cutoffs != sorted(cutoffs)) \
                 or (min(cutoffs) <= 0) \
-                or (max(cutoffs) >= (n_classes - 1)) \
+                or (max(cutoffs) > (n_classes - 1)) \
                 or (len(set(cutoffs)) != len(cutoffs)) \
                 or any([int(c) != c for c in cutoffs]):
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../ChannelUtils.hpp"
-#include "gloo/rendezvous/store.h"
+#include <THD/base/ChannelUtils.hpp>
+#include <gloo/rendezvous/store.h>
 
 #include <memory>
 #include <string>

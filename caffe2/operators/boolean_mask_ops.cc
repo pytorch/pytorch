@@ -9,8 +9,9 @@ template <class Context>
 class BooleanMaskLengthsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  BooleanMaskLengthsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit BooleanMaskLengthsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
@@ -20,7 +21,7 @@ class BooleanMaskLengthsOp final : public Operator<Context> {
   bool DoRunWithType() {
     auto& lengths = Input(0);
     auto& mask = Input(1);
-    auto* lengthsOut = Output(0);
+
     CAFFE_ENFORCE(lengths.dim() == 1);
     CAFFE_ENFORCE(mask.dim() == 1);
     const auto* lengthsPtr = lengths.template data<T>();
@@ -28,7 +29,7 @@ class BooleanMaskLengthsOp final : public Operator<Context> {
     auto totalLength =
         std::accumulate(lengthsPtr, lengthsPtr + lengths.numel(), 0);
     CAFFE_ENFORCE(mask.numel() == totalLength);
-    lengthsOut->ResizeLike(lengths);
+    auto* lengthsOut = Output(0, lengths.sizes(), at::dtype<T>());
     auto* lengthsOutPtr = lengthsOut->template mutable_data<T>();
     int p = 0;
     for (int i = 0; i < lengths.numel(); ++i) {
@@ -52,7 +53,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
   auto* dataOut = Output(0);
   CAFFE_ENFORCE(data.dim() >= 1);
   CAFFE_ENFORCE_EQ(mask.dim(), 1);
-  CAFFE_ENFORCE(data.sizes()[0] == mask.sizes()[0]);
+  CAFFE_ENFORCE(data.size(0) == mask.size(0));
 
   const auto* maskPtr = mask.template data<bool>();
   int numOutputs = 0;
@@ -70,8 +71,7 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
 
   int64_t* out_vec = nullptr;
   if (OutputSize() == 2) {
-    auto* indicesOut = Output(1);
-    indicesOut->Resize(numOutputs);
+    auto* indicesOut = Output(1, {numOutputs}, at::dtype<int64_t>());
     out_vec = indicesOut->template mutable_data<int64_t>();
   }
 
@@ -366,8 +366,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
     window_centers = &Input(1);
   }
 
-  auto* output = Output(0);
-  output->ResizeLike(*input);
+  auto* output = Output(0, input->sizes(), at::dtype<T>());
 
   const auto canonical_axis = input->canonical_axis_index(axis_);
 

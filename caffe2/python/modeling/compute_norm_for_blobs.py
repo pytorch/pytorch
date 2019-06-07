@@ -19,10 +19,11 @@ class ComputeNormForBlobs(NetModifier):
         blobs: list of blobs to compute norm for
         logging_frequency: frequency for printing norms to logs
         p: type of norm. Currently it supports p=1 or p=2
-        compute_averaged_norm: norm or averaged_norm (averaged_norm = norm/size)
+        compute_averaged_norm: norm or averaged_norm (averaged_norm = norm/size
+        row_index: to plot the entire blob or simply one row at the row_index)
     """
 
-    def __init__(self, blobs, logging_frequency, p=2, compute_averaged_norm=False):
+    def __init__(self, blobs, logging_frequency, p=2, compute_averaged_norm=False, row_index=None):
         self._blobs = blobs
         self._logging_frequency = logging_frequency
         self._p = p
@@ -31,11 +32,17 @@ class ComputeNormForBlobs(NetModifier):
         if compute_averaged_norm:
             self._field_name_suffix = '_averaged' + self._field_name_suffix
 
+        if row_index and row_index < 0:
+            raise Exception('{0} is not a valid row index, row_index should be >= 0'.format(
+                row_index))
+        self.row_index = row_index
+
     def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None,
                    modify_output_record=False):
 
         p = self._p
         compute_averaged_norm = self._compute_averaged_norm
+        row_index = self.row_index
 
         CPU = muji.OnCPU()
         # if given, blob_to_device is a map from blob to device_option
@@ -51,12 +58,21 @@ class ComputeNormForBlobs(NetModifier):
                 device = CPU
 
             with core.DeviceScope(device):
-                norm_name = net.NextScopedBlob(prefix=blob + self._field_name_suffix)
+                if row_index and row_index >= 0:
+                    blob = net.Slice(
+                        [blob],
+                        net.NextScopedBlob(prefix=blob + '_row_{0}'.format(row_index)),
+                        starts=[row_index, 0],
+                        ends=[row_index + 1, -1]
+                    )
+
                 cast_blob = net.Cast(
                     blob,
                     net.NextScopedBlob(prefix=blob + '_float'),
                     to=core.DataType.FLOAT
                 )
+
+                norm_name = net.NextScopedBlob(prefix=blob + self._field_name_suffix)
                 norm = net.LpNorm(
                     cast_blob, norm_name, p=p, average=compute_averaged_norm
                 )

@@ -22,7 +22,7 @@ void DataNetFiller::fill_input_internal(TensorList_t* input_data) const {
   }
 }
 
-static void fill_with_type(
+void fill_with_type(
     const TensorFiller& filler,
     const std::string& type,
     TensorCPU* output) {
@@ -67,19 +67,33 @@ DataRandomFiller::DataRandomFiller(
     const auto& op_types = input_types[i];
     CAFFE_ENFORCE(
         op_dims.size() == op.input_size(),
-        op.name() + " has " + caffe2::to_string(op.input_size()) +
+        op.name() + " has " + c10::to_string(op.input_size()) +
             " inputs; while the input dimension size is " +
-            caffe2::to_string(op_dims.size()));
+            c10::to_string(op_dims.size()));
     CAFFE_ENFORCE(
         op_types.size() == op.input_size(),
-        op.name() + " has " + caffe2::to_string(op.input_size()) +
+        op.name() + " has " + c10::to_string(op.input_size()) +
             " inputs; while the input type size is " +
-            caffe2::to_string(op_types.size()));
+            c10::to_string(op_types.size()));
 
     for (size_t j = 0; j < op.input_size(); ++j) {
-      inputs_.emplace(
-          op.input(j),
-          std::make_pair(get_tensor_filler(op, j, op_dims), op_types[j]));
+      inputs_[op.input(j)] =
+          std::make_pair(get_tensor_filler(op, j, op_dims), op_types[j]);
+    }
+
+    // Hack, we normal have a path of
+    // length -> LengthsiRangeFill -> Gather -> w -> SparseLengthsWeighted*
+    //       \---------------------------------------/
+    // So when we generate the value of length, we need to bound it to the size
+    // of weight input of Gather too
+    if (op.type().find("SparseLengthsWeighted") == 0 && i > 0) {
+      const auto& prev_op = run_net.op(i - 1);
+      if (prev_op.type() == "Gather") {
+        const auto& prev_dims = input_dims[i - 1];
+        VLOG(1) << "Setting max length value to " << prev_dims[0].front()
+                << " for " << op.input(3);
+        inputs_[op.input(3)].first.Max(prev_dims[0].front());
+      }
     }
 
     for (size_t j = 0; j < op.output_size(); ++j) {
@@ -143,6 +157,101 @@ void DataRandomFiller::fill_input_internal(TensorList_t* input_data) const {
     CAFFE_ENFORCE(it != inputs_.end());
     fill_with_type(it->second.first, it->second.second, &input_data->back());
   }
+}
+
+TestDataRandomFiller::TestDataRandomFiller(
+    const NetDef& net,
+    const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
+    const std::vector<std::vector<std::string>>& inputTypes)
+    : DataRandomFiller() {
+  std::unordered_set<std::string> outputNames;
+  // Determine blobs that are outputs of some ops (intermediate blobs).
+  for (auto opIdx = 0; opIdx < net.op_size(); ++opIdx) {
+    const auto& op = net.op(opIdx);
+    for (auto outputIdx = 0; outputIdx < op.output_size(); ++outputIdx) {
+      outputNames.emplace(op.output(outputIdx));
+    }
+  }
+  // Determine ops that have non-intermediate inputs.
+  std::unordered_set<size_t> opWithRequiredInputs;
+  for (auto opIdx = 0; opIdx < net.op_size(); ++opIdx) {
+    const auto& op = net.op(opIdx);
+    for (auto inputIdx = 0; inputIdx < op.input_size(); ++inputIdx) {
+      if (!outputNames.count(op.input(inputIdx))) {
+        opWithRequiredInputs.emplace(opIdx);
+        break;
+      }
+    }
+  }
+
+  CAFFE_ENFORCE_EQ(inputDims.size(), opWithRequiredInputs.size());
+  CAFFE_ENFORCE_EQ(inputTypes.size(), opWithRequiredInputs.size());
+
+  int counter = 0;
+  for (auto opIdx = 0; opIdx < net.op_size(); ++opIdx) {
+    if (!opWithRequiredInputs.count(opIdx)) {
+      // Skip intermediate ops.
+      continue;
+    }
+    const auto& op = net.op(opIdx);
+    const auto& op_dims = inputDims[counter];
+    const auto& op_types = inputTypes[counter];
+    ++counter;
+
+    int countRequiredInputs = 0;
+    for (auto inputIdx = 0; inputIdx < op.input_size(); ++inputIdx) {
+      if (!outputNames.count(op.input(inputIdx))) {
+        ++countRequiredInputs;
+      }
+    }
+
+    CAFFE_ENFORCE(
+        op_dims.size() == countRequiredInputs,
+        op.name() + " has " + c10::to_string(op.input_size()) +
+            " (required) inputs; while the input dimension size is " +
+            c10::to_string(op_dims.size()));
+    CAFFE_ENFORCE(
+        op_types.size() == countRequiredInputs,
+        op.name() + " has " + c10::to_string(op.input_size()) +
+            " (required) inputs; while the input type size is " +
+            c10::to_string(op_types.size()));
+
+    int dimCounter = 0;
+    for (auto inputIdx = 0; inputIdx < op.input_size(); ++inputIdx) {
+      auto inputName = op.input(inputIdx);
+      if (outputNames.count(inputName)) {
+        // Skip intermediate inputs.
+        continue;
+      }
+      inputs_[inputName] = std::make_pair(
+          get_tensor_filler(op, dimCounter, op_dims), op_types[dimCounter]);
+      ++dimCounter;
+    }
+  }
+  CAFFE_ENFORCE(inputs_.size() > 0, "Empty input for run net");
+  // generate input names
+  for (const auto& input : inputs_) {
+    input_names_.push_back(input.first);
+  }
+}
+
+void TestDataRandomFiller::fillInputToWorkspace(Workspace* workspace) const {
+  for (auto& name : input_names_) {
+    const auto& it = inputs_.find(name);
+    CAFFE_ENFORCE(it != inputs_.end());
+    auto* tensor =
+        BlobGetMutableTensor(workspace->CreateBlob(name), caffe2::CPU);
+    fill_with_type(it->second.first, it->second.second, tensor);
+  }
+}
+
+void fillRandomNetworkInputs(
+    const NetDef& net,
+    const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
+    const std::vector<std::vector<std::string>>& inputTypes,
+    Workspace* workspace) {
+  TestDataRandomFiller(net, inputDims, inputTypes)
+      .fillInputToWorkspace(workspace);
 }
 
 } // namespace emulator

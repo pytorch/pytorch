@@ -11,22 +11,35 @@ namespace caffe2 {
 template <typename T, typename Context>
 bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(INPUT);
-  auto* Y = Output(OUTPUT);
-  CAFFE_ENFORCE(Y != &X, "Can't run InstanceNorm NHWC in-place");
-  auto* mean = OutputSize() > 1 ? Output(MEAN) : &mean_;
-  auto* inv_stdev = OutputSize() > 1 ? Output(INV_STDEV) : &inv_stdev_;
+
+  CAFFE_ENFORCE(
+      !IsInputOutputAlias(INPUT, OUTPUT),
+      "Can't run InstanceNorm NHWC in-place");
+
   const int N = X.dim32(0);
   const int H = X.dim32(1);
   const int W = X.dim32(2);
   const int C = X.dim32(3);
   const size_t offset = H * W * C;
-
   CAFFE_ENFORCE_EQ(Input(SCALE).numel(), C);
   CAFFE_ENFORCE_EQ(Input(BIAS).numel(), C);
 
-  Y->ResizeLike(X);
-  mean->Resize(N, C);
-  inv_stdev->Resize(N, C);
+  auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
+  Tensor* mean;
+  if (OutputSize() >= 2) {
+    mean = Output(MEAN, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+  } else {
+    ReinitializeTensor(&mean_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+    mean = &mean_;
+  }
+  Tensor* inv_stdev;
+  if (OutputSize() >= 3) {
+    inv_stdev = Output(INV_STDEV, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+  } else {
+    ReinitializeTensor(&inv_stdev_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+    inv_stdev = &inv_stdev_;
+  }
+
   ConstEigenVectorArrayMap<T> scale(Input(SCALE).template data<T>(), C);
   ConstEigenVectorArrayMap<T> bias(Input(BIAS).template data<T>(), C);
   for (int n = 0; n < N; ++n) {
@@ -63,20 +76,30 @@ bool InstanceNormOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(INPUT);
   const auto& scale = Input(SCALE);
   const auto& bias = Input(BIAS);
-  auto* Y = Output(OUTPUT);
-  auto* mean = OutputSize() > 1 ? Output(MEAN) : &mean_;
-  auto* inv_stdev = OutputSize() > 1 ? Output(INV_STDEV) : &inv_stdev_;
+
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
   const int W = X.dim32(3);
-
   CAFFE_ENFORCE_EQ(scale.numel(), C);
   CAFFE_ENFORCE_EQ(bias.numel(), C);
 
-  Y->ResizeLike(X);
-  mean->Resize(N, C);
-  inv_stdev->Resize(N, C);
+  auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
+  Tensor* mean;
+  if (OutputSize() >= 2) {
+    mean = Output(MEAN, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+  } else {
+    ReinitializeTensor(&mean_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+    mean = &mean_;
+  }
+
+  Tensor* inv_stdev;
+  if (OutputSize() >= 3) {
+    inv_stdev = Output(INV_STDEV, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+  } else {
+    ReinitializeTensor(&inv_stdev_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
+    inv_stdev = &inv_stdev_;
+  }
 
   const auto* Xdata = X.template data<T>();
   auto* Ydata = Y->template mutable_data<T>();

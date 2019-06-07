@@ -4,7 +4,7 @@ include(../cmake/Codegen.cmake)
 # ---[ Declare source file lists
 
 # ---[ ATen build
-if (NOT BUILD_ATEN_MOBILE)
+if (INTERN_BUILD_ATEN_OPS)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
   set(AT_LINK_STYLE INTERFACE)
@@ -14,7 +14,7 @@ if (NOT BUILD_ATEN_MOBILE)
   # Generate the headers wrapped by our operator
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
   COMMAND
-  ${PYCMD} ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
+  "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
     --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
     --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
     --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
@@ -32,20 +32,18 @@ if (NOT BUILD_ATEN_MOBILE)
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
+  list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
+  list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
+  list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
+  list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
-
-  IF(USE_ROCM)
-    # Set the HIP Variables
-    set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${ATen_CUDA_SRCS})
-    set(Caffe2_HIP_INCLUDES ${Caffe2_HIP_INCLUDES} ${Caffe2_GPU_INCLUDE})
-  ENDIF(USE_ROCM)
 else()
   # Only add "ATen Core", a minimal, easy-to-compile fragment of ATen.
   # This codepath should only be exercised by the Android build.
@@ -54,11 +52,6 @@ else()
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
   # See cmake/Codegen.cmake for header installation
-endif()
-
-# ---[ Torch build
-if(BUILD_TORCH)
-  add_subdirectory(../torch torch)
 endif()
 
 # ---[ Caffe2 build
@@ -71,9 +64,8 @@ if(NOT BUILD_ATEN_ONLY)
   add_subdirectory(core)
   add_subdirectory(utils)
   add_subdirectory(predictor)
+  add_subdirectory(predictor/emulator)
   add_subdirectory(core/nomnigraph)
-  add_subdirectory(core/nomscheduler)
-  add_subdirectory(core/dispatch)
   add_subdirectory(serialize)
   if (USE_NVRTC)
     add_subdirectory(cuda_rtc)
@@ -92,7 +84,8 @@ if(NOT BUILD_ATEN_ONLY)
     add_subdirectory(operators)
     add_subdirectory(operators/rnn)
     if (USE_FBGEMM)
-      add_subdirectory(operators/quantized/server)
+      add_subdirectory(quantization)
+      add_subdirectory(quantization/server)
     endif()
     if (USE_QNNPACK)
       add_subdirectory(operators/quantized)
@@ -168,6 +161,11 @@ if (FALSE)
   foreach(tmp ${ATen_CUDA_TEST_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
+
+  message(STATUS "ATen HIP test sources: ")
+  foreach(tmp ${ATen_HIP_TEST_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
 endif()
 
 # ---[ List of libraries to link with
@@ -203,13 +201,636 @@ if(NOT BUILD_ATEN_ONLY)
   #     nothing changes. If one has a dependent library that uses protobuf, then one needs to
   #     have the right protobuf version as well as linking to libprotobuf.a.
   target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
+  if (NOT BUILD_SHARED_LIBS)
+    INSTALL(TARGETS caffe2_protos ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+  endif()
 endif()
+
+
+# ==========================================================
+# formerly-libtorch
+# ==========================================================
+
+set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../torch")
+set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
+
+if(NOT TORCH_INSTALL_BIN_DIR)
+  set(TORCH_INSTALL_BIN_DIR bin)
+endif()
+
+if(NOT TORCH_INSTALL_INCLUDE_DIR)
+  set(TORCH_INSTALL_INCLUDE_DIR include)
+endif()
+
+if(NOT TORCH_INSTALL_LIB_DIR)
+  set(TORCH_INSTALL_LIB_DIR lib)
+endif()
+
+
+
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
+
+
+  set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+
+  # Generate files
+  set(TOOLS_PATH "${TORCH_ROOT}/tools")
+
+  configure_file("${TORCH_ROOT}/aten/src/ATen/common_with_cwrap.py"
+    "${TOOLS_PATH}/shared/cwrap_common.py"
+    COPYONLY)
+
+  configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
+    "${TOOLS_PATH}/shared/_utils_internal.py"
+    COPYONLY)
+
+
+  set(GENERATED_CXX_TORCH
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
+    )
+
+  set(GENERATED_H_TORCH
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
+    )
+
+  set(GENERATED_THNN_CXX_CUDA ${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp)
+  set(GENERATED_THNN_CXX ${TORCH_SRC_DIR}/csrc/nn/THNN.cpp)
+
+  set(GENERATED_CXX_PYTHON
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
+    )
+
+  set(GENERATED_H_PYTHON
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods_dispatch.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_dispatch.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
+    )
+
+  set(GENERATED_THNN_SOURCES
+    ${GENERATED_THNN_CXX}
+    ${GENERATED_THNN_CXX_CUDA}
+    )
+
+  set(TORCH_GENERATED_CODE
+    ${GENERATED_CXX_TORCH}
+    ${GENERATED_THNN_SOURCES}
+    ${GENERATED_H_TORCH}
+    ${GENERATED_CXX_PYTHON}
+    ${GENERATED_H_PYTHON}
+    )
+
+  add_custom_command(
+    OUTPUT
+    ${TORCH_GENERATED_CODE}
+    COMMAND
+    "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
+      --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+      --nn-path "aten/src"
+    DEPENDS
+    "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+    "${CMAKE_CURRENT_LIST_DIR}/../aten/src/THNN/generic/THNN.h"
+    "${TOOLS_PATH}/autograd/templates/VariableType.h"
+    "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
+    "${TOOLS_PATH}/autograd/templates/Functions.h"
+    "${TOOLS_PATH}/autograd/templates/Functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_functions.h"
+    "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_variable_methods_dispatch.h"
+    "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_torch_functions_dispatch.h"
+    "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
+    "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
+    "${TOOLS_PATH}/autograd/templates/variable_factories.h"
+    "${TOOLS_PATH}/autograd/deprecated.yaml"
+    "${TOOLS_PATH}/autograd/derivatives.yaml"
+    "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
+    "${TOOLS_PATH}/autograd/gen_autograd.py"
+    "${TOOLS_PATH}/autograd/gen_python_functions.py"
+    "${TOOLS_PATH}/autograd/gen_variable_factories.py"
+    "${TOOLS_PATH}/autograd/gen_variable_type.py"
+    "${TOOLS_PATH}/autograd/load_derivatives.py"
+    "${TOOLS_PATH}/autograd/nested_dict.py"
+    "${TOOLS_PATH}/autograd/utils.py"
+    "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
+    "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
+    WORKING_DIRECTORY "${TORCH_ROOT}")
+
+
+  # Required workaround for libtorch_python.so build
+  # see https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
+  add_custom_target(
+    generate-torch-sources
+    DEPENDS ${TORCH_GENERATED_CODE}
+    )
+
+
+  set(TORCH_SRCS
+    ${GENERATED_CXX_TORCH}
+    ${GENERATED_H_TORCH}
+    ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/function_hook.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/functions/accumulate_grad.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/grad_mode.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/record_function.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/export.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/import_source.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/import.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/import_export_helpers.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/irparser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/register_c10_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/subgraph_matcher.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/symbolic_script.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/profiling_record.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/profiling_graph_executor_impl.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/constant_pooling.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/insert_guards.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/inliner.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_autogradzero.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/subgraph_rewrite.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/python_print.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/utils/subgraph_utils.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/quantization.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/register_quantized_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/class_type.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/kernel_cache.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
+    ${TORCH_ROOT}/test/cpp/jit/test.cpp
+    )
+
+  if (WIN32)
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_win.cpp
+    )
+  else ()
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_unix.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
+    )
+    if (USE_CUDA AND NOT USE_ROCM)
+      list(APPEND Caffe2_GPU_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+      )
+      add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
+      target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+      target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+      install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
+    endif()
+  endif ()
+
+  if (USE_CUDA)
+    list(APPEND Caffe2_GPU_SRCS
+      ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
+      ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
+    )
+  endif()
+
+  if (USE_ROCM)
+    list(APPEND Caffe2_HIP_SRCS
+      ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
+    )
+  endif()
+
+  if (NOT NO_API)
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/data/datasets/mnist.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/distributed.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/embedding.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/named_any.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/serialize.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+    )
+  endif()
+
+
+  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
+endif()
+
+# ==========================================================
+# END formerly-libtorch sources
+# ==========================================================
+
 
 # Compile exposed libraries.
 add_library(caffe2 ${Caffe2_CPU_SRCS})
-if (NOT WIN32)
+
+
+option(TORCH_STATIC "Build libtorch.a rather than libtorch.so" OFF)
+
+
+# This is required for older versions of CMake, which don't allow
+# specifying add_library() without a list of source files
+set(DUMMY_EMPTY_FILE ${CMAKE_BINARY_DIR}/empty.cpp)
+
+if (MSVC)
+  set(DUMMY_FILE_CONTENT "__declspec(dllexport) int ignore_this_library_placeholder(){return 0\\;}")
+else()
+  set(DUMMY_FILE_CONTENT "")
+endif()
+
+file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
+
+
+# Wrapper library for transition to merged libcaffe and libtorch.
+# Only necessary on Windows?
+# Contains "caffe2" and "caffe2_gpu".
+if (TORCH_STATIC)
+  add_library(torch STATIC ${DUMMY_EMPTY_FILE})
+else()
+  add_library(torch SHARED ${DUMMY_EMPTY_FILE})
+endif()
+
+
+target_link_libraries(torch caffe2)
+
+# ==========================================================
+# formerly-libtorch flags
+# ==========================================================
+
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
+
+  # Forces caffe2.pb.h to be generated before its dependents are compiled.
+  # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
+  # to establish the dependency, since the generation procedure is declared in a different CMake file.
+  # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
+  add_dependencies(caffe2 Caffe2_PROTO)
+
+  target_compile_definitions(caffe2 PUBLIC _THP_CORE)
+
+
+  # until they can be unified, keep these lists synced with setup.py
+  if(MSVC)
+
+    if (MSVC_Z7_OVERRIDE)
+      set(MSVC_DEBINFO_OPTION "/Z7")
+    else()
+      set(MSVC_DEBINFO_OPTION "/Zi")
+    endif()
+
+    target_compile_options(caffe2 PUBLIC
+      ${MSVC_RUNTIME_LIBRARY_OPTION}
+      ${MSVC_DEBINFO_OPTION}
+      /EHa
+      /DNOMINMAX
+      /wd4267
+      /wd4251
+      /wd4522
+      /wd4522
+      /wd4838
+      /wd4305
+      /wd4244
+      /wd4190
+      /wd4101
+      /wd4996
+      /wd4275
+      /bigobj
+      )
+  else()
+    target_compile_options(caffe2 PUBLIC
+      #    -std=c++11
+      -Wall
+      -Wextra
+      -Wno-unused-parameter
+      -Wno-missing-field-initializers
+      -Wno-write-strings
+      -Wno-unknown-pragmas
+      # Clang has an unfixed bug leading to spurious missing braces
+      # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
+      -Wno-missing-braces
+      )
+
+    if(NOT APPLE)
+      target_compile_options(caffe2 PRIVATE
+        # Considered to be flaky.  See the discussion at
+        # https://github.com/pytorch/pytorch/pull/9608
+        -Wno-maybe-uninitialized)
+    endif()
+
+  endif()
+
+  if (MSVC)
+  elseif (WERROR)
+    target_compile_options(caffe2 PRIVATE -Werror -Wno-strict-overflow)
+  endif()
+
+
+  if (NOT NO_API)
+    target_include_directories(caffe2 PRIVATE
+      ${TORCH_SRC_DIR}/csrc/api
+      ${TORCH_SRC_DIR}/csrc/api/include)
+  endif()
+
+  if(USE_CUDA)
+    if(MSVC)
+      if (NOT NVTOOLEXT_HOME)
+        set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
+      endif()
+      if ($ENV{NVTOOLEXT_HOME})
+        set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+      endif()
+      set(TORCH_CUDA_LIBRARIES
+        ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
+        ${CUDA_LIBRARIES})
+      target_include_directories(caffe2 PUBLIC "${NVTOOLEXT_HOME}/include")
+
+    elseif(APPLE)
+      set(TORCH_CUDA_LIBRARIES
+        ${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib
+        ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvrtc.dylib
+        ${CUDA_TOOLKIT_ROOT_DIR}/lib/libnvToolsExt.dylib
+        ${CUDA_LIBRARIES})
+
+    else()
+      find_library(LIBNVTOOLSEXT libnvToolsExt.so PATHS ${CUDA_TOOLKIT_ROOT_DIR}/lib64/)
+      set(TORCH_CUDA_LIBRARIES
+        ${LIBNVTOOLSEXT}
+        ${CUDA_LIBRARIES})
+    endif()
+
+    target_compile_definitions(caffe2 PRIVATE USE_CUDA)
+  endif()
+
+
+  set(TH_CPU_INCLUDE
+    # dense
+    aten/src/TH
+    ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
+    ${TORCH_ROOT}/aten/src
+    ${CMAKE_CURRENT_BINARY_DIR}/aten/src
+    ${CMAKE_BINARY_DIR}/aten/src)
+  target_include_directories(caffe2 PRIVATE ${TH_CPU_INCLUDE})
+
+  set(ATen_CPU_INCLUDE
+    ${TORCH_ROOT}/aten/src
+    ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
+    ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
+    ${CMAKE_BINARY_DIR}/aten/src)
+
+IF (USE_TBB)
+  list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
+  target_link_libraries(caffe2 PUBLIC tbb)
+ENDIF()
+
+
+  target_include_directories(caffe2 PRIVATE ${ATen_CPU_INCLUDE})
+
+  target_include_directories(caffe2 PRIVATE
+    ${TORCH_SRC_DIR}/csrc)
+
+  target_include_directories(caffe2 PRIVATE
+    ${TORCH_ROOT}/third_party/miniz-2.0.8)
+
+
+  set_property(TARGET caffe2 PROPERTY CXX_STANDARD 11)
+
+
+  install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
+    DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
+    FILES_MATCHING PATTERN "*.h")
+  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h"
+    DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
+
+
+  if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+  endif()
+
+  if (BUILD_TEST AND NOT NO_API)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
+  endif()
+
+
+  # XXX This ABI check cannot be run with arm-linux-androideabi-g++
+  if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    if (DEFINED GLIBCXX_USE_CXX11_ABI)
+      message(STATUS "_GLIBCXX_USE_CXX11_ABI is already defined as a cmake variable")
+    else()
+      message(STATUS "${CMAKE_CXX_COMPILER} ${TORCH_SRC_DIR}/abi-check.cpp -o ${CMAKE_BINARY_DIR}/abi-check")
+      execute_process(
+        COMMAND
+        "${CMAKE_CXX_COMPILER}"
+        "${TORCH_SRC_DIR}/abi-check.cpp"
+        "-o"
+        "${CMAKE_BINARY_DIR}/abi-check"
+        RESULT_VARIABLE ABI_CHECK_COMPILE_RESULT)
+      if (ABI_CHECK_COMPILE_RESULT)
+        message(FATAL_ERROR "Could not compile ABI Check: ${ABI_CHECK_COMPILE_RESULT}")
+      endif()
+      execute_process(
+        COMMAND "${CMAKE_BINARY_DIR}/abi-check"
+        RESULT_VARIABLE ABI_CHECK_RESULT
+        OUTPUT_VARIABLE GLIBCXX_USE_CXX11_ABI)
+      if (ABI_CHECK_RESULT)
+        message(WARNING "Could not run ABI Check: ${ABI_CHECK_RESULT}")
+      endif()
+    endif()
+    message(STATUS "Determined _GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
+  endif()
+
+  # CMake config for external projects.
+  configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/TorchConfigVersion.cmake.in
+    ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
+    @ONLY)
+  configure_file(
+    ${TORCH_ROOT}/cmake/TorchConfig.cmake.in
+    ${PROJECT_BINARY_DIR}/TorchConfig.cmake
+    @ONLY)
+  install(FILES
+    ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
+    ${PROJECT_BINARY_DIR}/TorchConfig.cmake
+    DESTINATION share/cmake/Torch)
+
+  if (USE_DISTRIBUTED)
+    add_subdirectory(${TORCH_SRC_DIR}/lib/THD lib_THD)
+    if (NOT MSVC AND NOT APPLE)
+      add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
+    endif()
+  endif()
+
+
+  # ---[ Torch python bindings build
+  add_subdirectory(../torch torch)
+
+
+endif()
+# ==========================================================
+# END formerly-libtorch flags
+# ==========================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+if (NOT NO_API)
+  target_include_directories(caffe2 PUBLIC
+    $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api>
+    $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api/include>)
+endif()
+
+
+find_package(OpenMP QUIET)
+if(USE_OPENMP AND OPENMP_FOUND)
+  message(STATUS "pytorch is compiling with OpenMP. \n"
+    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
+    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
+  target_compile_options(caffe2 INTERFACE ${OpenMP_CXX_FLAGS})
+  target_link_libraries(caffe2 PRIVATE ${OpenMP_CXX_LIBRARIES})
+endif()
+
+
+if(USE_ROCM)
+
+  # XXX kostmo
+#  target_link_libraries(caffe2 PUBLIC caffe2_hip_library)
+
+  target_compile_definitions(caffe2 PRIVATE
+    USE_ROCM
+    __HIP_PLATFORM_HCC__
+    )
+  target_include_directories(caffe2 PRIVATE
+    /opt/rocm/include
+    /opt/rocm/hcc/include
+    /opt/rocm/rocblas/include
+    /opt/rocm/hipsparse/include
+    )
+endif()
+
+
+if (NOT WIN32 AND NOT USE_ASAN)
+  # Enable hidden visibility by default to make it easier to debug issues with
+  # TORCH_API annotations. Hidden visibility with selective default visibility
+  # behaves close enough to Windows' dllimport/dllexport.
+  #
+  # Unfortunately, hidden visibility messes up some ubsan warnings because
+  # templated classes crossing library boundary get duplicated (but identical)
+  # definitions. It's easier to just disable it.
   target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
 endif()
+
 
 if(NOT BUILD_ATEN_ONLY)
   caffe2_interface_library(caffe2_protos caffe2_protos_whole)
@@ -219,6 +840,13 @@ if(NOT BUILD_ATEN_ONLY)
   else()
     target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
   endif()
+endif()
+
+if (USE_OPENMP AND OPENMP_FOUND)
+  message(STATUS "Caffe2 is compiling with OpenMP. \n"
+    "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
+    "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
+  target_link_libraries(caffe2 PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
 target_link_libraries(caffe2 PUBLIC c10)
@@ -231,15 +859,26 @@ target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
 torch_set_target_props(caffe2)
 
-if (MSVC)
-target_compile_options(caffe2 INTERFACE "-std=c++11")
-else()
-target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
-endif()
+#if (NOT MSVC)
+#  target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
+#endif()
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+
+# Parallelism settings
+#  OPENMP - OpenMP for intra-op, native thread pool for inter-op parallelism
+#  NATIVE - using native thread pool for intra- and inter-op parallelism
+set(PARALLEL_BACKEND "OPENMP" CACHE STRING "ATen parallel backend")
+if ("${PARALLEL_BACKEND}" STREQUAL "OPENMP")
+  target_compile_definitions(caffe2 PUBLIC "-DAT_PARALLEL_OPENMP=1")
+elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE")
+  target_compile_definitions(caffe2 PUBLIC "-DAT_PARALLEL_NATIVE=1")
+else()
+  message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
+endif()
+
 if (MSVC AND NOT BUILD_SHARED_LIBS)
-  # Note [Supporting both static and dynamic libraries on Window]
+  # Note [Supporting both static and dynamic libraries on Windows]
   # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   # A Windows library may be distributed as either a static or dynamic
   # library.  The chosen distribution mechanism affects how you setup
@@ -314,16 +953,38 @@ if (MSVC AND BUILD_SHARED_LIBS)
 endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
+
+
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
+
+install(TARGETS torch DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+
+if (MSVC AND NOT TORCH_STATIC)
+  install(FILES $<TARGET_PDB_FILE:torch> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+endif()
+
+
 caffe2_interface_library(caffe2 caffe2_library)
 list(APPEND Caffe2_MAIN_LIBS caffe2_library)
+if (USE_TBB)
+  list(APPEND Caffe2_MAIN_LIB tbb)
+endif()
+
+# Install PDB files for MSVC builds
+if (MSVC AND BUILD_SHARED_LIBS)
+  install(FILES $<TARGET_PDB_FILE:caffe2> DESTINATION lib OPTIONAL)
+endif()
 
 # ---[ CUDA library.
 if(USE_CUDA)
+
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
+  target_link_libraries(caffe2_gpu PUBLIC c10_cuda)
+
+  target_link_libraries(caffe2_gpu PUBLIC ${TORCH_CUDA_LIBRARIES})
 
   target_include_directories(
       caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
@@ -358,11 +1019,20 @@ if(USE_CUDA)
   install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
+
+
+  # Install PDB files for MSVC builds
+  if (MSVC AND BUILD_SHARED_LIBS)
+    install(FILES $<TARGET_PDB_FILE:caffe2_gpu> DESTINATION lib OPTIONAL)
+  endif()
+
+  target_link_libraries(torch caffe2_gpu)
+
 endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
+  # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
   # Get Compile Definitions from the directory (FindHIP.cmake bug)
   get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
   if(MY_DEFINITIONS)
@@ -371,29 +1041,35 @@ if(USE_ROCM)
     endforeach()
   endif()
 
-  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-  hip_include_directories(${Caffe2_HIP_INCLUDES})
+  # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
+  hip_include_directories(${Caffe2_HIP_INCLUDE})
 
-  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cc|cpp|cu)$")
+  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
   set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
   # FindHIP.CMake checks if the SHARED flag is set and adds extra logic accordingly.
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
-  target_compile_options(caffe2_hip PRIVATE ${HIP_HIPCC_FLAGS})
+  target_compile_options(caffe2_hip PRIVATE ${HIP_CXX_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
+  target_link_libraries(caffe2_hip PUBLIC c10_hip)
+  if(NOT INTERN_BUILD_MOBILE)
+    # TODO: Cut this over to ATEN_HIP_FILES_GEN_LIB.  At the moment, we
+    # only generate CUDA files
+    # NB: This dependency must be PRIVATE, because we don't install
+    # ATEN_CUDA_FILES_GEN_LIB (it's a synthetic target just to get the
+    # correct dependency from generated files.)
+    target_link_libraries(caffe2_hip PRIVATE ATEN_CUDA_FILES_GEN_LIB)
+  endif()
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
-  target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
+  target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDE})
   target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
   # Set standard properties on the target
   torch_set_target_props(caffe2_hip)
-
-  # When a library has object files that contain device code, it needs to use hipcc/hcc to link.
-  set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
 
   caffe2_interface_library(caffe2_hip caffe2_hip_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
@@ -401,7 +1077,7 @@ if(USE_ROCM)
 endif()
 
 # ---[ Check if warnings should be errors.
-if ($ENV{WERROR})
+if (WERROR)
   target_compile_options(caffe2 PRIVATE -Werror)
   if(USE_CUDA)
     target_compile_options(caffe2_gpu PRIVATE -Werror)
@@ -419,6 +1095,10 @@ if (BUILD_TEST)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if (INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
+      # Install PDB files for MSVC builds
+      if (MSVC AND BUILD_SHARED_LIBS)
+        install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+      endif()
     endif()
   endforeach()
 
@@ -432,18 +1112,22 @@ if (BUILD_TEST)
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if (INSTALL_TEST)
         install(TARGETS ${test_name} DESTINATION test)
+        # Install PDB files for MSVC builds
+        if (MSVC AND BUILD_SHARED_LIBS)
+          install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+        endif()
       endif()
     endforeach()
   endif()
 
   if(USE_ROCM)
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
-      set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
       get_filename_component(test_name ${test_src} NAME_WE)
-      hip_add_executable(${test_name} "${test_src}")
+      add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
-      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
+      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
+      target_compile_options(${test_name} PRIVATE ${HIP_CXX_FLAGS})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if (INSTALL_TEST)
         install(TARGETS ${test_name} DESTINATION test)
@@ -460,13 +1144,23 @@ if (BUILD_TEST)
   endif()
 endif()
 
+# Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
+# This is because the build rules here written in such a way that they always
+# appear to need to be re-run generating >600 pieces of work during the pytorch
+# rebuild step. The long-term fix should be to clean up these rules so they
+# only rerun when needed.
+
 if (BUILD_PYTHON)
   # Python site-packages
   # Get canonical directory for python site packages (relative to install
   # location).  It varies from system to system.
+  # We should pin the path separator to the forward slash on Windows.
+  # More details can be seen at
+  # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
+      import os
       from distutils import sysconfig
-      print(sysconfig.get_python_lib(prefix=''))
+      print(sysconfig.get_python_lib(prefix='').replace(os.sep, '/'))
   ")
   SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
@@ -495,11 +1189,6 @@ if (BUILD_PYTHON)
   # For cmake installs, including c++ only installs, install libcaffe2 into
   # CMAKE_INSTALL_PREFIX/lib . The pybind11 library can have a hardcoded
   # rpath
-  if(APPLE)
-    set(_rpath_portable_origin "@loader_path")
-  else()
-    set(_rpath_portable_origin $ORIGIN)
-  endif(APPLE)
   set(caffe2_pybind11_rpath "${_rpath_portable_origin}")
   if(${BUILDING_WITH_TORCH_LIBS})
     # site-packages/caffe2/python/caffe2_pybind11_state
@@ -507,18 +1196,20 @@ if (BUILD_PYTHON)
     set(caffe2_pybind11_rpath "${_rpath_portable_origin}/../../torch/lib")
   endif(${BUILDING_WITH_TORCH_LIBS})
 
+  # Must also include `CMAKE_SHARED_LINKER_FLAGS` in linker flags for
+  # `caffe2_pybind11_state_*` targets because paths to required libraries may
+  # need to be found there (e.g., specifying path to `libiomp5` with `LDFLAGS`).
+  set(_caffe2_pybind11_state_linker_flags "${CMAKE_SHARED_LINKER_FLAGS}")
+  if (APPLE)
+    set(_caffe2_pybind11_state_linker_flags "${_caffe2_pybind11_state_linker_flags} -undefined dynamic_lookup")
+  endif()
 
   # ---[ Python.
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
   set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
   set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "" DEBUG_POSTFIX "")
   set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
-  if (APPLE)
-    set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
-  endif()
-  if (WIN32)
-    set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
-  endif()
+  set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
   target_include_directories(caffe2_pybind11_state PRIVATE $<INSTALL_INTERFACE:include>)
   target_include_directories(caffe2_pybind11_state PRIVATE ${Caffe2_CPU_INCLUDE})
 
@@ -526,6 +1217,7 @@ if (BUILD_PYTHON)
       caffe2_pybind11_state caffe2_library)
   if (WIN32)
     target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
+    target_link_libraries(caffe2_pybind11_state onnx_proto)
   endif(WIN32)
 
   # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
@@ -534,6 +1226,9 @@ if (BUILD_PYTHON)
       caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
       ${CMAKE_BINARY_DIR}/caffe2/python)
   install(TARGETS caffe2_pybind11_state DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
+  if (MSVC AND BUILD_SHARED_LIBS)
+    install(FILES $<TARGET_PDB_FILE:caffe2_pybind11_state> DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python" OPTIONAL)
+  endif()
   set_target_properties(caffe2_pybind11_state PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
 
   if(USE_CUDA)
@@ -541,18 +1236,14 @@ if (BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "" DEBUG_POSTFIX "")
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
-    if (APPLE)
-      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
-    endif()
-    if (WIN32)
-      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
-    endif()
+    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
     target_link_libraries(
         caffe2_pybind11_state_gpu caffe2_library caffe2_gpu_library)
     if (WIN32)
       target_link_libraries(caffe2_pybind11_state_gpu ${PYTHON_LIBRARIES})
+      target_link_libraries(caffe2_pybind11_state_gpu onnx_proto)
     endif(WIN32)
 
     # Install with same rpath as non-gpu caffe2_pybind11_state
@@ -560,23 +1251,20 @@ if (BUILD_PYTHON)
         caffe2_pybind11_state_gpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY
         ${CMAKE_BINARY_DIR}/caffe2/python)
     install(TARGETS caffe2_pybind11_state_gpu DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
+    if (MSVC AND BUILD_SHARED_LIBS)
+      install(FILES $<TARGET_PDB_FILE:caffe2_pybind11_state_gpu> DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python" OPTIONAL)
+    endif()
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
   endif()
 
   if(USE_ROCM)
-    hip_add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
-    set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINKER_LANGUAGE HIP)
-    target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_HIPCC_FLAGS} -fvisibility=hidden)
+    add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
+    target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
-    if (APPLE)
-      set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
-    endif()
-    if (WIN32)
-      set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
-    endif()
+    set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_hip PRIVATE $<INSTALL_INTERFACE:include>)
-    target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE})
+    target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
     target_link_libraries(
         caffe2_pybind11_state_hip caffe2_library caffe2_hip_library)
     if (WIN32)
@@ -621,37 +1309,27 @@ if (BUILD_PYTHON)
   endif()
 
   # Finally, Copy all python files to build directory
-  # Generate and create all needed __init__.py files, if they aren't already
-  # present in the current source tree.
-  message(STATUS "Automatically generating missing __init__.py files.")
-  caffe_autogen_init_py_files()
-
   # Create a custom target that copies all python files.
   file(GLOB_RECURSE PYTHON_SRCS RELATIVE ${PROJECT_SOURCE_DIR}
        "${PROJECT_SOURCE_DIR}/caffe2/*.py")
-  add_custom_target(python_copy_files ALL)
-  if(MSVC OR CMAKE_GENERATOR MATCHES "Ninja")
-    # ninja fails when the command line is too long so we split
-    # the target into several. This would be beneficial for VS also
-    # since it build targets in parallel but not custom commands
-    foreach(python_src ${PYTHON_SRCS})
-      get_filename_component(dir ${python_src} DIRECTORY)
-      string(SHA1 name_hash "${python_src}")
-      # get_filename_component(name_we ${python_src} NAME_WE)
-      add_custom_target(python_copy_files_${name_hash}
-          COMMAND ${CMAKE_COMMAND} -E copy
-          ${PROJECT_SOURCE_DIR}/${python_src} ${CMAKE_BINARY_DIR}/${dir})
-      add_dependencies(python_copy_files python_copy_files_${name_hash})
-    endforeach()
-  else()
-    foreach(python_src ${PYTHON_SRCS})
-      get_filename_component(dir ${python_src} DIRECTORY)
-      add_custom_command(
-          TARGET python_copy_files PRE_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy
-          ${PROJECT_SOURCE_DIR}/${python_src} ${CMAKE_BINARY_DIR}/${dir})
-    endforeach()
-  endif()
+
+  # generated pb files are copied from build/caffe2 to caffe2
+  # if we copied them back to build this would create a build cycle
+  # consider removing the need for globs
+  filter_list_exclude(PYTHON_SRCS PYTHON_SRCS "proto/.*_pb")
+
+  set(build_files)
+  foreach(python_src ${PYTHON_SRCS})
+    add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/${python_src}
+                       DEPENDS ${PROJECT_SOURCE_DIR}/${python_src}
+                       COMMAND ${CMAKE_COMMAND} -E copy
+                       ${PROJECT_SOURCE_DIR}/${python_src}
+                       ${CMAKE_BINARY_DIR}/${python_src})
+    list(APPEND build_files ${CMAKE_BINARY_DIR}/${python_src})
+  endforeach()
+
+  add_custom_target(python_copy_files ALL DEPENDS ${build_files})
+
 
   # Install commands
   # Pick up static python files

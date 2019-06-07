@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/data/samplers/base.h>
 #include <torch/types.h>
 
@@ -18,14 +19,14 @@ namespace data {
 namespace samplers {
 
 /// A `Sampler` that returns indices sequentially.
-class SequentialSampler : public Sampler<> {
+class TORCH_API SequentialSampler : public Sampler<> {
  public:
   /// Creates a `SequentialSampler` that will return indices in the range
   /// `0...size - 1`.
   explicit SequentialSampler(size_t size);
 
   /// Resets the `SequentialSampler` to zero.
-  void reset() override;
+  void reset(optional<size_t> new_size = nullopt) override;
 
   /// Returns the next batch of indices.
   optional<std::vector<size_t>> next(size_t batch_size) override;

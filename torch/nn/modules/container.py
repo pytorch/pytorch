@@ -96,8 +96,9 @@ class Sequential(Module):
 class ModuleList(Module):
     r"""Holds submodules in a list.
 
-    ModuleList can be indexed like a regular Python list, but modules it
-    contains are properly registered, and will be visible by all Module methods.
+    :class:`~torch.nn.ModuleList` can be indexed like a regular Python list, but
+    modules it contains are properly registered, and will be visible by all
+    :class:`~torch.nn.Module` methods.
 
     Arguments:
         modules (iterable, optional): an iterable of modules to add
@@ -137,7 +138,7 @@ class ModuleList(Module):
             return self._modules[self._get_abs_string_index(idx)]
 
     def __setitem__(self, idx, module):
-        idx = operator.index(idx)
+        idx = self._get_abs_string_index(idx)
         return setattr(self, str(idx), module)
 
     def __delitem__(self, idx):
@@ -202,12 +203,24 @@ class ModuleList(Module):
 class ModuleDict(Module):
     r"""Holds submodules in a dictionary.
 
-    ModuleDict can be indexed like a regular Python dictionary, but modules it
-    contains are properly registered, and will be visible by all Module methods.
+    :class:`~torch.nn.ModuleDict` can be indexed like a regular Python dictionary,
+    but modules it contains are properly registered, and will be visible by all
+    :class:`~torch.nn.Module` methods.
+
+    :class:`~torch.nn.ModuleDict` is an **ordered** dictionary that respects
+
+    * the order of insertion, and
+
+    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged ``OrderedDict``
+      or another :class:`~torch.nn.ModuleDict` (the argument to :meth:`~torch.nn.ModuleDict.update`).
+
+    Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
+    types (e.g., Python's plain ``dict``) does not preserve the order of the
+    merged mapping.
 
     Arguments:
         modules (iterable, optional): a mapping (dictionary) of (string: module)
-            or an iterable of key/value pairs of type (string, module)
+            or an iterable of key-value pairs of type (string, module)
 
     Example::
 
@@ -283,12 +296,16 @@ class ModuleDict(Module):
         return self._modules.values()
 
     def update(self, modules):
-        r"""Update the ModuleDict with the key/value pairs from a mapping or
-        an iterable, overwriting existing keys.
+        r"""Update the :class:`~torch.nn.ModuleDict` with the key-value pairs from a
+        mapping or an iterable, overwriting existing keys.
+
+        .. note::
+            If :attr:`modules` is an ``OrderedDict``, a :class:`~torch.nn.ModuleDict`, or
+            an iterable of key-value pairs, the order of new elements in it is preserved.
 
         Arguments:
-            modules (iterable): a mapping (dictionary) of (string: :class:`~torch.nn.Module``) or
-                an iterable of key/value pairs of type (string, :class:`~torch.nn.Module``)
+            modules (iterable): a mapping (dictionary) from string to :class:`~torch.nn.Module`,
+                or an iterable of key-value pairs of type (string, :class:`~torch.nn.Module`)
         """
         if not isinstance(modules, container_abcs.Iterable):
             raise TypeError("ModuleDict.update should be called with an "
@@ -296,7 +313,7 @@ class ModuleDict(Module):
                             type(modules).__name__)
 
         if isinstance(modules, container_abcs.Mapping):
-            if isinstance(modules, OrderedDict):
+            if isinstance(modules, (OrderedDict, ModuleDict)):
                 for key, module in modules.items():
                     self[key] = module
             else:
@@ -318,11 +335,12 @@ class ModuleDict(Module):
 class ParameterList(Module):
     r"""Holds parameters in a list.
 
-    ParameterList can be indexed like a regular Python list, but parameters it
-    contains are properly registered, and will be visible by all Module methods.
+    :class:`~torch.nn.ParameterList` can be indexed like a regular Python
+    list, but parameters it contains are properly registered, and will be
+    visible by all :class:`~torch.nn.Module` methods.
 
     Arguments:
-        parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter`` to add
+        parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter` to add
 
     Example::
 
@@ -343,19 +361,24 @@ class ParameterList(Module):
         if parameters is not None:
             self += parameters
 
+    def _get_abs_string_index(self, idx):
+        """Get the absolute index for the list of modules"""
+        idx = operator.index(idx)
+        if not (-len(self) <= idx < len(self)):
+            raise IndexError('index {} is out of range'.format(idx))
+        if idx < 0:
+            idx += len(self)
+        return str(idx)
+
     def __getitem__(self, idx):
         if isinstance(idx, slice):
             return self.__class__(list(self._parameters.values())[idx])
         else:
-            idx = operator.index(idx)
-            if not (-len(self) <= idx < len(self)):
-                raise IndexError('index {} is out of range'.format(idx))
-            if idx < 0:
-                idx += len(self)
+            idx = self._get_abs_string_index(idx)
             return self._parameters[str(idx)]
 
     def __setitem__(self, idx, param):
-        idx = operator.index(idx)
+        idx = self._get_abs_string_index(idx)
         return self.register_parameter(str(idx), param)
 
     def __len__(self):
@@ -413,9 +436,21 @@ class ParameterDict(Module):
     ParameterDict can be indexed like a regular Python dictionary, but parameters it
     contains are properly registered, and will be visible by all Module methods.
 
+    :class:`~torch.nn.ParameterDict` is an **ordered** dictionary that respects
+
+    * the order of insertion, and
+
+    * in :meth:`~torch.nn.ParameterDict.update`, the order of the merged ``OrderedDict``
+      or another :class:`~torch.nn.ParameterDict` (the argument to
+      :meth:`~torch.nn.ParameterDict.update`).
+
+    Note that :meth:`~torch.nn.ParameterDict.update` with other unordered mapping
+    types (e.g., Python's plain ``dict``) does not preserve the order of the
+    merged mapping.
+
     Arguments:
         parameters (iterable, optional): a mapping (dictionary) of
-            (string : :class:`~torch.nn.Parameter`) or an iterable of key,value pairs
+            (string : :class:`~torch.nn.Parameter`) or an iterable of key-value pairs
             of type (string, :class:`~torch.nn.Parameter`)
 
     Example::
@@ -487,13 +522,17 @@ class ParameterDict(Module):
         return self._parameters.values()
 
     def update(self, parameters):
-        r"""Update the ParameterDict with the key/value pairs from a mapping or
-        an iterable, overwriting existing keys.
+        r"""Update the :class:`~torch.nn.ParameterDict` with the key-value pairs from a
+        mapping or an iterable, overwriting existing keys.
+
+        .. note::
+            If :attr:`parameters` is an ``OrderedDict``, a :class:`~torch.nn.ParameterDict`, or
+            an iterable of key-value pairs, the order of new elements in it is preserved.
 
         Arguments:
-            parameters (iterable): a mapping (dictionary) of
-                (string : :class:`~torch.nn.Parameter`) or an iterable of
-                key/value pairs of type (string, :class:`~torch.nn.Parameter`)
+            parameters (iterable): a mapping (dictionary) from string to
+                :class:`~torch.nn.Parameter`, or an iterable of
+                key-value pairs of type (string, :class:`~torch.nn.Parameter`)
         """
         if not isinstance(parameters, container_abcs.Iterable):
             raise TypeError("ParametersDict.update should be called with an "
@@ -501,7 +540,7 @@ class ParameterDict(Module):
                             type(parameters).__name__)
 
         if isinstance(parameters, container_abcs.Mapping):
-            if isinstance(parameters, OrderedDict):
+            if isinstance(parameters, (OrderedDict, ParameterDict)):
                 for key, parameter in parameters.items():
                     self[key] = parameter
             else:

@@ -1,4 +1,4 @@
-#include "THAllocator.h"
+#include <TH/THAllocator.h>
 
 /* stuff for mapped files */
 #ifdef _WIN32
@@ -10,6 +10,8 @@
 #define TH_ATOMIC_IPC_REFCOUNT 1
 #endif
 
+#include <c10/core/CPUAllocator.h>
+
 #if HAVE_MMAP
 #include <sys/types.h>
 #include <sys/mman.h>
@@ -19,24 +21,13 @@
 #endif
 /* end of stuff for mapped files */
 
-struct THDefaultAllocator final : public at::Allocator {
-  at::DataPtr allocate(size_t size) const override {
-    auto* ptr = THAlloc(size);
-    return {ptr, ptr, &THFree, at::DeviceType::CPU};
-  }
-  at::DeleterFnPtr raw_deleter() const override {
-    return &THFree;
-  }
-};
-
-static THDefaultAllocator th_default_allocator;
 at::Allocator* getTHDefaultAllocator() {
-  return &th_default_allocator;
+  return c10::GetCPUAllocator();
 }
 
-#if defined(_WIN32) || defined(HAVE_MMAP)
-
 #define TH_ALLOC_ALIGNMENT 64
+
+#if defined(_WIN32) || defined(HAVE_MMAP)
 
 typedef struct {
   std::atomic<int> refcount;
@@ -98,10 +89,8 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
     hfilesz.QuadPart = size;
 
     if (flags_ & TH_ALLOCATOR_MAPPED_EXCLUSIVE) {
-      handle_ = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, filename);
       event_ = CreateEvent(nullptr, FALSE, FALSE, eventname);
     } else if (flags_ & TH_ALLOCATOR_MAPPED_NOCREATE) {
-      handle_ = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, filename);
       event_ = OpenEvent(EVENT_ALL_ACCESS, FALSE, eventname);
     } else {
       AT_ERROR("Expected either TH_ALLOCATOR_MAPPED_EXCLUSIVE or TH_ALLOCATOR_MAPPED_NOCREATE");
@@ -109,6 +98,14 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 
     if (event_ == nullptr) {
       AT_ERROR("Couldn't open shared event: <", eventname, ">, error code: <", GetLastError(), ">");
+    }
+
+    if (flags_ & TH_ALLOCATOR_MAPPED_EXCLUSIVE) {
+      handle_ = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, filename);
+    } else if (flags_ & TH_ALLOCATOR_MAPPED_NOCREATE) {
+      handle_ = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, filename);
+    } else {
+      AT_ERROR("Expected either TH_ALLOCATOR_MAPPED_EXCLUSIVE or TH_ALLOCATOR_MAPPED_NOCREATE");
     }
 
     if (handle_ == nullptr) {
@@ -394,11 +391,11 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size) {
   AT_ERROR("file mapping not supported on your system");
 }
 
-THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags) {
+THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size) {
   AT_ERROR("file mapping not supported on your system");
 }
 
-THMapAllocator::~THMapAllocator(THMapAllocator* ctx) {}
+void THMapAllocator::close() { }
 
 #endif
 
@@ -505,16 +502,23 @@ int THRefcountedMapAllocator::decref()
 
 THRefcountedMapAllocatorArgCheck::THRefcountedMapAllocatorArgCheck(int flags) {}
 
-THRefcountedMapAllocator::THRefcountedMapAllocator(const char *filename, int flags, size_t size) {
+THRefcountedMapAllocator::THRefcountedMapAllocator(const char *filename, int flags, size_t size)
+  : THRefcountedMapAllocatorArgCheck(flags),
+    THMapAllocator(filename, flags, size + TH_ALLOC_ALIGNMENT)
+{
   AT_ERROR("refcounted file mapping not supported on your system");
 }
 
-THRefcountedMapAllocator::THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size) {
+THRefcountedMapAllocator::THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
+  : THRefcountedMapAllocatorArgCheck(flags),
+    THMapAllocator(WITH_FD, filename, flags, fd, size + TH_ALLOC_ALIGNMENT)
+{
   AT_ERROR("refcounted file mapping not supported on your system");
 }
 
 void THRefcountedMapAllocator::initializeAlloc() {}
-THRefcountedMapAllocator::~THRefcountedMapAllocator() {}
+
+void THRefcountedMapAllocator::close() {}
 
 #endif
 

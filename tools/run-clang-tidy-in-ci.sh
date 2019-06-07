@@ -16,7 +16,7 @@ if [[ ! -d build ]]; then
   mkdir build
   pushd build
   # We really only need compile_commands.json, so no need to build!
-  time cmake -DBUILD_TORCH=ON ..
+  time cmake ..
   popd
 
   # Generate ATen files.
@@ -36,13 +36,15 @@ if [[ ! -d build ]]; then
 fi
 
 # Run Clang-Tidy
-# The negative filters below are to exclude files that include onnx_pb.h,
-# otherwise we'd have to build ONNX protos as part of this CI job.
-time python tools/clang_tidy.py    \
-  --verbose                        \
-  --paths torch/csrc               \
-  --diff "$BASE_BRANCH"            \
-  -g"-torch/csrc/jit/init.cpp"     \
-  -g"-torch/csrc/jit/export.cpp"   \
-  -g"-torch/csrc/jit/import.cpp"   \
+# The negative filters below are to exclude files that include onnx_pb.h or
+# caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
+time python tools/clang_tidy.py                  \
+  --verbose                                      \
+  --paths torch/csrc/                            \
+  --diff "$BASE_BRANCH"                          \
+  -g"-torch/csrc/distributed/Module.cpp"         \
+  -g"-torch/csrc/jit/export.cpp"                 \
+  -g"-torch/csrc/jit/import.cpp"                 \
+  -g"-torch/csrc/jit/netdef_converter.cpp"       \
+  -g"-torch/csrc/jit/register_quantized_ops.cpp" \
   "$@"

@@ -4,9 +4,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/macros.h"
 
-#ifdef CAFFE2_USE_OPENCV
-#include <opencv2/opencv.hpp>
-#endif // CAFFE2_USE_OPENCV
+#include "caffe2/operators/generate_proposals_op_util_boxes.h"
 
 namespace caffe2 {
 
@@ -92,21 +90,55 @@ TEST(GenerateProposalsTest, TestComputeAllAnchors) {
   EXPECT_EQ((all_anchors_result - all_anchors_gt).norm(), 0);
 }
 
-namespace {
+TEST(GenerateProposalsTest, TestComputeSortedAnchors) {
+  ERMatXf anchors(3, 4);
+  anchors << -38, -16, 53, 31, -84, -40, 99, 55, -176, -88, 191, 103;
 
-template <class Derived>
-ERMatXf boxes_xyxy_to_xywh(const Eigen::MatrixBase<Derived>& boxes) {
-  CAFFE_ENFORCE_EQ(boxes.cols(), 4);
-  ERMatXf res(boxes.rows(), 4);
-  auto ones = ERMatXf::Constant(boxes.rows(), 1, 1.0);
-  res.col(0) = (boxes.col(0) + boxes.col(2)) / 2.0; // ctr_x = (x1 + x2)/2
-  res.col(1) = (boxes.col(1) + boxes.col(3)) / 2.0; // ctr_y = (y1 + y2)/2
-  res.col(2) = boxes.col(2) - boxes.col(0) + ones; // w = x2 - x1 + 1
-  res.col(3) = boxes.col(3) - boxes.col(1) + ones; // h = y2 - y1 + 1
-  return res;
+  int height = 4;
+  int width = 3;
+  int A = anchors.rows();
+  float feat_stride = 16;
+  int total = height * width * A;
+
+  // Generate all anchors for ground truth
+  Tensor anchors_tensor(vector<int64_t>{anchors.rows(), anchors.cols()}, CPU);
+  Eigen::Map<ERMatXf>(
+      anchors_tensor.mutable_data<float>(), anchors.rows(), anchors.cols()) =
+      anchors;
+  auto all_anchors =
+      utils::ComputeAllAnchors(anchors_tensor, height, width, feat_stride);
+  Eigen::Map<const ERMatXf> all_anchors_result(
+      all_anchors.data(), height * width * A, 4);
+
+  Eigen::Map<const ERArrXXf> anchors_map(
+      anchors.data(), anchors.rows(), anchors.cols());
+
+  // Test with random subsets and ordering of indices
+  vector<int> indices(total);
+  std::iota(indices.begin(), indices.end(), 0);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::shuffle(indices.begin(), indices.end(), gen);
+  for (int count = 0; count <= total; ++count) {
+    vector<int> order(indices.begin(), indices.begin() + count);
+    auto result = utils::ComputeSortedAnchors(
+        anchors_map, height, width, feat_stride, order);
+
+    // Compare the result of ComputeSortedAnchors with first generating all
+    // anchors via ComputeAllAnchors and then applying ordering and filtering.
+    // Need to convert order from (A, H, W) to (H, W, A) format before for this.
+    const auto& order_AHW = utils::AsEArrXt(order);
+    const auto& order_AH = order_AHW / width;
+    const auto& order_W = order_AHW - order_AH * width;
+    const auto& order_A = order_AH / height;
+    const auto& order_H = order_AH - order_A * height;
+    const auto& order_HWA = (order_H * width + order_W) * A + order_A;
+
+    ERArrXXf gt;
+    utils::GetSubArrayRows(all_anchors_result.array(), order_HWA, &gt);
+    EXPECT_EQ((result.matrix() - gt.matrix()).norm(), 0);
+  }
 }
-
-} // namespace
 
 TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
   // Similar to TestComputeAllAnchors but for rotated boxes with angle info.
@@ -115,7 +147,8 @@ TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
 
   // Convert to RRPN format and add angles
   ERMatXf anchors(3, 5);
-  anchors.block(0, 0, 3, 4) = boxes_xyxy_to_xywh(anchors_xyxy);
+  anchors.block(0, 0, 3, 4) = utils::bbox_xyxy_to_ctrwh(
+      anchors_xyxy.array(), true /* legacy_plus_one */);
   std::vector<float> angles{0.0, 45.0, -120.0};
   for (int i = 0; i < anchors.rows(); ++i) {
     anchors(i, 4) = angles[i % angles.size()];
@@ -138,7 +171,8 @@ TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
 
   // Convert gt to RRPN format and add angles
   ERMatXf all_anchors_gt(36, 5);
-  all_anchors_gt.block(0, 0, 36, 4) = boxes_xyxy_to_xywh(all_anchors_gt_xyxy);
+  all_anchors_gt.block(0, 0, 36, 4) = utils::bbox_xyxy_to_ctrwh(
+      all_anchors_gt_xyxy.array(), true /* legacy_plus_one */);
   for (int i = 0; i < all_anchors_gt.rows(); ++i) {
     all_anchors_gt(i, 4) = angles[i % angles.size()];
   }
@@ -154,6 +188,66 @@ TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
       result.data(), height * width * anchors.rows(), 5);
 
   EXPECT_EQ((all_anchors_result - all_anchors_gt).norm(), 0);
+}
+
+TEST(GenerateProposalsTest, TestComputeSortedAnchorsRotated) {
+  // Similar to TestComputeSortedAnchors but for rotated boxes with angle info.
+  ERMatXf anchors_xyxy(3, 4);
+  anchors_xyxy << -38, -16, 53, 31, -84, -40, 99, 55, -176, -88, 191, 103;
+
+  // Convert to RRPN format and add angles
+  ERMatXf anchors(3, 5);
+  anchors.block(0, 0, 3, 4) = utils::bbox_xyxy_to_ctrwh(
+      anchors_xyxy.array(), true /* legacy_plus_one */);
+  std::vector<float> angles{0.0, 45.0, -120.0};
+  for (int i = 0; i < anchors.rows(); ++i) {
+    anchors(i, 4) = angles[i % angles.size()];
+  }
+
+  int height = 4;
+  int width = 3;
+  int A = anchors.rows();
+  float feat_stride = 16;
+  int total = height * width * A;
+
+  // Generate all anchors for ground truth
+  Tensor anchors_tensor(vector<int64_t>{anchors.rows(), anchors.cols()}, CPU);
+  Eigen::Map<ERMatXf>(
+      anchors_tensor.mutable_data<float>(), anchors.rows(), anchors.cols()) =
+      anchors;
+  auto all_anchors =
+      utils::ComputeAllAnchors(anchors_tensor, height, width, feat_stride);
+  Eigen::Map<const ERMatXf> all_anchors_result(
+      all_anchors.data(), height * width * A, 5);
+
+  Eigen::Map<const ERArrXXf> anchors_map(
+      anchors.data(), anchors.rows(), anchors.cols());
+
+  // Test with random subsets and ordering of indices
+  vector<int> indices(total);
+  std::iota(indices.begin(), indices.end(), 0);
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::shuffle(indices.begin(), indices.end(), gen);
+  for (int count = 0; count <= total; ++count) {
+    vector<int> order(indices.begin(), indices.begin() + count);
+    auto result = utils::ComputeSortedAnchors(
+        anchors_map, height, width, feat_stride, order);
+
+    // Compare the result of ComputeSortedAnchors with first generating all
+    // anchors via ComputeAllAnchors and then applying ordering and filtering.
+    // Need to convert order from (A, H, W) to (H, W, A) format before for this.
+    const auto& order_AHW = utils::AsEArrXt(order);
+    const auto& order_AH = order_AHW / width;
+    const auto& order_W = order_AHW - order_AH * width;
+    const auto& order_A = order_AH / height;
+    const auto& order_H = order_AH - order_A * height;
+    const auto& order_HWA = (order_H * width + order_W) * A + order_A;
+
+    ERArrXXf gt;
+    utils::GetSubArrayRows(all_anchors_result.array(), order_HWA, &gt);
+    EXPECT_EQ((result.matrix() - gt.matrix()).norm(), 0);
+  }
 }
 
 TEST(GenerateProposalsTest, TestEmpty) {
@@ -321,12 +415,12 @@ TEST(GenerateProposalsTest, TestRealDownSampled) {
       1e-4);
 }
 
-#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
 TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   // Similar to TestRealDownSampled but for rotated boxes with angle info.
-  float angle = 0;
-  float delta_angle = 0;
-  float clip_angle_thresh = 1.0;
+  const float angle = 0;
+  const float delta_angle = 0;
+  const float clip_angle_thresh = 1.0;
+  const int box_dim = 5;
 
   Workspace ws;
   OperatorDef def;
@@ -399,7 +493,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   // Add angle in bbox deltas
   int num_boxes = scores.size();
   CHECK_EQ(bbx.size() / 4, num_boxes);
-  vector<float> bbx_with_angle(num_boxes * 5);
+  vector<float> bbx_with_angle(num_boxes * box_dim);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta
   // at each spatial location for each anchor.
   int i = 0, j = 0;
@@ -426,13 +520,14 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
       45.0336, 0, 0, 23.09477997f, 50.61448669f, 59, 0, 0, 39.52141571f,
       51.44710541f, 59, 0, 23.57396317f, 29.98791885f, 79, 59, 0, 0,
       41.90219116f, 79, 59, 0, 0, 23.30098343f, 78.2413f, 58.7287f;
-  ERMatXf rois_gt(9, 6);
+  ERMatXf rois_gt(rois_gt_xyxy.rows(), 6);
   // Batch ID
   rois_gt.block(0, 0, rois_gt.rows(), 1) =
-      ERMatXf::Constant(rois_gt.rows(), 1, 0.0);
+      rois_gt_xyxy.block(0, 0, rois_gt.rows(), 1);
   // rois_gt in [x_ctr, y_ctr, w, h] format
-  rois_gt.block(0, 1, rois_gt.rows(), 4) =
-      boxes_xyxy_to_xywh(rois_gt_xyxy.block(0, 1, rois_gt.rows(), 4));
+  rois_gt.block(0, 1, rois_gt.rows(), 4) = utils::bbox_xyxy_to_ctrwh(
+      rois_gt_xyxy.block(0, 1, rois_gt.rows(), 4).array(),
+      true /* legacy_plus_one */);
   // Angle
   rois_gt.block(0, 5, rois_gt.rows(), 1) =
       ERMatXf::Constant(rois_gt.rows(), 1, angle);
@@ -448,12 +543,12 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
 
   AddInput(vector<int64_t>{img_count, A, H, W}, scores, "scores", &ws);
   AddInput(
-      vector<int64_t>{img_count, 5 * A, H, W},
+      vector<int64_t>{img_count, box_dim * A, H, W},
       bbx_with_angle,
       "bbox_deltas",
       &ws);
   AddInput(vector<int64_t>{img_count, 3}, im_info, "im_info", &ws);
-  AddInput(vector<int64_t>{A, 5}, anchors, "anchors", &ws);
+  AddInput(vector<int64_t>{A, box_dim}, anchors, "anchors", &ws);
 
   def.add_arg()->CopyFrom(MakeArgument("spatial_scale", 1.0f / 16.0f));
   def.add_arg()->CopyFrom(MakeArgument("pre_nms_topN", 6000));
@@ -494,10 +589,11 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
 
 TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   // Similar to TestRealDownSampled but for rotated boxes with angle info.
-  float angle = 45.0;
-  float delta_angle = 0.174533; // 0.174533 radians -> 10 degrees
-  float expected_angle = 55.0;
-  float clip_angle_thresh = 1.0;
+  const float angle = 45.0;
+  const float delta_angle = 0.174533; // 0.174533 radians -> 10 degrees
+  const float expected_angle = 55.0;
+  const float clip_angle_thresh = 1.0;
+  const int box_dim = 5;
 
   Workspace ws;
   OperatorDef def;
@@ -570,7 +666,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   // Add angle in bbox deltas
   int num_boxes = scores.size();
   CHECK_EQ(bbx.size() / 4, num_boxes);
-  vector<float> bbx_with_angle(num_boxes * 5);
+  vector<float> bbx_with_angle(num_boxes * box_dim);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta
   // at each spatial location for each anchor.
   {
@@ -591,12 +687,12 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
 
   AddInput(vector<int64_t>{img_count, A, H, W}, scores, "scores", &ws);
   AddInput(
-      vector<int64_t>{img_count, 5 * A, H, W},
+      vector<int64_t>{img_count, box_dim * A, H, W},
       bbx_with_angle,
       "bbox_deltas",
       &ws);
   AddInput(vector<int64_t>{img_count, 3}, im_info, "im_info", &ws);
-  AddInput(vector<int64_t>{A, 5}, anchors, "anchors", &ws);
+  AddInput(vector<int64_t>{A, box_dim}, anchors, "anchors", &ws);
 
   def.add_arg()->CopyFrom(MakeArgument("spatial_scale", 1.0f / 16.0f));
   def.add_arg()->CopyFrom(MakeArgument("pre_nms_topN", 6000));
@@ -610,17 +706,22 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   EXPECT_NE(nullptr, op.get());
   EXPECT_TRUE(op->Run());
 
-  // Verify that the resulting angles are correct
   Blob* rois_blob = ws.GetBlob("rois");
   EXPECT_NE(nullptr, rois_blob);
   auto& rois = rois_blob->Get<TensorCPU>();
-  EXPECT_GT(rois.size(0), 0);
+  EXPECT_EQ(rois.sizes(), (vector<int64_t>{13, 6}));
+
+  Blob* rois_probs_blob = ws.GetBlob("rois_probs");
+  EXPECT_NE(nullptr, rois_probs_blob);
+  auto& rois_probs = rois_probs_blob->Get<TensorCPU>();
+  EXPECT_EQ(rois_probs.sizes(), (vector<int64_t>{13}));
+
+  // Verify that the resulting angles are correct
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.size(0), rois.size(1));
   for (int i = 0; i < rois.size(0); ++i) {
     EXPECT_LE(std::abs(rois_data(i, 5) - expected_angle), 1e-4);
   }
 }
-#endif // CV_MAJOR_VERSION >= 3
 
 } // namespace caffe2

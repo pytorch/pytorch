@@ -1,11 +1,32 @@
 # ---[ cuda
 
+# Poor man's include guard
+if(TARGET caffe2::cudart)
+  return()
+endif()
+
 # sccache is only supported in CMake master and not in the newest official
 # release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
 
+# We don't want to statically link cudart, because we rely on it's dynamic linkage in
+# python (follow along torch/cuda/__init__.py and usage of cudaGetErrorName).
+# Technically, we can link cudart here statically, and link libtorch_python.so
+# to a dynamic libcudart.so, but that's just wasteful.
+# However, on Windows, if this one gets switched off, the error "cuda: unknown error"
+# will be raised when running the following code:
+# >>> import torch
+# >>> torch.cuda.is_available()
+# >>> torch.cuda.current_device()
+# More details can be found in the following links.
+# https://github.com/pytorch/pytorch/issues/20635
+# https://github.com/pytorch/pytorch/issues/17108
+if (NOT MSVC)
+  set(CUDA_USE_STATIC_CUDA_RUNTIME OFF CACHE INTERNAL "")
+endif()
+
 # Find CUDA.
-find_package(CUDA 7.0)
+find_package(CUDA)
 if(NOT CUDA_FOUND)
   message(WARNING
     "Caffe2: CUDA cannot be found. Depending on whether you are building "
@@ -17,12 +38,23 @@ endif()
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
+if(CUDA_VERSION VERSION_LESS 9.0)
+  message(FATAL_ERROR "PyTorch requires CUDA 9.0 and above.")
+endif()
 
 if(CUDA_FOUND)
   # Sometimes, we may mismatch nvcc with the CUDA headers we are
   # compiling with, e.g., if a ccache nvcc is fed to us by CUDA_NVCC_EXECUTABLE
   # but the PATH is not consistent with CUDA_HOME.  It's better safe
   # than sorry: make sure everything is consistent.
+  if(MSVC AND CMAKE_GENERATOR MATCHES "Visual Studio")
+    # When using Visual Studio, it attempts to lock the whole binary dir when
+    # `try_run` is called, which will cause the build to fail.
+    string(RANDOM BUILD_SUFFIX)
+    set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}/${BUILD_SUFFIX}")
+  else()
+    set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
+  endif()
   set(file "${PROJECT_BINARY_DIR}/detect_cuda_version.cc")
   file(WRITE ${file} ""
     "#include <cuda.h>\n"
@@ -32,7 +64,7 @@ if(CUDA_FOUND)
     "  return 0;\n"
     "}\n"
     )
-  try_run(run_result compile_result ${PROJECT_BINARY_DIR} ${file}
+  try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
     CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
     LINK_LIBRARIES ${CUDA_LIBRARIES}
     RUN_OUTPUT_VARIABLE cuda_version_from_header
@@ -42,11 +74,11 @@ if(CUDA_FOUND)
     message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
   endif()
   message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
-  if(NOT ${cuda_version_from_header} STREQUAL ${CUDA_VERSION})
+  if(NOT ${cuda_version_from_header} STREQUAL ${CUDA_VERSION_STRING})
     # Force CUDA to be processed for again next time
     # TODO: I'm not sure if this counts as an implementation detail of
     # FindCUDA
-    set(${cuda_version_from_findcuda} ${CUDA_VERSION})
+    set(${cuda_version_from_findcuda} ${CUDA_VERSION_STRING})
     unset(CUDA_TOOLKIT_ROOT_DIR_INTERNAL CACHE)
     # Not strictly necessary, but for good luck.
     unset(CUDA_VERSION CACHE)
@@ -84,6 +116,9 @@ endif()
 
 if(DEFINED ENV{CUDNN_LIBRARY})
   set(CUDNN_LIBRARY $ENV{CUDNN_LIBRARY})
+  if (CUDNN_LIBRARY MATCHES ".*cudnn_static.a")
+    SET(CUDNN_STATIC_LINKAGE ON)
+  endif()
 else()
   find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
     HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
@@ -141,6 +176,9 @@ if(CAFFE2_USE_CUDNN)
         "${CUDNN_VERSION_MAJOR}.${CUDNN_VERSION_MINOR}.${CUDNN_VERSION_PATCH}")
   endif()
   message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_DIR}, library: ${CUDNN_LIBRARY})")
+  if(CUDNN_VERSION VERSION_LESS "7.0.0")
+    message(FATAL_ERROR "PyTorch requires cuDNN 7 and above.")
+  endif()
 endif()
 
 # ---[ CUDA libraries wrapper
@@ -178,7 +216,7 @@ add_library(caffe2::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt)
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt dl)
 else()
     set_property(
         TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
@@ -282,17 +320,6 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
   endif()
 endif()
 
-if (${CUDA_VERSION} LESS 8.0) # CUDA 7.x
-  list(APPEND CUDA_NVCC_FLAGS "-D_MWAITXINTRIN_H_INCLUDED")
-  list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")
-elseif (${CUDA_VERSION} LESS 9.0) # CUDA 8.x
-  list(APPEND CUDA_NVCC_FLAGS "-D_MWAITXINTRIN_H_INCLUDED")
-  list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")
-  # CUDA 8 may complain that sm_20 is no longer supported. Suppress the
-  # warning for now.
-  list(APPEND CUDA_NVCC_FLAGS "-Wno-deprecated-gpu-targets")
-endif()
-
 # Add onnx namepsace definition to nvcc
 if (ONNX_NAMESPACE)
   list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=${ONNX_NAMESPACE}")
@@ -312,19 +339,51 @@ if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
       CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
     message(FATAL_ERROR
       "CUDA ${CUDA_VERSION} is not compatible with std::tuple from GCC version "
-      ">= 6. Please upgrade to CUDA 9.2 or use the following option to use "
-      "another version (for example): \n"
-      "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-5\n")
+      ">= 6. Please upgrade to CUDA 9.2 or set the following environment "
+      "variable to use another version (for example): \n"
+      "  export CUDAHOSTCXX='/usr/bin/gcc-5'\n")
   endif()
-elseif (CUDA_VERSION VERSION_EQUAL 8.0)
-  # CUDA 8.0 requires GCC version <= 5
-  if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
-      NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 6.0 AND
-      CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
+endif()
+
+# CUDA 9.0 / 9.1 require MSVC version < 19.12
+# CUDA 9.2 require MSVC version < 19.13
+# CUDA 10.0 require MSVC version < 19.20
+if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
+    (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 9.2))
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
+      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.12 AND
+      NOT DEFINED ENV{CUDAHOSTCXX})
+        message(FATAL_ERROR
+          "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
+          ">= 19.12. (a.k.a Visual Studio 2017 Update 5, VS 15.5) "
+          "Please upgrade to CUDA >= 9.2 or set the following environment "
+          "variable to use another version (for example): \n"
+          "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
+          "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.11.25503\\bin\\HostX64\\x64\\cl.exe\"\n")
+  endif()
+elseif(CUDA_VERSION VERSION_EQUAL   9.2)
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
+      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.13 AND
+      NOT DEFINED ENV{CUDAHOSTCXX})
     message(FATAL_ERROR
-      "CUDA 8.0 is not compatible with GCC version >= 6. "
-      "Use the following option to use another version (for example): \n"
-      "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-5\n")
+      "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
+      ">= 19.13. (a.k.a Visual Studio 2017 Update 7, VS 15.7) "
+      "Please upgrade to CUDA >= 10.0 or set the following environment "
+      "variable to use another version (for example): \n"
+      "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
+      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.12.25827\\bin\\HostX64\\x64\\cl.exe\"\n")
+  endif()
+elseif(CUDA_VERSION VERSION_EQUAL   10.0)
+  if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
+      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.20 AND
+      NOT DEFINED ENV{CUDAHOSTCXX})
+    message(FATAL_ERROR
+      "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
+      ">= 19.20. (a.k.a Visual Studio 2019, VS 16.0) "
+      "Please upgrade to CUDA >= 10.1 or set the following environment "
+      "variable to use another version (for example): \n"
+      "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
+      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.16.27023\\bin\\HostX64\\x64\\cl.exe\"\n")
   endif()
 endif()
 
@@ -342,25 +401,15 @@ endforeach()
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if (NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()
 
 # Debug and Release symbol support
 if (MSVC)
-  if ((${CMAKE_BUILD_TYPE} MATCHES "Release") OR (${CMAKE_BUILD_TYPE} MATCHES "RelWithDebInfo") OR (${CMAKE_BUILD_TYPE} MATCHES "MinSizeRel"))
-    if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-      list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MT")
-    else()
-      list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MD")
-    endif()
-  elseif(${CMAKE_BUILD_TYPE} MATCHES "Debug")
-    if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-      list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MTd")
-    else()
-      list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MDd")
-    endif()
+  if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MT$<$<CONFIG:Debug>:d>")
   else()
-    message(FATAL_ERROR "Unknown cmake build type: " ${CMAKE_BUILD_TYPE})
+    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MD$<$<CONFIG:Debug>:d>")
   endif()
 elseif (CUDA_DEVICE_DEBUG)
   list(APPEND CUDA_NVCC_FLAGS "-g" "-G")  # -G enables device code debugging symbols

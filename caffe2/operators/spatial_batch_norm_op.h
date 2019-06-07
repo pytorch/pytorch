@@ -19,8 +19,9 @@ class SpatialBNOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  SpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SpatialBNOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, OpSchema::Arg_IsTest, is_test_, false),
         OP_SINGLE_ARG(double, "epsilon", epsilon_, 1e-5),
         OP_SINGLE_ARG(float, "momentum", momentum_, 0.9f),
@@ -49,7 +50,6 @@ class SpatialBNOp : public Operator<Context> {
     const auto& X = Input(INPUT);
     const auto& scale = Input(SCALE);
     const auto& bias = Input(BIAS);
-    auto* Y = Output(OUTPUT);
 
     const int ndim = X.dim();
     CAFFE_ENFORCE_GE(ndim, 3);
@@ -64,13 +64,15 @@ class SpatialBNOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(scale.numel(), C);
     CAFFE_ENFORCE_EQ(bias.numel(), C);
 
-    Y->ResizeLike(X);
+    auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
     const T* X_data = X.template data<T>();
     const T* scale_data = scale.template data<T>();
     const T* bias_data = bias.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
-    alpha_.Resize(C);
-    beta_.Resize(C);
+    ReinitializeTensor(
+        &alpha_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &beta_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
     T* alpha_data = alpha_.template mutable_data<T>();
     T* beta_data = beta_.template mutable_data<T>();
     if (is_test_) {
@@ -90,35 +92,42 @@ class SpatialBNOp : public Operator<Context> {
           alpha_data,
           beta_data);
     } else {
-      auto* saved_mean = Output(SAVED_MEAN);
-      auto* saved_rstd = Output(SAVED_INV_STD);
-      if (num_batches_ == 1) {
-        saved_mean->Resize(C);
-        saved_rstd->Resize(C);
-      } else {
-        const auto& batch_mean_sum = Input(BATCH_MEAN_SUM);
-        const auto& batch_var_sum = Input(BATCH_VAR_SUM);
-        if (saved_mean != &batch_mean_sum) {
-          saved_mean->Resize(C);
-        }
-        if (saved_rstd != &batch_var_sum) {
-          saved_rstd->Resize(C);
-        }
-      }
+      auto* saved_mean = Output(SAVED_MEAN, {C}, at::dtype<T>());
+      auto* saved_rstd = Output(SAVED_INV_STD, {C}, at::dtype<T>());
       T* saved_mean_data = saved_mean->template mutable_data<T>();
       T* saved_rstd_data = saved_rstd->template mutable_data<T>();
-      auto* running_mean = Output(RUNNING_MEAN);
-      auto* running_var = Output(RUNNING_VAR);
-      if (running_mean->numel() != C) {
-        running_mean->Resize(C);
+
+      // Enforce Alias
+      CAFFE_ENFORCE(
+          IsInputOutputAlias(3, 1), "Input 3 and Output 1 should be alias.");
+      CAFFE_ENFORCE(
+          IsInputOutputAlias(4, 2), "Input 4 and Output 2 should be alias.");
+
+      Tensor* running_mean = nullptr;
+      Tensor* running_var = nullptr;
+      const auto& mean = Input(EST_MEAN);
+      const auto& var = Input(EST_VAR);
+      if (mean.numel() != C) {
+        running_mean = Output(RUNNING_MEAN, {C}, at::dtype<T>());
+        C10_LOG_EVERY_MS(WARNING, 1000)
+            << "[Depreacated] Running mean is not initialized in "
+               "SpatialBatchNorm Op";
         math::Set<T, Context>(
             C, T(0), running_mean->template mutable_data<T>(), &context_);
+      } else {
+        running_mean = Output(RUNNING_MEAN, {C}, at::dtype<T>());
       }
-      if (running_var->numel() != C) {
-        running_var->Resize(C);
+      if (var.numel() != C) {
+        running_var = Output(RUNNING_VAR, {C}, at::dtype<T>());
         math::Set<T, Context>(
             C, T(0), running_var->template mutable_data<T>(), &context_);
+        C10_LOG_EVERY_MS(WARNING, 1000)
+            << "[Deprecated] Running variance is not initialized in "
+               "SpatialBatchNorm Op";
+      } else {
+        running_var = Output(RUNNING_VAR, {C}, at::dtype<T>());
       }
+
       T* running_mean_data = running_mean->template mutable_data<T>();
       T* running_var_data = running_var->template mutable_data<T>();
       if (N == 0) {
@@ -141,25 +150,23 @@ class SpatialBNOp : public Operator<Context> {
             saved_rstd_data);
       } else {
         if (order_ == StorageOrder::NCHW) {
-          const std::array<int, 3> dims = {N, C, HxW};
-          const std::array<int, 3> axes = {0, 2};
+          const std::array<int, 3> X_dims_arr = {N, C, HxW};
+          const std::array<int, 3> Y_dims_arr = {1, C, 1};
           math::Moments<T, Context>(
               3,
-              dims.data(),
-              2,
-              axes.data(),
+              X_dims_arr.data(),
+              Y_dims_arr.data(),
               X_data,
               saved_mean_data,
               saved_rstd_data,
               &context_);
         } else {
-          const std::array<int, 2> dims = {N * HxW, C};
-          const int axis = 0;
+          const std::array<int, 2> X_dims_arr = {N * HxW, C};
+          const std::array<int, 2> Y_dims_arr = {1, C};
           math::Moments<T, Context>(
               2,
-              dims.data(),
-              1,
-              &axis,
+              X_dims_arr.data(),
+              Y_dims_arr.data(),
               X_data,
               saved_mean_data,
               saved_rstd_data,
@@ -256,8 +263,8 @@ class SpatialBNOp : public Operator<Context> {
   const StorageOrder order_;
   const int num_batches_;
 
-  Tensor alpha_{Context::GetDeviceType()};
-  Tensor beta_{Context::GetDeviceType()};
+  Tensor alpha_;
+  Tensor beta_;
 
   INPUT_TAGS(
       INPUT,
@@ -275,8 +282,9 @@ class SpatialBNGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  SpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SpatialBNGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(double, "epsilon", epsilon_, 1e-5),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
@@ -315,23 +323,23 @@ class SpatialBNGradientOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(scale.numel(), C);
     CAFFE_ENFORCE_EQ(mean.numel(), C);
     CAFFE_ENFORCE_EQ(rstd.numel(), C);
-    auto* dX = Output(INPUT_GRAD);
-    auto* dscale = Output(SCALE_GRAD);
-    auto* dbias = Output(BIAS_GRAD);
-    dX->ResizeLike(X);
+
+    auto* dX = Output(INPUT_GRAD, X.sizes(), at::dtype<T>());
+    at::IntArrayRef dscale_sizes, dbias_sizes;
     if (num_batches_ == 1) {
-      dscale->ResizeLike(scale);
-      dbias->ResizeLike(scale);
+      dscale_sizes = scale.sizes();
+      dbias_sizes = scale.sizes();
     } else {
       const auto& dscale_sum = Input(AGGREGATE_SCALE_GRAD);
       const auto& dbias_sum = Input(AGGREGATE_BIAS_GRAD);
-      if (dscale != &dscale_sum) {
-        dscale->ResizeLike(dscale_sum);
-      }
-      if (dbias != &dbias_sum) {
-        dbias->ResizeLike(dbias_sum);
-      }
+      // Note: previously there was alias check to decide whether to call
+      // ResizeLike or not, since we only call Resize when the size does not
+      // match the size of cached Tensor, this check is not necessary
+      dscale_sizes = dscale_sum.sizes();
+      dbias_sizes = dbias_sum.sizes();
     }
+    auto* dscale = Output(SCALE_GRAD, dscale_sizes, at::dtype<T>());
+    auto* dbias = Output(BIAS_GRAD, dbias_sizes, at::dtype<T>());
     const T* X_data = X.template data<T>();
     const T* dY_data = dY.template data<T>();
     const T* scale_data = scale.template data<T>();
@@ -346,9 +354,12 @@ class SpatialBNGradientOp : public Operator<Context> {
       math::Set<T, Context>(C, T(0), dbias_data, &context_);
       return true;
     }
-    alpha_.Resize(C);
-    beta_.Resize(C);
-    gamma_.Resize(C);
+    ReinitializeTensor(
+        &alpha_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &beta_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
+    ReinitializeTensor(
+        &gamma_, {C}, at::dtype<T>().device(Context::GetDeviceType()));
     T* alpha_data = alpha_.template mutable_data<T>();
     T* beta_data = beta_.template mutable_data<T>();
     T* gamma_data = gamma_.template mutable_data<T>();
@@ -383,7 +394,8 @@ class SpatialBNGradientOp : public Operator<Context> {
           dbias_data,
           alpha_data,
           beta_data,
-          gamma_data);
+          gamma_data,
+          dX_data);
     }
     ComputeXGradient<T>(
         N, C, HxW, dY_data, X_data, alpha_data, beta_data, gamma_data, dX_data);
@@ -422,7 +434,8 @@ class SpatialBNGradientOp : public Operator<Context> {
       T* dbias,
       T* alpha,
       T* beta,
-      T* gamma);
+      T* gamma,
+      T* scratch);
 
   template <typename T>
   void ComputeXGradient(
@@ -440,9 +453,10 @@ class SpatialBNGradientOp : public Operator<Context> {
   const StorageOrder order_;
   const int num_batches_;
 
-  Tensor alpha_{Context::GetDeviceType()};
-  Tensor beta_{Context::GetDeviceType()};
-  Tensor gamma_{Context::GetDeviceType()};
+  Tensor alpha_;
+  Tensor beta_;
+  Tensor gamma_;
+  Tensor ones_;
 
   INPUT_TAGS(
       INPUT,

@@ -1,5 +1,5 @@
-#ifndef CAFFE2_OPERATORS_REDUCE_OPS_H_
-#define CAFFE2_OPERATORS_REDUCE_OPS_H_
+#ifndef CAFFE2_OPERATORS_EXPAND_OP_H_
+#define CAFFE2_OPERATORS_EXPAND_OP_H_
 
 #include <vector>
 
@@ -15,8 +15,9 @@ class ExpandOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  ExpandOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit ExpandOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
@@ -30,7 +31,6 @@ class ExpandOp final : public Operator<Context> {
         Y_shape_tensor.numel(),
         Y_shape_tensor.template data<int64_t>(),
         shape_dims.data());
-    auto* Y = Output(0);
 
     const int ndim = shape_dims.size();
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
@@ -49,7 +49,10 @@ class ExpandOp final : public Operator<Context> {
       Y_dims.push_back(std::max(shape_x, shape_y));
     }
     std::reverse(Y_dims.begin(), Y_dims.end());
-    Y->Resize(Y_dims);
+    // TODO: remove when the function in math are changed to use vector<int64_t>
+    std::vector<int64_t> Y_dims_int64;
+    std::copy(Y_dims.begin(), Y_dims.end(), std::back_inserter(Y_dims_int64));
+    auto* Y = Output(0, Y_dims_int64, at::dtype<T>());
     math::Broadcast<T, Context>(
         X_dims.size(),
         X_dims.data(),
@@ -69,8 +72,9 @@ class ExpandGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  ExpandGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit ExpandGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
@@ -80,11 +84,11 @@ class ExpandGradientOp final : public Operator<Context> {
   bool DoRunWithType() {
     const auto& dY = Input(0);
     const auto& X = Input(1);
-    auto* dX = Output(0);
+
     const int ndim = dY.dim();
     const std::vector<int> dX_dims(X.sizes().cbegin(), X.sizes().cend());
     const std::vector<int> dY_dims(dY.sizes().cbegin(), dY.sizes().cend());
-    dX->ResizeLike(X);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
     std::vector<int> axes;
     const int offset = ndim - X.dim();
     for (int i = 0; i < ndim; i++) {
@@ -92,11 +96,14 @@ class ExpandGradientOp final : public Operator<Context> {
         axes.push_back(i);
       }
     }
+    std::vector<int> X_dims = dY_dims;
+    for (const int axis : axes) {
+      X_dims[axis] = 1;
+    }
     math::ReduceSum<T, Context>(
         dY_dims.size(),
         dY_dims.data(),
-        axes.size(),
-        axes.data(),
+        X_dims.data(),
         T(1),
         dY.template data<T>(),
         dX->template mutable_data<T>(),

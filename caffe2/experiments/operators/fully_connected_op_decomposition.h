@@ -43,7 +43,7 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
     const auto& U = Input(1);
     const auto& V = Input(2);
     const auto& b = Input(3);
-    auto* Y = Output(0);
+
     //auto* buffer_ptr = Output(1);
     // Size M * middle;
     //auto& multi_buffer_ = *buffer_ptr;
@@ -64,15 +64,17 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
     int middle = U.dim32(0);
     CAFFE_ENFORCE_EQ(K, V.dim32(0));
     CAFFE_ENFORCE_EQ(N, b.dim32(0));
+    std::vector<int64_t> dims;
     if (X.dim() > 1) {
-      Y->Resize(M, N);
+      dims = {M, N};
       multi_buffer_.Resize(M, middle);
     } else {
-      Y->Resize(N);
+      dims = {N};
       multi_buffer_.Resize(middle);
     }
-  // The col buffer is stored in CHW order as well - kernel_dim, and the height
-  // and width.
+    auto* Y = Output(0, dims, at::dtype<T>());
+    // The col buffer is stored in CHW order as well - kernel_dim, and the
+    // height and width.
     //  multi_buffer_.Resize(M, middle);
     T* multi_buffer_data = multi_buffer_.template mutable_data<T>();
     //  X * V * tans(U)
@@ -136,12 +138,10 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
       DCHECK_EQ(X.dim(), 1);
       DCHECK_EQ(N, dY.numel());
     }
-    auto* dU = Output(0);
-    auto* dV = Output(1);
-    auto* db = Output(2);
-    dU->ResizeLike(U);
-    dV->ResizeLike(V);
-    db->Resize(N);
+
+    auto* dU = Output(0, U.sizes(), at::dtype<T>());
+    auto* dV = Output(1, V.sizes(), at::dtype<T>());
+    auto* db = Output(2, {N}, at::dtype<T>());
 
     // Compute dU
     // first compute X * V
@@ -187,8 +187,7 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
         &context_);
     // Compute dX if necessary.
     if (OutputSize() == 4) {
-      auto* dX = Output(3);
-      dX->ResizeLike(X);
+      auto* dX = Output(3, X.sizes(), at::dtype<T>());
       dx_buffer_.Resize(M, middle);
       T* dx_buffer_data = dx_buffer_.template mutable_data<T>();
       math::Gemm<T, Context, Engine>(

@@ -7,7 +7,6 @@ bool ElementwiseLinearOp<float, CPUContext>::RunOnDevice(){
   const auto& X = Input(0);
   const auto& a = Input(1);
   const auto& b = Input(2);
-  auto* Y = Output(0);
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
   const int N = X.size_to_dim(canonical_axis);
@@ -18,7 +17,7 @@ bool ElementwiseLinearOp<float, CPUContext>::RunOnDevice(){
   CAFFE_ENFORCE_EQ(b.dim(), 1, b.dim());
   CAFFE_ENFORCE_EQ(b.size(0), D, b.dim());
 
-  Y->ResizeLike(X);
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
   const float* X_data = X.data<float>();
   const float* a_data = a.data<float>();
@@ -48,12 +47,9 @@ bool ElementwiseLinearGradientOp<float, CPUContext>::RunOnDevice(){
   CAFFE_ENFORCE_EQ(a.dim(), 1, a.dim());
   CAFFE_ENFORCE_EQ(a.size(0), D, a.dim());
 
-  auto* g_X = Output(0);
-  auto *g_a = Output(1);
-  auto *g_b = Output(2);
-  g_X->ResizeLike(X);
-  g_a->ResizeLike(a);
-  g_b->ResizeLike(a);
+  auto* g_X = Output(0, X.sizes(), at::dtype<float>());
+  auto* g_a = Output(1, a.sizes(), at::dtype<float>());
+  auto* g_b = Output(2, a.sizes(), at::dtype<float>());
 
   const float* g_o_data = g_o.data<float>();
   const float* X_data = X.data<float>();
@@ -158,11 +154,26 @@ Y:
 </details>
 
   )DOC")
-    .Input(0, "X", "2D input tensor of size $NxD$. This input represents the input data to be operated on.")
-    .Input(1, "w", "1D scaling factors, or weights, of size $D$. This input contains the weights that will be multiplied by the data.")
-    .Input(2, "b", "1D biases of size $D$. This input contains the biases that will be added to the products of the weights and data.")
-    .Output(0, "Y", "2D output tensor of size $NxD$. Calculated as described above.")
-    .Arg("axis", "*(type: int; default: 1)* Describes the axis of the inputs; defaults to one because the 0th axis most likely describes the batch size.");
+    .Input(
+        0,
+        "X",
+        "2D input tensor of size $NxD$. This input represents the input data to be operated on.")
+    .Input(
+        1,
+        "w",
+        "1D scaling factors, or weights, of size $D$. This input contains the weights that will be multiplied by the data.")
+    .Input(
+        2,
+        "b",
+        "1D biases of size $D$. This input contains the biases that will be added to the products of the weights and data.")
+    .Output(
+        0,
+        "Y",
+        "2D output tensor of size $NxD$. Calculated as described above.")
+    .Arg(
+        "axis",
+        "*(type: int; default: 1)* Describes the axis of the inputs; defaults to one because the 0th axis most likely describes the batch size.")
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(ElementwiseLinearGradient)
   .NumInputs(3)

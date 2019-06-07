@@ -16,15 +16,18 @@ class FC(SamplingTrainableMixin, ModelLayer):
 
     def __init__(self, model, input_record, output_dims, weight_init=None,
                  bias_init=None, weight_optim=None, bias_optim=None, name='fc',
-                 weight_reg=None, bias_reg=None, clip_param=None, max_fc_size=None,
+                 weight_reg=None, bias_reg=None, clip_param=None,
+                 max_fc_size=None, axis=1,
                  **kwargs):
         super(FC, self).__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Scalar), (
             "Incorrect input type {}".format(input_record))
         assert len(input_record.field_types()[0].shape) > 0, (
             "FC expects limited dimensions of the input tensor")
+        assert axis >= 1, "axis {} should >= 1.".format(axis)
+        self.axis = axis
+        input_dims = np.prod(input_record.field_types()[0].shape[axis - 1:])
 
-        input_dims = input_record.field_types()[0].shape[0]
         assert input_dims > 0, (
             "FC expects input dimensions > 0, got {}".format(input_dims))
 
@@ -86,9 +89,14 @@ class FC(SamplingTrainableMixin, ModelLayer):
                                              initializer=weight_init,
                                              optimizer=weight_optim,
                                              regularizer=weight_reg))
+        if axis == 1:
+            output_shape = (output_dims, )
+        else:
+            output_shape = list(input_record.field_types()[0].shape)[0: axis - 1]
+            output_shape = tuple(output_shape + [output_dims])
 
         self.output_schema = schema.Scalar(
-            (np.float32, (output_dims, )),
+            (np.float32, output_shape),
             self.get_next_blob_reference('output')
         )
 
@@ -122,7 +130,7 @@ class FC(SamplingTrainableMixin, ModelLayer):
 
         if self.output_dim_vec is None or len(self.output_dim_vec) == 1:
             net.FC(self.input_record.field_blobs() + params,
-                   self.output_schema.field_blobs(), **self.kwargs)
+                   self.output_schema.field_blobs(), axis=self.axis, **self.kwargs)
         else:
             w_vec = params[:int(len(params) / 2)]
             b_vec = params[int(len(params) / 2):]
@@ -137,7 +145,7 @@ class FC(SamplingTrainableMixin, ModelLayer):
                 output_blob_vec.append(
                     net.FC(self.input_record.field_blobs() +
                            [w_vec[i], b_vec[i]],
-                           [output_blob], **self.kwargs))
+                           [output_blob], axis=self.axis, **self.kwargs))
 
             net.Concat(output_blob_vec,
                        self.output_schema.field_blobs() +

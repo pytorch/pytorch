@@ -2,13 +2,10 @@
 #include "c10/util/StringUtil.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/net_async_scheduling.h"
-#include "caffe2/core/net_dag.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
 
 #include <google/protobuf/text_format.h>
-
-C10_DECLARE_bool(caffe2_disable_chaining);
 
 namespace caffe2 {
 
@@ -151,10 +148,6 @@ void checkChainingAndRun(
       TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
-    auto old = FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
-    FLAGS_caffe2_disable_chaining = false;
-
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
     CHECK_NOTNULL(dag);
@@ -178,10 +171,6 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   }
 
   {
-    auto old = FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
-    FLAGS_caffe2_disable_chaining = false;
-
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
     CHECK_NOTNULL(dag);
@@ -573,10 +562,6 @@ TEST(NetTest, DISABLED_FailingOperator) {
 
   {
     net_def.set_num_workers(4);
-    auto old = FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
-    FLAGS_caffe2_disable_chaining = false;
-
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     for (int i = 0; i < 10; i++) {
       counter.exchange(0);
@@ -859,7 +844,7 @@ class AsyncErrorOp final : public Operator<CPUContext> {
     return true;
   }
 
-  ~AsyncErrorOp() {
+  ~AsyncErrorOp() override {
     if (thread_) {
       thread_->join();
     }
@@ -1004,7 +989,7 @@ class SyncErrorOp final : public Operator<CPUContext> {
     }
   }
 
-  ~SyncErrorOp() {}
+  ~SyncErrorOp() override {}
 
  private:
   bool fail_;
@@ -1056,6 +1041,64 @@ TEST(NetTest, ChainErrorTest) {
 
   net = ChainErrorNet(&ws, "net2", /*throw_*/ false);
   ASSERT_FALSE(net->Run());
+}
+
+void testProfDAGNetErrorCase(bool test_error) {
+  std::string spec_template = R"DOC(
+        name: "prof_dag_error_test_net"
+        type: "prof_dag"
+        external_input: "in"
+        op {
+          input: "in"
+          output: "hidden"
+          type: "SyncErrorOp"
+          arg {
+            name: "fail"
+            i: <FAIL>
+          }
+          arg {
+            name: "throw"
+            i: 0
+          }
+        }
+        op {
+          input: "hidden"
+          output: "out"
+          type: "SyncErrorOp"
+          arg {
+            name: "fail"
+            i: 0
+          }
+        }
+  )DOC";
+
+  Workspace ws;
+  ws.CreateBlob("in");
+
+  NetDef net_def;
+  std::string net_spec = spec_template;
+  ReplaceAll(net_spec, "<FAIL>", test_error ? "1" : "0");
+  CAFFE_ENFORCE(TextFormat::ParseFromString(net_spec, &net_def));
+  auto net = CreateNet(net_def, &ws);
+
+  // with failing op - net runs return false, without - true
+  for (auto num_runs = 0; num_runs < 10; ++num_runs) {
+    auto ret = net->Run();
+    ASSERT_TRUE(test_error ? !ret : ret);
+  }
+
+  // with failing op - prof_dag handles invalid runs and returns empty stats,
+  // without - returns stats for each op
+  auto* prof_dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
+  CHECK_NOTNULL(prof_dag);
+  auto stats_proto = prof_dag->GetPerOperatorCost();
+  ASSERT_EQ(
+      stats_proto.stats_size(), test_error ? 0 : net->GetOperators().size());
+}
+
+TEST(NetTest, ProfDAGNetErrorTest) {
+  testProfDAGNetErrorCase(/*test_error=*/false);
+  testProfDAGNetErrorCase(/*test_error=*/true);
 }
 
 } // namespace caffe2
