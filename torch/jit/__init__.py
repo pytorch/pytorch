@@ -6,7 +6,7 @@ from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
-from torch._six import PY2, PY37, with_metaclass, get_function_from_type, \
+from torch._six import PY37, with_metaclass, get_function_from_type, \
     string_classes, builtins
 from torch._jit_internal import ignore, export  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
@@ -1918,49 +1918,6 @@ def _get_builtin_table():
         (_unwrap_optional, "aten::_unwrap_optional"),
         (_wait, 'aten::wait'),
         (cudnn.is_acceptable, "aten::cudnn_is_acceptable"),
-        (math.ceil, "aten::ceil"),
-        (math.copysign, "aten::copysign"),
-        (math.erf, "aten::erf"),
-        (math.erfc, "aten::erfc"),
-        (math.exp, "aten::exp"),
-        (math.expm1, "aten::expm1"),
-        (math.fabs, "aten::fabs"),
-        (math.floor, "aten::floor"),
-        (math.gamma, "aten::gamma"),
-        (math.lgamma, "aten::lgamma"),
-        (math.log, "aten::log"),
-        (math.log10, "aten::log10"),
-        (math.log1p, "aten::log1p"),
-        (math.pow, "aten::pow"),
-        (math.sqrt, "aten::sqrt"),
-        (math.isnan, "aten::isnan"),
-        (math.asinh, "aten::asinh"),
-        (math.atanh, "aten::atanh"),
-        (math.cosh, "aten::cosh"),
-        (math.sinh, "aten::sinh"),
-        (math.tanh, "aten::tanh"),
-        (math.acos, "aten::acos"),
-        (math.asin, "aten::asin"),
-        (math.atan, "aten::atan"),
-        (math.atan2, "aten::atan2"),
-        (math.cos, "aten::cos"),
-        (math.sin, "aten::sin"),
-        (math.tan, "aten::tan"),
-        (math.asinh, "aten::asinh"),
-        (math.atanh, "aten::atanh"),
-        (math.acosh, "aten::acosh"),
-        (math.sinh, "aten::sinh"),
-        (math.cosh, "aten::cosh"),
-        (math.tanh, "aten::tanh"),
-        (math.fmod, "aten::fmod"),
-        (math.modf, "aten::modf"),
-        (math.factorial, "aten::factorial"),
-        (math.frexp, "aten::frexp"),
-        (math.isnan, "aten::isnan"),
-        (math.isinf, "aten::isinf"),
-        (math.degrees, "aten::degrees"),
-        (math.radians, "aten::radians"),
-        (math.ldexp, "aten::ldexp"),
         (torch._C._infer_size, "aten::_infer_size"),
         (torch.nn.functional._no_grad_embedding_renorm_, "aten::_no_grad_embedding_renorm_"),
         (torch.nn.functional.assert_int_or_pair, "aten::_assert_int_or_pair"),
@@ -1978,9 +1935,14 @@ def _get_builtin_table():
 
     for builtin, aten_op in builtin_ops:
         _builtin_table[id(builtin)] = aten_op
-    if not PY2:
-        _builtin_table[id(math.gcd)] = "aten::gcd"
-        _builtin_table[id(math.isfinite)] = "aten::isfinite"
+    math_ops = [x for x in dir(math) if callable(getattr(math, x))]
+    unimplemented_math_ops = ["fsum", "hypot", "isclose", "log2", "trunc"]
+    special_math_ops = ["remainder"]    # We bound this to aten::mathremainder, as there already exists
+                                        # aten::remainder used for other purposes
+    for op in math_ops:
+        if op in unimplemented_math_ops + special_math_ops:
+            continue
+        _builtin_table[id(getattr(math, op))] = "aten::" + op
     if PY37:
         _builtin_table[id(math.remainder)] = "aten::mathremainder"
 
