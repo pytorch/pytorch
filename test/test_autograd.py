@@ -3143,7 +3143,7 @@ for shape in [(1,), ()]:
     v = torch.ones(shape, requires_grad=True)
     MyFunction.apply(v).backward()
 """
-        s = self._run_and_capture_stderr(code);
+        s = self._run_and_capture_stderr(code)
         self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
 def index_variable(shape, max_indices):
