@@ -16,7 +16,7 @@ CONFIG_TREE_DATA = [
             ("5.4", [
                 XImportant("3.6"),
                 ("3.6", [
-                    ("xla", [X(True)]),
+                    ("xla", [XImportant(True)]),
                     ("namedtensor", [X(True)]),
                 ]),
             ]),
@@ -147,6 +147,9 @@ class XlaConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["is_xla"] = node_name
 
+    def child_constructor(self):
+        return ImportantConfigNode
+
 
 class NamedTensorConfigNode(TreeConfigNode):
     def modify_label(self, label):
@@ -162,6 +165,9 @@ class ImportantConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_important"] = node_name
+
+    def get_children(self):
+        return []
 
 
 class XenialCompilerConfigNode(TreeConfigNode):
