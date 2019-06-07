@@ -3247,7 +3247,7 @@
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_geometric_
+    CPU: geometirc_cpu_
     CUDA: geometric_cuda_
 
 # wrappers for TH functions

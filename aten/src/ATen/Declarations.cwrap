@@ -2741,20 +2741,7 @@
     - arg: double lambd
       default: 1
 ]]
-[[
-  name: _th_geometric_
-  backends:
-    - CPU
-  cname: geometric
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
-    - double p
-]]
+
 
 # In theory, this could be a part of the above declaration. But in
 # practice this leads to all sorts of problems with ambiguous overloads.
