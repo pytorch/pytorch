@@ -6138,32 +6138,38 @@ a")
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
                     self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
-
-        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
-                           "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
-                           "asinh", "atanh", "acosh", "sinh", "cosh", "tanh", "degrees", "radians"]
-        binary_float_ops = ["atan2", "fmod", "copysign"]
-        for op in unary_float_ops:
-            checkMathWrap(op, 1)
-        for op in binary_float_ops:
-            checkMathWrap(op, 2)
-
-        checkMath("modf", 1, ret_type="Tuple[float, float]")
-        checkMath("frexp", 1, ret_type="Tuple[float, int]")
-        checkMath("isnan", 1, ret_type="bool")
-        checkMath("isinf", 1, ret_type="bool")
-        checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
-                  vals=[(i, j) for i in float_vals for j in range(-10, 10)])
-        checkMath("pow", 2, is_float=False, ret_type="int")
-        checkMath("pow", 2, is_float=True, ret_type="float")
-        if not PY2:
-            checkMathWrap("floor", ret_type="int")
-            checkMathWrap("ceil", ret_type="int")
-            checkMathWrap("gcd", 2, is_float=False, ret_type="int")
-            checkMath("isfinite", 1, ret_type="bool")
-        if PY37:
-            checkMathWrap("remainder", 2)
-        checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
+        unimplemented = ["fsum", "hypot", "isclose", "log2", "trunc"]
+        ops = [x for x in dir(math) if callable(getattr(math, x))]
+        for op in ops:
+            if op in unimplemented:
+                continue
+            if op == "modf":
+                checkMath("modf", 1, ret_type="Tuple[float, float]")
+            elif op in ["isnan", "isinf", "isfinite"]:
+                checkMath(op, 1, ret_type="bool")
+            elif op in ["floor", "ceil"]:
+                checkMathWrap(op, ret_type="int")
+            elif op == "factorial":
+                checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
+            elif op == "frexp":
+                checkMath("frexp", 1, ret_type="Tuple[float, int]")
+            elif op == "gcd":
+                checkMathWrap("gcd", 2, is_float=False, ret_type="int")
+            elif op == "ldexp":
+                checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
+                            vals=[(i, j) for i in float_vals for j in range(-10, 10)])
+            elif op == "log":
+                checkMathWrap("log", 1)
+            elif op == "pow":
+                checkMath("pow", 2, is_float=False, ret_type="int")
+                checkMath("pow", 2, is_float=True, ret_type="float")
+            else:
+                func = getattr(math, op)
+                sig = inspect.signature(func)
+                if len(sig.parameters) == 1:
+                    checkMathWrap(op, 1)
+                else:
+                    checkMathWrap(op, 2)
 
     def test_if_nest_while(self):
         def func(a, b):
