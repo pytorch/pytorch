@@ -1441,6 +1441,30 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
   return n;
 }
 
+Value* Graph::insertFunctionCall(
+    std::shared_ptr<script::Function> callee,
+    script::MatchedSchema& matched) {
+  Value* fn_constant = insertNode(create(prim::Constant))
+                           ->output()
+                           ->setType(FunctionType::create(std::move(callee)));
+  std::vector<Value*> inputs = {fn_constant};
+  inputs.insert(inputs.end(), matched.inputs.begin(), matched.inputs.end());
+  Value* result = insertNode(create(prim::CallFunction, inputs))
+                      ->output()
+                      ->setType(matched.return_types.at(0));
+  return result;
+}
+
+Value* Graph::insertMethodCall(
+    std::string method_name,
+    script::MatchedSchema& matched) {
+  Value* result = insertNode(create(prim::CallMethod, matched.inputs))
+                      ->s_(attr::name, std::move(method_name))
+                      ->output()
+                      ->setType(matched.return_types.at(0));
+  return result;
+}
+
 Node* Graph::createClone(
     Node* n,
     const std::function<Value*(Value*)>& value_map,
