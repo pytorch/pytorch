@@ -326,10 +326,10 @@
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
 
-- func: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight, Tensor? pos_weight, int reduction) -> Tensor
+- func: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   variants: function
 
-- func: binary_cross_entropy_with_logits_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, Tensor? pos_weight, int reduction) -> Tensor
+- func: binary_cross_entropy_with_logits_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   variants: function
 
 - func: bincount(Tensor self, Tensor? weights=None, int minlength=0) -> Tensor
@@ -688,6 +688,7 @@
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
+    MkldnnCPU: empty_mkldnn
     SparseCPU: empty_sparse
     SparseCUDA: empty_sparse
 
@@ -944,6 +945,9 @@
 
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
   variants: function, method
+
+- func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
+  variants: function
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
   variants: function
@@ -1416,6 +1420,16 @@
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+
+# Only exposed from C++ -- in Python,
+# we expose it as an attribute `T`, not a function.
+#
+# I'd like to name this "T" in C++ too, but
+# calling a native function "T" causes undefined
+# behavior on Windows, for reasons I don't understand
+# (maybe related to capital letter collation somehow...)
+- func: numpy_T(Tensor(a) self) -> Tensor(a)
+  variants: method
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
 
@@ -2107,6 +2121,11 @@
   dispatch:
     CPU: _s_gamma_cpu
     CUDA: _s_gamma_cuda
+
+- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
+  dispatch:
+    CPU: _dirichlet_grad_cpu
+    CUDA: _dirichlet_grad_cuda
 
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
   variants: function
@@ -3205,31 +3224,31 @@
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_normal_
-    CUDA: legacy::cuda::_th_normal_
+    CUDA: normal_cuda_
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_cauchy_
-    CUDA: legacy::cuda::_th_cauchy_
+    CUDA: cauchy_cuda_
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_log_normal_
-    CUDA: legacy::cuda::_th_log_normal_
+    CUDA: log_normal_cuda_
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_exponential_
-    CUDA: legacy::cuda::_th_exponential_
+    CUDA: exponential_cuda_
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_geometric_
-    CUDA: legacy::cuda::_th_geometric_
+    CUDA: geometric_cuda_
 
 # wrappers for TH functions
 
@@ -3456,6 +3475,9 @@
   dispatch:
     CPU: legacy::cpu::_th_nonzero
     CUDA: legacy::cuda::_th_nonzero
+
+- func: nonzero_numpy(Tensor self) -> Tensor[]
+  variants: method, function
 
 - func: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3947,46 +3969,38 @@
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_normal_out
-    CUDA: legacy::cuda::_th_normal_out
+    CUDA: normal_out_cuda
 
 - func: normal(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
   dispatch:
     CPU: legacy::cpu::_th_normal
-    CUDA: legacy::cuda::_th_normal
+    CUDA: normal_cuda
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_normal_out
-    CUDA: legacy::cuda::_th_normal_out
+    CUDA: normal_out_cuda
 
 - func: normal(float mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
     CPU: legacy::cpu::_th_normal
-    CUDA: legacy::cuda::_th_normal
+    CUDA: normal_cuda
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: legacy::cpu::_th_normal_out
-    CUDA: legacy::cuda::_th_normal_out
+    CUDA: normal_out_cuda
 
 - func: normal(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
     CPU: legacy::cpu::_th_normal
-    CUDA: legacy::cuda::_th_normal
+    CUDA: normal_cuda
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_alias
     CUDA: legacy::cuda::_th_alias
-
-- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_dirichlet_grad_out
-
-- func: _dirichlet_grad(Tensor x, Tensor alpha, Tensor total) -> Tensor
-  dispatch:
-    CPU: legacy::cpu::_th_dirichlet_grad
 
 - func: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
@@ -4810,50 +4824,50 @@
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool2d_forward_out
-    CUDA: legacy::cuda::_thnn_max_unpool2d_forward_out
+    CPU: max_unpooling2d_forward_out_cpu
+    CUDA: max_unpooling2d_forward_out_cuda
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool2d_forward
-    CUDA: legacy::cuda::_thnn_max_unpool2d_forward
+    CPU: max_unpooling2d_forward_cpu
+    CUDA: max_unpooling2d_forward_cuda
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool2d_backward_out
-    CUDA: legacy::cuda::_thnn_max_unpool2d_backward_out
+    CPU: max_unpooling2d_backward_out_cpu
+    CUDA: max_unpooling2d_backward_out_cuda
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool2d_backward
-    CUDA: legacy::cuda::_thnn_max_unpool2d_backward
+    CPU: max_unpooling2d_backward_cpu
+    CUDA: max_unpooling2d_backward_cuda
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool3d_forward_out
-    CUDA: legacy::cuda::_thnn_max_unpool3d_forward_out
+    CPU: max_unpooling3d_forward_out_cpu
+    CUDA: max_unpooling3d_forward_out_cuda
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool3d_forward
-    CUDA: legacy::cuda::_thnn_max_unpool3d_forward
+    CPU: max_unpooling3d_forward_cpu
+    CUDA: max_unpooling3d_forward_cuda
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool3d_backward_out
-    CUDA: legacy::cuda::_thnn_max_unpool3d_backward_out
+    CPU: max_unpooling3d_backward_out_cpu
+    CUDA: max_unpooling3d_backward_out_cuda
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool3d_backward
-    CUDA: legacy::cuda::_thnn_max_unpool3d_backward
+    CPU: max_unpooling3d_backward_cpu
+    CUDA: max_unpooling3d_backward_cuda
 
 - func: reflection_pad1d(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
