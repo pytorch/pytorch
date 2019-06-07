@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/script/schema_matching.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
 namespace jit {
@@ -405,6 +405,27 @@ c10::optional<MatchedSchema> tryMatchSchema(
                        std::move(return_field_names)};
 }
 
+MatchedSchema matchSchema(
+    const ::c10::FunctionSchema& schema,
+    const SourceRange& loc,
+    Graph& graph,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs) {
+  std::stringstream failure_messages;
+  if (auto result = tryMatchSchema(
+          schema,
+          loc,
+          graph,
+          c10::nullopt,
+          args,
+          kwargs,
+          &failure_messages,
+          /*allow_conversions=*/true)) {
+    return *result;
+  }
+  throw ErrorReport(loc) << failure_messages.str();
+}
+
 // pack outputs of a function following python rules. If there is a single value
 // return a SimpleValue, otherwise pack all the values into a Tuple.
 static Value* packOutputs(
@@ -488,16 +509,18 @@ Value* emitBuiltinCall(
         return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
     }
-    for (Function* method : builtin_functions) {
-      if (auto result = method->try_emit_call(
-              graph,
+    for (const std::shared_ptr<Function>& method : builtin_functions) {
+      method->ensure_defined();
+      if (auto result = tryMatchSchema(
+              method->getSchema(),
               loc,
+              graph,
               self,
               inputs,
               attributes,
               render_errors ? &failure_messages : nullptr,
               allow_conversions)) {
-        return result;
+        return graph.insertFunctionCall(method, *result);
       }
     }
   }

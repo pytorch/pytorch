@@ -451,6 +451,26 @@ class TestQuantizedLinear(unittest.TestCase):
         # Assert equal
         np.testing.assert_equal(Y_q_ref2.int_repr().numpy(), Y_q.int_repr().numpy())
 
+    """Tests the correctness of the quantized::fbgemm_linear_unpack op."""
+    @given(Q=qtensor(shapes=array_shapes(2, 2,), dtypes=((torch.qint8, np.int8, None),)))
+    def test_qlinear_unpack(self, Q):
+        W, (W_scale, W_zp), (qmin, qmax), (torch_type, np_type) = Q
+        qlinear_prepack = torch.ops.quantized.fbgemm_linear_prepack
+        qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
+
+        W = torch.from_numpy(W)
+        W_q = torch.quantize_linear(W, scale=W_scale, zero_point=W_zp, dtype=torch_type)
+
+        # Weight prepacking operator for quantized Linear
+        W_prepack = qlinear_prepack(W_q)
+        # Weight unpack operator for quantized Linear (Used for serialization)
+        W_q_origin = qlinear_unpack(W_prepack)
+
+        # Assert equal
+        np.testing.assert_equal(W_q.int_repr(), W_q_origin.int_repr().numpy())
+        np.testing.assert_equal(W_q.q_scale(), W_q_origin.q_scale())
+        np.testing.assert_equal(W_q.q_zero_point(), W_q_origin.q_zero_point())
+
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),

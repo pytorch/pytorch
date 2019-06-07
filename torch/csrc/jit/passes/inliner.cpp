@@ -9,41 +9,48 @@ namespace prim {
 using namespace ::c10::prim;
 }
 
+static void replace(
+    Node* to_replace,
+    const std::shared_ptr<script::Function>& fn,
+    at::ArrayRef<Value*> inputs) {
+  WithInsertPoint guard(to_replace);
+  auto new_output =
+      inlineCallTo(*to_replace->owningGraph(), *fn->graph(), inputs).at(0);
+  if (to_replace->output()->hasUniqueName()) {
+    new_output->setUniqueName(to_replace->output()->uniqueName());
+  }
+  to_replace->output()->replaceAllUsesWith(new_output);
+}
+
 void inlineCalls(Block* block) {
-  Node* cur = block->nodes().front();
-  Node* end = block->return_node();
-
-  while (cur != end) {
-    auto next = cur->next();
-    for (auto b : cur->blocks()) {
-      inlineCalls(b);
+  for (auto it = block->nodes().begin(), end = block->nodes().end();
+       it != end;) {
+    Node* cur = *it++;
+    switch (cur->kind()) {
+      case prim::CallFunction: {
+        AT_ASSERT(cur->inputs().at(0)->node()->kind() == prim::Constant);
+        auto function_constant = cur->inputs().at(0)->node();
+        auto fun_type =
+            function_constant->output()->type()->expect<FunctionType>();
+        replace(cur, fun_type->function(), cur->inputs().slice(1));
+        cur->destroy();
+        if (!function_constant->hasUses()) {
+          function_constant->destroy();
+        }
+      } break;
+      case prim::CallMethod: {
+        const std::string& name = cur->s(attr::name);
+        auto function =
+            cur->inputs().at(0)->type()->expect<ClassType>()->getMethod(name);
+        replace(cur, function, cur->inputs());
+        cur->destroy();
+      } break;
+      default: {
+        for (auto b : cur->blocks()) {
+          inlineCalls(b);
+        }
+      } break;
     }
-    if (cur->kind() == prim::CallFunction) {
-      AT_ASSERT(cur->inputs().at(0)->node()->kind() == prim::Constant);
-      auto function_constant = cur->inputs().at(0)->node();
-      auto fun_type =
-          function_constant->output()->type()->expect<FunctionType>();
-      auto graph = fun_type->function()->graph();
-
-      auto old_output = cur->outputs();
-      // slice function ptr value
-      auto inputs = cur->inputs().slice(1);
-      WithInsertPoint guard(next);
-      auto new_output =
-          inlineCallTo(*cur->owningGraph(), *graph.get(), inputs).at(0);
-      if (old_output.at(0)->hasUniqueName()) {
-        auto name = old_output.at(0)->uniqueName();
-        new_output->setUniqueName(name);
-      }
-
-      old_output.at(0)->replaceAllUsesWith(new_output);
-      next = cur->next();
-      cur->destroy();
-      if (!function_constant->hasUses()) {
-        function_constant->destroy();
-      }
-    }
-    cur = next;
   }
 }
 
