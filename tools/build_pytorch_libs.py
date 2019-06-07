@@ -5,8 +5,7 @@ import shutil
 
 from .setup_helpers import escape_path
 from .setup_helpers.env import IS_64BIT, IS_WINDOWS, check_negative_env_flag
-from .setup_helpers import cmake
-from .setup_helpers.cmake import USE_NINJA
+from .setup_helpers.cmake import CMake, USE_NINJA
 from .setup_helpers.cuda import USE_CUDA, CUDA_HOME
 from .setup_helpers.cudnn import CUDNN_INCLUDE_DIR, CUDNN_LIBRARY, USE_CUDNN
 
@@ -59,16 +58,16 @@ def build_caffe2(version,
                  build_dir):
     my_env = _create_build_env()
     build_test = not check_negative_env_flag('BUILD_TEST')
+    cmake = CMake(build_dir)
     cmake.generate(version,
                    cmake_python_library,
                    build_python,
                    build_test,
-                   build_dir,
                    my_env,
                    rerun_cmake)
     if cmake_only:
         return
-    cmake.build(build_dir, my_env)
+    cmake.build(my_env)
     if build_python:
         caffe2_proto_dir = os.path.join(build_dir, 'caffe2', 'proto')
         for proto_file in glob(os.path.join(caffe2_proto_dir, '*.py')):
