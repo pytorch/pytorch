@@ -23,6 +23,7 @@
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
+#include "torch/csrc/jit/passes/guard_elimination.h"
 #include "torch/csrc/jit/passes/insert_guards.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
@@ -692,9 +693,7 @@ void testRecordFunction() {
             std::make_tuple(std::string(getFullName(&fn)), sizes));
       },
       [](const autograd::profiler::RecordFunction&) {},
-      true);
-
-  autograd::profiler::setSamplingProbability(1.0);
+      /* needs_inputs */ true);
 
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
@@ -714,6 +713,59 @@ void testRecordFunction() {
 
   checkTracedInputs(eager_inputs);
   checkTracedInputs(jit_inputs);
+
+  // test sampled callbacks
+  int sampled_cb_ctr = 0;
+  autograd::profiler::pushCallback(
+      [&sampled_cb_ctr](const autograd::profiler::RecordFunction& fn) {
+        if (std::string(fn.name().str()) == "test") {
+          ++sampled_cb_ctr;
+        }
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      /* needs_inputs */ false,
+      /* sampled */ true);
+
+  int non_sampled_cb_ctr = 0;
+  autograd::profiler::pushCallback(
+      [&non_sampled_cb_ctr](const autograd::profiler::RecordFunction& fn) {
+        if (std::string(fn.name().str()) == "test") {
+          ++non_sampled_cb_ctr;
+        }
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      /* needs_inputs */ false,
+      /* sampled */ false);
+
+  auto run_test_function = []() {
+    auto t = torch::randn({1, 2, 3}, at::kCPU);
+    for (auto k = 0; k < 1000; k++) {
+      invokeTestRecordFunction(t);
+    }
+  };
+
+  autograd::profiler::setSamplingProbability(0.5);
+  run_test_function();
+
+  TORCH_CHECK(non_sampled_cb_ctr == 1000);
+  TORCH_CHECK(sampled_cb_ctr > 0 && sampled_cb_ctr < 1000);
+
+  sampled_cb_ctr = 0;
+  autograd::profiler::setSamplingProbability(0.0);
+  run_test_function();
+
+  TORCH_CHECK(non_sampled_cb_ctr == 2000);
+  TORCH_CHECK(sampled_cb_ctr == 0);
+
+  sampled_cb_ctr = 0;
+  autograd::profiler::setSamplingProbability(1.0);
+  run_test_function();
+
+  TORCH_CHECK(non_sampled_cb_ctr == 3000);
+  TORCH_CHECK(sampled_cb_ctr == 1000);
+
+  autograd::profiler::popCallback();
+  autograd::profiler::popCallback();
 }
 
 void testAutogradProfiler() {
@@ -855,7 +907,7 @@ static void checkShape(
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
-void testInsertGuards() {
+void testInsertAndEliminateGuards() {
   static const auto basic_example = R"JIT(
   def basic(x, y):
     a = x + y
@@ -886,10 +938,14 @@ void testInsertGuards() {
   ASSERT_NE(guard, nodes.end());
   ASSERT_EQ(guard->input()->type()->cast<ProfiledTensorType>(), nullptr);
   checkShape(*guard, {2, 3}, false);
-  int num_guards = std::count_if(nodes.begin(), nodes.end(), [](Node* n) {
-    return n->kind() == prim::Guard;
-  });
+  auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
+  int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
   ASSERT_EQ(num_guards, 11);
+  // now eliminate as many guards as possible
+  // we should be left with two guards on x and y's defs
+  EliminateGuards(copy);
+  num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 2);
 }
 
 void testProfiler() {
