@@ -178,7 +178,7 @@ Tensor& exponential_cpu_(Tensor& self, double lambda, Generator* gen) {
     std::lock_guard<std::mutex> lock(generator->mutex);
     CPU_tensor_apply1<scalar_t>(
         self, [generator, lambda](scalar_t& ret_val) {
-          ret_val = static_cast<scalar_t>(THRandom_bernoulli(generator, lambda));
+          ret_val = static_cast<scalar_t>(THRandom_exponential(generator, lambda));
         });
   });
   return self;
