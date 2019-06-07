@@ -243,6 +243,12 @@ struct ParserImpl {
         // not greater than 'precedence'
         break;
 
+      if (L.cur().kind == TK_IN && in_for) {
+        // Don't parse for for-in loops
+        std::cout << "Skipping loop\n";
+        break;
+      }
+
       int kind = L.cur().kind;
       auto pos = L.cur().range;
       L.next();
@@ -511,8 +517,10 @@ struct ParserImpl {
   TreeRef parseFor() {
     auto r = L.cur().range;
     L.expect(TK_FOR);
+    in_for = true;
     auto targets = parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseExp);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
+    in_for = false;
     auto body = parseStatements();
     return For::create(r, targets, itrs, body);
   }
@@ -616,6 +624,7 @@ struct ParserImpl {
   }
   Lexer L;
   SharedParserData& shared;
+  bool in_for = false;
 };
 
 Parser::Parser(const std::shared_ptr<Source>& src)

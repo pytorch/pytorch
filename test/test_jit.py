@@ -13314,6 +13314,14 @@ a")
 
         self.checkScript(fn, ("abcdefgh",))
 
+    def test_dict_in(self):
+        def fn(x):
+            # type: (Dict[str, int]) -> bool
+            return 'hi' in x
+
+        self.checkScript(fn, ({'hi': 2, 'bye': 3},))
+        self.checkScript(fn, ({'bye': 3},))
+
     def test_split(self):
         def split_two(tensor):
             a, b, c = torch.split(tensor, 2, dim=1)

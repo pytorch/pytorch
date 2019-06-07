@@ -2141,6 +2141,8 @@ struct to_ir {
         return aten::__or__;
       case '^':
         return aten::__xor__;
+      case TK_IN:
+        return aten::__contains__;
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -2180,6 +2182,8 @@ struct to_ir {
         return "__or__";
       case '^':
         return "__xor__";
+      case TK_IN:
+        return "__contains__";
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -2522,6 +2526,7 @@ struct to_ir {
             {},
             /*required=*/true);
       }
+      case TK_IN:
       case TK_POW:
       case TK_NE:
       case TK_EQ:

@@ -299,6 +299,7 @@ struct Expr : public TreeView {
       case '|':
       case TK_LIST_COMP:
       case TK_DOTS:
+      case TK_IN:
         return;
       default:
         throw ErrorReport(tree)

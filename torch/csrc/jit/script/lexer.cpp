@@ -13,6 +13,7 @@ namespace script {
 static const std::unordered_map<int, int> binary_prec = {
     {TK_IF, 1},
     {TK_FOR, 1},
+    {TK_IN, 1},
     {TK_AND, 2},
     {TK_OR, 2},
     // reserve a level for unary not
