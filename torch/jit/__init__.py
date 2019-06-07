@@ -1936,7 +1936,7 @@ def _get_builtin_table():
     for builtin, aten_op in builtin_ops:
         _builtin_table[id(builtin)] = aten_op
     math_ops = [x for x in dir(math) if callable(getattr(math, x))]
-    unimplemented_math_ops = ["fsum", "isclose", "trunc"]
+    unimplemented_math_ops = ["fsum", "isclose", "trunc", "hypot", "log2"]
     special_math_ops = ["remainder"]    # We bound this to aten::mathremainder
     for op in math_ops:
         if op in unimplemented_math_ops + special_math_ops:
