@@ -63,7 +63,7 @@ static PyObject * THPVariable__is_same_impl_type(PyObject* self, PyObject* arg)
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   auto& tensor = reinterpret_cast<THPVariable*>(arg)->cdata;
-  return PyBool_FromLong(self_.is_same_impl_type(tensor));
+  return wrap(self_.is_same_impl_type(tensor));
   END_HANDLE_TH_ERRORS
 }
 

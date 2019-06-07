@@ -7812,36 +7812,48 @@ class TestNN(NNTestCase):
         self.assertEqual(out, asfm.log_prob(x).argmax(dim=1))
 
     def test_module_apply_tensorimpl_type(self):
-        class TestModule(nn.Module):
-            def __init__(self):
-                super(TestModule, self).__init__()
-                self.fc1 = nn.Linear(20, 10)
+        m = nn.Linear(20, 10)
+        m.weight.grad = torch.randn(10, 20)
 
-        m = TestModule()
-        m.fc1.weight.grad = torch.randn(10, 20)
+        param_ref = m.weight
+        param_grad_ref = m.weight.grad
 
-        param_ref = m.fc1.weight
-        param_grad_ref = m.fc1.weight.grad
+        sparse_tensor = torch.sparse_coo_tensor(torch.zeros([2, 1]), torch.ones([1]), torch.Size([10, 20]))
 
-        sparse_tensor = torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1]))
+        self.assertNotEqual(m.weight.type(), sparse_tensor.type())
+        self.assertFalse(m.weight._is_same_impl_type(sparse_tensor))
+        self.assertNotEqual(m.weight.grad.type(), sparse_tensor.type())
+        self.assertFalse(m.weight.grad._is_same_impl_type(sparse_tensor))
 
-        self.assertNotEqual(m.fc1.weight.type(), sparse_tensor.type())
-        self.assertFalse(m.fc1.weight._is_same_impl_type(sparse_tensor))
-        self.assertNotEqual(m.fc1.weight._grad.type(), sparse_tensor.type())
-        self.assertFalse(m.fc1.weight._grad._is_same_impl_type(sparse_tensor))
+        m = m._apply(lambda t: torch.sparse_coo_tensor(torch.zeros([2, 1]), torch.ones([1]), torch.Size([10, 20])))
 
-        m = m._apply(lambda t: torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1])))
+        self.assertEqual(m.weight, sparse_tensor)
+        self.assertEqual(m.weight.type(), sparse_tensor.type())
+        self.assertTrue(m.weight._is_same_impl_type(sparse_tensor))
+        self.assertEqual(m.weight.grad, sparse_tensor)
+        self.assertEqual(m.weight.grad.type(), sparse_tensor.type())
+        self.assertTrue(m.weight.grad._is_same_impl_type(sparse_tensor))
 
-        self.assertEqual(m.fc1.weight, sparse_tensor)
-        self.assertEqual(m.fc1.weight.type(), sparse_tensor.type())
-        self.assertTrue(m.fc1.weight._is_same_impl_type(sparse_tensor))
-        self.assertEqual(m.fc1.weight._grad, sparse_tensor)
-        self.assertEqual(m.fc1.weight._grad.type(), sparse_tensor.type())
-        self.assertTrue(m.fc1.weight._grad._is_same_impl_type(sparse_tensor))
+        # Previous references to a model's parameters / gradients are not preserved
+        # if `model._apply()` changes the TensorImpl type of those tensors.
+        self.assertNotEqual(id(param_ref), id(m.weight))
+        self.assertNotEqual(id(param_grad_ref), id(m.weight.grad))
 
-        # yf225 TODO: better comment here!
-        self.assertNotEqual(id(param_ref), id(m.fc1.weight))
-        self.assertNotEqual(id(param_grad_ref), id(m.fc1.weight._grad))
+    def test_module_change_device(self):
+        m = nn.Linear(20, 10)
+        m.weight.grad = torch.randn(10, 20)
+        m.cuda()  # This does not raise warning
+
+        m = nn.Linear(20, 10)
+        m.weight.grad = torch.randn(10, 20)
+        weight_ref = m.weight
+        self.assertWarnsRegex(m.cuda, "1 extra reference")
+
+        m = nn.Linear(20, 10)
+        m.weight.grad = torch.randn(10, 20)
+        weight_grad_ref = m.weight.grad
+        # yf225 TODO: what if we print `weight_grad_ref` here??
+        self.assertWarnsRegex(m.cuda, "1 extra reference")
 
 
 class TestNNInit(TestCase):

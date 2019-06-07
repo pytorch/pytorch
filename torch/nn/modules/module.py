@@ -2,6 +2,7 @@ from collections import OrderedDict, namedtuple
 import functools
 import itertools
 import sys
+import warnings
 
 import torch
 from ..backends.thnn import backend as thnn_backend
@@ -194,45 +195,68 @@ class Module(object):
         for module in self.children():
             module._apply(fn)
 
-        for key in list(self._parameters.keys()):
-            if self._parameters[key] is not None:
-                param_applied = fn(self._parameters[key])
-                grad_applied = fn(self._parameters[key]._grad) if self._parameters[key]._grad is not None else None
-                param_is_same_impl_type = self._parameters[key]._is_same_impl_type(param_applied)
-                if grad_applied is not None:
-                    grad_is_same_impl_type = self._parameters[key]._grad._is_same_impl_type(grad_applied)
+        for key in self._parameters.keys():
+            # We subtract the refcount by 2 here, because there are two references to
+            # the `self._parameters[key]` tensor that we expect to always exist:
+            #
+            # 1. The reference held by `self._parameters` to its values.
+            # 2. The temporary reference `obj` as an argument to the `sys.getrefcount(obj)` function call.
+            #    (For more details, see: https://docs.python.org/3/library/sys.html#sys.getrefcount)
+            param_extra_refcount = sys.getrefcount(self._parameters[key]) - 2
 
-                if param_is_same_impl_type:
-                    # Tensors stored in modules are graph leaves, and we don't
-                    # want to create copy nodes, so we have to unpack the data.
-                    #
-                    # yf225 TODO: check refcount of param, and give deprecation notice / throw error if refcount > 1
-                    #
-                    # yf225 TODO: also, post in the following threads about this behavior change:
-                    # 1. https://discuss.pytorch.org/t/effect-of-calling-model-cuda-after-constructing-an-optimizer/15165
-                    # 2. https://github.com/pytorch/pytorch/issues/7844
-                    if self._parameters[key].device != param_applied.device:
-                        if sys.getrefcount(self._parameters[key]) > 2:  # this is at least 2, see https://docs.python.org/3/library/sys.html#sys.getrefcount for reasons
-                            # yf225 TODO: use something like "warnings.warn(..., stacklevel=2)"
-                            raise RuntimeError("Attempted to change device of `{}`, but there are existing references to that tensor which would be broken by the device change. Current count: {}".format(key, sys.getrefcount(self._parameters[key])))
+            # We subtract the refcount by 1 here, because the refcount includes the temporary reference
+            # `obj` as an argument to the `sys.getrefcount(obj)` function call.
+            # (For more details, see: https://docs.python.org/3/library/sys.html#sys.getrefcount)
+            param_extra_refcount = sys.getrefcount(self._parameters[key]) - 1
+
+            # We create `param` here after obtaining the refcount of `self._parameters[key]`, instead
+            # of using `for key, param in self._parameters.items():`, because the latter approach would
+            # unnecessarily bump the refcount of the `self._parameters[key]` tensor, which is undesirable.
+            param = self._parameters[key]
+            if param is not None:
+                # Tensors stored in modules are graph leaves, and we don't
+                # want to create copy nodes, so we have to unpack the data.
+                param_applied = fn(param)
+
+                # NOTE [ TensorImpl Type and Parameter Replacement ]
+                #
+                # If `param_applied` has the same TensorImpl type as `param`, we can use
+                # `param.data = param_applied` to change the value of `param` in place.
+                # Otherwise, we have to replace the tensor stored in `self._parameters[key]`
+                # with `param_applied`, which will break all previous references to
+                # the `self._parameters[key]` tensor. Similarly, depending on whether
+                # `grad_applied` has the same TensorImpl type as `param.grad`, we may be
+                # able to change the value of `param.grad` in place, or we may have to replace
+                # `param.grad` yf225 TODO finish this!
+                #
+                # In order to provide the same behavior for 
+                if param._is_same_impl_type(param_applied):
+                    if param.device != param_applied.device:
+                        if param_extra_refcount > 0:
+                            warnings.warn("Attempted to change device of `{}`, but there are \
+{} extra reference(s) to that tensor which would be broken by the device change, in future releases \
+of PyTorch.".format(key, param_extra_refcount))
                     self._parameters[key].data = param_applied
                 else:
+                    # Tensors stored in modules are graph leaves, and we don't want to
+                    # create copy nodes, so we have to use `with torch.no_grad():` here.
                     with torch.no_grad():
-                        # yf225 TODO: improve comment here
-                        #
-                        # We use `requires_grad_()` here, to make sure the new `param` still
-                        # has the same `requires_grad` value as the old `param`. An alternative is
-                        # to not use `with torch.no_grad():`, but that would cause the following operation
-                        # to create a `CopyBackwards` gradient function which is not what we wanted.
-                        #
-                        # yf225 TODO: in a separate PR, we should enforce that `self._parameters[key].requires_grad == True`
-                        self._parameters[key] = param_applied.requires_grad_(self._parameters[key].requires_grad)
+                        # We use `.requires_grad_()` here to make sure the new `param` still
+                        # has the same `requires_grad` value as the old `param`.
+                        self._parameters[key] = param_applied.requires_grad_(param.requires_grad)
 
-                if grad_applied is not None:
-                    if grad_is_same_impl_type:
-                        self._parameters[key]._grad.data = grad_applied
+                if param.grad is not None:
+                    grad_applied = fn(param.grad)
+                    if param.grad._is_same_impl_type(grad_applied):
+                        if param.grad.device != grad_applied.device:
+                            if grad_extra_refcount > 0:
+                                warnings.warn("Attempted to change device of `{}.grad`, but there are \
+{} extra reference(s) to that tensor which would be broken by the device change, in future releases \
+of PyTorch.".format(key, grad_extra_refcount))
+                        self._parameters[key].grad.data = grad_applied
                     else:
-                        self._parameters[key]._grad = grad_applied
+                        with torch.no_grad():
+                            self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
             if buf is not None:
