@@ -4,6 +4,9 @@
 
 #include <ATen/ATen.h>
 
+#include <torch/csrc/autograd/variable.h>
+#include <test/cpp/api/support.h>
+
 #include <cmath>
 #include <cstddef>
 #include <vector>
@@ -303,4 +306,54 @@ TEST(TensorTest, Item_CUDA) {
     torch::Scalar scalar = tensor.item();
     ASSERT_EQ(scalar.to<int>(), 123);
   }
+}
+
+TEST(TensorTest, TensorToInplace) {
+  {
+    torch::Tensor tensor1 = torch::randn({3, 4}).to(torch::kFloat);
+    torch::Tensor tensor2 = tensor1;
+    torch::autograd::as_variable_ref(tensor2).to_(torch::kDouble);
+    ASSERT_EQ(tensor1.dtype(), tensor2.dtype());  // In-place change to `tensor2`'s dtype is synced to `tensor1`
+  }
+  {
+    torch::Tensor tensor1 = torch::randn({3, 4}).to(torch::kFloat).set_requires_grad(true);
+    torch::Tensor tensor1_view = tensor1.select(0, 0);
+    torch::Tensor tensor2 = tensor1;
+    {
+      torch::NoGradGuard guard;
+      torch::autograd::as_variable_ref(tensor2).to_(torch::kDouble);
+    }
+    ASSERT_THROWS_WITH(
+      tensor1_view.sum().backward(),
+      "Function SumBackward0 returned an invalid gradient at index 0 - expected type Variable[CPUDoubleType] but got Variable[CPUFloatType]");
+  }
+  // NOTE: ideally this test case should throw an error, but it currently doesn't. The following code also doesn't throw error in Python either:
+  /*
+  import torch
+  t = torch.randn(3, 4).requires_grad_(True)
+  ts = t.sum()
+  with torch.no_grad():
+      t.add_(1.0)
+
+  ts.backward()  # Doesn't throw error, even if we performed in-place op on `t`
+  */
+  // {
+  //   torch::Tensor tensor1 = torch::randn({3, 4}).to(torch::kFloat).set_requires_grad(true);
+  //   torch::Tensor tensor1_sum = tensor1.sum();
+  //   torch::Tensor tensor2 = tensor1;
+  //   {
+  //     torch::NoGradGuard guard;
+  //     torch::autograd::as_variable_ref(tensor2).to_(torch::kDouble);
+  //   }
+  //   ASSERT_THROWS_WITH(
+  //     tensor1_sum.backward(),
+  //     "SOME ERROR MESSAGE");
+  // }
+}
+
+TEST(TensorTest, TensorToInplace_CUDA) {
+  torch::Tensor tensor1 = torch::randn({3, 4});
+  torch::Tensor tensor2 = tensor1;
+  torch::autograd::as_variable_ref(tensor2).to_(torch::kCUDA);
+  ASSERT_EQ(tensor1.device(), tensor2.device());  // In-place change to `tensor2`'s device is synced to `tensor1`
 }
