@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -54,12 +55,10 @@ struct BailOutGraphBuilderForNode {
   void buildBailOutBlockFrom(Node* n) {
     auto* block = copy_graph_->block();
     auto b = n->owningBlock();
-    graph_node_list_iterator it(n, kNextDirection);
-    for (; it != b->nodes().end(); it++) {
+    for (auto it = n->iterator(); it != b->nodes().end(); it++) {
       auto env = [this](Value* v) { return getOrAddInputForValue(v); };
 
       auto node = *it;
-
       auto new_node = block->appendNode(copy_graph_->createClone(node, env));
       for (size_t i = 0; i < node->outputs().size(); ++i) {
         auto oo = node->outputs()[i];
@@ -71,12 +70,50 @@ struct BailOutGraphBuilderForNode {
 
     // we are either in `prim::If` or `prim::Loop`
     // bailout graph building will continue from `outer_node` next
-    // remember/map the outputs needed to unwind this `prim::If`
-    // or `prim::Loop`
     auto outer_node = n->owningBlock()->owningNode();
     if (outer_node) {
-      buildBailOutGraphForOwningNode(n, outer_node);
+      if (outer_node->kind() == prim::Loop) {
+        buildBailOutLoop(outer_node);
+      } else if (outer_node->kind() == prim::If) {
+        buildBailOutIf(b->outputs(), outer_node);
+      } else {
+        AT_ERROR("Unexpected outer node");
+      }
     }
+  }
+
+  void mapValues(
+      const at::ArrayRef<Value*>& block_outputs,
+      const at::ArrayRef<Value*>& carried_deps) {
+    TORCH_INTERNAL_ASSERT(block_outputs.size() == carried_deps.size());
+    for (size_t i = 0; i < block_outputs.size(); i++) {
+      auto nv = getOrAddInputForValue(block_outputs[i]);
+      old_to_new_[carried_deps[i]] = nv;
+    }
+  }
+
+  void buildBailOutLoop(Node* outer_node) {
+    LoopView lv(outer_node);
+    auto old_max_count = getOrAddInputForValue(lv.maxTripCount());
+    auto cur_iter = addNewInputForValue(lv.currentTripCount());
+    auto block_outputs = lv.bodyBlock()->outputs();
+    auto carried_deps = lv.carriedInputsWithCond();
+    mapValues(block_outputs, carried_deps);
+    auto* block = copy_graph_->block();
+    // subtract the number of iterations we already did
+    WithInsertPoint guard(*block->nodes().end());
+    auto updated_max_trip_count =
+        copy_graph_->insert(aten::sub, {old_max_count, cur_iter});
+    mapExistingInputForValue(outer_node->inputs()[0], updated_max_trip_count);
+    buildBailOutBlockFrom(outer_node);
+  }
+
+  void buildBailOutIf(
+      const at::ArrayRef<Value*>& block_outputs,
+      Node* outer_node) {
+    auto if_outputs = outer_node->outputs();
+    mapValues(block_outputs, if_outputs);
+    buildBailOutBlockFrom(outer_node->next());
   }
 
   // buildBailOutGraphForOwningNode builds a bailout graph
@@ -92,6 +129,7 @@ struct BailOutGraphBuilderForNode {
   // then, we continue building the rest of the bailout graph
   // starting from the owning `outer_node`
   // which implies `outer_node` will be cloned
+
   void buildBailOutGraphForOwningNode(Node* inner_node, Node* outer_node) {
     auto* block = copy_graph_->block();
     auto block_outputs = inner_node->owningBlock()->outputs();
@@ -102,6 +140,9 @@ struct BailOutGraphBuilderForNode {
     for (; i < block_outputs.size(); i++) {
       auto nv = old_to_new_[block_outputs[i]];
       old_to_new_[new_outputs.at(i)] = nv;
+
+      std::cout << "mapping " << new_outputs.at(i)->uniqueName() << " to "
+                << nv->uniqueName() << std::endl;
     }
 
     if (outer_node->kind() == prim::If) {
