@@ -1624,6 +1624,19 @@ class TestAutograd(TestCase):
     def test_sparse_gather_both_scalar(self):
         self._test_sparse_gather((), (), 0)
 
+    # autograd tests via common_method_invocations don't allow input tensors to
+    # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when
+    # check_sparse_nnz is set to False.)
+    def test_sparse_mask_autograd(self):
+        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
+            tensor = torch.randn(3, requires_grad=True, device=device)
+            mask = torch.ones(3, device=device)
+            mask[1] = 0
+            mask = mask.to_sparse()
+            converted = tensor.sparse_mask(mask).to_dense()
+            converted.sum().backward()
+            self.assertEqual(tensor.grad, mask.to_dense())
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,
@@ -3268,7 +3281,11 @@ def add_test(
                     args_variable, kwargs_variable = create_input(args, requires_grad=False, call_kwargs=kwargs)
                     output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                     if isinstance(output_variable, torch.autograd.Variable):
-                        output_variable.backward(randn_like(output_variable))
+                        if output_variable.is_sparse:
+                            rand = randn_like(output_variable.to_dense()).to_sparse()
+                        else:
+                            rand = randn_like(output_variable)
+                        output_variable.backward(rand)
                         self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
                         self.assertTrue(self_variable.size() == self_variable.grad.size())
 
