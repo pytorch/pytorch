@@ -104,16 +104,23 @@ void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) const {
 
 // Does `n` write to an alias of one of the values in `vs`?
 bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
+  const auto writtenTo = getWrites(n);
+  if (writtenTo.empty()) {
+    return false;
+  }
+
   MemoryLocations locs;
   for (const auto v : vs) {
     auto it = elementMap_.find(v);
     if (it != elementMap_.end()) {
-      locs |= it->second->getMemoryLocations();
+      const auto& vlocs = it->second->getMemoryLocations();
+      if (writtenTo.intersects(vlocs)) {
+        return true;
+      }
     }
   }
 
-  const auto writtenTo = getWrites(n);
-  return writtenTo.intersects(locs);
+  return false;
 }
 
 MemoryLocations AliasDb::getWrites(Node* n) const {
