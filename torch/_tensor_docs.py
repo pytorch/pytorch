@@ -1783,7 +1783,7 @@ See :func:`torch.qr`
 
 add_docstr_all('qscheme',
                r"""
-qscheme() -> QScheme
+qscheme() -> torch.qscheme
 
 Returns the quantization scheme of a given QTensor.
 """)

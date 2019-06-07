@@ -126,7 +126,7 @@ def type_to_python(typename, size=None):
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',
-        'QScheme': 'QScheme',
+        'QScheme': '_qscheme',
     }[typename]
 
     return typename
@@ -502,7 +502,7 @@ def gen_pyi(declarations_path, out):
                          for n in
                          ['float32', 'float', 'float64', 'double', 'float16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
-                          'complex32', 'complex64', 'complex128']]
+                          'complex32', 'complex64', 'complex128', 'quint8', 'qint8', 'qint32']]
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~

@@ -38,7 +38,7 @@ inline std::string toString(QScheme qscheme) {
     case kPerChannelSymmetric:
       return "PerChannelSymmetric";
     default:
-      TORCH_CHECK(false, "Unrecognized QScheme: ", static_cast<int>(qscheme));
+      TORCH_CHECK(false, "Unrecognized qscheme: ", static_cast<int>(qscheme));
   }
 }
 
