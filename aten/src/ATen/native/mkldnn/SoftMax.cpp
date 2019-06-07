@@ -29,7 +29,6 @@ namespace {
 struct ideep_softmax_forward
     : public ideep::softmax_forward,
       public ideep::utils::computation_cache<ideep_softmax_forward> {
- public:
   template <typename... Ts>
   ideep_softmax_forward(
       const ideep::tensor::descriptor& src_desc,
