@@ -6165,8 +6165,16 @@ a")
                 checkMath("pow", 2, is_float=True, ret_type="float")
             else:
                 func = getattr(math, op)
-                sig = inspect.signature(func)
-                if len(sig.parameters) == 1:
+                param_count = 0
+                def num_args(f):  # Parses the docstring for builtin functions
+                    spec = f.__doc__.split('\n')[0]
+                    args = spec[spec.find('(')+1:spec.find(')')]
+                    return args.count(',')+1 if args else 0
+                if PY2:
+                    param_count = num_args(func)
+                else:
+                    param_count = len(inspect.signature(func).parameters)
+                if param_count == 1:
                     checkMathWrap(op, 1)
                 else:
                     checkMathWrap(op, 2)
