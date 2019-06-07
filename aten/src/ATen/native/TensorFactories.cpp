@@ -770,8 +770,8 @@ Tensor reservoir_sampling_cpu(
 ){
 
   AT_CHECK(
-    weights.dtype() == kFloat,
-    "The sampling weights must be Float, got", weights.dtype()
+    x.dim() > 0,
+    "The input Tensor must have at least one dimension"
   );
 
   int n = x.size(0);
@@ -797,68 +797,65 @@ Tensor reservoir_sampling_cpu(
       end = k;
     }
 
-    reservoir_generator_cpu(
-      indices_n.data<int64_t>(),
-      n,
-      split,
-      generator);
+  reservoir_generator_cpu(
+    indices_n.data<int64_t>(),
+    n,
+    split,
+    generator
+	);
 
-      return x.index_select(
-        0,
-        indices_n.index_select(
-          0,
-          at::arange(begin, end, options)
-        )
-      );
+  return x.index_select(
+    0,
+    indices_n.index_select(
+      0,
+      at::arange(begin, end, options)
+    )
+  );
 
   } else {
 
-    Tensor weights_contiugous;
+		// If the weights are contiguous floating points, then
+		// the two next steps won't generate copies.
+	  Tensor weights_contiguous = weights.contiguous();
+		weights_contiguous = weights_contiguous.to(at::kFloat);
 
-    if(!weights.is_contiguous()){
-        weights_contiugous = weights.contiguous();
-    }else{
-        weights_contiugous = weights.clone();
-    }
+	  AT_CHECK(
+	    weights_contiguous.device() == x.device(),
+	    "The weights must share the same device as the inputs."
+	  );
 
-    AT_CHECK(
-      weights_contiugous.device() == x.device(),
-      "The weights must share the same device as the inputs."
-    );
+	  AT_CHECK(
+	    n == weights_contiguous.numel(),
+	    "The weights must have the same number of elements as the input's first dimension."
+	  );
 
-    AT_CHECK(
-      n == weights_contiugous.numel(),
-      "The weights must have the same number of elements as the input's first dimension."
-    );
+	  AT_CHECK(
+	    weights_contiguous.dim() == 1,
+	    "The weights must 1-dimensional."
+	  );
 
-    AT_CHECK(
-      weights_contiugous.dim() == 1,
-      "The weights must 1-dimensional."
-    );
+	  AT_CHECK(
+	    weights_contiguous.nonzero().numel() >= k,
+	    "Cannot have less non-zero weights than the number of samples."
+	  );
 
-    AT_CHECK(
-      weights_contiugous.nonzero().numel() >= k,
-      "Cannot have less non-zero weights than the number of samples."
-    );
+	  AT_CHECK(
+	    weights_contiguous.min().item().toLong() >= 0,
+	    "All the weights must be non-negative."
+	  );
 
-    AT_CHECK(
-      weights_contiugous.min().item().toLong() >= 0,
-      "All the weights must be non-negative."
-    );
+	  Tensor keys = at::empty({n}, weights_contiguous.options());
 
-    Tensor keys = at::empty({n}, weights_contiugous.options());
+	  AT_DISPATCH_FLOATING_TYPES(weights_contiguous.scalar_type(), "generate keys", [&] {
+	    generate_keys<scalar_t>(
+	      keys.data<scalar_t>(),
+	      weights_contiguous.data<scalar_t>(),
+	      n,
+	      generator);
+	  });
 
-    AT_DISPATCH_FLOATING_TYPES(weights_contiugous.scalar_type(), "generate keys", [&] {
-      generate_keys<scalar_t>(
-        keys.data<scalar_t>(),
-        weights_contiugous.data<scalar_t>(),
-        n,
-        generator);
-    });
-
-    return x.index_select(0, std::get<1>(keys.topk(k)));
+	  return x.index_select(0, std::get<1>(keys.topk(k)));
   }
-
 }
 
 Tensor sampling_with_replacement_cpu(
@@ -866,6 +863,12 @@ Tensor sampling_with_replacement_cpu(
   const Tensor& weights,
   int64_t k
 ){
+
+	AT_CHECK(
+    x.dim() > 0,
+    "The input Tensor must have at least one dimension"
+  );
+
   int n = x.size(0);
   Tensor samples;
 
@@ -883,9 +886,10 @@ Tensor sampling_with_replacement_cpu(
     int64_t *samples_ptr = samples.data<int64_t>();
 
     Tensor cdf = weights.cumsum(0);
+		cdf = cdf.to(at::kFloat);
     cdf /= cdf[-1];
 
-    AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "Sampling with replacement", [&] {
+    AT_DISPATCH_FLOATING_TYPES(cdf.scalar_type(), "Sampling with replacement", [&] {
       scalar_t *cdf_ptr = cdf.data<scalar_t>();
       for(int i = 0; i < k; i++){
         scalar_t u = THRandom_standard_uniform(generator);

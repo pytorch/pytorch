@@ -484,8 +484,8 @@ Tensor reservoir_sampling_cuda(
 ){
 
   AT_CHECK(
-    weights.dtype() == kFloat,
-    "The sampling weights must be Float, got", weights.dtype()
+    x.dim() > 0,
+    "The input Tensor must have at least one dimension"
   );
 
   int n = x.size(0);
@@ -528,6 +528,8 @@ Tensor reservoir_sampling_cuda(
       gen_states
     );
 
+    AT_CUDA_CHECK(cudaGetLastError());
+
     generate_reservoir<<<1, 1>>>(
       indices_n.data<int64_t>(),
       samples.data<int64_t>(),
@@ -547,46 +549,43 @@ Tensor reservoir_sampling_cuda(
 
   } else {
 
-    Tensor weights_contiugous;
+    // If the weights are contiguous floating points, then
+		// the two next steps won't generate copies.
+    Tensor weights_contiguous = weights.contiguous();
+    weights_contiguous = weights_contiguous.to(at::kFloat);
 
-    if(!weights.is_contiguous()){
-        weights_contiugous = weights.contiguous();
-    }else{
-        weights_contiugous = weights.clone();
-    }
+	  AT_CHECK(
+	    weights_contiguous.device() == x.device(),
+	    "The weights must share the same device as the inputs."
+	  );
 
-    AT_CHECK(
-      weights_contiugous.device() == x.device(),
-      "The weights must share the same device as the inputs."
-    );
+	  AT_CHECK(
+	    n == weights_contiguous.numel(),
+	    "The weights must have the same number of elements as the input's first dimension."
+	  );
 
-    AT_CHECK(
-      n == weights_contiugous.numel(),
-      "The weights must have the same number of elements as the input's first dimension."
-    );
+	  AT_CHECK(
+	    weights_contiguous.dim() == 1,
+	    "The weights must 1-dimensional."
+	  );
 
-    AT_CHECK(
-      weights_contiugous.dim() == 1,
-      "The weights must 1-dimensional."
-    );
+	  AT_CHECK(
+	    weights_contiguous.nonzero().numel() >= k,
+	    "Cannot have less non-zero weights than the number of samples."
+	  );
 
-    AT_CHECK(
-      weights_contiugous.nonzero().numel() >= k,
-      "Cannot have less non-zero weights than the number of samples."
-    );
+	  AT_CHECK(
+	    weights_contiguous.min().item().toLong() >= 0,
+	    "All the weights must be non-negative."
+	  );
 
-    AT_CHECK(
-      weights_contiugous.min().item().toLong() >= 0,
-      "All the weights must be non-negative."
-    );
-
-    Tensor keys = at::empty({n}, weights_contiugous.options());
+    Tensor keys = at::empty({n}, weights_contiguous.options());
     dim3 all_blocks((n + threadsPerBlock - 1)/threadsPerBlock);
 
-    AT_DISPATCH_FLOATING_TYPES(weights_contiugous.scalar_type(), "generate keys", [&] {
+    AT_DISPATCH_FLOATING_TYPES(weights_contiguous.scalar_type(), "generate keys", [&] {
       generate_keys<scalar_t><<<all_blocks, threads>>>(
         keys.data<scalar_t>(),
-        weights_contiugous.data<scalar_t>(),
+        weights_contiguous.data<scalar_t>(),
         n,
         gen_states
       );
@@ -604,6 +603,12 @@ Tensor sampling_with_replacement_cuda(
   const Tensor& weights,
   int64_t k
 ){
+
+  AT_CHECK(
+    x.dim() > 0,
+    "The input Tensor must have at least one dimension"
+  );
+
   int n = x.size(0);
   Tensor samples;
 
@@ -626,7 +631,7 @@ Tensor sampling_with_replacement_cuda(
     dim3 threads(threadsPerBlock);
     dim3 blocks((k + threadsPerBlock - 1)/threadsPerBlock);
 
-    AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "Sampling with replacement", [&] {
+    AT_DISPATCH_ALL_TYPES(weights.scalar_type(), "Sampling with replacement", [&] {
       sampling_with_replacement_kernel<scalar_t><<<blocks, threads>>>(
         samples.data<int64_t>(),
         cdf.data<scalar_t>(),
