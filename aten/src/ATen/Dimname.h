@@ -2,6 +2,7 @@
 #ifdef NAMEDTENSOR_ENABLED
 
 #include <ATen/core/interned_strings.h>
+#include <c10/util/Optional.h>
 
 namespace at {
 
@@ -28,6 +29,9 @@ struct CAFFE2_API Dimname {
 
 static Symbol kWildcard = Symbol::dimname("*");
 bool CAFFE2_API is_valid_identifier(const std::string& name);
+
+CAFFE2_API c10::optional<Dimname> unify(Dimname dimname, Dimname other);
+CAFFE2_API bool match(Dimname dimname, Dimname other);
 
 } // namespace at
 #endif
