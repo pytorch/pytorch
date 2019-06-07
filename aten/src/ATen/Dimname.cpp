@@ -57,5 +57,25 @@ Dimname Dimname::wildcard() {
   return result;
 }
 
+optional<Dimname> unify(Dimname dimname, Dimname other) {
+  if (other.type() == NameType::WILDCARD) {
+    return dimname;
+  }
+  if (dimname.type() == NameType::WILDCARD) {
+    return other;
+  }
+  if (dimname.name() == other.name()) {
+    return dimname;
+  }
+  if (dimname.untagged_name() == other.untagged_name()) {
+    return Dimname::fromSymbol(dimname.untagged_name());
+  }
+  return c10::nullopt;
+}
+
+bool match(Dimname dimname, Dimname other) {
+  return unify(dimname, other).has_value();
+}
+
 } // namespace at
 #endif

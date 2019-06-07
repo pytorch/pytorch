@@ -3,6 +3,7 @@
 
 #include <ATen/Dimname.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 using at::is_valid_identifier;
 using at::NameType;
@@ -53,5 +54,40 @@ TEST(DimnameTest, createTaggedName) {
   ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname(".bar")), c10::Error);
   ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("foo.")), c10::Error);
   ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("foo.bar.baz")), c10::Error);
+}
+
+static void check_unify_and_match(
+    const std::string& dimname,
+    const std::string& other,
+    at::optional<const std::string> expected) {
+  auto dimname1 = Dimname::fromSymbol(Symbol::dimname(dimname));
+  auto dimname2 = Dimname::fromSymbol(Symbol::dimname(other));
+  auto result = at::unify(dimname1, dimname2);
+  if (expected) {
+    auto expected_result = Dimname::fromSymbol(Symbol::dimname(*expected));
+    ASSERT_EQ(result->name(), expected_result.name());
+    ASSERT_EQ(result->type(), expected_result.type());
+    ASSERT_EQ(result->untagged_name(), expected_result.untagged_name());
+    ASSERT_TRUE(match(dimname1, dimname2));
+  } else {
+    ASSERT_FALSE(result);
+    ASSERT_FALSE(match(dimname1, dimname2));
+  }
+}
+
+TEST(DimnameTest, unifyAndMatch) {
+  check_unify_and_match("a", "a", "a");
+  check_unify_and_match("a", "*", "a");
+  check_unify_and_match("*", "a", "a");
+  check_unify_and_match("*", "*", "*");
+  check_unify_and_match("a", "b", c10::nullopt);
+
+  check_unify_and_match("*", "a.b", "a.b");
+  check_unify_and_match("a", "a.b", "a");
+  check_unify_and_match("c", "a.b", c10::nullopt);
+  check_unify_and_match("a.b", "a.c", "a");
+  check_unify_and_match("a.b", "a.b", "a.b");
+  check_unify_and_match("c.b", "a.b", c10::nullopt);
+  check_unify_and_match("c.b", "a", c10::nullopt);
 }
 #endif
