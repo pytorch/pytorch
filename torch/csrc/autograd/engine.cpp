@@ -216,11 +216,21 @@ auto ReadyQueue::pop() -> FunctionTask {
 
 Engine::Engine() = default;
 
-// Send shutdown tasks (which have the highest priority) to all ReadyQueues
+// Send shutdown tasks to all ReadyQueues if no backward tasks are running
+// Even though readyQueue should be empty, shutdown tasks have the highest
+// priority
 Engine::~Engine() {
-  for (auto& queue : ready_queues_) {
-   queue->pushShutdownTask();
+  bool noBackward = true;
+  for (auto& queue: ready_queues_) {
+    std::lock_guard<std::mutex> lock(queue->mutex_);
+    noBackward =  noBackward && queue->heap_.empty();
   }
+  if (noBackward) {
+    for (auto& queue : ready_queues_) {
+     queue->pushShutdownTask();
+    }
+  }
+  // Othewise threads are leaked
 }
 
 auto Engine::thread_init(int device) -> void {

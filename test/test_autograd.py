@@ -19,7 +19,7 @@ from torch.autograd.profiler import profile, format_time, EventList, FunctionEve
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
-                          load_tests, random_symmetric_pd_matrix)
+                          load_tests, random_symmetric_pd_matrix, IS_WINDOWS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -3127,6 +3127,7 @@ class TestAutograd(TestCase):
             env=env)
         return pipes.communicate()[1].decode('ascii')
 
+    @unittest.skipIf(IS_WINDOWS, "Skip for windows")
     def test_thread_shutdown(self):
         code = """import torch
 from torch.autograd import Function
