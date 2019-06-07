@@ -2482,8 +2482,8 @@ class _TestTorchMixin(object):
         dims = len(sizes)
         for device in torch.testing.get_all_device_types():
             x = torch.rand(sizes, device=device)
-            for rng in range(2, dims):
-                dim_list = list(combinations(list(range(dims)), r=rng))
+            for num_of_dims in range(2, dims):
+                dim_list = list(combinations(list(range(dims)), r=num_of_dims))
                 for dim in dim_list:
                     for unbiased in [False, True]:
                         for keepdim in [False, True]:
@@ -2498,8 +2498,8 @@ class _TestTorchMixin(object):
         dims = len(sizes)
         for device in torch.testing.get_all_device_types():
             x = torch.rand(sizes, device=device)
-            for rng in range(2, dims):
-                dim_list = list(combinations(list(range(dims)), r=rng))
+            for num_of_dims in range(2, dims):
+                dim_list = list(combinations(list(range(dims)), r=num_of_dims))
                 for dim in dim_list:
                     for unbiased in [False, True]:
                         for keepdim in [False, True]:
