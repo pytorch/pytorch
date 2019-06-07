@@ -94,6 +94,11 @@ inline TypedIValue toTypedIValue(py::handle input) {
     if (ten.is_sparse()) {
       AT_ERROR("sparse tensors not supported");
     }
+    if (ten.is_mkldnn()) {
+      // mkldnn tensor as opaque tensor doesn't have strides, so we can
+      // not create a CompleteTensorType
+      return TypedIValue(ten, DimensionedTensorType::create(ten));
+    }
     return TypedIValue(ten, CompleteTensorType::create(ten));
   } else if (six::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
@@ -110,7 +115,7 @@ inline TypedIValue toTypedIValue(py::handle input) {
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
-    c10::impl::GenericDict elems;
+    c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
 
     size_t len = py::len(dict);
     if (!len) {
@@ -200,7 +205,7 @@ inline IValue createGenericDict(
     py::handle obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
-  c10::impl::GenericDict elems;
+  c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
   elems.reserve(py::len(obj));
   for (auto key : obj) {
     elems.insert(
@@ -321,6 +326,8 @@ inline IValue toIValue(
     case TypeKind::VarType:
     case TypeKind::FutureType:
       break;
+    case TypeKind::FunctionType:
+      AT_ERROR("Function Values aren't yet supported");
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",
@@ -336,21 +343,11 @@ inline IValue argumentToIValue(
   try {
     return toIValue(object, argument.type(), argument.N());
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(c10::str(
-        schema.name(),
-        "() expected value of type ",
-        argument.type()->str(),
-        " for argument '",
-        argument.name(),
-        "' in position ",
-        argumentPosition,
-        ", but instead got value of type ",
+    throw std::runtime_error(schema.formatTypeMismatchMsg(
+        argument,
         py::str(object.get_type().attr("__name__")),
-        ".",
-        "\nValue: ",
-        py::repr(object),
-        "\nDeclaration: ",
-        schema));
+        argumentPosition,
+        py::repr(object)));
   }
 }
 

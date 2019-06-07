@@ -13,7 +13,7 @@ namespace caffe2 {
 namespace {
 template <class DataType, class Context>
 void concat_op_cpu_impl(
-    ArrayRef<at::Tensor> inputs,
+    std::vector<at::Tensor> inputs,
     const at::Tensor& output_,
     const at::Tensor& split_,
     int64_t axis,
@@ -106,10 +106,10 @@ void concat_op_cpu_impl(
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::Concat",
-    c10::kernel<
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(concat_op_cpu_impl<float, CPUContext>),
-        &concat_op_cpu_impl<float, CPUContext>>(),
-    c10::dispatchKey(CPUTensorId()));
+        &concat_op_cpu_impl<float, CPUContext>>(CPUTensorId()));
 
 } // namespace
 

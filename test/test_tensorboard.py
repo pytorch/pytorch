@@ -105,7 +105,7 @@ if TEST_TENSORBOARD:
                                     num=num,
                                     sum=floats.sum().item(),
                                     sum_squares=sum_sq,
-                                    bucket_limits=limits.tolist(),
+                                    bucket_limits=limits[1:].tolist(),
                                     bucket_counts=counts.tolist())
 
                 ints = make_np(torch.randint(0, 100, (num,)))
@@ -118,7 +118,7 @@ if TEST_TENSORBOARD:
                                     num=num,
                                     sum=ints.sum().item(),
                                     sum_squares=sum_sq,
-                                    bucket_limits=limits.tolist(),
+                                    bucket_limits=limits[1:].tolist(),
                                     bucket_counts=counts.tolist())
 
                 ints = torch.tensor(range(0, 100)).float()
@@ -462,16 +462,12 @@ if TEST_TENSORBOARD:
                 'vgg19': (2, 3, 224, 224),
                 'vgg16_bn': (2, 3, 224, 224),
                 'vgg19_bn': (2, 3, 224, 224),
-                'mobilenet_v2': (2, 3, 224, 224),  # will fail optimize_graph
+                'mobilenet_v2': (2, 3, 224, 224),
             }
             for model_name, input_shape in model_input_shapes.items():
                 with SummaryWriter(comment=model_name) as w:
                     model = getattr(torchvision.models, model_name)()
-                    # ValueError: only one element tensors can be converted to Python scalars
-                    if model_name == 'mobilenet_v2':
-                        w.add_graph(model, torch.zeros(input_shape), operator_export_type="RAW")
-                    else:
-                        w.add_graph(model, torch.zeros(input_shape))
+                    w.add_graph(model, torch.zeros(input_shape))
 
     class TestTensorBoardFigure(BaseTestCase):
         @skipIfNoMatplotlib

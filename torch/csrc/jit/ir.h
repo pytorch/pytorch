@@ -79,6 +79,11 @@ namespace aten {
 using namespace ::c10::aten;
 }
 
+namespace script {
+struct Function;
+struct MatchedSchema;
+} // namespace script
+
 // Graph represents one "function" of computation.
 // It uses a simple ownership model where the graph owns all the nodes inside
 // it. All references inside the graph are raw pointers. Destroying the Graph
@@ -162,9 +167,7 @@ struct Value {
 
  public:
   Value* setType(TypePtr type);
-  void inferTypeFrom(const at::Tensor& output) {
-    setType(CompleteTensorType::create(output));
-  }
+  TORCH_API void inferTypeFrom(const at::Tensor& output);
   const TypePtr& type() const {
     AT_ASSERT(type_ != nullptr);
     return type_;
@@ -634,7 +637,8 @@ struct TORCH_API Node {
   std::ostream& print(
       std::ostream& out,
       size_t level,
-      std::vector<const Node*>* groups) const;
+      std::vector<const Node*>* groups,
+      bool print_source_locations = true) const;
 
   virtual ~Node() = default;
 
@@ -1094,6 +1098,13 @@ struct Graph {
     return insertNode(createGetAttr(obj, field))->output();
   }
 
+  TORCH_API Value* insertFunctionCall(
+      std::shared_ptr<script::Function> callee,
+      script::MatchedSchema& matched);
+  TORCH_API Value* insertMethodCall(
+      std::string method_name,
+      script::MatchedSchema& matched);
+
   // Note: defined in python_ir.cpp and can be used only in python extension
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
@@ -1177,7 +1188,11 @@ struct Graph {
 
   TORCH_API ~Graph();
 
-  TORCH_API std::string toString() const;
+  TORCH_API std::string toString(bool print_source_locations = true) const;
+
+  TORCH_API std::ostream& print(
+      std::ostream& out,
+      bool print_source_locations = true) const;
 
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 
