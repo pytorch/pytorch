@@ -159,9 +159,7 @@ public:
   Vec256<float> tan() const {
     return map(std::tan);
   }
-  Vec256<float> tanh() const {
-    return Vec256<float>(Sleef_tanhf8_u10(values));
-  }
+  Vec256<float> tanh() const;
   Vec256<float> trunc() const {
     return _mm256_round_ps(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
@@ -280,10 +278,17 @@ void convert(const float* src, float* dst, int64_t n) {
 
 #ifdef __AVX2__
 template <>
-Vec256<float> inline fmadd(const Vec256<float>& a, const Vec256<float>& b, const Vec256<float>& c) {
+Vec256<float> inline fmadd(
+    const Vec256<float>& a,
+    const Vec256<float>& b,
+    const Vec256<float>& c) {
   return _mm256_fmadd_ps(a, b, c);
 }
-#endif
+#endif // __AVX2__
+
+Vec256<float> Vec256<float>::tanh() const {
+  return FastTanh<Vec256<float>>(*this);
+}
 
 #endif
 

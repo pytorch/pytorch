@@ -116,6 +116,15 @@ static void cosh_kernel(TensorIterator& iter) {
   });
 }
 
+void tanh_kernel(TensorIterator& it) {
+  AT_DISPATCH_FLOATING_TYPES(it.dtype(), "tanh_cpu", [&]() {
+    unary_kernel_vec(
+        it,
+        [](scalar_t x) { return std::tanh(x); },
+        [](const Vec256<scalar_t>& x) { return x.tanh(); });
+  });
+}
+
 #if !AT_MKL_ENABLED()
 void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
@@ -230,6 +239,7 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(fill_stub, &fill_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
+REGISTER_DISPATCH(tanh_stub, &tanh_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)
@@ -252,7 +262,7 @@ IMPLEMENT_FLOAT_KERNEL(FLOATING, sin)
 // IMPLEMENT_FLOAT_KERNEL(FLOATING, sinh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, sqrt)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, tan)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, tanh)
+// IMPLEMENT_FLOAT_KERNEL(FLOATING, tanh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, trunc)
 
 }} // namespace at::native

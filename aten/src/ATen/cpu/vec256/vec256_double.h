@@ -275,7 +275,7 @@ template <>
 Vec256<double> inline fmadd(const Vec256<double>& a, const Vec256<double>& b, const Vec256<double>& c) {
   return _mm256_fmadd_pd(a, b, c);
 }
-#endif
+#endif // __AVX2__
 
 #endif
 

@@ -399,6 +399,38 @@ inline T fmadd(const T& a, const T& b, const T& c) {
   return a * b + c;
 }
 
+// Implement fast tanh from Eigen.
+// https://github.com/eigenteam/eigen-git-mirror/blob/master/Eigen/src/Core/MathFunctionsImpl.h#L26
+template <typename T>
+inline T FastTanh(const T& x) {
+  const T kL = T(-9.0);
+  const T kR = T(9.0);
+  const T kAlpha1 = T(4.89352455891786e-03);
+  const T kAlpha3 = T(6.37261928875436e-04);
+  const T kAlpha5 = T(1.48572235717979e-05);
+  const T kAlpha7 = T(5.12229709037114e-08);
+  const T kAlpha9 = T(-8.60467152213735e-11);
+  const T kAlpha11 = T(2.00018790482477e-13);
+  const T kAlpha13 = T(-2.76076847742355e-16);
+  const T kBeta0 = T(4.89352518554385e-03);
+  const T kBeta2 = T(2.26843463243900e-03);
+  const T kBeta4 = T(1.18534705686654e-04);
+  const T kBeta6 = T(1.19825839466702e-06);
+  const T x1 = minimum(maximum(x, kL), kR);
+  const T x2 = x1 * x1;
+  T p = fmadd(x2, kAlpha13, kAlpha11);
+  p = fmadd(x2, p, kAlpha9);
+  p = fmadd(x2, p, kAlpha7);
+  p = fmadd(x2, p, kAlpha5);
+  p = fmadd(x2, p, kAlpha3);
+  p = fmadd(x2, p, kAlpha1);
+  p = p * x1;
+  T q = fmadd(x2, kBeta6, kBeta4);
+  q = fmadd(x2, q, kBeta2);
+  q = fmadd(x2, q, kBeta0);
+  return p / q;
+}
+
 template <int64_t scale = 1, typename T = void>
 c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<T>>
 inline gather(T const* base_addr, const Vec256<int_same_size_t<T>>& vindex) {
