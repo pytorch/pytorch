@@ -33,6 +33,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_NUMPY=0
+#     disables the NumPy build
+#
 #   BUILD_TEST=0
 #     disables the test build
 #
@@ -187,6 +190,7 @@ from tools.setup_helpers.cudnn import USE_CUDNN, CUDNN_LIBRARY, CUDNN_INCLUDE_DI
 from tools.setup_helpers.rocm import USE_ROCM
 from tools.setup_helpers.miopen import USE_MIOPEN, MIOPEN_LIBRARY, MIOPEN_INCLUDE_DIR
 from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_SYSTEM_LIB, NCCL_INCLUDE_DIR
+from tools.setup_helpers.numpy_ import USE_NUMPY
 from tools.setup_helpers.dist_check import USE_DISTRIBUTED
 ################################################################################
 # Parameters parsed from environment
@@ -618,14 +622,6 @@ main_sources = ["torch/csrc/stub.cpp"]
 # looked up in libtorch_python.so first, by making sure it comes
 # before libcaffe2.so in the linker command.
 main_link_args.extend(CAFFE2_LIBS)
-
-try:
-    import numpy as np
-except ImportError:
-    USE_NUMPY = False
-else:
-    NUMPY_INCLUDE_DIR = np.get_include()
-    USE_NUMPY = True
 
 if USE_CUDA:
     if IS_WINDOWS:

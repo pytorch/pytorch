@@ -63,7 +63,7 @@ void delValueTrace(const Variable& var) {
   getTracingState()->env_stack.back().value_map.erase(var);
 }
 
-// Given a variable 'var', return the 'node' which represents the instruction
+// Given a IValue 'var', return the 'node' which represents the instruction
 // which computes the value of this variable in the IR.
 // Here, we interpret untraced variables as constants that are just embedded
 // in the graph.  This is useful to handle code which does things like this
@@ -81,7 +81,22 @@ Value* getValueTrace(const IValue& var) {
   auto& state = getTracingState();
   auto& env_stack = getTracingState()->env_stack;
 
-  if (var.isTensor()) {
+  // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...] arguments
+  if (var.isTensorList()) {
+    return state->graph
+        ->insertNode(state->graph->createList(
+            TensorType::get(),
+            fmap(
+                var.toTensorListRef(),
+                [](const IValue& val) { return getValueTrace(val); })))
+        ->output();
+  } else if (var.isTuple()) {
+    return state->graph
+        ->insertNode(state->graph->createTuple(fmap(
+            var.toTuple()->elements(),
+            [](const IValue& val) { return getValueTrace(val); })))
+        ->output(); 
+  } if (var.isTensor()) {
     auto ten = var.toTensor();
     if (!ten.defined()) {
       Node* n = state->graph->createNone(TensorType::get());
@@ -134,33 +149,19 @@ Value* getValueTrace(const IValue& var) {
     oss << "Tried to trace Future that the tracer was not aware of.";
     throw std::runtime_error(oss.str());
   } else {
-    std::ostringstream oss;
-    oss << "Unknown type used in value trace lookup!";
-    throw std::runtime_error(oss.str());
+    // If the values are non-tensors, we try to create constants 
+    // and bake those constants into the traced graph
+    auto constant = tryInsertConstant(*state->graph, var);
+    if (constant) {
+      recordSourceLocation(constant.value()->node());
+      return *constant;
+    }
+    std::ostringstream os;
+    os << "Tracer cannot get value trace for type " << var.tagKind() << ". "
+       << "The below value could not be materialized as a constant:\n"
+       << var;
+    throw std::runtime_error(os.str());
   }
-}
-
-// allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...] arguments
-// One might merge getValueTrace and getNestedValueTrace after checking that
-// casting to IValue instead  of Variable is OK
-Value* getNestedValueTrace(const IValue& v) {
-  auto& state = getTracingState();
-  if (v.isTensorList()) {
-    return state->graph
-        ->insertNode(state->graph->createList(
-            TensorType::get(),
-            fmap(
-                v.toTensorListRef(),
-                [](const IValue& val) { return getNestedValueTrace(val); })))
-        ->output();
-  } else if (v.isTuple()) {
-    return state->graph
-        ->insertNode(state->graph->createTuple(fmap(
-            v.toTuple()->elements(),
-            [](const IValue& val) { return getNestedValueTrace(val); })))
-        ->output();
-  }
-  return getValueTrace(v.toTensor());
 }
 
 Value* getOutputTrace(

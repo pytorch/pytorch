@@ -53,12 +53,14 @@ TORCH_API void InsertObserverNodes(
  * performs quantization of the model by inserting quant-dequant node pairs for
  * quantizatable tensors - later passes only cleanup the IR and
  * make sure the model runs faster/consumes less memory.
- * \param graph which is instrumented for quant-dequant nodes.
+ * \moduleObj is the module object whose containing methods are modified.
+ * \param method_name whose graph is instrumented for quant-dequant nodes.
  * \param qparam_dict dictionary of tensor unique names to qparams.
  *
  */
 TORCH_API void InsertQuantDequantNodes(
-    std::shared_ptr<Graph>& graph,
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& methodName,
     const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
         qparam_dict);
 

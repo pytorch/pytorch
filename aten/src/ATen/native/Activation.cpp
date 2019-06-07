@@ -33,12 +33,12 @@ Tensor & selu_(Tensor & self) {
 
 Tensor celu(const Tensor & self, Scalar alpha) {
   double inv_alpha = 1. / alpha.to<double>();
-  return at::elu(self, 1.0, alpha, Scalar(inv_alpha));
+  return at::elu(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
 Tensor & celu_(Tensor & self, Scalar alpha) {
   double inv_alpha = 1. / alpha.to<double>();
-  return at::elu_(self, 1.0, alpha, Scalar(inv_alpha));
+  return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
 Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {

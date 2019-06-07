@@ -722,6 +722,35 @@ graph():
     ASSERT_FALSE(aliasDb.mayAlias(y, fresh));
     ASSERT_FALSE(aliasDb.mayAlias(z, fresh));
   }
+  {
+    // test "conservative" analysis writes to the inside of a container.
+    auto ops = torch::RegisterOperators(
+        "custom::conservative", [](std::vector<at::Tensor> in) { return in; });
+
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    script::parseIR(
+        R"IR(
+graph():
+  %10 : bool? = prim::Constant()
+  %8 : Device? = prim::Constant()
+  %4 : int? = prim::Constant()
+  %0 : int = prim::Constant[value=2]()
+  %1 : int = prim::Constant[value=3]()
+  %2 : int[] = prim::ListConstruct(%0, %1)
+  %11 : Tensor = aten::rand(%2, %4, %4, %8, %10)
+  %12 : Tensor[] = prim::ListConstruct(%11)
+  %out : Tensor[] = custom::conservative(%12)
+  %ret.2 : Tensor = aten::div(%11, %11)
+  return ()
+)IR",
+        graph.get(),
+        vmap);
+    AliasDb aliasDb(graph);
+    auto conservativeOp = vmap["out"]->node();
+    auto tensor = vmap["11"];
+    ASSERT_TRUE(aliasDb.writesToAlias(conservativeOp, ValueSet{tensor}));
+  }
 }
 
 void testWildcards() {
@@ -751,9 +780,7 @@ void testWildcards() {
     ASSERT_FALSE(aliasDb.mayAlias(a, fresh));
     ASSERT_FALSE(aliasDb.mayAlias(wildcard, fresh));
     ASSERT_TRUE(aliasDb.mayAlias(wildcard, a));
-    ASSERT_FALSE(aliasDb.mayAlias(
-        std::unordered_set<const Value*>({wildcard}),
-        std::unordered_set<const Value*>()));
+    ASSERT_FALSE(aliasDb.mayAlias(ValueSet{wildcard}, ValueSet{}));
     ASSERT_FALSE(aliasDb.hasWriters(wildcard->node()));
   }
 

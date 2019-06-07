@@ -26,10 +26,17 @@ TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
     const SourceRange& loc,
     Graph& graph,
     c10::optional<NamedValue> self,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     std::ostream* failure_messages,
     bool allow_conversions);
+
+TORCH_API MatchedSchema matchSchema(
+    const ::c10::FunctionSchema& schema,
+    const SourceRange& loc,
+    Graph& graph,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwarg);
 
 TORCH_API bool convertibleToList(
     const TypePtr& type,

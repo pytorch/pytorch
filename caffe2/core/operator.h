@@ -478,6 +478,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return false;
   }
 
+  virtual void CancelAsyncCallback() {}
+
   // RunAsync, if implemenented by the specific operators, will schedule the
   // computation on the corresponding context and record the event in its
   // event_ member object. If the specific operator does not support RunAsync,
