@@ -6523,6 +6523,19 @@ a")
 
         self.checkScript(int1, ())
         self.checkScript(int2, ())
+    
+    def test_number_sum(self):
+        def int1():
+            return sum(x)
+        
+        def float1():
+            return sum(x)
+        
+        a = torch.ones(2, 2)
+        b = torch.tensor([0.2,0.1,0.2])
+        
+        self.checkScript(int1, (a))
+        self.checkScript(float1, (b))
 
     def test_number_math(self):
         ops_template = dedent('''
