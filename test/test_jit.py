@@ -13534,17 +13534,15 @@ class TestRecursiveScript(JitTestCase):
             ('my_none', None),
         )
         class M(torch.nn.Module):
-            my_empty_list : List[int]
-            my_empty_dict : Dict[str, int]
-            my_none : Optional[int]
-            my_out_of_line_attribute: List[int] = [1, 2, 3]
+            # my_empty_list : List[int]
+            # my_empty_dict : Dict[str, int]
+            # my_none : Optional[int]
 
             def __init__(self):
                 super(M, self).__init__()
 
             def forward(self, x):
                 return (
-                    self.my_out_of_line_attribute,
                     self.my_dict,
                     self.my_float,
                     self.my_int,
@@ -13559,6 +13557,21 @@ class TestRecursiveScript(JitTestCase):
                     self.my_empty_dict,
                     self.my_none,
                 )
+
+        # TODO: as a followup, fix this test
+        # We can't define class attributes like we should be doing:
+        #   class M(torch.nn.Module):
+        #       my_empty_list : List[int]
+        #       my_empty_dict : Dict[str, int]
+        #       my_none : Optional[int]
+        #       my_out_of_line_attribute: List[int] = [1, 2, 3]
+        # since there's no string frontend for Python classes (so the `define`)
+        # trick doesn't work.
+        M.__annotations__ = {
+            'my_empty_list': List[int],
+            'my_empty_dict': Dict[str, int],
+            'my_none': Optional[int],
+        }
 
         m = M()
         for name, value in untyped_values + typed_values:
