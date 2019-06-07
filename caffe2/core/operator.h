@@ -220,6 +220,10 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline T* Output(int idx) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "Output(idx) not supported for operators exported to c10. Please use XOutput instead.");
+
     static_assert(
         !std::is_same<T, Tensor>::value,
         "You should use Output<Tensor>(int, DeviceType) for "
@@ -341,15 +345,24 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline T* Output(int idx, T* allocated) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "Output(idx, allocated) not supported for operators exported to c10. Please use XOutput.");
     outputs_.at(idx)->Reset(allocated);
     return allocated;
   }
 
   inline const Blob& InputBlob(int idx) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "InputBlob(idx) not (yet) supported for operators exported to c10.");
     return *inputs_.at(idx);
   }
 
   inline Blob* OutputBlob(int idx) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "OutputBlob(idx) not (yet) supported for operators exported to c10.");
     return outputs_.at(idx);
   }
 
@@ -365,6 +378,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   template <typename T>
   inline bool InputIsType(int idx) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "InputIsType(idx) not (yet) supported for operators exported to c10.");
     static_assert(
         !std::is_same<T, Tensor>::value,
         "You should use InputIsTensorType(int, DeviceType) for "
@@ -373,11 +389,17 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool InputIsTensorType(int idx, DeviceType device_type) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "InputIsTensorType(idx, device_type) not (yet) supported for operators exported to c10.");
     return BlobIsTensorType(*inputs_.at(idx), device_type);
   }
 
   template <typename T>
   inline bool OutputIsType(int idx) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "OutputIsType(idx) not (yet) supported for operators exported to c10.");
     static_assert(
         !std::is_same<T, Tensor>::value,
         "You should use OutputIsTensorType(int, DeviceType) for "
@@ -386,6 +408,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool OutputIsTensorType(int idx, DeviceType type) {
+    CAFFE_ENFORCE(
+        isLegacyOperator(),
+        "OutputIsTensorType(idx, type) not (yet) supported for operators exported to c10.");
     return BlobIsTensorType(*outputs_.at(idx), type);
   }
 
@@ -452,6 +477,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   virtual bool SupportsAsyncScheduling() const {
     return false;
   }
+
+  virtual void CancelAsyncCallback() {}
 
   // RunAsync, if implemenented by the specific operators, will schedule the
   // computation on the corresponding context and record the event in its
@@ -1293,6 +1320,13 @@ C10_DECLARE_REGISTRY(
   C10_MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
 #endif
 
+#ifdef CAFFE2_NO_GRADIENT_OPS
+#define REGISTER_CPU_GRADIENT_OPERATOR_WITH_ENGINE(...) /* No gradients. */
+#else
+#define REGISTER_CPU_GRADIENT_OPERATOR_WITH_ENGINE(...) \
+  C10_MACRO_EXPAND(REGISTER_CPU_OPERATOR_WITH_ENGINE(__VA_ARGS__))
+#endif
+
 C10_DECLARE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
@@ -1476,7 +1510,7 @@ class ExternalTensorFunctionsBase {
       const Blob* blob,
       std::vector<std::vector<uint64_t>>* shapes,
       std::vector<std::vector<float>>* all_scales,
-      std::vector<std::vector<float>>* all_offsets,
+      std::vector<std::vector<int32_t>>* all_offsets,
       ExternalTensorDescriptor* desc) = 0;
   virtual void LoadInfoOfBlob(
       const Blob* blob,

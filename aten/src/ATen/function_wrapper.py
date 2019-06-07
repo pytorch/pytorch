@@ -220,7 +220,6 @@ class NYIError(Exception):
 
 TYPE_FORMAL_GENERIC = {
     'THTensor*': 'Tensor &',
-    'THSTensor*': 'SparseTensorRef',
     'THByteTensor*': 'Tensor &',
     'THIndexTensor*': 'Tensor &',
     'THBoolTensor*': 'Tensor &',
@@ -237,7 +236,6 @@ TYPE_FORMAL_GENERIC = {
 
 DYNAMIC_TYPE = {
     'THTensor*': 'Tensor',
-    'THSTensor*': 'SparseTensorRef',
     'THByteTensor*': 'ByteTensor',
     'THBoolTensor*': 'BoolTensor',
     'THIndexTensor*': 'IndexTensor',
@@ -263,7 +261,6 @@ TYPE_RETURN = {
     'THByteTensor*': 'Tensor',
     'THBoolTensor*': 'Tensor',
     'THIntegerTensor*': 'Tensor',
-    'THSTensor*': 'Tensor',
     'THDenseTensor*': 'Tensor',
     'THDenseIndexTensor*': 'Tensor',
     'real': 'Tensor',
@@ -276,11 +273,6 @@ CHECKED_CAST = {
         CodeTemplate(
             'checked_tensor_unwrap('
             '${arg_name},"${arg_name}",${arg_pos}, ${null_okay}, '
-            'Backend::${Backend}, ScalarType::${ScalarName})'),
-    'THSTensor*':
-        CodeTemplate(
-            'checked_tensor_unwrap('
-            '${arg_name}.tref,"${arg_name}",${arg_pos},false, '
             'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THByteTensor*':
         CodeTemplate(
@@ -334,7 +326,6 @@ CHECKED_CAST = {
 
 CHECKED_USE = {
     'THTensor*': '{}_',
-    'THSTensor*': '{}_',
     'THIndexTensor*': '{}_',
     'THByteTensor*': '{}_',
     'THBoolTensor*': '{}_',
@@ -507,7 +498,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'api_name': str,
     'arguments': List[THFormal],
     'aten_custom_call': str,
-    'aten_dense_sparse': bool,
     'backend_types': Dict[str, List[str]],
     'backends': List[str],
     'broadcast_actuals': List[str],
@@ -725,11 +715,6 @@ def create_generic(top_env, declarations):
             if argument.get('output') and not argument.get('allocate', False):
                 insert(argument)
         for argument in option['arguments']:
-            if argument['type'] == 'THSTensor*':
-                # only enable for a subset of Dense/Sparse ops
-                if not (option.get('aten_dense_sparse', False)):
-                    raise NYIError("Sparse Tensor")
-
             if include_constants and argument['type'] == 'CONSTANT':
                 insert(argument)
             elif is_real_argument_to_wrapper(argument):
@@ -1283,16 +1268,6 @@ def create_derived(backend_type_env, declarations):
         else:
             return None
 
-    def handle_sparse(env, option):
-        # type: (Environment, FunctionOption) -> List[str]
-        if 'when_sparse_dispatch' not in option or 'Sparse' in backend_type_env['Backend']:
-            return []
-        check_name = option['when_sparse_dispatch']
-        sparse_actuals = [arg['name']
-                          if arg['name'] != check_name else "SparseTensorRef({})".format(arg['name'])
-                          for arg in option['formals_list']]
-        return [SPARSE_CHECK.substitute(env, check_name=check_name, sparse_actuals=sparse_actuals)]
-
     def allocate_arg(env, arg, output_count):
         # type: (Environment, THFormal, int) -> List[str]
         name = arg['name']
@@ -1347,7 +1322,6 @@ def create_derived(backend_type_env, declarations):
     def emit_body(env, option, scalar_type_cases):
         # type: (Environment, FunctionOption, List[str]) -> List[str]
         body = []  # type: List[str]
-        body += handle_sparse(env, option)
         body += handle_zero_dim(env, option)
         only_zero_dim_check = handle_only_zero_dim(env, option)
         if only_zero_dim_check is not None:

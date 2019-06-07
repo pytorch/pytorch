@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
@@ -61,40 +62,7 @@ class AliasDb {
   TORCH_API bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
   // value in group `b`? i.e. may they overlap?
-  //
-  // NOTE: Bit of ugly templating, but this is just to make sure we can
-  // transform an arbitrary container of `Values` to the same container of
-  // `Elements`.
-  template <
-      typename... Other1,
-      template <typename, typename...>
-      class T,
-      typename... Other2,
-      template <typename, typename...>
-      class U>
-  bool mayAlias(
-      const T<const Value*, Other1...>& a,
-      const U<const Value*, Other2...>& b) const {
-    if (a.empty() || b.empty()) {
-      return false;
-    }
-
-    T<Element*> aElements;
-    for (const Value* v : a) {
-      if (elementMap_.count(v)) {
-        aElements.insert(elementMap_.at(v));
-      }
-    }
-
-    U<Element*> bElements;
-    for (const Value* v : b) {
-      if (elementMap_.count(v)) {
-        bElements.insert(elementMap_.at(v));
-      }
-    }
-
-    return memoryDAG_->mayAlias(aElements, bElements);
-  }
+  TORCH_API bool mayAlias(const ValueSet& a, const ValueSet& b) const;
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
   TORCH_API bool hasWriters(const Node* n) const;
@@ -132,17 +100,21 @@ class AliasDb {
   // NOTE: this only returns values directly written to, not aliases thereof
   //
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
-  ValueSet getWrites(Node* n, bool recurseBlocks = false) const;
-  void getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks = false) const;
-  void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
+  MemoryLocations getWrites(Node* n, bool recurseBlocks = false) const;
+  void getWritesImpl(Block* b, MemoryLocations& ret, bool recurseBlocks = false)
+      const;
+  void getWritesImpl(Node* n, MemoryLocations& ret, bool recurseBlocks = false)
+      const;
   // Do any nodes write to `v`s memory location?
   TORCH_API bool hasWriters(const Value* v) const;
   // Register the fact that `n` writes to `v`.
   void registerWrite(const Value* v, Node* n);
+  void registerWrite(const Element* e, Node* n);
   // Get all the values that `n` reads from.
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
-  ValueSet getReads(Node* n, bool recurseBlocks = false) const;
-  void getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
+  MemoryLocations getReads(Node* n, bool recurseBlocks = false) const;
+  void getReadsImpl(Node* n, MemoryLocations& ret, bool recurseBlocks = false)
+      const;
 
   /**
    * Wildcard methods
@@ -173,7 +145,7 @@ class AliasDb {
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
   void analyzeTupleConstruct(Node* node);
-  void analyzeCustomOp(Node* node);
+  void analyzeConservative(Node* node);
   void analyzeContainerConstruct(Node* node);
   bool tryRegisteredAnalysis(Node* node);
 
@@ -200,7 +172,7 @@ class AliasDb {
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAG> memoryDAG_;
   // Mapping of values to MemoryDAG elements
-  std::unordered_map<const Value*, Element*> elementMap_;
+  ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
   std::map<TypeKind, Element*> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
@@ -210,10 +182,10 @@ class AliasDb {
   /**
    * State for tracking write info.
    */
-  // Map of nodes to the values that they write to
-  std::unordered_map<Node*, ValueSet> writeIndex_;
+  // Map of nodes to the memory locations that they write to
+  ska::flat_hash_map<Node*, MemoryLocations> writeIndex_;
   // Set of all memory locations that may have been written to.
-  mutable std::unordered_set<const Element*> writeCache_;
+  mutable MemoryLocations writeCache_;
   mutable bool isWriteCacheStale_ = true;
   void rebuildWriteCache() const;
 };
