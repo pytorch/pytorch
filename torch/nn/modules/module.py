@@ -1,6 +1,7 @@
 from collections import OrderedDict, namedtuple
 import functools
 import itertools
+import sys
 
 import torch
 from ..backends.thnn import backend as thnn_backend
@@ -193,13 +194,45 @@ class Module(object):
         for module in self.children():
             module._apply(fn)
 
-        for param in self._parameters.values():
-            if param is not None:
-                # Tensors stored in modules are graph leaves, and we don't
-                # want to create copy nodes, so we have to unpack the data.
-                param.data = fn(param.data)
-                if param._grad is not None:
-                    param._grad.data = fn(param._grad.data)
+        for key in list(self._parameters.keys()):
+            if self._parameters[key] is not None:
+                param_applied = fn(self._parameters[key])
+                grad_applied = fn(self._parameters[key]._grad) if self._parameters[key]._grad is not None else None
+                param_is_same_impl_type = self._parameters[key]._is_same_impl_type(param_applied)
+                if grad_applied is not None:
+                    grad_is_same_impl_type = self._parameters[key]._grad._is_same_impl_type(grad_applied)
+
+                if param_is_same_impl_type:
+                    # Tensors stored in modules are graph leaves, and we don't
+                    # want to create copy nodes, so we have to unpack the data.
+                    #
+                    # yf225 TODO: check refcount of param, and give deprecation notice / throw error if refcount > 1
+                    #
+                    # yf225 TODO: also, post in the following threads about this behavior change:
+                    # 1. https://discuss.pytorch.org/t/effect-of-calling-model-cuda-after-constructing-an-optimizer/15165
+                    # 2. https://github.com/pytorch/pytorch/issues/7844
+                    if self._parameters[key].device != param_applied.device:
+                        if sys.getrefcount(self._parameters[key]) > 2:  # this is at least 2, see https://docs.python.org/3/library/sys.html#sys.getrefcount for reasons
+                            # yf225 TODO: use something like "warnings.warn(..., stacklevel=2)"
+                            raise RuntimeError("Attempted to change device of `{}`, but there are existing references to that tensor which would be broken by the device change. Current count: {}".format(key, sys.getrefcount(self._parameters[key])))
+                    self._parameters[key].data = param_applied
+                else:
+                    with torch.no_grad():
+                        # yf225 TODO: improve comment here
+                        #
+                        # We use `requires_grad_()` here, to make sure the new `param` still
+                        # has the same `requires_grad` value as the old `param`. An alternative is
+                        # to not use `with torch.no_grad():`, but that would cause the following operation
+                        # to create a `CopyBackwards` gradient function which is not what we wanted.
+                        #
+                        # yf225 TODO: in a separate PR, we should enforce that `self._parameters[key].requires_grad == True`
+                        self._parameters[key] = param_applied.requires_grad_(self._parameters[key].requires_grad)
+
+                if grad_applied is not None:
+                    if grad_is_same_impl_type:
+                        self._parameters[key]._grad.data = grad_applied
+                    else:
+                        self._parameters[key]._grad = grad_applied
 
         for key, buf in self._buffers.items():
             if buf is not None:
@@ -381,26 +414,10 @@ class Module(object):
                 raise TypeError('nn.Module.to only accepts floating point '
                                 'dtypes, but got desired dtype={}'.format(dtype))
 
-        for module in self.children():
-            module.to(*args, **kwargs)
+        def convert(t):
+            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
-        for param in self._parameters.values():
-            if param is not None:
-                # Tensors stored in modules are graph leaves, and we don't
-                # want to create copy nodes, so we have to unpack the data.
-                param_applied = param.data.to(device, dtype if t.is_floating_point() else None, non_blocking)
-                if param._is_same_impl_type(param_applied):
-                    param.data = param_applied
-                else:
-                    param.to_(device, dtype if t.is_floating_point() else None, non_blocking)
-                if param._grad is not None:
-                    grad_applied = param._grad.data.to(device, dtype if t.is_floating_point() else None, non_blocking)
-                    if param._grad._is_same_impl_type(grad_applied):
-                        param._grad.data = grad_applied
-                    else:
-                        param._grad.to_(device, dtype if t.is_floating_point() else None, non_blocking)
-
-        return self
+        return self._apply(convert)
 
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.

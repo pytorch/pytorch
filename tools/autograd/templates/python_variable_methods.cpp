@@ -618,41 +618,6 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_to_(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  auto parsed = parse_to_conversion(args, kwargs, /*allow_copy*/ true);
-  auto& device = std::get<0>(parsed);
-  auto& scalarType = std::get<1>(parsed);
-  auto non_blocking = std::get<2>(parsed);
-  auto copy = std::get<3>(parsed);
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  if (device && device->is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
-  Variable result;
-  if (!device && !scalarType && !copy) {
-    Py_INCREF(self);
-    return self;
-  } else if (!device) {
-    result = dispatch_to(self_, *scalarType, non_blocking, copy);
-  } else if (!scalarType) {
-    result = dispatch_to(self_, *device, non_blocking, copy);
-  } else {
-    result = dispatch_to(self_, *device, *scalarType, non_blocking, copy);
-  }
-  if (self_.is_same_impl_type(result)) {
-    self_.set_data(result);
-  } else {
-    self_._set_data_swap_impl(result);
-  }
-  self_.bump_version();
-  Py_INCREF(self);
-  return self;
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -780,7 +745,6 @@ PyMethodDef variable_methods[] = {
   {"storage_type", (PyCFunction)THPVariable_storage_type, METH_NOARGS, NULL},
   {"stride", (PyCFunction)THPVariable_stride, METH_VARARGS | METH_KEYWORDS, NULL},
   {"to", (PyCFunction)THPVariable_to, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"to_", (PyCFunction)THPVariable_to_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"tolist", (PyCFunction)THPVariable_tolist, METH_NOARGS, NULL},
   {"type", (PyCFunction)THPVariable_type, METH_VARARGS | METH_KEYWORDS, NULL},
   ${py_method_defs}
