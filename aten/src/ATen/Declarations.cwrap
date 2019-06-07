@@ -374,9 +374,9 @@
 ]]
 [[
   name: _th_equal
-  cpu_bool: True
   cname: equal
   cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: bool
@@ -498,6 +498,8 @@
 [[
   name: _th_ixor_
   cname: __ixor__
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
