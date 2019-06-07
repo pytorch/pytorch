@@ -15,7 +15,7 @@ import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import _nested_map
 from torch.onnx import OperatorExportTypes
-from torch._six import inf, PY2, PY37, builtins, StringIO
+from torch._six import inf, PY2, builtins, StringIO
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
@@ -6157,7 +6157,7 @@ a")
                 checkMathWrap("gcd", 2, is_float=False, ret_type="int")
             elif op == "ldexp":
                 checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
-                            vals=[(i, j) for i in float_vals for j in range(-10, 10)])
+                          vals=[(i, j) for i in float_vals for j in range(-10, 10)])
             elif op == "log":
                 checkMathWrap("log", 1)
             elif op == "pow":

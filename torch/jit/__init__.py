@@ -6,7 +6,7 @@ from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
-from torch._six import PY2, PY37, with_metaclass, get_function_from_type, \
+from torch._six import PY37, with_metaclass, get_function_from_type, \
     string_classes, builtins
 from torch._jit_internal import ignore, export  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
@@ -1937,8 +1937,8 @@ def _get_builtin_table():
         _builtin_table[id(builtin)] = aten_op
     math_ops = [x for x in dir(math) if callable(getattr(math, x))]
     unimplemented_math_ops = ["fsum", "hypot", "isclose", "log2", "trunc"]
-    special_math_ops = ["remainder"] # We bound this to aten::mathremainder, as there already exists
-                                     # aten::remainder used for other purposes
+    special_math_ops = ["remainder"]    # We bound this to aten::mathremainder, as there already exists
+                                        # aten::remainder used for other purposes
     for op in math_ops:
         if op in unimplemented_math_ops + special_math_ops:
             continue
