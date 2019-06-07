@@ -884,11 +884,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       }
     } catch (std::exception& e) {
       frames.back().pc = af.pc;
-      // Error from the current thread
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
-      // TODO: stack trace
       handleError(ExceptionMessage(e), is_jit_exception);
-      //    is_jit_exception);
       return false;
     }
   }

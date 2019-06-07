@@ -615,7 +615,7 @@ class weak_intrusive_ptr final {
     // if refcount == 0, weakcount only must be >0.
     AT_ASSERTM(
         owning_weak_ptr == NullType::singleton() ||
-        owning_weak_ptr->weakcount_.load() > 1 ||
+        owning_weak_ptr->weakcount_.load() >= 1 ||
             (owning_weak_ptr->refcount_.load() == 0 &&
              owning_weak_ptr->weakcount_.load() > 0),
         "weak_intrusive_ptr: Can only weak_intrusive_ptr::reclaim() owning pointers that were created using weak_intrusive_ptr::release().");
