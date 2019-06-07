@@ -119,8 +119,8 @@ ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 # add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
-    return globalATenDispatch().getOp<${return_type} (${formals_types})>(
-        tensorTypeIdToBackend(type_id()), is_variable(), ${id}, "${api_name}")(${method_actuals});
+    static auto table = globalATenDispatch().getOpTable("${schema_string}");
+    return table->getOp<${return_type} (${formals_types})>(tensorTypeIdToBackend(type_id()), is_variable())(${method_actuals});
 }
 """)
 # add a method declaration in Functions.h
@@ -134,8 +134,8 @@ C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults}
 # add method definition in Functions.h
 FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
-    return globalATenDispatch().getOp<${return_type} (${formals_types})>(
-        ${inferred_backend}, ${inferred_is_variable}, ${id}, "${api_name}")(${native_actuals});
+    static auto table = globalATenDispatch().getOpTable("${schema_string}");
+    return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
 }
 """)
 # add a native declaration for a native function
@@ -147,8 +147,8 @@ CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults
 FACTORY_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
     globalLegacyTypeDispatch().initForBackend(${inferred_backend});
-    return globalATenDispatch().getOp<${return_type} (${formals_types})>(
-        ${inferred_backend}, ${inferred_is_variable}, ${id}, "${api_name}")(${native_actuals});
+    static auto table = globalATenDispatch().getOpTable("${schema_string}");
+    return table->getOp<${return_type} (${formals_types})>(${inferred_backend}, ${inferred_is_variable})(${native_actuals});
 }
 """)
 

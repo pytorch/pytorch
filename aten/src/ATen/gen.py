@@ -125,8 +125,6 @@ TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 TYPE_EXTENSION_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.h")
 TYPE_EXTENSION_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.cpp")
 
-ATEN_DISPATCH_H = CodeTemplate.from_file(TEMPLATE_PATH + "/ATenDispatch.h")
-
 LEGACY_TH_DISPATCHER_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.h")
 LEGACY_TH_DISPATCHER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.cpp")
 LEGACY_TH_DISPATCHER_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcherDerived.cpp")
@@ -403,20 +401,6 @@ def generate_legacy_th_dispatcher(backend, density, scalar_type, declarations):
     return env
 
 
-def generate_aten_dispatch(declarations):
-    env = {}
-    env['schema_to_id_pairs'] = []
-    max_id = 0
-    for declaration in declarations:
-        for option in declaration['options']:
-            if option['schema_string'] != '':
-                env['schema_to_id_pairs'].append(
-                    '{{"{}", {}}},'.format(option['schema_string'], option['id']))
-                max_id = max(max_id, option['id'])
-    env['function_count'] = max_id + 1
-    core_file_manager.write("ATenDispatch.h", ATEN_DISPATCH_H, env)
-
-
 # yields (backend, density, scalar_type) tuples
 def legacy_iterate_types():
     for backend in backends:
@@ -448,7 +432,7 @@ def iterate_types():
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['Type.h', 'Tensor.h', 'TensorMethods.h', 'ATenDispatch.h']
+    core_files = ['Type.h', 'Tensor.h', 'TensorMethods.h']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
@@ -552,8 +536,6 @@ def generate_outputs():
     for backend, density, scalar_type in legacy_iterate_types():
         if density == 'Dense':
             generate_legacy_th_dispatcher(backend, density, scalar_type, [])
-
-    generate_aten_dispatch(declarations)
 
     core_files = {
         'Type.h': TYPE_H,
