@@ -2398,11 +2398,6 @@ RegisterOperators reg2({
     CREATE_DICT_OPS("float"),
 #undef CREATE_DICT_OPS
 
-    Operator("aten::hash(str t) -> int", hashValue<std::string>),
-    Operator("aten::hash(int t) -> int", hashValue<int>),
-    Operator("aten::hash(float t) -> int", hashValue<double>),
-});
-
     Operator(
         "aten::divmod(int x, int y) -> (int, int)",
         [](Stack& stack) {
@@ -2456,6 +2451,11 @@ RegisterOperators reg2({
     DEFINE_DIVMOD_MIXED_OP(float, int),
 
 #undef DEFINE_DIVMOD_MIXED_OP
+
+    Operator("aten::hash(str t) -> int", hashValue<std::string>),
+    Operator("aten::hash(int t) -> int", hashValue<int>),
+    Operator("aten::hash(float t) -> int", hashValue<double>),
+});
 
 bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
   return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
