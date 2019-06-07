@@ -51,7 +51,7 @@ class CAFFE2_API ATenOpTable {
   ATenOpTable(std::string schema) : schema_(schema) {}
 
   template<class FuncType>
-  ATenOp<FuncType> getOp(Backend backend, bool is_variable) {
+  ATenOp<FuncType> getOp(Backend backend, bool is_variable) const {
     return ATenOp<FuncType>(getBaseOp(backend), getVariableWrapper(is_variable));
   }
  private:
@@ -63,7 +63,7 @@ class CAFFE2_API ATenOpTable {
     wrapper_ = wrapper;
   }
 
-  void* getBaseOp(Backend backend) {
+  void* getBaseOp(Backend backend) const {
     if (function_table_[static_cast<int64_t>(backend)] == nullptr) {
       if (function_table_[static_cast<int64_t>(Backend::Undefined)] == nullptr) {
         AT_ERROR("No function is registered for schema ", schema_, " on backend ", toString(backend));
@@ -73,7 +73,7 @@ class CAFFE2_API ATenOpTable {
     return function_table_[static_cast<int64_t>(backend)];
   }
 
-  void* getVariableWrapper(bool is_variable) {
+  void* getVariableWrapper(bool is_variable) const {
     if (is_variable) {
       if (wrapper_ == nullptr) {
         AT_ERROR("Dispatched to variable implementation of schema ", schema_, " but no variable wrapper is registered.");
@@ -95,9 +95,9 @@ class CAFFE2_API ATenDispatch {
   template<class FuncType>
   ATenDispatch& registerOp(Backend backend, const char* schema, FuncType* fn) {
    if (op_tables_.find(schema) == op_tables_.end()) {
-     op_tables_.insert(std::make_pair(schema, c10::guts::make_unique<ATenOpTable>(schema)));
+     op_tables_.insert(std::make_pair(schema, ATenOpTable(schema)));
    }
-   op_tables_[schema]->registerOp(backend, reinterpret_cast<void*>(fn));
+   op_tables_.at(schema).registerOp(backend, reinterpret_cast<void*>(fn));
    return *this;
   }
 
@@ -107,21 +107,22 @@ class CAFFE2_API ATenDispatch {
   template <class FuncType, class Return, class... Parameters>
   ATenDispatch& registerVariableWrapper(const char* schema, Return (*fn)(FuncType*, Parameters...)) {
     if (op_tables_.find(schema) == op_tables_.end()) {
-      op_tables_.insert(std::make_pair(schema, c10::guts::make_unique<ATenOpTable>(schema)));
+      op_tables_.insert(std::make_pair(schema, ATenOpTable(schema)));
     }
-    op_tables_[schema]->registerVariableWrapper(reinterpret_cast<void*>(fn));
+    op_tables_.at(schema).registerVariableWrapper(reinterpret_cast<void*>(fn));
     return *this;
   }
 
-  ATenOpTable* getOpTable(const char* schema) {
-    if (op_tables_.find(schema) == op_tables_.end()) {
+  const ATenOpTable* getOpTable(const char* schema) const {
+    auto iter = op_tables_.find(schema);
+    if (iter == op_tables_.end()) {
       AT_ERROR("No functions are registered for schema ", schema);
     }
-    return op_tables_[schema].get();
+    return &iter->second;
   }
 
  private:
-  std::unordered_map<std::string, std::unique_ptr<ATenOpTable>> op_tables_;
+  std::unordered_map<std::string, ATenOpTable> op_tables_;
 };
 
 CAFFE2_API ATenDispatch& globalATenDispatch();
