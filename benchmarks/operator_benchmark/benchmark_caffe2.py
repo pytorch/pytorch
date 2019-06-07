@@ -53,8 +53,7 @@ class Caffe2BenchmarkBase(object):
         return str(ret)
 
     def test_name(self, **kargs):
-        """ FIXME(mingzhe0908):
-            this is a globally unique name which can be used to
+        """ this is a globally unique name which can be used to
             label a specific test
         """
         test_name_str = []
@@ -62,7 +61,9 @@ class Caffe2BenchmarkBase(object):
             value = kargs[key]
             test_name_str.append(
                 key + self._value_to_str(value))
-        return '_'.join(test_name_str)
+        name = (self.module_name() + '_' +
+                '_'.join(test_name_str)).replace(" ", "")
+        return name
 
 
 class Caffe2OperatorTestCase(object):
