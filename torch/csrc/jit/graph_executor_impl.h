@@ -58,7 +58,7 @@ struct GraphExecutorImplBase {
     const auto& state = tracer::getTracingState();
     auto inputs = last(stack, num_inputs);
     auto input_values = fmap(
-        inputs, [](const IValue& v) { return tracer::getNestedValueTrace(v); });
+        inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
 
     // NB: we could just run the fallback in here and call it a day, but that
     // would loose all the control flow information we have in the graph. Thus,
