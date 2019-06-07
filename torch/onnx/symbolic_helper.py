@@ -187,6 +187,13 @@ def _try_get_scalar_type(*args):
             pass
     return None
 
+def _slice_op(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
+    if _export_onnx_opset_version == 9:
+        from torch.onnx.symbolic_opset9 import slice_op
+        return slice_op(g, input, axes, starts, ends)
+    if _export_onnx_opset_version == 10:
+        from torch.onnx.symbolic_opset10 import slice_op
+        return slice_op(g, input, axes, starts, ends, steps, dynamic_slice)
 
 # ---------------------------------------------------------------------
 # ONNX operator version
