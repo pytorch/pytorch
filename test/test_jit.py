@@ -6154,8 +6154,9 @@ a")
                 checkMath("modf", 1, ret_type="Tuple[float, float]")
             elif op in ["isnan", "isinf", "isfinite"]:
                 checkMath(op, 1, ret_type="bool")
-            elif op in ["floor", "ceil"] and not PY2:
-                checkMathWrap(op, ret_type="int")
+            elif op in ["floor", "ceil"]:
+                if not PY2:
+                    checkMathWrap(op, ret_type="int")
             elif op == "factorial":
                 checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
             elif op == "frexp":
