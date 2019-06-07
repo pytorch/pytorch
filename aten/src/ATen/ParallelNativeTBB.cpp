@@ -73,7 +73,7 @@ bool in_parallel_region() {
 }
 
 void intraop_launch(std::function<void()> func) {
-  tg_.run(func);
+  internal::tg_.run(func);
 }
 
 } // namespace at
