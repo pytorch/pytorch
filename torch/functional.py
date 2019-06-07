@@ -697,7 +697,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
             raise ValueError("dtype argument is not supported in nuclear norm")
         if dim is None:
             if out is None:
-                torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
+                return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
             return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
         return torch._C._VariableFunctions.nuclear_norm(input, dim, keepdim=keepdim, out=out)
     else:
