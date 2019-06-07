@@ -138,7 +138,7 @@ void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
       ret |= el->getMemoryLocations();
 
       // We also consider memory locations of contained values to be "read".
-      for (auto type : input->type()->containedTypes()) {
+      for (const auto& type : input->type()->containedTypes()) {
         if (auto wildcard = getWildcard(type)) {
           ret |= wildcard->getMemoryLocations();
         }
