@@ -105,6 +105,11 @@ BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .registerOp<${return_type} (${formals_types})>(Backend::${Backend}, "${schema_string}", &${Type}::${api_name})
 """)
 
+# Generate a file that lists all functions and their schema string. Used for XLA
+REGISTRATION_DECLARATION = CodeTemplate("""\
+${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
+""")
+
 # Overrideable stubs to be used in user-extendable backends
 NATIVE_DISPATCH_DEFINITION_EXTENSION_BACKEND = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) {
@@ -393,6 +398,7 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'function_definitions': List[str],
     'type_ids': List[str],
     'native_function_declarations': List[str],
+    'registration_declarations': List[str],
 })
 
 # A Declarations.cwrap formal argument
@@ -1038,7 +1044,8 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(env))
+        top_env['registration_declarations'].append(
+            REGISTRATION_DECLARATION.substitute(env))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1053,6 +1060,8 @@ def create_generic(top_env, declarations):
         if isinstance(type_method_dispatch, dict):
             abstract = True
         else:
+            top_env['type_method_declarations'].append(
+                NATIVE_DISPATCH_DECLARATION.substitute(env))
             top_env['type_method_definitions'].append(
                 NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(env))
             top_env['function_registrations'].append(

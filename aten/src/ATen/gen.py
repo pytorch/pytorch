@@ -124,6 +124,7 @@ TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 TYPE_EXTENSION_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.h")
 TYPE_EXTENSION_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.cpp")
+REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegistrationDeclarations.h")
 
 LEGACY_TH_DISPATCHER_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.h")
 LEGACY_TH_DISPATCHER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.cpp")
@@ -213,6 +214,7 @@ top_env = {
     'native_function_declarations': [],
     'extension_backend_headers': [],
     'extension_backend_register_switches': [],
+    'registration_declarations': [],
 }
 
 
@@ -437,7 +439,7 @@ def declare_outputs():
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
              'LegacyTHDispatcher.h', 'LegacyTHDispatcher.cpp', 'Functions.h', 'NativeFunctions.h',
-             'RegisterCPU.cpp', 'RegisterCPU.h', 'ExtensionBackendRegistration.h']
+             'RegisterCPU.cpp', 'RegisterCPU.h', 'ExtensionBackendRegistration.h', 'RegistrationDeclarations.h']
     for f in files:
         file_manager.will_write(f)
     cuda_files = ['RegisterCUDA.cpp', 'RegisterCUDA.h']
@@ -549,6 +551,7 @@ def generate_outputs():
     file_manager.write('TypeExtendedInterface.h', TYPE_EXTENDED_INTERFACE_H, top_env)
     file_manager.write('TypeDefault.h', TYPE_DEFAULT_H, top_env)
     file_manager.write('TypeDefault.cpp', TYPE_DEFAULT_CPP, top_env)
+    file_manager.write('RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, top_env)
 
     file_manager.write('LegacyTHDispatcher.h', LEGACY_TH_DISPATCHER_H, top_env)
     file_manager.write('LegacyTHDispatcher.cpp', LEGACY_TH_DISPATCHER_CPP, top_env)
