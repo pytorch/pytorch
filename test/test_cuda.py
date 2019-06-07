@@ -2406,6 +2406,7 @@ class TestCuda(TestCase):
     def test_index(self):
         _TestTorchMixin._test_index(self, lambda t: t.cuda())
 
+    @skipCUDANonDefaultStreamIf(True)
     def test_advancedindex(self):
         _TestTorchMixin._test_advancedindex(self, lambda t: t.cuda())
 
