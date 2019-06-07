@@ -98,7 +98,9 @@ class ProcessGroupShareTensorTest(TestCase):
         pg = init_pg(rank, filename, world_size)
         xs = [shared_tensors[rank]]
         pg.allreduce(xs, op=c10d.ReduceOp.SUM).wait()
-        cls.assert_equal(torch.ones(2, 2) * 2, xs[0].to("cpu"))
+        # deliberate failure to try test suite output
+        #cls.assert_equal(torch.ones(2, 2) * 2, xs[0].to("cpu"))
+        cls.assert_equal(torch.ones(2, 2) * 10, xs[0].to("cpu"))
 
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
     def test_shared_allreduce_gloo(self):
