@@ -205,7 +205,7 @@ TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 // involving this variable know which node in the IR to reference.
 TORCH_API void setValueTrace(const IValue& v, Value* value);
 
-TORCH_API void delValueTrace(const Variable& var);
+TORCH_API void delValueTrace(const IValue& var);
 
 TORCH_API std::function<void()> pauseTracing();
 
