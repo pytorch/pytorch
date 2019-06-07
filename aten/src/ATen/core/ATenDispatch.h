@@ -121,7 +121,8 @@ class CAFFE2_API ATenDispatch {
   }
 
  private:
-  std::unordered_map<std::string, std::unique_ptr<ATenOpTable>> op_tables_;
+  std::unordered_map<std::string, std::unique_ptr<ATenOpTable>> op_tables_ =
+      std::unordered_map<std::string, std::unique_ptr<ATenOpTable>>();
 };
 
 CAFFE2_API ATenDispatch& globalATenDispatch();
