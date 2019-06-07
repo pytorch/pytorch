@@ -187,4 +187,22 @@ static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tenso
   return std::make_tuple(arg1_broadcasted, arg2_broadcasted);
 }
 
+// Return a permutation with the given axes moved to the end.
+static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
+  const std::vector<int64_t> a = axes.vec();
+  std::vector<int64_t> perm;
+
+  for (int64_t i = 0; i < self.ndimension(); i++) {
+    auto it = std::find(a.begin(), a.end(), i);
+    if (it == a.end()) {
+       perm.push_back(i);
+    }
+  }
+  for (auto i : a) {
+    perm.push_back(i);
+  }
+
+  return self.permute(perm);
+}
+
 }}  // namespace at::native

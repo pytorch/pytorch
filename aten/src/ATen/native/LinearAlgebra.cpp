@@ -542,24 +542,6 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
   return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
 }
 
-// Return a permutation with the given axes moved to the end.
-static Tensor move_to_end(const Tensor& self, IntArrayRef axes) {
-  const std::vector<int64_t> a = axes.vec();
-  std::vector<int64_t> perm;
-
-  for (int64_t i = 0; i < self.ndimension(); i++) {
-    auto it = std::find(a.begin(), a.end(), i);
-    if (it == a.end()) {
-       perm.push_back(i);
-    }
-  }
-  for (auto i : a) {
-    perm.push_back(i);
-  }
-
-  return self.permute(perm);
-}
-
 // Non-optimized batched svd implementation. This can be merged with at::svd
 // once at::svd has been ported to ATen.
 static std::tuple<Tensor, Tensor, Tensor>
@@ -616,14 +598,14 @@ _batch_svd(const Tensor& self, bool some, bool compute_uv)
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
 
-  Tensor p = move_to_end(self, dim);
+  Tensor p = _move_to_end(self, dim);
   return at::sum(std::get<1>(_batch_svd(p, true, false)), -1, keepdim);
 }
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
 
-  Tensor p = move_to_end(self, dim);
+  Tensor p = _move_to_end(self, dim);
   return at::sum_out(result, std::get<1>(_batch_svd(p, true, false)), -1, keepdim);
 }
 
