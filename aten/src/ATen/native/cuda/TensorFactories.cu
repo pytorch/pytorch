@@ -488,11 +488,6 @@ Tensor reservoir_sampling_cuda(
     "The sampling weights must be Float, got", weights.dtype()
   );
 
-  AT_CHECK(
-    weights.is_contiguous(),
-    "The sampling weights must be contiguous."
-  );
-
   int n = x.size(0);
 
   AT_CHECK(
@@ -552,38 +547,46 @@ Tensor reservoir_sampling_cuda(
 
   } else {
 
+    Tensor weights_contiugous;
+
+    if(!weights.is_contiguous()){
+        weights_contiugous = weights.contiguous();
+    }else{
+        weights_contiugous = weights.clone();
+    }
+
     AT_CHECK(
-      weights.device() == x.device(),
+      weights_contiugous.device() == x.device(),
       "The weights must share the same device as the inputs."
     );
 
     AT_CHECK(
-      n == weights.numel(),
+      n == weights_contiugous.numel(),
       "The weights must have the same number of elements as the input's first dimension."
     );
 
     AT_CHECK(
-      weights.dim() == 1,
+      weights_contiugous.dim() == 1,
       "The weights must 1-dimensional."
     );
 
     AT_CHECK(
-      weights.nonzero().numel() >= k,
+      weights_contiugous.nonzero().numel() >= k,
       "Cannot have less non-zero weights than the number of samples."
     );
 
     AT_CHECK(
-      weights.min().item().toLong() >= 0,
+      weights_contiugous.min().item().toLong() >= 0,
       "All the weights must be non-negative."
     );
 
-    Tensor keys = at::empty({n}, weights.options());
+    Tensor keys = at::empty({n}, weights_contiugous.options());
     dim3 all_blocks((n + threadsPerBlock - 1)/threadsPerBlock);
 
-    AT_DISPATCH_FLOATING_TYPES(weights.scalar_type(), "generate keys", [&] {
+    AT_DISPATCH_FLOATING_TYPES(weights_contiugous.scalar_type(), "generate keys", [&] {
       generate_keys<scalar_t><<<all_blocks, threads>>>(
         keys.data<scalar_t>(),
-        weights.data<scalar_t>(),
+        weights_contiugous.data<scalar_t>(),
         n,
         gen_states
       );
@@ -607,6 +610,11 @@ Tensor sampling_with_replacement_cuda(
   if (weights.numel() == 0){
     samples = at::randint(0, n, {k}, x.options().dtype(at::kLong));
   } else {
+
+    AT_CHECK(
+      weights.min().item().toLong() >= 0,
+      "All the weights must be non-negative."
+    );
 
     THCState *state = at::globalContext().getTHCState();
     curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
@@ -635,9 +643,9 @@ Tensor sampling_with_replacement_cuda(
 
 Tensor choice_cuda(
   const Tensor& input,
-  const Tensor& weights,
+  int64_t k,
   bool replace,
-  int64_t k
+  const Tensor& weights
 ){
   if (replace){
     return sampling_with_replacement_cuda(input, weights, k);
@@ -648,15 +656,11 @@ Tensor choice_cuda(
 
 Tensor choice_cuda(
   const Tensor& input,
-  bool replace,
-  int64_t k
+  int64_t k,
+  bool replace
 ){
   at::Tensor weights = at::empty({0}, input.options().dtype(at::kFloat));
-  if (replace){
-    return sampling_with_replacement_cuda(input, weights, k);
-  } else {
-    return reservoir_sampling_cuda(input, weights, k);
-  }
+  return native::choice_cuda(input, k, replace, weights);
 }
 
 }} // namespace at::native

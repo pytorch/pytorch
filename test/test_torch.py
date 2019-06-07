@@ -3896,30 +3896,30 @@ class _TestTorchMixin(object):
 
             # 1 - UNIFORM Sampling WITHOUT replacement
             torch.manual_seed(2019)
-            res1 = torch.choice(x, replace=False, k=25)
+            res1 = torch.choice(x, size=25, replace=False)
             torch.manual_seed(2019)
-            res2 = torch.choice(x, replace=False, k=25)
+            res2 = torch.choice(x, size=25, replace=False)
             self.assertEqual(res1, res2, 0)
 
             # 2 - UNIFORM Sampling WITH replacement
             torch.manual_seed(2019)
-            res1 = torch.choice(x, replace=True, k=25)
+            res1 = torch.choice(x, size=25, replace=True)
             torch.manual_seed(2019)
-            res2 = torch.choice(x, replace=True, k=25)
+            res2 = torch.choice(x, size=25, replace=True)
             self.assertEqual(res1, res2, 0)
 
             # 3 - WEIGHTED Sampling WITHOUT replacement
             torch.manual_seed(2019)
-            res1 = torch.choice(x, w, replace=False, k=25)
+            res1 = torch.choice(x, size=25, replace=False, p=w)
             torch.manual_seed(2019)
-            res2 = torch.choice(x, w, replace=False, k=25)
+            res2 = torch.choice(x, size=25, replace=False, p=w)
             self.assertEqual(res1, res2, 0)
 
             # 4 - WEIGHTED Sampling WITH replacement
             torch.manual_seed(2019)
-            res1 = torch.choice(x, w, replace=True, k=25)
+            res1 = torch.choice(x, size=25, replace=True, p=w)
             torch.manual_seed(2019)
-            res2 = torch.choice(x, w, replace=True, k=25)
+            res2 = torch.choice(x, size=25, replace=True, p=w)
             self.assertEqual(res1, res2, 0)
 
             ############### Corner cases ################
@@ -3927,27 +3927,27 @@ class _TestTorchMixin(object):
             # 1 - Squashed weights
             # This setup only works for sampling WITH replacement
             w = torch.cat((torch.ones(1), torch.zeros(99))).float().to(device)
-            res = torch.choice(x, w, replace=True, k=25)
+            res = torch.choice(x, size=25, replace=True, p=w)
             self.assertTrue((res == res[0]).all())
 
             # 2 - Squashed weights
             w = torch.cat((torch.ones(25), torch.zeros(75))).float().to(device)
-            res = torch.choice(x, w, replace=True, k=25)
+            res = torch.choice(x, size=25, replace=True, p=w)
             self.assertTrue((res.view(-1) < 25 * x.dim()).all())
 
             w = torch.cat((torch.ones(25), torch.zeros(75))).float().to(device)
-            res = torch.choice(x, w, replace=False, k=25)
+            res = torch.choice(x, size=25, replace=False, p=w)
             self.assertTrue((res.view(-1) < 25 * x.dim()).all())
 
             ############### Correctness ################
 
             # 1 - UNIFORM Sampling WITHOUT replacement - Different values
-            res = torch.choice(x, replace=False, k=95)
+            res = torch.choice(x, size=95, replace=False)
             self.assertTrue((res == res.unsqueeze(1)).sum() == 95 * x.dim())
 
             # 1 - WEIGHTED Sampling WITHOUT replacement - Different values
             w = torch.arange(100).float().to(device)
-            res = torch.choice(x, w, replace=False, k=95)
+            res = torch.choice(x, size=95, replace=False, p=w)
             self.assertTrue((res == res.unsqueeze(1)).sum() == 95 * x.dim())
 
     def test_random(self):
