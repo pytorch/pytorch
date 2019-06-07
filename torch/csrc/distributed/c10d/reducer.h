@@ -52,6 +52,7 @@ class Reducer {
   std::vector<std::vector<std::shared_ptr<torch::autograd::Function>>>
       grad_accumulators_;
   std::unordered_map<torch::autograd::Function*, std::tuple<int, int>> func_;
+  std::unordered_set<std::unique_ptr<std::string>&> hooks_;
 
   bool expect_autograd_hooks_;
   bool require_finalize_;
