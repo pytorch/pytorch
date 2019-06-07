@@ -126,7 +126,7 @@ Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
            "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
-  return (S > tol).sum(ScalarType::Long);
+  return (S > tol).sum();
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {

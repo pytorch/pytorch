@@ -218,12 +218,12 @@ def isfinite(tensor):
         tensor (Tensor): A tensor to check
 
     Returns:
-        Tensor: A ``torch.BoolTensor`` containing a True at each location of finite elements and False otherwise
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of finite elements and False otherwise
 
     Example::
 
         >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-        tensor([ True,  False,  True,  False,  False], dtype=torch.bool)
+        tensor([True,  False,  True,  False,  False])
     """
     if not isinstance(tensor, torch.Tensor):
         raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
@@ -244,12 +244,12 @@ def isinf(tensor):
         tensor (Tensor): A tensor to check
 
     Returns:
-        Tensor: A ``torch.BoolTensor`` containing a True at each location of `+/-INF` elements and False otherwise
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of `+/-INF` elements and False otherwise
 
     Example::
 
         >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
-        tensor([ False,  True,  False,  True,  False], dtype=torch.bool)
+        tensor([False,  True,  False,  True,  False])
     """
     if not isinstance(tensor, torch.Tensor):
         raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
@@ -297,6 +297,7 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
 
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
          center=True, pad_mode='reflect', normalized=False, onesided=True):
+    # type: (Tensor, int, Optional[int], Optional[int], Optional[Tensor], bool, str, bool, bool) -> Tensor
     r"""Short-time Fourier transform (STFT).
 
     Ignoring the optional batch dimension, this method computes the following

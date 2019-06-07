@@ -651,6 +651,7 @@ BAD_EXAMPLES = [
 
 class TestDistributions(TestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = False
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
@@ -1781,6 +1782,11 @@ class TestDistributions(TestCase):
         multivariate_normal_log_prob_gradcheck(mean, None, None, scale_tril)
         multivariate_normal_log_prob_gradcheck(mean_no_batch, None, None, scale_tril_batched)
 
+    def test_multivariate_normal_stable_with_precision_matrix(self):
+        x = torch.randn(10)
+        P = torch.exp(-(x - x.unsqueeze(-1)) ** 2)  # RBF kernel
+        MultivariateNormal(x.new_zeros(10), precision_matrix=P)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):
         mean = torch.randn(3, requires_grad=True)
@@ -2243,8 +2249,8 @@ class TestDistributions(TestCase):
             self.assertEqual((beta_samples == 0).sum(), 0)
             self.assertEqual((beta_samples == 1).sum(), 0)
             # assert support is concentrated around 0 and 1
-            frac_zeros = float((beta_samples < 0.1).sum(dtype=torch.long)) / num_samples
-            frac_ones = float((beta_samples > 0.9).sum(dtype=torch.long)) / num_samples
+            frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
+            frac_ones = float((beta_samples > 0.9).sum()) / num_samples
             self.assertEqual(frac_zeros, 0.5, 0.05)
             self.assertEqual(frac_ones, 0.5, 0.05)
 
@@ -2254,11 +2260,11 @@ class TestDistributions(TestCase):
         num_samples = 50000
         conc = torch.tensor(1e-2, dtype=torch.float64).cuda()
         beta_samples = Beta(conc, conc).sample([num_samples])
-        self.assertEqual((beta_samples == 0).sum(dtype=torch.long), 0)
-        self.assertEqual((beta_samples == 1).sum(dtype=torch.long), 0)
+        self.assertEqual((beta_samples == 0).sum(), 0)
+        self.assertEqual((beta_samples == 1).sum(), 0)
         # assert support is concentrated around 0 and 1
-        frac_zeros = float((beta_samples < 0.1).sum(dtype=torch.long)) / num_samples
-        frac_ones = float((beta_samples > 0.9).sum(dtype=torch.long)) / num_samples
+        frac_zeros = float((beta_samples < 0.1).sum()) / num_samples
+        frac_ones = float((beta_samples > 0.9).sum()) / num_samples
         # TODO: increase precision once imbalance on GPU is fixed.
         self.assertEqual(frac_zeros, 0.5, 0.12)
         self.assertEqual(frac_ones, 0.5, 0.12)
