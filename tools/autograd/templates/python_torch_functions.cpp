@@ -362,6 +362,49 @@ static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyO
   END_HANDLE_TH_ERRORS
 }
 
+static Tensor dispatch_nonzero(const Tensor & self) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  return self.nonzero();
+}
+
+static Tensor dispatch_nonzero(const Tensor & self, Tensor out) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  return at::nonzero_out(out, self);
+}
+
+static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  return self.nonzero_numpy();
+}
+
+static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "nonzero(Tensor input, *, Tensor out=None)|deprecated",
+    "nonzero(Tensor input, *, bool as_tuple)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    if (r.isNone(1)) {
+      return wrap(dispatch_nonzero(r.tensor(0)));
+    } else {
+      return wrap(dispatch_nonzero(r.tensor(0), r.tensor(1)));
+    }
+  } else {
+    if (r.toBool(1)) {
+      return wrap(dispatch_nonzero_numpy(r.tensor(0)));
+    } else {
+      return wrap(dispatch_nonzero(r.tensor(0)));
+    }
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -405,6 +448,7 @@ static PyMethodDef torch_functions[] = {
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"hsmm", (PyCFunction)THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"_promote_types", (PyCFunction)THPVariable__promote_types, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"nonzero", (PyCFunction)THPVariable_nonzero, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"randint", (PyCFunction)THPVariable_randint, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"range", (PyCFunction)THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

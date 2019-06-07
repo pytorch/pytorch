@@ -853,6 +853,17 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
   }
   return grids;
 }
+
+// Numpy-style `a.T`: returns the tensor
+// with dims reversed
+Tensor numpy_T(const Tensor &self) {
+  int64_t n = self.dim();
+  DimVector transpose_dims;
+  for (int64_t i = n - 1; i >= 0; --i) {
+    transpose_dims.push_back(i);
+  }
+  return self.permute(transpose_dims);
+}
 }
 
 }

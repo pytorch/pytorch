@@ -287,16 +287,16 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
     # leftover
     code.append("        for (; j < block_size; j++) {")
     if InType == "float":
-        code.append("          op[j] += wgt * ip[j];")
+        code.append("          op[j] = std::fma(wgt, ip[j], op[j]);")
     elif InType == "at::Half":
         code.append("          vtmp1[0] = ip[j];")
         code.append(
             "          __m256 vtmp2 =\n"
             "              _mm256_cvtph_ps(*(reinterpret_cast<const __m128i*>(vtmp1)));"
         )
-        code.append("          op[j] += wgt * ((float*)(&vtmp2))[0];")
+        code.append("          op[j] = std::fma(wgt, ((float*)(&vtmp2))[0], op[j]);")
     elif InType == "uint8_t":
-        code.append("          op[j] += wgt * ((float)ip[j]) + bio;")
+        code.append("          op[j] = std::fma(wgt, (float)ip[j], bio + op[j]);")
     else:
         assert False
 
