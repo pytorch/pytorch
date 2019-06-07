@@ -4824,50 +4824,50 @@
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool2d_forward_out
-    CUDA: legacy::cuda::_thnn_max_unpool2d_forward_out
+    CPU: max_unpooling2d_forward_out_cpu
+    CUDA: max_unpooling2d_forward_out_cuda
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool2d_forward
-    CUDA: legacy::cuda::_thnn_max_unpool2d_forward
+    CPU: max_unpooling2d_forward_cpu
+    CUDA: max_unpooling2d_forward_cuda
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool2d_backward_out
-    CUDA: legacy::cuda::_thnn_max_unpool2d_backward_out
+    CPU: max_unpooling2d_backward_out_cpu
+    CUDA: max_unpooling2d_backward_out_cuda
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool2d_backward
-    CUDA: legacy::cuda::_thnn_max_unpool2d_backward
+    CPU: max_unpooling2d_backward_cpu
+    CUDA: max_unpooling2d_backward_cuda
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool3d_forward_out
-    CUDA: legacy::cuda::_thnn_max_unpool3d_forward_out
+    CPU: max_unpooling3d_forward_out_cpu
+    CUDA: max_unpooling3d_forward_out_cuda
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool3d_forward
-    CUDA: legacy::cuda::_thnn_max_unpool3d_forward
+    CPU: max_unpooling3d_forward_cpu
+    CUDA: max_unpooling3d_forward_cuda
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool3d_backward_out
-    CUDA: legacy::cuda::_thnn_max_unpool3d_backward_out
+    CPU: max_unpooling3d_backward_out_cpu
+    CUDA: max_unpooling3d_backward_out_cuda
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_max_unpool3d_backward
-    CUDA: legacy::cuda::_thnn_max_unpool3d_backward
+    CPU: max_unpooling3d_backward_cpu
+    CUDA: max_unpooling3d_backward_cuda
 
 - func: reflection_pad1d(Tensor self, int[2] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

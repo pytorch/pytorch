@@ -12,10 +12,23 @@ import numpy as np
 
 
 class TestBooleanMaskOp(serial.SerializedTestCase):
+    @given(x=hu.tensor1d(min_len=1,
+                         max_len=100,
+                         elements=st.floats(min_value=0.5, max_value=1.0)),
+           **hu.gcs_cpu_only)
+    def test_boolean_mask_gradient(self, x, gc, dc):
+        op = core.CreateOperator("BooleanMask",
+                                 ["data", "mask"],
+                                 "masked_data")
+        mask = np.random.choice(a=[True, False], size=x.shape[0])
+        expected_gradient = np.copy(mask).astype(int)
+        self.assertDeviceChecks(dc, op, [x, mask], [0])
+        self.assertGradientChecks(gc, op, [x, mask], 0, [0])
 
-    @serial.given(x=hu.tensor(min_dim=1,
-                       max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+
+    @given(x=hu.tensor1d(min_len=1,
+                         max_len=5,
+                         elements=st.floats(min_value=0.5, max_value=1.0)),
            **hu.gcs)
     def test_boolean_mask(self, x, gc, dc):
         op = core.CreateOperator("BooleanMask",
@@ -25,13 +38,12 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
 
         def ref(x, mask):
             return (x[mask],)
-
         self.assertReferenceChecks(gc, op, [x, mask], ref)
         self.assertDeviceChecks(dc, op, [x, mask], [0])
 
-    @given(x=hu.tensor(min_dim=1,
-                       max_dim=5,
-                       elements=st.floats(min_value=0.5, max_value=1.0)),
+    @given(x=hu.tensor1d(min_len=1,
+                         max_len=5,
+                         elements=st.floats(min_value=0.5, max_value=1.0)),
            **hu.gcs)
     def test_boolean_mask_indices(self, x, gc, dc):
         op = core.CreateOperator("BooleanMask",
@@ -54,7 +66,7 @@ class TestBooleanMaskOp(serial.SerializedTestCase):
             x = x.astype(dtype)
         return x, dc
 
-    @serial.given(x=hu.tensor(min_dim=2,
+    @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
            dtype=st.sampled_from([np.float32, np.float16]),
