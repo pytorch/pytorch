@@ -2,7 +2,10 @@
 
 namespace c10 {
 
-ThreadPool::ThreadPool(int pool_size, int numa_node_id)
+ThreadPool::ThreadPool(
+      int pool_size,
+      int numa_node_id,
+      std::function<void()> init_thread)
     : threads_(pool_size < 0 ? defaultNumThreads() : pool_size),
       running_(true),
       complete_(true),
@@ -10,7 +13,12 @@ ThreadPool::ThreadPool(int pool_size, int numa_node_id)
       total_(threads_.size()),
       numa_node_id_(numa_node_id) {
   for (std::size_t i = 0; i < threads_.size(); ++i) {
-    threads_[i] = std::thread(std::bind(&ThreadPool::main_loop, this, i));
+    threads_[i] = std::thread([this, i, init_thread](){
+      if (init_thread) {
+        init_thread();
+      }
+      this->main_loop(i);
+    });
   }
 }
 
@@ -68,8 +76,6 @@ void ThreadPool::waitWorkComplete() {
 }
 
 void ThreadPool::main_loop(std::size_t index) {
-  init_thread();
-
   std::unique_lock<std::mutex> lock(mutex_);
   while (running_) {
     // Wait on condition variable while the task is empty and

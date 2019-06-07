@@ -143,7 +143,7 @@ struct TORCH_API Module {
   ~Module() {
     // ClassType own the compilation unit of their Functions, but each
     // Function has a self argument which owns the ClassType, created a
-    // referernce cycle. By dropping all the methods of the module's class
+    // reference cycle. By dropping all the methods of the module's class
     // here we break the cycle.
     class_compilation_unit().drop_all_functions();
   }
@@ -304,6 +304,12 @@ struct TORCH_API Module {
     return offset ? modules_[*offset] : nullptr;
   }
   Method* find_method(const std::string& name) const {
+    // find_offset() method reads "dict_" object.
+    // Lock because another thread can modify "dict_" object at the same time
+    // calling insert() method.
+    // Ideally recursive_mutex should be replaced with shared_mutex (C++ 17)
+    // for the performance reasons.
+    std::unique_lock<std::recursive_mutex> keeper(create_method_guard_);
     auto offset = find_offset(name, EntityType::METHOD);
     if (offset) {
       return methods_[*offset].get();
@@ -314,7 +320,6 @@ struct TORCH_API Module {
       // but we have to update the internal Method cache.
       // This can be removed when class_compilation_unit() is the source of
       // truth for methods.
-      std::lock_guard<std::recursive_mutex> guard(create_method_guard_);
       Module* mutable_this = const_cast<Module*>(this);
       std::unique_ptr<Method> m(new Method(mutable_this, fn));
       return mutable_this
@@ -343,8 +348,8 @@ struct TORCH_API Module {
   }
   /// True if the module is in training mode.
   bool is_training() {
-    if (auto p = find_buffer("training")) {
-      return p->value().toTensor().item<int64_t>() == 1;
+    if (auto p = find_attribute("training")) {
+      return p->value().toBool();
     }
     // We are in training mode by default
     return true;

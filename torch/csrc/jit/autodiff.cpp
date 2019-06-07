@@ -213,11 +213,17 @@ class GradientHelper {
  private:
   Node* node;
 
-  SymbolicVariable gradSumToSizeOf(SymbolicVariable v, Symbol input_name) {
+  SymbolicVariable gradSumToSizeOf(
+      SymbolicVariable v,
+      Symbol input_name,
+      SymbolicVariable fw_output) {
     Value* size;
     {
-      WithInsertPoint insert_guard{node};
-      size = SymbolicVariable(node->namedInput(input_name)).size();
+      // We insert after the current node because we want to use
+      // its output.
+      WithInsertPoint insert_guard{node->next()};
+      size = SymbolicVariable(node->namedInput(input_name))
+                 .size_if_not_equal(fw_output);
     }
     return v.gradSumToSize(size);
   };
@@ -237,9 +243,11 @@ class GradientHelper {
 
     if (node->matches(
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {gradSumToSizeOf(grads.at(0), attr::self),
+      return {gradSumToSizeOf(grads.at(0), attr::self, outputs.at(0)),
               gradSumToSizeOf(
-                  grads.at(0) * node->namedInput(attr::alpha), attr::other),
+                  grads.at(0) * node->namedInput(attr::alpha),
+                  attr::other,
+                  outputs.at(0)),
               nullptr};
 
     } else if (
@@ -254,9 +262,11 @@ class GradientHelper {
     } else if (
         node->matches(
             "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {gradSumToSizeOf(grads.at(0), attr::self),
+      return {gradSumToSizeOf(grads.at(0), attr::self, outputs.at(0)),
               gradSumToSizeOf(
-                  -grads.at(0) * node->namedInput(attr::alpha), attr::other),
+                  -grads.at(0) * node->namedInput(attr::alpha),
+                  attr::other,
+                  outputs.at(0)),
               nullptr};
 
     } else if (
@@ -337,7 +347,9 @@ class GradientHelper {
         node->matches(
             "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
       return {gradSumToSizeOf(
-                  grads.at(0) * node->namedInput(attr::beta), attr::self),
+                  grads.at(0) * node->namedInput(attr::beta),
+                  attr::self,
+                  outputs.at(0)),
               grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
               inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
               nullptr,

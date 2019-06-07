@@ -28,10 +28,10 @@ void flatten_op_cpu_impl(
 
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::Flatten",
-    c10::kernel<
+    c10::RegisterOperators::options()
+      .kernel<
         decltype(flatten_op_cpu_impl<float, CPUContext>),
-        &flatten_op_cpu_impl<float, CPUContext>>(),
-    c10::dispatchKey(CPUTensorId()));
+        &flatten_op_cpu_impl<float, CPUContext>>(CPUTensorId()));
 
 } // namespace
 

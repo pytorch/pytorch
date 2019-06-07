@@ -270,7 +270,7 @@ void check_dim_size(
     int64_t dim_size,
     int64_t size) {
   /* Check dimension size of a tensor */
-  AT_CHECK(
+  TORCH_CHECK(
       tensor.dim() == dim && tensor.size(dim_size) == size,
       "Expected a tensor of dimension ",
       dim,

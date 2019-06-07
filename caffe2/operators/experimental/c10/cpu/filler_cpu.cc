@@ -45,10 +45,10 @@ void filler_init(
 
 template <class Type, class Context>
 void given_tensor_fill_op_cpu_impl(
-    ArrayRef<at::Tensor> inputs,
+    std::vector<at::Tensor> inputs,
     const at::Tensor& output_,
-    ArrayRef<int64_t> shape,
-    ArrayRef<int64_t> extra_shape,
+    std::vector<int64_t> shape,
+    std::vector<int64_t> extra_shape,
     bool input_as_shape,
     const at::Tensor& values_) {
   Tensor output(output_);
@@ -70,10 +70,10 @@ void given_tensor_fill_op_cpu_impl(
 }
 
 void constant_fill_op_cpu_impl(
-    ArrayRef<at::Tensor> inputs,
+    std::vector<at::Tensor> inputs,
     const at::Tensor& output_,
-    ArrayRef<int64_t> shape,
-    ArrayRef<int64_t> extra_shape,
+    std::vector<int64_t> shape,
+    std::vector<int64_t> extra_shape,
     bool input_as_shape,
     int64_t dtype,
     c10::Scalar value) {
@@ -110,10 +110,10 @@ void constant_fill_op_cpu_impl(
 }
 
 void uniform_fill_op_cpu_impl(
-    ArrayRef<at::Tensor> inputs,
+    std::vector<at::Tensor> inputs,
     const at::Tensor& output_,
-    ArrayRef<int64_t> shape,
-    ArrayRef<int64_t> extra_shape,
+    std::vector<int64_t> shape,
+    std::vector<int64_t> extra_shape,
     bool input_as_shape,
     double min,
     double max) {
@@ -146,30 +146,30 @@ void uniform_fill_op_cpu_impl(
 static auto registry =
     c10::RegisterOperators()
         .op("_c10_experimental::ConstantFill",
-            c10::kernel<
+            c10::RegisterOperators::options()
+              .kernel<
                 decltype(constant_fill_op_cpu_impl),
-                &constant_fill_op_cpu_impl>(),
-            c10::dispatchKey(CPUTensorId()))
+                &constant_fill_op_cpu_impl>(CPUTensorId()))
         .op("_c10_experimental::UniformFill",
-            c10::kernel<
+            c10::RegisterOperators::options()
+              .kernel<
                 decltype(uniform_fill_op_cpu_impl),
-                &uniform_fill_op_cpu_impl>(),
-            c10::dispatchKey(CPUTensorId()))
+                &uniform_fill_op_cpu_impl>(CPUTensorId()))
         .op("_c10_experimental::GivenTensorFill",
-            c10::kernel<
+            c10::RegisterOperators::options()
+              .kernel<
                 decltype(given_tensor_fill_op_cpu_impl<float, CPUContext>),
-                &given_tensor_fill_op_cpu_impl<float, CPUContext>>(),
-            c10::dispatchKey(CPUTensorId()))
+                &given_tensor_fill_op_cpu_impl<float, CPUContext>>(CPUTensorId()))
         .op("_c10_experimental::GivenTensorIntFill",
-            c10::kernel<
+            c10::RegisterOperators::options()
+              .kernel<
                 decltype(given_tensor_fill_op_cpu_impl<int, CPUContext>),
-                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(),
-            c10::dispatchKey(CPUTensorId()))
+                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(CPUTensorId()))
         .op("_c10_experimental::GivenTensorInt64Fill",
-            c10::kernel<
+            c10::RegisterOperators::options()
+              .kernel<
                 decltype(given_tensor_fill_op_cpu_impl<int, CPUContext>),
-                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(),
-            c10::dispatchKey(CPUTensorId()));
+                &given_tensor_fill_op_cpu_impl<int, CPUContext>>(CPUTensorId()));
 
 } // namespace
 

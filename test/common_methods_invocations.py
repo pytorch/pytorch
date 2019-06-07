@@ -466,8 +466,12 @@ def method_tests():
         ('ger', (S,), ((M,),)),
         ('matmul', (L,), ((L,),), '', (True,)),
         ('matmul', (S, M), ((M,),), "2d_1d", (True,)),
-        ('matmul', (M, ), ((M, S),), "1d_2d", (True,)),
+        ('matmul', (M,), ((M, S),), "1d_2d", (True,)),
         ('matmul', (S, M), ((M, S),), "2d_2d", (True,)),
+        ('matmul', (S, S, M), ((M,),), "3d_1d", (True,)),
+        ('matmul', (S, S, M), ((M, S),), "3d_2d", (True,)),
+        ('matmul', (M,), ((S, M, S),), "1d_3d", (True,)),
+        ('matmul', (S, M), ((S, M, S),), "2d_3d", (True,)),
         ('matmul', (S, S, M, M), ((S, S, M, S),), "4d_4d", (True,)),
         ('matmul', (S, S, M, M), ((M,),), "4d_1d", (True,)),
         ('matmul', (M,), ((S, S, M, S),), "1d_4d", (True,)),
@@ -668,6 +672,12 @@ def method_tests():
          'tall_all', (), NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0][:, :(S - 2)], usv[1], usv[2])),
         ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
          'large', (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (S, S), (False,), 'square_single', (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (S, S - 2), (True,), 'tall_single' , (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (3, S, S), (False,), 'square_batched', (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (3, S, S - 2), (True,), 'tall_batched', (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (3, 2, S, S), (False,), 'square_many_batched', (), NO_ARGS, [skipIfNoLapack]),
+        ('qr', (3, 2, S, S - 2), (True,), 'tall_many_batched', (), NO_ARGS, [skipIfNoLapack]),
         ('solve', (S, S), (random_fullrank_matrix_distinct_singular_value(
             S, silent=True),), '', (), NO_ARGS, [skipIfNoLapack]),
         ('solve', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S, silent=True),),
@@ -825,6 +835,7 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], Ellipsis]),), 'adv_index_sub_3'),
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
+        ('to_sparse', (S, S), (), '', (), (), (), lambda x: x.to_dense()),
     ]
 # TODO: clamp with min/max
 

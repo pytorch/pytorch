@@ -1,6 +1,5 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Dict.h>
-
 #include <iostream>
 
 namespace c10 {
@@ -25,7 +24,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     }
     out << ")";
   } else if (auto value = t.cast<ProfiledTensorType>()) {
-    out << "Tensor(dtype = ";
+    out << "ProfiledTensor(dtype = ";
     if  (value->scalarType().has_value())
     {
         out << *value->scalarType();
@@ -61,8 +60,10 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << *(tup->elements()[i]);
     }
     out << ")";
+  } else if (t.kind() == TypeKind::FunctionType) {
+    out << "Function";
   } else {
-    out << t.str();
+     out << t.str();
   }
   return out;
 }
@@ -227,7 +228,7 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     auto dict_type = type->expect<DictType>();
     const auto& dict = ivalue.toGenericDictRef();
     return std::all_of(
-        dict.begin(), dict.end(), [=](const c10::impl::GenericDict::const_iterator::value_type& item) {
+        dict.begin(), dict.end(), [=](const c10::impl::GenericDictPtr::const_iterator::value_type& item) {
           return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
               isSubvalueOf(item.value(), dict_type->getValueType());
         });
@@ -326,8 +327,8 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     }
     std::stringstream ss;
-    ss << "type variable '" << vt->name() <<"' previously matched to type " <<
-      it->second->str() << " is matched to type " << actual->str();
+    ss << "Type variable '" << vt->name() << "' previously matched to type " <<
+      it->second->python_str() << " is matched to type " << actual->python_str();
     ret.errMsg = ss.str();
     return ret;
   } else if(auto lt_formal = formal->cast<ListType>()) {
@@ -344,14 +345,15 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a list to " << actual->str();
+      ss << "Cannot match " << lt_formal->python_str() << " to "
+         << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
   } else if(auto tp_formal = formal->cast<TupleType>()) {
     if(auto tp_actual = actual->cast<TupleType>()) {
       if(tp_formal->elements().size() != tp_actual->elements().size()) {
-        ret.errMsg = "cannot match tuples of mismatched size";
+        ret.errMsg = "Cannot match tuples of mismatched size";
         return ret;
       }
       std::vector<TypePtr> elements;
@@ -369,7 +371,7 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a tuple to " << actual->str();
+      ss << "Cannot match a tuple to " << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
@@ -384,7 +386,7 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a future to " << actual->str();
+      ss << "Cannot match a future to " << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
@@ -404,7 +406,9 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     } else {
-      ret.errMsg = "cannot match an Optional[T] to None, because there is no way to determine T from None.";
+      ret.errMsg =
+          "Cannot match an Optional[T] to None, because there is no "
+          "way to determine T from None.";
       return ret;
     }
   } else if (auto dict_formal = formal->cast<DictType>()) {
@@ -429,13 +433,13 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a dict to " << actual->str();
+      ss << "Cannot match a dict to " << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
   }
 
-  AT_ERROR("unhandled free variable container: ", formal->str());
+  AT_ERROR("Unhandled free variable container: ", formal->python_str());
 }
 
 // change return types like List[List[t]] into List[List[int]]

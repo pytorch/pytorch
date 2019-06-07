@@ -9,7 +9,6 @@
 #include <ATen/CheckGenerator.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 #include <ATen/LegacyTHDispatcher.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
@@ -163,6 +162,15 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
     res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
   }
+  if (self.is_quantized()) {
+    // TODO: uncomment when qscheme diff is landed
+    // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
+    //                       "empty_like for quantized Tensor only works for
+    //                        PerTensorAffine scheme right now");
+    return at::_empty_affine_quantized(self.sizes(), self.options(),
+                                       self.q_scale().toDouble(),
+                                       self.q_zero_point().toLong());
+  }
   return at::empty(self.sizes(), options);
 }
 
@@ -194,9 +202,10 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   int64_t sz = std::min<int64_t>(n, m);
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data<scalar_t>();
-    for(int64_t i = 0; i < sz; i++) {
-      result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
-    }
+    at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
+      for(int64_t i = p_begin; i < p_end; i++)
+        result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
+    });
   });
 
   return result;
