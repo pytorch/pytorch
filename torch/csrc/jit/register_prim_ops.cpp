@@ -482,30 +482,6 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
-         "aten:sum(Tensor self) -> int",
-         [](Stack& stack) {
-         at::Tensor x;
-         pop(stack, x);
-         int sum;
-         for(int i = 0; i < sizeof(x)/sizeof(x[0]); i++){
-           sum += x[i].item().toInt();
-         }
-         push(stack, sum);
-         return 0;
-         }),
-     Operator(
-         "aten:sum(Tensor self) -> float",
-         [](Stack& stack) {
-         at::Tensor x;
-         pop(stack, x);
-         float sum;
-         for(int i = 0; i < sizeof(x)/sizeof(x[0]); i++){
-            sum += x[i].item().toFloat();
-         }
-         push(stack, sum);
-         return 0;
-         }),
-     Operator(
          "prim::is_cuda(Tensor a) -> bool",
          [](Stack& stack) {
            at::Tensor a;
