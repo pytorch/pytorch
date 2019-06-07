@@ -5663,18 +5663,10 @@ a")
         divmod_test_iterator(func_int_float, num_int, den_float)
         divmod_test_iterator(func_float_int, num_float, den_int)
 
-        with self.assertRaisesRegex(RuntimeError, 'division by 0'):
-            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int)))
-            cu.func_int(1024, 0)
-        with self.assertRaisesRegex(RuntimeError, 'division by 0'):
-            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float)))
-            cu.func_float(5.3, 0.0)
-        with self.assertRaisesRegex(RuntimeError, 'division by 0'):
-            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int_float)))
-            cu.func_int_float(1024, 0.0)
-        with self.assertRaisesRegex(RuntimeError, 'division by 0'):
-            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float_int)))
-            cu.func_float_int(5.3, 0)
+        self.checkScriptRaisesRegex(func_int, (1024, 0), RuntimeError, "division by 0")
+        self.checkScriptRaisesRegex(func_float, (5.3, 0.0), RuntimeError, "division by 0")
+        self.checkScriptRaisesRegex(func_int_float, (1024, 0.0), RuntimeError, "division by 0")
+        self.checkScriptRaisesRegex(func_float_int, (5.3, 0), RuntimeError, "division by 0")
 
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
