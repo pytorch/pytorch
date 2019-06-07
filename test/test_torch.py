@@ -1049,6 +1049,10 @@ class _TestTorchMixin(object):
                 x = torch.tensor(lst, dtype=torch.double)
                 self.assertRaises(RuntimeError, torch.norm, x, "nuc", axes)
 
+        x = torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.double)
+        self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
+        self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 2))
+
     @staticmethod
     def _test_dist(self, device):
         def run_test(x, y):
