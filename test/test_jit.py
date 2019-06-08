@@ -12537,6 +12537,18 @@ a")
 
         self.assertEqual(fn(), {'ok': 10})
 
+    def test_dict_loop(self):
+        @torch.jit.script
+        def fn(x):
+            # type: (int) -> Dict[str, int]
+            a = torch.jit.annotate(Dict[str, int], {})
+            for i in range(x):
+                a['ok'] = i
+            return a
+
+        self.assertEqual(fn(10), {'ok': 9})
+
+
     def test_dict_membership(self):
         def fn(x, y):
             # type: (Dict[int, int], int) -> int
