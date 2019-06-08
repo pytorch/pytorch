@@ -3,8 +3,8 @@
 #include <c10/util/Optional.h>
 
 #include <algorithm>
-#include <iostream>
 #include <memory>
+#include <iostream>
 namespace torch {
 namespace jit {
 
@@ -115,6 +115,29 @@ struct CAFFE2_API SourceRange {
     std::stringstream ss;
     highlight(ss);
     return ss.str();
+  }
+  std::string wrapException(
+      const std::exception& e,
+      const std::string& additional = "") {
+    std::stringstream msg;
+    std::string what;
+    auto c10_error = dynamic_cast<const c10::Error*>(&e);
+    if (c10_error) {
+      what = c10_error->msg_without_backtrace();
+    } else {
+      what = e.what();
+    }
+    msg << "\n" << what << ":\n";
+    if (!additional.empty()) {
+      msg << additional << ":\n";
+    }
+    highlight(msg);
+    return msg.str();
+  }
+  void wrapAndRethrowException(
+      const std::exception& e,
+      const std::string& additional = "") {
+    throw std::runtime_error(wrapException(e, additional));
   }
 
  private:
