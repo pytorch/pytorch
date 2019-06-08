@@ -52,27 +52,6 @@ struct TORCH_API TracingState
   TracingState();
   ~TracingState();
 
-  std::shared_ptr<Graph> graph;
-  bool warn = true;
-  bool force_outplace = false;
-  std::function<std::string(const Variable& var)> lookup_var_name_fn =
-      [](const Variable& var) { return ""; };
-
-  void enterFrame() {
-    env_stack.emplace_back();
-  }
-
-  void leaveFrame() {
-    env_stack.pop_back();
-  }
-
-  void setValue(const IValue& v, Value* value);
-  void delValue(const IValue& var);
-  Value* getValue(const IValue& var);
-  Value* getOutput(const IValue& var);
-  bool hasValue(const IValue& var) const;
-
-private:
   using WeakTensor = at::WeakTensor;
 
   struct WeakTensorHasher {
@@ -87,7 +66,7 @@ private:
     }
   };
 
-  struct Frame {
+  struct TracingEnvironmentFrame {
     std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq>
         value_map;
     // TODO weak refcount
@@ -95,8 +74,14 @@ private:
         future_map;
   };
 
-  std::vector<Frame> env_stack;
+  using TracingEnvironmentStack = std::vector<TracingEnvironmentFrame>;
 
+  TracingEnvironmentStack env_stack;
+  std::shared_ptr<Graph> graph;
+  bool warn = true;
+  bool force_outplace = false;
+  std::function<std::string(const Variable& var)> lookup_var_name_fn =
+      [](const Variable& var) { return ""; };
 };
 
 // This is meant to be used as a thread local place, where we can store extra
@@ -197,11 +182,11 @@ struct TORCH_API NoWarn {
 
 struct WithNestedTracingFrame {
   WithNestedTracingFrame() {
-    getTracingState()->enterFrame();
+    getTracingState()->env_stack.emplace_back();
   }
 
   ~WithNestedTracingFrame() {
-    getTracingState()->leaveFrame();
+    getTracingState()->env_stack.pop_back();
   }
 };
 TORCH_API void recordSourceLocation(Node* n);
@@ -212,11 +197,19 @@ TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 // involving this variable know which node in the IR to reference.
 TORCH_API void setValueTrace(const IValue& v, Value* value);
 
-TORCH_API void delValueTrace(const IValue& var);
+TORCH_API void delValueTrace(const Variable& var);
 
 TORCH_API std::function<void()> pauseTracing();
 
 TORCH_API Value* getValueTrace(const IValue& var);
+
+TORCH_API Value* getOutputTrace(
+    const std::shared_ptr<TracingState>& state,
+    const Variable& var);
+
+TORCH_API Value* getNestedOutputTrace(
+    const std::shared_ptr<TracingState>& state,
+    const IValue& iv);
 
 struct TypedStack : public std::pair<Stack, TupleTypePtr>
 {
