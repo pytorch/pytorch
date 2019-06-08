@@ -1,0 +1,892 @@
+node {
+  name: "conv1/XavierFill"
+  op: "XavierFill"
+  device: "/gpu:0"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 20
+          }
+          dim {
+            size: 1
+          }
+          dim {
+            size: 5
+          }
+          dim {
+            size: 5
+          }
+        }
+      }
+    }
+  }
+}
+node {
+  name: "conv1/ConstantFill"
+  op: "ConstantFill"
+  device: "/gpu:0"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 20
+          }
+        }
+      }
+    }
+  }
+}
+node {
+  name: "conv1/XavierFill_1"
+  op: "XavierFill"
+  device: "/gpu:0"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 100
+          }
+          dim {
+            size: 20
+          }
+          dim {
+            size: 5
+          }
+          dim {
+            size: 5
+          }
+        }
+      }
+    }
+  }
+}
+node {
+  name: "conv1/ConstantFill_1"
+  op: "ConstantFill"
+  device: "/gpu:0"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 100
+          }
+        }
+      }
+    }
+  }
+}
+node {
+  name: "classifier/XavierFill"
+  op: "XavierFill"
+  device: "/gpu:0"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 500
+          }
+          dim {
+            size: 1600
+          }
+        }
+      }
+    }
+  }
+}
+node {
+  name: "classifier/ConstantFill"
+  op: "ConstantFill"
+  device: "/gpu:0"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 500
+          }
+        }
+      }
+    }
+  }
+}
+node {
+  name: "classifier/XavierFill_1"
+  op: "XavierFill"
+  device: "/gpu:0"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 10
+          }
+          dim {
+            size: 500
+          }
+        }
+      }
+    }
+  }
+}
+node {
+  name: "classifier/ConstantFill_1"
+  op: "ConstantFill"
+  device: "/gpu:0"
+  attr {
+    key: "_output_shapes"
+    value {
+      list {
+        shape {
+          dim {
+            size: 10
+          }
+        }
+      }
+    }
+  }
+}
+node {
+  name: "ImageInput"
+  op: "ImageInput"
+  input: "db"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "is_test"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "use_cudnn"
+    value {
+      i: 1
+    }
+  }
+}
+node {
+  name: "NHWC2NCHW"
+  op: "NHWC2NCHW"
+  input: "data_nhwc"
+  device: "/gpu:0"
+}
+node {
+  name: "conv1/Conv"
+  op: "Conv"
+  input: "data"
+  input: "conv1/conv1_w"
+  input: "conv1/conv1_b"
+  device: "/gpu:0"
+  attr {
+    key: "exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "kernel"
+    value {
+      i: 5
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+}
+node {
+  name: "conv1/MaxPool"
+  op: "MaxPool"
+  input: "conv1/conv1"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "kernel"
+    value {
+      i: 2
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+  attr {
+    key: "stride"
+    value {
+      i: 2
+    }
+  }
+}
+node {
+  name: "conv1/Conv_1"
+  op: "Conv"
+  input: "conv1/pool1"
+  input: "conv1/conv2_w"
+  input: "conv1/conv2_b"
+  device: "/gpu:0"
+  attr {
+    key: "exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "kernel"
+    value {
+      i: 5
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+}
+node {
+  name: "conv1/MaxPool_1"
+  op: "MaxPool"
+  input: "conv1/conv2"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "kernel"
+    value {
+      i: 2
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+  attr {
+    key: "stride"
+    value {
+      i: 2
+    }
+  }
+}
+node {
+  name: "classifier/FC"
+  op: "FC"
+  input: "conv1/pool2"
+  input: "classifier/fc3_w"
+  input: "classifier/fc3_b"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+  attr {
+    key: "use_cudnn"
+    value {
+      i: 1
+    }
+  }
+}
+node {
+  name: "classifier/Relu"
+  op: "Relu"
+  input: "classifier/fc3"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+}
+node {
+  name: "classifier/FC_1"
+  op: "FC"
+  input: "classifier/fc3_1"
+  input: "classifier/pred_w"
+  input: "classifier/pred_b"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+  attr {
+    key: "use_cudnn"
+    value {
+      i: 1
+    }
+  }
+}
+node {
+  name: "classifier/Softmax"
+  op: "Softmax"
+  input: "classifier/pred"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+}
+node {
+  name: "classifier/LabelCrossEntropy"
+  op: "LabelCrossEntropy"
+  input: "classifier/softmax"
+  input: "label"
+  device: "/gpu:0"
+}
+node {
+  name: "classifier/AveragedLoss"
+  op: "AveragedLoss"
+  input: "classifier/xent"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/ConstantFill"
+  op: "ConstantFill"
+  input: "classifier/loss"
+  device: "/gpu:0"
+  attr {
+    key: "value"
+    value {
+      f: 1.0
+    }
+  }
+}
+node {
+  name: "GRADIENTS/classifier/AveragedLossGradient"
+  op: "AveragedLossGradient"
+  input: "classifier/xent"
+  input: "GRADIENTS/classifier/loss_autogen_grad"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/LabelCrossEntropyGradient"
+  op: "LabelCrossEntropyGradient"
+  input: "classifier/softmax"
+  input: "label"
+  input: "GRADIENTS/classifier/xent_grad"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/SoftmaxGradient"
+  op: "SoftmaxGradient"
+  input: "classifier/softmax"
+  input: "GRADIENTS/classifier/softmax_grad"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+}
+node {
+  name: "GRADIENTS/classifier/FCGradient"
+  op: "FCGradient"
+  input: "classifier/fc3_1"
+  input: "classifier/pred_w"
+  input: "GRADIENTS/classifier/pred_grad"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+  attr {
+    key: "use_cudnn"
+    value {
+      i: 1
+    }
+  }
+}
+node {
+  name: "GRADIENTS/classifier/ReluGradient"
+  op: "ReluGradient"
+  input: "classifier/fc3_1"
+  input: "GRADIENTS/classifier/fc3_grad"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+}
+node {
+  name: "GRADIENTS/c/FCGradient"
+  op: "FCGradient"
+  input: "conv1/pool2"
+  input: "classifier/fc3_w"
+  input: "GRADIENTS/classifier/fc3_grad_1"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+  attr {
+    key: "use_cudnn"
+    value {
+      i: 1
+    }
+  }
+}
+node {
+  name: "GRADIENTS/conv1/MaxPoolGradient"
+  op: "MaxPoolGradient"
+  input: "conv1/conv2"
+  input: "conv1/pool2"
+  input: "GRADIENTS/conv1/pool2_grad"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "kernel"
+    value {
+      i: 2
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+  attr {
+    key: "stride"
+    value {
+      i: 2
+    }
+  }
+}
+node {
+  name: "GRADIENTS/conv1/ConvGradient"
+  op: "ConvGradient"
+  input: "conv1/pool1"
+  input: "conv1/conv2_w"
+  input: "GRADIENTS/conv1/conv2_grad"
+  device: "/gpu:0"
+  attr {
+    key: "exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "kernel"
+    value {
+      i: 5
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+}
+node {
+  name: "GRADIENTS/conv1/MaxPoolGradient_1"
+  op: "MaxPoolGradient"
+  input: "conv1/conv1"
+  input: "conv1/pool1"
+  input: "GRADIENTS/conv1/pool1_grad"
+  device: "/gpu:0"
+  attr {
+    key: "cudnn_exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "kernel"
+    value {
+      i: 2
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+  attr {
+    key: "stride"
+    value {
+      i: 2
+    }
+  }
+}
+node {
+  name: "GRADIENTS/ConvGradient"
+  op: "ConvGradient"
+  input: "data"
+  input: "conv1/conv1_w"
+  input: "GRADIENTS/conv1/conv1_grad"
+  device: "/gpu:0"
+  attr {
+    key: "exhaustive_search"
+    value {
+      i: 0
+    }
+  }
+  attr {
+    key: "kernel"
+    value {
+      i: 5
+    }
+  }
+  attr {
+    key: "order"
+    value {
+      s: "NCHW"
+    }
+  }
+}
+node {
+  name: "GRADIENTS/NCHW2NHWC"
+  op: "NCHW2NHWC"
+  input: "GRADIENTS/data_grad"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/fc3_grad_1"
+  op: "Blob"
+  input: "GRADIENTS/classifier/ReluGradient:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/xent_grad"
+  op: "Blob"
+  input: "GRADIENTS/classifier/AveragedLossGradient:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/pred_w_grad"
+  op: "Blob"
+  input: "GRADIENTS/classifier/FCGradient:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/data_nhwc_grad"
+  op: "Blob"
+  input: "GRADIENTS/NCHW2NHWC:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/fc3_w_grad"
+  op: "Blob"
+  input: "GRADIENTS/c/FCGradient:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/conv1/conv1_grad"
+  op: "Blob"
+  input: "GRADIENTS/conv1/MaxPoolGradient_1:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/conv1/conv1_b_grad"
+  op: "Blob"
+  input: "GRADIENTS/ConvGradient:1"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/conv1/conv2_w_grad"
+  op: "Blob"
+  input: "GRADIENTS/conv1/ConvGradient:0"
+  device: "/gpu:0"
+}
+node {
+  name: "classifier/pred"
+  op: "Blob"
+  input: "classifier/FC_1:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/conv1/pool2_grad"
+  op: "Blob"
+  input: "GRADIENTS/c/FCGradient:2"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/conv1/conv1_w_grad"
+  op: "Blob"
+  input: "GRADIENTS/ConvGradient:0"
+  device: "/gpu:0"
+}
+node {
+  name: "data"
+  op: "Blob"
+  input: "NHWC2NCHW:0"
+  device: "/gpu:0"
+}
+node {
+  name: "classifier/xent"
+  op: "Blob"
+  input: "classifier/LabelCrossEntropy:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/conv1/pool1_grad"
+  op: "Blob"
+  input: "GRADIENTS/conv1/ConvGradient:2"
+  device: "/gpu:0"
+}
+node {
+  name: "db"
+  op: "Placeholder"
+}
+node {
+  name: "classifier/fc3_b"
+  op: "Blob"
+  input: "classifier/ConstantFill:0"
+  device: "/gpu:0"
+}
+node {
+  name: "classifier/pred_b"
+  op: "Blob"
+  input: "classifier/ConstantFill_1:0"
+  device: "/gpu:0"
+}
+node {
+  name: "classifier/softmax"
+  op: "Blob"
+  input: "classifier/Softmax:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/data_grad"
+  op: "Blob"
+  input: "GRADIENTS/ConvGradient:2"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/pred_b_grad"
+  op: "Blob"
+  input: "GRADIENTS/classifier/FCGradient:1"
+  device: "/gpu:0"
+}
+node {
+  name: "label"
+  op: "Blob"
+  input: "ImageInput:1"
+  device: "/gpu:0"
+}
+node {
+  name: "conv1/pool1"
+  op: "Blob"
+  input: "conv1/MaxPool:0"
+  device: "/gpu:0"
+}
+node {
+  name: "data_nhwc"
+  op: "Blob"
+  input: "ImageInput:0"
+  device: "/gpu:0"
+}
+node {
+  name: "conv1/conv2"
+  op: "Blob"
+  input: "conv1/Conv_1:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/conv1/conv2_grad"
+  op: "Blob"
+  input: "GRADIENTS/conv1/MaxPoolGradient:0"
+  device: "/gpu:0"
+}
+node {
+  name: "conv1/conv2_b"
+  op: "Blob"
+  input: "conv1/ConstantFill_1:0"
+  device: "/gpu:0"
+}
+node {
+  name: "conv1/conv1_b"
+  op: "Blob"
+  input: "conv1/ConstantFill:0"
+  device: "/gpu:0"
+}
+node {
+  name: "classifier/fc3_w"
+  op: "Blob"
+  input: "classifier/XavierFill:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/fc3_b_grad"
+  op: "Blob"
+  input: "GRADIENTS/c/FCGradient:1"
+  device: "/gpu:0"
+}
+node {
+  name: "classifier/pred_w"
+  op: "Blob"
+  input: "classifier/XavierFill_1:0"
+  device: "/gpu:0"
+}
+node {
+  name: "conv1/pool2"
+  op: "Blob"
+  input: "conv1/MaxPool_1:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/conv1/conv2_b_grad"
+  op: "Blob"
+  input: "GRADIENTS/conv1/ConvGradient:1"
+  device: "/gpu:0"
+}
+node {
+  name: "classifier/fc3_1"
+  op: "Blob"
+  input: "classifier/Relu:0"
+  device: "/gpu:0"
+}
+node {
+  name: "classifier/loss"
+  op: "Blob"
+  input: "classifier/AveragedLoss:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/fc3_grad"
+  op: "Blob"
+  input: "GRADIENTS/classifier/FCGradient:2"
+  device: "/gpu:0"
+}
+node {
+  name: "conv1/conv1_w"
+  op: "Blob"
+  input: "conv1/XavierFill:0"
+  device: "/gpu:0"
+}
+node {
+  name: "conv1/conv1"
+  op: "Blob"
+  input: "conv1/Conv:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/loss_autogen_grad"
+  op: "Blob"
+  input: "GRADIENTS/classifier/ConstantFill:0"
+  device: "/gpu:0"
+}
+node {
+  name: "classifier/fc3"
+  op: "Blob"
+  input: "classifier/FC:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/pred_grad"
+  op: "Blob"
+  input: "GRADIENTS/classifier/SoftmaxGradient:0"
+  device: "/gpu:0"
+}
+node {
+  name: "GRADIENTS/classifier/softmax_grad"
+  op: "Blob"
+  input: "GRADIENTS/classifier/LabelCrossEntropyGradient:0"
+  device: "/gpu:0"
+}
+node {
+  name: "conv1/conv2_w"
+  op: "Blob"
+  input: "conv1/XavierFill_1:0"
+  device: "/gpu:0"
+}
