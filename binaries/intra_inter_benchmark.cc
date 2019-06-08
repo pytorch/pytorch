@@ -57,7 +57,7 @@ void launch_tasks_and_wait(at::Tensor& left, at::Tensor& right, int tasks_num) {
 
 int main(int argc, char** argv) {
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
-    std::cout << "Failed to parse command line flags";
+    std::cout << "Failed to parse command line flags" << std::endl;
     return -1;
   }
   at::init_num_threads();
