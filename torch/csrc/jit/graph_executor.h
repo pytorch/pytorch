@@ -12,27 +12,18 @@ namespace jit {
 struct GraphExecutorState;
 struct Code;
 
-struct ExecutionPlan {
-  ExecutionPlan() = default;
-  ExecutionPlan(std::shared_ptr<Graph> graph)
-      : code(graph), graph(std::move(graph)) {}
-
-  operator bool() const {
-    return static_cast<bool>(graph);
-  }
-
-  Code code;
-  std::shared_ptr<Graph> graph;
-};
-
 // Notice that those structs don't manage lifetime of their members.
 // They is only valid only right after you call getDebugState() and should never
 // be used again once another GraphExecutor function is called.
+struct ExecutionPlanState {
+  Code* code = nullptr;
+  const Graph* graph = nullptr;
+};
 
 struct GraphExecutorState {
   const Graph* graph = nullptr;
-  ExecutionPlan fallback; // XXX: members of this field are optional
-  std::unordered_map<ArgumentSpec, ExecutionPlan> execution_plans;
+  ExecutionPlanState fallback; // XXX: members of this field are optional
+  std::unordered_map<ArgumentSpec, ExecutionPlanState> execution_plans;
 };
 
 struct GraphExecutorImplBase;
