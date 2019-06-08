@@ -1,6 +1,6 @@
+#include <torch/csrc/jit/operator.h>
 #include <ATen/ATen.h>
 #include <torch/csrc/jit/alias_info.h>
-#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/edit_distance.h>
@@ -246,16 +246,11 @@ const Operator& getOperatorFor(const Node* node) {
       er << ", ";
     er << *node->inputs()[i]->type();
   }
+  er << "\ncandidates were:\n";
   const auto& candidates = getAllOperatorsFor(node->kind());
-  if (candidates.size() > 0) {
-    er << "\ncandidates were:\n";
-    for (auto& candidate : candidates) {
-      er << "  " << candidate->schema() << "\n";
-    }
-  } else {
-    er << "\nno candidates found\n";
+  for (auto& candidate : candidates) {
+    er << "  " << candidate->schema() << "\n";
   }
-  er << "within the graph:\n";
   er << *node->owningGraph() << "\n";
   throw er;
 }
