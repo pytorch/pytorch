@@ -18,19 +18,13 @@
 namespace at {
 
 namespace {
-  std::mutex init_mutex_;
-
   static thread_local tbb::task_scheduler_init tbb_init_(intraop_default_num_threads());
-
   std::atomic<int> num_intraop_threads_{-1};
-
   static thread_local tbb::task_group tg_;
 }
 
 //TODO: use OMP and MKL env. vars as default values
 void init_num_threads() {
-  std::unique_lock<std::mutex> lock(init_mutex_);
-
   #ifdef _OPENMP
   omp_set_num_threads(1);
   #endif
@@ -50,7 +44,6 @@ void init_num_threads() {
 
 void set_num_threads(int nthreads) {
   TORCH_CHECK(nthreads > 0);
-  std::unique_lock<std::mutex> lock(init_mutex_);
   int no_value = -1;
   if (num_intraop_threads_.compare_exchange_strong(no_value, nthreads)) {
     if (tbb_init_.is_active()) {
