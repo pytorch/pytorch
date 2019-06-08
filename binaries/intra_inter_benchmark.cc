@@ -1,7 +1,7 @@
+#include <ATen/ATen.h>
 #include "ATen/Parallel.h"
 
 #include "c10/util/Flags.h"
-#include "torch/torch.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -75,10 +75,8 @@ int main(int argc, char** argv) {
             << at::get_num_threads() << " intra-op threads, "
             << "tensor dim: " << FLAGS_tensor_dim << std::endl;
 
-  auto left = torch::randn(
-      {FLAGS_tensor_dim, FLAGS_tensor_dim}, torch::dtype(torch::kFloat32));
-  auto right = torch::randn(
-      {FLAGS_tensor_dim, FLAGS_tensor_dim}, torch::dtype(torch::kFloat32));
+  auto left = at::ones({FLAGS_tensor_dim, FLAGS_tensor_dim}, at::kFloat);
+  auto right = at::ones({FLAGS_tensor_dim, FLAGS_tensor_dim}, at::kFloat);
 
   // warmup
   launch_tasks_and_wait(left, right, FLAGS_warmup_iter);
