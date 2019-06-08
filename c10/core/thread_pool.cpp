@@ -17,11 +17,7 @@ ThreadPool::ThreadPool(
       if (init_thread) {
         init_thread();
       }
-      ++thread_init_counter_;
-      // make sure that all threads finish their init_thread()
-      // before starting executing tasks
-      while (thread_init_counter_ != threads_.size()) {}
-      main_loop(i);
+      this->main_loop(i);
     });
   }
 }
