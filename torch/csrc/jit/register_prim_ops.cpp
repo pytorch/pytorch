@@ -1016,12 +1016,8 @@ RegisterOperators reg(
      Operator(
          "aten::wait(Future(t) self) -> t",
          [](Stack& stack) {
-           auto future = pop(stack).toFuture();
-           if (future->completed()) {
-             push(stack, future->value());
-           } else {
-             throw Suspend(future);
-           }
+           TORCH_CHECK(
+               false, "wait is implemented directly in the interpreter");
            return 0;
          }),
      Operator(
