@@ -1,9 +1,5 @@
 #include <torch/csrc/jit/tracer.h>
 
-#include <torch/csrc/utils/variadic.h>
-#include <torch/csrc/jit/constants.h>
-#include <ATen/core/functional.h>
-#include <ATen/Backtrace.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
