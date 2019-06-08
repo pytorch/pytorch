@@ -78,26 +78,21 @@ void dropUnused(Block* b) {
   }
 }
 
-// ensure every value has a final use in the same block where it is defined.
-// This already true for most nodes. The exceptions are:
-// 1. A value that is unused.
-// 2. A value whose last use is nested in some control flow.
-// For (1) we simply add a prim::Drop node that uses the value right after
-// it is defined. For (2), we insert a prim::Drop right after the control
-// flow node where the last use occurs
-void insertLastUses(Graph& g) {
+// for each input, should we move rather than copy the inputs
+std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph& g) {
   // struct to share common data structures
-  struct InsertLastUses {
+  struct FindLastUses {
     Graph& graph;
     // have we seen this value, yet, if not, it is the last use of the value
     std::unordered_set<Value*> seen;
 
+    std::unordered_map<Node*, std::vector<uint8_t>> move_flags;
     // A map from an If or Loop node to the optional Drop block that
     // occurs directly after it to release any tensors that go out of scope
     // when the If/Loop exits. These are created and inserted on demand.
     std::unordered_map<Node*, Node*> drop_for_node;
 
-    InsertLastUses(Graph& g) : graph(g) {
+    FindLastUses(Graph& g) : graph(g) {
       scanBlock(graph.block());
     }
     void scanBlock(Block* b) {
@@ -110,6 +105,7 @@ void insertLastUses(Graph& g) {
       for (auto b : n->blocks()) {
         scanBlock(b);
       }
+      move_flags[n].resize(n->inputs().size());
       // scan backwards so if a value is used twice in the list then it is a
       // move
       for (size_t i = n->inputs().size(); i > 0; --i) {
@@ -117,9 +113,11 @@ void insertLastUses(Graph& g) {
       }
     }
     void scanUse(Node* n, size_t i) {
+      auto& move_flags_n = move_flags[n];
       auto v = n->inputs()[i];
       auto inserted = seen.insert(v).second;
       if (!inserted) {
+        move_flags_n[i] = false;
         return;
       }
 
@@ -140,14 +138,16 @@ void insertLastUses(Graph& g) {
       AT_ASSERT(
           same_depth_node); // failure means v is not in scope for n, use lint!
 
-      // In the case where v and n are in the same block,
-      // we have a legit final use already.
+      // In the case where v and n are in the same block, just mark
+      // its move_flags to be true
       if (same_depth_node == n) {
+        move_flags_n[i] = true;
         return;
       }
 
       // in the case where the use is nested in a block
       // add a Drop node after that block which will drop 'v'.
+      move_flags_n[i] = false;
       addToDropIfNotExists(
           findOrCreateDropInstructionForNode(same_depth_node), v);
     }
@@ -185,109 +185,25 @@ void insertLastUses(Graph& g) {
           return;
       }
       drop->addInput(v);
+      move_flags[drop].push_back(true);
     }
   };
 
-  InsertLastUses ilu(g);
+  return FindLastUses(g).move_flags;
 }
 } // namespace
-
-/*
-This is an optimization that reduces the number of store/load/move nodes needed
-by recognizing that parts of the graph are simple trees like a*x + b*y. When
-this happens it is possible to work directly off of the stack by emitting the
-tree in a depth-first left-to-right manner:
-  load a
-  load x
-  mul # stack now is a*x
-  load b
-  load y
-  mul # stack now is a*x, b*y
-  add
-
-can_emit_inline_[node] == true means that this node participates as a non-root
-member of one of these trees. The code emitter will not emit this node when
-it is encountered in the node. Instead the node is emitted in a depth first
-traversal from where it is used in a tree.
-
-To participate in a tree a node must have a single use (otherwise it is not
-tree-like) and output a single value (for simplicity.) If our IR was functional,
-these would be the only constraints. However, many nodes have side effects, so
-we must ensure that emitting the nodes in depth first order from the tree's root
-_does not reorder the emission of the nodes_. To ensure this, we work backward
-from the root of a potential tree, visiting its inputs in reverse depth first
-order, while scanning the node list backward (with the block_point node). When
-these traversal line up we know it is safe to emit the tree in this way. We
-ignore constant nodes, which do not have side effects.
-*/
-struct CanEmitInline {
-  CanEmitInline(const std::shared_ptr<Graph>& graph) {
-    scanBlock(graph->block());
-  }
-  bool canInline(Value* v) {
-    return v->node()->kind() != prim::Param && v->uses().size() == 1 &&
-        v->node()->outputs().size() == 1;
-  }
-
-  Node* previousNonConstant(Node* n) {
-    do {
-      n = n->prev();
-    } while (n->kind() == prim::Constant);
-    return n;
-  }
-
-  Node* scanValue(Node* block_point, Value* v) {
-    // this node is a candidate for inline, if our reverse scan of the
-    // node list lines up with the use of v, we know it will be emitted in
-    // tree order, and we can inlining. Scan continutes for further nodes.
-    if (v->node() == block_point && canInline(v)) {
-      // since we inlined this node, we may be able to recursively inline
-      // its inputs, so we continue scanning it
-      block_point = scanNode(v->node());
-      can_emit_inline_[v->node()] = true;
-    }
-    // if it does not line up, we can't inline 'v', and will just generate
-    // a load/move for it. However, other inputs may still appear in tree
-    // order so we continue the scan of the inputs.
-    return block_point;
-  }
-
-  Node* scanNode(Node* n) {
-    // don't bother to scan nodes we have already determined to be inline
-    if (can_emit_inline_.count(n)) {
-      return nullptr;
-    }
-    for (auto b : n->blocks()) {
-      scanBlock(b);
-    }
-    Node* block_point = previousNonConstant(n);
-    for (auto it = n->inputs().rbegin(), end = n->inputs().rend(); it != end;
-         ++it) {
-      block_point = scanValue(block_point, *it);
-    }
-    return block_point;
-  }
-
-  void scanBlock(Block* b) {
-    scanNode(b->return_node());
-    for (auto node : b->nodes().reverse()) {
-      scanNode(node);
-    }
-  }
-  std::unordered_map<Node*, bool> can_emit_inline_;
-};
 
 // pre-processing that happens once per graph
 struct PreprocessGraph {
   PreprocessGraph(Graph& g) : graph(g.copy()) {
     dropUnused(graph->block());
     // fill in move_flags by scanning blocks;
-    insertLastUses(*graph);
-    can_emit_inline = std::move(CanEmitInline(graph).can_emit_inline_);
+    move_flags = findLastUses(*graph);
   }
   // Outputs of the preprocessing:
   std::shared_ptr<Graph> graph;
-  std::unordered_map<Node*, bool> can_emit_inline;
+  // for each input, should we move rather than copy the inputs
+  std::unordered_map<Node*, std::vector<uint8_t>> move_flags;
 };
 
 // instructs look like:
@@ -404,17 +320,10 @@ struct CodeImpl {
   c10::optional<std::vector<GraphExecutor*>> grad_executors_;
   PreprocessGraph preprocess_;
 
-  // map from unique of nodes to register in register table
-  std::unordered_map<Value*, int> value_to_reg_;
-
-  // running count of uses as we emit. When we reach use_count_[v] =
-  // v.uses().size() we know it is the final use and we can move rather than
-  // load.
-  std::unordered_map<Value*, size_t> use_count_;
-
+  std::unordered_map<Value*, int>
+      value_to_reg_; // map from unique of nodes to register in register table
   Node* current_node_; // used in creation of code to keep track
                        // of node being emitted
-  Node* last_inserted_op_ = nullptr;
 
   CodeImpl(const std::shared_ptr<Graph>& graph)
       : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
@@ -429,19 +338,6 @@ struct CodeImpl {
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
     instructions_.emplace_back(op, X, N);
     instructions_source_.emplace_back(current_node_);
-
-    // check that we didn't accidentally emit nodes out of topological order
-    if (op == OP) {
-      if (last_inserted_op_ != nullptr && current_node_ != last_inserted_op_ &&
-          current_node_->owningBlock() == last_inserted_op_->owningBlock()) {
-        TORCH_INTERNAL_ASSERT(
-            current_node_->isAfter(last_inserted_op_),
-            *current_node_,
-            " is not after ",
-            *last_inserted_op_);
-      }
-      last_inserted_op_ = current_node_;
-    }
   }
 
   int allocRegs(at::ArrayRef<Value*> vs) {
@@ -457,25 +353,14 @@ struct CodeImpl {
     return value_to_reg_.at(v);
   }
 
-  void emitUse(Value* input, bool drop) {
-    // drop - if true, we are not actually going to use this thing
-    // and we can short circuit doing many instructions here
-    // by either clearing the register (DROPR) or just popping the stack
-    // (DROP)
-    if (preprocess_.can_emit_inline[input->node()]) {
-      emitNode(input->node());
-      if (drop) {
-        insertInstruction(DROP);
-      }
-    } else {
+  void emitLoadInputs(Node* node) {
+    auto move_flag_it = preprocess_.move_flags.at(node).begin();
+    for (Value* input : node->inputs()) {
       int reg = registerFor(input);
-      bool moved = input->uses().size() == ++use_count_[input];
-
+      bool moved = (*move_flag_it++);
       OpCode op;
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
-      } else if (drop) {
-        op = DROPR;
       } else if (moved) {
         op = MOVE;
       } else {
@@ -485,26 +370,22 @@ struct CodeImpl {
     }
   }
 
-  void emitLoadInputs(Node* node) {
-    for (Value* input : node->inputs()) {
-      emitUse(input, false);
-    }
-  }
-
   void emitOperator(Node* node) {
     emitLoadInputs(node);
     insertInstruction(OP, operator_table_.size());
     operator_table_.emplace_back(getOperation(node));
+    emitStoreOutputs(node);
   }
 
   void emitWait(Node* node) {
     emitLoadInputs(node);
     insertInstruction(WAIT);
+    emitStoreOutputs(node);
   }
 
   void emitDrop(at::ArrayRef<Value*> to_drop) {
     for (Value* input : to_drop) {
-      emitUse(input, true);
+      insertInstruction(DROPR, registerFor(input));
     }
   }
 
@@ -542,6 +423,7 @@ struct CodeImpl {
     instructions_[start_if].X = start_else - start_if;
     emitCodeForBlock(node->blocks().at(1));
     instructions_[start_else - 1].X = instructions_.size() - (start_else - 1);
+    emitStoreOutputs(node);
   }
 
   void emitLoop(Node* loop) {
@@ -552,25 +434,9 @@ struct CodeImpl {
     emitCodeForBlock(loop->blocks().at(0));
     insertInstruction(JMP, start - instructions_.size());
     instructions_[start].X = instructions_.size() - start;
+    emitStoreOutputs(loop);
   }
 
-  void emitNodeAtBlockLevel(Node* node) {
-    WithCurrentNode guard(&current_node_, node);
-    switch (node->kind()) {
-      case prim::Constant:
-        emitConstant(node);
-        break;
-      case prim::Return:
-        emitLoadInputs(node);
-        break;
-      default:
-        if (!preprocess_.can_emit_inline[node]) {
-          emitNode(node);
-          emitStoreOutputs(node);
-        }
-        break;
-    }
-  }
   void emitNode(Node* node) {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
@@ -593,16 +459,20 @@ struct CodeImpl {
         emitWait(node);
         break;
       case prim::Param:
+        emitStoreOutputs(node);
+        break;
+      case prim::Return:
+        emitLoadInputs(node);
         break;
     }
   }
 
   void emitCodeForBlock(Block* block) {
-    emitNodeAtBlockLevel(block->param_node());
+    emitNode(block->param_node());
     for (auto node : block->nodes()) {
-      emitNodeAtBlockLevel(node);
+      emitNode(node);
     }
-    emitNodeAtBlockLevel(block->return_node());
+    emitNode(block->return_node());
   }
 
   const std::vector<GraphExecutor*>& grad_executors() {
@@ -647,7 +517,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // answer: to where it was when we were called, not
   // including any inputs to this function
   int64_t stack_start_ = -1;
-  c10::intrusive_ptr<Future> future_;
+  c10::intrusive_ptr<Future> future;
   std::shared_ptr<CodeImpl> function; // keep function alive
 
   // this holds all the tensors for this interpreter run
@@ -761,12 +631,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
         } break;
         case RET:
-          if (future_) {
+          if (future) {
             auto num_outputs = function->n_outputs;
             if (num_outputs == 1) {
-              future_->markCompleted(stack.back());
+              future->markCompleted(stack.back());
             } else {
-              future_->markCompleted(
+              future->markCompleted(
                   Tuple::create(jit::last(stack, num_outputs).vec()));
             }
           }
@@ -822,8 +692,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void handleError(std::string&& error_msg, bool is_jit_exception) {
-    if (future_) {
-      future_->markCompleted(Future::FutureError(std::move(error_msg)));
+    if (future) {
+      future->markCompleted(Future::FutureError(std::move(error_msg)));
     } else if (is_jit_exception) {
       throw JITException(std::move(error_msg));
     } else {
@@ -833,27 +703,27 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
  public:
   c10::intrusive_ptr<Future> getOrCreateFuture() {
-    if (!future_) {
-      future_ = c10::make_intrusive<Future>();
+    if (!future) {
+      future = c10::make_intrusive<Future>();
     }
-    return future_;
+    return future;
   }
 
   c10::intrusive_ptr<Future> runAsync(Stack& stack) {
     getOrCreateFuture();
     runImpl(stack);
-    return future_;
+    return future;
   }
 
   void run(Stack& stack) {
     if (runImpl(stack)) {
-      future_->wait();
+      future->wait();
 
       auto num_outputs = function->n_outputs;
       if (num_outputs == 1) {
-        push(stack, future_->value());
+        push(stack, future->value());
       } else {
-        auto tuple = future_->value().toTuple();
+        auto tuple = future->value().toTuple();
         for (const auto& value : tuple->elements()) {
           push(stack, value);
         }
