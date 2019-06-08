@@ -20,7 +20,7 @@ namespace at {
 namespace {
   std::mutex init_mutex_;
 
-  tbb::task_scheduler_init tbb_init_(intraop_default_num_threads());
+  static thread_local tbb::task_scheduler_init tbb_init_(intraop_default_num_threads());
 
   std::atomic<int> num_intraop_threads_{-1};
 
@@ -30,7 +30,7 @@ namespace {
 //TODO: use OMP and MKL env. vars as default values
 void init_num_threads() {
   std::unique_lock<std::mutex> lock(init_mutex_);
-  // omp- and mkl_set_num_threads don't affect TBB versions of MKL/MKL-DNN
+
   #ifdef _OPENMP
   omp_set_num_threads(1);
   #endif

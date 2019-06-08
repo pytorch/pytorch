@@ -1,5 +1,6 @@
 #include "ATen/Parallel.h"
 
+#include "c10/util/Flags.h"
 #include "torch/torch.h"
 
 #include <chrono>
@@ -8,14 +9,14 @@
 #include <mutex>
 #include <ctime>
 
+C10_DEFINE_int(iter, 100, "Number of iterations");
+C10_DEFINE_int(inter_op_threads, 0, "Number of inter-op iterations");
+C10_DEFINE_int(intra_op_threads, 0, "Number of intra-op threads");
+C10_DEFINE_int(tensor_dim, 2000, "Tensor dim");
+
 namespace {
-constexpr int kDefaultIterations = 100;
-constexpr int kDefaultTensorDim = 2000;
-int iter = kDefaultIterations;
-int inter_op_threads = at::get_num_interop_threads();
-int intra_op_threads = at::get_num_threads();
-int tensor_dim = kDefaultTensorDim;
 std::atomic<int> counter{0};
+int iter = 0;
 std::condition_variable cv;
 std::mutex mutex;
 }
@@ -38,53 +39,37 @@ void wait() {
   }
 }
 
-void check_param(char* param_name, char* param_value) {
-  int value = std::atoi(param_value);
-  TORCH_CHECK(value > 0);
-  if (std::string(param_name) == "--iter") {
-    iter = value;
-  } else if (std::string(param_name) == "--inter_op_threads") {
-    inter_op_threads = value;
-  } else if (std::string(param_name) == "--intra_op_threads") {
-    intra_op_threads = value;
-  } else if (std::string(param_name) == "--tensor_dim") {
-    tensor_dim = value;
-  } else {
-    AT_ERROR("invalid argument, expected: --iter or --threads");
-  }
-}
-
 int main(int argc, char** argv) {
-  at::init_num_threads();
-
-  if (argc > 1) {
-    TORCH_CHECK(argc % 2 == 1);
-    for (int idx = 1; idx < argc; idx+=2) {
-      check_param(argv[idx], argv[idx + 1]);
-    }
+  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
+    std::cout << "Failed to parse command line flags";
+    return -1;
   }
 
-  at::set_num_interop_threads(inter_op_threads);
-  at::set_num_threads(intra_op_threads);
+  if (FLAGS_inter_op_threads > 0) {
+    at::set_num_interop_threads(FLAGS_inter_op_threads);
+  }
+  if (FLAGS_intra_op_threads > 0) {
+    at::set_num_threads(FLAGS_intra_op_threads);
+  }
 
-  std::cout << "Launching " << iter << " tasks using "
+  std::cout << "Launching " << FLAGS_iter << " tasks using "
             << at::get_num_interop_threads() << " inter-op threads and "
             << at::get_num_threads() << " intra-op threads, "
-            << "tensor dim: " << tensor_dim << std::endl;
+            << "tensor dim: " << FLAGS_tensor_dim << std::endl;
 
   auto left = torch::randn(
-      {tensor_dim, tensor_dim}, torch::dtype(torch::kFloat32));
+      {FLAGS_tensor_dim, FLAGS_tensor_dim}, torch::dtype(torch::kFloat32));
   auto right = torch::randn(
-      {tensor_dim, tensor_dim}, torch::dtype(torch::kFloat32));
+      {FLAGS_tensor_dim, FLAGS_tensor_dim}, torch::dtype(torch::kFloat32));
 
   // warmup
-  auto saved_iter = iter;
   iter = 10;
   for (auto idx = 0; idx < iter; ++idx) {
     launch_task(left, right);
   }
   wait();
-  iter = saved_iter;
+
+  iter = FLAGS_iter;
   counter = 0;
 
   typedef std::chrono::high_resolution_clock clock;

@@ -69,6 +69,7 @@ class C10_API ThreadPool : public c10::TaskThreadPoolBase {
   std::size_t available_;
   std::size_t total_;
   int numa_node_id_;
+  std::atomic<int> thread_init_counter_{0};
 
  public:
   ThreadPool() = delete;
