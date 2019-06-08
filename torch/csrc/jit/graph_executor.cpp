@@ -679,6 +679,10 @@ void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
 }
 
+ExecutionPlan GraphExecutor::getPlanFor(Stack& inputs) {
+  return pImpl->getPlanFor(inputs);
+}
+
 std::shared_ptr<Graph> GraphExecutor::graph() const {
   return pImpl->graph;
 }
