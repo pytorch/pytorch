@@ -392,7 +392,7 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
 
 inline at::MemoryFormat PythonArgs::toMemoryFormat(int i) {
   if (!args[i]) return at::MemoryFormat::Any;
-  AT_CHECK(THPMemoryFormat_Check(args[i]), "memory_format arg must be an instance of the torch.memory_format");
+  TORCH_CHECK(THPMemoryFormat_Check(args[i]), "memory_format arg must be an instance of the torch.memory_format");
   const auto memory_format = reinterpret_cast<THPMemoryFormat*>(args[i]);
   return memory_format->memory_format;
 }

@@ -81,4 +81,10 @@ struct CAFFE2_API Generator {
     virtual Generator* clone_impl() const = 0;
 };
 
+namespace detail {
+
+CAFFE2_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
+
+} // namespace detail
+
 } // namespace at

@@ -9,12 +9,13 @@ import torch.optim as optim
 import torch.cuda
 import torch.jit.quantized
 from contextlib import contextmanager
+from collections import namedtuple
 from itertools import product, chain
 import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import _nested_map
 from torch.onnx import OperatorExportTypes
-from torch._six import inf, PY2, builtins, StringIO
+from torch._six import inf, PY2, PY37, builtins, StringIO
 from common_utils import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
@@ -1309,7 +1310,8 @@ graph(%x : Tensor,
         torch._C._jit_pass_constant_propagation(scriptM.graph)
         # TODO: Build the qparam_dict from parse_ir directly for this pass
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
+        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
+                                               qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # both conv and relu nodes and at external output since relu
@@ -1340,7 +1342,8 @@ graph(%x : Tensor,
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
         if not len(qparam_dict):
             return
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
+        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
+                                               qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # both conv and relu nodes and at external output since relu
@@ -1376,7 +1379,8 @@ graph(%x : Tensor,
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
+        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
+                                               qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # both conv and no quant-dequant after add. Constant nodes correspond
@@ -1410,7 +1414,8 @@ graph(%x : Tensor,
         torch._C._jit_pass_constant_propagation(scriptM.graph)
 
         qparam_dict = _helper_generate_qparam(scriptM, input_data)
-        torch._C._jit_pass_insert_quantdequant(scriptM.graph, qparam_dict)
+        torch._C._jit_pass_insert_quantdequant(scriptM._c, "forward",
+                                               qparam_dict)
 
         # We expect to see quant-dequant node before and after
         # conv, relu and add. Constant nodes correspond to params for the
@@ -3159,13 +3164,20 @@ graph(%Ra, %Rb):
     def test_warnings(self):
         import warnings
 
-        @torch.jit.script
         def fn(x):
             if bool(x < 2):
                 warnings.warn("x is less than 2")
             return x
 
-        FileCheck().check("aten::warn").run(str(fn.graph))
+        scripted_fn = torch.jit.script(fn)
+
+        with warnings.catch_warnings(record=True) as warns:
+            fn(torch.ones(1))
+
+        with warnings.catch_warnings(record=True) as script_warns:
+            scripted_fn(torch.ones(1))
+
+        self.assertEqual(str(warns[0]), str(script_warns[0]))
 
     def test_no_erroneous_warnings(self):
         import warnings
@@ -3724,8 +3736,9 @@ def foo(x):
         scripted = torch.jit.script(foobar)
 
         _, lineno = inspect.getsourcelines(foobar)
-        FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))\
-                   .run(scripted.graph)
+        fc = FileCheck().check('test_jit.py:{}:20'.format(lineno + 1))
+        fc.run(scripted.graph)
+        fc.run(str(scripted.graph))
 
     def test_file_line_save_load(self):
         class Scripted(torch.jit.ScriptModule):
@@ -3742,7 +3755,9 @@ def foo(x):
         bytesio = io.BytesIO(buffer)
         scripted = torch.jit.load(bytesio)
 
-        FileCheck().check('code/archive.py:4:10').run(scripted.graph)
+        fc = FileCheck().check('code/archive.py:4:10')
+        fc.run(scripted.graph)
+        fc.run(str(scripted.graph))
 
     def test_file_line_string(self):
         scripted = torch.jit.CompilationUnit('''
@@ -3750,7 +3765,9 @@ def foo(xyz):
     return torch.neg(xyz)
         ''')
 
-        FileCheck().check('<string>:2:12').run(scripted.foo.graph)
+        fc = FileCheck().check('<string>:2:12')
+        fc.run(scripted.foo.graph)
+        fc.run(str(scripted.foo.graph))
 
     def test_file_line_trace(self):
         def foobar(xyz):
@@ -3759,8 +3776,9 @@ def foo(xyz):
         scripted = torch.jit.trace(foobar, (torch.rand(3, 4)))
 
         _, lineno = inspect.getsourcelines(foobar)
-        FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))\
-                   .run(scripted.graph)
+        fc = FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))
+        fc.run(scripted.graph)
+        fc.run(str(scripted.graph))
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -6120,31 +6138,31 @@ a")
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
                     self.assertEqual(res_python, res_script, message=msg, prec=(1e-4) * max(abs(res_python), res_script))
 
-
-        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf", "erfc", "expm1", "fabs"]
+        unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
+                           "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
+                           "asinh", "atanh", "acosh", "sinh", "cosh", "tanh", "degrees", "radians"]
+        binary_float_ops = ["atan2", "fmod", "copysign"]
         for op in unary_float_ops:
-            checkMathWrap(op)
+            checkMathWrap(op, 1)
+        for op in binary_float_ops:
+            checkMathWrap(op, 2)
 
-        checkMathWrap("copysign", 2)
+        checkMath("modf", 1, ret_type="Tuple[float, float]")
+        checkMath("frexp", 1, ret_type="Tuple[float, int]")
+        checkMath("isnan", 1, ret_type="bool")
+        checkMath("isinf", 1, ret_type="bool")
+        checkMath("ldexp", 2, is_float=False, ret_type="float", args_type="(float, int)",
+                  vals=[(i, j) for i in float_vals for j in range(-10, 10)])
         checkMath("pow", 2, is_float=False, ret_type="int")
         checkMath("pow", 2, is_float=True, ret_type="float")
         if not PY2:
             checkMathWrap("floor", ret_type="int")
             checkMathWrap("ceil", ret_type="int")
             checkMathWrap("gcd", 2, is_float=False, ret_type="int")
-
-    @unittest.skipIf(PY2, "Requires python 3")
-    def test_math_gcd(self):
-        def test_gcd(x, y):
-            # type: (int, int) -> int
-            return math.gcd(x, y)
-
-        max_int = 2147483647
-        min_int = -2147483647 - 1
-        int_vals = list(range(-5, 5, 1)) + [max_int + 5, max_int * 2, min_int - 5, min_int * 2]
-        vals = [(i, j) for i in int_vals for j in int_vals]
-        for inputs in vals:
-            self.checkScript(test_gcd, inputs)
+            checkMath("isfinite", 1, ret_type="bool")
+        if PY37:
+            checkMathWrap("remainder", 2)
+        checkMathWrap("factorial", 1, is_float=False, ret_type="int", vals=[(i, 0) for i in range(-2, 10)])
 
     def test_if_nest_while(self):
         def func(a, b):
@@ -6710,7 +6728,7 @@ a")
             return torch.tensor([[1]])
 
         list_input = [func1, func2, func3, func4, func5, func6, func7]
-        expected_shape = ["Long(*)", ("Byte(*)"), "Double(*)", "Double()", "Long()", "Byte()", "Long(*, *)"]
+        expected_shape = ["Long(*)", ("Bool(*)"), "Double(*)", "Double()", "Long()", "Bool()", "Long(*, *)"]
 
         for fn, expect in zip(list_input, expected_shape):
             self.checkScript(fn, ())
@@ -13295,6 +13313,15 @@ a")
 
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
+
+    def test_named_tuple_error(self):
+        _GoogLeNetOutputs = namedtuple('GoogLeNetOuputs', ['logits', 'aux_logits2', 'aux_logits1'])
+
+        with self.assertRaisesRegex(RuntimeError, 'NamedTuple is currently not supported'):
+            @torch.jit.script
+            def foo(x):
+                return _GoogLeNetOutputs(x, x, x)
+
 
     def _test_pickle_checkpoint(self, device):
         with TemporaryFileName() as fname:

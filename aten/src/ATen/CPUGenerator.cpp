@@ -1,12 +1,6 @@
 #include <ATen/CPUGenerator.h>
 #include <c10/util/C++17.h>
 #include <algorithm>
-#include <chrono>
-
-#ifndef _WIN32
-#include <fcntl.h>
-#include <unistd.h>
-#endif
 
 namespace at {
 
@@ -34,7 +28,7 @@ CPUGenerator* getDefaultCPUGenerator() {
 }
 
 /**
- * Utility to create a CPUGenerator. Returns a unique_ptr
+ * Utility to create a CPUGenerator. Returns a shared_ptr
  */
 std::shared_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
   return std::make_shared<CPUGenerator>(seed_val);
@@ -46,42 +40,6 @@ std::shared_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val) {
  */
 inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
   return (static_cast<uint64_t>(hi) << 32) | lo;
-}
-
-/**
- * Gets a random number for /dev/urandom
- * Note this is a legacy method (from THRandom.cpp)
- */
-#ifndef _WIN32
-static uint64_t readURandomLong()
-{
-  int randDev = open("/dev/urandom", O_RDONLY);
-  uint64_t randValue;
-  TORCH_CHECK(randDev >= 0, "Unable to open /dev/urandom");
-  ssize_t readBytes = read(randDev, &randValue, sizeof(randValue));
-  TORCH_CHECK(readBytes >= (ssize_t) sizeof(randValue), "Unable to read from /dev/urandom");
-  close(randDev);
-  return randValue;
-}
-#endif // _WIN32
-
-/**
- * Gets a non deterministic random number number from either the
- * /dev/urandom or the current time
- * FIXME: The behavior in this function is from legacy code (THRandom_seed)
- * and is probably not the right thing to do, even though our tests pass.
- * Figure out if tests get perturbed
- * - when using C++11 std objects, such as std::random_device
- * - when constructing a 64 bit seed properly, rather than static casting
- *   a 32 bit number to 64 bit.
- */
-uint64_t getNonDeterministicRandom() {
-#ifdef _WIN32
-  uint64_t s = (uint64_t)std::chrono::high_resolution_clock::now().time_since_epoch().count();
-#else
-  uint64_t s = readURandomLong();
-#endif
-  return s;
 }
 
 } // namespace detail

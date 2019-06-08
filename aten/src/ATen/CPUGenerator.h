@@ -37,7 +37,6 @@ namespace detail {
 
 CAFFE2_API CPUGenerator* getDefaultCPUGenerator();
 CAFFE2_API std::shared_ptr<CPUGenerator> createCPUGenerator(uint64_t seed_val = default_rng_seed_val);
-CAFFE2_API uint64_t getNonDeterministicRandom();
 
 } // namespace detail
 
