@@ -2405,7 +2405,7 @@ RegisterOperators reg2({
           lldiv_t divresult = {};
           pop(stack, a, b);
           if (b == 0) {
-            throw std::runtime_error("division by 0");
+            throw std::runtime_error("ZeroDivisionError: integer division or modulo by zero");
           }
           divresult = lldiv(a, b);
           if (divresult.rem && (a < 0) != (b < 0)) {
@@ -2422,7 +2422,7 @@ RegisterOperators reg2({
           double a, b;
           pop(stack, a, b);
           if (b == 0) {
-            throw std::runtime_error("division by 0");
+            throw std::runtime_error("ZeroDivisionError: float divmod()");
           }
           double rem = fmod(a, b);
           if (rem && (a < 0) != (b < 0)) {
@@ -2431,20 +2431,20 @@ RegisterOperators reg2({
           push(stack, (a - rem)/b, rem);
           return 0;
         }),
-#define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                          \
-    Operator(                                                         \
-        "aten::divmod(" #type_a " x," #type_b " y) -> (float, float)",  \
-        [](Stack& stack) {                                              \
-          type_a a;                                                     \
-          type_b b;                                                     \
-          pop(stack, a, b);                                             \
-          if (b == 0) {                                                 \
-            throw std::runtime_error("division by 0");                  \
-          }                                                             \
-          double quot = floor(a / b);                                   \
-          double rem = a - (quot * b);                                  \
-          push(stack, quot, rem);                                       \
-          return 0;                                                     \
+#define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                              \
+    Operator(                                                               \
+        "aten::divmod(" #type_a " x," #type_b " y) -> (float, float)",      \
+        [](Stack& stack) {                                                  \
+          type_a a;                                                         \
+          type_b b;                                                         \
+          pop(stack, a, b);                                                 \
+          if (b == 0) {                                                     \
+            throw std::runtime_error("ZeroDivisionError: float divmod()");  \
+          }                                                                 \
+          double quot = floor(a / b);                                       \
+          double rem = a - (quot * b);                                      \
+          push(stack, quot, rem);                                           \
+          return 0;                                                         \
         })
 
     DEFINE_DIVMOD_MIXED_OP(int, float),
