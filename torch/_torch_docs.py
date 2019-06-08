@@ -6579,8 +6579,7 @@ Generator(device='cpu') -> Generator
 
 Creates and returns a generator object which manages the state of the algorithm that
 produces pseudo random numbers. Used as a keyword argument in many :ref:`inplace-random-sampling`
-functions. Currently only creation of CPU Generator is supported through
-this API.
+functions.
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the generator.
@@ -6591,6 +6590,9 @@ Returns:
 Example::
 
     >>> g_cpu = torch.Generator()
+    >>> g_cpu_default = torch.default_generator
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> g_cuda_defaults = torch.default_cuda_generators
 """)
 
 

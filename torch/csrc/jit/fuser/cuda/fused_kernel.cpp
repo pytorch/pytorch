@@ -2,16 +2,12 @@
 #include <torch/csrc/jit/fuser/compiler.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <THC/THC.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
 #include <torch/csrc/jit/fuser/cuda/thnvrtc.h>
 #include <torch/csrc/jit/resource_guard.h>
-
-// Note: unclear why this forward declaration is necessary
-#include <THC/THCGenerator.hpp>
-#include <THC/THCTensorRandom.h>
-THCGenerator* THCRandom_getGenerator(THCState* state);
 
 #include <cuda_runtime.h>
 
@@ -226,10 +222,10 @@ void FusedKernelCUDA::launch_raw(
   if (has_random_) {
     const auto rand_offset =
         4 * (std::ceil(numel / (4.0 * kBlockSize * nBlocks)) + 1);
-    auto gen = THCRandom_getGenerator(at::globalContext().getTHCState());
-    offset = gen->state.philox_seed_offset.fetch_add(rand_offset);
-    arguments.push_back(&gen->state.initial_seed);
-    arguments.push_back(&offset);
+    auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator();
+    auto philox_engine_inputs = gen->philox_engine_inputs(rand_offset);
+    arguments.push_back(&philox_engine_inputs.first);
+    arguments.push_back(&philox_engine_inputs.second);
   }
 
   // Launches kernel on current stream (device was set by executor)

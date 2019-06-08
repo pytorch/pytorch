@@ -79,8 +79,6 @@ class CAFFE2_API Context {
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
       thc_state = detail::getCUDAHooks().initCUDA();
-      generator_registry[static_cast<int>(DeviceType::CUDA)] =
-        detail::getCUDAHooks().initCUDAGenerator(this);
       detail::getCUDAHooks().registerCUDATypes(this);
     });
     return thc_state.get();
@@ -88,8 +86,6 @@ class CAFFE2_API Context {
   THHState* lazyInitHIP() {
     std::call_once(thh_init,[&] {
       thh_state = detail::getHIPHooks().initHIP();
-      generator_registry[static_cast<int>(DeviceType::HIP)] =
-        detail::getHIPHooks().initHIPGenerator(this);
       detail::getHIPHooks().registerHIPTypes(this);
     });
     return thh_state.get();
@@ -123,8 +119,6 @@ class CAFFE2_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
-  std::unique_ptr<Generator>
-    generator_registry[static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 private:
   void initCUDAIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {
@@ -255,7 +249,7 @@ static inline void manual_seed(uint64_t seed) {
   // available. In that case, we must not seed CUDA; it will fail!
   if (hasCUDA() && detail::getCUDAHooks().getNumGPUs() > 0) {
     globalContext().lazyInitCUDA();
-    auto& generator = globalContext().generator_registry[static_cast<int>(DeviceType::CUDA)];
+    auto generator = detail::getCUDAHooks().getDefaultCUDAGenerator();
     TORCH_CHECK(generator);
     generator->manualSeedAll(seed);
   }
