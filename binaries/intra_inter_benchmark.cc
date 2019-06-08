@@ -44,6 +44,7 @@ int main(int argc, char** argv) {
     std::cout << "Failed to parse command line flags";
     return -1;
   }
+  at::init_num_threads();
 
   if (FLAGS_inter_op_threads > 0) {
     at::set_num_interop_threads(FLAGS_inter_op_threads);

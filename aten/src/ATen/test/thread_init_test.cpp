@@ -19,6 +19,8 @@ void test(int given_num_threads) {
 }
 
 int main() {
+  at::init_num_threads();
+
   at::set_num_threads(4);
   test(4);
   std::thread t1([](){

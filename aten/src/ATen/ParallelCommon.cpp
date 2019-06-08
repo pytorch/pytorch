@@ -19,9 +19,25 @@ namespace at {
 
 namespace {
 
-const char* get_env_var(const char* var_name) {
+const char* get_env_var(
+    const char* var_name, const char* def_value = nullptr) {
   const char* value = std::getenv(var_name);
-  return value ? value : "[not set]";
+  return value ? value : def_value;
+}
+
+size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
+  try {
+    if (auto* value = std::getenv(var_name)) {
+      int nthreads = std::stoi(value);
+      TORCH_CHECK(nthreads > 0);
+      return nthreads;
+    }
+  } catch (const std::exception& e) {
+    std::ostringstream oss;
+    oss << "Invalid " << var_name << " variable value, " << e.what();
+    TORCH_WARN(oss.str());
+  }
+  return def_value;
 }
 
 } // namespace
@@ -48,8 +64,10 @@ std::string get_parallel_info() {
      << std::thread::hardware_concurrency() << std::endl;
 
   ss << "Environment variables:" << std::endl;
-  ss << "\tOMP_NUM_THREADS : " << get_env_var("OMP_NUM_THREADS") << std::endl;
-  ss << "\tMKL_NUM_THREADS : " << get_env_var("MKL_NUM_THREADS") << std::endl;
+  ss << "\tOMP_NUM_THREADS : "
+     << get_env_var("OMP_NUM_THREADS", "[not set]") << std::endl;
+  ss << "\tMKL_NUM_THREADS : "
+     << get_env_var("MKL_NUM_THREADS", "[not set]") << std::endl;
 
   ss << "Parallel backend: ";
   #if AT_PARALLEL_OPENMP
@@ -65,17 +83,12 @@ std::string get_parallel_info() {
 }
 
 int intraop_default_num_threads() {
-  try {
-    if (auto* value = std::getenv("MKL_NUM_THREADS")) {
-      return std::stoi(value);
-    }
-    if (auto* value = std::getenv("OMP_NUM_THREADS")) {
-      return std::stoi(value);
-    }
-  } catch (const std::exception& e) {
-    TORCH_WARN("Invalid MKL/OMP environment variable value, " + std::string(e.what()));
+  size_t nthreads = get_env_num_threads("OMP_NUM_THREADS", 0);
+  nthreads = get_env_num_threads("MKL_NUM_THREADS", nthreads);
+  if (nthreads == 0) {
+    nthreads = TaskThreadPoolBase::defaultNumThreads();
   }
-  return TaskThreadPoolBase::defaultNumThreads();
+  return nthreads;
 }
 
 } // namespace at

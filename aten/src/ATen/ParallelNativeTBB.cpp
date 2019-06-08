@@ -34,12 +34,14 @@ void init_num_threads() {
   #endif
 
   int nthreads = num_intraop_threads_.load();
-  if (nthreads > 0) {
-    if (tbb_init_.is_active()) {
-      tbb_init_.terminate();
-    }
-    tbb_init_.initialize(nthreads);
+  if (nthreads < 0) {
+    nthreads = intraop_default_num_threads();
   }
+  TORCH_INTERNAL_ASSERT(nthreads > 0);
+  if (tbb_init_.is_active()) {
+    tbb_init_.terminate();
+  }
+  tbb_init_.initialize(nthreads);
 }
 
 void set_num_threads(int nthreads) {
