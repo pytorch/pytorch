@@ -29,6 +29,8 @@ pip install ninja --user
 # ninja is installed in /var/lib/jenkins/.local/bin
 export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
+sudo apt-get install python-dev
+
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi
