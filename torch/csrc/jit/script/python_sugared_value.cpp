@@ -317,7 +317,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
               .attr("_make_strong_submodule")(field, attr, py_module_);
       if (!result.is_none()) {
         auto submodule = as_module(result);
-        TORCH_CHECK(
+        AT_CHECK(
             submodule,
             "Result of torch.jit._make_strong_submodule "
             "was not a ScriptModule");
