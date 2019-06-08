@@ -168,12 +168,12 @@ namespace detail {
       std::cout<<"ret object type: "<<retObject.type()->str()<<std::endl;
       retObject.setAttr("capsule", IValue(c10::make_intrusive<Capsule>(std::move(capsule))));
       std::cout<<"display invocation 167: ";
-      ((T_)retObject.getAttr("capsule").toCapsule()->ptr)->display();
+      // ((T_)retObject.getAttr("capsule").toCapsule()->ptr)->display();
       std::cout<<"set slot"<<std::endl;
       auto resIVal = IValue(c10::make_intrusive<ivalue::Object>(std::move(retObject)));
       std::cout<<"constructed result"<<std::endl;
       std::cout<<"display invocation 173: ";
-      ((T_)resIVal.toObject()->getAttr("capsule").toCapsule()->ptr)->display();
+      // ((T_)resIVal.toObject()->getAttr("capsule").toCapsule()->ptr)->display();
       return resIVal;
     }
     // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");

@@ -53,7 +53,6 @@ _(ProfiledTensorType) \
 _(DeviceObjType) \
 _(FunctionType) \
 _(ClassType) \
-_(BlobType) \
 _(CapsuleType) \
 
 enum class TypeKind {
@@ -1226,31 +1225,6 @@ private:
   VarType(std::string name_)
   : Type(TypeKind::VarType), name_(std::move(name_)) {}
   std::string name_;
-};
-
-struct BlobType;
-using BlobTypePtr = std::shared_ptr<BlobType>;
-// This type represents a Python Blob
-struct CAFFE2_API BlobType : public Type {
-  static BlobTypePtr create() {
-    return BlobTypePtr(new BlobType()); // NOLINT(modernize-make-shared)
-  }
-  DEFINE_IS_SUBCLASS(BlobType);
-  bool operator==(const Type& rhs) const override {
-    return rhs.kind() == kind();
-  }
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    return rhs->kind() == TypeKind::BlobType;
-  }
-  std::string str() const override {
-    return "Blob";
-  }
-  static const TypeKind Kind = TypeKind::BlobType;
-  // global singleton
-  static BlobTypePtr get();
-private:
-  BlobType()
-  : Type(TypeKind::BlobType) {}
 };
 
 struct CapsuleType;

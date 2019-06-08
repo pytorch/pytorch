@@ -112,10 +112,6 @@ OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(TensorType::get());
   return value;
 }
-BlobTypePtr BlobType::get() {
-  static auto value = BlobType::create();
-  return value;
-}
 CapsuleTypePtr CapsuleType::get() {
   static auto value = CapsuleType::create();
   return value;

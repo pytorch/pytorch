@@ -327,7 +327,6 @@ inline IValue toIValue(
     case TypeKind::FutureType:
       break;
     case TypeKind::FunctionType:
-    case TypeKind::BlobType:
       AT_ERROR("Function Values aren't yet supported");
   }
   AT_ERROR(

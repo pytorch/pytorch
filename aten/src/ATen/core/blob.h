@@ -131,7 +131,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   template <class T>
   T* Reset(T* allocated) {
     free_();
-    // meta_ = TypeMeta::Make<T>();
+    meta_ = TypeMeta::Make<T>();
     pointer_ = static_cast<void*>(allocated);
     has_ownership_ = true;
     return allocated;
@@ -184,16 +184,16 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
     swap(has_ownership_, rhs.has_ownership_);
   }
 
- void* pointer_ = nullptr;
  private:
   void free_() {
     if (has_ownership_) {
       AT_ASSERTM(pointer_ != nullptr, "Can't have ownership of nullptr");
-      // (*meta_.deleteFn())(pointer_);
+      (*meta_.deleteFn())(pointer_);
     }
   }
 
   TypeMeta meta_;
+  void* pointer_ = nullptr;
   bool has_ownership_ = false;
 
   C10_DISABLE_COPY_AND_ASSIGN(Blob);

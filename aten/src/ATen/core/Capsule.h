@@ -10,6 +10,5 @@ struct Capsule final: public c10::intrusive_ptr_target  {
   Capsule(): ptr(nullptr) {}
   Capsule(void* ptr_): ptr(ptr_) {}
   ~Capsule() {
-      std::cout<<"Deleting capsule: "<<std::endl;
   }
 };

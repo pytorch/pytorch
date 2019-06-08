@@ -146,12 +146,6 @@ struct getTypePtr_<at::optional<T>> final {
     return type;
   }
 };
-template <>
-struct getTypePtr_<caffe2::Blob> final {
-  static TypePtr call() {
-    return BlobType::get();
-  }
-};
 } // namespace detail
 template <class T>
 inline TypePtr getTypePtr() {

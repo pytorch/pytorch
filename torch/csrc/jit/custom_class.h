@@ -20,6 +20,7 @@ namespace py = pybind11;
 using namespace std;
 namespace torch {
 namespace jit {
+
 template <class CurClass>
 struct class_ {
   std::string className;
@@ -41,24 +42,51 @@ struct class_ {
     classTypePtr->addAttribute("capsule", CapsuleType::get());
     script::CompilationUnit::_get_python_cu().register_class(classTypePtr);
   }
+  template<class T> struct addInput {
+    static Value* call(std::shared_ptr<Graph> graph) {
+      auto classRes = tmap.find<CurClass*>();
+      assert(classRes != tmap.end());
+      return graph->addInput()->setType(classRes->second);
+    }
+  };
+  template<> struct addInput<int64_t> {
+    static Value* call(std::shared_ptr<Graph> graph) {
+      return graph->addInput()->setType(IntType::get());
+    }
+  };
+  template<class Func, size_t ...arg_indices>
+  std::vector<Value*> addInputs_(Func f, std::shared_ptr<Graph> graph, guts::index_sequence<arg_indices...>) {
+    using argTypes = typename guts::infer_function_traits_t<Func>::parameter_types;
+    std::cout<<"graph 53: "<<graph<<std::endl;
+    vector<Value*> res = {addInput<guts::typelist::element_t<arg_indices, argTypes>>::call(graph)...};
+    std::cout<<"value 58: "<<res[0]<<std::endl;
+    return res;
+  }
+  template<class Func>
+   std::vector<Value*> addInputs(Func f, std::shared_ptr<Graph> graph) {
+    constexpr auto numArgs = guts::infer_function_traits_t<Func>::number_of_parameters;
+    std::cout<<"graph 58: "<<graph<<std::endl;
+    return addInputs_(f, graph, guts::make_index_sequence<numArgs>());
+  }
+  template<class ...Types>
   class_& init() {
-    pyClass->def(py::init<>());
+    pyClass->def(py::init<Types...>());
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::__init__";
+    auto func = [](CurClass* cur, Types... args) {
+                *cur = CurClass(args...);
+              };
+    std::vector<Value*> inputs = addInputs(func, graph);
     static auto classRegistry = c10::RegisterOperators().op(
-        qualFuncName, [](CurClass* cur) {
-              // std::cout<<"initial class ptr: " <<&cur<<std::endl;
-              *cur = CurClass();
-            });
-    auto input = graph->addInput()->setType(classTypePtr);
+        qualFuncName, std::move(func));
     auto capsuleNode = graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))->output()->setType(CapsuleType::get());
-    // auto capsuleNode = graph->insertConstant(5);
-    auto n = graph->insertNode(graph->create(prim::SetAttr, {input, capsuleNode}, 0));
+    auto n = graph->insertNode(graph->create(prim::SetAttr, {inputs[0], capsuleNode}, 0));
     n->s_(attr::name, "capsule");
     auto res = graph
                    ->insertNode(graph->create(
-                       Symbol::fromQualString(qualFuncName), {input}, 0));
-    graph->registerOutput(input);
+                       Symbol::fromQualString(qualFuncName), inputs, 0));
+    std::cout<<"81"<<std::endl;
+    graph->registerOutput(inputs[0]);
     classCu->create_function("__init__", graph);
     return *this;
   }
