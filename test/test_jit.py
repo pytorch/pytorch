@@ -8436,7 +8436,7 @@ a")
     def test_non_tensor_tracing(self):
         def f(x):
             return x + param
-        with self.assertRaisesRegex(RuntimeError, "inputs or outputs of traced functions, but instead got value of type int."):
+        with self.assertRaisesRegex(RuntimeError, "Only tensors .* Got int"):
             torch.jit.trace(f, (1,))
 
     def test_type_annotation_module(self):
