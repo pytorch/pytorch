@@ -1055,6 +1055,7 @@ class _TestTorchMixin(object):
                             x = torch.randn(7 * r, 5 * o, 11 * n, 2 * m, device=device)[::7, ::5, ::11, ::2]
                             self.check_single_nuclear_norm(x, axes)
 
+    @skipIfRocm
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_nuclear_norm_axes_small_brute_force(self):
         for device in torch.testing.get_all_device_types():
@@ -1071,6 +1072,7 @@ class _TestTorchMixin(object):
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 2))
 
+    @skipIfRocm
     def test_nuclear_norm_exceptions(self):
         for device in torch.testing.get_all_device_types():
             self._test_nuclear_norm_exceptions(self, device)
