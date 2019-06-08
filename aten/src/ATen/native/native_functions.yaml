@@ -1741,6 +1741,7 @@
   dispatch:
     CPU: softmax_cpu
     CUDA: softmax_cuda
+    MkldnnCPU: mkldnn_softmax
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
