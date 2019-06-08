@@ -71,7 +71,6 @@ void _unset_thread_num() {
 
 } // namespace internal
 
-//TODO: use OMP and MKL env. vars as default values
 void init_num_threads() {
   #ifdef _OPENMP
   omp_set_num_threads(1);
