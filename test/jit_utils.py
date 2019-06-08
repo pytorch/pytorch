@@ -438,11 +438,12 @@ _in_first_class_mode = False
 @contextmanager
 def enable_first_class_mode():
     global _in_first_class_mode
+    old = _in_first_class_mode
     torch._C._jit_set_first_class_mode(True)
     _in_first_class_mode = True
     yield
-    torch._C._jit_set_first_class_mode(False)
-    _in_first_class_mode = False
+    torch._C._jit_set_first_class_mode(old)
+    _in_first_class_mode = old
 
 
 # note: not re-entrant, use unnested only

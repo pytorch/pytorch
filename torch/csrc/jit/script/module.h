@@ -99,6 +99,8 @@ struct TORCH_API Method {
     return *function_;
   }
 
+  std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> _lowered_graph();
+
  private:
   // Methods are uniqued onwed by a single module. This raw pointer allows
   // looking up the module.
@@ -194,21 +196,6 @@ struct TORCH_API Module {
   void register_module(
       const std::string& name,
       std::shared_ptr<Module> module) {
-    // We would like to enable more stringent error checking at this point,
-    // but because script functions are considered modules, it is possible
-    // to hit this situation without knowing it. For now this is disabled
-    // until a later PR that distinguishes script functions from script modules.
-    // See TestScript.test_submodule_twice for example failure
-    // if (module->parent_) {
-    //   AT_WARN(
-    //       "Attempting to assign submodule '",
-    //       name,
-    //       "' but it is already a submodule of another ScriptModule '",
-    //       module->parent_->name(), "'", " Modules of this form do not import
-    //       and export correctly. This use is deprecated and may be" " removed
-    //       in a future version.");
-    // }
-    module->parent_ = this;
     module->name_ = name;
     appendSlot(name, module->module_value_->type(), module->module_value_);
     insert(name, modules_, EntityType::MODULE, std::move(module));
@@ -549,9 +536,6 @@ struct TORCH_API Module {
   std::string name_;
 
   ModulePtr module_value_;
-
-  // back reference to parent of this Module if present
-  Module* parent_ = nullptr;
 
   // Currently we are in a transitionary state
   // where we construct such first class functions but we lower them

@@ -61,6 +61,8 @@ import unittest
 import warnings
 import zipfile
 
+enable_first_class_mode().__enter__()
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -10062,15 +10064,11 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        @_trace(torch.rand(3, 4))
-        def traced_fn(x):
-            return tm(x) + 1.0
-
-        # Note: the parameter self.param from the Python module is inlined
-        # into the graph
-        FileCheck().check("prim::Constant[value=<Tensor>]").check("aten::mm") \
-            .check("aten::add").run(str(traced_fn.graph))
-
+        with self.assertRaisesRegex(RuntimeError, "must be registered as submodules"):
+            @_trace(torch.rand(3, 4))
+            def traced_fn(x):
+                return tm(x) + 1.0
+                
     def test_call_script_fn_from_tracing_fn(self):
         @torch.jit.script
         def script_fn(x):
@@ -10083,7 +10081,7 @@ a")
         FileCheck().check("aten::neg").check("aten::add").run(str(traced_fn.graph))
 
     def test_call_script_mod_from_tracing_fn(self):
-        with self.disableEmitHook():
+        with self.assertRaisesRegex(RuntimeError, "must be registered as submodules"):
             class ScriptMod(torch.jit.ScriptModule):
                 def __init__(self):
                     super(ScriptMod, self).__init__()
@@ -10145,9 +10143,6 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        # Note: the parameters from both modules should appear in the flattened
-        # inputs of the graph. All ops from both modules should be inlined.
-        self.assertTrue(len(list(tm.graph.inputs())) == 3)
         FileCheck().check_not("value=<Tensor>").check_count("aten::mm", 2).check("aten::add") \
             .run(str(tm.graph))
 
@@ -10283,9 +10278,6 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        # Note: the parameters from both modules should appear in the flattened
-        # inputs of the graph. All ops from both modules should be inlined.
-        self.assertTrue(len(list(tm.graph.inputs())) == 3)
         FileCheck().check_count("aten::mm", 2).check("aten::add").run(str(tm.graph))
 
     def test_call_script_fn_from_traced_module(self):
@@ -10326,9 +10318,6 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        # Note: the parameters from both modules should appear in the flattened
-        # inputs of the graph. All ops from both modules should be inlined.
-        self.assertTrue(len(list(tm.graph.inputs())) == 3)
         FileCheck().check_count("aten::mm", 2).check("aten::add").run(str(tm.graph))
 
     def test_call_python_fn_from_script_fn(self):
@@ -10499,10 +10488,6 @@ a")
                 return self.tm(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        # Note: the parameters from both modules should appear in the flattened
-        # input list to the graph. The mm op from TracedMod should be properly
-        # inlined
-        self.assertTrue(len(list(sm.graph.inputs())) == 3)
         FileCheck().check("aten::mm").check("aten::mm").run(str(sm.graph))
 
     def test_call_script_fn_from_script_module(self):
@@ -12520,14 +12505,13 @@ a")
         m(torch.ones(1))
         self.assertEqual(m.some_state, torch.zeros(1) + 100)
 
-        # Export and ensure ignored code not present
-        pp, constants = _jit_python_print(m.forward)
-        printed = torch.jit.CompilationUnit()._import(pp, constants)
+        m2 = self.getExportImportCopy(m)
+        pp = str(m2.forward.code)
         self.assertIn('IgnoredPythonOp', pp)
         self.assertNotIn('ignored_code', pp)
 
         with self.assertRaisesRegex(torch.jit.Error, "This Python function is annotated to be ignored"):
-            printed.forward(torch.ones(1))
+            m2.forward(torch.ones(1))
 
     def test_view_write(self):
         def fn(x, y):

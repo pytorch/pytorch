@@ -556,6 +556,7 @@ void initJitScriptBindings(PyObject* module) {
             }
             return tensors;
           })
+      .def("_lowered_graph", &Method::_lowered_graph)
       .def_property_readonly("schema", &Method::getSchema)
       .def_property_readonly("name", &Method::name)
       .def_property_readonly("code", [](Method& self) {
