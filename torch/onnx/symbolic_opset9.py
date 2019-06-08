@@ -1600,3 +1600,15 @@ def log2(g, self):
 
 def prim_shape(g, self):
     return g.op('Shape', self)
+
+
+@parse_args('v', 'i', 'v', 'v')
+def gather(g, self, dim, index, sparse_grad=False):
+    # NOTE: Update this workaround if ONNX has native Gather support.
+    #       The current Gather in ONNX is not the same as torch.gather.
+    dtype = self.type().scalarType()
+    values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
+    depth = size(g, self, g.op("Constant", value_t=torch.LongTensor([dim])))
+    index = g.op("Cast", g.op("OneHot", index, depth, values, axis_i=dim), to_i=sym_help.cast_pytorch_to_onnx[dtype])
+    mul = g.op("Mul", g.op("Unsqueeze", self, axes_i=[dim + 1]), index)
+    return g.op("ReduceSum", mul, axes_i=[dim], keepdims_i=0)

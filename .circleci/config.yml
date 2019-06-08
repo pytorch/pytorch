@@ -1646,13 +1646,6 @@ jobs:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.5_cpu_build:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cpu"
-    docker:
-      - image: "soumith/conda-cuda"
-    <<: *binary_linux_build
-
   binary_linux_conda_3.6_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu"
@@ -1674,13 +1667,6 @@ jobs:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
 
-  binary_linux_conda_3.5_cu90_build:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu90"
-    docker:
-      - image: "soumith/conda-cuda"
-    <<: *binary_linux_build
-
   binary_linux_conda_3.6_cu90_build:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cu90"
@@ -1698,13 +1684,6 @@ jobs:
   binary_linux_conda_2.7_cu100_build:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu100"
-    docker:
-      - image: "soumith/conda-cuda"
-    <<: *binary_linux_build
-
-  binary_linux_conda_3.5_cu100_build:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu100"
     docker:
       - image: "soumith/conda-cuda"
     <<: *binary_linux_build
@@ -1767,11 +1746,6 @@ jobs:
   binary_macos_conda_2.7_cpu_build:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cpu"
-    <<: *binary_mac_build
-
-  binary_macos_conda_3.5_cpu_build:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cpu"
     <<: *binary_mac_build
 
   binary_macos_conda_3.6_cpu_build:
@@ -1910,12 +1884,6 @@ jobs:
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *binary_linux_test
 
-  binary_linux_conda_3.5_cpu_test:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cpu"
-      DOCKER_IMAGE: "soumith/conda-cuda"
-    <<: *binary_linux_test
-
   binary_linux_conda_3.6_cpu_test:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu"
@@ -1931,14 +1899,6 @@ jobs:
   binary_linux_conda_2.7_cu90_test:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu90"
-      DOCKER_IMAGE: "soumith/conda-cuda"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *binary_linux_test
-
-  binary_linux_conda_3.5_cu90_test:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu90"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -1963,14 +1923,6 @@ jobs:
   binary_linux_conda_2.7_cu100_test:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu100"
-      DOCKER_IMAGE: "soumith/conda-cuda"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *binary_linux_test
-
-  binary_linux_conda_3.5_cu100_test:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu100"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2095,11 +2047,6 @@ jobs:
       BUILD_ENVIRONMENT: "conda 2.7 cpu"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.5_cpu_upload:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cpu"
-    <<: *binary_linux_upload
-
   binary_linux_conda_3.6_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu"
@@ -2115,11 +2062,6 @@ jobs:
       BUILD_ENVIRONMENT: "conda 2.7 cu90"
     <<: *binary_linux_upload
 
-  binary_linux_conda_3.5_cu90_upload:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu90"
-    <<: *binary_linux_upload
-
   binary_linux_conda_3.6_cu90_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cu90"
@@ -2133,11 +2075,6 @@ jobs:
   binary_linux_conda_2.7_cu100_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu100"
-    <<: *binary_linux_upload
-
-  binary_linux_conda_3.5_cu100_upload:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu100"
     <<: *binary_linux_upload
 
   binary_linux_conda_3.6_cu100_upload:
@@ -2188,11 +2125,6 @@ jobs:
   binary_macos_conda_2.7_cpu_upload:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cpu"
-    <<: *binary_mac_upload
-
-  binary_macos_conda_3.5_cpu_upload:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cpu"
     <<: *binary_mac_upload
 
   binary_macos_conda_3.6_cpu_upload:
@@ -2329,12 +2261,6 @@ jobs:
       DOCKER_IMAGE: "soumith/conda-cuda"
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.5_cpu:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cpu"
-      DOCKER_IMAGE: "soumith/conda-cuda"
-    <<: *smoke_linux_test
-
   smoke_linux_conda_3.6_cpu:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu"
@@ -2350,14 +2276,6 @@ jobs:
   smoke_linux_conda_2.7_cu90:
     environment:
       BUILD_ENVIRONMENT: "conda 2.7 cu90"
-      DOCKER_IMAGE: "soumith/conda-cuda"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_conda_3.5_cu90:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu90"
       DOCKER_IMAGE: "soumith/conda-cuda"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
@@ -2387,14 +2305,6 @@ jobs:
     resource_class: gpu.medium
     <<: *smoke_linux_test
 
-  smoke_linux_conda_3.5_cu100:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cu100"
-      DOCKER_IMAGE: "soumith/conda-cuda"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
   smoke_linux_conda_3.6_cu100:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cu100"
@@ -2407,106 +2317,6 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cu100"
       DOCKER_IMAGE: "soumith/conda-cuda"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset3"
-      LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset3"
-      LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset3"
-      LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cpu devtoolset3"
-      LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda80"
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset3"
-      LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset3"
-      LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset3"
-      LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu90 devtoolset3"
-      LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda90"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset3"
-      LIBTORCH_VARIANT: "shared-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset3"
-      LIBTORCH_VARIANT: "shared-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-with-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset3"
-      LIBTORCH_VARIANT: "static-with-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    <<: *smoke_linux_test
-
-  smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-without-deps:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7m cu100 devtoolset3"
-      LIBTORCH_VARIANT: "static-without-deps"
-      DOCKER_IMAGE: "soumith/manylinux-cuda100"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     <<: *smoke_linux_test
@@ -2536,11 +2346,6 @@ jobs:
       BUILD_ENVIRONMENT: "conda 2.7 cpu"
     <<: *smoke_mac_test
 
-  smoke_macos_conda_3.5_cpu:
-    environment:
-      BUILD_ENVIRONMENT: "conda 3.5 cpu"
-    <<: *smoke_mac_test
-
   smoke_macos_conda_3.6_cpu:
     environment:
       BUILD_ENVIRONMENT: "conda 3.6 cpu"
@@ -2549,11 +2354,6 @@ jobs:
   smoke_macos_conda_3.7_cpu:
     environment:
       BUILD_ENVIRONMENT: "conda 3.7 cpu"
-    <<: *smoke_mac_test
-
-  smoke_macos_libtorch_2.7_cpu:
-    environment:
-      BUILD_ENVIRONMENT: "libtorch 2.7 cpu"
     <<: *smoke_mac_test
 
 
@@ -2971,9 +2771,6 @@ workflows:
       - smoke_linux_conda_2.7_cpu:
           requires:
             - setup
-      - smoke_linux_conda_3.5_cpu:
-          requires:
-            - setup
       - smoke_linux_conda_3.6_cpu:
           requires:
             - setup
@@ -2981,9 +2778,6 @@ workflows:
           requires:
             - setup
       - smoke_linux_conda_2.7_cu90:
-          requires:
-            - setup
-      - smoke_linux_conda_3.5_cu90:
           requires:
             - setup
       - smoke_linux_conda_3.6_cu90:
@@ -2995,49 +2789,10 @@ workflows:
       - smoke_linux_conda_2.7_cu100:
           requires:
             - setup
-      - smoke_linux_conda_3.5_cu100:
-          requires:
-            - setup
       - smoke_linux_conda_3.6_cu100:
           requires:
             - setup
       - smoke_linux_conda_3.7_cu100:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-with-deps:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_shared-without-deps:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-with-deps:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cpu_devtoolset3_static-without-deps:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-with-deps:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_shared-without-deps:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-with-deps:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cu90_devtoolset3_static-without-deps:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-with-deps:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_shared-without-deps:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-with-deps:
-          requires:
-            - setup
-      - smoke_linux_libtorch_2.7m_cu100_devtoolset3_static-without-deps:
           requires:
             - setup
       - smoke_macos_wheel_2.7_cpu:
@@ -3055,16 +2810,10 @@ workflows:
       - smoke_macos_conda_2.7_cpu:
           requires:
             - setup
-      - smoke_macos_conda_3.5_cpu:
-          requires:
-            - setup
       - smoke_macos_conda_3.6_cpu:
           requires:
             - setup
       - smoke_macos_conda_3.7_cpu:
-          requires:
-            - setup
-      - smoke_macos_libtorch_2.7_cpu:
           requires:
             - setup
 
@@ -3129,9 +2878,6 @@ workflows:
       - binary_linux_conda_2.7_cpu_build:
           requires:
             - setup
-      - binary_linux_conda_3.5_cpu_build:
-          requires:
-            - setup
       - binary_linux_conda_3.6_cpu_build:
           requires:
             - setup
@@ -3141,9 +2887,6 @@ workflows:
       - binary_linux_conda_2.7_cu90_build:
           requires:
             - setup
-      - binary_linux_conda_3.5_cu90_build:
-          requires:
-            - setup
       - binary_linux_conda_3.6_cu90_build:
           requires:
             - setup
@@ -3151,9 +2894,6 @@ workflows:
           requires:
             - setup
       - binary_linux_conda_2.7_cu100_build:
-          requires:
-            - setup
-      - binary_linux_conda_3.5_cu100_build:
           requires:
             - setup
       - binary_linux_conda_3.6_cu100_build:
@@ -3184,9 +2924,6 @@ workflows:
           requires:
             - setup
       - binary_macos_conda_2.7_cpu_build:
-          requires:
-            - setup
-      - binary_macos_conda_3.5_cpu_build:
           requires:
             - setup
       - binary_macos_conda_3.6_cpu_build:
@@ -3266,10 +3003,6 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_2.7_cpu_build
-      - binary_linux_conda_3.5_cpu_test:
-          requires:
-            - setup
-            - binary_linux_conda_3.5_cpu_build
       - binary_linux_conda_3.6_cpu_test:
           requires:
             - setup
@@ -3282,10 +3015,6 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_2.7_cu90_build
-      - binary_linux_conda_3.5_cu90_test:
-          requires:
-            - setup
-            - binary_linux_conda_3.5_cu90_build
       - binary_linux_conda_3.6_cu90_test:
           requires:
             - setup
@@ -3298,10 +3027,6 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_2.7_cu100_build
-      - binary_linux_conda_3.5_cu100_test:
-          requires:
-            - setup
-            - binary_linux_conda_3.5_cu100_build
       - binary_linux_conda_3.6_cu100_test:
           requires:
             - setup
@@ -3401,11 +3126,6 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_2.7_cpu_test
-      - binary_linux_conda_3.5_cpu_upload:
-          context: org-member
-          requires:
-            - setup
-            - binary_linux_conda_3.5_cpu_test
       - binary_linux_conda_3.6_cpu_upload:
           context: org-member
           requires:
@@ -3421,11 +3141,6 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_2.7_cu90_test
-      - binary_linux_conda_3.5_cu90_upload:
-          context: org-member
-          requires:
-            - setup
-            - binary_linux_conda_3.5_cu90_test
       - binary_linux_conda_3.6_cu90_upload:
           context: org-member
           requires:
@@ -3441,11 +3156,6 @@ workflows:
           requires:
             - setup
             - binary_linux_conda_2.7_cu100_test
-      - binary_linux_conda_3.5_cu100_upload:
-          context: org-member
-          requires:
-            - setup
-            - binary_linux_conda_3.5_cu100_test
       - binary_linux_conda_3.6_cu100_upload:
           context: org-member
           requires:
@@ -3496,11 +3206,6 @@ workflows:
           requires:
             - setup
             - binary_macos_conda_2.7_cpu_build
-      - binary_macos_conda_3.5_cpu_upload:
-          context: org-member
-          requires:
-            - setup
-            - binary_macos_conda_3.5_cpu_build
       - binary_macos_conda_3.6_cpu_upload:
           context: org-member
           requires:
