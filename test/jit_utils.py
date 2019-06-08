@@ -58,7 +58,7 @@ class JitTestCase(TestCase):
         self.clearHooks()
         yield None
         self.setHooks()
-        
+
     def _isHookExceptionOk(self, e):
         se = str(e)
         allowed = ("Could not export Python function",
