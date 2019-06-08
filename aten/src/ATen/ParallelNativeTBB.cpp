@@ -3,6 +3,7 @@
 #include <ATen/PTThreadPool.h>
 
 #include <atomic>
+#include <mutex>
 
 #include "tbb/tbb.h"
 
@@ -16,17 +17,20 @@
 
 namespace at {
 
-namespace internal {
-  static thread_local tbb::task_scheduler_init tbb_init(
+namespace {
+  std::mutex init_mutex_;
+
+  tbb::task_scheduler_init tbb_init_(
       tbb::task_scheduler_init::deferred);
 
-  std::atomic<int> num_intraop_threads{-1};
+  std::atomic<int> num_intraop_threads_{-1};
 
   static thread_local tbb::task_group tg_;
 }
 
 //TODO: use OMP and MKL env. vars as default values
 void init_num_threads() {
+  std::unique_lock<std::mutex> lock(init_mutex_);
   // omp- and mkl_set_num_threads don't affect TBB versions of MKL/MKL-DNN
   #ifdef _OPENMP
   omp_set_num_threads(1);
@@ -36,24 +40,25 @@ void init_num_threads() {
   mkl_set_num_threads(1);
   #endif
 
-  int nthreads = internal::num_intraop_threads.load();
+  int nthreads = num_intraop_threads_.load();
   if (nthreads > 0) {
-    if (!internal::tbb_init.is_active()) {
-      internal::tbb_init.initialize(nthreads);
-    } else {
-      TORCH_CHECK(tbb::this_task_arena::max_concurrency() == nthreads);
+    if (tbb_init_.is_active()) {
+      tbb_init_.terminate();
     }
+    tbb_init_.initialize(nthreads);
   }
 }
 
 void set_num_threads(int nthreads) {
   TORCH_CHECK(nthreads > 0);
+  std::unique_lock<std::mutex> lock(init_mutex_);
   int no_value = -1;
-  if (internal::num_intraop_threads.compare_exchange_strong(no_value, nthreads)) {
-    if (!internal::tbb_init.is_active()) {
-      internal::tbb_init.initialize(nthreads);
-      return;
+  if (num_intraop_threads_.compare_exchange_strong(no_value, nthreads)) {
+    if (tbb_init_.is_active()) {
+      tbb_init_.terminate();
     }
+    tbb_init_.initialize(nthreads);
+    return;
   }
   TORCH_CHECK(false,
     "Error: cannot set number of interop threads "
@@ -73,7 +78,7 @@ bool in_parallel_region() {
 }
 
 void intraop_launch(std::function<void()> func) {
-  internal::tg_.run(func);
+  tg_.run(func);
 }
 
 } // namespace at
