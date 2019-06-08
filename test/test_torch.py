@@ -981,7 +981,7 @@ class _TestTorchMixin(object):
 
     def check_single_nuclear_norm(self, x, axes):
         if x.is_cuda and randrange(100) < 95:
-            return # too many cpu <==> gpu copies
+            return  # too many cpu <==> gpu copies
 
         a = np.array(x.cpu(), copy=False)
         expected = np.linalg.norm(a, "nuc", axis=axes)
