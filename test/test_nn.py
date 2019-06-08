@@ -3386,7 +3386,7 @@ class TestNN(NNTestCase):
                 K = np.random.rand(*dims).astype(np.float64)
                 V = K
                 Q = np.expand_dims(decoder_state, 1)
-                attn_mask = np.random.randint(0 , 2, size=(1, seq_len))
+                attn_mask = np.random.randint(0, 2, size=(1, seq_len))
                 attn_mask_tensor = torch.from_numpy(attn_mask).float()
                 attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
                 attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
