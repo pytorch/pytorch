@@ -8,7 +8,14 @@ bool& getProfilingMode() {
   return profiling_mode;
 }
 
-ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
+void ProfilingGraphExecutorImpl::run(Stack& stack) {
+  TORCH_CHECK(
+      stack.size() >= num_inputs,
+      "expected ",
+      num_inputs,
+      " inputs, but got only ",
+      stack.size());
+
   {
     std::lock_guard<std::mutex> lock(compile_mutex);
     if (!pr_) {
@@ -18,10 +25,13 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
       exec_plan_ = caffe2::make_unique<ExecutionPlan>(pr_->profiled_graph_);
     }
   }
+
   if (pr_->profiling_count_ > 0) {
-    return *exec_plan_;
+    exec_plan_->run(stack);
+  } else {
+    AT_ERROR("Not yet implemented");
   }
-  AT_ERROR("Not yet implemented");
+  return;
 }
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {

@@ -7,7 +7,7 @@ namespace jit {
 struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   using GraphExecutorImplBase::GraphExecutorImplBase;
 
-  ExecutionPlan getPlanFor(Stack& stack) override;
+  void run(Stack& stack) override;
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
