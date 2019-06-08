@@ -1790,6 +1790,39 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.ones(5, 6)
         self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE)
 
+    def test_arange_end_script(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(a.size(0)).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+            example_outputs=(outputs,))
+
+    def test_arange_start_end_script(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0)+2).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+            example_outputs=(outputs,))
+
+    def test_arange_start_end_step_script(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0)*a.size(1) + 2, a.size(1)).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_model_test(ArangeScript(), train=False, input=(x,), batch_size=BATCH_SIZE,
+            example_outputs=(outputs,))
+
     def test_log2(self):
         class Log2Model(torch.nn.Module):
             def forward(self, input):
