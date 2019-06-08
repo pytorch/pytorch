@@ -1,13 +1,15 @@
-#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/jit/script/module_python.h>
+#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
+
+#include <Python.h>
 
 namespace torch {
 namespace jit {
@@ -234,7 +236,7 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
         &err,
         true);
     if (match) {
-      return MethodValue(module_, fn)
+      return MethodValue(module_, method_name)
           .call(loc, caller, inputs, attributes, n_binders);
     }
   }
@@ -250,16 +252,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // it adds a buffer 'training' to the model if one doesn't exist
   // and then loads that parameter, casting it to bool
   if (field == "training") {
-    Slot* v = module_->find_buffer(field);
+    Slot* v = module_->find_attribute(field);
     if (!v) {
       bool training = py::cast<bool>(py::getattr(py_module_, "training"));
-      auto t =
-          autograd::make_variable(at::full({}, training ? 1 : 0, at::kLong));
-      module_->register_buffer("training", std::move(t));
-      v = module_->find_buffer(field);
+      module_->register_attribute(
+          "training", BoolType::get(), std::move(training));
+      v = module_->find_attribute(field);
     }
-    Value* the_tensor = m.graph()->insertGetAttr(self_, "training");
-    Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
+    Value* the_bool = m.graph()->insertGetAttr(self_, "training");
     return std::make_shared<SimpleValue>(the_bool);
   }
 
@@ -346,9 +346,10 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   if (py::isinstance(attr, py::module::import("torch").attr("Tensor"))) {
     hint = "Tensors must be added to a module as a buffer or parameter";
   }
-  throw ErrorReport(loc)
-      << "attribute '" << field << "' of type '" << typeString(attr)
-      << "' is not usable in a script method (" << hint << ")";
+  throw ErrorReport(loc) << "attribute '" << field << "' of type '"
+                         << typeString(attr)
+                         << "' is not usable in a script method (" << hint
+                         << ")";
 }
 
 std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
@@ -507,6 +508,15 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto& pyCu = CompilationUnit::_get_python_cu();
     if (auto classType = pyCu.get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
+    }
+    // Use a heuristic here to identify NamedTuple instances:
+    // 1) must be a subclass of tuple
+    // 2) Has an attribute "_fields"
+    auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
+    if (PyObject_IsSubclass(obj.ptr(), tuple_type) &&
+        py::hasattr(obj, "_fields")) {
+      throw ErrorReport(loc)
+          << "NamedTuple is currently not supported in TorchScript";
     }
   }
 
