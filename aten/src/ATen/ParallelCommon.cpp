@@ -1,6 +1,7 @@
 #include <ATen/Parallel.h>
 
 #include <ATen/Config.h>
+#include <ATen/PTThreadPool.h>
 #include <ATen/Version.h>
 
 #include <sstream>
@@ -61,6 +62,20 @@ std::string get_parallel_info() {
   ss << std::endl;
 
   return ss.str();
+}
+
+int intraop_default_num_threads() {
+  try {
+    if (auto* value = std::getenv("MKL_NUM_THREADS")) {
+      return std::stoi(value);
+    }
+    if (auto* value = std::getenv("OMP_NUM_THREADS")) {
+      return std::stoi(value);
+    }
+  } catch (const std::exception& e) {
+    TORCH_WARN("Invalid MKL/OMP environment variable value, " + std::string(e.what()));
+  }
+  return TaskThreadPoolBase::defaultNumThreads();
 }
 
 } // namespace at

@@ -20,8 +20,7 @@ namespace at {
 namespace {
   std::mutex init_mutex_;
 
-  tbb::task_scheduler_init tbb_init_(
-      tbb::task_scheduler_init::deferred);
+  tbb::task_scheduler_init tbb_init_(intraop_default_num_threads());
 
   std::atomic<int> num_intraop_threads_{-1};
 
