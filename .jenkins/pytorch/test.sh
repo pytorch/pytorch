@@ -151,7 +151,7 @@ test_torchvision() {
   # this should be a transient requirement...)
   # See https://github.com/pytorch/pytorch/issues/7525
   #time python setup.py install
-  pip install -q --user .
+  pip install --user .
   popd
   rm -rf vision
 }

@@ -17,7 +17,7 @@ CONFIG_TREE_DATA = [
                 XImportant("3.6"),
                 ("3.6", [
                     ("xla", [XImportant(True)]),
-                    ("namedtensor", [X(True)]),
+                    ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
             ("7", [X("3.6")]),
@@ -157,6 +157,9 @@ class NamedTensorConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_namedtensor"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
 
 
 class ImportantConfigNode(TreeConfigNode):

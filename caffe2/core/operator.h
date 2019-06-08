@@ -1510,7 +1510,7 @@ class ExternalTensorFunctionsBase {
       const Blob* blob,
       std::vector<std::vector<uint64_t>>* shapes,
       std::vector<std::vector<float>>* all_scales,
-      std::vector<std::vector<float>>* all_offsets,
+      std::vector<std::vector<int32_t>>* all_offsets,
       ExternalTensorDescriptor* desc) = 0;
   virtual void LoadInfoOfBlob(
       const Blob* blob,
