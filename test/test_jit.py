@@ -3689,6 +3689,16 @@ a")
 
         self.checkScript(func2, [x], optimize=True)
 
+        def func3(x):
+            return x[:8:2]
+
+        self.checkScript(func3, [x], optimize=True)
+
+        def func4(x):
+            return x[1::4]
+
+        self.checkScript(func4, [x], optimize=True)
+
     def test_gather(self):
         def func(x):
             return x[0]
@@ -10631,6 +10641,30 @@ a")
         self.checkScriptRaisesRegex(test_indexing_out_of_bounds_pos, (), Exception,
                                     "out of range")
 
+        def negative_index():
+            tup = (1, 2, 3, 4)
+            return tup[-1]
+
+        self.checkScript(negative_index, [])
+
+        def really_negative_index():
+            tup = (1, 2, 3, 4)
+            return tup[-100]
+
+        self.checkScriptRaisesRegex(really_negative_index, [], Exception, "index out of range")
+
+        def negative_slice():
+            tup = (1, 2, 3, 4)
+            return tup[-3:4]
+
+        self.checkScript(negative_slice, [])
+
+        def really_slice_out_of_bounds():
+            tup = (1, 2, 3, 4)
+            return tup[-300:4000]
+
+        self.checkScript(really_slice_out_of_bounds, [])
+
     def test_namedtuple_attr(self):
         def f(x):
             return x.max(dim=1).indices + torch.max(x, dim=1).indices
@@ -12597,6 +12631,18 @@ a")
             return a
 
         self.assertEqual(fn(), {'ok': 10})
+
+    def test_dict_loop(self):
+        @torch.jit.script
+        def fn(x):
+            # type: (int) -> Dict[str, int]
+            a = torch.jit.annotate(Dict[str, int], {})
+            for i in range(x):
+                a['ok'] = i
+            return a
+
+        self.assertEqual(fn(10), {'ok': 9})
+
 
     def test_dict_membership(self):
         def fn(x, y):

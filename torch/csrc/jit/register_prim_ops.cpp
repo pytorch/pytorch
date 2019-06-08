@@ -1719,7 +1719,6 @@ int dictSetItem(Stack& stack) {
   auto idx = pop(stack);
   auto dict = pop(stack).toGenericDict();
   dict->elements().insert_or_assign(std::move(idx), std::move(value));
-  push(stack, std::move(dict));
   return 0;
 }
 

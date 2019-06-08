@@ -497,6 +497,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = False
 
     def _forward(self, module, input):
         with freeze_rng_state():
