@@ -57,34 +57,19 @@ using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(Module* owner, Function* function);
+  Method(Module* owner, const std::shared_ptr<Function>& function);
 
   // the module that contains this method.
   Module& owner() const {
     return *owner_;
   }
 
-  void run(Stack& stack) {
-    for (auto input : initial_ivalues_) {
-      push(stack, input.value());
-    }
-    function_->run(stack);
-  }
+  void run(Stack& stack);
   void run(Stack&& stack) {
     run(stack);
   }
 
-  IValue operator()(
-      std::vector<IValue> stack,
-      const Kwargs& kwargs = Kwargs()) {
-    getSchema().checkAndNormalizeInputs(stack, kwargs);
-    for (auto input : initial_ivalues_) {
-      push(stack, input.value());
-    }
-    // use run rather than operator() to skip the second schema check.
-    function_->run(std::move(stack));
-    return stack.front();
-  }
+  IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs());
 
   const std::vector<Slot>& initial_ivalues() const {
     return initial_ivalues_;
@@ -315,7 +300,8 @@ struct TORCH_API Module {
       return methods_[*offset].get();
     }
 
-    if (Function* fn = class_compilation_unit().find_function(name).get()) {
+    if (const std::shared_ptr<Function>& fn =
+            class_compilation_unit().find_function(name)) {
       // lock because technically this is marked const,
       // but we have to update the internal Method cache.
       // This can be removed when class_compilation_unit() is the source of
@@ -448,8 +434,7 @@ struct TORCH_API Module {
   void define(const std::string& src, const ResolverPtr& resolver = nullptr);
 
   template <typename... Types>
-  IValue create_class(const c10::QualifiedName& name, Types&&... args)
-      const {
+  IValue create_class(const c10::QualifiedName& name, Types&&... args) const {
     return create_class(name, {IValue(std::forward<Types>(args))...});
   }
 
@@ -581,6 +566,8 @@ struct TORCH_API Module {
   mutable std::recursive_mutex create_method_guard_;
   friend struct Method;
 };
+
+TORCH_API void setRunAsFirstClass(bool enabled);
 
 } // namespace script
 } // namespace jit
