@@ -524,11 +524,8 @@ class StickBreakingTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         offset = x.shape[-1] + 1 - x.new_ones(x.shape[-1]).cumsum(-1)
         x = x - offset.log()
-        z = torch.sigmoid(x)
-        z = torch.clamp(z, min=torch.finfo(x.dtype).tiny)
-        # use the identity 1 - z = z * exp(-x), we don't have to worry about
-        # the case z ~ 1
-        detJ = (-x + z.log() + y[..., :-1].log()).sum(-1)
+        # use the identity 1 - sigmoid(x) = exp(-x) * sigmoid(x)
+        detJ = (-x + F.logsigmoid(x) + y[..., :-1].log()).sum(-1)
         return detJ
 
 
