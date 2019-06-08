@@ -18,8 +18,8 @@ namespace script {
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
 thread_local bool experimental_run_as_first_class = false;
-bool& getFirstClassMode() {
-  return experimental_run_as_first_class;
+void setRunAsFirstClass(bool enabled) {
+  experimental_run_as_first_class = enabled;
 }
 
 struct RecursiveMethodCallError : public std::exception {};

@@ -8,11 +8,9 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 
 #include <exception>
@@ -300,7 +298,6 @@ struct PreprocessGraph {
 // I - literal integer
 // C - index into constant table
 // P - jump offset relative to beginning of current instruction
-// F - index into function table
 
 #define FORALL_OPCODES(_)                                                   \
   _(OP, "O") /* invoke operator X */                                        \
@@ -315,8 +312,7 @@ struct PreprocessGraph {
   _(JMP, "P") /* unconditional branch to X */                               \
   _(LOOP, "PI") /* perform a loop, X is where to branch if cond is false */ \
   _(RET, "") /* exit execution */                                           \
-  _(WAIT, "") /* wait for a future to be complete */                        \
-  _(CALL, "F") /* call function X */
+  _(WAIT, "") /* wait for a future to be complete */
 
 enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,
@@ -395,7 +391,6 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
-  std::vector<std::shared_ptr<script::Function>> function_table_;
   int register_size_ = 0;
   size_t n_outputs;
   size_t n_inputs;
@@ -450,10 +445,10 @@ struct CodeImpl {
   }
 
   int allocRegs(at::ArrayRef<Value*> vs) {
-    int result = register_size_ + 1;
+    int result = register_size_;
     for (Value* v : vs) {
       AT_ASSERT(value_to_reg_.count(v) == 0);
-      value_to_reg_[v] = ++register_size_;
+      value_to_reg_[v] = register_size_++;
     }
     return result;
   }
@@ -490,20 +485,20 @@ struct CodeImpl {
     }
   }
 
-  void emitLoadInputs(at::ArrayRef<Value*> inputs) {
-    for (Value* input : inputs) {
+  void emitLoadInputs(Node* node) {
+    for (Value* input : node->inputs()) {
       emitUse(input, false);
     }
   }
 
   void emitOperator(Node* node) {
-    emitLoadInputs(node->inputs());
+    emitLoadInputs(node);
     insertInstruction(OP, operator_table_.size());
     operator_table_.emplace_back(getOperation(node));
   }
 
   void emitWait(Node* node) {
-    emitLoadInputs(node->inputs());
+    emitLoadInputs(node);
     insertInstruction(WAIT);
   }
 
@@ -532,16 +527,13 @@ struct CodeImpl {
   }
 
   void emitConstant(Node* node) {
-    if (node->output()->type()->kind() == FunctionType::Kind) {
-      return;
-    }
     // constants are just put in the constant table
     value_to_reg_[node->output()] =
         insertConstant(toIValue(node->output()).value());
   }
 
   void emitIf(Node* node) {
-    emitLoadInputs(node->inputs());
+    emitLoadInputs(node);
     size_t start_if = instructions_.size();
     insertInstruction(JF, 0); // dummy offset to be filled in
     emitCodeForBlock(node->blocks().at(0));
@@ -554,20 +546,12 @@ struct CodeImpl {
 
   void emitLoop(Node* loop) {
     insertInstruction(LOADC, insertConstant(0));
-    emitLoadInputs(loop->inputs());
+    emitLoadInputs(loop);
     size_t start = instructions_.size();
     insertInstruction(LOOP, 0, loop->inputs().size()); // dummy offset
     emitCodeForBlock(loop->blocks().at(0));
     insertInstruction(JMP, start - instructions_.size());
     instructions_[start].X = instructions_.size() - start;
-  }
-
-  void emitCall(
-      std::shared_ptr<script::Function> func,
-      at::ArrayRef<Value*> inputs) {
-    emitLoadInputs(inputs);
-    insertInstruction(CALL, function_table_.size());
-    function_table_.emplace_back(std::move(func));
   }
 
   void emitNodeAtBlockLevel(Node* node) {
@@ -577,7 +561,7 @@ struct CodeImpl {
         emitConstant(node);
         break;
       case prim::Return:
-        emitLoadInputs(node->inputs());
+        emitLoadInputs(node);
         break;
       default:
         if (!preprocess_.can_emit_inline[node]) {
@@ -610,17 +594,6 @@ struct CodeImpl {
         break;
       case prim::Param:
         break;
-      case prim::CallFunction:
-        emitCall(
-            node->inputs().at(0)->type()->expect<FunctionType>()->function(),
-            node->inputs().slice(1));
-        break;
-      case prim::CallMethod:
-        emitCall(
-            node->inputs().at(0)->type()->expect<ClassType>()->getMethod(
-                node->s(attr::name)),
-            node->inputs());
-        break;
     }
   }
 
@@ -646,7 +619,7 @@ struct CodeImpl {
 
   void dump(std::ostream& out, size_t i) const {
     out << i << " " << instructions_[i];
-    if (instructions_[i].op == OP || instructions_[i].op == CALL) {
+    if (instructions_[i].op == OP) {
       out << " # " << *instructions_source_[i];
     } else {
       out << "\n";
@@ -663,16 +636,19 @@ struct CodeImpl {
 
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
-  InterpreterStateImpl(const Code& code) {
-    enterFrame(code);
-  }
+  InterpreterStateImpl(const Code& code)
+      : function(code.pImpl), registers(function->register_size_) {}
 
  private:
+  // pc is critical for the interperter to pick up the progress from suspend
+  size_t pc = 0;
+
   // if we need to suspend, where do we reset the stack?
   // answer: to where it was when we were called, not
   // including any inputs to this function
   int64_t stack_start_ = -1;
   c10::intrusive_ptr<Future> future_;
+  std::shared_ptr<CodeImpl> function; // keep function alive
 
   // this holds all the tensors for this interpreter run
   // we don't bother minimizing the size of this vector, since the extra
@@ -685,49 +661,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // minimizing the total number or register
   std::vector<IValue> registers;
 
-  struct Frame {
-    std::shared_ptr<CodeImpl> function;
-    size_t pc;
-  };
-
-  // saved-by-value stuff that can exist on the stack inside runInterpreter
-  struct ActiveFrame {
-    size_t pc;
-    Instruction* instructions;
-    IValue* constants;
-    Operation* operators;
-    std::shared_ptr<script::Function>* functions;
-    ActiveFrame(const Frame& frame)
-        : pc(frame.pc),
-          instructions(frame.function->instructions_.data()),
-          constants(frame.function->constant_table_.data()),
-          operators(frame.function->operator_table_.data()),
-          functions(frame.function->function_table_.data()) {}
-  };
-
-  std::vector<Frame> frames;
-
   c10::intrusive_ptr<InterpreterStateImpl> intrusive_from_this() {
     c10::raw::intrusive_ptr::incref(this);
     return c10::intrusive_ptr<InterpreterStateImpl>::reclaim(this);
-  }
-
-  void enterFrame(const Code& code) {
-    frames.emplace_back(Frame{code.pImpl, 0});
-    registers.resize(registers.size() + code.pImpl->register_size_);
-    // frames.back().function->dump(std::cout);
-  }
-
-  void leaveFrame() {
-    registers.resize(registers.size() - frames.back().function->register_size_);
-    frames.pop_back();
-  }
-
-  // relative to the end of the register list so that when we call
-  // functions we are referring to the registers of the currenly executing
-  // function.
-  IValue& reg(size_t reg) {
-    return *(registers.end() - reg);
   }
 
   bool runImpl(Stack& stack) {
@@ -735,189 +671,163 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     // stack when we suspend, record where it starts so we return the right
     // stack
     if (stack_start_ == -1) {
-      TORCH_INTERNAL_ASSERT(stack.size() >= frames.back().function->n_inputs);
-      stack_start_ = stack.size() - frames.back().function->n_inputs;
+      TORCH_INTERNAL_ASSERT(stack.size() >= function->n_inputs);
+      stack_start_ = stack.size() - function->n_inputs;
     } else {
       // during restarts, all of the stack is always our own, so we leave
       // nothing
       stack_start_ = 0;
     }
-
-    ActiveFrame af(frames.back());
     try {
-      while (true) {
-        // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, af.pc);
-        Instruction inst = af.instructions[af.pc];
-        switch (inst.op) {
-          case OP:
-            af.operators[inst.X](stack);
-            ++af.pc;
-            break;
-          case LOAD:
-            stack.emplace_back(reg(inst.X));
-            ++af.pc;
-            break;
-          case MOVE:
-            stack.emplace_back(std::move(reg(inst.X)));
-            ++af.pc;
-            break;
-          case STORE:
-            reg(inst.X) = pop(stack);
-            ++af.pc;
-            break;
-          case STOREN:
-            for (size_t i = inst.N; i > 0; --i) {
-              reg(inst.X + i - 1) = pop(stack);
-            }
-            ++af.pc;
-            break;
-          case DROP:
-            pop(stack);
-            ++af.pc;
-            break;
-          case DROPR:
-            reg(inst.X) = IValue();
-            ++af.pc;
-            break;
-          case LOADC:
-            stack.emplace_back(af.constants[inst.X]);
-            ++af.pc;
-            break;
-          case JF:
-            af.pc += (pop(stack).toBool()) ? 1 : inst.X;
-            break;
-          case JMP:
-            af.pc += inst.X;
-            break;
-          case LOOP: {
-            // stack: iteration_count, max_iter, cond, loop_carried_deps...
-            auto frame = stack.end() - (inst.N + 1);
-            int64_t trip_count = frame[0].toInt();
-            int64_t max_trip_count = frame[1].toInt();
-            bool cond = frame[2].toBool();
-            if (trip_count < max_trip_count && cond) {
-              frame[2] = trip_count;
-              frame[0] = trip_count + 1;
-              ++af.pc;
-            } else {
-              size_t n_loop_carried = inst.N - 2;
-              for (size_t i = 0; i < n_loop_carried; ++i) {
-                frame[i] = std::move(frame[i + 3]);
-              }
-              drop(stack, 3); // iteration_count, max_iter, cond
-              af.pc += inst.X;
-            }
-          } break;
-          case CALL: {
-            const Code& code =
-                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
-            frames.back().pc = af.pc + 1;
-            enterFrame(code);
-            af = ActiveFrame(frames.back());
-          } break;
-          case RET:
-            if (frames.size() > 1) {
-              leaveFrame();
-              af = ActiveFrame(frames.back());
-              break;
-            }
-            if (future_) {
-              auto num_outputs = frames.back().function->n_outputs;
-              if (num_outputs == 1) {
-                future_->markCompleted(stack.back());
-              } else {
-                future_->markCompleted(
-                    Tuple::create(jit::last(stack, num_outputs).vec()));
-              }
-            }
-            return false;
-          case WAIT:
-            auto future = stack.back().toFuture();
-            if (!future->completed()) {
-              getOrCreateFuture();
-
-              // callback needs to be a struct rather than a lambda so that
-              // we can move the stack to the other thread
-              struct Callback {
-                Callback(
-                    c10::intrusive_ptr<InterpreterStateImpl> state,
-                    Stack stack)
-                    : state_(std::move(state)), stack_(std::move(stack)) {}
-                void operator()() {
-                  at::launch(InterpreterContinuation(
-                      state_,
-                      std::move(stack_),
-                      autograd::GradMode::is_enabled()));
-                }
-
-               private:
-                InterpreterState state_;
-                Stack stack_;
-              };
-
-              // we are suspending, so we need to reset the stack to where we
-              // started if it started empty, except for the inputs we can avoid
-              // a true copy by swapping, which leaves the original stack empty.
-              Stack copied;
-              if (stack_start_ == 0) {
-                copied.swap(stack);
-              } else {
-                copied.insert(
-                    copied.begin(),
-                    std::make_move_iterator(stack.begin() + stack_start_),
-                    std::make_move_iterator(stack.end()));
-                stack.resize(stack_start_);
-              }
-              // save pc into the frame so we continue here when restored
-              frames.back().pc = af.pc;
-              future->addCallback(
-                  Callback(intrusive_from_this(), std::move(copied)));
-
-              return true;
-            }
-            stack.pop_back();
-            stack.emplace_back(future->value());
-            ++af.pc;
-            break;
-        }
-      }
+      return runInterpreterLoop(stack);
     } catch (std::exception& e) {
-      frames.back().pc = af.pc;
       // Error from the current thread
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
-      // TODO: stack trace
-      handleError(ExceptionMessage(e), is_jit_exception);
-      //    is_jit_exception);
+      handleError(
+          function->instructions_source_[pc]->sourceRange().wrapException(
+              e, "operation failed in interpreter"),
+          is_jit_exception);
       return false;
     }
   }
 
-  void formatStackTrace(std::ostream& out) {
-    for (size_t i = 0; i < frames.size(); ++i) {
-      const Frame& frame = frames[frames.size() - 1 - i];
-      size_t pc = (i == 0) ? frame.pc
-                           : frame.pc -
-              1; // make sure we report the call node, not the node after it
-      Node* node = frame.function->instructions_source_[pc];
-      if (i > 0) {
-        out << "during call ";
+  bool runInterpreterLoop(Stack& stack) {
+    // function->dump(std::cout);
+    Instruction* instructions = function->instructions_.data();
+    IValue* constants = function->constant_table_.data();
+    Operation* operators = function->operator_table_.data();
+    while (true) {
+      // std::cout << "RUNNING ";
+      // function->dump(std::cout, pc);
+      Instruction inst = instructions[pc];
+      switch (inst.op) {
+        case OP:
+          operators[inst.X](stack);
+          ++pc;
+          break;
+        case LOAD:
+          stack.emplace_back(registers[inst.X]);
+          ++pc;
+          break;
+        case MOVE:
+          stack.emplace_back(std::move(registers[inst.X]));
+          ++pc;
+          break;
+        case STORE:
+          registers[inst.X] = pop(stack);
+          ++pc;
+          break;
+        case STOREN:
+          for (size_t i = inst.N; i > 0; --i) {
+            registers[inst.X + i - 1] = pop(stack);
+          }
+          ++pc;
+          break;
+        case DROP:
+          pop(stack);
+          ++pc;
+          break;
+        case DROPR:
+          registers[inst.X] = IValue();
+          ++pc;
+          break;
+        case LOADC:
+          stack.emplace_back(constants[inst.X]);
+          ++pc;
+          break;
+        case JF:
+          pc += (pop(stack).toBool()) ? 1 : inst.X;
+          break;
+        case JMP:
+          pc += inst.X;
+          break;
+        case LOOP: {
+          // stack: iteration_count, max_iter, cond, loop_carried_deps...
+          auto frame = stack.end() - (inst.N + 1);
+          int64_t trip_count = frame[0].toInt();
+          int64_t max_trip_count = frame[1].toInt();
+          bool cond = frame[2].toBool();
+          if (trip_count < max_trip_count && cond) {
+            frame[2] = trip_count;
+            frame[0] = trip_count + 1;
+            ++pc;
+          } else {
+            size_t n_loop_carried = inst.N - 2;
+            for (size_t i = 0; i < n_loop_carried; ++i) {
+              frame[i] = std::move(frame[i + 3]);
+            }
+            drop(stack, 3); // iteration_count, max_iter, cond
+            pc += inst.X;
+          }
+        } break;
+        case RET:
+          if (future_) {
+            auto num_outputs = function->n_outputs;
+            if (num_outputs == 1) {
+              future_->markCompleted(stack.back());
+            } else {
+              future_->markCompleted(
+                  Tuple::create(jit::last(stack, num_outputs).vec()));
+            }
+          }
+          return false;
+        case WAIT:
+          auto future = stack.back().toFuture();
+          if (!future->completed()) {
+            getOrCreateFuture();
+
+            // callback needs to be a struct rather than a lambda so that
+            // we can move the stack to the other thread
+            struct Callback {
+              Callback(
+                  c10::intrusive_ptr<InterpreterStateImpl> state,
+                  Stack stack)
+                  : state_(std::move(state)), stack_(std::move(stack)) {}
+              void operator()() {
+                at::launch(InterpreterContinuation(
+                    state_,
+                    std::move(stack_),
+                    autograd::GradMode::is_enabled()));
+              }
+
+             private:
+              InterpreterState state_;
+              Stack stack_;
+            };
+
+            // we are suspending, so we need to reset the stack to where we
+            // started if it started empty, except for the inputs we can avoid a
+            // true copy by swapping, which leaves the original stack empty.
+            Stack copied;
+            if (stack_start_ == 0) {
+              copied.swap(stack);
+            } else {
+              copied.insert(
+                  copied.begin(),
+                  std::make_move_iterator(stack.begin() + stack_start_),
+                  std::make_move_iterator(stack.end()));
+              stack.resize(stack_start_);
+            }
+            future->addCallback(
+                Callback(intrusive_from_this(), std::move(copied)));
+
+            return true;
+          }
+          stack.pop_back();
+          stack.emplace_back(future->value());
+          ++pc;
+          break;
       }
-      node->sourceRange().highlight(out);
     }
   }
 
-  void handleError(const ExceptionMessage& msg, bool is_jit_exception) {
-    std::stringstream ss;
-    ss << msg << "\n";
-    ss << "The above operation failed in interpreter, with the following stack trace:\n";
-    formatStackTrace(ss);
+  void handleError(std::string&& error_msg, bool is_jit_exception) {
     if (future_) {
-      future_->markCompleted(Future::FutureError(ss.str()));
+      future_->markCompleted(Future::FutureError(std::move(error_msg)));
     } else if (is_jit_exception) {
-      throw JITException(ss.str());
+      throw JITException(std::move(error_msg));
     } else {
-      throw std::runtime_error(ss.str());
+      throw std::runtime_error(std::move(error_msg));
     }
   }
 
@@ -939,7 +849,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     if (runImpl(stack)) {
       future_->wait();
 
-      auto num_outputs = frames.front().function->n_outputs;
+      auto num_outputs = function->n_outputs;
       if (num_outputs == 1) {
         push(stack, future_->value());
       } else {
