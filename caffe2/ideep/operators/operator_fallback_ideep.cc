@@ -200,6 +200,12 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<UnaryElementwiseOp<
       TensorTypes<float>, CPUContext, SqrtFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
+    Sign,
+    IDEEPFallbackOp<UnaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        SignFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(
     Div,
     IDEEPFallbackOp<BinaryElementwiseOp<
       NumericTypes, CPUContext, DivFunctor<CPUContext>>>);

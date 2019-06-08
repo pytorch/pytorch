@@ -210,14 +210,14 @@ struct Environment {
   Function& method;
   ResolverPtr resolver;
   std::vector<std::string> captured_inputs;
-  std::unordered_map<std::string, std::string> error_messages;
+  std::unordered_map<std::string, std::function<std::string()>> error_messages;
   Block* b;
 
   std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
   // error has been set, then we will use the more informative error message
-  void setVariableTypeError(const std::string& name, const std::string& msg) {
+  void setVariableTypeError(const std::string& name, std::function<std::string()> msg) {
     auto runner = this;
     while (runner->next) {
       runner = runner->next.get();
@@ -233,7 +233,7 @@ struct Environment {
     }
     auto msg = runner->error_messages.find(name);
     if (msg != runner->error_messages.end()) {
-      return msg->second;
+      return msg->second();
     } else {
       return c10::nullopt;
     }
@@ -1206,25 +1206,26 @@ struct to_ir {
     // ordered set, because we want deterministic graph output
     std::set<std::string> mutated_variables;
 
-    // var is only defined in one branch save error in case it's used later
-    auto err = [&](const std::string& v, const std::string& branch) {
-      ErrorReport error(stmt);
-      error << v << " is not defined in the " << branch;
-      environment_stack->setVariableTypeError(v, error.what());
-    };
-
     for (auto& v : save_true->definedVariables()) {
       if (save_false->findInAnyFrame(v)) {
         mutated_variables.insert(v);
       } else {
-        err(v, "false branch");
+        ErrorReport error(stmt);
+        environment_stack->setVariableTypeError(v, [=]() -> std::string {
+          error << v << " is not defined in the false branch";
+          return error.what();
+        });
       }
     }
     for (auto& v : save_false->definedVariables()) {
       if (save_true->findInAnyFrame(v)) {
         mutated_variables.insert(v);
       } else {
-        err(v, "true branch");
+        ErrorReport error(stmt);
+        environment_stack->setVariableTypeError(v, [=]() -> std::string {
+          error << v << " is not defined in the true branch";
+          return error.what();
+        });
       }
     }
 
@@ -1255,7 +1256,9 @@ struct to_ir {
             save_false->findInParentFrame(x)) {
           throw error;
         } else {
-          environment_stack->setVariableTypeError(x, error.what());
+          environment_stack->setVariableTypeError(x, [=]() -> std::string {
+            return error.what();
+          });
           continue;
         }
       }
@@ -2722,16 +2725,25 @@ struct to_ir {
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
     if (input->type()->cast<TupleType>()) {
+      auto has_step = slice.step().present();
+      if (has_step)
+      {
+        // TODO: add support for slicing tuples with a step
+        throw ErrorReport(loc) << "Unsupported operation: slicing tuples with a step isn't supported";
+      }
+
       if (has_end) {
         return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2]);
       } else {
         return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
       }
     }
-    NamedValue step =
-        NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
+
+    auto step = emitExpr(Expr(slice.stepOr(1)));
+    NamedValue step_nv =
+        NamedValue(loc, "step", step);
     return emitBuiltinCall(
-        loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
+        loc, *graph, aten::slice, c10::nullopt, args, {step_nv}, true);
   }
 
   Value* emitUnsqueeze(const SourceRange& loc, Value* input, int64_t dim) {
