@@ -442,7 +442,7 @@ __global__ void generate_keys(
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
   float u = curand_uniform(state);
   if(thread_id < n){
-    keys[thread_id] = weights[thread_id] > 0? (float) __powf(u, (float) 1/weights[thread_id]):-1;
+    keys[thread_id] = weights[thread_id] > 0 ? (float) __powf(u, (float) 1 / weights[thread_id]):-1;
   }
 }
 
@@ -499,11 +499,12 @@ Tensor reservoir_sampling_cuda(
   THCState *state = at::globalContext().getTHCState();
   curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
 
-  if (weights.numel() == 0){
+  if (weights.numel() == 0){ // Uniform Sapling
     Tensor indices_n = at::arange({n}, options);
 
+    // This is a trick to speed up the reservoir sampling.
+    // It makes the worst case be k = n / 2.
     int split, begin, end;
-
     if(2 * k < n){
       split = n - k;
       begin = n - k;
@@ -528,6 +529,8 @@ Tensor reservoir_sampling_cuda(
 
     AT_CUDA_CHECK(cudaGetLastError());
 
+    // This must be done in a separeted kernel 
+    // since this algorithm isn't thread safe
     generate_reservoir<<<1, 1>>>(
       indices_n.data<int64_t>(),
       samples.data<int64_t>(),
@@ -545,7 +548,7 @@ Tensor reservoir_sampling_cuda(
       )
     );
 
-  } else {
+  } else { // Weighted Sapling
 
     // If the weights are contiguous floating points, then
 		// the next step won't generate a copy.
@@ -607,14 +610,29 @@ Tensor sampling_with_replacement_cuda(
   int n = x.size(0);
   Tensor samples;
 
-  if (weights.numel() == 0){
+  if (weights.numel() == 0){ // Uniform Sapling
     samples = at::randint(0, n, {k}, x.options().dtype(at::kLong));
-  } else {
+  } else { // Weighted Sapling
 
     AT_CHECK(
       weights.min().item().toLong() >= 0,
       "All the weights must be non-negative."
     );
+
+    AT_CHECK(
+      weights.max().item().toLong() > 0,
+      "The sum of all the weights must be strictly greater than zero."
+    );
+
+    AT_CHECK(
+	    n == weights.numel(),
+	    "The weights must have the same number of elements as the input's first dimension."
+	  );
+
+	  AT_CHECK(
+	    weights.dim() == 1,
+	    "The weights must 1-dimensional."
+	  );
 
     THCState *state = at::globalContext().getTHCState();
     curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);

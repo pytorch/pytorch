@@ -740,7 +740,7 @@ void generate_keys(
 
   for(int i = 0; i < n; i++){
     float u = THRandom_standard_uniform(generator);
-    keys[i] = weights[i] > 0? (float) std::pow(u, 1/weights[i]):-1;
+    keys[i] = weights[i] > 0 ? (float) std::pow(u, 1 / weights[i]):-1;
   }
 
 }
@@ -783,8 +783,11 @@ Tensor reservoir_sampling_cpu(
   auto options = x.options().dtype(at::kLong);
   THGenerator* generator = get_generator(nullptr);
 
-  if (weights.numel() == 0){
+  if (weights.numel() == 0){ // Uniform Sapling
     Tensor indices_n = at::arange({n}, options);
+
+    // This is a trick to speed up the reservoir sampling.
+    // It makes the worst case be k = n / 2.
     int split, begin, end;
     if(2 * k < n){
       split = n - k;
@@ -811,7 +814,7 @@ Tensor reservoir_sampling_cpu(
     )
   );
 
-  } else {
+} else { // Weighted Sapling
 
 		// If the weights are contiguous floating points, then
 		// the next step won't generate a copy.
@@ -868,14 +871,29 @@ Tensor sampling_with_replacement_cpu(
   int n = x.size(0);
   Tensor samples;
 
-  if (weights.numel() == 0){
+  if (weights.numel() == 0){ // Uniform Sapling
     samples = at::randint(0, n, {k}, x.options().dtype(at::kLong));
-  } else {
+  } else { // Weighted Sapling
 
     AT_CHECK(
       weights.min().item().toLong() >= 0,
       "All the weights must be non-negative."
     );
+
+    AT_CHECK(
+      weights.max().item().toLong() > 0,
+      "The sum of all the weights must be strictly greater than zero."
+    );
+
+    AT_CHECK(
+	    n == weights.numel(),
+	    "The weights must have the same number of elements as the input's first dimension."
+	  );
+
+	  AT_CHECK(
+	    weights.dim() == 1,
+	    "The weights must 1-dimensional."
+	  );
 
     THGenerator* generator = get_generator(nullptr);
     samples = at::empty({k}, x.options().dtype(at::kLong));
