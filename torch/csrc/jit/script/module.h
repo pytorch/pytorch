@@ -567,7 +567,7 @@ struct TORCH_API Module {
   friend struct Method;
 };
 
-TORCH_API void setRunAsFirstClass(bool enabled);
+TORCH_API bool& getFirstClassMode();
 
 } // namespace script
 } // namespace jit
