@@ -9,6 +9,8 @@ import shutil
 import sys
 import unittest
 
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 TEST_TENSORBOARD = True
 try:
     import tensorboard.summary.writer.event_file_writer  # noqa F401
