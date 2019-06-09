@@ -230,6 +230,12 @@ def _sum_of_list(tensorlist):
         s += t.sum()
     return s
 
+@contextmanager
+def enable_first_class_mode():
+    torch._C._jit_set_first_class_mode(True)
+    yield
+    torch._C._jit_set_first_class_mode(False)
+
 # helper function to generate test qparam
 def _helper_generate_qparam(script_module, input_data):
     class TestGenQParam:
@@ -2969,6 +2975,21 @@ def foo(x):
 
         self.assertEqual(D()(v), v + v)
 
+    def test_first_class_module(self):
+        with enable_first_class_mode():
+            class Foo(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(Foo, self).__init__()
+                    self.foo = nn.Parameter(torch.rand(3, 4))
+
+                @torch.jit.script_method
+                def forward(self, input):
+                    self.foo = input
+                    return self.foo
+            foo = Foo()
+            input = torch.rand(3, 4)
+            foo.forward(input)
+            self.assertEqual(input, foo.foo)
 
     def test_invalid_prefix_annotation(self):
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
