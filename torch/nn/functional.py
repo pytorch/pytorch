@@ -3077,29 +3077,29 @@ def _pad_circular(input, padding):
 
 
 @weak_script
-def multi_head_attention_forward(query,                        # type: Tensor
-                                 key,                          # type: Tensor
-                                 value,                        # type: Tensor
-                                 embed_dim_to_check,           # type: int
-                                 num_heads,                    # type: int
-                                 in_proj_weight,               # type: Tensor
-                                 in_proj_bias,                 # type: Tensor
-                                 bias_k,                       # type: Optional[Tensor]
-                                 bias_v,                       # type: Optional[Tensor]
-                                 add_zero_attn,                # type: bool
-                                 dropout_p,                    # type: float
-                                 out_proj_weight,              # type: Tensor
-                                 out_proj_bias,                # type: Tensor
-                                 training=True,                # type: bool
-                                 key_padding_mask=None,        # type: Optional[Tensor]
-                                 need_weights=True,            # type: bool
-                                 attn_mask=None,               # type: Optional[Tensor]
-                                 use_chunk_proj_weight=True,   # type: bool
-                                 q_proj_weight=None,           # type: Optional[Tensor]
-                                 k_proj_weight=None,           # type: Optional[Tensor]
-                                 v_proj_weight=None,           # type: Optional[Tensor]
-                                 static_k=None,                # type: Optional[Tensor]
-                                 static_v=None                 # type: Optional[Tensor]
+def multi_head_attention_forward(query,                           # type: Tensor
+                                 key,                             # type: Tensor
+                                 value,                           # type: Tensor
+                                 embed_dim_to_check,              # type: int
+                                 num_heads,                       # type: int
+                                 in_proj_weight,                  # type: Tensor
+                                 in_proj_bias,                    # type: Tensor
+                                 bias_k,                          # type: Optional[Tensor]
+                                 bias_v,                          # type: Optional[Tensor]
+                                 add_zero_attn,                   # type: bool
+                                 dropout_p,                       # type: float
+                                 out_proj_weight,                 # type: Tensor
+                                 out_proj_bias,                   # type: Tensor
+                                 training=True,                   # type: bool
+                                 key_padding_mask=None,           # type: Optional[Tensor]
+                                 need_weights=True,               # type: bool
+                                 attn_mask=None,                  # type: Optional[Tensor]
+                                 use_separate_proj_weight=False,  # type: bool
+                                 q_proj_weight=None,              # type: Optional[Tensor]
+                                 k_proj_weight=None,              # type: Optional[Tensor]
+                                 v_proj_weight=None,              # type: Optional[Tensor]
+                                 static_k=None,                   # type: Optional[Tensor]
+                                 static_v=None                    # type: Optional[Tensor]
                                  ):
     # type: (...) -> Tuple[Tensor, Optional[Tensor]]
     r"""
@@ -3121,9 +3121,9 @@ def multi_head_attention_forward(query,                        # type: Tensor
         need_weights: output attn_output_weights.
         attn_mask: mask that prevents attention to certain positions. This is an additive mask
             (i.e. the values will be added to the attention layer).
-        use_chunk_proj_weight: the function accept the proj. weights for query, key, and value
-            in differnt forms. If true, in_proj_weight will be used, which is a combination of
-            q_proj_weight, k_proj_weight, v_proj_weight.
+        use_separate_proj_weight: the function accept the proj. weights for query, key, 
+            and value in differnt forms. If false, in_proj_weight will be used, which is 
+            a combination of q_proj_weight, k_proj_weight, v_proj_weight.
         q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         static_k, static_v: static key and value used for attention operators.
 
@@ -3162,7 +3162,7 @@ def multi_head_attention_forward(query,                        # type: Tensor
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 
-    if use_chunk_proj_weight:
+    if use_separate_proj_weight is not True:
         if qkv_same:
             # self-attention
             q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)

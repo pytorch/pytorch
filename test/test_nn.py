@@ -3404,7 +3404,7 @@ class TestNN(NNTestCase):
                         multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
                         multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
                         multihead_attn_module.training, key_padding_mask_tensor, True, attn_mask_tensor,
-                        False, multihead_attn_module.q_proj_weight, 
+                        True, multihead_attn_module.q_proj_weight, 
                         multihead_attn_module.k_proj_weight, multihead_attn_module.v_proj_weight,
                         static_k=saved_k_tensor, static_v=saved_v_tensor) 
 
