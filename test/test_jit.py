@@ -25,7 +25,7 @@ from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, enable_profiling_mode
+    _trace, enable_cpu_fuser_if, enable_profiling_mode, enable_first_class_mode
 from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -230,11 +230,6 @@ def _sum_of_list(tensorlist):
         s += t.sum()
     return s
 
-@contextmanager
-def enable_first_class_mode():
-    torch._C._jit_set_first_class_mode(True)
-    yield
-    torch._C._jit_set_first_class_mode(False)
 
 # helper function to generate test qparam
 def _helper_generate_qparam(script_module, input_data):
@@ -2990,6 +2985,27 @@ def foo(x):
             input = torch.rand(3, 4)
             foo.forward(input)
             self.assertEqual(input, foo.foo)
+
+    def test_first_class_calls(self):
+        with enable_first_class_mode():
+            @torch.jit.script
+            class Foo(object):
+                def __init__(self, x):
+                    self.bar = x
+
+                def stuff(self, x):
+                    return self.bar + x
+
+            @torch.jit.script
+            def foo(x):
+                return x * x + Foo(x).stuff(2 * x)
+
+            @torch.jit.script
+            def bar(x):
+                return foo(x) * foo(x)
+
+            x = torch.rand(3, 4)
+            self.assertEqual(bar(x), (x * x + 3 * x) * (x * x + 3 * x))
 
     def test_invalid_prefix_annotation(self):
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):

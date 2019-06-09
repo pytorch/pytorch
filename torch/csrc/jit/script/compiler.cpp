@@ -596,7 +596,9 @@ struct to_ir {
 
   void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
     // remove any uses of tuples that we inserted that are not needed
-    Inline(*to_clean);
+    if (!script::getFirstClassMode()) {
+      Inline(*to_clean);
+    }
     LowerSimpleTuples(to_clean);
     ConstantPooling(to_clean);
     // For jitter
