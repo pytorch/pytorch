@@ -979,90 +979,88 @@ class _TestTorchMixin(object):
     def test_norm(self):
         self._test_norm(self, device='cpu')
 
-    def check_single_nuclear_norm(self, x, axes):
-        if x.is_cuda and randrange(100) < 95:
-            return  # too many cpu <==> gpu copies
-
-        a = np.array(x.cpu(), copy=False)
-        expected = np.linalg.norm(a, "nuc", axis=axes)
-
-        ans = torch.norm(x, "nuc", dim=axes)
-        self.assertTrue(ans.is_contiguous())
-        self.assertEqual(ans.shape, expected.shape)
-        self.assertTrue(np.allclose(ans.cpu(), expected))
-
-        out = torch.zeros(expected.shape, dtype=x.dtype, device=x.device)
-        ans = torch.norm(x, "nuc", dim=axes, out=out)
-        self.assertIs(ans, out)
-        self.assertTrue(ans.is_contiguous())
-        self.assertEqual(ans.shape, expected.shape)
-        self.assertTrue(np.allclose(ans.cpu(), expected))
-
     @staticmethod
-    def _test_nuclear_norm_axes(self, device):
+    def _test_nuclear_norm_axes(self, device='cpu'):
+        def check_single_nuclear_norm(x, axes):
+            if x.is_cuda and randrange(100) < 95:
+                return  # too many cpu <==> gpu copies
+
+            a = np.array(x.cpu(), copy=False)
+            expected = np.linalg.norm(a, "nuc", axis=axes)
+
+            ans = torch.norm(x, "nuc", dim=axes)
+            self.assertTrue(ans.is_contiguous())
+            self.assertEqual(ans.shape, expected.shape)
+            self.assertTrue(np.allclose(ans.cpu(), expected))
+
+            out = torch.zeros(expected.shape, dtype=x.dtype, device=x.device)
+            ans = torch.norm(x, "nuc", dim=axes, out=out)
+            self.assertIs(ans, out)
+            self.assertTrue(ans.is_contiguous())
+            self.assertEqual(ans.shape, expected.shape)
+            self.assertTrue(np.allclose(ans.cpu(), expected))
+
         for n in range(1, 5):
             for m in range(1, 5):
                 for axes in permutations([0, 1], 2):
                     # 2d, inner dimensions C
                     x = torch.randn(n, m, device=device)
-                    self.check_single_nuclear_norm(x, axes)
+                    check_single_nuclear_norm(x, axes)
 
                     # 2d, inner dimensions Fortran
                     x = torch.randn(m, n, device=device).transpose(-1, -2)
-                    self.check_single_nuclear_norm(x, axes)
+                    check_single_nuclear_norm(x, axes)
 
                     # 2d, inner dimensions non-contiguous
                     x = torch.randn(n, 2 * m, device=device)[:, ::2]
-                    self.check_single_nuclear_norm(x, axes)
+                    check_single_nuclear_norm(x, axes)
 
                     # 2d, all dimensions non-contiguous
                     x = torch.randn(7 * n, 2 * m, device=device)[::7, ::2]
-                    self.check_single_nuclear_norm(x, axes)
+                    check_single_nuclear_norm(x, axes)
 
                 for o in range(1, 3):
                     for axes in permutations([0, 1, 2], 2):
                         # 3d, inner dimensions C
                         x = torch.randn(o, n, m, device=device)
-                        self.check_single_nuclear_norm(x, axes)
+                        check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions Fortran
                         y = torch.randn(o, n, m, device=device).transpose(-1, -2)
-                        self.check_single_nuclear_norm(x, axes)
+                        check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions non-contiguous
                         x = torch.randn(o, n, 2 * m, device=device)[:, :, ::2]
-                        self.check_single_nuclear_norm(x, axes)
+                        check_single_nuclear_norm(x, axes)
 
                         # 3d, all dimensions non-contiguous
                         x = torch.randn(7 * o, 5 * n, 2 * m, device=device)[::7, ::5, ::2]
-                        self.check_single_nuclear_norm(x, axes)
+                        check_single_nuclear_norm(x, axes)
 
                     for r in range(1, 3):
                         for axes in permutations([0, 1, 2, 3], 2):
                             # 4d, inner dimensions C
                             x = torch.randn(r, o, n, m, device=device)
-                            self.check_single_nuclear_norm(x, axes)
+                            check_single_nuclear_norm(x, axes)
 
                             # 4d, inner dimensions Fortran
                             x = torch.randn(r, o, n, m, device=device).transpose(-1, -2)
-                            self.check_single_nuclear_norm(x, axes)
+                            check_single_nuclear_norm(x, axes)
 
                             # 4d, inner dimensions non-contiguous
                             x = torch.randn(r, o, n, 2 * m, device=device)[:, :, :, ::2]
-                            self.check_single_nuclear_norm(x, axes)
+                            check_single_nuclear_norm(x, axes)
 
                             # 4d, all dimensions non-contiguous
                             x = torch.randn(7 * r, 5 * o, 11 * n, 2 * m, device=device)[::7, ::5, ::11, ::2]
-                            self.check_single_nuclear_norm(x, axes)
+                            check_single_nuclear_norm(x, axes)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_nuclear_norm_axes_small_brute_force(self):
-        for device in torch.testing.get_all_device_types():
-            self._test_nuclear_norm_axes(self, device)
+        self._test_nuclear_norm_axes(self)
 
     @staticmethod
-    def _test_nuclear_norm_exceptions(self, device):
+    def _test_nuclear_norm_exceptions(self, device='cpu'):
         for lst in [], [1], [1, 2]:
             for axes in (), (0,), (0, 1):
                 x = torch.tensor(lst, dtype=torch.double, device=device)
@@ -1072,10 +1070,8 @@ class _TestTorchMixin(object):
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 2))
 
-    @skipIfRocm
     def test_nuclear_norm_exceptions(self):
-        for device in torch.testing.get_all_device_types():
-            self._test_nuclear_norm_exceptions(self, device)
+        self._test_nuclear_norm_exceptions(self)
 
     @staticmethod
     def _test_dist(self, device):
