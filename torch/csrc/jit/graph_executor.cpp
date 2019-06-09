@@ -61,11 +61,6 @@ std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();
 }
 
-void ExecutionPlan::run(Stack& stack) const {
-  InterpreterState(code).run(stack);
-  last_executed_optimized_graph = graph;
-}
-
 namespace {
 
 using tensor_list = std::vector<at::Tensor>;
@@ -467,6 +462,27 @@ GraphExecutor* getGradExecutor(Operation& op) {
 }
 } // namespace detail
 
+void GraphExecutorImplBase::run(Stack& stack) {
+  TORCH_CHECK(
+      stack.size() >= num_inputs,
+      "expected ",
+      num_inputs,
+      " inputs, but got only ",
+      stack.size());
+
+  C10_LOG_API_USAGE_ONCE("torch.graph_executor.run");
+  logging::getLogger()->addStatValue(
+      logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
+
+  if (tracer::isTracing()) {
+    return runTraced(stack);
+  }
+
+  ExecutionPlan plan = getPlanFor(stack);
+  InterpreterState(plan.code).run(stack);
+  last_executed_optimized_graph = plan.graph;
+}
+
 // a Graph can be created via tracing, or via a language-based frontend
 // GraphExecutor runs it. It can run the same graph on many different sizes
 // and different requires_grad states, and handles specializations for each
@@ -479,36 +495,18 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
-  // entry point where execution begins
-  void run(Stack& stack) override {
-    TORCH_CHECK(
-        stack.size() >= num_inputs,
-        "expected ",
-        num_inputs,
-        " inputs, but got only ",
-        stack.size());
-
-    C10_LOG_API_USAGE_ONCE("torch.graph_executor.run");
-    logging::getLogger()->addStatValue(
-        logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
-
-    if (tracer::isTracing()) {
-      return runTraced(stack);
-    }
-
-    auto& execution_plan =
-        optimize ? getOrCompile(stack) : getOrCompileFallback();
-    return execution_plan.run(stack);
+  ExecutionPlan getPlanFor(Stack& stack) override {
+    return optimize ? getOrCompile(stack) : getOrCompileFallback();
   }
 
   GraphExecutorState getDebugState() override {
     GraphExecutorState state;
     state.graph = graph.get();
     if (fallback) {
-      state.fallback = fallback.getDebugState();
+      state.fallback = fallback;
     }
     for (auto& entry : plan_cache) {
-      state.execution_plans.emplace(entry.first, entry.second.getDebugState());
+      state.execution_plans.emplace(entry.first, entry.second);
     }
     return state;
   }
@@ -602,8 +600,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     return ExecutionPlan(opt_graph);
   }
 
-  void runOptimization(
-      std::shared_ptr<Graph>& graph) {
+  void runOptimization(std::shared_ptr<Graph>& graph) {
     // Basic graph preprocessing to eliminate noise.
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
@@ -625,8 +622,8 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     for (const auto& pass : getCustomPasses()) {
       pass(graph);
     }
-    // decomposition pass, decompose certain ops that will be used in the following
-    // passes (like batchmm and jit fusion)
+    // decomposition pass, decompose certain ops that will be used in the
+    // following passes (like batchmm and jit fusion)
     DecomposeOps(graph);
     // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
@@ -656,41 +653,6 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
       }
     }
     return false;
-  }
-
-  void runTraced(Stack& stack) {
-    const auto& state = tracer::getTracingState();
-    auto inputs = last(stack, num_inputs);
-    auto input_values = fmap(
-        inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
-
-    ArgumentSpec spec =
-        arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
-    // NB: we could just run the fallback in here and call it a day, but that
-    // would loose all the control flow information we have in the graph. Thus,
-    // we run the fallback to get the correct output values, but we will
-    // override the tracing states later.
-    {
-      // No need to trace a script module.
-      ResourceGuard guard(tracer::pauseTracing());
-      getOrCompileFallback().run(stack);
-    }
-
-    // Traces always have types propagated through them, so we make sure to
-    // also propagate types through the graph we are inserting here.
-    // However, this->graph itself may already have been generated with
-    // tracing and so we only do the type propgation if no concrete types have
-    // been set.
-    auto local_graph = this->graph->copy();
-    arg_spec_creator_.specializeTypes(*local_graph, spec);
-    PropagateInputShapes(local_graph);
-    auto output_values =
-        inlineCallTo(*state->graph, *local_graph, input_values);
-
-    auto outputs = last(stack, num_outputs);
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      tracer::setValueTrace(outputs[i], output_values[i]);
-    }
   }
 
   ~GraphExecutorImpl() override = default;
