@@ -103,6 +103,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
 fi
 
 test_python_nn() {
+  pip list
   export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
   time python test/run_test.py --include tensorboard --verbose
   assert_git_not_dirty
