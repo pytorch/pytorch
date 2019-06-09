@@ -2992,6 +2992,64 @@ def foo(x):
                     #     type: (Int) -> Int
                     return a + 2
 
+    def test_interpreter_fuzz(self):
+        # This test generates random tree-like programs to fuzz test
+        # that the interpreter does not have a bug in its stack manipulation
+        # code. An assert in that code ensures individual operators are
+        # not reordered.
+        templates = [
+            "torch.rand(3, 4)",
+            "({} + {})",
+            "-{}",
+            "({} * {})",
+            "torch.tanh({})",
+            "VAR {}",
+        ]
+
+        def gen_code():
+            src_lines = ['def f():']
+            exprs = []
+            n_variables = 0
+
+            def get_expr(idx):
+                elem = exprs[idx]
+                exprs[idx] = exprs[-1]
+                exprs.pop()
+                return elem
+
+            def select_expr_or_var():
+                idx = random.randrange(0, len(exprs) + n_variables)
+                if idx < len(exprs):
+                    return get_expr(idx)
+                else:
+                    return 'v{}'.format(idx - len(exprs))
+
+            for i in range(50):
+                n = None
+                while n is None or n > len(exprs) + n_variables:
+                    template = random.choice(templates)
+                    n = template.count('{}')
+
+                if 'VAR' in template:
+                    src_lines.append('  v{} = {}'.format(n_variables, select_expr_or_var()))
+                    n_variables += 1
+                else:
+                    exprs.append(template.format(*(select_expr_or_var() for _ in range(n))))
+
+            src_lines.append('  return ({})\n'.format(''.join('v{},'.format(i) for i in range(n_variables))))
+            return '\n'.join(src_lines)
+
+        for i in range(100):
+            g = {'torch': torch}
+            code = gen_code()
+            torch._six.exec_(code, g, None)
+            cu = torch.jit.CompilationUnit(code)
+            with freeze_rng_state():
+                o1 = g['f']()
+            with freeze_rng_state():
+                o2 = cu.f()
+            self.assertEqual(o1, o2)
+
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
