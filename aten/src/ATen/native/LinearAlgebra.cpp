@@ -527,18 +527,16 @@ Tensor &frobenius_norm_out(
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
   TORCH_CHECK(
       self.dim() == 2,
-      "Expected a tensor with 2 dimensions, but got a ",
-      self.dim(),
-      " dimensions tensor instead.");
+      "Expected a tensor with 2 dimensions, but got a tensor with ",
+      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
   return at::sum(std::get<1>(at::svd(self)), 0, keepdim);
 }
 
 Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
   TORCH_CHECK(
       self.dim() == 2,
-      "Expected a tensor with 2 dimensions, but got a ",
-      self.dim(),
-      " dimensions tensor instead.");
+      "Expected a tensor with 2 dimensions, but got a tensor with ",
+      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
   return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
 }
 
@@ -551,9 +549,8 @@ _batch_svd(const Tensor& self, bool some, bool compute_uv)
 
   TORCH_CHECK(
       ndim >= 2,
-      "Expected a tensor with at least 2 dimensions, but got a ",
-      ndim,
-      " dimensions tensor instead.");
+      "Expected a tensor with at least 2 dimensions, but got a tensor with ",
+      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
 
   if (ndim == 2) {
     return at::svd(self, some, compute_uv);
