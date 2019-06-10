@@ -19,11 +19,6 @@ namespace torch {
 namespace jit {
 namespace script {
 struct CompilationUnit;
-// static CompilationUnit& CompilationUnit::_get_python_cu();
-// std::shared_ptr<ClassType> CompilationUnit::get_class(const c10::QualifiedName& name) const;
-// struct CompilationUnit {
-// };
-
 struct Function;
 }
 } // namespace jit
@@ -1324,6 +1319,7 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
  * User Defined Types
  */
 
+struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
 using ::torch::jit::script::Function;
@@ -1334,7 +1330,6 @@ struct CAFFE2_API ClassType : public Type {
   static ClassTypePtr create(
       QualifiedName qualifiedName,
       std::shared_ptr<CompilationUnit> cu);
-  static ClassTypePtr create();
 
   // Create a type representing a Module,
   // These do not have methods, and are not globally registered
@@ -1460,7 +1455,6 @@ struct CAFFE2_API ClassType : public Type {
 
  private:
   ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu);
-  ClassType();
 
   // Fully qualified name of type (note that this has to be globally unique).
   // Looks like: "foo.bar.Baz".
@@ -1476,7 +1470,6 @@ struct CAFFE2_API ClassType : public Type {
   std::vector<TypePtr> attributeTypes_;
   // Holds method attributes
   std::shared_ptr<CompilationUnit> compilation_unit_;
-
 };
 
 } // namespace c10

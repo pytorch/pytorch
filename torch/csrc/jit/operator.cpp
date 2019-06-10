@@ -225,8 +225,6 @@ bool Operator::matches(const Node* node) const {
 std::shared_ptr<Operator> findOperatorFor(const Node* node) {
   const auto& candidates = getAllOperatorsFor(node->kind());
   for (const auto& candidate : candidates) {
-    // std::cout<<"schema: "<<candidate->schema().name()<<std::endl;
-    // std::cout<<"node: "<<node->kind().toQualString()<<std::endl;
     if (candidate->matches(node)) {
       return candidate;
     }

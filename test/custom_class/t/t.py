@@ -14,8 +14,9 @@ class Bar:
 @torch.jit.script
 def f(x):
     val = torch._C.Foo(5, 3)
+    val2 = torch._C.Foo(100, 0)
+    print(val, val2)
     val.display()
-    # print(val)
     print(val.add(3))
 
 print(f.graph)

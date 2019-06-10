@@ -14,9 +14,7 @@ namespace py = pybind11;
 void warp_perspective(torch::Tensor image) { cout<<"HEY"<<endl; }
 struct Foo {
   int x, y;
-  Foo(): x(2), y(5){
-    std::cout<<"Running constructor"<<std::endl;
-  }
+  Foo(): x(2), y(5){}
   Foo(int x_, int y_) : x(x_), y(y_) {}
   void display() {
     cout<<"x: "<<x<<' '<<"y: "<<y<<endl;
@@ -24,8 +22,12 @@ struct Foo {
   int64_t add(int64_t z) {
     return (x+y)*z;
   }
-  ~Foo() {
+  Foo* combine(Foo* x) {
+    this->x += x->x;
+    this->y += x->y;
+    return this;
   }
+
 };
 
 static auto registry = torch::jit::RegisterOperators("my_ops::warp_perspective",
@@ -34,4 +36,5 @@ static auto test = torch::jit::class_<Foo>("Foo")
                     // .init<>()
                     .init<int64_t, int64_t>()
                     .def("display", &Foo::display)
-                    .def("add", &Foo::add);
+                    .def("add", &Foo::add)
+                    .def("combine", &Foo::combine);

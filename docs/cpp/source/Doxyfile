@@ -57,7 +57,6 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../torch/csrc/api/src \
                          ../../../torch/csrc/autograd/generated/variable_factories.h \
                          ../../../torch/csrc/jit/custom_operator.h \
-                         ../../../torch/csrc/jit/custom_class.h \
                          ../../../torch/csrc/jit/import.h \
                          ../../../torch/csrc/jit/script/module.h
 # Don't include .cpp files!

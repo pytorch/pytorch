@@ -66,7 +66,6 @@ struct getTypePtr_ final {
         throw c10::Error("Trying to convert a class that's not registered.", "");
     }
     return std::dynamic_pointer_cast<Type>(res->second);
-//   return std::dynamic_pointer_cast<Type>(torch::jit::script::CompilationUnit::_get_python_cu().get_class(c10::QualifiedName("Foo")));
   }
 //   static_assert(
 //       guts::false_t<T>::value,

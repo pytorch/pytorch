@@ -475,10 +475,8 @@ const char * typeKindToString(TypeKind kind) {
 
 bool Type::isSubtypeOf(const TypePtr rhs) const {
   if(auto rhs_ = rhs->cast<OptionalType>()) {
-    // std::cout<<"branch"<<std::endl;
     return this->isSubtypeOf(rhs_->getElementType());
   }
-  // std::cout<<"not branch?"<<std::endl;
   return *this == *rhs;
 }
 
@@ -486,9 +484,6 @@ ClassTypePtr ClassType::create(
     QualifiedName qualifiedName,
     std::shared_ptr<CompilationUnit> cu) {
   return ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
-}
-ClassTypePtr ClassType::create() {
-  return ClassTypePtr(new ClassType());
 }
 
 ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
@@ -558,8 +553,4 @@ ClassType::ClassType(
       name_(std::move(name)),
       compilation_unit_(std::move(cu)) {}
 
-ClassType::ClassType()
-    : Type(TypeKind::ClassType),
-      name_(c10::QualifiedName("Foo")),
-      compilation_unit_(nullptr) {}
 } // namespace c10

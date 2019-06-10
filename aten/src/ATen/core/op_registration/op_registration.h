@@ -378,8 +378,8 @@ public:
     *
     * This API looks like:
     *
-    * > static auto registry = c10::registeroperators()
-    * >     .op("my_op", [] (tensor a, tensor b) {...});
+    * > static auto registry = c10::RegisterOperators()
+    * >     .op("my_op", [] (Tensor a, Tensor b) {...});
     *
     * This is equivalent to:
     *
