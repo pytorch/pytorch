@@ -30,6 +30,10 @@ pip install ninja --user
 export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
 sudo apt-get install libpython-dev
+ll /usr/local/include
+ll /var/lib/jenkins/.local/include
+ll /usr/local/include/python2.7
+ll /var/lib/jenkins/.local/include/python2.7
 
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
