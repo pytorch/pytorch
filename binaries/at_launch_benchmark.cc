@@ -1,6 +1,7 @@
 #include "ATen/Parallel.h"
 
 #include "c10/util/Flags.h"
+#include "caffe2/core/init.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -11,6 +12,7 @@
 C10_DEFINE_int(iter, 10e4, "Number of at::launch iterations (tasks)");
 C10_DEFINE_int(warmup_iter, 10, "Number of warmup iterations")
 C10_DEFINE_int(inter_op_threads, 0, "Number of inter-op threads");
+C10_DEFINE_bool(init_caffe2, false, "Initialize Caffe2");
 
 namespace {
 int iter = 0;
@@ -52,6 +54,10 @@ int main(int argc, char** argv) {
     std::cout << "Failed to parse command line flags" << std::endl;
     return -1;
   }
+  if (FLAGS_init_caffe2) {
+    caffe2::GlobalInit(&argc, &argv);
+  }
+
   at::init_num_threads();
 
   if (FLAGS_inter_op_threads > 0) {
