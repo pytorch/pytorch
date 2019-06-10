@@ -49,7 +49,7 @@ struct BailOutGraphBuilderForNode {
   // buildBailOutBlockFrom builds a bailout graph from
   // a given node `n` until the end of the owning block
   // If `n` belongs to `prim::If` or `prim::Loop`
-  // buildBailOutGraphForOwningNode continues
+  // buildBailOutLoop/If continue
   // from block's owning node (e.g. `prim::If` or
   // `prim::Loop`)
   void buildBailOutBlockFrom(Node* n) {
@@ -64,7 +64,6 @@ struct BailOutGraphBuilderForNode {
         auto oo = node->outputs()[i];
         auto no = new_node->outputs()[i];
         old_to_new_[oo] = no;
-        no->copyMetadata(oo);
       }
     }
 
@@ -100,7 +99,7 @@ struct BailOutGraphBuilderForNode {
     auto carried_deps = lv.carriedInputsWithCond();
     mapValues(block_outputs, carried_deps);
     auto* block = copy_graph_->block();
-    // subtract the number of iterations we already did
+    // subtract the number of iterations
     WithInsertPoint guard(*block->nodes().end());
     auto updated_max_trip_count =
         copy_graph_->insert(aten::sub, {old_max_count, cur_iter});
@@ -114,55 +113,6 @@ struct BailOutGraphBuilderForNode {
     auto if_outputs = outer_node->outputs();
     mapValues(block_outputs, if_outputs);
     buildBailOutBlockFrom(outer_node->next());
-  }
-
-  // buildBailOutGraphForOwningNode builds a bailout graph
-  // for a CFG given node () as follows:
-  // * if `inner_node` is in a true or false arm of an `prim::If` node
-  // the rest of the arm gets inlined in the bailout graph
-  // and we continue building the rest of the bailout graph
-  // from the node *following* `outer_node`.
-  // * if `inner_node` is in a loop, the rest of the loop gets inlined
-  // we remember the loop outputs needed to execute the
-  // we adjust the upper limit (old_upper_limit - current_iteration)
-  // note the stop condition is already mapped (remembered)
-  // then, we continue building the rest of the bailout graph
-  // starting from the owning `outer_node`
-  // which implies `outer_node` will be cloned
-
-  void buildBailOutGraphForOwningNode(Node* inner_node, Node* outer_node) {
-    auto* block = copy_graph_->block();
-    auto block_outputs = inner_node->owningBlock()->outputs();
-    // skip the first input for loops (current iteration count)
-    size_t i = outer_node->kind() == prim::Loop;
-    auto new_outputs = outer_node->kind() == prim::Loop ? outer_node->inputs()
-                                                        : outer_node->outputs();
-    for (; i < block_outputs.size(); i++) {
-      auto nv = old_to_new_[block_outputs[i]];
-      old_to_new_[new_outputs.at(i)] = nv;
-
-      std::cout << "mapping " << new_outputs.at(i)->uniqueName() << " to "
-                << nv->uniqueName() << std::endl;
-    }
-
-    if (outer_node->kind() == prim::If) {
-      // skip if since the rest of true or false block has already been
-      // inlined
-      buildBailOutBlockFrom(outer_node->next());
-    } else if (outer_node->kind() == prim::Loop) {
-      auto new_max_count = addNewInputForValue(outer_node->inputs()[0]);
-      auto cur_iter = addNewInputForValue(outer_node->blocks()[0]->inputs()[0]);
-      // subtract the number of iterations we already did
-      WithInsertPoint guard(*block->nodes().end());
-      auto updated_max_trip_count =
-          copy_graph_->insert(aten::sub, {new_max_count, cur_iter});
-      mapExistingInputForValue(outer_node->inputs()[0], updated_max_trip_count);
-      // N.B. the rest of inputs have already been mapped
-      // when loop->blocks()[0] was processed
-      buildBailOutBlockFrom(outer_node);
-    } else {
-      AT_ERROR("Unexpected outer node");
-    }
   }
 
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
