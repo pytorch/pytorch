@@ -2409,7 +2409,6 @@ class TestCuda(TestCase):
     def test_index(self):
         _TestTorchMixin._test_index(self, lambda t: t.cuda())
 
-    @skipCUDANonDefaultStreamIf(True)
     def test_advancedindex(self):
         _TestTorchMixin._test_advancedindex(self, lambda t: t.cuda())
 
@@ -2670,7 +2669,6 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
-    @skipCUDANonDefaultStreamIf(True)
     def test_norm(self):
         _TestTorchMixin._test_norm(self, device='cuda')
 
