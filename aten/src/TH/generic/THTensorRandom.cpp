@@ -149,7 +149,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
 
   for (i = 0; i < inputsize; i++)
     {
-      THLongTensor_fastSet1d(J, i, -1L);
+      THLongTensor_fastSet1d(J, i, 0L);
       scalar_t val = THTensor_(fastGet1d)(probs, i);
       THTensor_(fastSet1d)(q, i, inputsize*val);
 
@@ -200,7 +200,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
       else if (q_temp > q_max)
         q_max = q_temp;
     }
-  THArgCheckWithCleanup((q_min >= 0),
+  THArgCheckWithCleanup((q_min > 0),
                         THCleanup(THLongTensor_free(smaller); THLongTensor_free(larger);), 2,
                         "q_min is less than 0");
 
@@ -215,7 +215,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
     {
       // sometimes an large index isn't added to J.
       // fix it by making the probability 1 so that J isn't indexed.
-      if(J_data[i] < 0)
+      if(J_data[i] <= 0)
         q_data[i] = 1.0;
     }
   THLongTensor_free(smaller);
@@ -247,9 +247,9 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
 
       J_sample = THLongTensor_fastGet1d(J, rand_ind);
 
-      sample_idx = J_sample*(1 -_mask) + rand_ind * _mask;
+      sample_idx = J_sample*(1 -_mask) + (rand_ind+1L) * _mask;
 
-      THLongTensor_fastSet1d(self, i, sample_idx);
+      THLongTensor_fastSet1d(self, i, sample_idx-1L);
     }
 }
 void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
