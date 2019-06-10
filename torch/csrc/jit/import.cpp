@@ -95,6 +95,7 @@ void ScriptModuleDeserializer::deserialize(
     script::ModuleLookup module_lookup,
     c10::optional<at::Device> device,
     script::ExtraFilesMap& extra_files) {
+  C10_LOG_API_USAGE_ONCE("torch.script.load");
   torch::ModelDef model_def;
   at::DataPtr data_ptr;
   size_t data_size;
@@ -134,11 +135,13 @@ void ScriptModuleDeserializer::deserialize(
   // Load extra files.
   for (const auto& kv : extra_files) {
     const std::string& key = "extra/" + kv.first;
-    at::DataPtr meta_ptr;
-    size_t meta_size;
-    std::tie(meta_ptr, meta_size) = reader_.getRecord(key);
-    extra_files[kv.first] =
-        std::string(static_cast<char*>(meta_ptr.get()), meta_size);
+    if (reader_.hasFile(key)) {
+      at::DataPtr meta_ptr;
+      size_t meta_size;
+      std::tie(meta_ptr, meta_size) = reader_.getRecord(key);
+      extra_files[kv.first] =
+          std::string(static_cast<char*>(meta_ptr.get()), meta_size);
+    }
   }
 
   loadTensorTable(&model_def);
@@ -250,7 +253,8 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   at::DataPtr data;
   size_t size;
   std::tie(data, size) = reader_.getRecord(path);
-  std::string src(static_cast<const char*>(data.get()), size);
+  auto src = std::make_shared<Source>(
+      std::string(static_cast<const char*>(data.get()), size), path, 0);
   script::import_libs(
       main_module_->class_compilation_unit(),
       qualifier,
@@ -264,7 +268,7 @@ void ScriptModuleDeserializer::moduleSetState(
     IValue state) {
   auto setstate = module->class_compilation_unit().find_function("__setstate__");
 
-  AT_CHECK(
+  TORCH_CHECK(
       setstate != nullptr,
       "Cannot call '__setstate__' method because"
       " it does not exist");
@@ -318,13 +322,17 @@ void ScriptModuleDeserializer::convertModule(
     std::tie(data, size) =
         reader_.getRecord(module_def.torchscript_arena().key());
     std::string data_str(static_cast<const char*>(data.get()), size);
+    auto src = std::make_shared<Source>(
+        std::string(static_cast<const char*>(data.get()), size),
+        module_def.torchscript_arena().key(),
+        1);
 
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
     script::import_methods(
         main_module_->class_compilation_unit(),
         module,
-        data_str,
+        src,
         tensor_table_,
         import_callback);
   }
@@ -338,7 +346,7 @@ void ScriptModuleDeserializer::convertModule(
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
     if (slot.type()->kind() != TypeKind::OptionalType) {
-      AT_CHECK(
+      TORCH_CHECK(
           !slot.value().isNone(),
           "The field '",
           slot.name(),

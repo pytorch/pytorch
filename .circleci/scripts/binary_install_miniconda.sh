@@ -4,28 +4,29 @@ set -eux -o pipefail
 
 # This step runs on multiple executors with different envfile locations
 if [[ "$(uname)" == Darwin ]]; then
-  source "/Users/distiller/project/env"
+  envfile="/Users/distiller/project/env"
 elif [[ -d "/home/circleci/project" ]]; then
   # machine executor (binary tests)
-  source "/home/circleci/project/env"
+  envfile="/home/circleci/project/env"
 else
   # docker executor (binary builds)
-  source "/env"
+  envfile="/env"
 fi
 
-# MINICONDA_ROOT is populated in binary_populate_env.sh , but update_htmls does
-# not source that script since it does not have a BUILD_ENVIRONMENT. It could
-# make a fake BUILD_ENVIRONMENT and call that script anyway, but that seems
-# more hacky than this
-if [[ -z "${MINICONDA_ROOT:-}" ]]; then
-  # TODO get rid of this. Might need to separate binary_populate_env into two
-  # steps, one for every job and one for build jobs
+# TODO this is super hacky and ugly. Basically, the binary_update_html job does
+# not have an env file, since it does not call binary_populate_env.sh, since it
+# does not have a BUILD_ENVIRONMENT. So for this one case, which we detect by a
+# lack of an env file, we manually export the environment variables that we
+# need to install miniconda
+if [[ ! -f "$envfile" ]]; then
   MINICONDA_ROOT="/home/circleci/project/miniconda"
   workdir="/home/circleci/project"
   retry () {
       $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
   }
   export -f retry
+else
+  source "$envfile"
 fi
 
 conda_sh="$workdir/install_miniconda.sh"

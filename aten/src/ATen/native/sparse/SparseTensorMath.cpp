@@ -328,9 +328,7 @@ void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sp
   });
 }
 
-Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef sparse__, Scalar value) {
-  const SparseTensor& sparse_ = sparse__.tref;
-
+Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, Scalar value) {
   AT_ASSERT(!r.is_sparse());
   AT_ASSERT(!dense.is_sparse());
   AT_ASSERT(sparse_.is_sparse());
@@ -618,6 +616,15 @@ Tensor _sparse_mm(
 ) {
   Tensor t = at::zeros({}, dense.options());
   return at::_sparse_addmm(t, sparse, dense, 0, 1);
+}
+
+SparseTensor& _sparse_mm_out(
+  SparseTensor& result,
+  const SparseTensor& sparse,
+  const Tensor& dense
+) {
+  Tensor t = at::zeros({}, dense.options());
+  return at::addmm_out(result, t, sparse, dense, 0, 1);
 }
 
 // --------------------------------------------------------------------

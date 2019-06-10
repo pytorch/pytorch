@@ -19,10 +19,22 @@ fi
 # Install the package
 # These network calls should not have 'retry's because they are installing
 # locally and aren't actually network calls
+# TODO there is duplicated and inconsistent test-python-env setup across this
+#   file, builder/smoke_test.sh, and builder/run_tests.sh, and also in the
+#   conda build scripts themselves. These should really be consolidated
 pkg="/final_pkgs/\$(ls /final_pkgs)"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   conda install -y "\$pkg" --offline
   retry conda install -yq future numpy protobuf six
+  if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
+    # DESIRED_CUDA is in format cu90 or cu100
+    if [[ "${#DESIRED_CUDA}" == 4 ]]; then
+      cu_ver="${DESIRED_CUDA:2:1}.${DESIRED_CUDA:3}"
+    else
+      cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
+    fi
+    retry conda install -yq -c pytorch "cudatoolkit=\${cu_ver}"
+  fi
 else
   pip install "\$pkg"
   retry pip install -q future numpy protobuf six

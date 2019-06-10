@@ -223,7 +223,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_and_output_shapes(
     output_values = output_values.at(0)->node()->inputs();
   }
   AT_ASSERT(output_values.size() == outputs.size());
-  for (size_t i = 0; i < retval->outputs().size(); ++i) {
+  for (size_t i = 0; i < outputs.size(); ++i) {
     auto scalar_type = outputs[i].scalar_type();
     auto sizes = outputs[i].sizes();
     auto type =
@@ -231,6 +231,17 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_and_output_shapes(
     output_values[i]->setType(type);
   }
   return retval;
+}
+
+void addFunctionToModule(
+    Module& module,
+    const std::shared_ptr<Function>& func) {
+  // Make a graph with a fake self argument
+  auto graph = func->graph()->copy();
+  auto v = graph->insertInput(0, "self");
+  v->setType(module.module_object()->type());
+  module.module_object()->type()->compilation_unit().create_function(
+      "forward", graph);
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -324,6 +335,14 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("_register_module", &Module::register_module)
       .def("_register_buffer", &Module::register_buffer)
+      .def(
+          "_set_attribute",
+          [](Module& self, const std::string& name, py::object value) {
+            auto attr = self.find_attribute(name);
+            AT_CHECK(attr != nullptr, "Could not find attribute '", name, "'");
+            auto ivalue = toIValue(value, attr->type());
+            attr->setValue(ivalue);
+          })
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
       .def("_get_buffer", &Module::get_buffer)
@@ -481,6 +500,27 @@ void initJitScriptBindings(PyObject* module) {
             }
             return result;
           })
+      .def(
+          "save",
+          [](std::shared_ptr<Function> self,
+             const std::string& filename,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            Module module;
+            addFunctionToModule(module, self);
+            module.save(filename, _extra_files);
+          },
+          py::arg("filename"),
+          py::arg("_extra_files") = ExtraFilesMap())
+      .def(
+          "save_to_buffer",
+          [](std::shared_ptr<Function> self,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            std::ostringstream buf;
+            Module module;
+            addFunctionToModule(module, self);
+            return py::bytes(buf.str());
+          },
+          py::arg("_extra_files") = ExtraFilesMap())
       .def_property_readonly("graph", &Function::graph)
       .def_property_readonly("schema", &Function::getSchema)
       .def_property_readonly(
@@ -527,10 +567,14 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def(
       "_jit_recursive_script",
+      []() { return getRecursiveScriptMode(); });
+  m.def(
+      "_jit_recursive_script",
       [](bool recurse) { getRecursiveScriptMode() = recurse; });
   m.def(
       "_jit_script_compile",
       [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
+        C10_LOG_API_USAGE_ONCE("torch.script.compile");
         CompilationUnit cu;
         cu.define({def}, {pythonResolver(rcb)}, nullptr);
         std::shared_ptr<Function> defined = cu.get_functions().at(0);
@@ -561,6 +605,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
          ResolutionCallback rcb) {
+        C10_LOG_API_USAGE_ONCE("torch.script.class");
         auto cu = std::make_shared<CompilationUnit>();
         auto classType =
             ClassType::create(c10::QualifiedName(qualifiedName), cu);
@@ -576,7 +621,7 @@ void initJitScriptBindings(PyObject* module) {
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {
-    Parser p(comment);
+    Parser p(std::make_shared<Source>(comment));
     return Decl(p.parseTypeComment());
   });
 
@@ -620,7 +665,7 @@ void initJitScriptBindings(PyObject* module) {
         import_functions(
             CompilationUnit::_get_python_cu_const(),
             cu,
-            src,
+            std::make_shared<Source>(src),
             constant_table,
             self,
             nullptr);

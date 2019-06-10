@@ -493,12 +493,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * the amount of code we have to write for add, when actually
    * a Tensor-Scalar addition is really just a Tensor-Tensor
    * addition when the RHS is 0-dim (except for promotion behavior.)
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   bool is_wrapped_number() const {
-    TORCH_INTERNAL_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     return is_wrapped_number_;
   }
 
@@ -506,12 +502,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Set whether or not a tensor was auto-wrapped from a C++ or Python
    * number.  You probably don't want to call this, unless you are
    * writing binding code.
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   void set_wrapped_number(bool value) {
-    TORCH_INTERNAL_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     TORCH_INTERNAL_ASSERT(dim() == 0);
     is_wrapped_number_ = value;
   }
@@ -522,36 +514,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // Note [Tensor versus Variable in C++]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Autograd methods are only valid for the Variable::Impl subclass
-  // of Tensor.  This is due to some questionable life choices, where
-  // a Variable has a Tensor (so they are not the same thing), but
-  // a Variable is a Tensor (they are subclassed, so that you can write
-  // code on Tensor that works both with Variables and Tensors.  Poor
-  // man's polymorphism).  Variable does NOT satisfy the Liskov Substitution
-  // Principle for Tensor; generally you want to work with all Variables,
-  // or all Tensors, but not a mix of both.  We intend to fix this in
-  // the future.
-  //
-  // Note [We regret making Variable hold a Tensor]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Tensor has a bunch of fields in it.  Are those fields always valid?
-  // Not necessarily: the Variable::Impl subclass of a tensor doesn't use these
-  // fields; instead, it *forwards* them to a contained, inner tensor
-  // (the 'data' tensor).  It doesn't even bother keeping the fields on the
-  // outer tensor up-to-date, because an end user could grab the inner
-  // tensor and directly, e.g., resize it (making any outer fields we track
-  // stale).
-  //
-  // As you might imagine, this is a TERRIBLE state of affairs to be in.
-  // It makes implementing everything on TensorImpl complicated: if
-  // you directly access a field on TensorImpl, you must *virtualize*
-  // the function, if you want it to work correctly when called from
-  // Variable (because we need to override the method to avoid looking
-  // in our fields, and look in the data tensor's fields.)  Anything that
-  // isn't virtualized, won't work if called on a variable.
-  //
-  // The way to fix this is to make Variable::Impl stop holding a tensor;
-  // instead, it should just *be* a tensor.
+  // Autograd methods are only valid for Variables (i.e. Tensors that contain
+  // autograd metadata).
 
   /**
    * Set whether or not a tensor requires gradient.
@@ -609,13 +573,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * performing index calculations to determine the location of elements in
    * the tensor.  We recommend using 'TensorAccessor' to handle this computation
    * for you; this class is available from 'Tensor'.
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   template <typename T>
   inline T * data() const {
-    TORCH_INTERNAL_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     TORCH_CHECK(has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
     TORCH_CHECK(
@@ -643,12 +603,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: The data pointed to by this tensor may not contiguous; do NOT
    * assume that itemsize() * numel() is sufficient to compute the bytes that
    * can be validly read from this tensor.
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   inline void* data() const {
-    TORCH_INTERNAL_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     TORCH_CHECK(has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
     TORCH_CHECK(dtype_initialized(),
@@ -660,20 +616,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * This is just like data(), except it works with Variables.
-   * This function will go away once Variable and Tensor are merged.
-   * See Note [We regret making Variable hold a Tensor]
-   */
-  virtual void* slow_data() const {
-    return data();
-  }
-
-  /**
    * Like data<T>(), but performs no checks.  You are responsible for ensuring
    * that all invariants required by data() are upheld here.
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   template <typename T>
   inline T * unsafe_data() const {
@@ -783,13 +727,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: This function does not check if the requested
    * sizes/strides are in bounds for the storage that is allocated;
    * this is the responsibility of the caller
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_contiguous(IntArrayRef new_size) {
     TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
-    TORCH_INTERNAL_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
 
@@ -808,12 +748,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: This function does not check if the requested
    * sizes/strides are in bounds for the storage that is allocated;
    * this is the responsibility of the caller
-   *
-   * WARNING: It is NOT valid to call this method on a Variable.
-   * See Note [We regret making Variable hold a Tensor]
    */
   void set_sizes_and_strides(IntArrayRef new_size, IntArrayRef new_stride) {
-    TORCH_INTERNAL_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_and_strides is not allowed on Tensor created from .data or .detach()");
     TORCH_CHECK(
         new_size.size() == new_stride.size(),
@@ -907,28 +843,67 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return std::move(autograd_meta_);
   }
 
-  // NOTE: `shallow_copy_and_detach()` does not copy the following TensorImpl fields:
-  // 1. the AutogradMeta pointer, because it is unique for each Variable.
-  // 2. the version counter, because it is set to the passed in `version_counter`.
-  //    See NOTE [ Version Counter Sharing ] for details.
+  // NOTE [ TensorImpl Shallow-Copying ]
   //
-  // NOTE: `allow_tensor_metadata_change` determines whether the TensorImpl shallow-copy
-  // allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
-  // See NOTE [ Metadata Change for a Detached Tensor ] for details.
+  // TensorImpl shallow-copying is used when we want to have two Variables share the same storage pointer
+  // and tensor metadata, but each with a different autograd history. Example call sites:
+  //
+  // 1. `var_detached = var.detach()` uses `shallow_copy_and_detach()` to create `var_detached` that shares
+  // the same storage pointer and tensor metadata with `var`, but with a completely new autograd history.
+  // 2. `var.set_data(tensor)` uses `shallow_copy_from()` to copy storage pointer and tensor metadata from
+  // `tensor` into `var`, while keeping `var`'s original AutogradMeta.
+  //
+  // Functions that shallow-copy a TensorImpl (such as `shallow_copy_and_detach()` / `shallow_copy_from()` /
+  // `copy_tensor_data()`) copy the storage pointer and the tensor metadata fields (e.g. sizes / strides /
+  // storage_offset) by value. However, the following fields are not copied:
+  //
+  // 1. the AutogradMeta pointer, because it is unique for each Variable.
+  // 2. the version counter, because the destination TensorImpl's version counter is either set to the
+  // passed-in `version_counter` (in `shallow_copy_and_detach()` and `copy_tensor_data()`), or it is kept
+  // intact (in `shallow_copy_from()`). See NOTE [ Version Counter Sharing ] for details.
+  //
+  // In `shallow_copy_and_detach()` and `copy_tensor_data()`, the passed-in `allow_tensor_metadata_change`
+  // determines whether the TensorImpl shallow-copy allows changes to its metadata (e.g. sizes / strides /
+  // storage / storage_offset). See NOTE [ Metadata Change for a Detached Tensor ] for details.
+  //
+  // In `shallow_copy_from()`, we don't check the destination TensorImpl's `allow_tensor_metadata_change_`,
+  // because `shallow_copy_from()` is used for implementing functions such as `var.set_data(tensor)`, which
+  // changes `var`'s tensor metadata and expects its `allow_tensor_metadata_change_` to be ignored.
+
+  /**
+   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
+   */
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const {
-    TORCH_INTERNAL_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     auto impl = c10::make_intrusive<TensorImpl>(Storage(storage()), type_id());
-    impl->set_sizes_and_strides(sizes(), strides());
-    impl->storage_offset_ = storage_offset_;
-    impl->is_wrapped_number_ = is_wrapped_number_;
-    impl->reserved_ = reserved_;
+    copy_tensor_data(
+      /*src_impl=*/this,
+      /*dest_impl=*/impl.get(),
+      /*version_counter=*/version_counter,
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
     impl->refresh_contiguous();
-    impl->set_version_counter(version_counter);
-    impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
     return impl;
+  }
+
+  /**
+   * Shallow-copies data from another TensorImpl into this TensorImpl.
+   *
+   * For why this function doesn't check this TensorImpl's `allow_tensor_metadata_change_`,
+   * see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  virtual void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
+    copy_tensor_data(
+      /*src_impl=*/impl.get(),
+      /*dest_impl=*/this,
+      /*version_counter=*/version_counter(),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
+    refresh_numel();
+    refresh_contiguous();
   }
 
   void set_version_counter(
@@ -966,7 +941,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
    */
   DeviceType device_type() const {
-    TORCH_INTERNAL_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     // TODO: A useful internal assert would be to show that device_opt_ is null
     // only if you are an undefined tensor
     TORCH_CHECK(device_opt_.has_value(), "device_type cannot be run on undefined Tensor");
@@ -1438,7 +1412,6 @@ protected:
    * Recompute the cached numel of a tensor.  Call this if you modify sizes.
    */
   void refresh_numel() {
-    TORCH_INTERNAL_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     numel_ = compute_numel();
   }
 
@@ -1447,8 +1420,32 @@ protected:
    * or strides.
    */
   void refresh_contiguous() {
-    TORCH_INTERNAL_ASSERT(!is_variable());  // TODO: remove this when Variable and Tensor are merged
     is_contiguous_ = compute_contiguous();
+  }
+
+  /**
+   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * from one TensorImpl to another TensorImpl.
+   *
+   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
+   */
+  static void copy_tensor_data(
+      const TensorImpl* src_impl,
+      TensorImpl* dest_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) {
+    dest_impl->storage_ = src_impl->storage_;
+    dest_impl->sizes_ = src_impl->sizes_;
+    dest_impl->strides_ = src_impl->strides_;
+    dest_impl->storage_offset_ = src_impl->storage_offset_;
+    dest_impl->data_type_ = src_impl->data_type_;
+    dest_impl->device_opt_ = src_impl->device_opt_;
+    dest_impl->type_id_ = src_impl->type_id_;
+    dest_impl->is_contiguous_ = src_impl->is_contiguous_;
+    dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
+    dest_impl->reserved_ = src_impl->reserved_;
+    dest_impl->set_version_counter(version_counter);
+    dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
   }
 
 protected:

@@ -3,7 +3,7 @@
 # not currently relevant so they are combined into one list.
 from __future__ import absolute_import, division, print_function, unicode_literals
 load("@bazel_skylib//lib:new_sets.bzl", "sets")
-load("//caffe2/caffe2/fb:defs_gpu.bzl", "gpu_library_targets")
+load("//caffe2/caffe2/fb:defs_gpu.bzl", "gpu_library_selector")
 
 GENERATED_CPP = [
     "Functions.cpp",
@@ -83,8 +83,11 @@ libtorch_sources = [
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
+    "torch/csrc/jit/passes/guard_elimination.cpp",
     "torch/csrc/jit/passes/inline_autodiff_subgraphs.cpp",
+    "torch/csrc/jit/passes/inliner.cpp",
     "torch/csrc/jit/passes/inplace_check.cpp",
+    "torch/csrc/jit/passes/insert_guards.cpp",
     "torch/csrc/jit/passes/loop_unrolling.cpp",
     "torch/csrc/jit/passes/lower_grad_of.cpp",
     "torch/csrc/jit/passes/lower_tuples.cpp",
@@ -346,11 +349,11 @@ def add_torch_libs():
     )
 
     # TODO: split it into cpp and cuda parts similarly to libtorch
-    gpu_library_targets(
+    gpu_library_selector(
         name="_C_impl",
-        deps=[":_C_impl_cuda"],
         deps_cpu=[":_C_impl_cpu"],
-        merge_only=True,
+        deps_cuda=[":_C_impl_cuda"],
+        merge_cpu_deps=False,
     )
 
     cpp_library(

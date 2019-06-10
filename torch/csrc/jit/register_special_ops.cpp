@@ -99,7 +99,6 @@ void storeLastDimension(
   }
 }
 
-// bool vector needs to be cast to uint8_t
 template <>
 void storeLastDimension<bool>(
     char* data,
@@ -112,7 +111,7 @@ void storeLastDimension<bool>(
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
   for (int64_t i = 0; i < n; i++) {
-    *(uint8_t*)data = static_cast<uint8_t>(obj[i]);
+    *(bool*)data = static_cast<bool>(obj[i]);
     data += strides[dim] * elementSize;
   }
 }
@@ -291,7 +290,7 @@ RegisterOperators reg({
             DEFINE_TORCH_TENSOR_OP(
                 bool,
                 bool,
-                at::empty({}, at::CPU(at::kByte).options()).fill_(scalar_val))
+                at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
 
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp
@@ -405,7 +404,7 @@ RegisterOperators reg({
           double a;
           double b;
           pop(stack, tensor, a, b);
-          push(stack, at::_th_uniform_(tensor, a, b));
+          push(stack, tensor.uniform_(a, b));
           return 0;
         }),
     Operator(
@@ -418,7 +417,7 @@ RegisterOperators reg({
           double mean;
           double std;
           pop(stack, tensor, mean, std);
-          push(stack, at::_th_normal_(tensor, mean, std));
+          push(stack, tensor.normal_(mean, std));
           return 0;
         }),
     Operator(

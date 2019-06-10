@@ -159,7 +159,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quantdequant",
-          [](std::shared_ptr<Graph>& g, py::dict& pyQParamDict) {
+          [](std::shared_ptr<script::Module>& moduleObj,
+             const std::string& methodName,
+             py::dict& pyQParamDict) {
             if (!pyQParamDict.size()) {
               return;
             }
@@ -167,14 +169,16 @@ void initJITBindings(PyObject* module) {
             auto qparam_dict = py::cast<std::unordered_map<
                 std::string,
                 std::tuple<std::string, float, int>>>(pyQParamDict);
-            return InsertQuantDequantNodes(g, qparam_dict);
+            return InsertQuantDequantNodes(moduleObj, methodName, qparam_dict);
           })
       .def(
-          "_jit_pass_insert_quantdequant_for_param",
+          "_jit_pass_insert_quantdequant_for_weight_bias",
           [](std::shared_ptr<script::Module>& moduleObj,
              const std::string& method_name,
              const std::string& param_name,
              py::function pyGetQParamFunc) {
+            // For different static params we pass different getQParamFunc via
+            // same interface exposed by the quantizer.
             if (param_name == std::string("weight")) {
               auto getQParamFunc =
                   py::cast<std::function<std::tuple<std::string, float, int>(
@@ -184,7 +188,19 @@ void initJITBindings(PyObject* module) {
                   method_name,
                   param_name,
                   getQParamFunc,
-                  at::ScalarType::QUInt8);
+                  at::ScalarType::QInt8);
+            } else if (param_name == std::string("bias")) {
+              auto getQParamFunc =
+                  py::cast<std::function<std::tuple<std::string, float, int>(
+                      float, float)>>(pyGetQParamFunc);
+              InsertQuantDequantNodesForParam(
+                  moduleObj,
+                  method_name,
+                  param_name,
+                  getQParamFunc,
+                  at::ScalarType::QInt32);
+            } else {
+              TORCH_CHECK(false, "Invalid Param Name");
             }
           })
       .def(
@@ -317,6 +333,9 @@ void initJITBindings(PyObject* module) {
           "_jit_set_profiling_mode",
           [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
       .def(
+          "_jit_set_first_class_mode",
+          [](bool enabled) { script::getFirstClassMode() = enabled; })
+      .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
@@ -339,11 +358,9 @@ void initJITBindings(PyObject* module) {
     return states;
   });
 
-  py::class_<ExecutionPlanState>(m, "ExecutionPlanState")
-      .def_property_readonly(
-          "graph", [](ExecutionPlanState& s) { return s.graph; })
-      .def_property_readonly(
-          "code", [](ExecutionPlanState& s) { return s.code; });
+  py::class_<ExecutionPlan>(m, "ExecutionPlan")
+      .def_property_readonly("graph", [](ExecutionPlan& s) { return s.graph; })
+      .def_property_readonly("code", [](ExecutionPlan& s) { return s.code; });
 
   py::class_<Gradient>(m, "Gradient")
       .def_property_readonly("f", [](Gradient& m) { return m.f; })
@@ -504,7 +521,7 @@ void initJITBindings(PyObject* module) {
         // information of this IValue is used both to record the correct type in
         // the trace.
         output_ivalue = toIValue(py_func_output);
-        Value* out_val = jit::tracer::getNestedValueTrace(output_ivalue);
+        Value* out_val = jit::tracer::getValueTrace(output_ivalue);
         body_block->registerOutput(out_val);
         node_output =
             fork_node->output()->setType(FutureType::create(out_val->type()));
