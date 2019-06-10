@@ -136,6 +136,7 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/cpu/dynamic_library_unix.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
+    "torch/csrc/jit/function.cpp",
     "test/cpp/jit/test.cpp",
 ]
 
