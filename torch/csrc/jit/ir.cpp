@@ -1297,6 +1297,12 @@ Node* Graph::createNone(TypePtr typ) {
   return n;
 }
 
+Node* Graph::createUninitialized(TypePtr typ) {
+  Node* n = create(prim::Uninitialized);
+  n->output()->setType(std::move(typ));
+  return n;
+}
+
 Node* Graph::createWithSubgraph(Symbol kind) {
   auto n = create(kind, 0);
   n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope()));

@@ -5006,6 +5006,19 @@ a")
 
         test_resize_as()
 
+    def test_uninitialized(self):
+        graph_str = """graph():
+          %1 : int = prim::Uninitialized()
+          %2 : int = prim::Constant[value=1]()
+          %3 : int = aten::add(%1, %2)
+          return (%3)
+        """
+        g = parse_ir(graph_str)
+        m = self.createFunctionFromGraph(g)
+        self.getExportImportCopy(m)
+        with self.assertRaisesRegex(RuntimeError, "isInt"):
+            m()
+
     def test_requires_grad_loop(self):
         @torch.jit.script
         def test(x, y, z):

@@ -1065,6 +1065,7 @@ struct Graph {
   TORCH_API Node* createNone(
       TypePtr typ); // value of None with type Optional[typ]
   TORCH_API Node* createAutogradZero();
+  TORCH_API Node* createUninitialized(TypePtr typ);
   TORCH_API Node* createWithSubgraph(Symbol kind);
   TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(
