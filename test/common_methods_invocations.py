@@ -835,6 +835,7 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], Ellipsis]),), 'adv_index_sub_3'),
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
+        ('to_sparse', (S, S), (), '', (), (), (), lambda x: x.to_dense()),
     ]
 # TODO: clamp with min/max
 

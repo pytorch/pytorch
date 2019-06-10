@@ -7,6 +7,7 @@
 #include <pybind11/stl.h>
 
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
@@ -256,6 +257,12 @@ bool feedBlob(
       "Unexpected type of argument - only numpy array or string are "
       "supported for feeding");
   return false;
+}
+
+Blob deserializeBlob(const string& content) {
+  Blob blob;
+  DeserializeBlob(content, &blob);
+  return blob;
 }
 } // namespace python_detail
 
@@ -1531,6 +1538,9 @@ void addGlobalMethods(py::module& m) {
       py::arg("name"),
       py::arg("arg"),
       py::arg("device_option") = py::none());
+  m.def("deserialize_blob", [](const string& content) {
+    return python_detail::deserializeBlob(content);
+  });
   m.def("serialize_blob", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     auto* blob = gWorkspace->GetBlob(name);

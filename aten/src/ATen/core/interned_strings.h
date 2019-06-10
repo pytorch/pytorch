@@ -75,6 +75,7 @@ namespace c10 {
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
   _(prim, Guard)                   \
+  _(prim, BailOut)                 \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
   _(prim, MMTreeReduce)            \
@@ -93,6 +94,7 @@ namespace c10 {
   _(aten, __round_to_zero_floordiv)\
   _(aten, _unwrap_optional)        \
   _(prim, fork)                    \
+  _(prim, forkClosure)             \
   _(prim, RaiseException)          \
   _(prim, Function)                \
   _(prim, CreateObject)            \
