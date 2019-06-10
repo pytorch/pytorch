@@ -1,4 +1,5 @@
-from torch import _C, device, default_cuda_generators
+from torch import device
+from torch._C import default_cuda_generators
 from . import _lazy_init, _lazy_call, device_count, device as device_ctx_manager, current_device
 
 __all__ = ['get_rng_state', 'get_rng_state_all',
@@ -85,6 +86,7 @@ def manual_seed(seed):
         to get determinism.  To seed all GPUs, use :func:`manual_seed_all`.
     """
     seed = int(seed)
+    
     def cb():
         idx = current_device()
         default_generator = default_cuda_generators[idx]
@@ -102,6 +104,7 @@ def manual_seed_all(seed):
         seed (int): The desired seed.
     """
     seed = int(seed)
+    
     def cb():
         for i in range(device_count()):
             with device_ctx_manager(i):

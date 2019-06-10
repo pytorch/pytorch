@@ -249,9 +249,10 @@ static inline void manual_seed(uint64_t seed) {
   // available. In that case, we must not seed CUDA; it will fail!
   if (hasCUDA() && detail::getCUDAHooks().getNumGPUs() > 0) {
     globalContext().lazyInitCUDA();
-    auto generator = detail::getCUDAHooks().getDefaultCUDAGenerator();
-    TORCH_CHECK(generator);
-    generator->manualSeedAll(seed);
+    int num_gpus = detail::getCUDAHooks().getNumGPUs();
+    for (int i = 0; i < num_gpus; i++) {
+      detail::getCUDAHooks().getDefaultCUDAGenerator(i)->set_current_seed(seed);
+    }
   }
 }
 

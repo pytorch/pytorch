@@ -6590,9 +6590,7 @@ Returns:
 Example::
 
     >>> g_cpu = torch.Generator()
-    >>> g_cpu_default = torch.default_generator
     >>> g_cuda = torch.Generator(device='cuda')
-    >>> g_cuda_defaults = torch.default_cuda_generators
 """)
 
 

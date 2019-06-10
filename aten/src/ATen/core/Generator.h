@@ -70,9 +70,6 @@ struct CAFFE2_API Generator {
   virtual uint64_t current_seed() const = 0;
   Device device() const;
 
-  // stubbed. will be removed
-  virtual Generator& manualSeedAll(uint64_t seed);
-  
   // See Note [Acquire lock when using random generators]
   std::mutex mutex_;
 
@@ -88,3 +85,4 @@ CAFFE2_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
 } // namespace detail
 
 } // namespace at
+
