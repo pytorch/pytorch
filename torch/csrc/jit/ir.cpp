@@ -1449,7 +1449,7 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 }
 
 Value* Graph::insertFunctionCall(
-    std::shared_ptr<script::Function> callee,
+    std::shared_ptr<Function> callee,
     script::MatchedSchema& matched) {
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->output()
