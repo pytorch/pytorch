@@ -133,13 +133,16 @@ void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
   for (const auto input : n->inputs()) {
     auto it = elementMap_.find(input);
     if (it != elementMap_.end()) {
-      ret |= it->second->getMemoryLocations();
-    }
-  }
-  for (const auto output : n->outputs()) {
-    auto it = elementMap_.find(output);
-    if (it != elementMap_.end()) {
-      ret |= it->second->getMemoryLocations();
+      auto el = it->second;
+      // Add all memory locations this element may alias.
+      ret |= el->getMemoryLocations();
+
+      // We also consider memory locations of contained values to be "read".
+      for (const auto& type : input->type()->containedTypes()) {
+        if (auto wildcard = getWildcard(type)) {
+          ret |= wildcard->getMemoryLocations();
+        }
+      }
     }
   }
 
@@ -606,9 +609,10 @@ void AliasDb::analyzeContainerConstruct(Node* node) {
   for (auto input : node->inputs()) {
     setWildcard(input);
   }
-  for (auto output : node->outputs()) {
-    giveFreshAlias(output);
-  }
+
+  TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+  auto container = node->output();
+  giveFreshAlias(container);
 }
 
 // BroadcastingChunk: all inputs are broadcasted, and then individually chunked.
@@ -1172,10 +1176,8 @@ Element* AliasDb::getOrCreateWildcard(const TypePtr& type) {
 // Search the wildcard index for an element that corresponds to the given type.
 // Const version returns nullptr
 Element* AliasDb::getWildcard(const TypePtr& type) const {
-  TORCH_INTERNAL_ASSERT(shouldAnnotate(type));
   const auto kind = getMutableTypeKind(type);
-  TORCH_INTERNAL_ASSERT(kind);
-  if (!wildcardIndex_.count(*kind)) {
+  if (!kind || !wildcardIndex_.count(*kind)) {
     return nullptr;
   }
   return wildcardIndex_.at(*kind);
