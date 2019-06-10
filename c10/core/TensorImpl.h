@@ -737,7 +737,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void set_sizes_contiguous(IntArrayRef new_size) {
     TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
-    auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
 
     sizes_.resize(new_dim);
@@ -1147,7 +1146,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         " The old caffe2 mixes Reshape and Resize but this behavior has "
         "been changed. If you find this error, most likely you will need "
         "to change corresponding code from Reshape to Resize.");
-    auto old_dim = sizes_.size();
     sizes_ = dims;
     empty_tensor_restride(MemoryFormat::Contiguous);
   }
@@ -1394,7 +1392,6 @@ private:
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDimsTemplate(ArrayRef<T> src) {
     auto old_numel = numel_;
-    auto old_dim = sizes_.size();
     sizes_.resize(src.size());
     int64_t new_numel = 1;
     for (size_t i = 0; i < src.size(); ++i) {
