@@ -1,12 +1,12 @@
 #pragma once
 
+#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/irparser.h>
 #include "test/cpp/jit/test_base.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/utils/memory.h"
-#include "torch/script.h"
 
 namespace torch {
 namespace jit {
