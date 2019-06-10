@@ -263,6 +263,7 @@ make_per_channel_affine_quantizer(
 CAFFE2_API Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer);
+    QuantizerPtr quantizer,
+    MemoryFormat memory_format);
 
 } // namespace at

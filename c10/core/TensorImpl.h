@@ -144,6 +144,10 @@ struct C10_API NonVariableTypeMode {
   static void set_enabled(bool enabled);
 };
 
+#ifdef NAMEDTENSOR_ENABLED
+struct C10_API NamedTensorMetaInterface {};
+#endif
+
 // NOTE [ Version Counter Sharing ]
 //
 // Every Tensor has a version counter. Version counters are incremented whenever the
@@ -733,7 +737,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void set_sizes_contiguous(IntArrayRef new_size) {
     TORCH_CHECK(allow_tensor_metadata_change(), "set_sizes_contiguous is not allowed on Tensor created from .data or .detach()");
-    auto old_dim = sizes_.size();
     auto new_dim = new_size.size();
 
     sizes_.resize(new_dim);
@@ -741,7 +744,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       sizes_[dim] = new_size[dim];
     }
 
-    update_to_contiguous_strides(old_dim);
+    empty_tensor_restride(MemoryFormat::Contiguous);
     refresh_numel();
   }
 
@@ -846,6 +849,28 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   std::unique_ptr<c10::AutogradMetaInterface> detach_autograd_meta() {
     return std::move(autograd_meta_);
   }
+
+#ifdef NAMEDTENSOR_ENABLED
+  /**
+   * Set the pointer to named tensor metadata.
+   */
+  void set_named_tensor_meta(std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
+#ifdef DEBUG
+    if (named_tensor_meta) {
+      TORCH_INTERNAL_ASSERT(dim() == named_tensor_meta->names.size());
+    }
+#endif
+    named_tensor_meta_ = std::move(named_tensor_meta);
+  }
+
+  /**
+   * Return the pointer to named tensor metadata.
+   */
+  c10::NamedTensorMetaInterface* named_tensor_meta() const {
+    return named_tensor_meta_.get();
+  }
+#endif
+
 
   // NOTE [ TensorImpl Shallow-Copying ]
   //
@@ -1121,9 +1146,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         " The old caffe2 mixes Reshape and Resize but this behavior has "
         "been changed. If you find this error, most likely you will need "
         "to change corresponding code from Reshape to Resize.");
-    auto old_dim = sizes_.size();
     sizes_ = dims;
-    update_to_contiguous_strides(old_dim);
+    empty_tensor_restride(MemoryFormat::Contiguous);
   }
 
   /**
@@ -1323,11 +1347,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     device_opt_ = storage_.device();
   }
 
-  virtual void update_strides_to_format(MemoryFormat memory_format) {
+  virtual void empty_tensor_restride(MemoryFormat memory_format) {
+    is_contiguous_ = false;
+    is_channels_last_contiguous_ = false;
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
-        auto old_dim = sizes_.size();
-        update_to_contiguous_strides(old_dim);
+        strides_.resize(sizes_.size(), 0);
+        if (dim() > 0) {
+          int last_idx = dim() - 1;
+          strides_[last_idx] = 1;
+          for (auto i = last_idx - 1; i >= 0; --i) {
+            strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
+          }
+        }
+        is_contiguous_ = true;
         return;
       }
       case MemoryFormat::ChannelsLast: {
@@ -1335,7 +1368,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             dim() == 4,
             "required rank 4 tensor to use channels_last format");
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
-        is_contiguous_ = false;
         is_channels_last_contiguous_ = true;
         return;
       }
@@ -1360,14 +1392,13 @@ private:
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDimsTemplate(ArrayRef<T> src) {
     auto old_numel = numel_;
-    auto old_dim = sizes_.size();
     sizes_.resize(src.size());
     int64_t new_numel = 1;
     for (size_t i = 0; i < src.size(); ++i) {
       new_numel *= src[i];
       sizes_[i] = src[i];
     }
-    update_to_contiguous_strides(old_dim);
+    empty_tensor_restride(MemoryFormat::Contiguous);
     numel_ = new_numel;
     return numel_ != old_numel;
   }
@@ -1402,18 +1433,6 @@ private:
 
   bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
     return SetDims(IntArrayRef{d0, d1, d2, d3});
-  }
-
-  inline void update_to_contiguous_strides(size_t old_dim) {
-    strides_.resize(sizes_.size(), 0);
-    if (dim() > 0) {
-      int last_idx = dim() - 1;
-      strides_[last_idx] = 1;
-      for (auto i = last_idx - 1; i >= 0; --i) {
-        strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
-      }
-    }
-    is_contiguous_ = true;
   }
 
   /**
@@ -1481,6 +1500,10 @@ protected:
   // This pointer always has unique ownership (meaning only one TensorImpl can own it
   // at a time).
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
+
+#ifdef NAMEDTENSOR_ENABLED
+  std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
+#endif
 
   c10::VariableVersion version_counter_;
 
@@ -1605,8 +1628,13 @@ protected:
 //    (optional) device
 //    miscellaneous bitfield
 //
+#ifdef NAMEDTENSOR_ENABLED
+#define NWORDS 30
+#else
+#define NWORDS 29
+#endif
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 29,
+              sizeof(TensorImpl) == sizeof(int64_t) * NWORDS,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 

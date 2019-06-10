@@ -118,7 +118,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
   }
 
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->update_strides_to_format(memory_format);
+  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
 
@@ -134,16 +134,15 @@ Tensor& empty_out(
     IntArrayRef size,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
-      !(result.is_sparse() &&
-          optional_memory_format.has_value()),
-      " memory format options is incompatible with sparse tensors");
+      !optional_memory_format.has_value(),
+      "'memory_format' argument is incompatible with 'out' tensor argument");
   check_size_nonnegative(size);
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0);
   } else {
     result.resize_(size);
     auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
-    result.unsafeGetTensorImpl()->update_strides_to_format(memory_format);
+    result.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   }
   return result;
 }
@@ -184,6 +183,21 @@ Tensor empty_like(
     return result;
   }
 
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
+  auto use_memory_format = memory_format;
+  if (memory_format == MemoryFormat::Preserve) {
+    if (self.is_contiguous(MemoryFormat::ChannelsLast)) {
+      use_memory_format = MemoryFormat::ChannelsLast;
+    } else if (self.is_contiguous(MemoryFormat::Contiguous)) {
+      use_memory_format = MemoryFormat::Contiguous;
+    } else {
+      TORCH_CHECK(
+          false,
+          "undefined behavior of the preserve format, source tensor neither channels last nor contiguous")
+    }
+  }
+
   if (self.is_quantized()) {
     // TODO: uncomment when qscheme diff is landed
     // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
@@ -191,17 +205,8 @@ Tensor empty_like(
     //                        PerTensorAffine scheme right now");
     return at::_empty_affine_quantized(self.sizes(), self.options(),
                                        self.q_scale().toDouble(),
-                                       self.q_zero_point().toLong());
-  }
-
-  auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
-  auto use_memory_format = memory_format;
-  if (memory_format == MemoryFormat::Preserve) {
-    if (self.is_contiguous(MemoryFormat::ChannelsLast)) {
-      use_memory_format = MemoryFormat::ChannelsLast;
-    } else {
-      use_memory_format = MemoryFormat::Contiguous;
-    }
+                                       self.q_zero_point().toLong(),
+                                       use_memory_format);
   }
 
   return at::empty(self.sizes(), options, use_memory_format);
@@ -235,9 +240,10 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   int64_t sz = std::min<int64_t>(n, m);
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data<scalar_t>();
-    for(int64_t i = 0; i < sz; i++) {
-      result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
-    }
+    at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
+      for(int64_t i = p_begin; i < p_end; i++)
+        result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
+    });
   });
 
   return result;

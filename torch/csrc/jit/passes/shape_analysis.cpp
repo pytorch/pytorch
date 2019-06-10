@@ -2,9 +2,11 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/script/error_report.h>
 
 #include <torch/csrc/autograd/variable.h>
 
@@ -73,8 +75,9 @@ class ShapePropagator {
       } catch (propagation_error& e) {
         setUnshapedType(node);
       } catch (std::exception& e) {
-        node->sourceRange().wrapAndRethrowException(
-            e, "operation failed shape propagation");
+        throw script::ErrorReport(node->sourceRange())
+            << ExceptionMessage(e)
+            << "\nThe above operation failed shape propagation in this context";
       }
     }
   }
@@ -571,6 +574,8 @@ class ShapePropagator {
         }
         return;
       }
+      case prim::CallFunction:
+      case prim::CallMethod:
       case prim::AutogradZero: {
         setUnshapedType(node);
         return;
