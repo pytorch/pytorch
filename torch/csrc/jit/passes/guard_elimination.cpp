@@ -24,6 +24,13 @@ struct GuardElimination {
         // grab the next node before we move this one all the way back
         it++;
         auto guardee = n->inputs().at(0)->node();
+        // alias analysis will try to hoist a node out of a loop
+        // if asked. if guardee is in a loop, it should only
+        // be moved to the beginning of the basic block
+        // given the current implementation of AliasAnalysis
+        if (guardee->owningBlock() != n->owningBlock()) {
+          guardee = *n->owningBlock()->nodes().begin();
+        }
         aliasDb_->moveAfterTopologicallyValid(n, guardee);
       } else {
         it++;

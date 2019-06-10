@@ -161,7 +161,7 @@ def run_actual_test(testCaffe2Backend, model, train, batch_size, state_dict=None
     verify.verify(model, input, c2, rtol=rtol, atol=atol,
                   example_outputs=example_outputs,
                   do_constant_folding=do_constant_folding,
-                  opset_version=opset_version)
+                  opset_version=opset_version, verbose=True)
 
 def run_model_test(testCaffe2Backend, model, train, batch_size, state_dict=None,
                    input=None, use_gpu=True, rtol=0.001, atol=1e-7,

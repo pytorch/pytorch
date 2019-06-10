@@ -20,6 +20,8 @@ VALGRIND=${VALGRIND:=ON}
 ./extension_backend_test
 ./xla_tensor_test
 ./tensor_iterator_test
+./Dimname_test
+./NamedTensor_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi

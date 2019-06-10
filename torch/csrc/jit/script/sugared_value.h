@@ -232,12 +232,26 @@ struct FunctionValue : public SugaredValue {
     callee_->ensure_defined();
     MatchedSchema match =
         matchSchema(callee_->getSchema(), loc, *f.graph(), inputs, attributes);
-    return std::make_shared<SimpleValue>(
-        f.graph()->insertFunctionCall(callee_, match));
+    Value* output = f.graph()->insertFunctionCall(callee_, match);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
   }
 
  private:
   std::shared_ptr<Function> callee_;
+};
+
+struct TORCH_API ClosureValue : public SugaredValue {
+  ClosureValue(Value* value) : value_(value) {
+    TORCH_INTERNAL_ASSERT(value_->node()->kind() == prim::Function);
+  }
+  std::string kind() const override {
+    return "closure";
+  }
+  Value* asValue(const SourceRange& range, Function& m) override {
+    return value_;
+  }
+  Value* value_;
 };
 
 // defines how a method obtained from a module behaves in script
@@ -262,8 +276,9 @@ struct MethodValue : public SugaredValue {
     method->ensure_defined();
     MatchedSchema match = matchSchema(
         method->getSchema(), loc, *f.graph(), inputsWithSelf, attributes);
-    return std::make_shared<SimpleValue>(
-        f.graph()->insertMethodCall(method_name_, match));
+    Value* output = f.graph()->insertMethodCall(method_name_, match);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
   }
 
  private:
