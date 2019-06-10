@@ -38,7 +38,6 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   pip install -q ninja --user
   # ninja is installed in /var/lib/jenkins/.local/bin
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
-
   # TODO: move this to Docker
   pip install -q hypothesis --user
 
@@ -103,14 +102,12 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
 fi
 
 test_python_nn() {
-  pip list
-  export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
-  time python test/run_test.py --include tensorboard --verbose
+  time python test/run_test.py --include nn --verbose
   assert_git_not_dirty
 }
 
 test_python_all_except_nn() {
-  # time python test/run_test.py --exclude nn --verbose
+  time python test/run_test.py --exclude nn --verbose
   assert_git_not_dirty
 }
 
