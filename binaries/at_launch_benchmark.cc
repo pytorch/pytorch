@@ -12,7 +12,6 @@
 C10_DEFINE_int(iter, 10e4, "Number of at::launch iterations (tasks)");
 C10_DEFINE_int(warmup_iter, 10, "Number of warmup iterations")
 C10_DEFINE_int(inter_op_threads, 0, "Number of inter-op threads");
-C10_DEFINE_bool(init_caffe2, false, "Initialize Caffe2");
 
 namespace {
 int iter = 0;
@@ -50,13 +49,11 @@ void launch_tasks_and_wait(int tasks_num) {
 }
 
 int main(int argc, char** argv) {
-  if (FLAGS_init_caffe2) {
-    caffe2::GlobalInit(&argc, &argv);
-  } else if (!c10::ParseCommandLineFlags(&argc, &argv)) {
+  caffe2::GlobalInit(&argc, &argv);
+  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
     std::cout << "Failed to parse command line flags" << std::endl;
     return -1;
   }
-
   at::init_num_threads();
 
   if (FLAGS_inter_op_threads > 0) {
