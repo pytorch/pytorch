@@ -14,6 +14,9 @@
 #include <c10/util/Optional.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensor.h>
+#endif
 
 namespace caffe2 {
 class Tensor;
@@ -248,6 +251,14 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
+#ifdef NAMEDTENSOR_ENABLED
+  /// Returns if a `Tensor` has any dimension names
+  bool is_named() const;
+
+  /// Returns a `Tensor`'s dimension names data structure
+  NamedTensorMeta* get_named_tensor_meta() const;
+#endif
+
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
   TensorOptions options() const;
@@ -469,6 +480,7 @@ class CAFFE2_API Tensor {
   Tensor narrow_copy(int64_t dim, int64_t start, int64_t length) const;
   Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
   Tensor permute(IntArrayRef dims) const;
+  Tensor numpy_T() const;
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
   Tensor reciprocal() const;
@@ -701,6 +713,7 @@ class CAFFE2_API Tensor {
   Tensor index_select(int64_t dim, const Tensor & index) const;
   Tensor masked_select(const Tensor & mask) const;
   Tensor nonzero() const;
+  std::vector<Tensor> nonzero_numpy() const;
   Tensor gather(int64_t dim, const Tensor & index, bool sparse_grad=false) const;
   Tensor addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;

@@ -1062,6 +1062,15 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(MyModule(), train=False, input=(x),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_rand(self):
+        x = torch.randn(1, 2, 3, 4)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return (torch.rand(1, 2, 3, 4) + x).shape
+        self.run_model_test(MyModule(), train=False, input=(x),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_convtranspose(self):
         model = nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False, padding=1, output_padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE, atol=1e-7)
@@ -1188,6 +1197,17 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_dynamic_slice_script(self):
+        class DynamicSliceModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x[1:x.size(0)]
+        module = DynamicSliceModel()
+        x = torch.rand(1, 2)
+        example_output = module(x)
+        self.run_model_test(DynamicSliceModel(), train=False, input=(x,),
+                            batch_size=BATCH_SIZE, use_gpu=False, example_outputs=example_output)
 
     def test_dynamic_slice_to_the_end(self):
         class DynamicSliceExportMod(torch.nn.Module):

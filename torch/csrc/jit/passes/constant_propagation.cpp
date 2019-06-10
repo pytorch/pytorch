@@ -18,6 +18,7 @@ namespace {
 std::unordered_set<Symbol> skip_list = {
     prim::If,
     prim::Loop,
+    prim::Function,
     prim::Constant,
     prim::AutogradZero,
     prim::Uninitialized,
