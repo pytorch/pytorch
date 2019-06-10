@@ -1860,6 +1860,10 @@ The returned tensor and :attr:`ndarray` share the same memory. Modifications to
 the tensor will be reflected in the :attr:`ndarray` and vice versa. The returned
 tensor is not resizable.
 
+The :attr:`ndarray` currently supports dtypes of ``torch.float64``,
+``torch.float32``, ``torch.float16``, ``torch.int64``, ``torch.int32``,
+``torch.int16``, ``torch.int8``, ``torch.uint8``, and ``torch.bool``.
+
 Example::
 
     >>> a = numpy.array([1, 2, 3])
@@ -3929,8 +3933,8 @@ between :attr:`low` (inclusive) and :attr:`high` (exclusive).
 The shape of the tensor is defined by the variable argument :attr:`size`.
 
 .. note:
-    With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.int64`.
+    With the global dtype default (``torch.float32``), this function returns
+    a tensor with dtype ``torch.int64``.
 
 Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
@@ -3969,8 +3973,8 @@ random integers generated uniformly between :attr:`low` (inclusive) and
 :attr:`high` (exclusive).
 
 .. note:
-    With the global dtype default (`torch.float32`), this function returns
-    a tensor with dtype `torch.int64`.
+    With the global dtype default (``torch.float32``), this function returns
+    a tensor with dtype ``torch.int64``.
 
 Args:
     {input}
