@@ -201,11 +201,11 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
 }
 
 SourceRange Node::sourceRange() const {
- if(source_range_) {
-   return *source_range_;
- }
- std::stringstream ss;
- return SourceRange(ss.str());
+  if (source_range_) {
+    return *source_range_;
+  }
+  std::stringstream ss;
+  return SourceRange(ss.str());
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
@@ -236,7 +236,6 @@ std::ostream& Node::print(
 
       groups->push_back(this);
     } else {
-
       out << kind().toQualString();
       if (hasAttributes()) {
         printAttributes(out);
@@ -892,6 +891,7 @@ bool Node::hasSideEffects() const {
     case prim::AddStatValue:
     case prim::TimePoint:
     case prim::CallFunction:
+    case prim::CallMethod:
       return true;
   }
   // All other builtin ops are known to be safe.
@@ -1427,6 +1427,43 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
   const auto outputType = classType->getAttribute(field);
   n->output()->setType(outputType);
   return n;
+}
+
+Node* Graph::createStore(const std::string& name, Value* v) {
+  auto n = create(prim::Store, {v}, /*num_outputs*/ 0);
+  n->s_(attr::name, name);
+  return n;
+}
+
+Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
+  auto n = create(prim::Load, {}, /*num_outputs*/ 1);
+  n->s_(attr::name, name);
+  n->output()->setType(type);
+  return n;
+}
+
+Value* Graph::insertFunctionCall(
+    std::shared_ptr<script::Function> callee,
+    script::MatchedSchema& matched) {
+  Value* fn_constant = insertNode(create(prim::Constant))
+                           ->output()
+                           ->setType(FunctionType::create(std::move(callee)));
+  std::vector<Value*> inputs = {fn_constant};
+  inputs.insert(inputs.end(), matched.inputs.begin(), matched.inputs.end());
+  Value* result = insertNode(create(prim::CallFunction, inputs))
+                      ->output()
+                      ->setType(matched.return_types.at(0));
+  return result;
+}
+
+Value* Graph::insertMethodCall(
+    std::string method_name,
+    script::MatchedSchema& matched) {
+  Value* result = insertNode(create(prim::CallMethod, matched.inputs))
+                      ->s_(attr::name, std::move(method_name))
+                      ->output()
+                      ->setType(matched.return_types.at(0));
+  return result;
 }
 
 Node* Graph::createClone(

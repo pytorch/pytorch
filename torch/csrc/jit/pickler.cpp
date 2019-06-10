@@ -600,7 +600,7 @@ OpCode Unpickler::readInstruction() {
     } break;
     case OpCode::BINPUT: {
       size_t memo_id = read<uint8_t>();
-      if (memo_table_.size() <= memo_id) {
+      if (memo_table_.capacity() <= memo_id) {
         memo_table_.reserve(1 + 2 * memo_id);
       }
       memo_table_.push_back(stack_.back());
@@ -612,7 +612,7 @@ OpCode Unpickler::readInstruction() {
           "Found a LONG_BINPUT opcode, but size_t on this system is "
           "not big enough to decode it");
       size_t memo_id = read<uint32_t>();
-      if (memo_table_.size() <= memo_id) {
+      if (memo_table_.capacity() <= memo_id) {
         memo_table_.reserve(1 + 2 * memo_id);
       }
       memo_table_.push_back(stack_.back());

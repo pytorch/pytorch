@@ -79,6 +79,11 @@ namespace aten {
 using namespace ::c10::aten;
 }
 
+namespace script {
+struct Function;
+struct MatchedSchema;
+} // namespace script
+
 // Graph represents one "function" of computation.
 // It uses a simple ownership model where the graph owns all the nodes inside
 // it. All references inside the graph are raw pointers. Destroying the Graph
@@ -1092,6 +1097,15 @@ struct Graph {
   TORCH_API Value* insertGetAttr(Value* obj, const std::string& field) {
     return insertNode(createGetAttr(obj, field))->output();
   }
+  TORCH_API Node* createStore(const std::string& name, Value* v);
+  TORCH_API Node* createLoad(const std::string& name, const TypePtr& type);
+
+  TORCH_API Value* insertFunctionCall(
+      std::shared_ptr<script::Function> callee,
+      script::MatchedSchema& matched);
+  TORCH_API Value* insertMethodCall(
+      std::string method_name,
+      script::MatchedSchema& matched);
 
   // Note: defined in python_ir.cpp and can be used only in python extension
   Node* createPythonOp(
@@ -1176,7 +1190,7 @@ struct Graph {
 
   TORCH_API ~Graph();
 
-  TORCH_API std::string toString(bool print_source_locations=false) const;
+  TORCH_API std::string toString(bool print_source_locations = true) const;
 
   TORCH_API std::ostream& print(
       std::ostream& out,

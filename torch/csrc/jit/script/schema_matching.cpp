@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/script/schema_matching.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
 namespace jit {
@@ -162,8 +162,8 @@ static Value* tryMatchArgument(
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
     if (failure_messages) {
-      auto& ostream =
-          err() << arg.formatTypeMismatchMsg(value->type()->python_str());
+      auto& ostream = err()
+          << arg.formatTypeMismatchMsg(value->type()->python_str());
 
       if (auto v = value->type()->cast<ListType>()) {
         if (v->getElementType()->isSubtypeOf(TensorType::get())) {
@@ -343,8 +343,14 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
     // Make sure the actual_named_value found matches the type of arg
     Value* positional = tryMatchArgument(
-        arg, graph, loc, *actual_named_value,
-        failure_messages, err, allow_conversions, type_env);
+        arg,
+        graph,
+        loc,
+        *actual_named_value,
+        failure_messages,
+        err,
+        allow_conversions,
+        type_env);
     if (!positional) {
       return c10::nullopt;
     }
@@ -403,6 +409,27 @@ c10::optional<MatchedSchema> tryMatchSchema(
   return MatchedSchema{std::move(positional_inputs),
                        std::move(return_types),
                        std::move(return_field_names)};
+}
+
+MatchedSchema matchSchema(
+    const ::c10::FunctionSchema& schema,
+    const SourceRange& loc,
+    Graph& graph,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs) {
+  std::stringstream failure_messages;
+  if (auto result = tryMatchSchema(
+          schema,
+          loc,
+          graph,
+          c10::nullopt,
+          args,
+          kwargs,
+          &failure_messages,
+          /*allow_conversions=*/true)) {
+    return *result;
+  }
+  throw ErrorReport(loc) << failure_messages.str();
 }
 
 // pack outputs of a function following python rules. If there is a single value
@@ -488,16 +515,20 @@ Value* emitBuiltinCall(
         return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
     }
-    for (Function* method : builtin_functions) {
-      if (auto result = method->try_emit_call(
-              graph,
+    for (const std::shared_ptr<Function>& method : builtin_functions) {
+      method->ensure_defined();
+      if (auto result = tryMatchSchema(
+              method->getSchema(),
               loc,
+              graph,
               self,
               inputs,
               attributes,
               render_errors ? &failure_messages : nullptr,
               allow_conversions)) {
-        return result;
+        // we inline builtin calls because they are normally very small
+        // wrappers and are not useful for keeping around to debug
+        return inlineCallTo(graph, *method->graph(), result->inputs).at(0);
       }
     }
   }
@@ -510,8 +541,15 @@ Value* emitBuiltinCall(
   // If errors were required, but we didn't eagerly render error strings,
   // then replay schema matching with error strings eagerly rendered.
   if (!render_errors) {
-    return emitBuiltinCall(loc, graph, name, self, inputs,
-                           attributes, required, /*render_errors=*/true);
+    return emitBuiltinCall(
+        loc,
+        graph,
+        name,
+        self,
+        inputs,
+        attributes,
+        required,
+        /*render_errors=*/true);
   }
 
   // no operators found with the same name, print out similarly named operators
