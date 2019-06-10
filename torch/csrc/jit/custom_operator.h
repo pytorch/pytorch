@@ -48,6 +48,4 @@ private:
 
 } // namespace jit
 
-using RegisterOperators = c10::RegisterOperators;
-
 } // namespace torch
