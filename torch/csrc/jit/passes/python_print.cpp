@@ -1031,7 +1031,7 @@ struct PythonPrintPass {
   }
 
  public:
-  void printFunction(const script::Function& func) {
+  void printFunction(const Function& func) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
@@ -1122,7 +1122,7 @@ struct PythonPrintPass {
 
 void PythonPrint(
     std::ostream& out,
-    const script::Function& func,
+    const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
     std::vector<ClassTypePtr>& class_table,
