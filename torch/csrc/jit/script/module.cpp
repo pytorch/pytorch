@@ -12,6 +12,16 @@ namespace torch {
 namespace jit {
 namespace script {
 
+// first class mode runs models as first class objects,
+// and does not force inlining everywhere. This is experimental
+// as we bring up the system since it will degrade performance
+// and may introduce bugs. test_jit.py provides context managers
+// that enable it for specific tests.
+thread_local bool experimental_run_as_first_class = false;
+bool& getFirstClassMode() {
+  return experimental_run_as_first_class;
+}
+
 void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
   to_impl(device, dtype, non_blocking);
 }
