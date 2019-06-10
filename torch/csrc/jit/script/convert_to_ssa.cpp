@@ -172,6 +172,62 @@ struct ControlFlowLoadStores {
   std::shared_ptr<TypeEnvironment> environment_stack = nullptr;
 };
 
+// The loop node is initially emitted as:
+// Loop(max_trip_count)
+//    block0(loop_counter) {
+//      <body>
+//    }
+//    block1 {
+//      <loop condition>
+//      -> (condition)
+//    }
+// Here, we inline the loop condition and convert the loop to the form:
+// Loop(max_trip_count, start_condition)
+//    block0(loop_counter, loop_carried_block*) {
+//      <body>
+//      -> (continue_condition)
+//    }
+
+void inlineLoopCondition(Node* n) {
+  Block* body_block = n->blocks().at(0);
+
+  auto pre_header = n->blocks().at(1);
+  auto header_block = n->addBlock();
+  header_block->cloneFrom(pre_header, [](Value* v) { return v; });
+  for (auto it = header_block->nodes().begin();
+       it != header_block->nodes().end();) {
+    auto block_node = *it++;
+    block_node->moveBefore(n);
+  }
+  n->addInput(header_block->outputs().at(0));
+  n->eraseBlock(2);
+
+  for (auto it = pre_header->nodes().begin();
+       it != pre_header->nodes().end();) {
+    auto block_node = *it++;
+    block_node->moveBefore(body_block->return_node());
+  }
+  body_block->insertOutput(0, pre_header->outputs().at(0));
+  n->eraseBlock(1);
+}
+
+void inlineLoopCondition(Block* block) {
+  for (Node* n : block->nodes()) {
+    switch (n->kind()) {
+      case prim::If:
+      case prim::Function: {
+        for (auto b : n->blocks()) {
+          inlineLoopCondition(b);
+        }
+      } break;
+      case prim::Loop: {
+        inlineLoopCondition(n->blocks().at(0));
+        inlineLoopCondition(n);
+      } break;
+    }
+  }
+}
+
 // Given a graph where outputs have been added to control flow nodes, and
 // loads and stores are represented in the graph, converts the graph to SSA
 struct SSATransformer {
@@ -223,9 +279,11 @@ struct SSATransformer {
   std::shared_ptr<ValueEnvironment> environment_stack = nullptr;
 };
 
-// Converting to SSA works in two parts. First we add outputs to control flow
+// Converting to SSA works in multiple parts. First we inline the loop condition
+// before and into the body of loops, then we add outputs to control flow
 // nodes, then we stitch together Loads & Stores into SSA form.
 void ConvertToSSA(std::shared_ptr<Graph>& graph) {
+  inlineLoopCondition(graph->block());
   ControlFlowLoadStores ctrl;
   ctrl.run(graph);
   SSATransformer ssa;

@@ -40,6 +40,8 @@ namespace c10 {
   _(prim, JumpZ) /* debug */       \
   _(prim, Load)                    \
   _(prim, Loop)                    \
+  _(prim, While)                   \
+  _(prim, For)                     \
   _(prim, Param)                   \
   _(prim, PackPadded) /* onnx */   \
   _(prim, PadPacked) /* onnx */    \
