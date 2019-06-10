@@ -66,7 +66,7 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   // Quick path to mark Tensor as channels last, without making data copy
   if (memory_format == MemoryFormat::ChannelsLast && self.dim() == 4 && self.strides() == get_channels_last_strides(self.sizes())){
     auto result = self.alias();
-    result.unsafeGetTensorImpl()->update_strides_to_format(MemoryFormat::ChannelsLast);
+    result.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
     return result;
   }
 

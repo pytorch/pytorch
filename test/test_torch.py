@@ -1,4 +1,5 @@
 import sys
+import inspect
 import io
 import os
 import math
@@ -11776,6 +11777,36 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             fake.is_contiguous(memory_format=torch.channels_last),
             "must be tagged to be identified as channels_last")
 
+    def _test_memory_format_operators(self, device):
+        x = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
+        y = abs(torch.randn((10, 3, 32, 32), device=device)) + 1
+        s = 3
+        fns = [
+            lambda x, y, s: x.clone(),
+            lambda x, y, s: abs(x),
+            lambda x, y, s: x + s,
+            lambda x, y, s: x + y,
+            lambda x, y, s: y + x,
+            lambda x, y, s: x * y,
+            lambda x, y, s: y * x,
+            lambda x, y, s: x.sin(),
+            lambda x, y, s: x.sinh(),
+            lambda x, y, s: x.sqrt(),
+            lambda x, y, s: x.abs(),
+        ]
+        for fn in fns:
+            result = fn(x, y, s)
+            self.assertTrue(
+                result.is_contiguous(memory_format=torch.channels_last),
+                "result of the '{}' is not in channels_last format".format(inspect.getsource(fn).strip()))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_memory_format_operators_cuda(self):
+        self._test_memory_format_operators('cuda')
+
+    def test_memory_format_operators_cpu(self):
+        self._test_memory_format_operators('cpu')
+
     def test_memory_format_after_permute(self):
         x = torch.randn(10, 3, 32, 32)
         nhwc = x.contiguous(memory_format=torch.channels_last)
@@ -11828,15 +11859,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         with self.assertRaises(RuntimeError):
             x = torch.empty((3, 3), memory_format=torch.channels_last)
         x = torch.empty((3, 3, 3, 3), memory_format=torch.channels_last)
-        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
-
-    def test_memory_format_empty_out(self):
-        o = torch.empty(3, 3, 3, 3).contiguous(memory_format=torch.channels_last)
-        x = torch.empty((3, 3, 3, 3), out=o, memory_format=torch.channels_last)
-        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
-
-        o = torch.empty(3, 3, 2, 1)
-        x = torch.empty((3, 3, 3, 3), out=o, memory_format=torch.channels_last)
         self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')

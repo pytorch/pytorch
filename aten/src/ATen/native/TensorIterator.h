@@ -266,6 +266,7 @@ protected:
   std::tuple<Device, ScalarType> compute_common_type();
   void allocate_outputs();
   void coalesce_dimensions();
+  void analyze_memory_formats();
 
 protected:
   DimVector shape_;
@@ -280,6 +281,7 @@ protected:
   bool allow_cpu_scalars_ = false;
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
+  bool input_had_channels_last_format_ = false;
 };
 
 struct TensorIterator::Builder {

@@ -201,6 +201,19 @@ void TensorIterator::allocate_outputs() {
         tensor_stride[dim] /= element_size;
       }
       op.tensor = at::empty_strided(tensor_shape, tensor_stride, op.options());
+      if (input_had_channels_last_format_) {
+          op.tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+      }
+    }
+  }
+}
+
+void TensorIterator::analyze_memory_formats() {
+  for (auto& op : operands_) {
+    if (!op.tensor.defined())
+      continue;
+    if (op.tensor.is_contiguous(MemoryFormat::ChannelsLast)) {
+      input_had_channels_last_format_ = true;
     }
   }
 }
@@ -592,6 +605,9 @@ void TensorIterator::compute_shape() {
         // Preserve legacy resizing behavior of out=... arguments
         // TODO: issue warning
         tensor.resize_(shape_);
+        if (input_had_channels_last_format_) {
+          tensor.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+        }
         continue;
       }
       if (!is_reduction_) {
@@ -683,6 +699,8 @@ SplitUntil32Bit TensorIterator::with_32bit_indexing() const {
 }
 
 std::unique_ptr<TensorIterator> TensorIterator::Builder::build() {
+  // Analyze inputs memory format
+  iter_->analyze_memory_formats();
   // set is_output and is_read_write flags on appropriate tensors
   iter_->mark_outputs();
   // compute the broadcasted shape
