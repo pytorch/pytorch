@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/ir_views.h>
 #include <memory>
 #include <unordered_set>
 
@@ -9,7 +9,7 @@ namespace torch {
 namespace jit {
 
 struct BailOutGraphBuilderForNode {
-  BailOutGraphBuilderForNode(std::shared_ptr<Graph> graph)
+  explicit BailOutGraphBuilderForNode(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {
     copy_graph_ = std::make_shared<Graph>();
   }
@@ -32,16 +32,21 @@ struct BailOutGraphBuilderForNode {
     return mapExistingInputForValue(old_value, new_value);
   }
 
-  Value* mapExistingInputForValue(Value* old_value, Value* new_value) {
+  Value* mapExistingInputForValue(Value* old_value, Value* new_value)
+  {
     this->old_to_new_[old_value] = new_value;
     new_value->copyMetadata(old_value);
     return new_value;
   }
 
-  Value* getOrAddInputForValue(Value* v) {
-    if (this->old_to_new_.count(v) == 0) {
+  Value* getOrAddInputForValue(Value* v)
+  {
+    if (this->old_to_new_.count(v) == 0)
+    {
       return addNewInputForValue(v);
-    } else {
+    }
+    else
+    {
       return this->old_to_new_[v];
     }
   }
@@ -53,10 +58,14 @@ struct BailOutGraphBuilderForNode {
   // from block's owning node (e.g. `prim::If` or
   // `prim::Loop`)
   void buildBailOutBlockFrom(Node* n) {
+
     auto* block = copy_graph_->block();
     auto b = n->owningBlock();
     for (auto it = n->iterator(); it != b->nodes().end(); it++) {
-      auto env = [this](Value* v) { return getOrAddInputForValue(v); };
+
+      auto env = [this](Value* v) {
+        return getOrAddInputForValue(v);
+      };
 
       auto node = *it;
       auto new_node = block->appendNode(copy_graph_->createClone(node, env));
@@ -71,27 +80,34 @@ struct BailOutGraphBuilderForNode {
     // bailout graph building will continue from `outer_node` next
     auto outer_node = n->owningBlock()->owningNode();
     if (outer_node) {
-      if (outer_node->kind() == prim::Loop) {
+      if (outer_node->kind() == prim::Loop)
+      {
         buildBailOutLoop(outer_node);
-      } else if (outer_node->kind() == prim::If) {
+      }
+      else if (outer_node->kind() == prim::If)
+      {
         buildBailOutIf(b->outputs(), outer_node);
-      } else {
+      }
+      else
+      {
         AT_ERROR("Unexpected outer node");
       }
+
     }
   }
 
-  void mapValues(
-      const at::ArrayRef<Value*>& block_outputs,
-      const at::ArrayRef<Value*>& carried_deps) {
+  void mapValues(const at::ArrayRef<Value*>& block_outputs, const at::ArrayRef<Value*>& carried_deps)
+  {
     TORCH_INTERNAL_ASSERT(block_outputs.size() == carried_deps.size());
-    for (size_t i = 0; i < block_outputs.size(); i++) {
+    for (size_t i = 0; i < block_outputs.size(); i++)
+    {
       auto nv = getOrAddInputForValue(block_outputs[i]);
       old_to_new_[carried_deps[i]] = nv;
     }
   }
 
-  void buildBailOutLoop(Node* outer_node) {
+  void buildBailOutLoop(Node* outer_node)
+  {
     LoopView lv(outer_node);
     auto old_max_count = getOrAddInputForValue(lv.maxTripCount());
     auto cur_iter = addNewInputForValue(lv.currentTripCount());
@@ -101,15 +117,13 @@ struct BailOutGraphBuilderForNode {
     auto* block = copy_graph_->block();
     // subtract the number of iterations
     WithInsertPoint guard(*block->nodes().end());
-    auto updated_max_trip_count =
-        copy_graph_->insert(aten::sub, {old_max_count, cur_iter});
+    auto updated_max_trip_count = copy_graph_->insert(aten::sub, {old_max_count, cur_iter});
     mapExistingInputForValue(outer_node->inputs()[0], updated_max_trip_count);
     buildBailOutBlockFrom(outer_node);
   }
 
-  void buildBailOutIf(
-      const at::ArrayRef<Value*>& block_outputs,
-      Node* outer_node) {
+  void buildBailOutIf(const at::ArrayRef<Value*>& block_outputs, Node* outer_node)
+  {
     auto if_outputs = outer_node->outputs();
     mapValues(block_outputs, if_outputs);
     buildBailOutBlockFrom(outer_node->next());
@@ -131,7 +145,7 @@ struct BailOutGraphBuilderForNode {
 };
 
 struct BailOutInserter {
-  BailOutInserter(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
+  explicit BailOutInserter(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
 
   void run() {
     insertBailOuts(graph_->block());
