@@ -45,7 +45,7 @@ builtin_cast_methods() {
 
 // The current supported iterable/builtin function
 static const std::unordered_set<c10::Symbol> iterable_funcs = {
-  aten::range,
+  prim::range,
 };
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
@@ -339,7 +339,7 @@ void SimpleValue::fillInLoopInfo(
 std::vector<TypePtr> IterableValue::getItersTypeInfo(
   const SourceRange& loc,
   Function& m) {
-    if (symbol_ == aten::range) {
+    if (symbol_ == prim::range) {
       return {IntType::get()};
     } else {
       throw ErrorReport(loc)
@@ -355,7 +355,7 @@ void IterableValue::fillInLoopInfo(
   TORCH_INTERNAL_ASSERT(n->kind() == prim::Loop);
   // List, Tuple, Tensor, fill in missing information desugaring
   Graph& g = *m.graph();
-  if (symbol_ == aten::range) {
+  if (symbol_ == prim::range) {
     // fill in max_trip_count_val
     WithInsertPoint guard(n);
     Value* end_val = nullptr, *start_val = nullptr, *step_val = nullptr;
