@@ -12443,14 +12443,6 @@ a")
         self.checkScript(fn3, ("abcdefghi",))
         self.checkScript(fn4, ("abcdefghi",))
 
-    def test_optional_scalartype(self):
-        @torch.jit.script
-        def fn(a, b):
-            return torch.add(a.cumsum(0, dtype=torch.long).sum(dtype=None),
-                             b.cumprod(0, dtype=None).prod(dtype=torch.double))
-
-        self.assertExpectedGraph(fn.graph)
-
     def test_non_final_return(self):
 
         def simple(x):
