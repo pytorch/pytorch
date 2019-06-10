@@ -651,6 +651,7 @@ BAD_EXAMPLES = [
 
 class TestDistributions(TestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = False
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob

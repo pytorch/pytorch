@@ -260,6 +260,14 @@ class TestMkldnn(TestCase):
             self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
             self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
+    def test_softmax(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
+        for dim in range(x.ndim):
+            softmax = torch.nn.Softmax(dim=dim)
+            self.assertEqual(
+                softmax(x),
+                softmax(x.to_mkldnn()).to_dense())
+
     def test_sigmoid(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10
         mkldnn_x = x.to_mkldnn()

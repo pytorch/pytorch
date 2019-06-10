@@ -1,4 +1,4 @@
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 
 namespace caffe2 {
 
