@@ -2445,16 +2445,10 @@ workflows:
       - pytorch_namedtensor_linux_trusty_py3_6_gcc5_4_build:
           requires:
             - setup
-          filters:
-            branches:
-              only: master
       - pytorch_namedtensor_linux_trusty_py3_6_gcc5_4_test:
           requires:
             - setup
             - pytorch_namedtensor_linux_trusty_py3_6_gcc5_4_build
-          filters:
-            branches:
-              only: master
       - pytorch_linux_trusty_py3_6_gcc7_build:
           requires:
             - setup

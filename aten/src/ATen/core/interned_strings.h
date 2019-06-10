@@ -93,6 +93,7 @@ namespace c10 {
   _(aten, __round_to_zero_floordiv)\
   _(aten, _unwrap_optional)        \
   _(prim, fork)                    \
+  _(prim, forkClosure)             \
   _(prim, RaiseException)          \
   _(prim, Function)                \
   _(prim, CreateObject)            \
