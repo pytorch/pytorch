@@ -118,7 +118,7 @@ class ShapePropagator {
       }
       if (resizesInput(n)) {
         for (const auto input : n->inputs()) {
-          if (aliasDb_.writesToAlias(n, {input}, /*recurseBlocks*/ false)) {
+          if (aliasDb_.writesToAlias(n, {input})) {
             resized_alias_set.insert(input);
           }
         }
