@@ -1563,15 +1563,15 @@ class TestNN(NNTestCase):
         m.weight.grad = torch.randn(10, 20)
         weight_ref = m.weight
         weight_grad_ref = m.weight.grad
-        m.to_("cuda")
-        self.assertNotEqual(weight_ref.device, m.weight.device)
-        self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
+        m.to_(torch.double)
+        self.assertNotEqual(weight_ref.dtype, m.weight.dtype)
+        self.assertNotEqual(weight_grad_ref.dtype, m.weight.grad.dtype)
 
         # Test that `module.to_()` invalidates `module`'s original parameters
         # in any autograd graph they participate in.
         m = nn.Linear(20, 10)
         pvm = m.weight.mul(m.weight)
-        m.to_("cuda")
+        m.to_(torch.double)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pvm.backward(torch.randn(10, 20))
 
@@ -1580,7 +1580,7 @@ class TestNN(NNTestCase):
         m = nn.Linear(20, 10)
         m.weight.grad = torch.randn(10, 20).requires_grad_()
         pgm = m.weight.grad.mul(m.weight.grad)
-        m.to_("cuda")
+        m.to_(torch.double)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pgm.backward(torch.randn(10, 20))
 
