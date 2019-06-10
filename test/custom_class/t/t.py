@@ -15,7 +15,8 @@ class Bar:
 def f(x):
     val = torch._C.Foo(5, 3)
     val.display()
-    print(val)
+    # print(val)
+    print(val.add(3))
 
 print(f.graph)
 f(torch.randn(32, 32))

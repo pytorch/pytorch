@@ -21,16 +21,17 @@ struct Foo {
   void display() {
     cout<<"x: "<<x<<' '<<"y: "<<y<<endl;
   }
+  int64_t add(int64_t z) {
+    return (x+y)*z;
+  }
   ~Foo() {
-    std::cout<<"Deleting?????"<<std::endl;
   }
 };
-// static auto registry2 = c10::RegisterOperators()
-//          .op("my_op", [](torch::Tensor a) {return x;});
 
 static auto registry = torch::jit::RegisterOperators("my_ops::warp_perspective",
                                                      &warp_perspective);
 static auto test = torch::jit::class_<Foo>("Foo")
                     // .init<>()
                     .init<int64_t, int64_t>()
-                    .def("display", &Foo::display);
+                    .def("display", &Foo::display)
+                    .def("add", &Foo::add);
