@@ -1000,8 +1000,8 @@ class _TestTorchMixin(object):
             self.assertEqual(ans.shape, expected.shape)
             self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-04, atol=1e-04))
 
-        for n in range(1, 5):
-            for m in range(1, 5):
+        for n in range(1, 3):
+            for m in range(1, 3):
                 for axes in permutations([0, 1], 2):
                     # 2d, inner dimensions C
                     x = torch.randn(n, m, device=device)
