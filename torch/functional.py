@@ -533,7 +533,7 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
 def tensordot(a, b, dims=2):
     r"""Returns a contraction of a and b over multiple dimensions.
 
-    :attr:`tensordot` implements a generalizes the matrix product.
+    :attr:`tensordot` implements a generalized matrix product.
 
     Args:
       a (Tensor): Left tensor to contract
