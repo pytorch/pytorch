@@ -6150,7 +6150,7 @@ a")
         for op in ops:
             if op in unimplemented:
                 continue
-            elif op == "__load__":  # Weird windows behavior...
+            elif op == "__loader__":    # Weird windows behavior...
                 continue
             elif op == "modf":
                 checkMath("modf", 1, ret_type="Tuple[float, float]")
