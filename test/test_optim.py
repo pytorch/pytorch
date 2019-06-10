@@ -1,3 +1,4 @@
+import warnings
 import math
 import unittest
 import functools
@@ -529,7 +530,10 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning(self):
         epochs = 35
-        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         def old_pattern():
             for e in range(epochs):
@@ -540,7 +544,10 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_with_arg(self):
         epochs = 35
-        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         def old_pattern2():
             for e in range(epochs):
@@ -554,7 +561,10 @@ class TestLRScheduler(TestCase):
         for i, group in enumerate(self.opt.param_groups):
             group['initial_lr'] = 0.01
 
-        scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         def old_pattern():
             for e in range(epochs):
@@ -568,7 +578,38 @@ class TestLRScheduler(TestCase):
         for i, group in enumerate(self.opt.param_groups):
             group['initial_lr'] = 0.01
 
-        scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_with_overriden_optim_step(self):
+        epochs = 35
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+        # emulate use-case with optimizer.step overriden
+        import types
+
+        old_step = self.opt.step
+
+        def new_step(o, *args, **kwargs):
+            retval = old_step(*args, **kwargs)
+            return retval
+
+        self.opt.step = types.MethodType(new_step, self.opt)
 
         def old_pattern2():
             for e in range(epochs):
@@ -578,10 +619,11 @@ class TestLRScheduler(TestCase):
         self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
 
     def test_new_pattern_no_warning(self):
-        import warnings
-
         epochs = 35
-        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
@@ -591,10 +633,11 @@ class TestLRScheduler(TestCase):
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
     def test_new_pattern_no_warning_with_arg(self):
-        import warnings
-
         epochs = 35
-        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
@@ -602,6 +645,31 @@ class TestLRScheduler(TestCase):
                 self.opt.step()
                 scheduler.step(e)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+    def test_new_pattern_no_warning_with_overriden_optim_step(self):
+        epochs = 35
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+        # emulate use-case with optimizer.step overriden
+        import types
+
+        old_step = self.opt.step
+
+        def new_step(o, *args, **kwargs):
+            retval = old_step(*args, **kwargs)
+            return retval
+
+        self.opt.step = types.MethodType(new_step, self.opt)
+
+        def new_pattern():
+            for e in range(epochs):
+                self.opt.step()
+                scheduler.step()
+
+        self.assertWarnsRegex(new_pattern, r'`optimizer.step\(\)` has been overridden')
 
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3

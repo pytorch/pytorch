@@ -48,7 +48,7 @@ static std::pair<std::string, std::string> getDtypeNames(
     case at::ScalarType::QInt32:
       return std::make_pair("qint32", "");
     case at::ScalarType::BFloat16:
-      return std::make_pair("bfloat16", "bfloat16");
+      return std::make_pair("bfloat16", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");
   }

@@ -187,4 +187,4 @@ REGISTER_CUDA_OPERATOR(RoIAlign, RoIAlignOp<float, CUDAContext>);
 
 using RoIAlignOpFloatCUDA = caffe2::RoIAlignOp<float, caffe2::CUDAContext>;
 
-C10_REGISTER_CAFFE2_OPERATOR_CUDA(RoIAlign, RoIAlignOpFloatCUDA);
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(RoIAlign, RoIAlignOpFloatCUDA);

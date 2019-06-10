@@ -12,6 +12,16 @@ namespace torch {
 namespace jit {
 namespace script {
 
+// first class mode runs models as first class objects,
+// and does not force inlining everywhere. This is experimental
+// as we bring up the system since it will degrade performance
+// and may introduce bugs. test_jit.py provides context managers
+// that enable it for specific tests.
+thread_local bool experimental_run_as_first_class = false;
+bool& getFirstClassMode() {
+  return experimental_run_as_first_class;
+}
+
 struct RecursiveMethodCallError : public std::exception {};
 void placeholderCreator(Function&) {
   throw RecursiveMethodCallError();
@@ -213,10 +223,40 @@ static FunctionSchema sliceFirst(const FunctionSchema& schema) {
   return schema.cloneWithArguments(std::move(sliced));
 }
 
-Method::Method(Module* owner, Function* first_class_function)
+Method::Method(
+    Module* owner,
+    const std::shared_ptr<Function>& first_class_function)
     : owner_(owner), schema_(sliceFirst(first_class_function->getSchema())) {
-  std::tie(function_, initial_ivalues_) =
-      owner->lower_first_class_method(first_class_function);
+  if (experimental_run_as_first_class) {
+    function_ = first_class_function;
+    // initial_ivalues_ left blank
+  } else {
+    std::tie(function_, initial_ivalues_) =
+        owner->lower_first_class_method(first_class_function.get());
+  }
+}
+
+void Method::run(Stack& stack) {
+  if (experimental_run_as_first_class) {
+    stack.insert(stack.begin(), owner().module_object());
+  }
+  for (const auto& input : initial_ivalues_) {
+    push(stack, input.value());
+  }
+  function_->run(stack);
+}
+
+IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
+  getSchema().checkAndNormalizeInputs(stack, kwargs);
+  if (experimental_run_as_first_class) {
+    stack.insert(stack.begin(), owner().module_object());
+  }
+  for (const auto& input : initial_ivalues_) {
+    push(stack, input.value());
+  }
+  // use run rather than operator() to skip the second schema check.
+  function_->run(stack);
+  return stack.front();
 }
 
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
@@ -306,7 +346,11 @@ void Module::train(bool on) {
   for (auto& submod : get_modules()) {
     submod->train(on);
   }
-  register_buffer("training", torch::tensor(on ? 1 : 0, at::kLong));
+  if (auto slot = find_attribute("training")) {
+    slot->setValue(on);
+  } else {
+    register_attribute("training", BoolType::get(), on);
+  }
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {

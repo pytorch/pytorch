@@ -1,5 +1,6 @@
 #include <THC/THCApply.cuh>
 #include <TH/THHalf.h>
+#include <TH/THBFloat16.h>
 #include <THC/THCNumerics.cuh>
 #include <THC/THCTensorCopy.hpp>
 #include <type_traits>
@@ -20,6 +21,13 @@ template <>
 struct CopyOp <bool> {
   __device__ __forceinline__ void operator()(bool* dst, bool* src) {
       *dst = ScalarConvert<bool, bool>::to(*src);
+  }
+};
+
+template <>
+struct CopyOp <at::BFloat16> {
+  __device__ __forceinline__ void operator()(at::BFloat16* dst, at::BFloat16* src) {
+      *dst = ScalarConvert<at::BFloat16, at::BFloat16>::to(*src);
   }
 };
 

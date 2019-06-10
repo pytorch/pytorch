@@ -5,7 +5,6 @@
 #include <TH/THBFloat16.h>
 
 #define scalar_t THBFloat16
-#define accreal float
 #define Real BFloat16
 
 #define CReal CudaBFloat16
@@ -14,7 +13,6 @@
 #line 1 THC_GENERIC_FILE
 #include THC_GENERIC_FILE
 #undef scalar_t
-#undef accreal
 #undef Real
 
 #undef CReal
