@@ -47,8 +47,10 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -70,7 +72,7 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, DEVICE, STRING
+  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STRING
 };
 
 struct FunctionParameter;
@@ -134,6 +136,7 @@ struct PythonArgs {
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
+  inline at::MemoryFormat toMemoryFormat(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -177,6 +180,7 @@ struct FunctionParameter {
   // having this as a raw PyObject * will presumably leak it, but these are only held by static objects
   // anyway, and Py_Finalize can already be called when this is destructed.
   PyObject *python_name;
+  at::SmallVector<PyObject *, 5> numpy_python_names;
   at::Scalar default_scalar;
   std::vector<int64_t> default_intlist;
   union {
@@ -334,7 +338,21 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
     return (scalartype == at::ScalarType::Undefined) ?
             torch::tensors::get_default_scalar_type() : scalartype;
   }
-  return reinterpret_cast<THPDtype*>(args[i])->scalar_type;
+  PyObject *obj = args[i];
+  if (obj == (PyObject*)&PyFloat_Type) {
+    return at::ScalarType::Double;
+  }
+  if (obj == (PyObject*)&PyBool_Type) {
+    return at::ScalarType::Bool;
+  }
+  if (obj == (PyObject*)&PyLong_Type
+#if PY_MAJOR_VERSION == 2
+      || obj == (PyObject*)&PyInt_Type
+#endif
+  ) {
+    return at::ScalarType::Long;
+  }
+  return reinterpret_cast<THPDtype*>(obj)->scalar_type;
 }
 
 inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
@@ -369,7 +387,7 @@ inline at::Device PythonArgs::device(int i) {
   }
   if (THPUtils_checkLong(args[i])) {
     const auto device_index = THPUtils_unpackLong(args[i]);
-    AT_CHECK(device_index >= 0, "Device index must not be negative");
+    TORCH_CHECK(device_index >= 0, "Device index must not be negative");
     return at::Device(at::DeviceType::CUDA, device_index);
   }
   const std::string &device_str = THPUtils_unpackString(args[i]);
@@ -385,6 +403,13 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return device(i);
+}
+
+inline at::MemoryFormat PythonArgs::toMemoryFormat(int i) {
+  if (!args[i]) return at::MemoryFormat::Any;
+  TORCH_CHECK(THPMemoryFormat_Check(args[i]), "memory_format arg must be an instance of the torch.memory_format");
+  const auto memory_format = reinterpret_cast<THPMemoryFormat*>(args[i]);
+  return memory_format->memory_format;
 }
 
 inline std::string PythonArgs::string(int i) {

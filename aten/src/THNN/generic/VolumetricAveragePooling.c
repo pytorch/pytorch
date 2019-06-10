@@ -5,6 +5,8 @@
 #include <THNN/generic/pooling_shape.h>
 #include <algorithm>
 
+#include <ATen/Parallel.h>
+
 static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
                          THNNState *state,
                          THTensor *input,
@@ -107,67 +109,67 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           int padH,
           bool count_include_pad)
 {
-  int64_t k;
-#pragma omp parallel for private(k)
-  for (k = 0; k < nslices; k++)
-  {
-    int64_t i, j, ti;
-
-    /* local pointers. */
-    scalar_t *ip = input_p + k * itime * iwidth * iheight;
-    scalar_t *op = output_p + k * otime * owidth * oheight;
-    for (i = 0; i < otime * oheight * owidth; ++i)
-      *(op + i) = 0;
-
-    /* loop over output */
-    for (ti = 0; ti < otime; ti++)
+  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    for (auto k = start; k < end; k++)
     {
-      for (i = 0; i < oheight; i++)
+      int64_t i, j, ti;
+
+      /* local pointers. */
+      scalar_t *ip = input_p + k * itime * iwidth * iheight;
+      scalar_t *op = output_p + k * otime * owidth * oheight;
+      for (i = 0; i < otime * oheight * owidth; ++i)
+        *(op + i) = 0;
+
+      /* loop over output */
+      for (ti = 0; ti < otime; ti++)
       {
-        for (j = 0; j < owidth; j++)
+        for (i = 0; i < oheight; i++)
         {
-          /* compute pool range. */
-          int64_t tstart = ti * dT - padT;
-          int64_t hstart = i  * dH - padH;
-          int64_t wstart = j  * dW - padW;
-          int64_t tend = std::min(tstart + kT, itime + padT);
-          int64_t hend = std::min(hstart + kH, iheight + padH);
-          int64_t wend = std::min(wstart + kW, iwidth + padW);
-          int64_t pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
-          tstart = std::max(tstart, (int64_t) 0);
-          hstart = std::max(hstart, (int64_t) 0);
-          wstart = std::max(wstart, (int64_t) 0);
-          tend = std::min(tend, itime);
-          hend = std::min(hend, iheight);
-          wend = std::min(wend, iwidth);
-
-          int divide_factor;
-          if (count_include_pad)
-            divide_factor = pool_size;
-          else
-            divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
-
-          /* compute local sum: */
-          scalar_t sum = 0.0;
-          int64_t x, y, z;
-
-          for (z = tstart; z < tend; z++)
+          for (j = 0; j < owidth; j++)
           {
-            for (y = hstart; y < hend; y++)
+            /* compute pool range. */
+            int64_t tstart = ti * dT - padT;
+            int64_t hstart = i  * dH - padH;
+            int64_t wstart = j  * dW - padW;
+            int64_t tend = std::min(tstart + kT, itime + padT);
+            int64_t hend = std::min(hstart + kH, iheight + padH);
+            int64_t wend = std::min(wstart + kW, iwidth + padW);
+            int64_t pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
+            tstart = std::max(tstart, (int64_t) 0);
+            hstart = std::max(hstart, (int64_t) 0);
+            wstart = std::max(wstart, (int64_t) 0);
+            tend = std::min(tend, itime);
+            hend = std::min(hend, iheight);
+            wend = std::min(wend, iwidth);
+
+            int divide_factor;
+            if (count_include_pad)
+              divide_factor = pool_size;
+            else
+              divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
+
+            /* compute local sum: */
+            scalar_t sum = 0.0;
+            int64_t x, y, z;
+
+            for (z = tstart; z < tend; z++)
             {
-              for (x = wstart; x < wend; x++)
+              for (y = hstart; y < hend; y++)
               {
-                sum +=  *(ip + z * iwidth * iheight + y * iwidth + x);
+                for (x = wstart; x < wend; x++)
+                {
+                  sum +=  *(ip + z * iwidth * iheight + y * iwidth + x);
+                }
               }
             }
-          }
 
-          /* set output to local max */
-          *op++ += sum / divide_factor;
+            /* set output to local max */
+            *op++ += sum / divide_factor;
+          }
         }
       }
     }
-  }
+  });
 }
 
 void THNN_(VolumetricAveragePooling_updateOutput)(
@@ -245,7 +247,6 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   }
   else  /* batch mode */
   {
-    int64_t p;
     int64_t nBatch = input->size(0);
 
     int64_t istride = nslices * itime * iwidth * iheight;
@@ -257,19 +258,20 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     input_data = input->data<scalar_t>();
     output_data = output->data<scalar_t>();
 
-#pragma omp parallel for private(p)
-    for (p=0; p < nBatch; p++)
-    {
-      THNN_(VolumetricAveragePooling_updateOutput_frame)(
-        input_data + p * istride, output_data + p * ostride, nslices,
-        itime, iwidth, iheight,
-        otime, owidth, oheight,
-        kT, kW, kH,
-        dT, dW, dH,
-        padT, padW, padH,
-        count_include_pad
-      );
-    }
+    at::parallel_for(0, nBatch, 0, [&](int64_t start, int64_t end) {
+      for (auto p = start; p < end; p++)
+      {
+        THNN_(VolumetricAveragePooling_updateOutput_frame)(
+          input_data + p * istride, output_data + p * ostride, nslices,
+          itime, iwidth, iheight,
+          otime, owidth, oheight,
+          kT, kW, kH,
+          dT, dW, dH,
+          padT, padW, padH,
+          count_include_pad
+        );
+      }
+    });
   }
 
   /* cleanup */
@@ -297,63 +299,63 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
           int padH,
           bool count_include_pad)
 {
-  int64_t k;
-#pragma omp parallel for private(k)
-  for (k = 0; k < nslices; k++)
-  {
-    int64_t i, j, ti;
-
-    /* local pointers */
-    scalar_t *ip = gradInput_p + k * itime * iwidth * iheight;
-    scalar_t *op = gradOutput_p + k * otime * owidth * oheight;
-    for (i = 0; i < itime*iwidth*iheight; i++)
-      *(ip + i) = 0;
-
-    /* loop over output */
-    for (ti = 0; ti < otime; ti++)
+  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
+    for (auto k = start; k < end; k++)
     {
-      for (i = 0; i < oheight; i++)
+      int64_t i, j, ti;
+
+      /* local pointers */
+      scalar_t *ip = gradInput_p + k * itime * iwidth * iheight;
+      scalar_t *op = gradOutput_p + k * otime * owidth * oheight;
+      for (i = 0; i < itime*iwidth*iheight; i++)
+        *(ip + i) = 0;
+
+      /* loop over output */
+      for (ti = 0; ti < otime; ti++)
       {
-        for (j = 0; j < owidth; j++)
+        for (i = 0; i < oheight; i++)
         {
-          int64_t tstart = ti * dT - padT;
-          int64_t hstart = i  * dH - padH;
-          int64_t wstart = j  * dW - padW;
-          int64_t tend = std::min(tstart + kT, itime + padT);
-          int64_t hend = std::min(hstart + kH, iheight + padH);
-          int64_t wend = std::min(wstart + kW, iwidth + padW);
-          int64_t pool_size = (tend -tstart) * (hend - hstart) * (wend - wstart);
-          tstart = std::max(tstart, (int64_t) 0);
-          hstart = std::max(hstart, (int64_t) 0);
-          wstart = std::max(wstart, (int64_t) 0);
-          tend = std::min(tend, itime);
-          hend = std::min(hend, iheight);
-          wend = std::min(wend, iwidth);
-
-          int64_t divide_factor;
-          if (count_include_pad)
-            divide_factor = pool_size;
-          else
-            divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
-
-          /* scatter gradients out to footprint: */
-          scalar_t val  = *op++;
-
-          int64_t x,y,z;
-          for (z = tstart; z < tend; z++)
+          for (j = 0; j < owidth; j++)
           {
-            for (y = hstart; y < hend; y++)
+            int64_t tstart = ti * dT - padT;
+            int64_t hstart = i  * dH - padH;
+            int64_t wstart = j  * dW - padW;
+            int64_t tend = std::min(tstart + kT, itime + padT);
+            int64_t hend = std::min(hstart + kH, iheight + padH);
+            int64_t wend = std::min(wstart + kW, iwidth + padW);
+            int64_t pool_size = (tend -tstart) * (hend - hstart) * (wend - wstart);
+            tstart = std::max(tstart, (int64_t) 0);
+            hstart = std::max(hstart, (int64_t) 0);
+            wstart = std::max(wstart, (int64_t) 0);
+            tend = std::min(tend, itime);
+            hend = std::min(hend, iheight);
+            wend = std::min(wend, iwidth);
+
+            int64_t divide_factor;
+            if (count_include_pad)
+              divide_factor = pool_size;
+            else
+              divide_factor = (tend - tstart) * (hend - hstart) * (wend - wstart);
+
+            /* scatter gradients out to footprint: */
+            scalar_t val  = *op++;
+
+            int64_t x,y,z;
+            for (z = tstart; z < tend; z++)
             {
-              for (x = wstart; x < wend; x++)
+              for (y = hstart; y < hend; y++)
               {
-                *(ip + z * iheight * iwidth + y * iwidth + x) += val / divide_factor;
+                for (x = wstart; x < wend; x++)
+                {
+                  *(ip + z * iheight * iwidth + y * iwidth + x) += val / divide_factor;
+                }
               }
             }
           }
         }
       }
     }
-  }
+  });
 }
 
 void THNN_(VolumetricAveragePooling_updateGradInput)(
@@ -435,25 +437,25 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   }
   else /* batch mode */
   {
-    int64_t p;
     int64_t nBatch = input->size(0);
 
     int64_t istride = nslices * itime * iwidth * iheight;
     int64_t ostride = nslices * otime * owidth * oheight;
 
-#pragma omp parallel for private(p)
-    for (p = 0; p < nBatch; p++)
-    {
-      THNN_(VolumetricAveragePooling_updateGradInput_frame)(
-        gradInput_data  + p * istride, gradOutput_data + p * ostride, nslices,
-        itime, iwidth, iheight,
-        otime, owidth, oheight,
-        kT, kW, kH,
-        dT, dW, dH,
-        padT, padW, padH,
-        count_include_pad
-      );
-    }
+    at::parallel_for(0, nBatch, 0, [&](int64_t start, int64_t end) {
+      for (auto p = start; p < end; p++)
+      {
+        THNN_(VolumetricAveragePooling_updateGradInput_frame)(
+          gradInput_data  + p * istride, gradOutput_data + p * ostride, nslices,
+          itime, iwidth, iheight,
+          otime, owidth, oheight,
+          kT, kW, kH,
+          dT, dW, dH,
+          padT, padW, padH,
+          count_include_pad
+        );
+      }
+    });
   }
 
   /* cleanup */

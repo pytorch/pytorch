@@ -49,13 +49,13 @@ signature.
   and may be omitted by passing an undefined tensor.  When a function takes multiple
   `Tensor` arguments, these tensors are assumed to be the same type (e.g.,
   if one argument is a `FloatTensor`, all other arguments are checked
-  to be `FloatTensor`s.)
+  to be `FloatTensor`s).  
   `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
-  In general annotations can be defined via the following four situtations
-  `Tensor(a)` - `a` is a set of Tensors that may alias to the same data.
-  `Tensor(a!)` - `a` members of a may be written to thus mutating the underlying data.
-  `Tensor!` - shorthand for Tensor(fresh\_identifier!)
-  `Tensor(a! -> a|b)` - Tensor is in set `a`, written to, and after the write is in set `a` AND `b`.
+  In general annotations can be defined via the following four situations:
+  - `Tensor(a)` - `a` is a set of Tensors that may alias to the same data.
+  - `Tensor(a!)` - `a` members of a may be written to thus mutating the underlying data.
+  - `Tensor!` - shorthand for Tensor(fresh\_identifier!)
+  - `Tensor(a! -> a|b)` - Tensor is in set `a`, written to, and after the write is in set `a` AND `b`.
   For more details on when and why this needs to happen, please see the section on annotations.
 - `Tensor[]`.  A `Tensor[]` argument translates into a C++ argument of type `ArrayRef<Tensor>`
   (a.k.a. `TensorList`)
@@ -80,18 +80,18 @@ signature.
 - `*` is a special sentinel argument, which doesn't translate into an actual
   argument, but indicates that in the Python bindings, any subsequent arguments
   must be specified as keyword arguments (and cannot be provided positionally).
-- `?` is trailing question mark that annotate an argument to be an optional type, grep for
+- `?` is trailing question mark that annotates an argument to be an optional type. Grep for
   `optional` to find some example usages. In general, most functions will not need to use
   this, but there are some cases that we want to use optional for the different types:
-    - You want to pass in a `None` to a ATen function/method from Python, and handles the
-      None type in the C++ side. For example, `clamp(Tensor self, Scalar? min=None, Scalar? max=None)`
-      can take `None` for its `min` and `max` parameter, and do dispatch to different
-      backend if one of the parameters is `None`. Optional type can accept a `None` type
+    - You want to pass a `None` to an ATen function/method from Python and handle the
+      None type on the C++ side. For example, `clamp(Tensor self, Scalar? min=None, Scalar? max=None)`
+      can take `None` for its `min` and `max` parameter, but does not dispatch to different
+      backends if one of the parameters is `None`. Optional type can accept a `None` type
       (`nullopt` in C++) from Python and use the [C++ Optional class](https://en.cppreference.com/w/cpp/utility/optional) to interact with the parameters.
-    - You want a default value which is fine in Python but would cause ambiguity in C++.
+    - You want a default value, which is fine in Python, but would cause ambiguity in C++.
       For example, `norm(Tensor self, Scalar p=2, int dim, bool keepdim=False)` would
-      cause ambiguity in C++ since it default args must be adjacent and `p` could not
-      have a default value when `dim` does not. Therefore, we need to make `p` as a
+      cause ambiguity in C++ since its default args must be adjacent (`p` could not
+      have a default value when `dim` does not). Therefore, we need to make `p` as a
       optional Scalar, and make `p=2` when `p` is not passed in (nullopt).
     - You want a value to default to the same value as another argument (this cannot be
       expressed in C++ default arguments).
@@ -123,7 +123,7 @@ Here are the supported default values:
 * Numbers (e.g., `0` or `5.0` for `int`, `float` and `int[]`
   with an explicit length (e.g., `int[2]`)--in the case of `int[]`
   a number is replicated to fill the length (e.g., `int[2] x=2`
-  is equivalent to `int[2] x=[2,2]`.
+  is equivalent to `int[2] x=[2,2]`).
 * Lists of numbers (e.g., `[0, 0]`) for `IntList`.
 * Booleans (e.g., `True`) for `bool`.
 * Empty initializer lists (e.g., `[]`) for `Tensor` (this implicitly changes
@@ -191,19 +191,19 @@ more complicated neural network layers (e.g., `conv2d`) and internal functions
 designed specifically for binding (e.g., `cudnn_convolution`).
 
 As we progress along our schema unification of the `func` schema with the JIT
-signatue schema, we must introduce features that allow us to increase compliance.
+signature schema, we must introduce features that allow us to increase compliance.
 One of these features are Tensor annotations. As of now we use naming conventions
 to indicate whether an argument of a function is going to be mutated and returned.
 
 ### `annotations`
 
 There are two typical situations in which we mutate the memory of an argument in the Python
-frontend:
-a) For an inplace operations such as `self.abs_()`
+frontend:  
+a) For an inplace operations such as `self.abs_()`  
 b) for a function with an output keyword argument such as `torch.abs(input, out=None)`.
 
 In order to provide implementations for these Python functions the legacy schema
-requires C++ implementations for three situations `abs(Tensor self)  -> Tensor`, 
+requires C++ implementations for three situations `abs(Tensor self)  -> Tensor`,
 `abs_(Tensor self) -> Tensor` and `abs_out(Tensor out, Tensor self) -> Tensor`.
 
 Now, as we move towards the unification, we start to use a different syntax to represent
@@ -220,14 +220,14 @@ Let's revisit the previous native function declarations and see the conventions 
     `self` may be written to and returned. Further, the annotation indicates that the return value
     may alias the input. This indicates an inplace function and by convention ends in a single '\_'.
   - `abs(Tensor self, *, Tensor(a!) out) -> Tensor(a!)`
-    In the Python frontend `out` can be passed as a keyword argument and may be written to. 
+    In the Python frontend `out` can be passed as a keyword argument and may be written to.
     In this case it indicates the schema for a function that must accept `out` as this does not
     provide a default argument. The idea behind representing this as a optional argument is to
     document the intended usage. This maps to the legacy `abs_out(Tensor out, Tensor self) -> Tensor`.
     As with the legacy `_out` function you must call the argument `Tensor out` or `Tensor out0`,
     `Tensor out1` in the context of multiple arguments.
 
-There is also another situtation in which we use annotations, namely views.
+There is also another situation in which we use annotations, namely views.
   - `transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)`
     An alias to the memory represented by `self` may be also returned, however it is not mutated.
 
@@ -298,9 +298,8 @@ implementation (no header necessary) with a matching signature to
 the generated header from the ATen metadata.  There are many
 simple native functions; take a look at some of them to see what to do.
 
-Although, for the most part, writing an ATen function is mostly writing
-the algorithm you want to implement, there are some less obvious details
-you should also consider.
+Although writing an ATen function is mostly writing the algorithm you want
+to implement, there are some less obvious details you should also consider.
 
 ### Will your function be automatically differentiable?
 

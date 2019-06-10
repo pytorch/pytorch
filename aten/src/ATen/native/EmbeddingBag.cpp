@@ -12,10 +12,8 @@
 #include <memory>
 #include <sstream>
 #include <vector>
+#include <algorithm>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 namespace {
   const int MODE_SUM = 0;
@@ -236,12 +234,12 @@ static Tensor apply_bag_size(const Tensor &offsets, const Tensor &indices,
                              const int64_t mode, Tensor &output,
                              const Tensor &bag_size) {
   if (mode == MODE_MEAN) {
+    // Avoid dividing by 0 for empty bags.
+    // Instead we want empty bags to return all 0s
     if (offsets.size(0) == 1) {
-      auto bag_size_ = indices.size(0);
+      auto bag_size_ = std::max(indices.size(0), static_cast<int64_t>(1));
       output /= bag_size_;
     } else {
-      // Avoid dividing by 0 for empty bags.
-      // Instead we want empty bags to return all 0s
       auto bag_size_ = at::max(bag_size, at::ones_like(bag_size))
                            .to(output.options())
                            .unsqueeze(1)
@@ -342,7 +340,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
 
   if (per_sample_weights.defined()) {
-    AT_CHECK(mode == MODE_SUM,
+    TORCH_CHECK(mode == MODE_SUM,
         "embedding_bag: per_sample_weights only supported with mode='sum'");
     auto per_input_weights_arg = TensorArg(
         per_sample_weights,"per_sample_weights", 1);
@@ -546,8 +544,8 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
   auto next_unique_index_idx =
       compute_counts_uniq(num_weights, indices_data, numel, counts);
 
-  #pragma omp parallel for if (numel > 1000)
-    for (int64_t i = 0; i < (int64_t)next_unique_index_idx.size(); i++) {
+  auto loop = [&](int64_t start, int64_t end) {
+    for (int64_t i = start; i < end; i++) {
       int64_t start = i == 0 ? 0 : next_unique_index_idx[i - 1];
       int64_t index = indices_data[start];
       for (int64_t j = start; j < next_unique_index_idx[i]; j++) {
@@ -579,6 +577,12 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
                     igwd + ddim * index, 1);
       }
     }
+  };
+  if (numel > 1000) {
+    at::parallel_for(0, (int64_t)next_unique_index_idx.size(), 0, loop);
+  } else {
+    loop(0, (int64_t)next_unique_index_idx.size());
+  }
 }
 
 Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indices_,
@@ -621,7 +625,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     const Tensor& offsets,
     const Tensor& offset2bag,
     int64_t mode) {
-  AT_CHECK(
+  TORCH_CHECK(
       mode == MODE_SUM,
       "embedding_bag_backward: per_sample_weights only supported for mode='sum'");
 

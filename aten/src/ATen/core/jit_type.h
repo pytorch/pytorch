@@ -45,6 +45,7 @@ _(OptionalType) \
 _(VarType) \
 _(ProfiledTensorType) \
 _(DeviceObjType) \
+_(FunctionType) \
 _(ClassType) \
 
 enum class TypeKind {
@@ -492,6 +493,15 @@ struct CAFFE2_API ProfiledTensorType : public TensorType {
   static ProfiledTensorTypePtr create(c10::optional<at::ScalarType> scalar_type, c10::optional<Device> device,const VaryingShape& sizes, const VaryingStrides& strides, c10::optional<bool> requires_grad)
   {
       return ProfiledTensorTypePtr(new ProfiledTensorType(scalar_type, device, sizes, strides, requires_grad));
+  }
+
+  static ProfiledTensorTypePtr create(ProfiledTensorTypePtr pttp) {
+    return ProfiledTensorTypePtr(new ProfiledTensorType(
+        pttp->scalarType(),
+        pttp->device(),
+        pttp->sizes(),
+        pttp->strides(),
+        pttp->requiresGrad()));
   }
 
   const VaryingShape& sizes() const { return sizes_; }
@@ -1078,6 +1088,41 @@ private:
   : Type(TypeKind::StringType) {}
 };
 
+struct FunctionType;
+using FunctionTypePtr = std::shared_ptr<FunctionType>;
+// This type represents a Python Function
+struct CAFFE2_API FunctionType : public Type {
+  static FunctionTypePtr create(
+      std::shared_ptr<torch::jit::script::Function> function) {
+    return FunctionTypePtr(
+        new FunctionType(function)); // NOLINT(modernize-make-shared)
+  }
+  DEFINE_IS_SUBCLASS(FunctionType);
+  bool operator==(const Type& rhs) const override {
+    if (auto func_type = rhs.cast<FunctionType>()) {
+      return func_type->function_ == function_;
+    }
+
+    return false;
+  }
+  std::string str() const override {
+    return "Function";
+  }
+  std::string python_str() const override {
+    throw "Function";
+  }
+  std::shared_ptr<torch::jit::script::Function> function() const {
+    return function_;
+  }
+  static const TypeKind Kind = TypeKind::FunctionType;
+
+ private:
+  FunctionType(std::shared_ptr<torch::jit::script::Function> function)
+      : Type(TypeKind::FunctionType), function_(function) {}
+
+  std::shared_ptr<torch::jit::script::Function> function_;
+};
+
 struct NoneType;
 using NoneTypePtr = std::shared_ptr<NoneType>;
 // This type represents a Python None
@@ -1209,7 +1254,7 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   } else if (type == IntType::get()) {
     return at::ScalarType::Long;
   } else if (type == BoolType::get()) {
-    return at::ScalarType::Byte;
+    return at::ScalarType::Bool;
   }
   AT_ASSERTM(
       0,
@@ -1270,6 +1315,14 @@ struct getTypePtr_<std::unordered_map<K, V>> final {
     return type;
   }
 };
+template <class K, class V>
+struct getTypePtr_<c10::DictPtr<K, V>> final {
+  static TypePtr call() {
+    static auto type =
+        DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
+    return type;
+  }
+};
 template <class T>
 struct getTypePtr_<at::optional<T>> final {
   static TypePtr call() {
@@ -1310,7 +1363,7 @@ using ::torch::jit::script::Function;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public Type {
-  // Create a user type and register it globally.
+  // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       QualifiedName qualifiedName,
       std::shared_ptr<CompilationUnit> cu);
@@ -1318,11 +1371,6 @@ struct CAFFE2_API ClassType : public Type {
   // Create a type representing a Module,
   // These do not have methods, and are not globally registered
   static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
-
-  // returns nullptr if there is no type with that name
-  static ClassTypePtr get(const QualifiedName& qualifiedName);
-  // For testing: delete all registered types
-  static void clearRegistry();
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {

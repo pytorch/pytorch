@@ -127,7 +127,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   }
  if (input.dim() == 0)
     input = input.view(1);
-  AT_CHECK(
+  TORCH_CHECK(
       dim >= 0 && dim < input.dim(),
       "dim must be non-negative and less than input dimensions");
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
@@ -151,7 +151,7 @@ Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half
   }
   if (input.dim() == 0)
     input = input.view(1);
-  AT_CHECK(
+  TORCH_CHECK(
       dim >= 0 && dim < input.dim(),
       "dim must be non-negative and less than input dimensions");
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
@@ -183,7 +183,7 @@ Tensor softmax_backward_cpu(
     grad = grad.view(1);
   if (output.dim() == 0)
     output = output.view(1);
-  AT_CHECK(
+  TORCH_CHECK(
       dim >= 0 && dim < grad.dim(),
       "dim must be non-negative and less than input dimensions");
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
@@ -215,7 +215,7 @@ Tensor log_softmax_backward_cpu(
     grad = grad.view(1);
   if (output.dim() == 0)
     output = output.view(1);
-  AT_CHECK(
+  TORCH_CHECK(
       dim >= 0 && dim < grad.dim(),
       "dim must be non-negative and less than input dimensions");
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {

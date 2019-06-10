@@ -15,7 +15,7 @@ void THNN_(ELU_updateOutput)(
            bool inplace)
 {
   scalar_t negcoef = ScalarConvert<accreal, scalar_t>::to(alpha * scale);
-  scalar_t poscoef = ScalarConvert<accreal, scalar_t>::to(scale * input_scale);
+  scalar_t poscoef = ScalarConvert<accreal, scalar_t>::to(scale);
   scalar_t negiptcoef = ScalarConvert<accreal, scalar_t>::to(input_scale);
   THCUNN_assertSameGPU(state, 2, input, output);
 
@@ -31,7 +31,6 @@ void THNN_(ELU_updateOutput)(
   }
 }
 
-
 void THNN_(ELU_updateGradInput)(
            THCState *state,
            THCTensor *gradOutput,
@@ -42,7 +41,7 @@ void THNN_(ELU_updateGradInput)(
            accreal input_scale)
 {
   scalar_t negcoef = ScalarConvert<accreal, scalar_t>::to(alpha * scale);
-  scalar_t poscoef = ScalarConvert<accreal, scalar_t>::to(scale * input_scale);
+  scalar_t poscoef = ScalarConvert<accreal, scalar_t>::to(scale);
   scalar_t negiptcoef = ScalarConvert<accreal, scalar_t>::to(input_scale);
   THCUNN_check_nElement(state, output, gradOutput);
   THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);

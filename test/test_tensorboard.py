@@ -22,6 +22,13 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
+TEST_CAFFE2 = True
+try:
+    from caffe2.python import workspace
+except ImportError:
+    TEST_CAFFE2 = False
+skipIfNoCaffe2 = unittest.skipIf(not TEST_CAFFE2, "no caffe2")
+
 TEST_MATPLOTLIB = True
 try:
     import matplotlib
@@ -72,6 +79,10 @@ if TEST_TENSORBOARD:
             self.assertIsInstance(make_np(0), np.ndarray)
             self.assertIsInstance(make_np(0.1), np.ndarray)
 
+        def test_pytorch_autograd_np(self):
+            x = torch.autograd.Variable(torch.Tensor(1))
+            self.assertIsInstance(make_np(x), np.ndarray)
+
         def test_pytorch_write(self):
             with SummaryWriter() as w:
                 w.add_scalar('scalar', torch.autograd.Variable(torch.rand(1)), 0)
@@ -94,7 +105,7 @@ if TEST_TENSORBOARD:
                                     num=num,
                                     sum=floats.sum().item(),
                                     sum_squares=sum_sq,
-                                    bucket_limits=limits.tolist(),
+                                    bucket_limits=limits[1:].tolist(),
                                     bucket_counts=counts.tolist())
 
                 ints = make_np(torch.randint(0, 100, (num,)))
@@ -107,7 +118,7 @@ if TEST_TENSORBOARD:
                                     num=num,
                                     sum=ints.sum().item(),
                                     sum_squares=sum_sq,
-                                    bucket_limits=limits.tolist(),
+                                    bucket_limits=limits[1:].tolist(),
                                     bucket_counts=counts.tolist())
 
                 ints = torch.tensor(range(0, 100)).float()
@@ -137,13 +148,31 @@ if TEST_TENSORBOARD:
             self.assertEqual(converted.shape, (32, 32, 3))
 
         def test_prepare_video(self):
-            # at each timestep the sum over all other dimensions of the video should stay the same
-            V_before = np.random.random((4, 10, 3, 20, 20))
-            V_after = _prepare_video(np.copy(V_before))
-            V_before = np.swapaxes(V_before, 0, 1)
-            V_before = np.reshape(V_before, newshape=(10, -1))
-            V_after = np.reshape(V_after, newshape=(10, -1))
-            np.testing.assert_array_almost_equal(np.sum(V_before, axis=1), np.sum(V_after, axis=1))
+            # At each timeframe, the sum over all other
+            # dimensions of the video should be the same.
+            shapes = [(16, 30, 3, 28, 28),
+                      (36, 30, 3, 28, 28),
+                      (19, 29, 3, 23, 19),
+                      (3, 3, 3, 3, 3)]
+            for s in shapes:
+                V_input = np.random.random(s)
+                V_after = _prepare_video(np.copy(V_input))
+                total_frame = s[1]
+                V_input = np.swapaxes(V_input, 0, 1)
+                for f in range(total_frame):
+                    x = np.reshape(V_input[f], newshape=(-1))
+                    y = np.reshape(V_after[f], newshape=(-1))
+                    np.testing.assert_array_almost_equal(np.sum(x), np.sum(y))
+
+        def test_numpy_vid_uint8(self):
+            V_input = np.random.randint(0, 256, (16, 30, 3, 28, 28)).astype(np.uint8)
+            V_after = _prepare_video(np.copy(V_input)) * 255
+            total_frame = V_input.shape[1]
+            V_input = np.swapaxes(V_input, 0, 1)
+            for f in range(total_frame):
+                x = np.reshape(V_input[f], newshape=(-1))
+                y = np.reshape(V_after[f], newshape=(-1))
+                np.testing.assert_array_almost_equal(np.sum(x), np.sum(y))
 
     freqs = [262, 294, 330, 349, 392, 440, 440, 440, 440, 440, 440]
 
@@ -433,16 +462,12 @@ if TEST_TENSORBOARD:
                 'vgg19': (2, 3, 224, 224),
                 'vgg16_bn': (2, 3, 224, 224),
                 'vgg19_bn': (2, 3, 224, 224),
-                'mobilenet_v2': (2, 3, 224, 224),  # will fail optimize_graph
+                'mobilenet_v2': (2, 3, 224, 224),
             }
             for model_name, input_shape in model_input_shapes.items():
                 with SummaryWriter(comment=model_name) as w:
                     model = getattr(torchvision.models, model_name)()
-                    # ValueError: only one element tensors can be converted to Python scalars
-                    if model_name == 'mobilenet_v2':
-                        w.add_graph(model, torch.zeros(input_shape), operator_export_type="RAW")
-                    else:
-                        w.add_graph(model, torch.zeros(input_shape))
+                    w.add_graph(model, torch.zeros(input_shape))
 
     class TestTensorBoardFigure(BaseTestCase):
         @skipIfNoMatplotlib
@@ -500,15 +525,19 @@ if TEST_TENSORBOARD:
             res = make_np(np.int64(100000000000))
             self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
 
-        def test_numpy_vid(self):
-            shapes = [(16, 3, 30, 28, 28), (19, 3, 30, 28, 28), (19, 3, 29, 23, 19)]
-            for s in shapes:
-                x = np.random.random_sample(s)
-                # assert make_np(x, 'VID').shape[3] == 3
+        @skipIfNoCaffe2
+        def test_caffe2_np(self):
+            workspace.FeedBlob("testBlob", np.random.randn(1, 3, 64, 64).astype(np.float32))
+            self.assertIsInstance(make_np('testBlob'), np.ndarray)   
 
-        def test_numpy_vid_uint8(self):
-            x = np.random.randint(0, 256, (16, 3, 30, 28, 28)).astype(np.uint8)
-            # make_np(x, 'VID').shape[3] == 3
+        @skipIfNoCaffe2
+        def test_caffe2_np_expect_fail(self):
+            with self.assertRaises(RuntimeError):
+                res = make_np('This_blob_does_not_exist')
+
+        def test_pytorch_np_expect_fail(self):
+            with self.assertRaises(NotImplementedError):
+                res = make_np({'pytorch': 1.0})
 
 if __name__ == '__main__':
     run_tests()

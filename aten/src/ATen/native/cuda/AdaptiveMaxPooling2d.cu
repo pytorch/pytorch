@@ -204,21 +204,20 @@ void adaptive_max_pool2d_out_cuda_template(
   checkAllSameGPU("adaptive_max_pool2d_cuda", {output_arg, indices_arg, input_arg});
 
   for (int64_t i = 0; i < input.ndimension(); i++) {
-     AT_CHECK(input.size(i) > 0,
+     TORCH_CHECK(input.size(i) > 0,
         "adaptive_max_pool2d_cuda(): expected input to have non-empty spatial dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i, " being "
         "empty");
   }
 
-  AT_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
+  TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
-  // the jit sometimes passes output_size.size() == 1
-  AT_CHECK(output_size.size() == 1 || output_size.size() == 2,
-    "adaptive_max_pool2d: internal error: output_size.size() must be 1 or 2");
+  TORCH_CHECK(output_size.size() == 2,
+    "adaptive_max_pool2d: internal error: output_size.size() must be 2");
 
   int64_t osizeH = output_size[0];
-  int64_t osizeW = output_size.size() == 1 ? output_size[0] : output_size[1];
+  int64_t osizeW = output_size[1];
 
   if (input.ndimension() == 3) {
     int64_t sizeD  = input.size(0);
@@ -288,7 +287,7 @@ void adaptive_max_pool2d_out_cuda_template(
                                    indices_data,
                                    isizeH, isizeW, osizeH, osizeW,
                                    istrideD, istrideH, istrideW);
-      } 
+      }
     );
     THCudaCheck(cudaGetLastError());
 

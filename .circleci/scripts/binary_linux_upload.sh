@@ -1,6 +1,7 @@
 #!/bin/bash
 # Do NOT set -x
 source /home/circleci/project/env
+set -eu -o pipefail
 set +x
 declare -x "AWS_ACCESS_KEY_ID=${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
 declare -x "AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
@@ -17,7 +18,7 @@ chmod +x /home/circleci/project/login_to_anaconda.sh
 #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
 # DO NOT TURN -x ON BEFORE THIS LINE
 #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
-set -ex
+set -eux -o pipefail
 export PATH="$MINICONDA_ROOT/bin:$PATH"
 
 # Upload the package to the final location

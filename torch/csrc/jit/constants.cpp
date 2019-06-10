@@ -85,7 +85,7 @@ c10::optional<Value*> tryInsertConstant(
     return c10::nullopt;
   }
   if (loc)
-    n->setSourceLocation(std::make_shared<SourceRange>(*loc));
+    n->setSourceRange(*loc);
   if (scope)
     n->setScope(*scope);
   if (result_type) {

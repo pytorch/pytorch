@@ -149,7 +149,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
         inout_path = os.path.join(temp_dir, 'inout.npz')
 
         # load serialized input and output
-        loaded = np.load(inout_path, encoding='bytes')
+        loaded = np.load(inout_path, encoding='bytes', allow_pickle=True)
         loaded_inputs = loaded['inputs'].tolist()
         inputs_equal = True
         for (x, y) in zip(inputs, loaded_inputs):

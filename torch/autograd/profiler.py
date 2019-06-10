@@ -564,8 +564,16 @@ class FunctionEventAvg(FormattedTimesMixin):
         return self
 
     def __repr__(self):
-        return '<FunctionEventAvg cpu_time={} cuda_time={} key={}>'.format(
-            self.cpu_time_str, self.cuda_time_str, self.key)
+        return (
+            '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '
+            'cuda_time={} input_shapes={}>'.format(
+                self.key,
+                self.self_cpu_time_total_str,
+                self.cpu_time_str,
+                self.cuda_time_str,
+                str(self.input_shapes),
+            )
+        )
 
 
 ################################################################################

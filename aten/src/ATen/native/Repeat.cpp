@@ -32,7 +32,7 @@ Tensor repeat_interleave(const Tensor &self, const Tensor &repeats, c10::optiona
     if (repeats.dim() == 0 || (repeats.dim() == 1 && repeats.size(0) == 1)) {
         repeats_ = repeats.reshape({1}).expand({input.size(dim.value())});
     } else if (repeats.dim() == 1) {
-        AT_CHECK(repeats.size(0) == input.size(dim.value()), "repeats must have the same size as input along dim")
+        TORCH_CHECK(repeats.size(0) == input.size(dim.value()), "repeats must have the same size as input along dim")
     } else {
         AT_ERROR("repeats must be 0-dim or 1-dim tensor");
     }

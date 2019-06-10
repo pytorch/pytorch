@@ -45,8 +45,8 @@ Decl mergeTypesFromTypeComment(
 }
 
 struct ParserImpl {
-  explicit ParserImpl(const std::string& str)
-      : L(str), shared(sharedParserData()) {}
+  explicit ParserImpl(const std::shared_ptr<Source>& source)
+      : L(source), shared(sharedParserData()) {}
 
   Ident parseIdent() {
     auto t = L.expect(TK_IDENT);
@@ -218,7 +218,7 @@ struct ParserImpl {
     return parseExp(0);
   }
   Expr parseExp(int precedence) {
-    TreeRef prefix = nullptr;
+    TreeRef prefix;
     int unary_prec;
     if (shared.isUnary(L.cur().kind, &unary_prec)) {
       auto kind = L.cur().kind;
@@ -329,22 +329,29 @@ struct ParserImpl {
     });
   }
 
-  // Parse expr's of the form [a:], [:b], [a:b], [:]
+  // Parse expr's of the form [a:], [:b], [a:b], [:] and all variations with "::"
   Expr parseSubscriptExp() {
-    TreeRef first, second;
+    TreeRef first, second, third;
     auto range = L.cur().range;
     if (L.cur().kind != ':') {
       first = parseExp();
     }
     if (L.nextIf(':')) {
-      if (L.cur().kind != ',' && L.cur().kind != ']') {
+      if (L.cur().kind != ',' && L.cur().kind != ']' && L.cur().kind != ':') {
         second = parseExp();
       }
+    if (L.nextIf(':')) {
+      if (L.cur().kind != ',' && L.cur().kind != ']') {
+        third = parseExp();
+      }
+    }
       auto maybe_first = first ? Maybe<Expr>::create(range, Expr(first))
                                : Maybe<Expr>::create(range);
       auto maybe_second = second ? Maybe<Expr>::create(range, Expr(second))
                                  : Maybe<Expr>::create(range);
-      return SliceExpr::create(range, maybe_first, maybe_second);
+      auto maybe_third = third ? Maybe<Expr>::create(range, Expr(third))
+                                : Maybe<Expr>::create(range);
+      return SliceExpr::create(range, maybe_first, maybe_second, maybe_third);
     } else {
       return Expr(first);
     }
@@ -363,9 +370,9 @@ struct ParserImpl {
     auto ident = parseIdent();
     TreeRef type;
     if (L.nextIf(':')) {
-      type = parseExp();
+      type = Maybe<Expr>::create(L.cur().range, parseExp());
     } else {
-      type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
+      type = Maybe<Expr>::create(L.cur().range);
     }
     TreeRef def;
     if (L.nextIf('=')) {
@@ -374,7 +381,7 @@ struct ParserImpl {
       def = Maybe<Expr>::create(L.cur().range);
     }
     return Param::create(
-        type->range(), Ident(ident), Expr(type), Maybe<Expr>(def), kwarg_only);
+        type->range(), Ident(ident), Maybe<Expr>(type), Maybe<Expr>(def), kwarg_only);
   }
 
   Param parseBareTypeAnnotation() {
@@ -382,7 +389,7 @@ struct ParserImpl {
     return Param::create(
         type.range(),
         Ident::create(type.range(), ""),
-        type,
+        Maybe<Expr>::create(type.range(), type),
         Maybe<Expr>::create(type.range()),
         /*kwarg_only=*/false);
   }
@@ -618,7 +625,8 @@ struct ParserImpl {
   SharedParserData& shared;
 };
 
-Parser::Parser(const std::string& src) : pImpl(new ParserImpl(src)) {}
+Parser::Parser(const std::shared_ptr<Source>& src)
+    : pImpl(new ParserImpl(src)) {}
 
 Parser::~Parser() = default;
 

@@ -8,45 +8,45 @@ import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.visualization as visualization
 
+from dataclasses import dataclass, field
+from typing import List, Optional
+
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
 DOCKER_IMAGE_VERSION = 300
 
 
-class Conf(object):
-    def __init__(self,
-                 distro,
-                 parms,
-                 pyver=None,
-                 cuda_version=None,
-                 is_xla=False,
-                 restrict_phases=None,
-                 gpu_resource=None,
-                 dependent_tests=None,
-                 parent_build=None):
-
-        self.distro = distro
-        self.pyver = pyver
-        self.parms = parms
-        self.cuda_version = cuda_version
-
-        # TODO expand this to cover all the USE_* that we want to test for
-        #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
-        # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
-        self.is_xla = is_xla
-
-        self.restrict_phases = restrict_phases
-        self.gpu_resource = gpu_resource
-        self.dependent_tests = dependent_tests or []
-        self.parent_build = parent_build
+@dataclass
+class Conf:
+    distro: str
+    parms: List[str]
+    pyver: Optional[str] = None
+    cuda_version: Optional[str] = None
+    # TODO expand this to cover all the USE_* that we want to test for
+    #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
+    # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
+    is_xla: bool = False
+    restrict_phases: Optional[List[str]] = None
+    gpu_resource: Optional[str] = None
+    dependent_tests: List = field(default_factory=list)
+    parent_build: Optional['Conf'] = None
+    is_namedtensor: bool = False
+    is_important: bool = False
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
     def get_parms(self, for_docker):
-        leading = ["pytorch"]
+        leading = []
+        # We just don't run non-important jobs on pull requests;
+        # previously we also named them in a way to make it obvious
+        # if self.is_important and not for_docker:
+        #    leading.append("AAA")
+        leading.append("pytorch")
         if self.is_xla and not for_docker:
             leading.append("xla")
+        if self.is_namedtensor and not for_docker:
+            leading.append("namedtensor")
 
         cuda_parms = []
         if self.cuda_version:
@@ -118,6 +118,9 @@ class Conf(object):
             dependency_build = self.parent_build or self
             parameters["requires"].append(dependency_build.gen_build_name("build"))
 
+        if not self.is_important:
+            parameters["filters"] = {"branches": {"only": "master"}}
+
         return {self.gen_build_name(phase): parameters}
 
 
@@ -157,6 +160,7 @@ def gen_dependent_configs(xenial_parent_config):
             restrict_phases=["test"],
             gpu_resource=gpu,
             parent_build=xenial_parent_config,
+            is_important=xenial_parent_config.is_important,
         )
 
         configs.append(c)
@@ -212,6 +216,7 @@ def instantiate_configs():
             gcc_version = compiler_name + (fc.find_prop("compiler_version") or "")
             parms_list.append(gcc_version)
 
+            # TODO: This is a nasty special case
             if compiler_name == "clang":
                 parms_list.append("asan")
 
@@ -220,6 +225,8 @@ def instantiate_configs():
             parms_list.append("gcc7")
 
         is_xla = fc.find_prop("is_xla") or False
+        is_namedtensor = fc.find_prop("is_namedtensor") or False
+        is_important = fc.find_prop("is_important") or False
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
@@ -233,9 +240,11 @@ def instantiate_configs():
             is_xla,
             restrict_phases,
             gpu_resource,
+            is_namedtensor=is_namedtensor,
+            is_important=is_important,
         )
 
-        if cuda_version == "8":
+        if cuda_version == "9" and python_version == "3.6":
             c.dependent_tests = gen_dependent_configs(c)
 
         config_list.append(c)
