@@ -683,8 +683,7 @@ add_docstr_all('dense_dim',
 dense_dim() -> int
 
 If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
-this returns a the number of dense dimensions. Otherwise, this throws an
-error.
+this returns the number of dense dimensions. Otherwise, this throws an error.
 
 See also :meth:`Tensor.sparse_dim`.
 """)
@@ -2266,8 +2265,7 @@ add_docstr_all('sparse_dim',
 sparse_dim() -> int
 
 If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
-this returns a the number of sparse dimensions. Otherwise, this throws an
-error.
+this returns the number of sparse dimensions. Otherwise, this throws an error.
 
 See also :meth:`Tensor.dense_dim`.
 """)

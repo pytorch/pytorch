@@ -586,6 +586,11 @@ class TestOperators(TestCase):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
         self.assertONNX(lambda x: torch.nonzero(x), x)
 
+    def test_gather(self):
+        data = torch.randn(3, 4, 3, requires_grad=True)
+        index = torch.tensor([2, 0]).view(1, 2, 1).expand(3, 2, 3)
+        self.assertONNX(lambda data, index: data.gather(1, index), (data, index))
+
     def test_master_opset(self):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()
