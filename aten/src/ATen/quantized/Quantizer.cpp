@@ -305,6 +305,7 @@ inline Tensor new_qtensor_cpu(
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage, at::QuantizedCPUTensorId(), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
+  get_qtensorimpl(tensor)->empty_tensor_restride(memory_format);
   return tensor;
 }
 

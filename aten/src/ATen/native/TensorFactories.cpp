@@ -183,17 +183,6 @@ Tensor empty_like(
     return result;
   }
 
-  if (self.is_quantized()) {
-    // TODO: uncomment when qscheme diff is landed
-    // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
-    //                       "empty_like for quantized Tensor only works for
-    //                        PerTensorAffine scheme right now");
-    return at::_empty_affine_quantized(self.sizes(), self.options(),
-                                       self.q_scale().toDouble(),
-                                       self.q_zero_point().toLong(),
-                                       optional_memory_format);
-  }
-
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Contiguous);
   auto use_memory_format = memory_format;
@@ -207,6 +196,17 @@ Tensor empty_like(
           false,
           "undefined behavior of the preserve format, source tensor neither channels last nor contiguous")
     }
+  }
+
+  if (self.is_quantized()) {
+    // TODO: uncomment when qscheme diff is landed
+    // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
+    //                       "empty_like for quantized Tensor only works for
+    //                        PerTensorAffine scheme right now");
+    return at::_empty_affine_quantized(self.sizes(), self.options(),
+                                       self.q_scale().toDouble(),
+                                       self.q_zero_point().toLong(),
+                                       use_memory_format);
   }
 
   return at::empty(self.sizes(), options, use_memory_format);
