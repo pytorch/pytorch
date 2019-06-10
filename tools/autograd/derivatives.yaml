@@ -1044,6 +1044,9 @@
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   self: elu_backward(grad, alpha, scale, input_scale, result)
 
+- name: gelu(Tensor self) -> Tensor
+  self: gelu_backward(grad, self)
+
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)
 
