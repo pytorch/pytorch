@@ -218,7 +218,7 @@ struct Environment {
     }
   }
 
-  SugaredValuePtr insertLoad(const std::string& name, TypePtr type) {
+  SugaredValuePtr insertLoad(const std::string& name, const TypePtr& type) {
     auto g = b->owningGraph();
     auto load = g->insertNode(g->createLoad(name, type));
     if (meaningfulName(name)) {
@@ -740,7 +740,7 @@ struct to_ir {
   // 4. There is no parsing support in frontend.py, this is intentional since it
   //    prevents people from accidentally using this feature.
   std::shared_ptr<ClosureValue> emitClosure(
-      std::function<void(Block*)> emit_body) {
+      const std::function<void(Block*)>& emit_body) {
     Node* closure_node = graph->insertNode(graph->create(prim::Function, 1));
     // it is not a real thing yet, so just say the type is None
     closure_node->output()->setType(NoneType::get());
