@@ -1097,6 +1097,8 @@ struct Graph {
   TORCH_API Value* insertGetAttr(Value* obj, const std::string& field) {
     return insertNode(createGetAttr(obj, field))->output();
   }
+  TORCH_API Node* createStore(const std::string& name, Value* v);
+  TORCH_API Node* createLoad(const std::string& name, const TypePtr& type);
 
   TORCH_API Value* insertFunctionCall(
       std::shared_ptr<script::Function> callee,

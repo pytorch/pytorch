@@ -839,21 +839,21 @@ graph(%x : Tensor,
         m(x1, y1)
 
         # Check what we collected
-        self.assertTrue('x' in value_stats and 'y' in value_stats)
-        self.assertTrue('p' in value_stats and 'z' in value_stats)
+        self.assertTrue('x.1' in value_stats and 'y.1' in value_stats)
+        self.assertTrue('p.1' in value_stats and 'z.1' in value_stats)
         self.assertEqual(len(value_stats), 5)
-        self.assertEqual(len(value_stats['p']), 1)
-        self.assertEqual(len(value_stats['z']), 1)
-        self.assertEqual(value_stats['p'][0], x1 + y1)
-        self.assertEqual(value_stats['z'][0], x1 - y1)
+        self.assertEqual(len(value_stats['p.1']), 1)
+        self.assertEqual(len(value_stats['z.1']), 1)
+        self.assertEqual(value_stats['p.1'][0], x1 + y1)
+        self.assertEqual(value_stats['z.1'][0], x1 - y1)
 
         # Run one more time and check the updated statistics
         m(x2, y2)
-        self.assertTrue('x' in value_stats and 'y' in value_stats)
-        self.assertEqual(len(value_stats['p']), 2)
-        self.assertEqual(len(value_stats['z']), 2)
-        self.assertEqual(value_stats['p'][1], x2 + y2)
-        self.assertEqual(value_stats['z'][1], x2 - y2)
+        self.assertTrue('x.1' in value_stats and 'y.1' in value_stats)
+        self.assertEqual(len(value_stats['p.1']), 2)
+        self.assertEqual(len(value_stats['z.1']), 2)
+        self.assertEqual(value_stats['p.1'][1], x2 + y2)
+        self.assertEqual(value_stats['z.1'][1], x2 - y2)
 
     def test_insert_quantdequant_consecutive_qnodes_script(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -14317,8 +14317,8 @@ graph(%0 : Double(5, 5)):
         def func(x):
             return torch.ops.aten.relu(x)
         self.assertExpectedInline(canonical(func.graph), '''\
-graph(%x : Tensor):
-  %1 : Tensor = aten::relu(%x)
+graph(%x.1 : Tensor):
+  %1 : Tensor = aten::relu(%x.1)
   return (%1)
 ''')
 
