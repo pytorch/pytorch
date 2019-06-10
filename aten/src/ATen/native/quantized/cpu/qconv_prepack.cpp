@@ -35,8 +35,8 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         reinterpret_cast<int8_t*>(weight_config.data<c10::qint8>());
 
     std::vector<int32_t> col_offsets(NDim * groups);
-    std::vector<int32_t> kernel{static_cast<int>(weight.size(0)),
-                                static_cast<int>(weight.size(1))};
+    std::vector<int64_t> kernel{static_cast<int64_t>(weight.size(0)),
+                                static_cast<int64_t>(weight.size(1))};
     std::vector<int8_t> weight_int8(KDim * NDim * groups);
     auto ret_ptr = guts::make_unique<PackedConvWeight>(
         PackedConvWeight{guts::make_unique<fbgemm::PackBMatrix<int8_t>>(

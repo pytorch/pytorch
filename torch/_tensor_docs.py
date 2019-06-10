@@ -683,8 +683,7 @@ add_docstr_all('dense_dim',
 dense_dim() -> int
 
 If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
-this returns a the number of dense dimensions. Otherwise, this throws an
-error.
+this returns the number of dense dimensions. Otherwise, this throws an error.
 
 See also :meth:`Tensor.sparse_dim`.
 """)
@@ -1782,15 +1781,6 @@ qr(some=True) -> (Tensor, Tensor)
 See :func:`torch.qr`
 """)
 
-add_docstr_all('quantize_linear',
-               r"""
-quantize_linear(scale, zero_point) -> Tensor
-
-Quantize a float Tensor using affine quantization scheme with given scale and
-zero_point.
-returns the quantized Tensor.
-""")
-
 add_docstr_all('q_scale',
                r"""
 q_scale() -> float
@@ -2275,8 +2265,7 @@ add_docstr_all('sparse_dim',
 sparse_dim() -> int
 
 If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
-this returns a the number of sparse dimensions. Otherwise, this throws an
-error.
+this returns the number of sparse dimensions. Otherwise, this throws an error.
 
 See also :meth:`Tensor.dense_dim`.
 """)
@@ -3195,4 +3184,12 @@ Is the :class:`torch.device` where this Tensor is.
 add_docstr_all('ndim',
                r"""
 Alias for :meth:`~Tensor.dim()`
+""")
+
+add_docstr_all('T',
+               r"""
+Is this Tensor with its dimensions reversed.
+
+If ``n`` is the number of dimensions in ``x``,
+``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 """)

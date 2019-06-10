@@ -497,6 +497,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = False
 
     def _forward(self, module, input):
         with freeze_rng_state():
@@ -2612,6 +2613,26 @@ class TestNN(NNTestCase):
             self._test_EmbeddingBag(False, 'sum', True, test_backward=test_backward, dtype=dtype)
             self._test_EmbeddingBag(False, 'mean', True, test_backward=test_backward, dtype=dtype)
 
+    def _test_embedding_bag_empty_input(self, device):
+        m = 4
+        n = 3
+        x = torch.tensor([], device=device, dtype=torch.long)
+        for sparse in [True, False]:
+            Embed = torch.nn.EmbeddingBag(m, n, sparse=True)
+
+            output = Embed(input=x, offsets=torch.tensor([0], device=device, dtype=torch.long))
+            self.assertEqual(output, torch.zeros_like(output))
+
+            output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=torch.long))
+            self.assertEqual(output, torch.zeros_like(output))
+
+    def test_embedding_bag_empty_input_cpu(self):
+        self._test_embedding_bag_empty_input('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_embedding_bag_empty_input_cuda(self):
+        self._test_embedding_bag_empty_input('cuda')
+
     @staticmethod
     def _embedding_bag_reference_impl(input, weight, offsets=None, mode='sum',
                                       per_sample_weights=None):
@@ -3240,7 +3261,7 @@ class TestNN(NNTestCase):
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     def test_multihead_attention(self):
-        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, src_lengths=None, 
+        def _scaled_dot_attn_ref(Q, K, V, dims, unseen_mask=None, src_lengths=None,
                                  attn_mask=None, add_zero_attn=False):
             """ Numpy-based reference implementation of scaled dot attention
             for testing"""
@@ -3374,7 +3395,7 @@ class TestNN(NNTestCase):
                 decoder_state_tensor = torch.from_numpy(decoder_state).double()
                 source_hid_tensor = torch.from_numpy(K).double().transpose(0, 1)
 
-                multihead_attn_module = MultiheadAttention(d_model, nheads, 
+                multihead_attn_module = MultiheadAttention(d_model, nheads,
                                                            add_bias_kv=add_bias_kv,
                                                            add_zero_attn=add_zero_attn)
 
@@ -3404,7 +3425,7 @@ class TestNN(NNTestCase):
                     multihead_attn_module.bias_k, multihead_attn_module.bias_v,
                     multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
                     multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
-                    multihead_attn_module.training, src_len_mask, True, attn_mask_tensor) 
+                    multihead_attn_module.training, src_len_mask, True, attn_mask_tensor)
 
                 result = result.squeeze(0).detach().numpy()
 
@@ -3845,6 +3866,42 @@ class TestNN(NNTestCase):
             return dpm(inp)
 
         torch.autograd.gradcheck(fn, (m.t_rg,))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_data_parallel_rnn(self):
+
+        class TestModule(torch.nn.Module):
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.rnn = torch.nn.LSTM(300, 1024, 1, batch_first=True, bidirectional=True)
+
+            def forward(self, x):
+                self.rnn.flatten_parameters()
+                return self.rnn(x)
+
+        def step(model):
+            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+            input = torch.ones(4, 4, 300).to(0)
+            output = model(input)
+            loss = F.mse_loss(output[0], torch.zeros_like(output[0]))
+            loss.backward()
+            opt.step()
+
+        with torch.no_grad():
+            model = TestModule().to(0)
+            model_dp = torch.nn.DataParallel(deepcopy(model))
+
+            # make sure DP does not crash when grad is disabled.
+            # See #21108
+            model_dp(torch.rand(2, 4, 300).to(0))
+
+        step(model)
+        step(model_dp)
+
+        for p1, p2 in zip(model.parameters(), model_dp.parameters()):
+            p1.allclose(p2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
@@ -4779,6 +4836,7 @@ class TestNN(NNTestCase):
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
     def test_Conv2d_groups_nobias_v2(self):
+        torch.manual_seed(123)
         dev_dtypes = [("cpu", torch.float)]
         if TEST_CUDA:
             dev_dtypes += [("cuda", torch.float), ("cuda", torch.half)]
@@ -5272,9 +5330,11 @@ class TestNN(NNTestCase):
                 if l < 10:
                     self.assertEqual(padded.grad.data[l:, i].abs().sum(), 0)
 
-        # test error message
+        # test error messages
         with self.assertRaisesRegex(RuntimeError, 'You can pass `enforce_sorted=False`'):
             packed = rnn_utils.pack_padded_sequence(torch.randn(3, 3), [1, 3, 2])
+        with self.assertRaisesRegex(RuntimeError, 'empty tensor'):
+            packed = rnn_utils.pack_padded_sequence(torch.randn(0, 0), [])
 
     def _test_variable_sequence(self, device="cpu", dtype=torch.float):
         def pad(var, length):
@@ -6328,6 +6388,36 @@ class TestNN(NNTestCase):
         y = m(x)
         y.mean().backward()
         self.assertEqual(x.grad, None)
+
+    @unittest.skipIf(
+        not TEST_NUMPY or not TEST_SCIPY, "Numpy or Scipy not found")
+    def test_gelu(self):
+        def _test_gelu(n, m, dtype, contiguous):
+            def _gelu_ref(X):
+                return X * stats.norm.cdf(X)
+
+            if contiguous:
+                X = torch.rand(n, m, dtype=dtype, requires_grad=True)
+            else:
+                X = torch.rand(n, m, dtype=dtype, requires_grad=True)[:, ::2]
+            res = F.gelu(X)
+            ref = _gelu_ref(X.detach().numpy())
+            self.assertEqual(res, ref)
+            gradcheck(F.gelu, [X], eps=1e-4)
+
+            if TEST_CUDA:
+                X_cuda = X.cuda()
+                res_cuda = F.gelu(X_cuda)
+                self.assertEqual(res_cuda.cpu(), ref)
+                gradcheck(F.gelu, [X_cuda], eps=1e-4)
+
+        for n in range(1, 10):
+            for m in range(1, 10):
+                _test_gelu(n, m, torch.float32, True)
+                _test_gelu(n, m, torch.float32, False)
+                _test_gelu(n, m, torch.float64, True)
+                _test_gelu(n, m, torch.float64, False)
+
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
