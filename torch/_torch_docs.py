@@ -3468,7 +3468,9 @@ Example::
 
 add_docstr(torch.nonzero,
            r"""
-nonzero(input, out=None) -> LongTensor
+nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensors
+
+**When** :attr:`as_tuple` **is false or unspecified:**
 
 Returns a tensor containing the indices of all non-zero elements of
 :attr:`input`.  Each row in the result contains the indices of a non-zero
@@ -3479,9 +3481,28 @@ If :attr:`input` has `n` dimensions, then the resulting indices tensor
 :attr:`out` is of size :math:`(z \times n)`, where :math:`z` is the total number of
 non-zero elements in the :attr:`input` tensor.
 
+**When** :attr:`as_tuple` **is true:**
+
+Returns a tuple of 1-D tensors, one for each dimension in :attr:`input`,
+each containing the indices (in that dimension) of all non-zero elements of
+:attr:`input` .
+
+If :attr:`input` has `n` dimensions, then the resulting tuple contains `n` tensors
+of size `z`, where `z` is the total number of
+non-zero elements in the :attr:`input` tensor.
+
+As a special case, when :attr:`input` has zero dimensions and a nonzero scalar
+value, it is treated as a one-dimensional tensor with one element.
+
 Args:
     input (Tensor): the input tensor
     out (LongTensor, optional): the output tensor containing indices
+
+Returns:
+    LongTensor or tuple of LongTensor: If :attr:`as_tuple` is false, the output
+    tensor containing indices. If :attr:`as_tuple` is true, one 1-D tensor for
+    each dimension, containing the indices of each nonzero element along that
+    dimension.
 
 Example::
 
@@ -3498,6 +3519,15 @@ Example::
             [ 1,  1],
             [ 2,  2],
             [ 3,  3]])
+    >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]), as_tuple=True)
+    (tensor([0, 1, 2, 4]),)
+    >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
+                                    [0.0, 0.4, 0.0, 0.0],
+                                    [0.0, 0.0, 1.2, 0.0],
+                                    [0.0, 0.0, 0.0,-0.4]]), as_tuple=True)
+    (tensor([0, 1, 2, 3]), tensor([0, 1, 2, 3]))
+    >>> torch.nonzero(torch.tensor(5), as_tuple=True)
+    (tensor([0]),)
 """)
 
 add_docstr(torch.normal,

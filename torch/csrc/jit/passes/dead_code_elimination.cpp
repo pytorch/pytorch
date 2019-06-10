@@ -153,7 +153,7 @@ class DeadCodeEliminator {
     }
 
     if (aliasDb_) {
-      if (aliasDb_->writesToAlias(node, liveValues_, /*recurseBlocks=*/false)) {
+      if (aliasDb_->writesToAlias(node, liveValues_)) {
         return mark(node);
       }
     }
