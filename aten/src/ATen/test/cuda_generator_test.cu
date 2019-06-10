@@ -190,6 +190,7 @@ TEST(CUDAGenerator, TestCloning) {
   // Check cloning of new generators.
   // Note that we don't allow cloning of other
   // generator states into default generators.
+  if (!at::cuda::is_available()) return;
   auto gen1 = at::detail::getCUDAHooks().createCUDAGenerator();
   gen1->set_current_seed(123); // modify gen1 state
   gen1->set_philox_offset_per_thread(4);
@@ -207,9 +208,10 @@ void thread_func_get_set_current_seed(CUDAGenerator* generator) {
 }
   
 TEST(CUDAGenerator, TestMultithreadingGetSetCurrentSeed) {
-// Test Description: 
-// Test current seed getter and setter are thread safe
-// See Note [Acquire lock when using random generators]
+  // Test Description: 
+  // Test current seed getter and setter are thread safe
+  // See Note [Acquire lock when using random generators]
+  if (!at::cuda::is_available()) return;
   auto gen1 = at::detail::getCUDAHooks().getDefaultCUDAGenerator();
   auto initial_seed = gen1->current_seed();
   std::thread t0{thread_func_get_set_current_seed, gen1};
@@ -226,6 +228,7 @@ TEST(CUDAGenerator, TestRNGForking) {
   // Test that state of a generator can be frozen and
   // restored
   // See Note [Acquire lock when using random generators]
+  if (!at::cuda::is_available()) return;
   auto default_gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator();
   auto current_gen = at::detail::getCUDAHooks().createCUDAGenerator();
   {
