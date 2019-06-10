@@ -135,7 +135,7 @@ class JitTestCase(TestCase):
             archive2 = zipfile.ZipFile(saved_module_buffer_2)
             main_module_2 = archive2.open('archive/code/archive.py')
             main_module_2_code = "".join([line.decode() for line in main_module_2])
-            
+
             self.assertMultiLineEqual(main_module_code, main_module_2_code)
 
     def getExportImportCopy(self, m, also_test_file=True, map_location=None):

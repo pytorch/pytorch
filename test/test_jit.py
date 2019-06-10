@@ -10068,7 +10068,7 @@ a")
             @_trace(torch.rand(3, 4))
             def traced_fn(x):
                 return tm(x) + 1.0
-                
+
     def test_call_script_fn_from_tracing_fn(self):
         @torch.jit.script
         def script_fn(x):
@@ -13621,6 +13621,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             def __init__(self):
                 super(Traced, self).__init__()
                 self.seq = Sequence()
+
             def forward(self, input):
                 return self.seq.forward(input)
 
