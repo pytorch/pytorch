@@ -3,6 +3,7 @@
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/function_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
 #include <vector>
 
@@ -25,6 +26,38 @@ inline std::vector<at::Tensor> _call_caffe2_op(
   Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
   op.Run();
   return std::move(op).move_newstyle_outputs();
+}
+
+inline at::Tensor unwrap_tensor(at::Tensor&& tensor) {
+  if (tensor.is_variable()) {
+    return torch::autograd::Variable(std::move(tensor)).tensor_data();
+  } else {
+    return std::move(tensor);
+  }
+}
+
+inline IValue unwrap(IValue&& ivalue) {
+  // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
+  if (ivalue.isTensor() && ivalue.toTensor().defined()) {
+    return unwrap_tensor(std::move(ivalue).toTensor());
+  } else if (ivalue.isTensorList()) {
+    for (auto& item : ivalue.toTensorList()->elements()) {
+      item = unwrap_tensor(std::move(item));
+    }
+    return std::move(ivalue);
+  } else if (ivalue.isGenericList()) {
+    for (auto& item : ivalue.toGenericList()->elements()) {
+      item = unwrap(std::move(item));
+    }
+    return std::move(ivalue);
+  } else if (ivalue.isGenericDict()) {
+    for (auto& item : ivalue.toGenericDict()->elements()) {
+      item.setValue(unwrap(item.value()));
+    }
+    return std::move(ivalue);
+  } else {
+    return std::move(ivalue);
+  }
 }
 
 // This function is inline in the hope that compilers optimizing for speed will
@@ -64,6 +97,11 @@ inline void _call_caffe2_op_from_c10(
     AT_ASSERT(preallocated_outputs.isTensorList());
     outputs =
         std::move(*std::move(preallocated_outputs).toTensorList()).elements();
+  }
+
+  // unwrap tensor inputs from variable
+  for (auto iter = stack->end() - num_inputs; iter != stack->end(); ++iter) {
+    *iter = unwrap(std::move(*iter));
   }
 
   // TODO Avoid vector allocation. One idea would be to keep the std::vector
