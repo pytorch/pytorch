@@ -13589,28 +13589,11 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 self.lstm2 = nn.LSTMCell(51, 51)
                 self.linear = nn.Linear(51, 1)
 
-            # TODO: could not pass tuple to a python Op and type annotations
-            # is not descending to python signature, hence the wrapper
-            # see https://github.com/pytorch/pytorch/issues/8778
-            # and https://github.com/pytorch/pytorch/issues/8777
-            def test_lstm1(self, input, hx, cx):
-                # type: (Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor]
-                return self.lstm1(input, (hx, cx))
-
-            def test_lstm2(self, input, hx, cx):
-                # type: (Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor]
-                return self.lstm2(input, (hx, cx))
-
-            # TODO: could not support tensor constructors in script
-            # see https://github.com/pytorch/pytorch/issues/8814
-            def test_tensor(self):
-                return torch.tensor([], dtype=torch.double)
-
             @torch.jit.script_method
             def forward(self, input):
                 # TODO: add future as input with default val
                 # see https://github.com/pytorch/pytorch/issues/8724
-                outputs = self.test_tensor()
+                outputs = torch.empty((3, 0), dtype=torch.double)
                 h_t = torch.zeros((3, 51), dtype=torch.double)
                 c_t = torch.zeros((3, 51), dtype=torch.double)
                 h_t2 = torch.zeros((3, 51), dtype=torch.double)
@@ -13623,20 +13606,29 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 # We hard-code it to 4 for now.
                 a, b, c, d = input.chunk(input.size(1), dim=1)
                 for input_t in (a, b, c, d):
-                    h_t, c_t = self.test_lstm1(input_t, h_t, c_t)
-                    h_t2, c_t2 = self.test_lstm2(h_t, h_t2, c_t2)
+                    h_t, c_t = self.lstm1(input_t, (h_t, c_t))
+                    h_t2, c_t2 = self.lstm2(h_t, (h_t2, c_t2))
                     output = self.linear(h_t2)
                     outputs = torch.cat((outputs, output), 1)
                 for _ in range(future):  # if we should predict the future
-                    h_t, c_t = self.test_lstm1(output, h_t, c_t)
-                    h_t2, c_t2 = self.test_lstm2(h_t, h_t2, c_t2)
+                    h_t, c_t = self.lstm1(output, (h_t, c_t))
+                    h_t2, c_t2 = self.lstm2(h_t, (h_t2, c_t2))
                     output = self.linear(h_t2)
                     outputs = torch.cat((outputs, output), 1)
                 return outputs
 
-        # TODO: toggle export_import once above issues are fixed
-        self.checkTrace(Sequence(), (torch.rand(3, 4),),
-                        export_import=False)
+        class Traced(nn.Module):
+            def __init__(self):
+                super(Traced, self).__init__()
+                self.seq = Sequence()
+            def forward(self, input):
+                return self.seq.forward(input)
+
+        # disabled due to a jitter issues that will be fixed by using load/store in the compiler
+        with self.disableEmitHook(): 
+            # TODO: toggle export_import once above issues are fixed
+            self.checkTrace(Traced(), (torch.rand(3, 4),),
+                            export_import=False)
 
     @staticmethod
     def _test_vae(self, device, check_export_import=True, quantized=False):

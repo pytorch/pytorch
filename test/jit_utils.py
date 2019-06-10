@@ -116,9 +116,7 @@ class JitTestCase(TestCase):
                 # check that we have no duplicate names
                 self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
                 main_module = archive.open('archive/code/archive.py')
-                main_module_code = ""
-                for line in main_module:
-                    main_module_code += line.decode()
+                main_module_code = "".join([line.decode() for line in main_module])
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
                     raise
@@ -136,11 +134,8 @@ class JitTestCase(TestCase):
             saved_module_buffer_2.seek(0)
             archive2 = zipfile.ZipFile(saved_module_buffer_2)
             main_module_2 = archive2.open('archive/code/archive.py')
-
-            main_module_2_code = ""
-            for line in main_module_2:
-                main_module_2_code += line.decode()
-
+            main_module_2_code = "".join([line.decode() for line in main_module_2])
+            
             self.assertMultiLineEqual(main_module_code, main_module_2_code)
 
     def getExportImportCopy(self, m, also_test_file=True, map_location=None):
