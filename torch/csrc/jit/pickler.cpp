@@ -645,7 +645,7 @@ OpCode Unpickler::readInstruction() {
     case OpCode::TUPLE: {
       size_t start = marks_.back();
       marks_.pop_back();
-      c10::ivalue::TuplePtr tuple = c10::ivalue::TuplePtr::create();
+      c10::ivalue::TuplePtr tuple = c10::ivalue::TuplePtr::create({});
       tuple.elements().reserve(stack_.size() - start);
       auto start_it = stack_.begin() + start;
       for (auto it = start_it; it != stack_.end(); ++it) {
