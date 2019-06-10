@@ -188,6 +188,28 @@ static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tenso
   return std::make_tuple(arg1_broadcasted, arg2_broadcasted);
 }
 
+// Return a permutation with the given axes moved to the end.
+static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
+  const std::vector<int64_t> a = axes.vec();
+  const int64_t ndim = self.ndimension();
+  std::vector<int64_t> perm;
+
+  for (int64_t i = 0; i < ndim; i++) {
+    auto it = std::find(a.begin(), a.end(), i);
+    if (it == a.end()) {
+       perm.push_back(i);
+    }
+  }
+  for (auto i : a) {
+    perm.push_back(i);
+  }
+
+  TORCH_CHECK(perm.size() == ndim,
+    "duplicate or invalid axis in 'dim' argument for tensor with ndim==", ndim);
+
+  return self.permute(perm);
+}
+
 // Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition
 static inline std::tuple<std::vector<int64_t>,
                          std::vector<int64_t>,
