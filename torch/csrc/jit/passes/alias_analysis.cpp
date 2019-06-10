@@ -865,6 +865,9 @@ class AliasDb::WorkingSet {
 
  private:
   bool hasDataDependency(Node* n) const {
+    if (!mover_ && nodes_.empty()) {
+      return false;
+    }
     const Node* pivot = mover_ ? mover_ : nodes_.front();
     if (n->isAfter(pivot)) {
       return producesFor(n);
