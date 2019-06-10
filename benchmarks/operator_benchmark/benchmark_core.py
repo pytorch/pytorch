@@ -93,13 +93,14 @@ class BenchmarkRunner(object):
             else:
                 print("# {}".format(self.args.operator))
 
-    def _print_perf_result(self, full_test_id, reported_run_time_us, test_case):
+    def _print_perf_result(self, reported_run_time_us, test_case):
         if self.args.ai_pep_format:
             # Output for AI-PEP
+            test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
             print("Caffe2Observer " + json.dumps(
                 {
-                    "type": "NET",
-                    "metric": full_test_id,
+                    "type": test_name,
+                    "metric": "latency",
                     "unit": "us",
                     "value": str(reported_run_time_us),
                 }
@@ -232,4 +233,4 @@ class BenchmarkRunner(object):
                 # Actual Execution
                 reported_time = self._measure_time(self._launch_forward, test_case, self.iters)
 
-            self._print_perf_result(full_test_id, reported_time, test_case)
+            self._print_perf_result(reported_time, test_case)

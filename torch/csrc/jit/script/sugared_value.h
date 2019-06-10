@@ -417,6 +417,30 @@ struct TORCH_API IsInstanceValue : SugaredValue {
   }
 };
 
+// matched against for special handling of builtin functions or
+// iterables expressions like range(), zip(), enumerate(), etc.
+struct TORCH_API IterableValue : SugaredValue {
+  IterableValue(c10::Symbol sym, std::vector<Value*> iter_inputs)
+      : symbol_(sym), iter_inputs_(iter_inputs) {}
+  std::string kind() const override {
+    return "iterable";
+  }
+
+  virtual std::vector<TypePtr> getItersTypeInfo(
+    const SourceRange& loc,
+    Function& m) override;
+
+  virtual void fillInLoopInfo(
+    const SourceRange& loc,
+    Function& m,
+    Node* n,
+    size_t iters_size) override;
+
+ private:
+  c10::Symbol symbol_;
+  std::vector<Value*> iter_inputs_;
+};
+
 // This represents the "__new__" method on classes, which can't be a MethodValue
 // because it takes a ClassValue as input.
 // So if we see:
