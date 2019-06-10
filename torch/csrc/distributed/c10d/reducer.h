@@ -24,6 +24,8 @@ class Reducer {
       std::vector<std::vector<size_t>> bucket_indices,
       std::shared_ptr<c10d::ProcessGroup> process_group);
 
+  ~Reducer();
+
   // To (re-)initialize bucket assignment, pass a list of buckets, each
   // of which is specified by a list of indices in the variables list.
   // This function performs validation that the variables within a bucket

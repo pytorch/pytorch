@@ -138,6 +138,14 @@ Reducer::Reducer(
   }
 }
 
+Reducer::~Reducer() {
+  for (auto& replica_grad_accumulators: grad_accumulators_) {
+    for (auto& grad_accumulator: replica_grad_accumulators) {
+      grad_accumulator->delete_post_hooks<LambdaPostHook>();
+    }
+  }
+}
+
 // Called when the gradient for the specified variable is ready.
 // It can be called from two places:
 // - By an autograd thread after executing a gradient accumulator function.

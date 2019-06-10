@@ -256,6 +256,20 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     return post_hooks_;
   }
 
+  // delete all post hooks matching HookType
+  template <typename HookType>
+  void delete_post_hooks() {
+    std::lock_guard<std::mutex> lock(this->mutex_);
+    for (auto it = post_hooks_.begin(); it != post_hooks_.end();) {
+      HookType* ptr = dynamic_cast<HookType*>(it->get());
+      if (ptr) {
+        it = post_hooks_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
   std::vector<std::unique_ptr<FunctionPostHook>>& post_hooks() noexcept {
     return post_hooks_;
   }
@@ -325,6 +339,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
   at::SmallVector<InputMetadata, 2> input_metadata_;
+  std::mutex mutex_;
 };
 
 /// See Function::is_traceable() for definition.
