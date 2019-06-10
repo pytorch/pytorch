@@ -123,10 +123,17 @@ def replicate(network, devices, detach=False):
                 # we have to initialize ScriptModule properly so that
                 # it works with pybind11
                 replica = _init_script_module()
-                keys = set(module.__dict__.keys()) - scriptmodule_skip_attr
+
+                attribute_names = set(entry[0] for entry in module._c._get_attributes())
+
+                keys = set(module.__dict__.keys()) - scriptmodule_skip_attr - attribute_names
                 for key in keys:
                     if not _is_script_method(module.__dict__[key]):
                         replica.__dict__[key] = module.__dict__[key]
+                for name, the_type, value in module._c._get_attributes():
+                    if name in module._buffers.keys():
+                        continue
+                    replica._c._register_attribute(name, the_type, value)
             else:
                 replica = module.__new__(type(module))
                 replica.__dict__ = module.__dict__.copy()
