@@ -1029,6 +1029,14 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         prim::Uninitialized,
+         [](const Node* node) {
+           return [](Stack& stack) {
+             push(stack, IValue::uninitialized());
+             return 0;
+           };
+         }),
+     Operator(
          prim::CreateObject,
          [](const Node* node) {
            const auto type = node->output()->type()->expect<ClassType>();
@@ -2306,13 +2314,13 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
 
     Operator(
-    "aten::isnan(float a) -> bool",
-    [](Stack& stack) {
-      double a;
-      pop(stack, a);
-      push(stack, std::isnan(a));
-      return 0;
-    }),
+        "aten::isnan(float a) -> bool",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::isnan(a));
+          return 0;
+        }),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
