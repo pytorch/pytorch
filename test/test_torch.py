@@ -4948,6 +4948,16 @@ class _TestTorchMixin(object):
     def test_cat_empty(self):
         self._test_cat_empty(self)
 
+    @slowTest
+    def test_cat_big(self):
+        SIZE1 = 6500
+        SIZE2 = 4500
+        concat_list = []
+        concat_list.append(torch.ones((SIZE1, 1024 * 512), dtype=torch.uint8))
+        concat_list.append(torch.ones((SIZE2, 1024 * 512), dtype=torch.uint8))
+        result = torch.cat(concat_list)
+        self.assertEqual(result.size(0), SIZE1 + SIZE2)
+
     def test_narrow(self):
         x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
         self.assertEqual(x.narrow(0, 0, 1), torch.Tensor([[0, 1, 2]]))

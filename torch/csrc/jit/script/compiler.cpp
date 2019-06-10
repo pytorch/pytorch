@@ -2622,16 +2622,25 @@ struct to_ir {
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
     if (input->type()->cast<TupleType>()) {
+      auto has_step = slice.step().present();
+      if (has_step)
+      {
+        // TODO: add support for slicing tuples with a step
+        throw ErrorReport(loc) << "Unsupported operation: slicing tuples with a step isn't supported";
+      }
+
       if (has_end) {
         return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2]);
       } else {
         return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
       }
     }
-    NamedValue step =
-        NamedValue(loc, "step", graph->insertConstant(1, nullptr, loc));
+
+    auto step = emitExpr(Expr(slice.stepOr(1)));
+    NamedValue step_nv =
+        NamedValue(loc, "step", step);
     return emitBuiltinCall(
-        loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
+        loc, *graph, aten::slice, c10::nullopt, args, {step_nv}, true);
   }
 
   Value* emitUnsqueeze(const SourceRange& loc, Value* input, int64_t dim) {
@@ -3064,8 +3073,10 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
   // be inlined into forked closures
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
+  if (!script::getFirstClassMode()) {
+    Inline(*to_clean);
+  }
   // remove any uses of tuples that we inserted that are not needed
-  Inline(*to_clean);
   LowerSimpleTuples(to_clean);
   ConstantPooling(to_clean);
   // For jitter

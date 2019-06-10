@@ -891,6 +891,7 @@ bool Node::hasSideEffects() const {
     case prim::AddStatValue:
     case prim::TimePoint:
     case prim::CallFunction:
+    case prim::CallMethod:
       return true;
   }
   // All other builtin ops are known to be safe.
