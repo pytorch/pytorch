@@ -1559,8 +1559,8 @@ class TestNN(NNTestCase):
     def test_module_to_(self):
         # Test that `module.to_()` doesn't preserve previous references to
         # `module`'s parameters or gradients.
-        m = nn.Linear(20, 10)
-        m.weight.grad = torch.randn(10, 20)
+        m = nn.Linear(20, 10).float()
+        m.weight.grad = torch.randn(10, 20, dtype=torch.float)
         weight_ref = m.weight
         weight_grad_ref = m.weight.grad
         m.to_(torch.double)
@@ -1569,20 +1569,20 @@ class TestNN(NNTestCase):
 
         # Test that `module.to_()` invalidates `module`'s original parameters
         # in any autograd graph they participate in.
-        m = nn.Linear(20, 10)
+        m = nn.Linear(20, 10).float()
         pvm = m.weight.mul(m.weight)
         m.to_(torch.double)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
-            pvm.backward(torch.randn(10, 20))
+            pvm.backward(torch.randn(10, 20, dtype=torch.float))
 
         # Test that `module.to_()` invalidates `module`'s original parameters' gradients
         # in any autograd graph they participate in.
-        m = nn.Linear(20, 10)
-        m.weight.grad = torch.randn(10, 20).requires_grad_()
+        m = nn.Linear(20, 10).float()
+        m.weight.grad = torch.randn(10, 20, dtype=torch.float).requires_grad_()
         pgm = m.weight.grad.mul(m.weight.grad)
         m.to_(torch.double)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
-            pgm.backward(torch.randn(10, 20))
+            pgm.backward(torch.randn(10, 20, dtype=torch.float))
 
     def test_type(self):
         l = nn.Linear(10, 20)
