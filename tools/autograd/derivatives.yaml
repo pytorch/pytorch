@@ -893,6 +893,9 @@
 - name: to_dense(Tensor self)
   self: to_dense_backward(grad, self)
 
+- name: to_sparse(Tensor self)
+  self: grad.to_dense()
+
 - name: to_mkldnn(Tensor self)
   self: to_mkldnn_backward(grad, self)
 
@@ -938,8 +941,8 @@
   self: zeros_like(grad)
 
 - name: sparse_mask(Tensor self, Tensor mask)
-  self: not_implemented("sparse_mask")
-  mask: not_implemented("sparse_mask")
+  self: grad.to_dense().sparse_mask(mask).to_dense()
+  mask: non_differentiable
 
 - name: _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size, Tensor indices, Tensor values, TensorOptions options)
   values: sparse_constructor_values_backward(grad, indices, values.sizes())

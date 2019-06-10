@@ -68,7 +68,7 @@ class KernelTable_ final {
 
   void removeIfExists(TensorTypeId key, const std::string& operator_name) {
     auto num_removed = map_.erase(key);
-    assert(num_removed <= 1); // This is not a multi-map
+    TORCH_INTERNAL_ASSERT(num_removed <= 1); // This is not a multi-map
   }
 
   const DispatchTableEntry* lookup(TensorTypeId key) const {

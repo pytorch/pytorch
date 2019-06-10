@@ -1008,12 +1008,8 @@ RegisterOperators reg(
      Operator(
          "aten::wait(Future(t) self) -> t",
          [](Stack& stack) {
-           auto future = pop(stack).toFuture();
-           if (future->completed()) {
-             push(stack, future->value());
-           } else {
-             throw Suspend(future);
-           }
+           TORCH_CHECK(
+               false, "wait is implemented directly in the interpreter");
            return 0;
          }),
      Operator(
@@ -1652,7 +1648,6 @@ int dictSetItem(Stack& stack) {
   auto idx = pop(stack);
   auto dict = pop(stack).toGenericDict();
   dict.insert_or_assign(std::move(idx), std::move(value));
-  push(stack, std::move(dict));
   return 0;
 }
 

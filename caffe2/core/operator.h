@@ -480,6 +480,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return false;
   }
 
+  virtual void CancelAsyncCallback() {}
+
   // RunAsync, if implemenented by the specific operators, will schedule the
   // computation on the corresponding context and record the event in its
   // event_ member object. If the specific operator does not support RunAsync,
@@ -1510,7 +1512,7 @@ class ExternalTensorFunctionsBase {
       const Blob* blob,
       std::vector<std::vector<uint64_t>>* shapes,
       std::vector<std::vector<float>>* all_scales,
-      std::vector<std::vector<float>>* all_offsets,
+      std::vector<std::vector<int32_t>>* all_offsets,
       ExternalTensorDescriptor* desc) = 0;
   virtual void LoadInfoOfBlob(
       const Blob* blob,

@@ -37,43 +37,43 @@ c10::intrusive_ptr<T, NullType> IValue::toIntrusivePtr() const {
 }
 
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() && {
-  AT_ASSERT(isFuture());
+  AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return moveToIntrusivePtr<ivalue::Future>();
 }
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() const & {
-  AT_ASSERT(isFuture());
+  AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return toIntrusivePtr<ivalue::Future>();
 }
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() && {
-  AT_ASSERT(isString());
+  AT_ASSERT(isString(), "Expected String but got ", tagKind());
   return moveToIntrusivePtr<ivalue::ConstantString>();
 }
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() const & {
-  AT_ASSERT(isString());
+  AT_ASSERT(isString(), "Expected String but got ", tagKind());
   return toIntrusivePtr<ivalue::ConstantString>();
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() && {
-  AT_ASSERT(isObject());
+  AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
   return toIntrusivePtr<ivalue::Object>();
 }
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
-  AT_ASSERT(isObject());
+  AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
   return toIntrusivePtr<ivalue::Object>();
 }
 inline at::Tensor IValue::toTensor() && {
-  AT_ASSERT(isTensor());
+  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
   return at::Tensor(moveToIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
 }
 inline at::Tensor IValue::toTensor() const & {
-  AT_ASSERT(isTensor());
+  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
   return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
-  AT_ASSERT(isBlob());
+  AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
   return moveToIntrusivePtr<caffe2::Blob>();
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() const & {
-  AT_ASSERT(isBlob());
+  AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
   return toIntrusivePtr<caffe2::Blob>();;
 }
 
@@ -471,79 +471,79 @@ inline T IValue::to() const& {
 }
 
 inline c10::ListPtr<int64_t> IValue::toIntList() && {
-  AT_ASSERT(isIntList());
+  AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   return c10::ListPtr<int64_t>(moveToIntrusivePtr<c10::detail::ListImpl<int64_t>>());
 }
 inline c10::ListPtr<int64_t> IValue::toIntList() const & {
-  AT_ASSERT(isIntList());
+  AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   return c10::ListPtr<int64_t>(toIntrusivePtr<c10::detail::ListImpl<int64_t>>());
 }
 inline c10::ArrayRef<int64_t> IValue::toIntListRef() const {
-  AT_ASSERT(isIntList());
+  AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   return static_cast<const c10::detail::ListImpl<int64_t>*>(payload.as_intrusive_ptr)->list;
 }
 inline c10::ListPtr<double> IValue::toDoubleList() && {
-  AT_ASSERT(isDoubleList());
+  AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return c10::ListPtr<double>(moveToIntrusivePtr<c10::detail::ListImpl<double>>());
 }
 inline c10::ListPtr<double> IValue::toDoubleList() const & {
-  AT_ASSERT(isDoubleList());
+  AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return c10::ListPtr<double>(toIntrusivePtr<c10::detail::ListImpl<double>>());
 }
 inline c10::ArrayRef<double> IValue::toDoubleListRef() const {
-  AT_ASSERT(isDoubleList());
+  AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return static_cast<const c10::detail::ListImpl<double>*>(payload.as_intrusive_ptr)->list;
 }
 inline c10::ListPtr<bool> IValue::toBoolList() && {
-  AT_ASSERT(isBoolList());
+  AT_ASSERT(isBoolList(), "Expected BoolList but got ", tagKind());
   return c10::ListPtr<bool>(moveToIntrusivePtr<c10::detail::ListImpl<bool>>());
 }
 inline c10::ListPtr<bool> IValue::toBoolList() const & {
-  AT_ASSERT(isBoolList());
+  AT_ASSERT(isBoolList(), "Expected BoolList but got ", tagKind());
   return c10::ListPtr<bool>(toIntrusivePtr<c10::detail::ListImpl<bool>>());
 }
 inline c10::ListPtr<at::Tensor> IValue::toTensorList() && {
-  AT_ASSERT(isTensorList());
+  AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
   return c10::ListPtr<at::Tensor>(moveToIntrusivePtr<c10::detail::ListImpl<at::Tensor>>());
 }
 inline c10::ListPtr<at::Tensor> IValue::toTensorList() const & {
-  AT_ASSERT(isTensorList());
+  AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
   return c10::ListPtr<at::Tensor>(toIntrusivePtr<c10::detail::ListImpl<at::Tensor>>());
 }
 inline c10::ArrayRef<at::Tensor> IValue::toTensorListRef() const {
-  AT_ASSERT(isTensorList());
+  AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
   return static_cast<const c10::detail::ListImpl<at::Tensor>*>(payload.as_intrusive_ptr)->list;
 }
 inline c10::ListPtr<IValue> IValue::toGenericList() && {
-  AT_ASSERT(isGenericList());
+  AT_ASSERT(isGenericList(), "Expected GenericList but got ", tagKind());
   return c10::ListPtr<IValue>(moveToIntrusivePtr<c10::detail::ListImpl<IValue>>());
 }
 inline c10::ListPtr<IValue> IValue::toGenericList() const & {
-  AT_ASSERT(isGenericList());
+  AT_ASSERT(isGenericList(), "Expected GenericList but got ", tagKind());
   return c10::ListPtr<IValue>(toIntrusivePtr<c10::detail::ListImpl<IValue>>());
 }
 inline c10::ArrayRef<IValue> IValue::toGenericListRef() const {
-  AT_ASSERT(isGenericList());
+  AT_ASSERT(isGenericList(), "Expected GenericList but got ", tagKind());
   return static_cast<const c10::detail::ListImpl<IValue>*>(payload.as_intrusive_ptr)->list;
 }
 inline c10::DictPtr<IValue, IValue> IValue::toGenericDict() && {
-  AT_ASSERT(isGenericDict());
+  AT_ASSERT(isGenericDict(), "Expected GenericDict but got ", tagKind());
   return c10::DictPtr<IValue, IValue>(moveToIntrusivePtr<c10::detail::DictImpl>());
 }
 inline c10::DictPtr<IValue, IValue> IValue::toGenericDict() const & {
-  AT_ASSERT(isGenericDict());
+  AT_ASSERT(isGenericDict(), "Expected GenericDict but got ", tagKind());
   return c10::DictPtr<IValue, IValue>(toIntrusivePtr<c10::detail::DictImpl>());
 }
 inline ivalue::TuplePtr IValue::toTuple() && {
-  AT_ASSERT(isTuple());
+  AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
   return ivalue::TuplePtr::create(c10::ListPtr<IValue>(moveToIntrusivePtr<c10::detail::ListImpl<IValue>>()));
 }
 inline ivalue::TuplePtr IValue::toTuple() const & {
-  AT_ASSERT(isTuple());
+  AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
   return ivalue::TuplePtr::create(c10::ListPtr<IValue>(toIntrusivePtr<c10::detail::ListImpl<IValue>>()));
 }
 inline c10::ArrayRef<IValue> IValue::toTupleRef() const {
-  AT_ASSERT(isTuple());
+  AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
   return static_cast<const c10::detail::ListImpl<IValue>*>(payload.as_intrusive_ptr)->list;
 }
 

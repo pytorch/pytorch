@@ -166,7 +166,6 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
         // consume object
         const IValue* iv = stack[stack_top]++;
         AT_ASSERT(iv->isObject());
-        iv->toObject();
         // see [argspec refcounting]
         auto p = *reinterpret_cast<const at::ivalue::Object* const*>(iv);
         auto obj_ptr = &p->slots()[0];
