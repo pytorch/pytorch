@@ -15,6 +15,7 @@ C10_DEFINE_int(warmup_iter, 10, "Number of warmup iterations")
 C10_DEFINE_int(inter_op_threads, 0, "Number of inter-op iterations");
 C10_DEFINE_int(intra_op_threads, 0, "Number of intra-op threads");
 C10_DEFINE_int(tensor_dim, 2000, "Tensor dim");
+C10_DEFINE_int(benchmark_iter, 3, "Number of times to run benchmark")
 
 namespace {
 std::atomic<int> counter{0};
@@ -69,28 +70,36 @@ int main(int argc, char** argv) {
     at::set_num_threads(FLAGS_intra_op_threads);
   }
 
+  auto left = at::ones({FLAGS_tensor_dim, FLAGS_tensor_dim}, at::kFloat);
+  auto right = at::ones({FLAGS_tensor_dim, FLAGS_tensor_dim}, at::kFloat);
+
+  std::cout << "Launching " << FLAGS_warmup_iter << " warmup tasks" << std::endl;
+
+  typedef std::chrono::high_resolution_clock clock;
+  typedef std::chrono::milliseconds ms;
+
+  std::chrono::time_point<clock> start_time = clock::now();
+  launch_tasks_and_wait(left, right, FLAGS_warmup_iter);
+  auto duration = static_cast<float>(
+      std::chrono::duration_cast<ms>(clock::now() - start_time).count());
+
+  std::cout << "Warmup time: " << duration << " ms." << std::endl;
+
   std::cout << "Launching " << FLAGS_iter << " tasks with "
             << FLAGS_sub_iter << " subtasks each, using "
             << at::get_num_interop_threads() << " inter-op threads and "
             << at::get_num_threads() << " intra-op threads, "
             << "tensor dim: " << FLAGS_tensor_dim << std::endl;
 
-  auto left = at::ones({FLAGS_tensor_dim, FLAGS_tensor_dim}, at::kFloat);
-  auto right = at::ones({FLAGS_tensor_dim, FLAGS_tensor_dim}, at::kFloat);
+  for (auto bench_iter = 0; bench_iter < FLAGS_benchmark_iter; ++bench_iter) {
+    start_time = clock::now();
+    launch_tasks_and_wait(left, right, FLAGS_iter);
+    duration = static_cast<float>(
+        std::chrono::duration_cast<ms>(clock::now() - start_time).count());
 
-  // warmup
-  launch_tasks_and_wait(left, right, FLAGS_warmup_iter);
-
-  typedef std::chrono::high_resolution_clock clock;
-  typedef std::chrono::milliseconds ms;
-  std::chrono::time_point<clock> start_time = clock::now();
-
-  launch_tasks_and_wait(left, right, FLAGS_iter);
-
-  auto duration = static_cast<float>(
-      std::chrono::duration_cast<ms>(clock::now() - start_time).count());
-  std::cout << "Time to run " << FLAGS_iter << " iterations "
-            << (duration/1000.0) << " s." << std::endl;
+    std::cout << "Time to run " << FLAGS_iter << " iterations "
+              << (duration/1000.0) << " s." << std::endl;
+  }
 
   return 0;
 }

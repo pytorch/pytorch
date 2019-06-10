@@ -45,6 +45,9 @@ ${return_type} ${api_name}(${type_method_formals});
 """)
 LEGACY_TH_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}) {
+#ifdef NAMEDTENSOR_ENABLED
+    ${named_guard_declaration}
+#endif
     ${device_guard_declaration}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
@@ -57,6 +60,9 @@ ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals});
 """)
 LEGACY_TH_DEFINITION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) {
+#ifdef NAMEDTENSOR_ENABLED
+    ${named_guard_declaration}
+#endif
     ${device_guard_declaration}
     ${type_definition_body}
 }
@@ -104,6 +110,9 @@ ${return_type} ${api_name}(${type_method_formals}) const override;
 """)
 TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
 ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
+#ifdef NAMEDTENSOR_ENABLED
+    ${named_guard_declaration}
+#endif
     ${device_guard_declaration}
     ${type_definition_body}
 }
@@ -116,6 +125,9 @@ ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const
 """)
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
+#ifdef NAMEDTENSOR_ENABLED
+    ${named_guard_declaration}
+#endif
     ${device_guard_declaration}
     ${type_definition_body}
 }
@@ -534,6 +546,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'method_formals_with_defaults': List[str],
     'method_formals': List[str],
     'method_prefix_derived': str,
+    'named_guard_declaration': str,
     'mode': str,
     'python_module': str,
     'name': str,
@@ -592,6 +605,20 @@ def device_guard(option, dispatch_options, dispatch_tensor):
         if dispatch_tensor:
             return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(dispatch_tensor)
     return '// DeviceGuard omitted'
+
+
+def named_guard(option, tensors, tensorlists):
+    if not option.get('named_guard', True) or (len(tensors) + len(tensorlists) == 0):
+        return ''
+    named_conditions = []
+    for tensor in tensors:
+        named_conditions.append('{}.is_named()'.format(tensor))
+    for tensorlist in tensorlists:
+        named_conditions.append('at::has_names({})'.format(tensorlist))
+    return ("""\
+if ({named_conditions}) {{
+    AT_ERROR("{op}: no named inference rule implemented.");
+}}""".format(named_conditions=' || '.join(named_conditions), op=option['name']))
 
 
 def dispatch_scalar_type(option, dispatch_options, dispatch_tensor):
@@ -757,12 +784,21 @@ def create_generic(top_env, declarations):
             return return_types[0]['type']
         return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
 
+    def is_any_tensor_type(formal):
+        return (formal['dynamic_type'] == 'Tensor' or formal['dynamic_type'] == 'ByteTensor'
+                or formal['dynamic_type'] == 'IndexTensor' or formal['dynamic_type'] == 'BoolTensor')
+
+    def find_tensors(formals):
+        # type: (List[AtFormal]) -> List[str]
+        return [formal['name'] for formal in formals if is_any_tensor_type(formal)]
+
+    def find_tensorlists(formals):
+        # type: (List[AtFormal]) -> List[str]
+        return [formal['name'] for formal in formals if formal['dynamic_type'] == 'TensorList']
+
     def find_dispatch_tensor(formals):
         # type: (List[AtFormal]) -> Optional[str]
         # dispatch to self if it's a parameter
-        def is_any_tensor_type(formal):
-            return (formal['dynamic_type'] == 'Tensor' or formal['dynamic_type'] == 'ByteTensor'
-                    or formal['dynamic_type'] == 'IndexTensor' or formal['dynamic_type'] == 'BoolTensor')
 
         for formal in formals:
             if formal['name'] == 'self' and is_any_tensor_type(formal) and not formal.get('is_nullable', False):
@@ -880,6 +916,8 @@ def create_generic(top_env, declarations):
         if option['mode'] == 'TH':
             option['device_guard'] = False
         option['device_guard_declaration'] = device_guard(option, False, dispatch_tensor)
+        option['named_guard_declaration'] = named_guard(option, find_tensors(formals),
+                                                        find_tensorlists(formals))
         option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, False, dispatch_tensor)
 
         assert option['extended_method'], 'Expected legacy operator to be an extended method'
@@ -1045,6 +1083,8 @@ def create_generic(top_env, declarations):
 
         option['method_prefix_derived'] = ''
         option['device_guard_declaration'] = device_guard(option, dispatch_options, dispatch_tensor)
+        option['named_guard_declaration'] = named_guard(option, find_tensors(formals),
+                                                        find_tensorlists(formals))
         option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, dispatch_options, dispatch_tensor)
 
         env = nested_dict(option, top_env)
