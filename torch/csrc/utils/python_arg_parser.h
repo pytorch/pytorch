@@ -50,6 +50,7 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/object_ptr.h>
