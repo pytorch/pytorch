@@ -8,7 +8,7 @@ torch.Tensor
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type.
 
-Torch defines eight CPU tensor types and eight GPU tensor types:
+Torch defines nine CPU tensor types and nine GPU tensor types:
 
 ========================   ===========================================   ===========================   ================================
 Data type                  dtype                                         CPU tensor                    GPU tensor
@@ -21,6 +21,7 @@ Data type                  dtype                                         CPU ten
 16-bit integer (signed)    ``torch.int16`` or ``torch.short``            :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
 32-bit integer (signed)    ``torch.int32`` or ``torch.int``              :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
+Boolean                    ``torch.bool``                                :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
 ========================   ===========================================   ===========================   ================================
 
 :class:`torch.Tensor` is an alias for the default tensor type (:class:`torch.FloatTensor`).
