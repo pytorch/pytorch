@@ -1148,6 +1148,19 @@ Applies element-wise :math:`\text{LogSigmoid}(x_i) = \log \left(\frac{1}{1 + \ex
 See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
+@weak_script
+def gelu(input):
+    r"""gelu(input) -> Tensor
+
+    Applies element-wise the function
+    :math:`\text{GeLU}(x) = x * \Phi(x)`
+
+    where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
+
+    See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
+    """
+    return torch._C._nn.gelu(input)
+
 
 @weak_script
 def hardshrink(input, lambd=0.5):
@@ -1267,7 +1280,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     # type: (Tensor, float, bool, float, int) -> Tensor
     r"""
-    Samples from the `Gumbel-Softmax distribution`_ and optionally discretizes.
+    Samples from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretizes.
 
     Args:
       logits: `[..., num_features]` unnormalized log probabilities
@@ -1300,8 +1313,9 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
         >>> # Sample hard categorical using "Straight-through" trick:
         >>> F.gumbel_softmax(logits, tau=1, hard=True)
 
-    .. _Gumbel-Softmax distribution:
+    .. _Link 1:
         https://arxiv.org/abs/1611.00712
+    .. _Link 2:
         https://arxiv.org/abs/1611.01144
     """
 

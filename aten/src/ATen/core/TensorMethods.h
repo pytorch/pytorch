@@ -452,6 +452,9 @@ inline Tensor Tensor::narrow(int64_t dim, int64_t start, int64_t length) const {
 inline Tensor Tensor::permute(IntArrayRef dims) const {
     return dispatch_type().permute(*this, dims);
 }
+inline Tensor Tensor::numpy_T() const {
+    return dispatch_type().numpy_T(*this);
+}
 inline Tensor Tensor::pin_memory() const {
     return dispatch_type().pin_memory(*this);
 }
@@ -796,9 +799,6 @@ inline Tensor Tensor::to_sparse() const {
 }
 inline Tensor Tensor::to_mkldnn() const {
     return dispatch_type().to_mkldnn(*this);
-}
-inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const {
-    return dispatch_type().quantize_linear(*this, scale, zero_point, dtype);
 }
 inline Tensor Tensor::dequantize() const {
     return dispatch_type().dequantize(*this);
@@ -1150,6 +1150,9 @@ inline Tensor Tensor::masked_select(const Tensor & mask) const {
 }
 inline Tensor Tensor::nonzero() const {
     return dispatch_type().nonzero(*this);
+}
+inline std::vector<Tensor> Tensor::nonzero_numpy() const {
+    return dispatch_type().nonzero_numpy(*this);
 }
 inline Tensor Tensor::gather(int64_t dim, const Tensor & index, bool sparse_grad) const {
     return dispatch_type().gather(*this, dim, index, sparse_grad);
