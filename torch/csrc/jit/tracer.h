@@ -21,7 +21,7 @@ struct Value;
 struct Graph;
 
 namespace script {
-struct Module;
+  struct Module;
 }
 
 namespace tracer {
@@ -224,7 +224,9 @@ struct TypedStack : public std::pair<Stack, TupleTypePtr>
 
   // NB: The inherited default constructor gives nullptr for |type|,
   //     so we provide a saner one.
-  TypedStack() : pair({}, TupleType::create({})) {}
+  TypedStack()
+    : pair({}, TupleType::create({}))
+  {}
 
   Stack& stack() {
     return this->first;
@@ -239,9 +241,7 @@ struct TypedStack : public std::pair<Stack, TupleTypePtr>
   }
 };
 
-TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(
-    TypedStack inputs,
-    const std::shared_ptr<script::Module>& self = nullptr);
+TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs, const std::shared_ptr<script::Module>& self=nullptr);
 
 TORCH_API void exit(const Stack& outputs);
 
@@ -351,6 +351,7 @@ TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 TORCH_API autograd::Variable getSizeOf(
     const autograd::Variable& var,
     int64_t dim);
+
 } // namespace tracer
 } // namespace jit
 } // namespace torch
