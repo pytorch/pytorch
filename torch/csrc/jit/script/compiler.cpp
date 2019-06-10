@@ -376,6 +376,7 @@ struct Environment {
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
+          {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"rangelist",
