@@ -635,8 +635,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       if (NOT NVTOOLEXT_HOME)
         set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
       endif()
-      if ($ENV{NVTOOLEXT_HOME})
-        set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+      if (DEFINED ENV{NVTOOLSEXT_PATH})
+        set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
+        string(REPLACE "\\\\" "/" NVTOOLEXT_HOME ${NVTOOLEXT_HOME})
       endif()
       set(TORCH_CUDA_LIBRARIES
         ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
