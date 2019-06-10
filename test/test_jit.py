@@ -16050,6 +16050,17 @@ class TestClassType(JitTestCase):
                 other.stack = list(self.stack)
                 return other
 
+    def test_optional_type_promotion(self):
+        # should not throw
+        @torch.jit.script  # noqa: B903
+        class Tree(object):
+            def __init__(self):
+                self.parent = torch.jit.annotate(Optional[Tree], None)
+
+            def add_child(self, child):
+                # type: (Tree) -> None
+                child.parent = torch.jit.annotate(Optional[Tree], self)
+
 
 class TestLogging(JitTestCase):
     def test_bump_numeric_counter(self):
