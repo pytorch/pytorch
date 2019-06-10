@@ -1250,15 +1250,13 @@ class ShapePropagator {
             "aten::mean(Tensor self, int[] dim, bool keepdim, *, int? dtype) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto dims = node->namedInput(attr::dim)->node()->inputs().size()) {
-            auto opt_keepdim = node->get<bool>(attr::keepdim);
-            at::optional<IValue> opt_dtype = node->get(attr::dtype);
-            auto num_reduced = *opt_keepdim ? 0 : dims;
-            // TODO: can dim contain duplicates?
-            return reduce_op_handler(
-                node, /*num_reduced_dim=*/num_reduced, /*upcast_integer=*/true, opt_dtype);
-          }
-          return {};
+          auto dims = node->namedInput(attr::dim)->node()->inputs().size();
+          auto opt_keepdim = node->get<bool>(attr::keepdim);
+          at::optional<IValue> opt_dtype = node->get(attr::dtype);
+          auto num_reduced = *opt_keepdim ? 0 : dims;
+          // TODO: can dim contain duplicates?
+          return reduce_op_handler(
+              node, /*num_reduced_dim=*/num_reduced, /*upcast_integer=*/true, opt_dtype);
         }};
 
     // Requirements:
