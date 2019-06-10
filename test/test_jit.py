@@ -6150,7 +6150,9 @@ a")
         for op in ops:
             if op in unimplemented:
                 continue
-            if op == "modf":
+            elif op == "__load__":  # Weird windows behavior...
+                continue
+            elif op == "modf":
                 checkMath("modf", 1, ret_type="Tuple[float, float]")
             elif op in ["isnan", "isinf", "isfinite"]:
                 checkMath(op, 1, ret_type="bool")
