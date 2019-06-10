@@ -12,6 +12,7 @@
 C10_DEFINE_int(iter, 10e4, "Number of at::launch iterations (tasks)");
 C10_DEFINE_int(warmup_iter, 10, "Number of warmup iterations")
 C10_DEFINE_int(inter_op_threads, 0, "Number of inter-op threads");
+C10_DEFINE_int(benchmark_iter, 3, "Number of times to run benchmark")
 
 namespace {
 int iter = 0;
@@ -78,12 +79,15 @@ int main(int argc, char** argv) {
             << at::get_num_interop_threads() << " threads "
             << std::endl;
 
-  start_time = clock::now();
-  launch_tasks_and_wait(FLAGS_iter);
-  duration = static_cast<float>(
-      std::chrono::duration_cast<ms>(clock::now() - start_time).count());
-  std::cout << "Time to run " << iter << " iterations "
-            << (duration/1000.0) << " s." << std::endl;
+  for (auto bench_iter = 0; bench_iter < FLAGS_benchmark_iter; ++bench_iter) {
+    start_time = clock::now();
+    launch_tasks_and_wait(FLAGS_iter);
+    duration = static_cast<float>(
+        std::chrono::duration_cast<ms>(clock::now() - start_time).count());
+
+    std::cout << "Time to run " << iter << " iterations "
+              << (duration/1000.0) << " s." << std::endl;
+  }
 
   return 0;
 }
