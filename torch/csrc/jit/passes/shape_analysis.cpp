@@ -1227,13 +1227,11 @@ class ShapePropagator {
             "aten::min_values(Tensor self, int[] dim, bool keepdim) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto dims = node->namedInput(attr::dim)->node()->inputs().size()) {
-            return multidim_reduce_with_keepdim(
-                node,
-                /*num_reduced_dim=*/dims,
-                /*upcast_integer=*/false);
-          }
-          return {};
+          auto dims = node->namedInput(attr::dim)->node()->inputs().size();
+          return multidim_reduce_with_keepdim(
+              node,
+              /*num_reduced_dim=*/dims,
+              /*upcast_integer=*/false);
         }};
 
     // Requirements:
