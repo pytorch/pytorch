@@ -96,8 +96,7 @@ class ProcessGroupShareTensorTest(TestCase):
         pg = init_pg(rank, filename, world_size)
         xs = [shared_tensors[rank]]
         pg.broadcast(xs).wait()
-        # delibrate failure to try CI
-        c2p.put((rank, torch.zeros(2, 2) + 7, xs[0].to("cpu")))
+        c2p.put((rank, torch.zeros(2, 2), xs[0].to("cpu")))
         p2c.get()
 
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
