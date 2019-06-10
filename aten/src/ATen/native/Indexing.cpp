@@ -273,7 +273,7 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   if (source.dim() == 0 && numIndices != 1) {
     AT_INDEX_ERROR("index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
   } else if (source.dim() != self.dim()) {
-    AT_INDEX_ERROR("index_copy_(): When source is not scalar, its dimension must match destinations");
+    AT_INDEX_ERROR("index_copy_(): When source is not scalar, its dimensionality must match the dimensionality of the destination");
   }
 
   if (index.scalar_type() != ScalarType::Long) {
