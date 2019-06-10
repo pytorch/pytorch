@@ -391,6 +391,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/insert_guards.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inliner.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/lift_closures.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/inline_forked_closures.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
@@ -423,6 +425,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
@@ -635,8 +638,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       if (NOT NVTOOLEXT_HOME)
         set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
       endif()
-      if ($ENV{NVTOOLEXT_HOME})
-        set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+      if (DEFINED ENV{NVTOOLSEXT_PATH})
+        set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
+        file(TO_CMAKE_PATH ${NVTOOLEXT_HOME} NVTOOLEXT_HOME)
       endif()
       set(TORCH_CUDA_LIBRARIES
         ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
@@ -1160,8 +1164,9 @@ if (BUILD_PYTHON)
   pycmd(PYTHON_SITE_PACKAGES "
       import os
       from distutils import sysconfig
-      print(sysconfig.get_python_lib(prefix='').replace(os.sep, '/'))
+      print(sysconfig.get_python_lib(prefix=''))
   ")
+  file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
   SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
   SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")

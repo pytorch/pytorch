@@ -296,9 +296,9 @@ void initTreeViewBindings(PyObject* module) {
             wrap_list(base.range(), std::move(subscript_exprs)));
       }));
   py::class_<SliceExpr, Expr>(m, "SliceExpr")
-      .def(py::init([](const SourceRange& range, Expr* lower, Expr* upper) {
+      .def(py::init([](const SourceRange& range, Expr* lower, Expr* upper, Expr* step) {
         return SliceExpr::create(
-            range, wrap_maybe(range, lower), wrap_maybe(range, upper));
+            range, wrap_maybe(range, lower), wrap_maybe(range, upper), wrap_maybe(range, step));
       }));
   py::class_<Starred, Expr>(m, "Starred")
       .def(py::init([](const SourceRange& range, Expr expr) {

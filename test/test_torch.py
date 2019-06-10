@@ -2646,6 +2646,13 @@ class _TestTorchMixin(object):
                 torch.tensor([0, 2, 1, 0], dtype=torch.float, device=device),
                 actual)
             self.assertEqual(actual.dtype, torch.float)
+            # scalar input and 1 bin -- should return a 1-dimensional tensor, not a scalar.
+            actual = torch.histc(
+                torch.tensor(0, dtype=torch.float, device=device),
+                bins=1, min=0, max=3)
+            self.assertEqual(
+                torch.tensor([1], dtype=torch.float, device=device),
+                actual)
 
         # test against numpy.histogram()
         def test_against_np(tensor, bins=100, min=0, max=0):
@@ -2981,6 +2988,7 @@ class _TestTorchMixin(object):
         for dtype in [torch.quint8, torch.qint8, torch.qint32]:
             if dtype == torch.qint32:
                 zero_point = 0
+
             def quantize(r):
                 return torch.quantize_linear(r, scale, zero_point, dtype)
             qr = quantize(r)
@@ -4966,6 +4974,16 @@ class _TestTorchMixin(object):
 
     def test_cat_empty(self):
         self._test_cat_empty(self)
+
+    @slowTest
+    def test_cat_big(self):
+        SIZE1 = 6500
+        SIZE2 = 4500
+        concat_list = []
+        concat_list.append(torch.ones((SIZE1, 1024 * 512), dtype=torch.uint8))
+        concat_list.append(torch.ones((SIZE2, 1024 * 512), dtype=torch.uint8))
+        result = torch.cat(concat_list)
+        self.assertEqual(result.size(0), SIZE1 + SIZE2)
 
     def test_narrow(self):
         x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
