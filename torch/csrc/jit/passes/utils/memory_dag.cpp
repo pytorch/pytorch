@@ -88,13 +88,14 @@ bool MemoryDAG::mayContainAlias(
   return all_a_mlocs.intersects(all_b_mlocs);
 }
 
-// Make `v` point at `to`.
 void MemoryDAG::makePointerTo(Element* from, Element* to) {
   from->pointsTo.set(to->index);
   to->pointedFrom.set(from->index);
 }
 
 void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
+  TORCH_INTERNAL_ASSERT(
+      elem != container, "Elements cannot contain themselves");
   container->containedElements.set(elem->index);
 }
 
