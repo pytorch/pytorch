@@ -94,7 +94,7 @@ def uniform_(tensor, a=0., b=1.):
 def normal_(tensor, mean=0., std=1.):
     # type: (Tensor, float, float) -> Tensor
     r"""Fills the input Tensor with values drawn from the normal
-    distribution :math:`\mathcal{N}(\text{mean}, \text{std})`.
+    distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -262,7 +262,7 @@ def xavier_normal_(tensor, gain=1.):
     described in `Understanding the difficulty of training deep feedforward
     neural networks` - Glorot, X. & Bengio, Y. (2010), using a normal
     distribution. The resulting tensor will have values sampled from
-    :math:`\mathcal{N}(0, \text{std})` where
+    :math:`\mathcal{N}(0, \text{std}^2)` where
 
     .. math::
         \text{std} = \text{gain} \times \sqrt{\frac{2}{\text{fan\_in} + \text{fan\_out}}}
@@ -333,7 +333,7 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     described in `Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification` - He, K. et al. (2015), using a
     normal distribution. The resulting tensor will have values sampled from
-    :math:`\mathcal{N}(0, \text{std})` where
+    :math:`\mathcal{N}(0, \text{std}^2)` where
 
     .. math::
         \text{std} = \sqrt{\frac{2}{(1 + a^2) \times \text{fan\_in}}}

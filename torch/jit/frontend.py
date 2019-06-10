@@ -526,10 +526,8 @@ class ExprBuilder(Builder):
         def build_SliceExpr(ctx, base, slice_expr):
             lower = build_expr(ctx, slice_expr.lower) if slice_expr.lower is not None else None
             upper = build_expr(ctx, slice_expr.upper) if slice_expr.upper is not None else None
-            if slice_expr.step is not None:
-                step = build_expr(ctx, slice_expr.step)
-                raise NotSupportedError(step.range(), "slices with ranges are not supported yet")
-            return SliceExpr(base.range(), lower, upper)
+            step = build_expr(ctx, slice_expr.step) if slice_expr.step is not None else None
+            return SliceExpr(base.range(), lower, upper, step)
 
         def build_Index(ctx, base, index_expr):
             if isinstance(index_expr.value, ast.Tuple) or \

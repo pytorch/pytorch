@@ -497,6 +497,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = False
 
     def _forward(self, module, input):
         with freeze_rng_state():
@@ -2611,6 +2612,26 @@ class TestNN(NNTestCase):
             test_backward = dtype is not torch.float
             self._test_EmbeddingBag(False, 'sum', True, test_backward=test_backward, dtype=dtype)
             self._test_EmbeddingBag(False, 'mean', True, test_backward=test_backward, dtype=dtype)
+
+    def _test_embedding_bag_empty_input(self, device):
+        m = 4
+        n = 3
+        x = torch.tensor([], device=device, dtype=torch.long)
+        for sparse in [True, False]:
+            Embed = torch.nn.EmbeddingBag(m, n, sparse=True)
+
+            output = Embed(input=x, offsets=torch.tensor([0], device=device, dtype=torch.long))
+            self.assertEqual(output, torch.zeros_like(output))
+
+            output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=torch.long))
+            self.assertEqual(output, torch.zeros_like(output))
+
+    def test_embedding_bag_empty_input_cpu(self):
+        self._test_embedding_bag_empty_input('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_embedding_bag_empty_input_cuda(self):
+        self._test_embedding_bag_empty_input('cuda')
 
     @staticmethod
     def _embedding_bag_reference_impl(input, weight, offsets=None, mode='sum',
@@ -5309,9 +5330,11 @@ class TestNN(NNTestCase):
                 if l < 10:
                     self.assertEqual(padded.grad.data[l:, i].abs().sum(), 0)
 
-        # test error message
+        # test error messages
         with self.assertRaisesRegex(RuntimeError, 'You can pass `enforce_sorted=False`'):
             packed = rnn_utils.pack_padded_sequence(torch.randn(3, 3), [1, 3, 2])
+        with self.assertRaisesRegex(RuntimeError, 'empty tensor'):
+            packed = rnn_utils.pack_padded_sequence(torch.randn(0, 0), [])
 
     def _test_variable_sequence(self, device="cpu", dtype=torch.float):
         def pad(var, length):
