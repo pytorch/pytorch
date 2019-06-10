@@ -635,8 +635,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       if (NOT NVTOOLEXT_HOME)
         set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
       endif()
-      if ($ENV{NVTOOLEXT_HOME})
-        set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+      if (DEFINED ENV{NVTOOLSEXT_PATH})
+        set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
+        file(TO_CMAKE_PATH ${NVTOOLEXT_HOME} NVTOOLEXT_HOME)
       endif()
       set(TORCH_CUDA_LIBRARIES
         ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
@@ -1160,8 +1161,9 @@ if (BUILD_PYTHON)
   pycmd(PYTHON_SITE_PACKAGES "
       import os
       from distutils import sysconfig
-      print(sysconfig.get_python_lib(prefix='').replace(os.sep, '/'))
+      print(sysconfig.get_python_lib(prefix=''))
   ")
+  file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
   SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
   SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")

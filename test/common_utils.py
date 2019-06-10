@@ -767,6 +767,20 @@ class TestCase(expecttest.TestCase):
             else:
                 self.assertEqual(s, expected)
 
+    # returns captured stderr
+    @staticmethod
+    def runWithPytorchAPIUsageStderr(code):
+        import subprocess
+
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        pipes = subprocess.Popen(
+            [sys.executable, '-c', code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env)
+        return pipes.communicate()[1].decode('ascii')
+
     if sys.version_info < (3, 2):
         # assertRegexpMatches renamed to assertRegex in 3.2
         assertRegex = unittest.TestCase.assertRegexpMatches
