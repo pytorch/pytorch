@@ -6,6 +6,7 @@ from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
 import torch._jit_internal as _jit_internal
+from torch._jit_internal import Final
 from torch._six import PY2, PY37, with_metaclass, get_function_from_type, \
     string_classes, builtins
 from torch._jit_internal import ignore, export  # noqa: F401
@@ -1618,6 +1619,11 @@ if _enabled:
                     object.__setattr__(self, name, None)
                 else:
                     self.register_buffer(name, original._buffers[name])
+
+            # Constants annotated via `Final[T]` rather than being added to `__constants__`
+            for name, ann in getattr(original, '__annotations__', {}).items():
+                if torch._jit_internal.is_final(ann):
+                    constants_set.add(name)
 
             # Copy constants
             self.__dict__["_constants_set"] = constants_set
