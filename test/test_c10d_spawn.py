@@ -57,40 +57,61 @@ class ProcessGroupShareTensorTest(TestCase):
             "Expecting tensor value {} but got {}."
         ).format(expected, value)
 
+    def _test_multiprocess(self, f, shared_tensors, init_pg, n_output):
+        ws = self.world_size
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            ctx = mp.get_context('spawn')
+            c2p = ctx.Queue(2)
+            p2c = ctx.Queue(2)
+            ps = []
+            for i in range(ws):
+                p = ctx.Process(
+                    target=f,
+                    args=(i, file.name, shared_tensors, ws, init_pg, c2p, p2c))
+
+                p.start()
+                ps.append(p)
+
+            for _ in range(ws * n_output):
+                pid, expected, result = c2p.get()
+                self.assertEqual(expected, result, (
+                    "Expect rank {} to broadcast result {} but got {}."
+                    ).format(pid, expected, result))
+
+            for _ in range(ws):
+                p2c.put(0)
+
+            for p in ps:
+                p.join()
+
     # Why classmethod? multiprocessing cannot pickle TestCase subclass when in
     # spawn mode. See https://bugs.python.org/issue33884.
     @classmethod
     def _test_broadcast_process(
-            cls, rank, filename, shared_tensors, world_size, init_pg):
+            cls, rank, filename, shared_tensors, world_size, init_pg, c2p, p2c):
         pg = init_pg(rank, filename, world_size)
         xs = [shared_tensors[rank]]
         pg.broadcast(xs).wait()
-        cls.assert_equal(torch.zeros(2, 2), xs[0].to("cpu"))
+        c2p.put((rank, torch.zeros(2, 2) + 1, xs[0].to("cpu")))
+        p2c.get()
 
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
     def test_shared_broadcast_gloo(self):
-        with tempfile.NamedTemporaryFile(delete=False) as file:
-            shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
-            mp.spawn(ProcessGroupShareTensorTest._test_broadcast_process,
-                     args=(file.name,
-                           shared_tensors,
-                           self.world_size,
-                           ProcessGroupShareTensorTest._init_pg_gloo),
-                     nprocs=self.world_size,
-                     join=True)
+        self._test_multiprocess(
+            ProcessGroupShareTensorTest._test_broadcast_process,
+            [torch.ones(2, 2).to(i) * i for i in range(self.world_size)],
+            ProcessGroupShareTensorTest._init_pg_gloo,
+            1)
+
 
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
     @unittest.skipIf(NO_NCCL, "NCCL needed")
     def test_shared_broadcast_nccl(self):
-        with tempfile.NamedTemporaryFile(delete=False) as file:
-            shared_tensors = [torch.ones(2, 2).to(i) * i for i in range(2)]
-            mp.spawn(ProcessGroupShareTensorTest._test_broadcast_process,
-                     args=(file.name,
-                           shared_tensors,
-                           self.world_size,
-                           ProcessGroupShareTensorTest._init_pg_nccl),
-                     nprocs=self.world_size,
-                     join=True)
+        self._test_multiprocess(
+            ProcessGroupShareTensorTest._test_broadcast_process,
+            [torch.ones(2, 2).to(i) * i for i in range(self.world_size)],
+            ProcessGroupShareTensorTest._init_pg_nccl,
+            1)
 
     @classmethod
     def _test_allreduce_process(
