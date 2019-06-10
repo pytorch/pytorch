@@ -247,8 +247,11 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   // Hook API
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  void add_post_hook(std::unique_ptr<FunctionPostHook>&& post_hook) {
+  uintptr_t add_post_hook(std::unique_ptr<FunctionPostHook>&& post_hook) {
     post_hooks_.push_back(std::move(post_hook));
+    // Use the raw pointer as the unique key to identify this hook. This key
+    // can then be used in del_post_hook(key) to remove this hook.
+    return reinterpret_cast<std::uintptr_t>(post_hooks_.back().get());
   }
 
   const std::vector<std::unique_ptr<FunctionPostHook>>& post_hooks() const
@@ -256,18 +259,15 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     return post_hooks_;
   }
 
-  // delete all post hooks matching HookType
-  template <typename HookType>
-  void delete_post_hooks() {
-    std::lock_guard<std::mutex> lock(this->mutex_);
+  // delete a post hook matching the key
+  bool del_post_hook(const uintptr_t key) {
     for (auto it = post_hooks_.begin(); it != post_hooks_.end();) {
-      HookType* ptr = dynamic_cast<HookType*>(it->get());
-      if (ptr) {
-        it = post_hooks_.erase(it);
-      } else {
-        ++it;
+      if (key == reinterpret_cast<std::uintptr_t>(it->get())) {
+        post_hooks_.erase(it);
+        return true;
       }
     }
+    return false;
   }
 
   std::vector<std::unique_ptr<FunctionPostHook>>& post_hooks() noexcept {
@@ -339,7 +339,6 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
   at::SmallVector<InputMetadata, 2> input_metadata_;
-  std::mutex mutex_;
 };
 
 /// See Function::is_traceable() for definition.
