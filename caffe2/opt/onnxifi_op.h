@@ -64,6 +64,8 @@ class OnnxifiOp final : public Operator<Context> {
       input_desc_.push_back(onnxTensorDescriptorV1());
       input_desc_.back().name = input.c_str();
     }
+    all_offsets_.reserve(ws->Blobs().size());
+    all_scales_.reserve(ws->Blobs().size());
     input_shapes_.resize(input_names_.size());
     output_shapes_.resize(output_names_.size());
     output_reshape_info_.begins.reserve(output_names_.size());
@@ -121,29 +123,6 @@ class OnnxifiOp final : public Operator<Context> {
     // process.
     buildBackendAndGraph(ws, property_pointers, onnx_model_str);
 
-    // Get the weights (initializer) a second time to fill in its shape info
-    std::vector<std::string> weight_names;
-    std::vector<std::vector<uint64_t>> weight_shapes;
-    auto initializers =
-        this->template GetRepeatedArgument<std::string>("initializers");
-    std::vector<std::vector<float>> dummy_scales;
-    std::vector<std::vector<float>> dummy_offsets;
-    buildInitializationList(
-        ws,
-        initializers,
-        &weight_names,
-        &weight_shapes,
-        &dummy_scales,
-        &dummy_offsets);
-    for (int i = 0; i < weight_names.size(); ++i) {
-      TensorShape shape;
-      const auto& shape0 = weight_shapes[i];
-      for (const auto d : shape0) {
-        shape.add_dims(d);
-      }
-      input_shape_info_[weight_names[i]] =
-          ShapeInfo(ShapeInfo::DimType::CONSTANT, std::move(shape));
-    }
   }
 
   ~OnnxifiOp() {
@@ -250,6 +229,18 @@ class OnnxifiOp final : public Operator<Context> {
           &all_scales_,
           &all_offsets_);
 
+      // Extra weight shapes
+      std::unordered_map<std::string, ShapeInfo> weight_shape_info;
+      for (int i = 0; i < weight_names.size(); ++i) {
+        TensorShape shape;
+        const auto& shape0 = weight_shapes[i];
+        for (const auto d : shape0) {
+          shape.add_dims(d);
+        }
+        weight_shape_info[weight_names[i]] =
+            ShapeInfo(ShapeInfo::DimType::CONSTANT, std::move(shape));
+      }
+
       onnxGraph graph{nullptr};
       CAFFE_ENFORCE_EQ(
           lib_->onnxInitGraph(
@@ -263,7 +254,7 @@ class OnnxifiOp final : public Operator<Context> {
           ONNXIFI_STATUS_SUCCESS);
 
       return std::make_shared<onnx::BackendGraphInfo>(
-          backend_id, backend, graph, lib_);
+          backend_id, backend, graph, lib_, std::move(weight_shape_info));
     };
     backend_graph_shared_ptr_ =
         backend_graph_map_ptr_->insert(op_id_string_, creator);
@@ -271,6 +262,7 @@ class OnnxifiOp final : public Operator<Context> {
     backend_id_ = backend_graph_shared_ptr_->backend_id;
     backend_ = backend_graph_shared_ptr_->backend;
     graph_ = backend_graph_shared_ptr_->graph;
+    input_shape_info_ = backend_graph_shared_ptr_->weight_shape_info;
 
     getExtFunctionPointers();
   }
@@ -314,7 +306,7 @@ class OnnxifiOp final : public Operator<Context> {
       std::vector<std::string>* weight_names,
       std::vector<std::vector<uint64_t>>* weight_shapes,
       std::vector<std::vector<float>>* all_scales,
-      std::vector<std::vector<float>>* all_offsets) const;
+      std::vector<std::vector<int32_t>>* all_offsets) const;
 
   // pointer to loaded onnxifi library
   onnxifi_library* lib_{nullptr};
@@ -381,7 +373,7 @@ class OnnxifiOp final : public Operator<Context> {
 
   // This is for multi group quantization info
   std::vector<std::vector<float>> all_scales_;
-  std::vector<std::vector<float>> all_offsets_;
+  std::vector<std::vector<int32_t>> all_offsets_;
 
   // output shape hints
   std::unordered_map<int, TensorInfo> output_shape_hints_;

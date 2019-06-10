@@ -228,7 +228,7 @@ endif()
 
 
 
-if (NOT INTERN_BUILD_MOBILE)
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -391,12 +391,15 @@ if (NOT INTERN_BUILD_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/insert_guards.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inliner.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/lift_closures.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/inline_forked_closures.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
@@ -422,6 +425,7 @@ if (NOT INTERN_BUILD_MOBILE)
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
@@ -556,7 +560,7 @@ target_link_libraries(torch caffe2)
 # formerly-libtorch flags
 # ==========================================================
 
-if (NOT INTERN_BUILD_MOBILE)
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   # Forces caffe2.pb.h to be generated before its dependents are compiled.
   # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
@@ -634,8 +638,9 @@ if (NOT INTERN_BUILD_MOBILE)
       if (NOT NVTOOLEXT_HOME)
         set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
       endif()
-      if ($ENV{NVTOOLEXT_HOME})
-        set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+      if (DEFINED ENV{NVTOOLSEXT_PATH})
+        set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
+        file(TO_CMAKE_PATH ${NVTOOLEXT_HOME} NVTOOLEXT_HOME)
       endif()
       set(TORCH_CUDA_LIBRARIES
         ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
@@ -692,13 +697,6 @@ ENDIF()
 
   set_property(TARGET caffe2 PROPERTY CXX_STANDARD 11)
 
-
-  # Prevent the unused functions being optimized away
-  # Otherwise torch.dll will be linked without caffe2_gpu.dll
-  if (MSVC)
-    # TODO What to do with this line?
-    set_target_properties(caffe2 PROPERTIES LINK_FLAGS "/OPT:NOREF")
-  endif()
 
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
@@ -1101,10 +1099,10 @@ if (BUILD_TEST)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if (INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
-        # Install PDB files for MSVC builds
-        if (MSVC AND BUILD_SHARED_LIBS)
-          install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
-        endif()
+      # Install PDB files for MSVC builds
+      if (MSVC AND BUILD_SHARED_LIBS)
+        install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+      endif()
     endif()
   endforeach()
 
@@ -1166,8 +1164,9 @@ if (BUILD_PYTHON)
   pycmd(PYTHON_SITE_PACKAGES "
       import os
       from distutils import sysconfig
-      print(sysconfig.get_python_lib(prefix='').replace(os.sep, '/'))
+      print(sysconfig.get_python_lib(prefix=''))
   ")
+  file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
   SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
   SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")

@@ -10,17 +10,15 @@ import torch.nn._intrinsic as _intrinsic
 
 
 # Reference method for quantizing a tensor.
-def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, num_bits):
-    quant_min, quant_max = 0, 2 ** num_bits - 1
+def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
     res = (np.clip(np.round(X / scale) + zero_point, quant_min, quant_max) - zero_point) * scale
     res = res.reshape(X.shape)
     return res
 
 
 # Reference method for the gradient of the quantizer.
-def _fake_quantize_per_tensor_affine_grad_reference(X, dY, scale, zero_point, num_bits):
+def _fake_quantize_per_tensor_affine_grad_reference(X, dY, scale, zero_point, quant_min, quant_max):
     Xq = np.round(X / scale) + zero_point
-    quant_min, quant_max = 0, 2 ** num_bits - 1
     mask = np.logical_and(Xq >= quant_min, Xq <= quant_max)
     res = dY[mask].reshape(dY.shape)
     return res
@@ -35,13 +33,13 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
 
         scale = 3
         zero_point = 2
-        num_bits = 8
+        quant_min, quant_max = 0, 255
         X = np.random.rand(20, 20) * 125
         X_torch = torch.from_numpy(X).float()
-        Y = _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, num_bits)
+        Y = _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max)
         Y_prime = _intrinsic.fq_per_tensor_affine_forward(
-            X=X_torch, scale=scale, zero_point=zero_point, num_bits=num_bits,
-            quant_delay=0, iter=0)
+            X=X_torch, scale=scale, zero_point=zero_point, quant_min=quant_min,
+            quant_max=quant_max, quant_delay=0, iter=0)
         tolerance = 1e-6
         np.testing.assert_allclose(Y, Y_prime, rtol=tolerance, atol=tolerance)
 
@@ -53,16 +51,17 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
 
         scale = 3
         zero_point = 2
-        num_bits = 8
+        quant_min, quant_max = 0, 255
         X = np.random.rand(20, 20) * 125
-        Y = _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, num_bits)
+        Y = _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max)
         dY = Y - X  # Fake gradient
-        dX = _fake_quantize_per_tensor_affine_grad_reference(X, dY, scale, zero_point, num_bits)
+        dX = _fake_quantize_per_tensor_affine_grad_reference(
+            X, dY, scale, zero_point, quant_min, quant_max)
         X_torch = torch.from_numpy(X).float()
         dY_torch = torch.from_numpy(dY).float()
         dX_prime = _intrinsic.fq_per_tensor_affine_backward(
             X=X_torch, dY=dY_torch, scale=scale, zero_point=zero_point,
-            num_bits=num_bits, quant_delay=0, iter=0)
+            quant_min=quant_min, quant_max=quant_max, quant_delay=0, iter=0)
         tolerance = 1e-6
         np.testing.assert_allclose(dX, dX_prime, rtol=tolerance, atol=tolerance)
 
@@ -75,13 +74,13 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
 
         scale = 3
         zero_point = 2
-        num_bits = 8
+        quant_min, quant_max = 0, 255
         X = np.random.rand(20, 20) * 125
         X_torch = torch.from_numpy(X).float()
         Y = torch.dequantize(torch.quantize_linear(X_torch, scale, zero_point, torch.qint8))
         Y_prime = _intrinsic.fq_per_tensor_affine_forward(
-            X=X_torch, scale=scale, zero_point=zero_point, num_bits=num_bits,
-            quant_delay=0, iter=0)
+            X=X_torch, scale=scale, zero_point=zero_point, quant_min=quant_min,
+            quant_max=quant_max, quant_delay=0, iter=0)
         tolerance = 1e-6
         np.testing.assert_allclose(Y, Y_prime, rtol=tolerance, atol=tolerance)
 
@@ -91,13 +90,14 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         np.random.seed(NP_RANDOM_SEED)
         scale = 3
         zero_point = 2
-        num_bits = 8
+        quant_min, quant_max = 0, 255
         X = np.random.rand(20, 20) * 125
         X_torch = torch.from_numpy(X).float().cuda()
-        Y = _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, num_bits)
+        Y = _fake_quantize_per_tensor_affine_reference(
+            X, scale, zero_point, quant_min, quant_max)
         Y_prime = _intrinsic.fq_per_tensor_affine_forward(
-            X=X_torch, scale=scale, zero_point=zero_point, num_bits=num_bits,
-            quant_delay=0, iter=0)
+            X=X_torch, scale=scale, zero_point=zero_point, quant_min=quant_min,
+            quant_max=quant_max, quant_delay=0, iter=0)
         tolerance = 1e-6
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
@@ -109,16 +109,18 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
 
         scale = 3
         zero_point = 2
-        num_bits = 8
+        quant_min, quant_max = 0, 255
         X = np.random.rand(20, 20) * 125
-        Y = _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, num_bits)
+        Y = _fake_quantize_per_tensor_affine_reference(
+            X, scale, zero_point, quant_min, quant_max)
         dY = Y - X  # Fake gradient
-        dX = _fake_quantize_per_tensor_affine_grad_reference(X, dY, scale, zero_point, num_bits)
+        dX = _fake_quantize_per_tensor_affine_grad_reference(
+            X, dY, scale, zero_point, quant_min=quant_min, quant_max=quant_max)
         X_torch = torch.from_numpy(X).float().cuda()
         dY_torch = torch.from_numpy(dY).float().cuda()
         dX_prime = _intrinsic.fq_per_tensor_affine_backward(
             X=X_torch, dY=dY_torch, scale=scale, zero_point=zero_point,
-            num_bits=num_bits, quant_delay=0, iter=0)
+            quant_min=quant_min, quant_max=quant_max, quant_delay=0, iter=0)
         tolerance = 1e-6
         np.testing.assert_allclose(dX, dX_prime.cpu(), rtol=tolerance, atol=tolerance)
 
@@ -131,13 +133,13 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
 
         scale = 3
         zero_point = 2
-        num_bits = 8
+        quant_min, quant_max = 0, 255
         X = np.random.rand(20, 20) * 125
         X_torch = torch.from_numpy(X).float()
         Y = torch.dequantize(torch.quantize_linear(X_torch, scale, zero_point, torch.qint8))
         Y_prime = _intrinsic.fq_per_tensor_affine_forward(
-            X=X_torch.cuda(), scale=scale, zero_point=zero_point, num_bits=num_bits,
-            quant_delay=0, iter=0)
+            X=X_torch.cuda(), scale=scale, zero_point=zero_point, quant_min=quant_min,
+            quant_max=quant_max, quant_delay=0, iter=0)
         tolerance = 1e-6
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 

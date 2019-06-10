@@ -118,6 +118,9 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   THPCharStorage_postInit(module);
   THPByteStorage_postInit(module);
   THPBoolStorage_postInit(module);
+  THPQUInt8Storage_postInit(module);
+  THPQInt8Storage_postInit(module);
+  THPQInt32Storage_postInit(module);
   THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -561,7 +564,19 @@ static void warning_handler(
     const c10::SourceLocation& source_location,
     const char* msg) {
   AutoGIL gil;
-  if (PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1) < 0) {
+  auto result = -1;
+  if (source_location.file == nullptr) {
+    result = PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1);
+  } else {
+    result = PyErr_WarnExplicit(
+        /*category=*/PyExc_UserWarning,
+        /*message=*/msg,
+        /*filename=*/source_location.file,
+        /*lineno=*/source_location.line,
+        /*module=*/nullptr,
+        /*registry=*/nullptr);
+  }
+  if (result < 0) {
     throw python_error();
   }
 }
@@ -649,6 +664,9 @@ PyObject* initModule() {
   ASSERT_TRUE(THPCharStorage_init(module));
   ASSERT_TRUE(THPByteStorage_init(module));
   ASSERT_TRUE(THPBoolStorage_init(module));
+  ASSERT_TRUE(THPQUInt8Storage_init(module));
+  ASSERT_TRUE(THPQInt8Storage_init(module));
+  ASSERT_TRUE(THPQInt32Storage_init(module));
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace

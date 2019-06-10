@@ -8,6 +8,9 @@ from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 
+# Borrowed from cPython implementation 
+# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411# 
+
 _reserved_prefix = '__jit'
 _reserved_names = {'print'}
 _identifier_chars = set(string.ascii_lowercase + string.ascii_uppercase + string.digits)
@@ -142,27 +145,35 @@ def get_jit_class_def(cls, self_name):
     method_defs = [get_jit_def(method[1],
                    self_name=self_name) for method in methods]
 
-    source = dedent(inspect.getsource(cls))
-    py_ast = ast.parse(source)
-    ctx = SourceContext(source, False)
+    sourcelines, file_lineno = inspect.getsourcelines(cls)
+    source = ''.join(sourcelines)
+    filename = inspect.getsourcefile(cls)
+    dedent_src = dedent(source)
+    py_ast = ast.parse(dedent_src)
+    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
+    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
     return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
 def get_jit_def(fn, self_name=None):
-    source = dedent(inspect.getsource(fn))
-    py_ast = ast.parse(source)
+    sourcelines, file_lineno = inspect.getsourcelines(fn)
+    source = ''.join(sourcelines)
+    filename = inspect.getsourcefile(fn)
+    dedent_src = dedent(source)
+    py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
+    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, _uses_true_division(fn))
+    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
     return build_def(ctx, py_ast.body[0], type_line, self_name)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
 class SourceContext(SourceRangeFactory):
-    def __init__(self, source, uses_true_division=True):
-        super(SourceContext, self).__init__(source)
+    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
+        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
 
 
@@ -223,7 +234,7 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
     elif self_name is not None and name == 'self':
         annotation_expr = Var(Ident(r, self_name))
     else:
-        annotation_expr = Var(Ident(r, 'Tensor'))
+        annotation_expr = EmptyTypeAnnotation(r)
     return Param(annotation_expr, Ident(r, name), kwarg_only)
 
 
@@ -515,10 +526,8 @@ class ExprBuilder(Builder):
         def build_SliceExpr(ctx, base, slice_expr):
             lower = build_expr(ctx, slice_expr.lower) if slice_expr.lower is not None else None
             upper = build_expr(ctx, slice_expr.upper) if slice_expr.upper is not None else None
-            if slice_expr.step is not None:
-                step = build_expr(ctx, slice_expr.step)
-                raise NotSupportedError(step.range(), "slices with ranges are not supported yet")
-            return SliceExpr(base.range(), lower, upper)
+            step = build_expr(ctx, slice_expr.step) if slice_expr.step is not None else None
+            return SliceExpr(base.range(), lower, upper, step)
 
         def build_Index(ctx, base, index_expr):
             if isinstance(index_expr.value, ast.Tuple) or \
@@ -587,6 +596,27 @@ class ExprBuilder(Builder):
         value = str(expr.s)
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
         return StringLiteral(r, value)
+
+    @staticmethod
+    def build_JoinedStr(ctx, expr):
+        s = ''
+        args = []
+        for value in expr.values:
+            r = ctx.make_range(value.lineno, value.col_offset, value.col_offset + 1)
+            if isinstance(value, ast.FormattedValue):
+                if value.conversion != -1:
+                    raise NotSupportedError(r, 'Don\'t support conversion in JoinedStr')
+                if value.format_spec is not None:
+                    raise NotSupportedError(r, 'Don\'t support formatting in JoinedStr')
+                s += '{}'
+                args.append(build_expr(ctx, value.value))
+            elif isinstance(value, ast.Str):
+                s += value.s
+            else:
+                raise NotSupportedError(r, 'Unsupported value in JoinedStr')
+
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        return Apply(Select(StringLiteral(r, s), Ident(r, 'format')), args, [])
 
     @staticmethod
     def build_ListComp(ctx, stmt):
