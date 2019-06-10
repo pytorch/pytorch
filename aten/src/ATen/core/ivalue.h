@@ -340,7 +340,7 @@ struct CAFFE2_API IValue final {
       TORCH_FORALL_TAGS(DEFINE_CASE)
       #undef DEFINE_CASE
     }
-    return "Invalid Tag";
+    return "InvalidTag(" + c10::guts::to_string(tag) + ")";
   }
 
   // generic v.to<at::Tensor>() implementations
