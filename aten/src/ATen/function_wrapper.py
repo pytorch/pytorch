@@ -1598,8 +1598,6 @@ def create_extension_backend(backend_type_env, declarations):
                     env = nested_dict(option, backend_type_env)
                     type_object_declarations.append(
                         NATIVE_DISPATCH_DECLARATION.substitute(env))
-                    function_registrations.append(
-                        BACKEND_FUNCTION_REGISTRATION.substitute(env))
                     type_object_definitions.append(
                         NATIVE_DISPATCH_DEFINITION_EXTENSION_BACKEND.substitute(env))
                 except NYIError:
