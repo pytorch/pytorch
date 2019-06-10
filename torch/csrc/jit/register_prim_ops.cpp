@@ -161,6 +161,14 @@ int64_t factorial(int n) {
   loop(n, p, r);
   return r << nminussumofbits(n);
 }
+static const double degToRad = std::acos(-1.0) / 180.0;
+static const double radToDeg = 180.0 / std::acos(-1.0);
+double degrees(double x) {
+  return x * radToDeg;
+}
+double radians(double x) {
+  return x * degToRad;
+}
 
 // reference function THPVariable_to in python_variable_methods.cpp
 static at::Tensor to_dispatch(
@@ -218,6 +226,14 @@ RegisterOperators reg(
          [](const Node* node) {
            return [](Stack& stack) {
              AT_ERROR("Should be replaced by prim::BailOut");
+             return 0;
+           };
+         }),
+     Operator(
+         "prim::BailOut(...) -> Tensor(a)",
+         [](const Node* /* node */) {
+           return [](Stack& /* stack */) {
+             AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
              return 0;
            };
          }),
@@ -1008,12 +1024,8 @@ RegisterOperators reg(
      Operator(
          "aten::wait(Future(t) self) -> t",
          [](Stack& stack) {
-           auto future = pop(stack).toFuture();
-           if (future->completed()) {
-             push(stack, future->value());
-           } else {
-             throw Suspend(future);
-           }
+           TORCH_CHECK(
+               false, "wait is implemented directly in the interpreter");
            return 0;
          }),
      Operator(
@@ -1715,7 +1727,6 @@ int dictSetItem(Stack& stack) {
   auto idx = pop(stack);
   auto dict = pop(stack).toGenericDict();
   dict->elements().insert_or_assign(std::move(idx), std::move(value));
-  push(stack, std::move(dict));
   return 0;
 }
 
@@ -2222,8 +2233,13 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
     DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
     DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
+    DEFINE_UNARY_OP(aten::degrees, degrees(a), float, float),
+    DEFINE_UNARY_OP(aten::radians, radians(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
     DEFINE_UNARY_INT_OP(aten::factorial, factorial(a), int),
+    DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
+    DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
+    DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
     Operator(
         "aten::modf(float a) -> (float, float)",
         [](Stack& stack) {
@@ -2232,6 +2248,26 @@ RegisterOperators reg2({
           double b, c;
           b = modf(a, &c);
           push(stack, b, c);
+          return 0;
+        }),
+    Operator(
+        "aten::frexp(float a) -> (float, int)",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          double m;
+          int e;
+          m = std::frexp(a, &e);
+          push(stack, m, e);
+          return 0;
+        }),
+    Operator(
+        "aten::ldexp(float x, int i) -> float",
+        [](Stack& stack) {
+          double a;
+          int64_t b;
+          pop(stack, a, b);
+          push(stack, std::ldexp(a, b));
           return 0;
         }),
     DEFINE_BINARY_FLOAT_OP(aten::mathremainder, std::remainder(a, b)),

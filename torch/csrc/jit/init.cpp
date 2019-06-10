@@ -159,7 +159,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quantdequant",
-          [](std::shared_ptr<Graph>& g, py::dict& pyQParamDict) {
+          [](std::shared_ptr<script::Module>& moduleObj,
+             const std::string& methodName,
+             py::dict& pyQParamDict) {
             if (!pyQParamDict.size()) {
               return;
             }
@@ -167,7 +169,7 @@ void initJITBindings(PyObject* module) {
             auto qparam_dict = py::cast<std::unordered_map<
                 std::string,
                 std::tuple<std::string, float, int>>>(pyQParamDict);
-            return InsertQuantDequantNodes(g, qparam_dict);
+            return InsertQuantDequantNodes(moduleObj, methodName, qparam_dict);
           })
       .def(
           "_jit_pass_insert_quantdequant_for_weight_bias",
@@ -331,6 +333,9 @@ void initJITBindings(PyObject* module) {
           "_jit_set_profiling_mode",
           [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
       .def(
+          "_jit_set_first_class_mode",
+          [](bool enabled) { script::getFirstClassMode() = enabled; })
+      .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
@@ -353,11 +358,9 @@ void initJITBindings(PyObject* module) {
     return states;
   });
 
-  py::class_<ExecutionPlanState>(m, "ExecutionPlanState")
-      .def_property_readonly(
-          "graph", [](ExecutionPlanState& s) { return s.graph; })
-      .def_property_readonly(
-          "code", [](ExecutionPlanState& s) { return s.code; });
+  py::class_<ExecutionPlan>(m, "ExecutionPlan")
+      .def_property_readonly("graph", [](ExecutionPlan& s) { return s.graph; })
+      .def_property_readonly("code", [](ExecutionPlan& s) { return s.code; });
 
   py::class_<Gradient>(m, "Gradient")
       .def_property_readonly("f", [](Gradient& m) { return m.f; })

@@ -3,6 +3,7 @@
 #else
 
 #include "ATen/cuda/CUDAContext.h"
+#include <utility>
 
 #define NUM_BLOCKS min((int)THCCeilDiv(size, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
 
@@ -130,6 +131,12 @@ void THCTensor_(multinomial)(struct THCState *state,
     // Prefix sum along rows
     THCTensor_(cumsum)(state, prefixSum, normDist, 1);
 
+    // each thread will utilize one random, however, since we have to use
+    // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
+    // offset is 4.
+    uint64_t offset = gen->state.philox_seed_offset.fetch_add(4);
+    std::pair<uint64_t, uint64_t> next_philox_seed = std::make_pair(gen->state.initial_seed, offset);
+
     if (with_replacement) {
       // Sample with replacement
 
@@ -144,7 +151,7 @@ void THCTensor_(multinomial)(struct THCState *state,
 
       sampleMultinomialWithReplacement
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          gen->state.gen_states,
+          next_philox_seed,
           n_sample,
           THCudaLongTensor_data(state, self),
           numDist, numCategories,
@@ -178,7 +185,7 @@ void THCTensor_(multinomial)(struct THCState *state,
         // recalculate our distribution
         sampleMultinomialWithoutReplacement
           <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-            gen->state.gen_states,
+            next_philox_seed,
             n_sample,
             sample,
             THCudaLongTensor_data(state, self),
