@@ -66,7 +66,7 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
   }
 
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->update_strides_to_format(memory_format);
+  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
 

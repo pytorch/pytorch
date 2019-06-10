@@ -683,6 +683,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     strides_.resize(ndim, 0);
     refresh_numel();
     refresh_contiguous();
+    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -698,6 +699,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
+    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -711,6 +713,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
+    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -742,7 +745,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       sizes_[dim] = new_size[dim];
     }
 
-    update_to_contiguous_strides(old_dim);
+    empty_tensor_restride(MemoryFormat::Contiguous);
     refresh_numel();
   }
 
@@ -791,6 +794,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
     refresh_numel();
     refresh_contiguous();
+    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -911,6 +915,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       /*dest_impl=*/impl.get(),
       /*version_counter=*/version_counter,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    impl->is_channels_last_contiguous_ = is_channels_last_contiguous_;
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
@@ -1144,7 +1149,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "to change corresponding code from Reshape to Resize.");
     auto old_dim = sizes_.size();
     sizes_ = dims;
-    update_to_contiguous_strides(old_dim);
+    empty_tensor_restride(MemoryFormat::Contiguous);
   }
 
   /**
@@ -1344,11 +1349,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     device_opt_ = storage_.device();
   }
 
-  virtual void update_strides_to_format(MemoryFormat memory_format) {
+  virtual void empty_tensor_restride(MemoryFormat memory_format) {
+    is_contiguous_ = false;
+    is_channels_last_contiguous_ = false;
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
-        auto old_dim = sizes_.size();
-        update_to_contiguous_strides(old_dim);
+        strides_.resize(sizes_.size(), 0);
+        if (dim() > 0) {
+          int last_idx = dim() - 1;
+          strides_[last_idx] = 1;
+          for (auto i = last_idx - 1; i >= 0; --i) {
+            strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
+          }
+        }
+        is_contiguous_ = true;
         return;
       }
       case MemoryFormat::ChannelsLast: {
@@ -1356,7 +1370,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             dim() == 4,
             "required rank 4 tensor to use channels_last format");
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
-        refresh_contiguous();
+        is_channels_last_contiguous_ = true;
         return;
       }
       case MemoryFormat::Preserve:
@@ -1387,7 +1401,7 @@ private:
       new_numel *= src[i];
       sizes_[i] = src[i];
     }
-    update_to_contiguous_strides(old_dim);
+    empty_tensor_restride(MemoryFormat::Contiguous);
     numel_ = new_numel;
     return numel_ != old_numel;
   }
@@ -1422,18 +1436,6 @@ private:
 
   bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
     return SetDims(IntArrayRef{d0, d1, d2, d3});
-  }
-
-  inline void update_to_contiguous_strides(size_t old_dim) {
-    strides_.resize(sizes_.size(), 0);
-    if (dim() > 0) {
-      int last_idx = dim() - 1;
-      strides_[last_idx] = 1;
-      for (auto i = last_idx - 1; i >= 0; --i) {
-        strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
-      }
-    }
-    is_contiguous_ = true;
   }
 
   /**
@@ -1546,6 +1548,7 @@ protected:
   // should pack this into a bitfield.
   TensorTypeId type_id_;
   bool is_contiguous_ = true;
+  bool is_channels_last_contiguous_ = false;
   bool is_wrapped_number_ = false;
 
   // NOTE [ Metadata Change for a Detached Tensor ]

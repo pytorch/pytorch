@@ -118,7 +118,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
   }
 
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->update_strides_to_format(memory_format);
+  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
 
@@ -134,16 +134,15 @@ Tensor& empty_out(
     IntArrayRef size,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
-      !(result.is_sparse() &&
-          optional_memory_format.has_value()),
-      " memory format options is incompatible with sparse tensors");
+      !optional_memory_format.has_value(),
+      "'memory_format' argument is incompatible with 'out' tensor argument");
   check_size_nonnegative(size);
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0);
   } else {
     result.resize_(size);
     auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
-    result.unsafeGetTensorImpl()->update_strides_to_format(memory_format);
+    result.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   }
   return result;
 }
@@ -194,13 +193,18 @@ Tensor empty_like(
                                        self.q_zero_point().toLong());
   }
 
-  auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
   auto use_memory_format = memory_format;
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_contiguous(MemoryFormat::ChannelsLast)) {
       use_memory_format = MemoryFormat::ChannelsLast;
-    } else {
+    } else if (self.is_contiguous(MemoryFormat::Contiguous)) {
       use_memory_format = MemoryFormat::Contiguous;
+    } else {
+      TORCH_CHECK(
+          false,
+          "undefined behavior of the preserve format, source tensor neither channels last nor contiguous")
     }
   }
 
