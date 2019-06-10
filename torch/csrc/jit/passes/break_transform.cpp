@@ -43,7 +43,7 @@ struct BreakTransformer {
     auto true_block = node->blocks().at(0);
     auto false_block = node->blocks().at(1);
 
-     // recurse
+    // recurse
     auto true_status = handleBreaks(true_block);
     auto false_status = handleBreaks(false_block);
 
@@ -55,10 +55,64 @@ struct BreakTransformer {
       return MIGHT_BREAK;
     }
   }
+  BreakStatus guardBlockNodes(
+      Block* block,
+      generic_graph_node_list_iterator<Node>& iter) {
+    AT_ASSERT(getBlockStatus(block) == MIGHT_BREAK);
+    auto sentinel = block_sentinel_val[block];
+    auto new_if = graph->create(prim::If, 0)->insertAfter(sentinel->node());
+    new_if->addInput(sentinel);
 
-  void handleLoop(Node * n) {
+    auto break_block = new_if->addBlock();
+    auto guard_block = new_if->addBlock();
 
+    // Move all remaining nodes into the guard block
+    while (iter != block->nodes().end()) {
+      auto node = *iter++;
+      node->moveBefore(guard_block->return_node());
+    }
+    std::vector<std::string> block_output_names =
+        block->owningNode()->ss(attr::value);
+    for (auto name : block_output_names) {
+      break_block->registerOutput(environment_stack->findInAnyFrame(name));
+    }
+    for (size_t i = 0; i < block->outputs().size(); ++i) {
+      guard_block->registerOutput(block->outputs().at(i));
+    }
+    new_if->ss_(attr::value, block_output_names);
 
+    for (size_t i = 0; i < block->outputs().size(); ++i) {
+      auto orig_output = block->outputs().at(i);
+      new_if->addOutput()
+          ->setType(orig_output->type())
+          ->setUniqueName(uniqueName(orig_output));
+    }
+    while (block->outputs().size() > 0) {
+      block->eraseOutput(0);
+    }
+    for (auto out : new_if->outputs()) {
+      block->registerOutput(out);
+    }
+    block_sentinel_val[break_block] = true_val;
+    return handleIf(new_if);
+  }
+
+  void deleteAfterBreakNodes(Block* block, graph_node_list_iterator& iter) {
+    if (iter == block->nodes().end()) {
+      return;
+    }
+    // need to destroy in reverse order so nodes have no uses when destroyed
+    for (auto it = block->nodes().reverse().begin(); it != iter;) {
+      if (*it == block->return_node()) {
+        it++;
+      } else {
+        it.destroyCurrent();
+      }
+    }
+    iter->destroy();
+  }
+
+  void handleLoop(Node* n){
 
   };
 
@@ -84,97 +138,98 @@ struct BreakTransformer {
           break;
       }
       if (ret_status == WILL_BREAK) {
-        // deleteAfterBreakNodes(block, node);
+        deleteAfterBreakNodes(block, it);
         break;
       } else if (ret_status == MIGHT_BREAK) {
         if (it != block->nodes().end()) {
-          if (block->owningNode()->kind() == prim::Loop) {
-            // ret_status = guardLoopBlockNodes(block, getSentinelVal(node), it);
-          } else {
-            // ret_status = guardBlockNodes(block, getSentinelVal(node), it);
-          }
+          // if (block->owningNode()->kind() == prim::Loop) {
+          // ret_status = guardLoopBlockNodes(block, getSentinelVal(node), it);
+        } else {
+          ret_status = guardBlockNodes(block, it);
         }
-        break;
       }
-    }
-    if (block_status.count(block) == 0) {
-      block_status[block] = ret_status;
-    } else {
-      // Guarded return blocks have their status set prior
-      AT_ASSERT(
-          block_status[block] == WILL_BREAK &&
-          block->nodes().begin() == block->nodes().end());
+      break;
     }
   }
+  if (block_status.count(block) == 0) {
+    block_status[block] = ret_status;
+  } else {
+    // Guarded return blocks have their status set prior
+    AT_ASSERT(
+        block_status[block] == WILL_BREAK &&
+        block->nodes().begin() == block->nodes().end());
+  }
+}
 
-  Value* getBottomVal() {
-    if (bottom_val != nullptr) {
-      return bottom_val;
-    }
-    WithInsertPoint guard(graph->block()->nodes().front());
-    bottom_val = graph->insertNode(graph->create(prim::Bottom, {}, 1))
-                     ->output()
-                     ->setType(BottomType::get());
+Value*
+getBottomVal() {
+  if (bottom_val != nullptr) {
     return bottom_val;
   }
+  WithInsertPoint guard(graph->block()->nodes().front());
+  bottom_val = graph->insertNode(graph->create(prim::Bottom, {}, 1))
+                   ->output()
+                   ->setType(BottomType::get());
+  return bottom_val;
+}
 
-  Value* getBoolVal(bool val) {
-    WithInsertPoint guard(graph->block()->nodes().front());
-    if (val) {
-      if (true_val != nullptr) {
-        return true_val;
-      }
-      true_val = graph->insertConstant(true);
+Value* getBoolVal(bool val) {
+  WithInsertPoint guard(graph->block()->nodes().front());
+  if (val) {
+    if (true_val != nullptr) {
       return true_val;
-    } else {
-      if (false_val != nullptr) {
-        return false_val;
-      }
-      false_val = graph->insertConstant(false);
+    }
+    true_val = graph->insertConstant(true);
+    return true_val;
+  } else {
+    if (false_val != nullptr) {
       return false_val;
     }
+    false_val = graph->insertConstant(false);
+    return false_val;
   }
-  // for (Node * n: block->nodes()) {
-  void associateVarCaptures(Block* block) {
-    for (auto it = block->nodes().begin(); it != block->nodes().end();) {
-      Node* n = *it;
-      it++;
-      if (n->kind() == prim::VarCapture) {
-        block_capture[block] = convertVarNameToValueNode(n);
-        n->destroy();
-      }
-      for (Block* b : n->blocks()) {
-        associateVarCaptures(b);
-      }
+}
+// for (Node * n: block->nodes()) {
+void associateVarCaptures(Block* block) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+    Node* n = *it;
+    it++;
+    if (n->kind() == prim::VarCapture) {
+      block_capture[block] = convertVarNameToValueNode(n);
+      n->destroy();
+    }
+    for (Block* b : n->blocks()) {
+      associateVarCaptures(b);
     }
   }
+}
 
-  void run() {
-    associateVarCaptures(graph->block());
-    handleBreaks(graph->block());
-  }
+void run() {
+  associateVarCaptures(graph->block());
+  handleBreaks(graph->block());
+}
 
-  // a block may have a value that is used in the loop continue condition
-  std::unordered_map<Block*, Value*> loop_continue_condition;
+// a block may have a value that is used in the loop continue condition
+std::unordered_map<Block*, Value*> loop_continue_condition;
 
-  // After a call to handleBreaks, a block will have set its break status
-  std::unordered_map<Block*, BreakStatus> block_status;
+// After a call to handleBreaks, a block will have set its break status
+std::unordered_map<Block*, BreakStatus> block_status;
 
-  // Blocks that might break need a sentinel value to indicate if they
-  // broke or not
-  std::unordered_map<Block*, Value*> block_sentinel_val;
+// Blocks that might break need a sentinel value to indicate if they
+// broke or not
+std::unordered_map<Block*, Value*> block_sentinel_val;
 
-  std::unordered_map<Block*, NameToValue> block_capture;
-  // std::unordered_map<Block *, NameToValue> var_capture_blocks;
+std::unordered_map<Block*, NameToValue> block_capture;
+// std::unordered_map<Block *, NameToValue> var_capture_blocks;
 
-  std::unordered_map<Node*, NameToValue> node_capture;
+std::unordered_map<Node*, NameToValue> node_capture;
 
-  Value* bottom_val = nullptr;
-  Value* true_val = nullptr;
-  Value* false_val = nullptr;
+Value* bottom_val = nullptr;
+Value* true_val = nullptr;
+Value* false_val = nullptr;
 
-  std::shared_ptr<Graph> graph;
-};
+std::shared_ptr<Graph> graph;
+}; // namespace script
 
 void transformBreaks(std::shared_ptr<Graph>& graph) {
   ConstantPooling(graph);
@@ -183,6 +238,6 @@ void transformBreaks(std::shared_ptr<Graph>& graph) {
   // maybe dce ?
 }
 
-} // namespace script
 } // namespace jit
+} // namespace torch
 } // namespace torch
