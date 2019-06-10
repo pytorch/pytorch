@@ -60,19 +60,27 @@ int main(int argc, char** argv) {
     at::set_num_interop_threads(FLAGS_inter_op_threads);
   }
 
+  typedef std::chrono::high_resolution_clock clock;
+  typedef std::chrono::milliseconds ms;
+
+  std::cout << "Launching " << FLAGS_warmup_iter << " warmup tasks using "
+            << at::get_num_interop_threads() << " threads "
+            << std::endl;
+
+  std::chrono::time_point<clock> start_time = clock::now();
   launch_tasks_and_wait(FLAGS_warmup_iter);
+  auto duration = static_cast<float>(
+      std::chrono::duration_cast<ms>(clock::now() - start_time).count());
+
+  std::cout << "Warmup time: " << duration << " ms." << std::endl;
 
   std::cout << "Launching " << FLAGS_iter << " tasks using "
             << at::get_num_interop_threads() << " threads "
             << std::endl;
 
-  typedef std::chrono::high_resolution_clock clock;
-  typedef std::chrono::milliseconds ms;
-  std::chrono::time_point<clock> start_time = clock::now();
-
+  start_time = clock::now();
   launch_tasks_and_wait(FLAGS_iter);
-
-  auto duration = static_cast<float>(
+  duration = static_cast<float>(
       std::chrono::duration_cast<ms>(clock::now() - start_time).count());
   std::cout << "Time to run " << iter << " iterations "
             << (duration/1000.0) << " s." << std::endl;

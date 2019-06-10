@@ -143,6 +143,8 @@ class SparseLookup(ModelLayer):
                     self._fp16_compatible_init_op_types)
             )
 
+            assert regularizer is None, "Regularizer is not compatible with fp16"
+
         if _is_id_list(self.input_record):
             sparse_key = self.input_record.items()
         elif _is_id_score_list(self.input_record):
