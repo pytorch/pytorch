@@ -190,7 +190,8 @@ Tensor empty_like(
     //                        PerTensorAffine scheme right now");
     return at::_empty_affine_quantized(self.sizes(), self.options(),
                                        self.q_scale().toDouble(),
-                                       self.q_zero_point().toLong());
+                                       self.q_zero_point().toLong(),
+                                       optional_memory_format);
   }
 
   auto memory_format =

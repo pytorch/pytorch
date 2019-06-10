@@ -286,7 +286,8 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
 inline Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer) {
+    QuantizerPtr quantizer,
+    MemoryFormat memory_format=MemoryFormat::Contiguous) {
   AT_ASSERT(options.device().is_cpu());
 
   native::check_size_nonnegative(sizes);
