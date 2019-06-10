@@ -56,7 +56,7 @@ const uint32_t curand4_engine_calls = 4;
 // thread yielding one element per thread. For the edge of the grid-stride
 // loop, if the tensor size is large, the unroll loop will kick in and the float4
 // from curand4 will start getting utilized (for common tensor sizes, we end up
-// using rand.x from each thread). Hence, the philox_offset is 
+// using rand.x from each thread). Hence, the philox_offset is
 // (number of elements per thread * number of engine calls), which makes
 // sure that philox offset increment is not less than the number of randoms used
 // in each thread.
@@ -101,7 +101,7 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
         transform_func(li, static_cast<accscalar_t>((&rand.x)[ii]));
       }
     }
-    __syncthreads(); 
+    __syncthreads();
   }
 }
 
@@ -121,7 +121,7 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
  * kernels? Note that we need a grid-stride loop kernel because, we found by testing
  * that it achieves peak effective bandwidth.
  */
-template<typename scalar_t, 
+template<typename scalar_t,
          typename accscalar_t,
          int unroll_factor,
          typename dist_t,
@@ -135,7 +135,7 @@ void distribution_nullary_kernel(at::TensorIterator& iter,
   if (numel == 0) {
     return;
   }
-  
+
   auto execution_policy = calc_execution_policy(numel);
   auto counter_offset = std::get<0>(execution_policy);
   auto grid = std::get<1>(execution_policy);
@@ -714,7 +714,7 @@ Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generato
 Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
   normal_cuda_(output, 0, 1, gen);
   at::native::legacy::cuda::_th_addcmul_out(output, mean, output, std, 1);
-  return output; 
+  return output;
 }
 
 Tensor normal_cuda(const Tensor& mean, double std, Generator* gen) {

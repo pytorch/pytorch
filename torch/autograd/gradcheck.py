@@ -307,7 +307,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                 continue
             if isinstance(gi, torch.Tensor) and gi.layout != torch.strided:
                 if gi.layout != i.layout:
-                    return fail_test('grad is incorrect layout')
+                    return fail_test('grad is incorrect layout (' + str(gi.layout) + ' is not ' + str(i.layout) + ')')
                 if gi.layout == torch.sparse_coo:
                     if gi.sparse_dim() != i.sparse_dim():
                         return fail_test('grad is sparse tensor, but has incorrect sparse_dim')
