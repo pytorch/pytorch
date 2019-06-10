@@ -50,12 +50,11 @@ void launch_tasks_and_wait(int tasks_num) {
 }
 
 int main(int argc, char** argv) {
-  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
-    std::cout << "Failed to parse command line flags" << std::endl;
-    return -1;
-  }
   if (FLAGS_init_caffe2) {
     caffe2::GlobalInit(&argc, &argv);
+  } else if (!c10::ParseCommandLineFlags(&argc, &argv)) {
+    std::cout << "Failed to parse command line flags" << std::endl;
+    return -1;
   }
 
   at::init_num_threads();
