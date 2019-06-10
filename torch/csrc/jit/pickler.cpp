@@ -645,11 +645,11 @@ OpCode Unpickler::readInstruction() {
     case OpCode::TUPLE: {
       size_t start = marks_.back();
       marks_.pop_back();
-      c10::ListPtr<IValue> tuple = c10::make_list<IValue>();
-      tuple.reserve(stack_.size() - start);
+      c10::ivalue::TuplePtr tuple = c10::ivalue::TuplePtr::create();
+      tuple.elements().reserve(stack_.size() - start);
       auto start_it = stack_.begin() + start;
       for (auto it = start_it; it != stack_.end(); ++it) {
-        tuple.emplace_back(it->ivalue());
+        tuple.elements().emplace_back(it->ivalue());
       }
       stack_.erase(start_it, stack_.end());
       stack_.emplace_back(IValue(tuple));
