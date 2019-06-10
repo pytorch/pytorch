@@ -6,7 +6,12 @@
 #include <stdexcept>
 
 namespace c10 {
-
+class intrusive_ptr_target;
+namespace raw {
+  namespace weak_intrusive_ptr {
+    inline void incref(intrusive_ptr_target* self);
+  }
+}
 /**
  * intrusive_ptr<T> is an alternative to shared_ptr<T> that has better
  * performance because it does the refcounting intrusively
@@ -62,6 +67,7 @@ class C10_API intrusive_ptr_target {
   friend class intrusive_ptr;
   template <typename T, typename NullType>
   friend class weak_intrusive_ptr;
+  friend inline void raw::weak_intrusive_ptr::incref(intrusive_ptr_target* self);
 
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
@@ -615,7 +621,7 @@ class weak_intrusive_ptr final {
     // if refcount == 0, weakcount only must be >0.
     AT_ASSERTM(
         owning_weak_ptr == NullType::singleton() ||
-        owning_weak_ptr->weakcount_.load() >= 1 ||
+        owning_weak_ptr->weakcount_.load() > 1 ||
             (owning_weak_ptr->refcount_.load() == 0 &&
              owning_weak_ptr->weakcount_.load() > 0),
         "weak_intrusive_ptr: Can only weak_intrusive_ptr::reclaim() owning pointers that were created using weak_intrusive_ptr::release().");
@@ -720,10 +726,7 @@ namespace intrusive_ptr {
 namespace weak_intrusive_ptr {
 
   inline void incref(weak_intrusive_ptr_target* self) {
-    auto wptr = c10::weak_intrusive_ptr<weak_intrusive_ptr_target>::reclaim(self);
-    auto wptr_copy = wptr;
-    wptr_copy.release();
-    wptr.release();
+    ++self->weakcount_;
   }
 
   inline void decref(weak_intrusive_ptr_target* self) {
