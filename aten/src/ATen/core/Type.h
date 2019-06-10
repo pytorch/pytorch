@@ -8,7 +8,6 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Half.h>
 #include <c10/core/TensorTypeIdRegistration.h>
@@ -275,6 +274,7 @@ struct CAFFE2_API Type {
   virtual Tensor narrow_copy(const Tensor & self, int64_t dim, int64_t start, int64_t length) const = 0;
   virtual Tensor narrow(const Tensor & self, int64_t dim, int64_t start, int64_t length) const = 0;
   virtual Tensor permute(const Tensor & self, IntArrayRef dims) const = 0;
+  virtual Tensor numpy_T(const Tensor & self) const = 0;
   virtual Tensor pin_memory(const Tensor & self) const = 0;
   virtual Tensor pinverse(const Tensor & self, double rcond) const = 0;
   virtual Tensor reciprocal(const Tensor & self) const = 0;
@@ -372,7 +372,7 @@ struct CAFFE2_API Type {
   virtual Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & sparse_resize_(Tensor & self, IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) const = 0;
   virtual Tensor & sparse_resize_and_clear_(Tensor & self, IntArrayRef size, int64_t sparse_dim, int64_t dense_dim) const = 0;
-  virtual Tensor sparse_mask(const Tensor & self, SparseTensorRef mask) const = 0;
+  virtual Tensor sparse_mask(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor to_dense(const Tensor & self) const = 0;
   virtual int64_t sparse_dim(const Tensor & self) const = 0;
   virtual int64_t _dimI(const Tensor & self) const = 0;
@@ -391,9 +391,7 @@ struct CAFFE2_API Type {
   virtual Tensor to_sparse(const Tensor & self, int64_t sparse_dim) const = 0;
   virtual Tensor to_sparse(const Tensor & self) const = 0;
   virtual Tensor to_mkldnn(const Tensor & self) const = 0;
-  virtual Tensor quantize_linear(const Tensor & self, double scale, int64_t zero_point, ScalarType dtype) const = 0;
   virtual Tensor dequantize(const Tensor & self) const = 0;
-  virtual Tensor dequantize_linear(const Tensor & self, double scale, int64_t zero_point, ScalarType dtype) const = 0;
   virtual Scalar q_scale(const Tensor & self) const = 0;
   virtual Scalar q_zero_point(const Tensor & self) const = 0;
   virtual Tensor int_repr(const Tensor & self) const = 0;
@@ -402,7 +400,6 @@ struct CAFFE2_API Type {
   virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking, bool copy) const = 0;
   virtual Scalar item(const Tensor & self) const = 0;
-  virtual void* data_ptr(const Tensor & self) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source) const = 0;
   virtual Tensor & set_(Tensor & self, Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) const = 0;
   virtual Tensor & set_(Tensor & self, const Tensor & source) const = 0;
@@ -511,6 +508,7 @@ struct CAFFE2_API Type {
   virtual Tensor index_select(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
   virtual Tensor masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor nonzero(const Tensor & self) const = 0;
+  virtual std::vector<Tensor> nonzero_numpy(const Tensor & self) const = 0;
   virtual Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) const = 0;
   virtual Tensor addcmul(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
   virtual Tensor addcdiv(const Tensor & self, const Tensor & tensor1, const Tensor & tensor2, Scalar value) const = 0;
@@ -524,7 +522,7 @@ struct CAFFE2_API Type {
   virtual std::tuple<Tensor,Tensor> solve(const Tensor & self, const Tensor & A) const = 0;
   virtual Tensor cholesky_inverse(const Tensor & self, bool upper) const = 0;
   virtual std::tuple<Tensor,Tensor> pstrf(const Tensor & self, bool upper, Scalar tol) const = 0;
-  virtual std::tuple<Tensor,Tensor> qr(const Tensor & self) const = 0;
+  virtual std::tuple<Tensor,Tensor> qr(const Tensor & self, bool some) const = 0;
   virtual std::tuple<Tensor,Tensor> geqrf(const Tensor & self) const = 0;
   virtual Tensor orgqr(const Tensor & self, const Tensor & input2) const = 0;
   virtual Tensor ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose) const = 0;

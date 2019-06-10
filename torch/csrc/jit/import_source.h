@@ -18,7 +18,7 @@ TORCH_API void import_methods(
     // CompilationUnit in which to look up any classes used
     const CompilationUnit& lib_cu,
     const std::shared_ptr<script::Module>& mod,
-    const std::string& src,
+    const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     // Callback to import any dependencies of this source before compiling
     const std::function<void(const std::string&)>& import_callback);
@@ -30,7 +30,7 @@ TORCH_API void import_libs(
     // Qualifier for any classes that `src` defines. Looks like a module path,
     // like "foo.bar.baz"
     const std::string& class_qualifier,
-    const std::string& src,
+    const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     // Callback to import any dependencies of this source before compiling
     const std::function<void(const std::string&)>& import_callback);
@@ -44,7 +44,7 @@ TORCH_API void import_functions(
     const CompilationUnit& lib_cu,
     // CompilationoUnit to define the functions in.
     CompilationUnit& cu,
-    const std::string& src,
+    const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const Self& self = nullptr,
     const std::function<void(const std::string&)>& import_callback = nullptr);

@@ -8,7 +8,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 export PATH="/usr/local/bin:$PATH"
 
 # Set up conda environment
-export PYTORCH_ENV_DIR="${HOME}/pytorch-ci-env"
+export PYTORCH_ENV_DIR="${HOME}/workspace"
 # If a local installation of conda doesn't exist, we download and install conda
 if [ ! -d "${PYTORCH_ENV_DIR}/miniconda3" ]; then
   mkdir -p ${PYTORCH_ENV_DIR}

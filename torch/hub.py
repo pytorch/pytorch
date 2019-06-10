@@ -23,10 +23,12 @@ except ImportError:
     # fake tqdm if it's not installed
     class tqdm(object):
 
-        def __init__(self, total=None, disable=False):
+        def __init__(self, total=None, disable=False,
+                     unit=None, unit_scale=None, unit_divisor=None):
             self.total = total
             self.disable = disable
             self.n = 0
+            # ignore unit, unit_scale, unit_divisor; they're just for real tqdm
 
         def update(self, n):
             if self.disable:
@@ -380,7 +382,8 @@ def _download_url_to_file(url, dst, hash_prefix, progress):
     try:
         if hash_prefix is not None:
             sha256 = hashlib.sha256()
-        with tqdm(total=file_size, disable=not progress) as pbar:
+        with tqdm(total=file_size, disable=not progress,
+                  unit='B', unit_scale=True, unit_divisor=1024) as pbar:
             while True:
                 buffer = u.read(8192)
                 if len(buffer) == 0:

@@ -200,7 +200,7 @@ THTensor *THTensor_(newView)(THTensor *tensor, at::IntArrayRef size)
                                         inferred_size);
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
-    "across two contiguous subspaces). Call .contiguous() before .view().");
+    "across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
   THTensor_setStorage(self, THTensor_getStoragePtr(tensor), tensor->storage_offset(), inferred_size, stride_value);
   return self;
@@ -799,7 +799,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         if (!should_skip(inputs[j])) {
           THTensor* input0 = inputs[j];
           scalar_t* input0_data = THStorage_(data)(THTensor_getStoragePtr(input0)) + input0->storage_offset();
-          int local_inner = inner * input0->size(dimension);
+          int64_t local_inner = inner * input0->size(dimension);
           if (local_inner != 0) {
             memcpy(result_data + offset, input0_data + o*local_inner, local_inner*sizeof(scalar_t));
           } // input0_size != 0

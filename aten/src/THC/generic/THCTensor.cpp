@@ -206,7 +206,7 @@ THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntArrayR
                                         inferred_size);
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
-    "across two contiguous subspaces). Call .contiguous() before .view().");
+    "across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
 
   // NOTE: This path of constructing the Tensor directly with the viewed Storage is necessary

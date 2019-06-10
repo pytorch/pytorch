@@ -137,6 +137,7 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
     "USE_GLOO" OFF)
+option(USE_TBB "Use TBB" OFF)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
@@ -193,7 +194,6 @@ endif()
 # TorchScript model, but doesn't contain not-yet-unified caffe2 ops;
 if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(BUILD_PYTHON OFF)
-  set(BUILD_TORCH ON)
   set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
   set(FEATURE_TORCH_MOBILE ON)
@@ -221,8 +221,12 @@ include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
-set(TORCH_DEFAULT_VERSION "1.0.0")
+set(TORCH_DEFAULT_VERSION "1.1.0")
 set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}" CACHE STRING "Torch build version")
+if (DEFINED ENV{PYTORCH_BUILD_VERSION})
+  set(TORCH_BUILD_VERSION "$ENV{PYTORCH_BUILD_VERSION}"
+    CACHE STRING "Torch build version" FORCE)
+endif()
 if (NOT TORCH_BUILD_VERSION)
   # An empty string was specified so force version to the default
   set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}"
