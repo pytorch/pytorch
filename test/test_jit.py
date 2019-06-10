@@ -1782,7 +1782,7 @@ graph(%Ra, %Rb):
         inputs = (scores, bbox_deltas, im_info, anchors)
         traced_model = torch.jit.trace(model, inputs)
         self.assertEqual(traced_model(*inputs), model(*inputs))
-        self.assertExportImport(traced_model.graph, (scores, bbox_deltas, im_info, anchors))
+        self.assertExportImportModule(traced_model, (scores, bbox_deltas, im_info, anchors))
 
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
