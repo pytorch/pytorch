@@ -6,11 +6,11 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/c10_operator.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
 
-C10_DECLARE_CAFFE2_OPERATOR(LayerNorm)
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(LayerNorm)
 
 namespace caffe2 {
 

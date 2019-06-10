@@ -56,6 +56,7 @@ blacklist = [
     # defined in functional
     'einsum',
     # reduction argument; these bindings don't make sense
+    'binary_cross_entropy_with_logits',
     'ctc_loss',
     'cosine_embedding_loss',
     'hinge_embedding_loss',
