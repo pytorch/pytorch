@@ -1556,6 +1556,34 @@ class TestNN(NNTestCase):
         with self.assertRaises(TypeError):
             net.to(cpu, torch.tensor(3, dtype=torch.long), non_blocking=True)
 
+    def test_module_to_(self):
+        # Test that `module.to_()` doesn't preserve previous references to
+        # `module`'s parameters or gradients.
+        m = nn.Linear(20, 10)
+        m.weight.grad = torch.randn(10, 20)
+        weight_ref = m.weight
+        weight_grad_ref = m.weight.grad
+        m.to_("cuda")
+        self.assertNotEqual(weight_ref.device, m.weight.device)
+        self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
+
+        # Test that `module.to_()` invalidates `module`'s original parameters
+        # in any autograd graph they participate in.
+        m = nn.Linear(20, 10)
+        pvm = m.weight.mul(m.weight)
+        m.to_("cuda")
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            pvm.backward(torch.randn(10, 20))
+
+        # Test that `module.to_()` invalidates `module`'s original parameters' gradients
+        # in any autograd graph they participate in.
+        m = nn.Linear(20, 10)
+        m.weight.grad = torch.randn(10, 20).requires_grad_()
+        pgm = m.weight.grad.mul(m.weight.grad)
+        m.to_("cuda")
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            pgm.backward(torch.randn(10, 20))
+
     def test_type(self):
         l = nn.Linear(10, 20)
         net = nn.Module()

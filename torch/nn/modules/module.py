@@ -1,6 +1,7 @@
 from collections import OrderedDict, namedtuple
 import functools
 import itertools
+import warnings
 
 import torch
 from ..backends.thnn import backend as thnn_backend
@@ -189,17 +190,35 @@ class Module(object):
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
-    def _apply(self, fn):
+    def _apply(self, fn, update_params_inplace=True):
         for module in self.children():
-            module._apply(fn)
+            module._apply(fn, update_params_inplace)
 
-        for param in self._parameters.values():
+        for key, param in self._parameters.items():
             if param is not None:
-                # Tensors stored in modules are graph leaves, and we don't
-                # want to create copy nodes, so we have to unpack the data.
-                param.data = fn(param.data)
-                if param._grad is not None:
-                    param._grad.data = fn(param._grad.data)
+                param_applied = fn(param.data)
+                if not update_params_inplace:
+                    # Tensors stored in modules are graph leaves, and we don't want to
+                    # create copy nodes, so we have to use `with torch.no_grad():`
+                    with torch.no_grad():
+                        self.register_parameter(key, Parameter(param_applied, param.requires_grad))
+                        # Bump up the version counter of the original parameter, to invalidate
+                        # any previous references of it in the autograd graph.
+                        param.add_(0.0)
+                else:
+                    # Tensors stored in modules are graph leaves, and we don't
+                    # want to create copy nodes, so we have to unpack the data.
+                    param.data = param_applied
+                if param.grad is not None:
+                    grad_applied = fn(param.grad.data)
+                    if not update_params_inplace:
+                        with torch.no_grad():
+                            self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
+                            # Bump up the version counter of the original parameter's gradient,
+                            # to invalidate any previous references of it in the autograd graph.
+                            param.grad.add_(0.0)
+                    else:
+                        param.grad.data = grad_applied
 
         for key, buf in self._buffers.items():
             if buf is not None:
@@ -374,6 +393,11 @@ class Module(object):
 
         """
 
+        warnings.warn("The current behavior of `model.to()` is incorrect because it changes \
+`model`'s parameters in-place instead of creating a new model. In future releases of PyTorch, \
+we will fix this behavior and return a new model, without changing the current model's parameters. \
+If you want to change the current model's parameters, please use the in-place version `model.to_()`.")
+
         device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:
@@ -385,6 +409,84 @@ class Module(object):
             return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
         return self._apply(convert)
+
+    def to_(self, *args, **kwargs):
+        r"""Moves and/or casts the parameters and buffers.
+
+        This can be called as
+
+        .. function:: to_(device=None, dtype=None, non_blocking=False)
+
+        .. function:: to_(dtype, non_blocking=False)
+
+        .. function:: to_(tensor, non_blocking=False)
+
+        Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
+        floating point desired :attr:`dtype` s. In addition, this method will
+        only cast the floating point parameters and buffers to :attr:`dtype`
+        (if given). The integral parameters and buffers will be moved
+        :attr:`device`, if that is given, but with dtypes unchanged. When
+        :attr:`non_blocking` is set, it tries to convert/move asynchronously
+        with respect to the host if possible, e.g., moving CPU Tensors with
+        pinned memory to CUDA devices.
+
+        See below for examples.
+
+        .. note::
+            This method modifies the module in-place.
+
+        Args:
+            device (:class:`torch.device`): the desired device of the parameters
+                and buffers in this module
+            dtype (:class:`torch.dtype`): the desired floating point type of
+                the floating point parameters and buffers in this module
+            tensor (torch.Tensor): Tensor whose dtype and device are the desired
+                dtype and device for all parameters and buffers in this module
+
+        Returns:
+            Module: self
+
+        Example::
+
+            >>> linear = nn.Linear(2, 2)
+            >>> linear.weight
+            Parameter containing:
+            tensor([[ 0.1913, -0.3420],
+                    [-0.5113, -0.2325]])
+            >>> linear.to_(torch.double)
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+            Parameter containing:
+            tensor([[ 0.1913, -0.3420],
+                    [-0.5113, -0.2325]], dtype=torch.float64)
+            >>> gpu1 = torch.device("cuda:1")
+            >>> linear.to_(gpu1, dtype=torch.half, non_blocking=True)
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+            Parameter containing:
+            tensor([[ 0.1914, -0.3420],
+                    [-0.5112, -0.2324]], dtype=torch.float16, device='cuda:1')
+            >>> cpu = torch.device("cpu")
+            >>> linear.to_(cpu)
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+            Parameter containing:
+            tensor([[ 0.1914, -0.3420],
+                    [-0.5112, -0.2324]], dtype=torch.float16)
+
+        """
+
+        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
+
+        if dtype is not None:
+            if not dtype.is_floating_point:
+                raise TypeError('nn.Module.to_ only accepts floating point '
+                                'dtypes, but got desired dtype={}'.format(dtype))
+
+        def convert(t):
+            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
+
+        return self._apply(convert, update_params_inplace=False)
 
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.
