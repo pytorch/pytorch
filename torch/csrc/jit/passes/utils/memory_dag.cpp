@@ -9,7 +9,7 @@ namespace torch {
 namespace jit {
 
 Element::Element(MemoryDAG& dag_, const Value* value_, unsigned index_)
-  : dag(dag_), value(value_), index(index_) { }
+    : dag(dag_), index(index_), value(value_) {}
 
 const Element* MemoryDAG::fromIndex(unsigned x) const {
   TORCH_INTERNAL_ASSERT(x < indexToElementMap.size());
@@ -53,7 +53,7 @@ void MemoryDAG::collectAllContainedMemoryLocations(
     collectAllContainedMemoryLocations(fromIndex(mem_loc), cont);
   }
 
-  for (const auto& contained : elem->contained_elements) {
+  for (const auto& contained : elem->containedElements) {
     collectAllContainedMemoryLocations(fromIndex(contained), cont);
   }
 }
@@ -95,7 +95,7 @@ void MemoryDAG::makePointerTo(Element* from, Element* to) {
 }
 
 void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
-  container->contained_elements.set(elem->index);
+  container->containedElements.set(elem->index);
 }
 
 // Give `v` a fresh alias (i.e. it does not point to any value)
