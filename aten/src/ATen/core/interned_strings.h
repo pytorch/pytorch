@@ -75,6 +75,7 @@ namespace c10 {
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
   _(prim, Guard)                   \
+  _(prim, BailOut)                 \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
   _(prim, MMTreeReduce)            \
