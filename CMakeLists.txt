@@ -24,6 +24,9 @@ endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# add a postfix to binaries to make packaging easier
+SET(CMAKE_DEBUG_POSTFIX "d" CACHE STRING "add a postfix, usually d on windows")
+
 # One variable that determines whether the current cmake process is being run
 # with the main Caffe2 library. This is useful for building modules - if
 # modules are built with the main Caffe2 library then one does not need to do
