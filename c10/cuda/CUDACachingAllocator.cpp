@@ -376,26 +376,16 @@ struct THCCachingAllocator
     cacheInfoAux(small_blocks, dev_id, total, largest);
   }
 
-  void recordStream(void* ptr, cuda::CUDAStream stream, bool suppressError=false)
+  void recordStream(void* ptr, cuda::CUDAStream stream)
   {
     // Empty tensor's storage().data() might be a null ptr. As there is no
     // blocks associated with those tensors, it is fine to do nothing here.
     if (ptr) {
       std::lock_guard<std::recursive_mutex> lock(mutex);
       Block* block = find_allocated_block(ptr);
-      if (!block) {
-        // In some cases (e.g., tensor loaded from blob, or shared by another
-        // process), this CUDACachingAllocator does not know about the ptr,
-        // and the caller of this function might not have enough context to
-        // check where the tensor is originated. One option is to expose a new
-        // API from CUDACachingAllocator to check whether it knows about the
-        // ptr, but it would force other use cases to unnecessarily do two
-        // map look up (one check + one recordStream). Hence, we provide a
-        // suppressError argument to avoid error and two lookups.
-        if (!suppressError) {
-          AT_ERROR("invalid device pointer: ", ptr);
-        }
-      } else {
+      // block could be nullptr in some cases, e.g., tensor loaded from blob, or
+      // shared from another process, or not pointing to a CUDA tensor.
+      if (block) {
         if (stream.stream() == block->stream) {
           // ignore uses on the allocation stream, since those don't require any
           // special synchronization
@@ -662,9 +652,9 @@ void* getBaseAllocation(void *ptr, size_t *size)
   return caching_allocator.getBaseAllocation(ptr, size);
 }
 
-void recordStream(void *ptr, cuda::CUDAStream stream, bool suppressError)
+void recordStream(void *ptr, cuda::CUDAStream stream)
 {
-  caching_allocator.recordStream(ptr, stream, suppressError);
+  caching_allocator.recordStream(ptr, stream);
 }
 
 std::mutex* getFreeMutex()

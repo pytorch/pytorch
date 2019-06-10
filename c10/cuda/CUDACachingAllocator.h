@@ -46,7 +46,7 @@ C10_CUDA_API Allocator* get();
 C10_CUDA_API void emptyCache();
 C10_CUDA_API void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
 C10_CUDA_API void* getBaseAllocation(void *ptr, size_t *size);
-C10_CUDA_API void recordStream(void *ptr, CUDAStream stream, bool suppressError=false);
+C10_CUDA_API void recordStream(void *ptr, CUDAStream stream);
 C10_CUDA_API uint64_t currentMemoryAllocated(int device);
 C10_CUDA_API uint64_t maxMemoryAllocated(int device);
 C10_CUDA_API void     resetMaxMemoryAllocated(int device);

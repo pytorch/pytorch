@@ -74,9 +74,13 @@ class ProcessGroupShareTensorTest(TestCase):
 
             for _ in range(ws * n_output):
                 pid, expected, result = c2p.get()
-                self.assertEqual(expected, result, (
-                    "Expect rank {} to broadcast result {} but got {}."
-                    ).format(pid, expected, result))
+                self.assertEqual(
+                    expected,
+                    result,
+                    (
+                        "Expect rank {} to broadcast result {} but got {}."
+                    ).format(pid, expected, result)
+                )
 
             for _ in range(ws):
                 p2c.put(0)
@@ -92,7 +96,8 @@ class ProcessGroupShareTensorTest(TestCase):
         pg = init_pg(rank, filename, world_size)
         xs = [shared_tensors[rank]]
         pg.broadcast(xs).wait()
-        c2p.put((rank, torch.zeros(2, 2), xs[0].to("cpu")))
+        # delibrate failure to try CI
+        c2p.put((rank, torch.zeros(2, 2) + 7, xs[0].to("cpu")))
         p2c.get()
 
     @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")

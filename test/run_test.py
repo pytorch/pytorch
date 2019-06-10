@@ -21,6 +21,7 @@ TESTS = [
     'autograd',
     'cpp_extensions',
     'c10d',
+    'c10d_spawn',
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
@@ -59,6 +60,7 @@ WINDOWS_BLACKLIST = [
 
 ROCM_BLACKLIST = [
     'c10d',
+    'c10d_spawn',
     'cpp_extensions',
     'distributed',
     'multiprocessing',

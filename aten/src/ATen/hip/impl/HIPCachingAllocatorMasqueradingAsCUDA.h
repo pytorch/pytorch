@@ -8,8 +8,7 @@ namespace c10 { namespace hip {
 namespace HIPCachingAllocatorMasqueradingAsCUDA {
 
 Allocator* get();
-C10_HIP_API void recordStreamMasqueradingAsCUDA(
-    void *ptr, HIPStreamMasqueradingAsCUDA stream, bool suppressError=false);
+C10_HIP_API void recordStreamMasqueradingAsCUDA(void *ptr, HIPStreamMasqueradingAsCUDA stream);
 
 } // namespace HIPCachingAllocatorMasqueradingAsCUDA
 }} // namespace c10::hip

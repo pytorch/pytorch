@@ -8,9 +8,8 @@ Allocator* get() {
   return &allocator;
 }
 
-void recordStreamMasqueradingAsCUDA(
-    void *ptr, HIPStreamMasqueradingAsCUDA stream, bool suppressError) {
-  HIPCachingAllocator::recordStream(ptr, stream.hip_stream(), suppressError);
+void recordStreamMasqueradingAsCUDA(void *ptr, HIPStreamMasqueradingAsCUDA stream) {
+  HIPCachingAllocator::recordStream(ptr, stream.hip_stream());
 }
 
 } // namespace HIPCachingAllocatorMasqueradingAsCUDA

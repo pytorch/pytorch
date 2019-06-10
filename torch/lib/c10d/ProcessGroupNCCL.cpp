@@ -414,7 +414,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     //
     // See [Sync Streams].
     c10::cuda::CUDACachingAllocator::recordStream(
-      inputs[i].storage().data(), ncclStream, true);
+      inputs[i].storage().data(), ncclStream);
 
     C10D_NCCL_CHECK(fn(
       inputs[i],
@@ -529,7 +529,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
     [&] (at::Tensor& input, at::Tensor& output,
          ncclComm_t comm, at::cuda::CUDAStream& stream) {
       c10::cuda::CUDACachingAllocator::recordStream(
-        output.storage().data(), stream, true
+        output.storage().data(), stream
       );
       return ncclAllGather(
         input.data_ptr(),
@@ -548,7 +548,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
         for (size_t j = 0; j < outputTensors[0].size(); ++j) {
           // See [Sync Streams].
           c10::cuda::CUDACachingAllocator::recordStream(
-            outputTensors[i][j].storage().data(), ncclStreams[i], true);
+            outputTensors[i][j].storage().data(), ncclStreams[i]);
 
           outputTensors[i][j].copy_(outputFlattened[i][j], true);
         }
@@ -572,7 +572,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
     [&] (at::Tensor& input, at::Tensor& output,
          ncclComm_t comm, at::cuda::CUDAStream& stream) {
       c10::cuda::CUDACachingAllocator::recordStream(
-        output.storage().data(), stream, true
+        output.storage().data(), stream
       );
       return ncclReduceScatter(
         input.data_ptr(),
@@ -591,7 +591,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
         for (size_t j = 0; j < inputTensors[0].size(); ++j) {
           // See [Sync Streams].
           c10::cuda::CUDACachingAllocator::recordStream(
-            inputTensors[i][j].storage().data(), ncclStreams[i], true);
+            inputTensors[i][j].storage().data(), ncclStreams[i]);
 
           inputFlattened[i][j].copy_(inputTensors[i][j], true);
         }
