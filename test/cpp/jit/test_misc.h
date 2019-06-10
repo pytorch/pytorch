@@ -18,6 +18,7 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/passes/bailout_graph.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
@@ -946,6 +947,73 @@ void testInsertAndEliminateGuards() {
   EliminateGuards(copy);
   num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
   ASSERT_EQ(num_guards, 2);
+}
+
+void testInsertBailOuts() {
+  static const auto basic_example = R"JIT(
+  def basic_loop(x, y):
+
+      a = x + 1
+      b = y + 2
+      c = x + y + 3
+
+      for i in range(10):
+          a = a + b
+          # invariant
+          d = b * c
+          #
+          a = a - d
+
+      e = a + 4
+      return e
+  )JIT";
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("basic_loop");
+  auto pr = ProfilingRecord::instrumentGraph(fun.graph());
+  auto x = at::randn({2, 3}, at::kCPU);
+  auto y = at::randn({2, 3}, at::kCPU);
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+  auto stack = createStack({v(x), v(y)});
+  // introduce some profiling information
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+  auto copy = pr->profiled_graph_->copy();
+  InsertGuards(copy);
+  EliminateGuards(copy);
+  auto nodes = copy->block()->nodes();
+  auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
+  auto num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 3);
+  InsertBailOuts(copy);
+  auto is_bailout = [](Node* n) { return n->kind() == prim::BailOut; };
+  auto num_bailouts = std::count_if(nodes.begin(), nodes.end(), is_bailout);
+  ASSERT_EQ(num_guards, num_bailouts);
+  std::vector<Node*> bailouts(num_bailouts);
+  std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
+  auto last_graph = bailouts[num_bailouts - 1]->g(attr::Subgraph);
+  ASSERT_EQ(last_graph->inputs().size(), 1);
+  ASSERT_EQ(last_graph->outputs().size(), 1);
+  auto lb_nodes = last_graph->nodes();
+  auto is_add = [](Node* n) { return n->kind() == aten::add; };
+  auto is_loop = [](Node* n) { return n->kind() == prim::Loop; };
+  auto lb_graph_num_adds =
+      std::count_if(lb_nodes.begin(), lb_nodes.end(), is_add);
+  auto lb_graph_num_loops =
+      std::count_if(lb_nodes.begin(), lb_nodes.end(), is_loop);
+  ASSERT_EQ(lb_graph_num_adds, 1);
+  ASSERT_EQ(lb_graph_num_loops, 0);
+  auto first_graph = bailouts[0]->g(attr::Subgraph);
+  auto fst_nodes = first_graph->nodes();
+  ASSERT_EQ(first_graph->inputs().size(), 2);
+  ASSERT_EQ(first_graph->outputs().size(), 1);
+  auto fst_graph_num_adds =
+      std::count_if(fst_nodes.begin(), fst_nodes.end(), is_add);
+  auto fst_graph_num_loops =
+      std::count_if(fst_nodes.begin(), fst_nodes.end(), is_loop);
+  ASSERT_EQ(fst_graph_num_loops, 1);
+  ASSERT_EQ(fst_graph_num_adds, 5);
 }
 
 void testProfiler() {
