@@ -107,10 +107,30 @@ def run(version,
     if USE_NINJA:
         cmake_args.append('-GNinja')
     elif IS_WINDOWS:
-        cmake_args.append('-GVisual Studio 15 2017')
+        generator = os.getenv('CMAKE_GENERATOR', 'Visual Studio 15 2017')
+        supported = ['Visual Studio 15 2017', 'Visual Studio 16 2019']
+        if generator not in supported:
+            print('Unsupported `CMAKE_GENERATOR`: ' + generator)
+            print('Please set it to one of the following values: ')
+            print('\n'.join(supported))
+            exit(1)
+        cmake_args.append('-G' + generator)
+        toolset_dict = {}
+        toolset_version = os.getenv('CMAKE_GENERATOR_TOOLSET_VERSION')
+        if toolset_version is not None:
+            toolset_dict['version'] = toolset_version
+            curr_toolset = os.getenv('VCToolsVersion')
+            if curr_toolset is None:
+                print('When you specify `CMAKE_GENERATOR_TOOLSET_VERSION`, you must also '
+                      'activate the vs environment of this version. Please read the notes '
+                      'in the build steps carefully.')
+                exit(1)
         if IS_64BIT:
             cmake_args.append('-Ax64')
-            cmake_args.append('-Thost=x64')
+            toolset_dict['host'] = 'x64'
+        if toolset_dict:
+            toolset_expr = ','.join(["{}={}".format(k, v) for k, v in toolset_dict.items()])
+            cmake_args.append('-T' + toolset_expr)
 
     cflags = os.getenv('CFLAGS', "") + " " + os.getenv('CPPFLAGS', "")
     ldflags = os.getenv('LDFLAGS', "")
