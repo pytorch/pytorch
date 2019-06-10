@@ -1,10 +1,7 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/utils/memory.h>
-
-#include <list>
 
 namespace torch {
 namespace jit {
@@ -181,9 +178,9 @@ void AliasDb::dump() const {
       }
       std::cout << "\n";
     }
-    if (!element->contained_elements.empty()) {
+    if (!element->containedElements.empty()) {
       std::cout << getElementName(element) << " contains: ";
-      for (const auto contained : element->contained_elements) {
+      for (const auto contained : element->containedElements) {
         std::cout << getElementName(memoryDAG_->fromIndex(contained)) << ", ";
       }
       std::cout << "\n";
