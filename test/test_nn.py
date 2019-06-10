@@ -3368,7 +3368,7 @@ class TestNN(NNTestCase):
                     saved_k_tensor = torch.from_numpy(saved_k)
                     saved_v = np.random.rand(batch_sz * nheads, seq_len, d_head)
                     saved_v_tensor = torch.from_numpy(saved_v)
-            
+
                 key_padding_mask = None
                 key_padding_mask_tensor = None
                 if add_key_padding_mask:
@@ -3405,7 +3405,7 @@ class TestNN(NNTestCase):
                 _Q = decoder_state_tensor.unsqueeze(1).transpose(0, 1)
                 _V = source_hid_tensor
                 _K = source_hid_tensor
- 
+
                 if multihead_attn_module._qkv_same_embed_dim:
                     result, result_weight = torch.nn.functional.multi_head_attention_forward(
                         _Q, _K, _V,
@@ -3534,7 +3534,7 @@ class TestNN(NNTestCase):
         test_multihead_attn_no_masking()   # Test MultiheadAttention without masking
         test_multihead_attn_key_padding_mask()  # Test MultiheadAttention with src lengths
         test_multihead_attn_saved_kv()  # Test MultiheadAttention with static kv.
-        test_multihead_attn_add_bias_kv_zero_attn() # Test MultiheadAttention with bias_kv and zero_attn.
+        test_multihead_attn_add_bias_kv_zero_attn()  # Test MultiheadAttention with bias_kv and zero_attn.
         test_multihead_attn_all_arguments1()  # Test MultiheadAttention with all the argument.
         with self.assertRaisesRegex(AssertionError, "bias cannot be added to static key."):
             test_multihead_attn_all_arguments2()  # Test MultiheadAttention with all the argument.
