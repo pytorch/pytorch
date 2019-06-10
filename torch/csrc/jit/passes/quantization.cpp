@@ -521,7 +521,7 @@ void InsertQuantDequantNodesForParam(
     if (!param_index) {
       continue;
     }
-    std::vector<size_t> node_inputs_idx{0, *param_index};
+    std::vector<size_t> node_inputs_idx{0, (size_t)*param_index};
     std::array<float, 2> scale_factors = {0, 0};
     bool skip_node = false;
     for (size_t idx = 0; idx < node_inputs_idx.size(); idx++) {

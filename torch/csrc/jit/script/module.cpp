@@ -262,6 +262,7 @@ IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
 
 static std::vector<at::Tensor> loadTensors(const std::vector<Slot>& slots) {
   std::vector<at::Tensor> result;
+  result.reserve(slots.size());
   for(const Slot& slot : slots) {
     result.emplace_back(slot.value().toTensor());
   }
