@@ -10891,6 +10891,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             expected = np.trapz(t.numpy(), dx=dx, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
             self.assertTrue(np.allclose(expected, actual.numpy()))
+
         def test_x(sizes, dim, x):
             t = torch.randn(sizes)
             actual = torch.trapz(t, x=torch.Tensor(x), dim=dim)
