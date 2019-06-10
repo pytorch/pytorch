@@ -259,9 +259,9 @@ inline TypedIValue toTraceableIValue(py::handle input) {
   }
   auto type = *match.type;
 
-  if (type->kind() != TypeKind::ListType ||
-      type->kind() != TypeKind::DictType ||
-      type->kind() != TypeKind::TupleType ||
+  if (type->kind() == TypeKind::ListType ||
+      type->kind() == TypeKind::DictType ||
+      type->kind() == TypeKind::TupleType ||
       type->isSubtypeOf(TensorType::get())) {
     return TypedIValue(toIValue(input, type), type);
   }
