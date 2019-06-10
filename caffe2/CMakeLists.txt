@@ -1161,8 +1161,9 @@ if (BUILD_PYTHON)
   pycmd(PYTHON_SITE_PACKAGES "
       import os
       from distutils import sysconfig
-      print(sysconfig.get_python_lib(prefix='').replace(os.sep, '/'))
+      print(sysconfig.get_python_lib(prefix=''))
   ")
+  file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
   SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
   SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
