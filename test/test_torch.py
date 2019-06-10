@@ -991,14 +991,14 @@ class _TestTorchMixin(object):
             ans = torch.norm(x, "nuc", dim=axes)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
-            self.assertTrue(np.allclose(ans.cpu(), expected))
+            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-04, atol=1e-04))
 
             out = torch.zeros(expected.shape, dtype=x.dtype, device=x.device)
             ans = torch.norm(x, "nuc", dim=axes, out=out)
             self.assertIs(ans, out)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
-            self.assertTrue(np.allclose(ans.cpu(), expected))
+            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-04, atol=1e-04))
 
         for n in range(1, 5):
             for m in range(1, 5):
