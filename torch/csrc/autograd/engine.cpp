@@ -58,18 +58,24 @@ struct FunctionTask {
   // gradients flowing here.  Once all the dependencies are finished, we
   // use the contents of this buffer to run the function.
   InputBuffer inputs_;
+  // When worker receives a task with isShutdownTask = true, it will immediately
+  // exit. The engine sends a shutdown task to every queue upon its destruction.
+  bool isShutdownTask_;
 
-  FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs)
+  FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs, bool isShutdownTask = false)
     : base_(base)
     , fn_(std::move(fn))
-    , inputs_(std::move(inputs)) {}
+    , inputs_(std::move(inputs))
+    , isShutdownTask_(isShutdownTask) {}
 };
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
-// Empty FunctionTask are first.
+// Shutdown tasks are first and then empty FunctionTask are next.
 struct CompareFunctionTaskTime {
   bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
-    if (!t1.fn_) {
+    if (t2.isShutdownTask_) {
+      return true;
+    } else if (!t1.fn_ || t1.isShutdownTask_) {
       return false;
     } else if (!t2.fn_) {
       return true;
@@ -87,6 +93,7 @@ struct ReadyQueue {
   std::mutex mutex_;
 
   void push(FunctionTask item);
+  void pushShutdownTask();
   FunctionTask pop();
 };
 
@@ -199,6 +206,14 @@ auto ReadyQueue::push(FunctionTask item) -> void {
   not_empty_.notify_one();
 }
 
+auto ReadyQueue::pushShutdownTask() -> void {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    heap_.push(FunctionTask(nullptr, nullptr, InputBuffer(0), true));
+  }
+  not_empty_.notify_one();
+}
+
 auto ReadyQueue::pop() -> FunctionTask {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
@@ -210,8 +225,22 @@ auto ReadyQueue::pop() -> FunctionTask {
 
 Engine::Engine() = default;
 
-// This Engine's ReadyQueues and their corresponding threads are leaked here
-Engine::~Engine() = default;
+// Send shutdown tasks to all ReadyQueues if no backward tasks are running
+// Even though readyQueue should be empty, shutdown tasks have the highest
+// priority
+Engine::~Engine() {
+  bool noBackward = true;
+  for (auto& queue: ready_queues_) {
+    std::lock_guard<std::mutex> lock(queue->mutex_);
+    noBackward =  noBackward && queue->heap_.empty();
+  }
+  if (noBackward) {
+    for (auto& queue : ready_queues_) {
+     queue->pushShutdownTask();
+    }
+  }
+  // Othewise threads are leaked
+}
 
 auto Engine::thread_init(int device) -> void {
   at::init_num_threads();
@@ -245,14 +274,14 @@ auto Engine::thread_init(int device) -> void {
   //
   // NB: We need an array here since neither DeviceGuard nor OptionalDeviceGuard
   // are movable.
-  std::array<c10::OptionalDeviceGuard,
-             static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
-      guards;  // Guards! Guards!
+
+  // Don't use DeviceGuard here because its destructor may be called before the
+  // device is reset. This is fine because the device is thread local.
   if (device != -1) {
     for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
       auto* impl = c10::impl::device_guard_impl_registry[i].load();
       if (impl && device < impl->deviceCount()) {
-        guards[i].reset_device(at::Device(static_cast<c10::DeviceType>(i), device));
+        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
       }
     }
   }
@@ -280,6 +309,12 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
   // Note [Reentrant backwards]
   while (!graph_task || graph_task->outstanding_tasks_ > 0) {
     FunctionTask task = queue->pop();
+    // This will only work if the worker is running a non backward task
+    // TODO Needs to be fixed this to work in all cases
+    if (task.isShutdownTask_) {
+      C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
+      break;
+    }
     if (task.fn_ && !task.base_->has_error_.load()) {
       GradMode::set_enabled(task.base_->grad_mode_);
       try {
