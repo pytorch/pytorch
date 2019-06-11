@@ -868,6 +868,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   c10::NamedTensorMetaInterface* named_tensor_meta() const {
     return named_tensor_meta_.get();
   }
+
+  c10::NamedTensorMetaInterface* named_tensor_meta() {
+    return named_tensor_meta_.get();
+  }
 #endif
 
 
