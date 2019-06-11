@@ -16,7 +16,7 @@ inline std::tuple<c10::optional<at::Device>, c10::optional<at::ScalarType>, bool
     "to(ScalarType dtype, bool non_blocking=False, bool copy=False, bool force_move_params_cpu_cuda=False)",
     "to(Tensor tensor, bool non_blocking=False, bool copy=False, bool force_move_params_cpu_cuda=False)",
   });
-  ParsedArgs<4> parsed_args;
+  ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     if (!allow_copy && !r.isNone(3))
