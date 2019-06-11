@@ -19,6 +19,9 @@ namespace torch { namespace autograd {
 struct Variable;
 using at::Context;
 using at::Device;
+#ifdef NAMEDTENSOR_ENABLED
+using at::DimnameList;
+#endif
 using at::Generator;
 using at::IntArrayRef;
 using at::MemoryFormat;
