@@ -355,4 +355,8 @@ GenericDictPtr toGenericDict(DictPtr<Key, Value> dict) {
 
 }
 
+namespace torch {
+  template<class Key, class Value> using DictPtr = c10::DictPtr<Key, Value>;
+}
+
 #include <ATen/core/Dict_inl.h>

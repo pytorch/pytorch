@@ -1741,6 +1741,7 @@
   dispatch:
     CPU: softmax_cpu
     CUDA: softmax_cuda
+    MkldnnCPU: mkldnn_softmax
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
@@ -2189,6 +2190,12 @@
   variants: function
 
 - func: nuclear_norm(Tensor self, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+
+- func: nuclear_norm(Tensor self, int[2] dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: nuclear_norm(Tensor self, int[2] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
 - func: clone(Tensor self) -> Tensor

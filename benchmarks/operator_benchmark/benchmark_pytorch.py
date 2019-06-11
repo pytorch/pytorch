@@ -63,6 +63,12 @@ class PyTorchOperatorTestCase(object):
         self.op_bench = op_bench
         self.framework = "PyTorch"
 
+    def run_jit_forward(self, num_runs):
+        """ This is a temp solution and will be removed later 
+            Run the forward op with JIT 
+        """
+        self.op_bench.jit_forward(num_runs)
+
     def run_forward(self, num_runs):
         """ TODO (mingzhe): when JIT is ready, switch this to JIT 
             Run the forward path of an op in many iterations
