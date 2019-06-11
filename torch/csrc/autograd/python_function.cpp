@@ -107,6 +107,11 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
 // C++'s Function::apply to a Python method "apply".
 auto PyFunction::apply(variable_list&& inputs) -> variable_list {
   AutoGIL gil;
+  auto old_tstate = PyThreadState_Get();
+  auto interp = old_tstate->interp;
+  PyThreadState* new_tstate = PyThreadState_New(interp);
+  PyThreadState_Swap(new_tstate);
+
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
@@ -197,6 +202,9 @@ auto PyFunction::apply(variable_list&& inputs) -> variable_list {
     }
   }
 
+  PyThreadState_Swap(old_tstate);
+  PyThreadState_Clear(new_tstate);
+  PyThreadState_Delete(new_tstate);
   return results;
 }
 
