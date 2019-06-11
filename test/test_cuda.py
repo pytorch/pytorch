@@ -2355,6 +2355,7 @@ class TestCuda(TestCase):
         samples = probs.multinomial(1000000, replacement=True)
         self.assertGreater(probs[samples].min().item(), 0)
 
+    @skipCUDANonDefaultStreamIf(True)
     def test_multinomial_alias(self):
         _TestTorchMixin._test_multinomial_alias(self, lambda t: t.cuda())
 
@@ -2673,6 +2674,15 @@ class TestCuda(TestCase):
     @skipCUDANonDefaultStreamIf(True)
     def test_norm(self):
         _TestTorchMixin._test_norm(self, device='cuda')
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_nuclear_norm_axes_small_brute_force(self):
+        _TestTorchMixin._test_nuclear_norm_axes(self, device='cuda')
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_nuclear_norm_exceptions(self):
+        _TestTorchMixin._test_nuclear_norm_exceptions(self, device='cuda')
 
     def test_dist(self):
         _TestTorchMixin._test_dist(self, device='cuda')

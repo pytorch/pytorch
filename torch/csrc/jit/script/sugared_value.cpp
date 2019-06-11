@@ -247,25 +247,10 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }
 
-std::vector<TypePtr> SimpleValue::getItersTypeInfo(
-  const SourceRange& loc,
-  Function& m) {
-    TypePtr val_type = getValue()->type();
-    if (auto list_type = val_type->cast<ListType>()) {
-      return {list_type->getElementType()};
-    } else if (val_type->isSubtypeOf(TensorType::get())) {
-      return {val_type};
-    } else {
-      throw ErrorReport(loc)
-          << "Value type " << val_type->str() << "cannot be used as a iterator";
-    }
-}
-
-void SimpleValue::fillInLoopInfo(
+std::vector<Value*> SimpleValue::fillInLoopInfo(
   const SourceRange& loc,
   Function& m,
-  Node* n,
-  size_t iters_size) {
+  Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == prim::Loop);
   // List, Tuple, Tensor, fill in missing information desugaring
   Value* val = getValue();
@@ -281,22 +266,14 @@ void SimpleValue::fillInLoopInfo(
 
     // fill in the target element assignment value in the beginning of the FOR loop
     {
-      if (iters_size != 1) {
-        throw ErrorReport(loc) <<"more than one iterable for in list";
-      }
       Block* body_block = n->blocks()[0];
-      // replace the first Placeholder node in the block with the correct assignment
       auto it = body_block->nodes().begin();
-      Value* trip_count = body_block->inputs()[0]; // Iteration num
-      TORCH_INTERNAL_ASSERT(it->kind() == prim::Placeholder);
-
       WithInsertPoint it_guard(*it);
+      Value* trip_count = body_block->inputs()[0]; // Iteration num
       Value* cur_elem = g.insert(aten::select, {val, trip_count}, {}, loc);
-      it->output()->replaceAllUsesWith(cur_elem);
-      it.destroyCurrent();
+      return {cur_elem};
     }
   } else if (val_type->isSubtypeOf(TensorType::get())) {
-    // fill in max_trip_count_val
     Value* outermost_dim_index = g.insertConstant(0, IntType::get(), loc);
     // zero-dim tensor error handling
     Value* num_dim = g.insert(aten::dim, {val}, {}, loc);
@@ -312,46 +289,33 @@ void SimpleValue::fillInLoopInfo(
           {std::string("iteration over a 0-d tensor!")}, {}, loc);
     }
 
+    // fill in max_trip_count_val
     Value* sizes_tuple = g.insert(aten::size, {val}, {}, loc);
     Value* max_trip_count_val = g.insert(aten::select, {sizes_tuple, outermost_dim_index}, {}, loc);
     n->insertInput(0, max_trip_count_val);
+
     // fill in the target element assignment value in the beginning of the FOR loop
+    Value* cur_elem = nullptr;
     {
-      TORCH_CHECK(iters_size == 1, "more than one iterable for in tensor");
       Block* body_block = n->blocks()[0];
-      // replace the first Placeholder node in the block with the correct assignment
       auto it = body_block->nodes().begin();
       Value* trip_count = body_block->inputs()[0]; // Iteration num
-      TORCH_INTERNAL_ASSERT(it->kind() == prim::Placeholder);
 
       WithInsertPoint it_guard(*it);
-      Value* cur_elem = g.insert(aten::select, {val, outermost_dim_index, trip_count}, {}, loc);
-      it->output()->replaceAllUsesWith(cur_elem);
-      it.destroyCurrent();
+      cur_elem = g.insert(aten::select, {val, outermost_dim_index, trip_count}, {}, loc);
     }
+    return {cur_elem};
 
   } else {
       throw ErrorReport(loc)
-          << "Value type " << val_type->str() << "does not have loop information to fill";
-    }
+          << "Value type " << val_type->str() << " does not have loop information to fill";
+  }
 }
 
-std::vector<TypePtr> IterableValue::getItersTypeInfo(
-  const SourceRange& loc,
-  Function& m) {
-    if (symbol_ == prim::range) {
-      return {IntType::get()};
-    } else {
-      throw ErrorReport(loc)
-          << "No iterator type information on " << symbol_.toDisplayString();
-    }
-}
-
-void IterableValue::fillInLoopInfo(
+std::vector<Value*> IterableValue::fillInLoopInfo(
   const SourceRange& loc,
   Function& m,
-  Node* n,
-  size_t iters_size) {
+  Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == prim::Loop);
   // List, Tuple, Tensor, fill in missing information desugaring
   Graph& g = *m.graph();
@@ -374,7 +338,7 @@ void IterableValue::fillInLoopInfo(
       if (iter_inputs_.size() == 3) {
         step_val = iter_inputs_[2];
         // error handling when step_val = 0 during runtime
-        Value* cond_val = g.insert(aten::eq, {step_val, g.insertConstant(0, nullptr, loc)},{}, loc);
+        Value* cond_val = g.insert(aten::eq, {step_val, g.insertConstant(0, nullptr, loc)}, {}, loc);
         Node* if_node = g.insertNode(g.create(prim::If, 0)->setSourceRange(loc));
         if_node->addInput(cond_val);
         auto true_block = if_node->addBlock();
@@ -394,26 +358,20 @@ void IterableValue::fillInLoopInfo(
 
     // fill in the target element assignment value in the beginning of the FOR loop
     {
-      if (iters_size != 1) {
-        throw ErrorReport(loc) <<"more than one iterable for in range";
-      }
       Block* body_block = n->blocks()[0];
-      // replace the first Placeholder node in the block with the correct assignment
       auto it = body_block->nodes().begin();
       Value* trip_count = body_block->inputs()[0]; // Iteration num
-      TORCH_INTERNAL_ASSERT(it->kind() == prim::Placeholder);
 
       WithInsertPoint it_guard(*it);
       Value* cur_elem = trip_count;
       if (iter_inputs_size != 1) {
         cur_elem = g.insert(aten::__derive_index, {trip_count, start_val, step_val}, {}, loc);
       }
-      it->output()->replaceAllUsesWith(cur_elem);
-      it.destroyCurrent();
+      return {cur_elem};
     }
   } else {
       throw ErrorReport(loc)
-          << "Iterable " << symbol_.toDisplayString() << "does not have loop information to fill";
+          << "Iterable " << symbol_.toDisplayString() << " does not have loop information to fill";
   }
 }
 

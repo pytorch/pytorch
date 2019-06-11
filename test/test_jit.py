@@ -3260,96 +3260,6 @@ def foo(x):
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
 
-    def test_for_in_tensors(self):
-        def test_sizes(x):
-            sumz = 0
-            for s in x:
-                sumz += 1
-            return sumz
-        self.checkScript(test_sizes, (torch.rand(5, 4, 3, 2, 1),))
-        self.checkScript(test_sizes, (torch.rand(777),))
-        self.checkScript(test_sizes, (torch.rand(0),))
-
-    def test_for_in_tensors_rank0(self):
-        with self.assertRaisesRegex(Exception, "iteration over a 0-d tensor"):
-            @torch.jit.script
-            def test_sizes(x):
-                sumz = 0
-                for s in x:
-                    sumz += 1
-                return sumz
-
-            test_sizes(torch.tensor(1))
-
-    def test_for_in_tensors_fail_scalar(self):
-        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
-            @torch.jit.script
-            def test_sizes(x):
-                # type: (float) -> int
-                sumz = 0
-                for s in x: # noqa
-                    sumz += 1
-                return sumz
-
-            test_sizes(0.0)
-
-    def test_for_in_tensors_nested(self):
-        def test_sizes(x):
-            sumz = 0
-            for n in x:
-                for t in n:
-                    sumz += 1
-            return sumz
-
-        self.checkScript(test_sizes, (torch.rand(5, 4, 3, 2, 1),))
-
-    # to avoid defining sum_list in multiple tests
-    def get_sum_list_fn(self):
-        def sum_list(a):
-            # type: (List[int]) -> int
-            sum = 0
-            for i in a:
-                sum += i
-
-            return sum
-
-        return sum_list
-
-    def test_sum_list_diff_elms(self):
-        self.checkScript(self.get_sum_list_fn(), ([1, 2, 3, 4, 5],))
-
-    def test_sum_list_empty(self):
-        self.checkScript(self.get_sum_list_fn(), ([],))
-
-    def test_sum_list_one(self):
-        self.checkScript(self.get_sum_list_fn(), ([1],))
-
-    def test_sum_list_literal(self):
-
-        def sum_list():
-            # type: () -> int
-            sum = 0
-            for i in [1, 2, 3, 4, 5]:
-                sum += i
-
-            return sum
-
-        self.checkScript(sum_list, ())
-
-    def test_sum_list_wrong_type(self):
-
-        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
-            @torch.jit.script
-            def sum_list(a):
-                # type: (int) -> int
-                sum = 0
-                for i in a:  # noqa: T484
-                    sum += i
-
-                return sum
-
-            sum_list(1)
-
     def test_bool_list_io(self):
         @torch.jit.script
         def stuff4(x):
@@ -5006,6 +4916,19 @@ a")
 
         test_resize_as()
 
+    def test_uninitialized(self):
+        graph_str = """graph():
+          %1 : int = prim::Uninitialized()
+          %2 : int = prim::Constant[value=1]()
+          %3 : int = aten::add(%1, %2)
+          return (%3)
+        """
+        g = parse_ir(graph_str)
+        m = self.createFunctionFromGraph(g)
+        self.getExportImportCopy(m)
+        with self.assertRaisesRegex(RuntimeError, "isInt"):
+            m()
+
     def test_requires_grad_loop(self):
         @torch.jit.script
         def test(x, y, z):
@@ -5737,6 +5660,50 @@ a")
         inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+    def test_divmod(self):
+        def func_int(a, b):
+            # type: (int, int) -> Tuple[int, int]
+            return divmod(a, b)
+
+        def func_float(a, b):
+            # type: (float, float) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def func_int_float(a, b):
+            # type: (int, float) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def func_float_int(a, b):
+            # type: (float, int) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def divmod_test_iterator(func, num, den):
+            for i in num:
+                for j in den:
+                    self.checkScript(func, (i, j))
+
+        num_int = [1024, -1024]
+        den_int = [10, -10]
+        num_float = [5.3, -5.3]
+        den_float = [2.0, -2.0]
+        divmod_test_iterator(func_int, num_int, den_int)
+        divmod_test_iterator(func_float, num_float, den_float)
+        divmod_test_iterator(func_int_float, num_int, den_float)
+        divmod_test_iterator(func_float_int, num_float, den_int)
+
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: integer division or modulo by zero"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int)))
+            cu.func_int(1024, 0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float)))
+            cu.func_float(5.3, 0.0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int_float)))
+            cu.func_int_float(1024, 0.0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float_int)))
+            cu.func_float_int(5.3, 0)
+
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
             if is_float:
@@ -5847,87 +5814,6 @@ a")
 
         inputs = self._make_scalar_vars([4321, 1234], torch.int64)
         self.checkScript(func, inputs, optimize=True)
-
-    def test_script_for_in_range(self):
-        def fn():
-            c = 0
-            for i in range(100):
-                c += i
-            return c
-        self.checkScript(fn, (), outputs=4950, optimize=True)
-
-    def test_script_for_in_range_dynamic(self):
-        def fn():
-            c = 0
-            for i in range(100):
-                acc = 0
-                for j in range(i):
-                    acc += j
-                c += acc
-            return c
-        self.checkScript(fn, (), optimize=False)
-
-    def test_script_for_in_range_ast(self):
-        @torch.jit.script
-        def test_script_for_in_range_ast():
-            c = 0
-            for i in range(100):
-                acc = 0
-                for j in range(i):
-                    acc += j
-                c += acc
-            return c
-
-        self.assertEqual(test_script_for_in_range_ast(), 161700)
-
-    def test_script_for_in_range_if_ast(self):
-        @torch.jit.script
-        def test_script_for_in_range_if_ast(x):
-            output = x
-            for i in range(20):
-                if i == 0:
-                    output = x.unsqueeze(0)
-                else:
-                    output = torch.cat((output, x.unsqueeze(0)), dim=0)
-            return output
-        inputs = self._make_scalar_vars([0], torch.int64)
-
-        self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
-
-    def test_script_for_in_range_start_end(self):
-        def fn():
-            x = 0
-            for i in range(7, 100):
-                x += i
-            return x
-        self.checkScript(fn, (), outputs=4929, optimize=True)
-
-    def test_script_for_in_range_start_end_step(self):
-        def fn(start, end, step):
-            # type: (int, int, int) -> int
-            x = 0
-            for i in range(start, end, step):
-                x += i
-            return x
-
-        def check(inp):
-            self.checkScript(fn, inp, outputs=fn(*inp), optimize=True)
-        check((7, 100, 7))
-        check((7, 100, -7))
-        check((2, -11, -3))
-        check((2, -11, 3))
-        check((2, 10, 3))
-        check((-2, -10, -10))
-
-    def test_script_for_zero_step(self):
-        @torch.jit.script
-        def fn():
-            x = 0
-            for i in range(2, -11, 0):
-                x += i
-            return x
-        with self.assertRaisesRegex(torch.jit.Error, "must not be zero"):
-            fn()
 
     def test_script_optional_none(self):
         def none_stmt(x):
@@ -9814,7 +9700,88 @@ a")
                 return x
         self.checkScript(return_stmt, (torch.rand(1),))
 
-    def test_for_range_no_arg(self):
+    def test_for_in_range(self):
+        def fn():
+            c = 0
+            for i in range(100):
+                c += i
+            return c
+        self.checkScript(fn, (), outputs=4950, optimize=True)
+
+    def test_for_in_range_dynamic(self):
+        def fn():
+            c = 0
+            for i in range(100):
+                acc = 0
+                for j in range(i):
+                    acc += j
+                c += acc
+            return c
+        self.checkScript(fn, (), optimize=False)
+
+    def test_for_in_range_ast(self):
+        @torch.jit.script
+        def test_script_for_in_range_ast():
+            c = 0
+            for i in range(100):
+                acc = 0
+                for j in range(i):
+                    acc += j
+                c += acc
+            return c
+
+        self.assertEqual(test_script_for_in_range_ast(), 161700)
+
+    def test_for_in_range_if_ast(self):
+        @torch.jit.script
+        def test_script_for_in_range_if_ast(x):
+            output = x
+            for i in range(20):
+                if i == 0:
+                    output = x.unsqueeze(0)
+                else:
+                    output = torch.cat((output, x.unsqueeze(0)), dim=0)
+            return output
+        inputs = self._make_scalar_vars([0], torch.int64)
+
+        self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
+
+    def test_for_in_range_start_end(self):
+        def fn():
+            x = 0
+            for i in range(7, 100):
+                x += i
+            return x
+        self.checkScript(fn, (), outputs=4929, optimize=True)
+
+    def test_for_in_range_start_end_step(self):
+        def fn(start, end, step):
+            # type: (int, int, int) -> int
+            x = 0
+            for i in range(start, end, step):
+                x += i
+            return x
+
+        def check(inp):
+            self.checkScript(fn, inp, outputs=fn(*inp), optimize=True)
+        check((7, 100, 7))
+        check((7, 100, -7))
+        check((2, -11, -3))
+        check((2, -11, 3))
+        check((2, 10, 3))
+        check((-2, -10, -10))
+
+    def test_for_in_range_zero_step(self):
+        @torch.jit.script
+        def fn():
+            x = 0
+            for i in range(2, -11, 0):
+                x += i
+            return x
+        with self.assertRaisesRegex(torch.jit.Error, "must not be zero"):
+            fn()
+
+    def test_for_in_range_no_arg(self):
         with self.assertRaisesRegex(RuntimeError, r'range expected at least 1 arguments, got 0'):
             @torch.jit.script
             def range_no_arg(x):
@@ -9841,6 +9808,96 @@ a")
                     y += j
                 return x, y
             ''')
+
+    def test_for_in_tensors(self):
+        def test_sizes(x):
+            sumz = 0
+            for s in x:
+                sumz += 1
+            return sumz
+        self.checkScript(test_sizes, (torch.rand(5, 4, 3, 2, 1),))
+        self.checkScript(test_sizes, (torch.rand(777),))
+        self.checkScript(test_sizes, (torch.rand(0),))
+
+    def test_for_in_tensors_rank0(self):
+        with self.assertRaisesRegex(Exception, "iteration over a 0-d tensor"):
+            @torch.jit.script
+            def test_sizes(x):
+                sumz = 0
+                for s in x:
+                    sumz += 1
+                return sumz
+
+            test_sizes(torch.tensor(1))
+
+    def test_for_in_tensors_fail_scalar(self):
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+            @torch.jit.script
+            def test_sizes(x):
+                # type: (float) -> int
+                sumz = 0
+                for s in x: # noqa
+                    sumz += 1
+                return sumz
+
+            test_sizes(0.0)
+
+    def test_for_in_tensors_nested(self):
+        def test_sizes(x):
+            sumz = 0
+            for n in x:
+                for t in n:
+                    sumz += 1
+            return sumz
+
+        self.checkScript(test_sizes, (torch.rand(5, 4, 3, 2, 1),))
+
+    # to avoid defining sum_list in multiple tests
+    def get_sum_list_fn(self):
+        def sum_list(a):
+            # type: (List[int]) -> int
+            sum = 0
+            for i in a:
+                sum += i
+
+            return sum
+
+        return sum_list
+
+    def test_sum_list_diff_elms(self):
+        self.checkScript(self.get_sum_list_fn(), ([1, 2, 3, 4, 5],))
+
+    def test_sum_list_empty(self):
+        self.checkScript(self.get_sum_list_fn(), ([],))
+
+    def test_sum_list_one(self):
+        self.checkScript(self.get_sum_list_fn(), ([1],))
+
+    def test_sum_list_literal(self):
+
+        def sum_list():
+            # type: () -> int
+            sum = 0
+            for i in [1, 2, 3, 4, 5]:
+                sum += i
+
+            return sum
+
+        self.checkScript(sum_list, ())
+
+    def test_sum_list_wrong_type(self):
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+            @torch.jit.script
+            def sum_list(a):
+                # type: (int) -> int
+                sum = 0
+                for i in a:  # noqa: T484
+                    sum += i
+
+                return sum
+
+            sum_list(1)
 
     def test_single_starred_lhs(self):
         with self.assertRaisesRegex(RuntimeError, 'A Starred expression may only appear on the lhs within the presence'
@@ -10742,6 +10799,13 @@ a")
             def test_wrong_type():
                 a = 8
                 return a[0]
+
+    def test_unsupported_builtin_error(self):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calling a python builtin_function_or_method which is currently not supported"):
+            @torch.jit.script
+            def test_unsupported(a):
+                return math.hypot(a, 2.0)
 
     def test_annotated_script_fn(self):
         @torch.jit.script
@@ -12060,30 +12124,6 @@ a")
             return x[2]
 
         self.checkScript(fn, ("abcde",))
-
-    def test_str_ops(self):
-        def test_str_is(s):
-            # type: (str) -> Tuple[bool, bool, bool, bool, bool, bool]
-            return s.isupper(), s.islower(), s.isdigit(), s.isspace(), \
-                s.isalnum(), s.isalpha()
-
-        def test_str_to(s):
-            # type: (str) -> Tuple[str, str]
-            return s.upper(), s.lower()
-
-        inputs = ["", "12a", "!B", "12", "a", "B", "aB", "$12", "B12", "AB ",
-                  "  \t", "  \n", "\na", "abc"]
-
-        for input in inputs:
-            self.checkScript(test_str_is, (input,))
-            self.checkScript(test_str_to, (input,))
-
-        def test_str_cmp(a, b):
-            # type: (str, str) -> Tuple[bool, bool, bool, bool, bool, bool]
-            return a != b, a == b, a < b, a > b, a <= b, a >= b
-
-        for i in range(len(inputs) - 1):
-            self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
 
     def test_ord(self):
         def fn(x):
@@ -16049,6 +16089,17 @@ class TestClassType(JitTestCase):
                 other = LSTMStateStack(self.num_layers, self.hidden_size)
                 other.stack = list(self.stack)
                 return other
+
+    def test_optional_type_promotion(self):
+        # should not throw
+        @torch.jit.script  # noqa: B903
+        class Tree(object):
+            def __init__(self):
+                self.parent = torch.jit.annotate(Optional[Tree], None)
+
+            def add_child(self, child):
+                # type: (Tree) -> None
+                child.parent = torch.jit.annotate(Optional[Tree], self)
 
 
 class TestLogging(JitTestCase):

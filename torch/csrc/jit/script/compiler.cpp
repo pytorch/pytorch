@@ -37,7 +37,6 @@ using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 using TypeAndRange = std::pair<TypePtr, const SourceRange*>;
-using IterType = std::pair<std::string, TypePtr>;
 
 // Holds mappings from a variable name to a refined type for that variable
 // E.g if x is not None is true than we can refine x from type t? to t.
@@ -378,6 +377,7 @@ struct Environment {
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
+          {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"rangelist",
@@ -1253,13 +1253,11 @@ struct to_ir {
   // loop-carried variables whose definitions are updated as the loop executes
   // in a way that ensure single static assignment.
 
-  // emitLoopCommon does not add the max_trip_count to the Loop node, it relies
-  // on different use cases (iterables) to compute the max_trip_count and add the
-  // value as the first input of the prim::Loop node 
   Node* emitLoopCommon(
       SourceRange range,
       const List<Stmt>& body,
-      at::ArrayRef<IterType> iters_info,
+      std::vector<std::string> iter_names,
+      SugaredValuePtr iterable,
       c10::optional<Expr> cond) {
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     WithInsertPoint guard(n);
@@ -1277,15 +1275,21 @@ struct to_ir {
       pushFrame(body_block);
       WithInsertPoint guard(body_block);
 
-      // Insert a placeholder for each iterator target to allow the loop body to
-      // refer to them in the value table, and emit the rest of the FOR loop.
-      // These placeholders will be fixed up by each SugaredValue fillLoopInfo call.
-      for(auto iter: iters_info) {
-        Node *assigner = graph->insertNode(create(prim::Placeholder, range, 1));
-        assigner->output()->setType(iter.second);
-        environment_stack->setVar(range, iter.first, assigner->output());
+      // max_trip_count, current element assignement is being added to the Loop node
+      // in sugared value, it relies on different use cases (iterables) to emit the
+      // computation and add those values to the prim::Loop node 
+      if (iterable != nullptr) {
+        // fill in the loop information and get the values of the elemnt assignments
+        std::vector<Value*> iter_vals = iterable->fillInLoopInfo(range, method, n);
+        // assign element in the environment stack
+        if (iter_names.size() != iter_vals.size()) {
+          throw ErrorReport(range) << "expect " << iter_vals.size() 
+              << " for each iterable but get " << iter_names.size() << " loop veriables";
+        }
+        for (size_t i = 0; i < iter_names.size(); ++ i){
+          environment_stack->setVar(range, iter_names[i], iter_vals[i]);
+        }
       }
-
       // emit the body statements
       emitStatements(body);
 
@@ -1329,20 +1333,17 @@ struct to_ir {
     // like List, Tensor, Dict. 
     auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
     auto iterable_val = std::dynamic_pointer_cast<IterableValue>(sv);
+    std::vector<std::string> iter_names;
 
     if ((siv && (siv->getValue()->type()->kind() == TypeKind::ListType
         || siv->getValue()->type()->isSubtypeOf(TensorType::get()))
         ) || iterable_val) {
-      std::vector<IterType> iters_info;
-      std::vector<TypePtr> types_info = sv->getItersTypeInfo(stmt.range(), method);
-      TORCH_INTERNAL_ASSERT(targets.size() == types_info.size());
+      // collect all iterable names to fill in the value table
       for(size_t i = 0; i < targets.size(); ++ i) {
         std::string iter_name = Var(targets[i]).name().name();
-        iters_info.emplace_back(IterType(iter_name, types_info[i]));
+        iter_names.emplace_back(iter_name);
       }
-
-      Node* loop_node = emitLoopCommon(stmt.range(), stmt.body(), iters_info, {});
-      sv->fillInLoopInfo(stmt.range(), method, loop_node, iters_info.size());
+      emitLoopCommon(stmt.range(), body, iter_names, sv, {});
       return;
     }
 
@@ -1370,9 +1371,8 @@ struct to_ir {
 
   void emitWhile(const While& stmt) {
     auto cond = stmt.cond();
-    // pass in empty iterable assigner list since WHILE does not need assigners
-    Node* loop_node = emitLoopCommon(stmt.range(), stmt.body(), {}, cond);
-    // fill in max_trip_count_val for the prim::Loop node for complete information
+    Node* loop_node = emitLoopCommon(stmt.range(), stmt.body(), {}, {}, cond);
+    // fill in max_trip_count_val for the prim::Loop node for compete information
     Value* max_trip_count_val = materializeConstant(
       std::numeric_limits<int64_t>::max(),
       *graph,
@@ -1933,11 +1933,15 @@ struct to_ir {
     });
   }
 
-  void checkApplyExpr(Apply& apply, SourceRange& loc) {
-    if (apply.inputs().size() != 2) {
-      throw ErrorReport(loc) << Var(apply.callee()).name().name()
-                             << " expected exactly two arguments but found "
-                             << apply.inputs().size();
+  void checkApplyExpr(
+      Apply& apply,
+      SourceRange& loc,
+      size_t expected_inputs = 2) {
+    if (apply.inputs().size() != expected_inputs) {
+      throw ErrorReport(loc)
+          << Var(apply.callee()).name().name() << " expected exactly "
+          << expected_inputs << " arguments but found "
+          << apply.inputs().size();
     }
     if (apply.attributes().size() > 0) {
       throw ErrorReport(loc)
@@ -1993,6 +1997,14 @@ struct to_ir {
       }
       const std::string& name = StringLiteral(selector).text();
       return obj->attr(apply.range(), method, name);
+    } else if (
+        auto uninitialized_value =
+            dynamic_cast<UninitializedValue*>(sv.get())) {
+      checkApplyExpr(apply, loc, 1);
+      TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+      auto out = graph->insertNode(graph->createUninitialized(type))
+                     ->setSourceRange(loc);
+      return std::make_shared<SimpleValue>(out->output());
     } else if (auto isinstance = dynamic_cast<IsInstanceValue*>(sv.get())) {
       // NOTE: for `isinstance` builtin call in JIT, we only check the static
       // types on the inputs to evaluate, and insert the corresponding constant

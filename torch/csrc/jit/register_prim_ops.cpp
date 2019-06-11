@@ -1,4 +1,5 @@
 #include <aten/src/ATen/Context.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -1029,6 +1030,14 @@ RegisterOperators reg(
            return 0;
          }),
      Operator(
+         prim::Uninitialized,
+         [](const Node* node) {
+           return [](Stack& stack) {
+             push(stack, IValue::uninitialized());
+             return 0;
+           };
+         }),
+     Operator(
          prim::CreateObject,
          [](const Node* node) {
            const auto type = node->output()->type()->expect<ClassType>();
@@ -1195,30 +1204,6 @@ RegisterOperators logging_operators(
     push(stack, op);                                               \
     return 0;                                                      \
   })
-
-int stringSlice(Stack& stack) {
-  auto step = pop(stack).toInt();
-  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
-
-  auto end = pop(stack).toInt();
-  auto start = pop(stack).toInt();
-  auto string = pop(stack).toStringRef();
-  const int64_t size = string.size();
-
-  // Clamp start and end to the bounds of the list
-  start = std::max(int64_t(0), normalizeIndex(start, size));
-  end = std::min(size, normalizeIndex(end, size));
-
-  if (end <= start) {
-    // Slice is empty
-    push(stack, std::string(""));
-    return 0;
-  }
-
-  std::string result(string.begin() + start, string.begin() + end);
-  push(stack, result);
-  return 0;
-}
 
 // Equivalent to list.at(idx)
 template <typename TList> // something like Shared<IntList>
@@ -2033,72 +2018,6 @@ RegisterOperators reg2({
         "aten::ne(Tensor[] a, Tensor[] b) -> bool",
         listNe<Shared<TensorList>>),
     Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<Shared<BoolList>>),
-    Operator(
-        "aten::slice(str string, int start, int end=9223372036854775807, int step=1) -> str",
-        stringSlice),
-
-// python string is methods return false if empty
-#define DEFINE_STRING_IS_OP(op_name, char_op)                      \
-  Operator(#op_name "(str self) -> bool", [](Stack& stack) {       \
-    auto string = pop(stack).toStringRef();                        \
-    push(                                                          \
-        stack,                                                     \
-        string.size() != 0 &&                                      \
-            std::all_of(string.begin(), string.end(), [](char c) { \
-              return char_op(c);                                   \
-            }));                                                   \
-    return 0;                                                      \
-  })
-
-    // upper and lower require there to be at least one alpha character,
-    // and ignore all other characters
-    Operator(
-        "aten::isupper(str self) -> bool",
-        [](Stack& stack) {
-          auto string = pop(stack).toStringRef();
-          bool found_alpha = false;
-          bool is_upper = true;
-          for (size_t i = 0; i < string.size() && is_upper; ++i) {
-            char c = string[i];
-            found_alpha |= std::isalpha(c);
-            is_upper &= (!std::isalpha(c) || std::isupper(c));
-          }
-          push(stack, found_alpha && is_upper);
-          return 0;
-        }),
-    Operator(
-        "aten::islower(str self) -> bool",
-        [](Stack& stack) {
-          auto string = pop(stack).toStringRef();
-          bool found_alpha = false;
-          bool is_lower = true;
-          for (size_t i = 0; i < string.size() && is_lower; ++i) {
-            char c = string[i];
-            found_alpha |= std::isalpha(c);
-            is_lower &= (!std::isalpha(c) || std::islower(c));
-          }
-          push(stack, found_alpha && is_lower);
-          return 0;
-        }),
-
-    DEFINE_STRING_IS_OP(aten::isdigit, std::isdigit),
-    DEFINE_STRING_IS_OP(aten::isspace, std::isspace),
-    DEFINE_STRING_IS_OP(aten::isalnum, std::isalnum),
-    DEFINE_STRING_IS_OP(aten::isalpha, std::isalpha),
-
-#define DEFINE_STRING_CHAR_MAP_OP(op_name, char_op)         \
-  Operator(#op_name "(str self) -> str", [](Stack& stack) { \
-    auto string = pop(stack).toStringRef();                 \
-    std::stringstream ss;                                   \
-    for (char c : string) {                                 \
-      ss << static_cast<char>(char_op(c));                  \
-    }                                                       \
-    push(stack, ss.str());                                  \
-    return 0;                                               \
-  })
-
-    DEFINE_STRING_CHAR_MAP_OP(aten::upper, std::toupper),
-    DEFINE_STRING_CHAR_MAP_OP(aten::lower, std::tolower),
 
     Operator(
         "prim::StringIndex(str string, int index) -> str",
@@ -2306,13 +2225,13 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
 
     Operator(
-    "aten::isnan(float a) -> bool",
-    [](Stack& stack) {
-      double a;
-      pop(stack, a);
-      push(stack, std::isnan(a));
-      return 0;
-    }),
+        "aten::isnan(float a) -> bool",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::isnan(a));
+          return 0;
+        }),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
@@ -2400,6 +2319,60 @@ RegisterOperators reg2({
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("float"),
 #undef CREATE_DICT_OPS
+
+    Operator(
+        "aten::divmod(int x, int y) -> (int, int)",
+        [](Stack& stack) {
+          int64_t a, b;
+          lldiv_t divresult = {};
+          pop(stack, a, b);
+          if (b == 0) {
+            throw std::runtime_error("ZeroDivisionError: integer division or modulo by zero");
+          }
+          divresult = lldiv(a, b);
+          if (divresult.rem && (a < 0) != (b < 0)) {
+            divresult.quot -= 1;
+            divresult.rem  += b;
+          }
+          push(stack, static_cast<int64_t>(divresult.quot), \
+            static_cast<int64_t>(divresult.rem));
+          return 0;
+        }),
+    Operator(
+        "aten::divmod(float x, float y) -> (float, float)",
+        [](Stack& stack) {
+          double a, b;
+          pop(stack, a, b);
+          if (b == 0) {
+            throw std::runtime_error("ZeroDivisionError: float divmod()");
+          }
+          double rem = fmod(a, b);
+          if (rem && (a < 0) != (b < 0)) {
+            rem  += b;
+          }
+          push(stack, (a - rem)/b, rem);
+          return 0;
+        }),
+#define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                              \
+    Operator(                                                               \
+        "aten::divmod(" #type_a " x," #type_b " y) -> (float, float)",      \
+        [](Stack& stack) {                                                  \
+          type_a a;                                                         \
+          type_b b;                                                         \
+          pop(stack, a, b);                                                 \
+          if (b == 0) {                                                     \
+            throw std::runtime_error("ZeroDivisionError: float divmod()");  \
+          }                                                                 \
+          double quot = floor(a / b);                                       \
+          double rem = a - (quot * b);                                      \
+          push(stack, quot, rem);                                           \
+          return 0;                                                         \
+        })
+
+    DEFINE_DIVMOD_MIXED_OP(int, float),
+    DEFINE_DIVMOD_MIXED_OP(float, int),
+
+#undef DEFINE_DIVMOD_MIXED_OP
 
     Operator("aten::hash(str t) -> int", hashValue<std::string>),
     Operator("aten::hash(int t) -> int", hashValue<int>),

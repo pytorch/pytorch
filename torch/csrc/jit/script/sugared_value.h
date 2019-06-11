@@ -94,29 +94,21 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
-  // If it is a iterable sugared value, use this interface to get the type information
-  // for all the iterables inside for loop, and prepare for loop information filling
-  virtual std::vector<TypePtr> getItersTypeInfo(
-    const SourceRange& loc,
-    Function& m) {
-   throw ErrorReport(loc) << kind() << " does not have the iterables type information";
-  }
-
   // Fill in loop information, specifically:
-  // * max_trip_count_val: calculate the max trip count and fill it in
-  // * iterator element assignment: iterator assignment inside the beginning of the FOR loop
-  //   is being temporarily placed by prim::PlaceHolder, fillInLoopInfo will need to replace
-  //   them with the correct element assignment logic/subgraph.
+  // * max_trip_count_val: calculate the max trip count and fill it in the graph
+  // * iterator element assignment: iterator assignment inside the beginning of the FOR loop,
+  //   fillInLoopInfo will need to return those iterator elemnt value to the compiler to
+  //   set the environment stack for the following uses 
   // * condition variable: the condition that will terminate the FOR loop. WHILE loop does not
   //   need to fill this in because it will be emitted by the compiler. TorchScript classes
   //   iterator will need to fill the condition variable in, and it requires the classes to
   //   define a protocol __next__ and __hasnext__, the __hasnext__ magic method graph will
   //   substitute the condition value with the corresponding subgraph
-  virtual void fillInLoopInfo(
+  // * return: a list of Value for current element assignment
+  virtual std::vector<Value*> fillInLoopInfo(
     const SourceRange& loc,
     Function& m,
-    Node* n,
-    size_t iters_size) {
+    Node* n) {
     throw ErrorReport(loc) << kind() << " does not have loop information to fill in";
   }
 
@@ -167,15 +159,11 @@ struct TORCH_API SimpleValue : public SugaredValue {
   Value* getValue() const {
     return value_;
   }
-  std::vector<TypePtr> getItersTypeInfo(
-    const SourceRange& loc,
-    Function& m) override;
 
-  void fillInLoopInfo(
+  std::vector<Value*> fillInLoopInfo(
     const SourceRange& loc,
     Function& m,
-    Node* n,
-    size_t iters_size) override;
+    Node* n) override;
 
  private:
   Value* value_;
@@ -416,6 +404,13 @@ struct TORCH_API AnnotateValue : public SugaredValue {
   }
 };
 
+struct TORCH_API UninitializedValue : public SugaredValue {
+  UninitializedValue() = default;
+  std::string kind() const override {
+    return "uninitialized";
+  }
+};
+
 // matched against for special handling of getattr expressions
 struct TORCH_API GetAttrValue : SugaredValue {
   GetAttrValue() = default;
@@ -441,15 +436,10 @@ struct TORCH_API IterableValue : SugaredValue {
     return "iterable";
   }
 
-  virtual std::vector<TypePtr> getItersTypeInfo(
-    const SourceRange& loc,
-    Function& m) override;
-
-  virtual void fillInLoopInfo(
+  std::vector<Value*> fillInLoopInfo(
     const SourceRange& loc,
     Function& m,
-    Node* n,
-    size_t iters_size) override;
+    Node* n) override;
 
  private:
   // The symbol of the iterable function (e.g. `prim::range`).
