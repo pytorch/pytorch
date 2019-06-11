@@ -1954,12 +1954,8 @@ struct to_ir {
     switch (stmt.lhs().kind()) {
       case TK_VAR: {
         auto v = Var(stmt.lhs());
-        TypePtr type = nullptr;
-        if (stmt.type().present()) {
-          type = typeParser_.parseTypeFromExpr(stmt.type().get());
-        }
         environment_stack->setSugaredVar(
-            v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1, type));
+            v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1));
       } break;
       case TK_TUPLE_LITERAL:
         emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());
