@@ -10885,29 +10885,31 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_trapz(self):
-        def test_dx(sizes, dim, dx):
-            t = torch.randn(sizes)
+        def test_dx(sizes, dim, dx, device):
+            t = torch.randn(sizes, device=device)
             actual = torch.trapz(t, dx=dx, dim=dim)
             expected = np.trapz(t.numpy(), dx=dx, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
-            self.assertTrue(np.allclose(expected, actual.numpy()))
+            self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
 
-        def test_x(sizes, dim, x):
-            t = torch.randn(sizes)
-            actual = torch.trapz(t, x=torch.Tensor(x), dim=dim)
+        def test_x(sizes, dim, x, device):
+            t = torch.randn(sizes, device=device)
+            actual = torch.trapz(t, x=torch.Tensor(x, device=device), dim=dim)
             expected = np.trapz(t.numpy(), x=x, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
-            self.assertTrue(np.allclose(expected, actual.numpy()))
-        test_dx((2, 3, 4), 1, 1)
-        test_dx((10, 2), 0, 0.1)
-        test_dx((1, 10), 0, 2.3)
-        test_dx((0, 2), 0, 1.0)
-        test_dx((0, 2), 1, 1.0)
-        test_x((2, 3, 4), 1, [1, 2, 3])
-        test_x((10, 2), 0, [2, 3, 4, 7, 11, 14, 22, 26, 26.1, 30.3])
-        test_x((1, 10), 0, [1])
-        test_x((0, 2), 0, [])
-        test_x((0, 2), 1, [1, 2])
+            self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
+
+        for device in torch.testing.get_all_device_types():
+            test_dx((2, 3, 4), 1, 1, device)
+            test_dx((10, 2), 0, 0.1, device)
+            test_dx((1, 10), 0, 2.3, device)
+            test_dx((0, 2), 0, 1.0, device)
+            test_dx((0, 2), 1, 1.0, device)
+            test_x((2, 3, 4), 1, [1, 2, 3], device)
+            test_x((10, 2), 0, [2, 3, 4, 7, 11, 14, 22, 26, 26.1, 30.3], device)
+            test_x((1, 10), 0, [1], device)
+            test_x((0, 2), 0, [], device)
+            test_x((0, 2), 1, [1, 2], device)
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(

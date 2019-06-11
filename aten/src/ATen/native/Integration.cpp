@@ -43,6 +43,7 @@ static Tensor zeros_like_except(const Tensor& y, int64_t dim) {
 }
 
 Tensor trapz(const Tensor& y, const Tensor& x, int64_t dim) {
+    dim = maybe_wrap_dim(dim, y);
     // asking for the integral with zero samples is a bit nonsensical,
     // but we'll return "0" to match numpy behavior.
     if (y.size(dim) == 0) {
