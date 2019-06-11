@@ -1696,9 +1696,6 @@ def _convert_to_script_module(mod, methods=None):
         # Create constant versions for the iterable modules
         return _create_constant_iterable_module(mod)
 
-    if mod.__class__.forward is torch.nn.Module.forward:
-        raise Exception("nn.Module must implement forward(self, ...) to be scripted")
-
     if methods is None:
         methods = ('forward',)
     exported = []
@@ -1708,6 +1705,9 @@ def _convert_to_script_module(mod, methods=None):
             if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.EXPORT:
                 exported.append(name)
     methods = methods + tuple(exported)
+    if 'forward' in methods and mod.__class__.forward is torch.nn.Module.forward:
+        raise Exception("nn.Module must implement forward(self, ...) to be scripted")
+
 
     def make_stub(method):
         func = get_function_from_type(type(mod), method)
