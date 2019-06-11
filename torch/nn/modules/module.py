@@ -196,8 +196,8 @@ class Module(object):
 
         def compute_should_move_tensor(tensor, tensor_applied):
             # yf225 TODO: add comment in this function!
-            if param.device != param_applied.device:
-                if (param.is_cuda and param_applied.device == torch.device('cpu')) or (param.device == torch.device('cpu') and param_applied.is_cuda):
+            if tensor.device != tensor_applied.device:
+                if (tensor.is_cuda and tensor_applied.device == torch.device('cpu')) or (tensor.device == torch.device('cpu') and tensor_applied.is_cuda):
                     return force_move_params_cpu_cuda
                 else:
                     return True
