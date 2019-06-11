@@ -5478,13 +5478,13 @@ class TestNN(NNTestCase):
             x = p.data
             sz = x.view(-1).size(0)
             shape = x.shape
-            x = torch.arange(0, sz).float().view(shape) / 100
+            x = torch.cos(torch.arange(0, sz).float().view(shape))
             p.data.copy_(x)
 
         # deterministic input
         encoder_input = torch.Tensor([[[20, 30, 40, 50]]])
         result = model(encoder_input)
-        ref_output = torch.Tensor([[[20.188193, 30.509644, 40.831094, 51.152544]]])
+        ref_output = torch.Tensor([[[2.258703, 0.127985, -0.697881, 0.170862]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -5494,8 +5494,8 @@ class TestNN(NNTestCase):
         encoder_input = torch.Tensor([[[1, 2, 3, 4]],
                                       [[5, 6, 7, 8]]])
         result = model(encoder_input)
-        ref_output = torch.Tensor([[[1.188193, 2.509643, 3.831094, 5.152544]],
-                                   [[5.188193, 6.509643, 7.831094, 9.152544]]])
+        ref_output = torch.Tensor([[[2.272644, 0.119035, -0.691669, 0.153486]],
+                                   [[2.272644, 0.119035, -0.691669, 0.153486]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -5513,16 +5513,16 @@ class TestNN(NNTestCase):
                                       [[0.8117, 0.2366, 0.4838, 0.7881],
                                        [0.3718, 0.4945, 0.9511, 0.0864]]])
         result = model(encoder_input)
-        ref_output = torch.Tensor([[[0.885106, 1.045834, 1.190062, 1.352890],
-                                    [0.685175, 0.565700, 1.010425, 0.954749]],
-                                   [[0.981710, 0.684621, 1.164332, 1.212443],
-                                    [0.311492, 0.496087, 1.520880, 1.184876]],
-                                   [[0.800466, 1.388175, 0.877983, 2.020791],
-                                    [1.042615, 0.697116, 1.338817, 1.223719]],
-                                   [[1.128990, 1.073061, 0.939233, 1.039404],
-                                    [1.005443, 0.737230, 0.937316, 0.952603]],
-                                   [[0.979752, 0.692799, 1.228147, 1.820594],
-                                    [0.533056, 0.932719, 1.666282, 1.078544]]])
+        ref_output = torch.Tensor([[[2.428589, 0.020835, -0.602055, -0.085249],
+                                    [2.427987, 0.021213, -0.602496, -0.084103]],
+                                   [[2.424689, 0.019155, -0.604793, -0.085672],
+                                    [2.413863, 0.022211, -0.612486, -0.072490]],
+                                   [[2.433774, 0.021598, -0.598343, -0.087548],
+                                    [2.425104, 0.019748, -0.604515, -0.084839]],
+                                   [[2.436185, 0.022682, -0.596625, -0.087261],
+                                    [2.433556, 0.021891, -0.598509, -0.086832]],
+                                   [[2.416246, 0.017512, -0.610712, -0.082961],
+                                    [2.422901, 0.024187, -0.606178, -0.074929]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -5545,14 +5545,14 @@ class TestNN(NNTestCase):
             x = p.data
             sz = x.view(-1).size(0)
             shape = x.shape
-            x = torch.arange(0, sz).float().view(shape) / 100
+            x = torch.cos(torch.arange(0, sz).float().view(shape))
             p.data.copy_(x)
 
         # deterministic input
         decoder_input = torch.Tensor([[[20, 30, 40, 50]]])
         memory_input = torch.Tensor([[[60, 70, 80, 90]]])
         result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[27.934393, 57.321043, 86.707694, 116.094344]]])
+        ref_output = torch.Tensor([[[2.314351, 0.094805, -0.671322, 0.101977]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -5564,8 +5564,8 @@ class TestNN(NNTestCase):
         memory_input = torch.Tensor([[[1, 2, 3, 4]]])
         result = model(decoder_input, memory_input)
         result = result.detach().numpy()
-        ref_output = torch.Tensor([[[9.454393, 11.441044, 13.427694, 15.414344]],
-                                   [[11.454393, 13.441044, 15.427694, 17.414344]]])
+        ref_output = torch.Tensor([[[2.422245, 0.051716, -0.606338, -0.024756]],
+                                   [[2.422245, 0.051716, -0.606338, -0.024756]]])
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         np.testing.assert_allclose(result, ref_output, atol=1e-5)
@@ -5576,8 +5576,8 @@ class TestNN(NNTestCase):
         memory_input = torch.Tensor([[[9, 10, 11, 12]],
                                      [[11, 12, 13, 14]]])
         result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[2.385052, 6.656602, 10.928153, 15.199703]],
-                                   [[6.385052, 10.656602, 14.928153, 19.199703]]])
+        ref_output = torch.Tensor([[[2.343536, 0.085561, -0.654954, 0.074991]],
+                                   [[2.343536, 0.085561, -0.654954, 0.074991]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
@@ -5601,12 +5601,12 @@ class TestNN(NNTestCase):
                                      [[0.8117, 0.2366, 0.4838, 0.7881],
                                       [0.3718, 0.4945, 0.9511, 0.0864]]])
         result = model(decoder_input, memory_input)
-        ref_output = torch.Tensor([[[0.685969, 1.373277, 1.684985, 1.616793],
-                                    [0.501402, 1.044472, 1.565842, 2.279712]],
-                                   [[1.043224, 1.063270, 1.559716, 1.806162],
-                                    [0.926405, 1.553391, 1.715478, 2.377260]],
-                                   [[0.293519, 1.653856, 1.790492, 2.053428],
-                                    [0.769622, 1.011778, 2.039333, 2.157689]]])
+        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                    [2.431935, 0.028907, -0.599809, -0.072488]],
+                                   [[2.428457, 0.027053, -0.602275, -0.073462],
+                                    [2.431970, 0.029387, -0.599789, -0.071621]],
+                                   [[2.431934, 0.028196, -0.599802, -0.073809],
+                                    [2.432306, 0.028858, -0.599542, -0.072846]]])
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
