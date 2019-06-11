@@ -6487,7 +6487,7 @@ a")
         if(dtype == torch.int32):
             return "Int" + param
 
-    def _test_dtype_op_shape(self, ops, args=[], input_dims=1):
+    def _test_dtype_op_shape(self, ops, args, input_dims=1):
         if input_dims < 1:
             raise 'input dims must be at least 1'
         dtypes = [torch.float32, torch.float64, torch.int64, torch.int32]
@@ -6526,7 +6526,7 @@ a")
 
     def test_dtype_op_shape(self):
         ops = ['sum', 'mean', 'prod']
-        self._test_dtype_op_shape(ops)
+        self._test_dtype_op_shape(ops, [])
         self._test_dtype_op_shape(ops, [0, False])
 
         ops = ['sum', 'mean']
