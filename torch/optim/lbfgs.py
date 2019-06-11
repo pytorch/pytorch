@@ -112,8 +112,8 @@ class LBFGS(Optimizer):
             return orig_loss
 
         # tensors cached in state (for tracing)
-        d = state.get('d')
-        t = state.get('t')
+        d = state.get('d')  # Direction.
+        t = state.get('t')  # Step-size.
         old_dirs = state.get('old_dirs')
         old_stps = state.get('old_stps')
         H_diag = state.get('H_diag')
