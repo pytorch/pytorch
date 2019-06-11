@@ -1,12 +1,8 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/core/DimVector.h"
-#include "Functions.h"
-#include "c10/util/Exception.h"
-#include <ATen/Parallel.h>
-#include <tuple>
-
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/core/DimVector.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 namespace native {
