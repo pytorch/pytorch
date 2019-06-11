@@ -972,7 +972,13 @@ class TestLRScheduler(TestCase):
         self._test_cycle_lr(scheduler, lr_targets, momentum_targets, len(lr_target))
 
     def test_cycle_lr_with_momentumless_optimizer(self):
-        # temporarily set optimizer to Adam
+        # Note [Temporarily set optimizer to Adam]
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # The TestLRScheduler object carries around an SGD optimizer to avoid having to
+        # instantiate one for every test. This gets in the way for our very specific case
+        # in which we need to use Adam (or really any optimizer that doesn't use momentum)
+        # in order to test that the momentum bug in CyclicLR is fixed (the bug is described
+        # in more detail in https://github.com/pytorch/pytorch/issues/19003 ).
         old_opt = self.opt
         self.opt = optim.Adam(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
