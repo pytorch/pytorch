@@ -38,6 +38,7 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   pip install -q ninja --user
   # ninja is installed in /var/lib/jenkins/.local/bin
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
+
   # TODO: move this to Docker
   pip install -q hypothesis --user
 

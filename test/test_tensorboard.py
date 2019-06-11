@@ -22,11 +22,11 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-TEST_CAFFE2 = False
-# try:
-#     from caffe2.python import workspace
-# except ImportError:
-#     TEST_CAFFE2 = False
+TEST_CAFFE2 = True
+try:
+    from caffe2.python import workspace
+except ImportError:
+    TEST_CAFFE2 = False
 skipIfNoCaffe2 = unittest.skipIf(not TEST_CAFFE2, "no caffe2")
 
 TEST_MATPLOTLIB = True
