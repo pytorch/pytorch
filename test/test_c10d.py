@@ -2496,6 +2496,16 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
+        # need to create a separate file for the recovered FileStore, because
+        # the original one will be deleted when destructing the first FileStore.
+        recovery_filename = self.file.name + "_recovery"
+
+        if self.rank == 0:
+            # the file will be deleted by the recovered FileStore
+            open(recovery_filename, "w").close()
+
+        # not necessary to run barrier here, as DDP will synchronize
+
         class TestModel(nn.Module):
             def __init__(self):
                 super(TestModel, self).__init__()
@@ -2527,13 +2537,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss.backward()
 
         del ddp
-        sys.stdout.flush()
         del process_group
-        sys.stdout.flush()
-        del store
-        sys.stdout.flush()
+        del store # this will delete self.file
 
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(recovery_filename, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         ddp = DistributedDataParallel(
             model,
