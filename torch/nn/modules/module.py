@@ -408,8 +408,8 @@ class Module(object):
              # yf225 TODO: fix example!
 
         """
-
-        device, dtype, non_blocking, force_move_params_cpu_cuda = torch._C._nn._parse_to(*args, **kwargs)
+        force_move_params_cpu_cuda = kwargs.get("force_move_params_cpu_cuda", False)
+        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:
             if not dtype.is_floating_point:
