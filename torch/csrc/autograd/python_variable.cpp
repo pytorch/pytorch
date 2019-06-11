@@ -183,13 +183,15 @@ PyObject *THPVariable_get_version(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_bump_version(THPVariable *self)
+PyObject *THPVariable_bump_version(THPVariable *self)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
   var.bump_version();
-  return 0;
-  END_HANDLE_TH_ERRORS_RET(-1)
+  auto self_obj = reinterpret_cast<PyObject*>(self);
+  Py_INCREF(self_obj);
+  return self_obj;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPVariable_get_grad_fn(THPVariable *self)
