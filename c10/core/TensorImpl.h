@@ -145,7 +145,9 @@ struct C10_API NonVariableTypeMode {
 };
 
 #ifdef NAMEDTENSOR_ENABLED
-struct C10_API NamedTensorMetaInterface {};
+struct C10_API NamedTensorMetaInterface {
+  virtual ~NamedTensorMetaInterface();
+};
 #endif
 
 // NOTE [ Version Counter Sharing ]
