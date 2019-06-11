@@ -51,6 +51,9 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/ir.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <torch/csrc/python_dimname.h>
+#endif
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -72,7 +75,8 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STRING
+  BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STRING,
+  DIMNAME, DIMNAME_LIST,
 };
 
 struct FunctionParameter;
@@ -136,6 +140,9 @@ struct PythonArgs {
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
+#ifdef NAMEDTENSOR_ENABLED
+  inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
+#endif
   inline at::MemoryFormat toMemoryFormat(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
@@ -404,6 +411,22 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
     return c10::nullopt;
   return device(i);
 }
+
+#ifdef NAMEDTENSOR_ENABLED
+inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional(int i) {
+  if (!args[i]) return c10::nullopt;
+  PyObject* arg = args[i];
+  auto tuple = PyTuple_Check(arg);
+  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  std::vector<at::Dimname> res;
+  res.reserve(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    res.push_back(THPDimname_parse(obj));
+  }
+  return res;
+}
+#endif
 
 inline at::MemoryFormat PythonArgs::toMemoryFormat(int i) {
   if (!args[i]) return at::MemoryFormat::Any;

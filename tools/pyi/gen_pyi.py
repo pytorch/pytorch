@@ -126,6 +126,7 @@ def type_to_python(typename, size=None):
         'void*': '_int',    # data_ptr
         'void': 'None',
         'std::string': 'str',
+        'DimnameList': 'List[Union[str, None]]',
     }[typename]
 
     return typename
