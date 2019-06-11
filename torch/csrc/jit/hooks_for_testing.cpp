@@ -11,16 +11,15 @@ void didFinishEmitModule(std::shared_ptr<script::Module> module) {
     emit_module_callback(std::move(module));
   }
 }
-static std::function<void(std::shared_ptr<script::Function> fn)>
-    emit_function_callback;
-void didFinishEmitFunction(std::shared_ptr<script::Function> fn) {
+static std::function<void(std::shared_ptr<Function> fn)> emit_function_callback;
+void didFinishEmitFunction(std::shared_ptr<Function> fn) {
   if (emit_function_callback) {
     emit_function_callback(fn);
   }
 }
 void setEmitHooks(
     std::function<void(std::shared_ptr<script::Module> module)> for_mod,
-    std::function<void(std::shared_ptr<script::Function> for_fn)> for_fn) {
+    std::function<void(std::shared_ptr<Function> for_fn)> for_fn) {
   emit_module_callback = std::move(for_mod);
   emit_function_callback = std::move(for_fn);
 }
