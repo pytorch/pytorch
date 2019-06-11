@@ -241,6 +241,19 @@ struct FunctionValue : public SugaredValue {
   std::shared_ptr<Function> callee_;
 };
 
+struct TORCH_API ClosureValue : public SugaredValue {
+  ClosureValue(Value* value) : value_(value) {
+    TORCH_INTERNAL_ASSERT(value_->node()->kind() == prim::Function);
+  }
+  std::string kind() const override {
+    return "closure";
+  }
+  Value* asValue(const SourceRange& range, Function& m) override {
+    return value_;
+  }
+  Value* value_;
+};
+
 // defines how a method obtained from a module behaves in script
 struct MethodValue : public SugaredValue {
   MethodValue(Value* self, std::string method_name)

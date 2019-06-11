@@ -230,6 +230,14 @@ RegisterOperators reg(
            };
          }),
      Operator(
+         "prim::BailOut(...) -> Tensor(a)",
+         [](const Node* /* node */) {
+           return [](Stack& /* stack */) {
+             AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
+             return 0;
+           };
+         }),
+     Operator(
          "prim::rangelist(int n) -> int[]",
          [](Stack& stack) {
            int64_t n;

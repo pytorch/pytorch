@@ -1380,12 +1380,6 @@ struct CAFFE2_API ClassType : public Type {
     return false;
   }
 
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    // XXX: We do not have inheritance implemented, only types that are the
-    // same can subtype from each other.
-    return *this == *rhs;
-  }
-
   std::string str() const override {
     return std::string("ClassType<") + name_.name() + ">";
   }

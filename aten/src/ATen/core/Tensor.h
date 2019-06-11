@@ -14,6 +14,9 @@
 #include <c10/util/Optional.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensor.h>
+#endif
 
 namespace caffe2 {
 class Tensor;
@@ -247,6 +250,14 @@ class CAFFE2_API Tensor {
 
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
+
+#ifdef NAMEDTENSOR_ENABLED
+  /// Returns if a `Tensor` has any dimension names
+  bool is_named() const;
+
+  /// Returns a `Tensor`'s dimension names data structure
+  NamedTensorMeta* get_named_tensor_meta() const;
+#endif
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
