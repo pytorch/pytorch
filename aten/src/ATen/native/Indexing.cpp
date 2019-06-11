@@ -263,8 +263,6 @@ Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, con
 }
 
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  dim = maybe_wrap_dim(dim, self.dim());
-
   if (index.dim() >= 2) {
     AT_INDEX_ERROR("index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
   }
@@ -272,8 +270,9 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   int64_t numIndices = index.numel();
   if (source.dim() == 0 && numIndices != 1) {
     AT_INDEX_ERROR("index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
-  } else if (source.dim() != self.dim()) {
-    AT_INDEX_ERROR("index_copy_(): When source is not scalar, its dimensionality must match the dimensionality of the destination");
+  } else if ((source.dim() != self.dim()) && (source.dim() != 0 && self.dim() != 0)) {
+    AT_INDEX_ERROR("index_copy_(): When source and destination are not scalars, their dimensionality must match. Source dimensionality (",
+                   source.dim(), "), destination dimensionality (", self.dim(), ")");
   }
 
   if (index.scalar_type() != ScalarType::Long) {
