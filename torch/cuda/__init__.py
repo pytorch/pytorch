@@ -60,7 +60,15 @@ def find_cuda_windows_lib():
 
 
 def is_available():
-    r"""Returns a bool indicating if CUDA is currently available."""
+    r"""Returns a bool indicating if CUDA is currently available.
+    CUDA is considered unavailable if there are no devices available.
+
+    .. warning::
+
+        It is NOT safe to call this function if you are planning to
+        subsequently fork; this function will initialize CUDA, if it
+        is possible to initialize it.
+    """
     if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
             not torch._C._cuda_isDriverSufficient()):
         return False
@@ -69,17 +77,6 @@ def is_available():
     # API and forks are no longer permissible.  Calling
     # _lazy_init() is required so we can give a good error
     # message in this case.
-    #
-    # However, the way we have written the initialization here
-    # is a bit bogus, as the very act of checking if
-    # the driver is sufficient will initialize the CUDA
-    # runtime (and thus prevent us from forking in the future)
-    # but I am not allowed to call _lazy_init() unless I am
-    # sure there is a valid driver.  The problem with this
-    # line, is that it doesn't get called if we conclude
-    # CUDA is not available. Hopefully, this won't
-    # matter in practice, as if the driver is not sufficient,
-    # bad fork detection is surely the least of your worries.
     #
     # See https://github.com/pytorch/pytorch/issues/15734 for
     # more context.
