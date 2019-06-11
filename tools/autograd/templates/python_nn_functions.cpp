@@ -29,7 +29,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
   // `std::get<3>(parsed)` corresponds to `copy`, which nn.Module.to doesn't use
-  auto force_move_params_cpu_cuda = std::get<4>(parsed);
+  auto change_params_inplace_cpu_cuda = std::get<4>(parsed);
   auto tuple = THPObjectPtr{PyTuple_New(4)};
   if (!tuple) throw python_error();
   if (device) {
@@ -45,7 +45,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
     PyTuple_SET_ITEM(tuple.get(), 1, Py_None);
   }
   PyTuple_SET_ITEM(tuple.get(), 2, torch::autograd::utils::wrap(non_blocking));
-  PyTuple_SET_ITEM(tuple.get(), 3, torch::autograd::utils::wrap(force_move_params_cpu_cuda));
+  PyTuple_SET_ITEM(tuple.get(), 3, torch::autograd::utils::wrap(change_params_inplace_cpu_cuda));
   return tuple.release();
   END_HANDLE_TH_ERRORS
 }

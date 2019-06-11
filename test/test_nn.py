@@ -1558,31 +1558,31 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_module_to_move_params(self):
-        # Test that `cpu_module.to("cuda", force_move_params_cpu_cuda=True)` doesn't
+        # Test that `cpu_module.to("cuda", change_params_inplace_cpu_cuda=False)` doesn't
         # preserve previous references to `cpu_module`'s parameters or gradients.
         m = nn.Linear(20, 10)
         m.weight.grad = torch.randn(10, 20)
         weight_ref = m.weight
         weight_grad_ref = m.weight.grad
-        m.to("cuda", force_move_params_cpu_cuda=True)
+        m.to("cuda", change_params_inplace_cpu_cuda=False)
         self.assertNotEqual(weight_ref.device, m.weight.device)
         self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
 
-        # Test that `cpu_module.to("cuda", force_move_params_cpu_cuda=True)` invalidates
+        # Test that `cpu_module.to("cuda", change_params_inplace_cpu_cuda=False)` invalidates
         # `cpu_module`'s original parameters in any autograd graph they participate in.
         m = nn.Linear(20, 10)
         pvm = m.weight.mul(m.weight)
-        m.to("cuda", force_move_params_cpu_cuda=True)
+        m.to("cuda", change_params_inplace_cpu_cuda=False)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pvm.backward(torch.randn(10, 20))
 
-        # Test that `cpu_module.to("cuda", force_move_params_cpu_cuda=True)` invalidates
+        # Test that `cpu_module.to("cuda", change_params_inplace_cpu_cuda=False)` invalidates
         # `cpu_module`'s original parameters' gradients in any autograd graph they
         # participate in.
         m = nn.Linear(20, 10)
         m.weight.grad = torch.randn(10, 20).requires_grad_()
         pgm = m.weight.grad.mul(m.weight.grad)
-        m.to("cuda", force_move_params_cpu_cuda=True)
+        m.to("cuda", change_params_inplace_cpu_cuda=False)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pgm.backward(torch.randn(10, 20))
 
