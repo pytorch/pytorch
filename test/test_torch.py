@@ -10888,14 +10888,14 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         def test_dx(sizes, dim, dx, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapz(t, dx=dx, dim=dim)
-            expected = np.trapz(t.numpy(), dx=dx, axis=dim)
+            expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
             self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
 
         def test_x(sizes, dim, x, device):
             t = torch.randn(sizes, device=device)
-            actual = torch.trapz(t, x=torch.Tensor(x, device=device), dim=dim)
-            expected = np.trapz(t.numpy(), x=x, axis=dim)
+            actual = torch.trapz(t, x=torch.tensor(x, device=device), dim=dim)
+            expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
             self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
 
@@ -10905,11 +10905,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             test_dx((1, 10), 0, 2.3, device)
             test_dx((0, 2), 0, 1.0, device)
             test_dx((0, 2), 1, 1.0, device)
-            test_x((2, 3, 4), 1, [1, 2, 3], device)
-            test_x((10, 2), 0, [2, 3, 4, 7, 11, 14, 22, 26, 26.1, 30.3], device)
-            test_x((1, 10), 0, [1], device)
+            test_x((2, 3, 4), 1, [1.0, 2.0, 3.0], device)
+            test_x((10, 2), 0, [2.0, 3.0, 4.0, 7.0, 11.0, 14.0, 22.0, 26.0, 26.1, 30.3], device)
+            test_x((1, 10), 0, [1.0], device)
             test_x((0, 2), 0, [], device)
-            test_x((0, 2), 1, [1, 2], device)
+            test_x((0, 2), 1, [1.0, 2.0], device)
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(
