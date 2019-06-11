@@ -343,11 +343,11 @@ class Module(object):
 
         This can be called as
 
-        .. function:: to(device=None, dtype=None, non_blocking=False)
+        .. function:: to(device=None, dtype=None, non_blocking=False) # yf225 TODO: fix param list
 
-        .. function:: to(dtype, non_blocking=False)
+        .. function:: to(dtype, non_blocking=False) # yf225 TODO: fix param list
 
-        .. function:: to(tensor, non_blocking=False)
+        .. function:: to(tensor, non_blocking=False) # yf225 TODO: fix param list
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
         floating point desired :attr:`dtype` s. In addition, this method will
@@ -404,6 +404,8 @@ class Module(object):
             Parameter containing:
             tensor([[ 0.1914, -0.3420],
                     [-0.5112, -0.2324]], dtype=torch.float16)
+
+             # yf225 TODO: fix example!
 
         """
 
