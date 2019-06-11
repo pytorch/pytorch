@@ -10800,6 +10800,13 @@ a")
                 a = 8
                 return a[0]
 
+    def test_unsupported_builtin_error(self):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calling a python builtin_function_or_method which is currently not supported"):
+            @torch.jit.script
+            def test_unsupported(a):
+                return math.hypot(a, 2.0)
+
     def test_annotated_script_fn(self):
         @torch.jit.script
         def foo(x, y, z):
