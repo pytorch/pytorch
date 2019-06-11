@@ -205,6 +205,22 @@ DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
 }
 """)
 
+# If the `baseType` operation has return values, we use the `tmp` variable to hold the
+# values temporarily and pass the values to the return variables outside of the
+# `at::AutoNonVariableTypeMode` guard block.
+DISPATCH_TO_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
+auto tmp = ([&]() {
+  return ${base_type_call};
+})();
+${return_values} = ${rhs_value};
+""")
+
+DISPATCH_TO_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
+{
+  ${base_type_call};
+}
+""")
+
 SET_HISTORY = CodeTemplate("""\
 if (grad_fn) {
     ${fn}_history(${differentiable_outputs}, grad_fn);
@@ -790,10 +806,16 @@ def emit_body(declaration):
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
         else:
-            call = CALL_VIA_TYPE.substitute(declaration)
+            base_type_call = CALL_VIA_TYPE.substitute(declaration)
             if not modifies_arguments and not returns_void:
-                call = '{} = {}'.format(tie_return_values(), call)
-            call = call + ';'
+                rhs_value, extra_wrapping_stmts = wrap_output('tmp')
+                call = DISPATCH_TO_VAR_TYPE_WITH_RETURN_VALUES.substitute(
+                    base_type_call=base_type_call,
+                    return_values=tie_return_values(),
+                    rhs_value=rhs_value)
+            else:
+                call = DISPATCH_TO_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
+                    base_type_call=base_type_call)
         for stmt in extra_wrapping_stmts:
             call += '\n' + stmt
         call = enforce_same_tensorimpl_and_storage(env, call)
