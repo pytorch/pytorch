@@ -1,7 +1,6 @@
 from collections import OrderedDict, namedtuple
 import functools
 import itertools
-import warnings
 
 import torch
 from ..backends.thnn import backend as thnn_backend
@@ -195,9 +194,16 @@ class Module(object):
             module._apply(fn, force_move_params_cpu_cuda)
 
         def compute_should_move_tensor(tensor, tensor_applied):
-            # yf225 TODO: add comment in this function!
+            # If the new tensor is still on the same device, we don't move
+            # the existing tensor (and we in-place update the existing tensor
+            # instead).
             if tensor.device != tensor_applied.device:
-                if (tensor.is_cuda and tensor_applied.device == torch.device('cpu')) or (tensor.device == torch.device('cpu') and tensor_applied.is_cuda):
+                # If the new tensor is on a different device, then we take
+                # `force_move_params_cpu_cuda` into account only if we are
+                # moving the model between CPU and CUDA. Otherwise, we always
+                # move the existing tensor.
+                if (tensor.is_cuda and tensor_applied.device == torch.device('cpu')) or \
+                    (tensor.device == torch.device('cpu') and tensor_applied.is_cuda):
                     return force_move_params_cpu_cuda
                 else:
                     return True
@@ -343,11 +349,11 @@ class Module(object):
 
         This can be called as
 
-        .. function:: to(device=None, dtype=None, non_blocking=False) # yf225 TODO: fix param list
+        .. function:: to(device=None, dtype=None, non_blocking=False, force_move_params_cpu_cuda=False)
 
-        .. function:: to(dtype, non_blocking=False) # yf225 TODO: fix param list
+        .. function:: to(dtype, non_blocking=False, force_move_params_cpu_cuda=False)
 
-        .. function:: to(tensor, non_blocking=False) # yf225 TODO: fix param list
+        .. function:: to(tensor, non_blocking=False, force_move_params_cpu_cuda=False)
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
         floating point desired :attr:`dtype` s. In addition, this method will
@@ -370,9 +376,9 @@ class Module(object):
                 the floating point parameters and buffers in this module
             tensor (torch.Tensor): Tensor whose dtype and device are the desired
                 dtype and device for all parameters and buffers in this module
-            force_move_params_cpu_cuda (bool): whether to move the parameters
-                instead of updating the parameters in-place when moving the model
-                from CPU to CUDA (or vice versa).
+            force_move_params_cpu_cuda (bool): whether to assign new tensors to
+                the parameters instead of updating the existing parameters in-place
+                when moving the model from CPU to CUDA (or vice versa).
 
         Returns:
             Module: self
@@ -404,8 +410,6 @@ class Module(object):
             Parameter containing:
             tensor([[ 0.1914, -0.3420],
                     [-0.5112, -0.2324]], dtype=torch.float16)
-
-             # yf225 TODO: fix example!
 
         """
 
