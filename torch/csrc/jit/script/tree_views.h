@@ -33,7 +33,7 @@ namespace script {
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       -- NB: the only type of Expr's allowed on lhs are Var
 //          Or a tuple containing Var with an optional terminating Starred
-//       | Assign(Expr lhs, Expr rhs, Maybe<Expr> type)                 TK_ASSIGN
+//       | Assign(Expr lhs, Expr rhs)                                   TK_ASSIGN
 //       | AugAssign(Expr lhs, AugAssignKind aug_op, Expr rhs)          TK_AUG_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
@@ -584,21 +584,14 @@ struct Assign : public Stmt {
   static Assign create(
       const SourceRange& range,
       const Expr& lhs,
-      const Expr& rhs,
-      const Maybe<Expr>& type) {
-    return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs, type}));
+      const Expr& rhs) {
+    return Assign(Compound::create(TK_ASSIGN, range, {lhs, rhs}));
   }
-
   Expr lhs() const {
     return Expr(subtree(0));
   }
-
   Expr rhs() const {
     return Expr(subtree(1));
-  }
-
-  Maybe<Expr> type() const {
-    return Maybe<Expr>(subtree(2));
   }
 };
 
