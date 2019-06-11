@@ -36,6 +36,7 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
+#include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
 #include <torch/csrc/jit/python_ir.h>
@@ -46,12 +47,14 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/utils/auto_gil.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/core/function_schema.h>
 
+#include <Python.h>
 #include <pybind11/functional.h>
 
 #include <memory>
@@ -563,6 +566,16 @@ void initJITBindings(PyObject* module) {
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
+
+  setPrintHandler([](const std::string& str) {
+    AutoGIL ag;
+    // TODO: I can't get the below to work without crashing.
+    //       figure out how to make this work. Otherwise,
+    //       WriteStdout will truncate to 1000 bytes.
+    // auto _stdout = py::module::import("sys").attr("stdout");
+    // _stdout.attr("write")(_stdout, str);
+    PySys_WriteStdout("%s", str.c_str());
+  });
 }
 } // namespace jit
 } // namespace torch
