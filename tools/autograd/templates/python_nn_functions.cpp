@@ -29,7 +29,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
   auto force_move_params_cpu_cuda = std::get<3>(parsed);
-  auto tuple = THPObjectPtr{PyTuple_New(3)};
+  auto tuple = THPObjectPtr{PyTuple_New(4)};
   if (!tuple) throw python_error();
   if (device) {
     PyTuple_SET_ITEM(tuple.get(), 0, THPDevice_New(*device));
