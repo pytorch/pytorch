@@ -430,7 +430,7 @@ struct CodeImpl {
                        // of node being emitted
   Node* last_inserted_op_ = nullptr;
 
-  // out-of-line jumps for bailouts that are patched in at the end 
+  // out-of-line jumps for bailouts that are patched in at the end
   std::vector<BailoutBlock> bailout_blocks_;
 
   CodeImpl(const std::shared_ptr<Graph>& graph)
@@ -474,8 +474,16 @@ struct CodeImpl {
   void createBailoutBlock(size_t jf_index) {
     bailout_blocks_.emplace_back(BailoutBlock{jf_index});
     auto& bailout_instructions = bailout_blocks_.back().instructions;
-    bailout_instructions.insert(bailout_instructions.begin(), instructions_.begin() + jf_index + 1, instructions_.end());
-    truncateInstructions(jf_index);
+
+    bailout_instructions.insert(
+        bailout_instructions.end(),
+        instructions_.begin() + jf_index + 1,
+        instructions_.end());
+    // for (size_t i = jf_index + 1; i < instructions_.size(); i++)
+    // {
+    //   bailout_instructions.push_back(instructions_[i]);
+    // }
+    truncateInstructions(jf_index + 1);
   }
 
   int allocRegs(at::ArrayRef<Value*> vs) {
@@ -621,8 +629,8 @@ struct CodeImpl {
     emitLoadInputs(node->inputs().slice(0, 1));
     insertInstruction(GUARD, type_table_.size());
     type_table_.emplace_back(node->outputs().at(0)->type());
-    size_t jf_index = instructions_.size();
     insertInstruction(JF, 0 /* to be patched */);
+    size_t jf_index = instructions_.size() - 1;
     emitLoadInputs(node->inputs().slice(1));
     insertInstruction(TAIL_CALL, function_table_.size());
     auto func = std::make_shared<script::Function>("bailout", /*optimize=*/true, node->g(attr::Subgraph), nullptr);
@@ -632,7 +640,9 @@ struct CodeImpl {
 
   void insertBailoutBlocks() {
     for(const BailoutBlock& block : bailout_blocks_) {
-      instructions_[block.jf_instruction_index].X = instructions_.size() - block.jf_instruction_index;
+      TORCH_INTERNAL_ASSERT(instructions_[block.jf_instruction_index].op == JF)
+      instructions_[block.jf_instruction_index].X =
+          instructions_.size() - block.jf_instruction_index;
       instructions_.insert(
           instructions_.end(),
           block.instructions.begin(),
@@ -643,7 +653,7 @@ struct CodeImpl {
           instructions_source_[block.jf_instruction_index]);
     }
   }
-  
+
   void emitNode(Node* node) {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
@@ -748,7 +758,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   struct Frame {
     std::shared_ptr<CodeImpl> function;
     size_t pc;
-    size_t base_pointer; 
+    size_t base_pointer;
   };
 
   // saved-by-value stuff that can exist on the stack inside runInterpreter
@@ -955,9 +965,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 af.functions[inst.X]->get_executor().getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
-            size_t inputs_start = stack.size() - num_inputs - 1;
-            for(size_t i = 0; i < num_inputs; ++i) {
-              stack[base_pointer + i] = std::move(stack[inputs_start + i]);
+            size_t inputs_start = stack.size() - num_inputs;
+            for (size_t i = 0; i < num_inputs; ++i) {
+              stack.at(base_pointer + i) =
+                  std::move(stack.at(inputs_start + i));
             }
             stack.resize(base_pointer + num_inputs);
             leaveFrame();

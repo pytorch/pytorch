@@ -29,13 +29,18 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   if (!pr_->ready()) {
     return profiling_plan_;
   }
-  
+
   auto copy = pr_->graph()->copy();
+  std::cout << "before InsertGuards\n";
+  copy->dump();
   InsertGuards(copy);
   EliminateGuards(copy);
+  std::cout << "before InsertBailOuts\n";
+  copy->dump();
   InsertBailOuts(copy);
   optimized_plan_ = ExecutionPlan(copy);
-
+  std::cout << "optimized graph = \n";
+  copy->dump();
   return *optimized_plan_;
 }
 
