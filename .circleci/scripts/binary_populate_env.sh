@@ -2,9 +2,6 @@
 set -eux -o pipefail
 export TZ=UTC
 
-echo "Using Pytorch from "
-git --no-pager log --max-count 1
-
 # We need to write an envfile to persist these variables to following
 # steps, but the location of the envfile depends on the circleci executor
 if [[ "$(uname)" == Darwin ]]; then
