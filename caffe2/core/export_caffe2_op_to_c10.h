@@ -3,7 +3,6 @@
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <ATen/core/function_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/script/function_schema_parser.h>
 #include <vector>
 
@@ -30,7 +29,11 @@ inline std::vector<at::Tensor> _call_caffe2_op(
 
 inline at::Tensor unwrap_tensor(at::Tensor&& tensor) {
   if (tensor.is_variable()) {
-    return torch::autograd::Variable(std::move(tensor)).tensor_data();
+    auto tensor_impl = tensor.unsafeGetTensorImpl();
+    auto tensor_impl_copy = tensor_impl->shallow_copy_and_detach(
+    /*version_counter=*/tensor_impl->version_counter(),
+    /*allow_tensor_metadata_change=*/tensor_impl->allow_tensor_metadata_change());
+    return at::Tensor(tensor_impl_copy);
   } else {
     return std::move(tensor);
   }
