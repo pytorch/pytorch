@@ -12,7 +12,7 @@ bool NamedTensorMeta::has_names() const {
       });
 }
 
-void internal_set_names_inplace(Tensor tensor, optional<DimnameList> names) {
+void internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
   if (!names) {
     tensor.unsafeGetTensorImpl()->set_named_tensor_meta(nullptr);
     return;

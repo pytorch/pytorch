@@ -97,7 +97,7 @@ inline NamedTensorMeta* Tensor::get_named_tensor_meta() {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
 
-inline NamedTensorMeta* Tensor::get_named_tensor_meta() const {
+inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
 
