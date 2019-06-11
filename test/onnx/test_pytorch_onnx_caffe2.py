@@ -1198,6 +1198,17 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_dynamic_slice_script(self):
+        class DynamicSliceModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x[1:x.size(0)]
+        module = DynamicSliceModel()
+        x = torch.rand(1, 2)
+        example_output = module(x)
+        self.run_model_test(DynamicSliceModel(), train=False, input=(x,),
+                            batch_size=BATCH_SIZE, use_gpu=False, example_outputs=example_output)
+
     def test_dynamic_slice_to_the_end(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
