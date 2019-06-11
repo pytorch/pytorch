@@ -369,4 +369,19 @@ Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& in
     return at::_sparse_coo_tensor_unsafe(sparse_ind, grad.reshape(-1), self.sizes());
 }
 
+std::vector<Tensor> nonzero_numpy(const Tensor& self) {
+  // special case scalar for compatibility with numpy:
+  //
+  // >>> np.array(5).nonzero()
+  // (array([0]),)
+  // >>> np.array(0).nonzero()
+  // (array([], dtype=int64),)
+
+  if (self.dim() == 0) {
+    return self.unsqueeze(0).nonzero().unbind(1);
+  }
+
+  return self.nonzero().unbind(1);
+}
+
 }} // at::native

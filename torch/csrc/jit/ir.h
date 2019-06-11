@@ -79,8 +79,8 @@ namespace aten {
 using namespace ::c10::aten;
 }
 
-namespace script {
 struct Function;
+namespace script {
 struct MatchedSchema;
 } // namespace script
 
@@ -1065,6 +1065,7 @@ struct Graph {
   TORCH_API Node* createNone(
       TypePtr typ); // value of None with type Optional[typ]
   TORCH_API Node* createAutogradZero();
+  TORCH_API Node* createUninitialized(TypePtr typ);
   TORCH_API Node* createWithSubgraph(Symbol kind);
   TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(
@@ -1097,9 +1098,11 @@ struct Graph {
   TORCH_API Value* insertGetAttr(Value* obj, const std::string& field) {
     return insertNode(createGetAttr(obj, field))->output();
   }
+  TORCH_API Node* createStore(const std::string& name, Value* v);
+  TORCH_API Node* createLoad(const std::string& name, const TypePtr& type);
 
   TORCH_API Value* insertFunctionCall(
-      std::shared_ptr<script::Function> callee,
+      std::shared_ptr<Function> callee,
       script::MatchedSchema& matched);
   TORCH_API Value* insertMethodCall(
       std::string method_name,

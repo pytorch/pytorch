@@ -24,11 +24,13 @@ struct TORCH_API RegisterOperators {
 
   /// Calls `op(...)` with the given operator name and implementation.
   template <typename Implementation>
+  C10_DEPRECATED_MESSAGE("torch::jit::RegisterOperators is deprecated. Please use torch::RegisterOperators instead.")
   RegisterOperators(const std::string& name, Implementation&& implementation) {
     op(name, std::forward<Implementation>(implementation));
   }
 
   template <typename Implementation>
+  C10_DEPRECATED_MESSAGE("torch::jit::RegisterOperators is deprecated. Please use torch::RegisterOperators instead.")
   RegisterOperators& op(
       const std::string& name,
       Implementation&& implementation) {
@@ -47,7 +49,5 @@ private:
 };
 
 } // namespace jit
-
-using RegisterOperators = c10::RegisterOperators;
 
 } // namespace torch
