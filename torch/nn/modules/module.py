@@ -295,6 +295,9 @@ class Module(object):
         Arguments:
             device (int, optional): if specified, all parameters will be
                 copied to that device
+            change_params_inplace_cpu_cuda (bool, optional): whether to change
+                the existing parameters in-place instead of assigning new tensors
+                to the parameters when moving the model from CPU to GPU.
 
         Returns:
             Module: self
@@ -305,6 +308,11 @@ class Module(object):
 
     def cpu(self, change_params_inplace_cpu_cuda=True):
         r"""Moves all model parameters and buffers to the CPU.
+
+        Arguments:
+            change_params_inplace_cpu_cuda (bool, optional): whether to change
+                the existing parameters in-place instead of assigning new tensors
+                to the parameters when moving the model from GPU to CPU.
 
         Returns:
             Module: self
@@ -318,6 +326,9 @@ class Module(object):
 
         Arguments:
             dst_type (type or string): the desired type
+            change_params_inplace_cpu_cuda (bool, optional): whether to change
+                the existing parameters in-place instead of assigning new tensors
+                to the parameters when moving the model between CPU and GPU.
 
         Returns:
             Module: self
@@ -329,6 +340,11 @@ class Module(object):
     def float(self, change_params_inplace_cpu_cuda=True):
         r"""Casts all floating point parameters and buffers to float datatype.
 
+        Arguments:
+            change_params_inplace_cpu_cuda (bool, optional): whether to change
+                the existing parameters in-place instead of assigning new tensors
+                to the parameters when moving the model between CPU and GPU.
+
         Returns:
             Module: self
         """
@@ -339,6 +355,11 @@ class Module(object):
     def double(self, change_params_inplace_cpu_cuda=True):
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
 
+        Arguments:
+            change_params_inplace_cpu_cuda (bool, optional): whether to change
+                the existing parameters in-place instead of assigning new tensors
+                to the parameters when moving the model between CPU and GPU.
+
         Returns:
             Module: self
         """
@@ -348,6 +369,11 @@ class Module(object):
 
     def half(self, change_params_inplace_cpu_cuda=True):
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
+
+        Arguments:
+            change_params_inplace_cpu_cuda (bool, optional): whether to change
+                the existing parameters in-place instead of assigning new tensors
+                to the parameters when moving the model between CPU and GPU.
 
         Returns:
             Module: self
@@ -388,9 +414,9 @@ class Module(object):
                 the floating point parameters and buffers in this module
             tensor (torch.Tensor): Tensor whose dtype and device are the desired
                 dtype and device for all parameters and buffers in this module
-            change_params_inplace_cpu_cuda (bool): whether to change the existing
-                parameters in-place instead of assigning new tensors to the
-                parameters when moving the model from CPU to CUDA (or vice versa).
+            change_params_inplace_cpu_cuda (bool, optional): whether to change
+                the existing parameters in-place instead of assigning new tensors
+                to the parameters when moving the model between CPU and GPU.
 
         Returns:
             Module: self
