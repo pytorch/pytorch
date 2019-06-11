@@ -19,6 +19,10 @@ TEST(NamedTensorTest, defaultMetadata) {
   }
 }
 
+static Dimname dimnameFromString(const std::string& str) {
+  return Dimname::fromSymbol(Symbol::dimname(str));
+}
+
 TEST(NamedTensorTest, isNamed) {
   auto tensor = at::zeros({3, 2, 5, 7});
   ASSERT_FALSE(tensor.is_named());
@@ -29,10 +33,10 @@ TEST(NamedTensorTest, isNamed) {
   ASSERT_FALSE(tensor.is_named());
 
   tensor = at::zeros({3, 2, 5, 7});
-  auto N = Dimname::fromSymbol(Symbol::dimname("N"));
-  auto C = Dimname::fromSymbol(Symbol::dimname("C"));
-  auto H = Dimname::fromSymbol(Symbol::dimname("H"));
-  auto W = Dimname::fromSymbol(Symbol::dimname("W"));
+  auto N = dimnameFromString("N");
+  auto C = dimnameFromString("C");
+  auto H = dimnameFromString("H");
+  auto W = dimnameFromString("W");
   std::vector<Dimname> names = { N, C, H, W };
   tensor.unsafeGetTensorImpl()->set_named_tensor_meta(
       make_unique<NamedTensorMeta>(names));
@@ -55,10 +59,10 @@ static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
 
 TEST(NamedTensorTest, attachMetadata) {
   auto tensor = at::zeros({3, 2, 5, 7});
-  auto N = Dimname::fromSymbol(Symbol::dimname("N"));
-  auto C = Dimname::fromSymbol(Symbol::dimname("C"));
-  auto H = Dimname::fromSymbol(Symbol::dimname("H"));
-  auto W = Dimname::fromSymbol(Symbol::dimname("W"));
+  auto N = dimnameFromString("N");
+  auto C = dimnameFromString("C");
+  auto H = dimnameFromString("H");
+  auto W = dimnameFromString("W");
   std::vector<Dimname> names = { N, C, H, W };
 
   tensor.unsafeGetTensorImpl()->set_named_tensor_meta(
@@ -74,10 +78,10 @@ TEST(NamedTensorTest, attachMetadata) {
 
 TEST(NamedTensorTest, internalSetNamesInplace) {
   auto tensor = at::zeros({3, 2, 5, 7});
-  auto N = Dimname::fromSymbol(Symbol::dimname("N"));
-  auto C = Dimname::fromSymbol(Symbol::dimname("C"));
-  auto H = Dimname::fromSymbol(Symbol::dimname("H"));
-  auto W = Dimname::fromSymbol(Symbol::dimname("W"));
+  auto N = dimnameFromString("N");
+  auto C = dimnameFromString("C");
+  auto H = dimnameFromString("H");
+  auto W = dimnameFromString("W");
   std::vector<Dimname> names = { N, C, H, W };
   ASSERT_FALSE(tensor.is_named());
 
