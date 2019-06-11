@@ -7,10 +7,25 @@
 namespace torch {
 namespace jit {
 
-// IValue -> Constant node
 Value* insertConstant(
     Graph& g,
     const IValue& val,
+    const c10::TypePtr& result_type,
+    c10::optional<SourceRange> loc,
+    c10::optional<ScopePtr> scope) {
+  auto value = tryInsertConstant(g, val, result_type, loc, scope);
+  if (value) {
+    return *value;
+  }
+  throw constant_not_supported_error(
+      "Unsupported value kind: " + val.tagKind());
+}
+
+// IValue -> Constant node
+c10::optional<Value*> tryInsertConstant(
+    Graph& g,
+    const IValue& val,
+    const c10::TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   Node* n = g.create(prim::Constant);
@@ -64,17 +79,23 @@ Value* insertConstant(
     n->s_(attr::value, ss.str());
     n->output()->setType(DeviceObjType::get());
   } else if (val.isNone()) {
-    n->destroy();
-    n = g.create(prim::None);
     n->output()->setType(NoneType::get());
   } else {
-    throw constant_not_supported_error(
-        "Unsupported value kind: " + val.tagKind());
+    n->destroy();
+    return c10::nullopt;
   }
   if (loc)
-    n->setSourceLocation(std::make_shared<SourceRange>(*loc));
+    n->setSourceRange(*loc);
   if (scope)
     n->setScope(*scope);
+  if (result_type) {
+    auto inferred_type = n->output()->type();
+    // Retain more type information in case of tensor constant
+    if (!(inferred_type->isSubtypeOf(TensorType::get()) &&
+          result_type->isSubtypeOf(inferred_type))) {
+      n->output()->setType(result_type);
+    }
+  }
   return g.insertNode(n)->output();
 }
 
@@ -82,6 +103,7 @@ RegisterOperators reg({
     Operator(
         FunctionSchema(
             prim::Constant,
+            "",
             {},
             {},
             /*is_vararg=*/false,
@@ -123,8 +145,7 @@ RegisterOperators reg({
               return 0;
             };
           } else if (type->isSubtypeOf(ListType::ofBools())) {
-            const auto& int_list = node->is(attr::value);
-            const std::vector<bool> bs(int_list.begin(), int_list.end());
+            const auto bs = fmap<bool>(node->is(attr::value));
             return [bs](Stack& stack) {
               push(stack, bs);
               return 0;
@@ -145,6 +166,11 @@ RegisterOperators reg({
             auto d = c10::Device(node->s(attr::value));
             return [d](Stack& stack) {
               push(stack, d);
+              return 0;
+            };
+          } else if (node->mustBeNone()) {
+            return [](Stack& stack) {
+              push(stack, IValue());
               return 0;
             };
           } else {

@@ -194,7 +194,6 @@ struct AT_CUDA_API DropoutDescriptor
   }
 
   // Restore a dropout descriptor given a dropout probability and existing RNG state.
-  // See Note [cuDNN dropout descriptor initialization]
   void set(cudnnHandle_t handle, float dropout, at::Tensor state_) {
     AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     state = state_;
@@ -205,7 +204,6 @@ struct AT_CUDA_API DropoutDescriptor
   }
 
   // Restore a dropout descriptor corresponding to no dropout
-  // See Note [cuDNN dropout descriptor initialization]
   void set_no_dropout(cudnnHandle_t handle) {
     // NB: seed doesn't matter when dropout = 0, because no random number
     // initialization actually takes place when there is no dropout.
@@ -223,7 +221,7 @@ struct AT_CUDA_API RNNDescriptor
   DropoutDescriptor dropout_desc_;
   void set(cudnnHandle_t handle, int hidden_size, int num_layers, DropoutDescriptor&& dropout_desc,
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
-           cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnRNNAlgo_t algo) {
+           cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo) {
     dropout_desc_ = std::move(dropout_desc);
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
@@ -239,7 +237,7 @@ struct AT_CUDA_API RNNDescriptor
 #if CUDA_VERSION >= 9000
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7) {
-      if (datatype == CUDNN_DATA_HALF) {
+      if (input_type == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
       } else {
         // Technically, as the default it's not necessary to explicitly

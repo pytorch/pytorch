@@ -23,7 +23,7 @@ __global__ void GeneratePreNMSUprightBoxesKernel(
     const float* d_img_info_vec,
     const int num_images,
     const float bbox_xform_clip,
-    const bool correct_transform,
+    const bool legacy_plus_one,
     float4* d_out_boxes,
     const int prenms_nboxes, // leading dimension of out_boxes
     float* d_inout_scores,
@@ -82,40 +82,35 @@ __global__ void GeneratePreNMSUprightBoxesKernel(
     dh = fmin(dh, bbox_xform_clip);
 
     // Applying the deltas
-    float width = x2 - x1 + 1.0f;
+    float width = x2 - x1 + float(int(legacy_plus_one));
     const float ctr_x = x1 + 0.5f * width;
     const float pred_ctr_x = ctr_x + width * dx; // TODO fuse madd
     const float pred_w = width * expf(dw);
     x1 = pred_ctr_x - 0.5f * pred_w;
-    x2 = pred_ctr_x + 0.5f * pred_w;
+    x2 = pred_ctr_x + 0.5f * pred_w - float(int(legacy_plus_one));
 
-    float height = y2 - y1 + 1.0f;
+    float height = y2 - y1 + float(int(legacy_plus_one));
     const float ctr_y = y1 + 0.5f * height;
     const float pred_ctr_y = ctr_y + height * dy;
     const float pred_h = height * expf(dh);
     y1 = pred_ctr_y - 0.5f * pred_h;
-    y2 = pred_ctr_y + 0.5f * pred_h;
-
-    if (correct_transform) {
-      x2 -= 1.0f;
-      y2 -= 1.0f;
-    }
+    y2 = pred_ctr_y + 0.5f * pred_h - float(int(legacy_plus_one));
 
     // Clipping box to image
     const float img_height = d_img_info_vec[3 * image_index + 0];
     const float img_width = d_img_info_vec[3 * image_index + 1];
     const float min_size_scaled =
         min_size * d_img_info_vec[3 * image_index + 2];
-    x1 = fmax(fmin(x1, img_width - 1.0f), 0.0f);
-    y1 = fmax(fmin(y1, img_height - 1.0f), 0.0f);
-    x2 = fmax(fmin(x2, img_width - 1.0f), 0.0f);
-    y2 = fmax(fmin(y2, img_height - 1.0f), 0.0f);
+    x1 = fmax(fmin(x1, img_width - float(int(legacy_plus_one))), 0.0f);
+    y1 = fmax(fmin(y1, img_height - float(int(legacy_plus_one))), 0.0f);
+    x2 = fmax(fmin(x2, img_width - float(int(legacy_plus_one))), 0.0f);
+    y2 = fmax(fmin(y2, img_height - float(int(legacy_plus_one))), 0.0f);
 
     // Filter boxes
     // Removing boxes with one dim < min_size
     // (center of box is in image, because of previous step)
-    width = x2 - x1 + 1.0f; // may have changed
-    height = y2 - y1 + 1.0f;
+    width = x2 - x1 + float(int(legacy_plus_one)); // may have changed
+    height = y2 - y1 + float(int(legacy_plus_one));
     bool keep_box = fmin(width, height) >= min_size_scaled;
 
     // We are not deleting the box right now even if !keep_box
@@ -146,6 +141,7 @@ __global__ void GeneratePreNMSRotatedBoxesKernel(
     const float* d_img_info_vec,
     const int num_images,
     const float bbox_xform_clip,
+    const bool legacy_plus_one,
     const bool angle_bound_on,
     const int angle_bound_lo,
     const int angle_bound_hi,
@@ -235,22 +231,22 @@ __global__ void GeneratePreNMSRotatedBoxesKernel(
         min_size * d_img_info_vec[3 * image_index + 2];
     if (fabs(box.a) <= clip_angle_thresh) {
       // Convert from [x_ctr, y_ctr, w, h] to [x1, y1, x2, y2]
-      float x1 = box.x_ctr - (box.w - 1.f) / 2.f;
-      float y1 = box.y_ctr - (box.h - 1.f) / 2.f;
-      float x2 = x1 + box.w - 1.f;
-      float y2 = y1 + box.h - 1.f;
+      float x1 = box.x_ctr - (box.w - float(int(legacy_plus_one))) / 2.f;
+      float y1 = box.y_ctr - (box.h - float(int(legacy_plus_one))) / 2.f;
+      float x2 = x1 + box.w - float(int(legacy_plus_one));
+      float y2 = y1 + box.h - float(int(legacy_plus_one));
 
       // Clip
-      x1 = fmax(fmin(x1, img_width - 1.0f), 0.0f);
-      y1 = fmax(fmin(y1, img_height - 1.0f), 0.0f);
-      x2 = fmax(fmin(x2, img_width - 1.0f), 0.0f);
-      y2 = fmax(fmin(y2, img_height - 1.0f), 0.0f);
+      x1 = fmax(fmin(x1, img_width - float(int(legacy_plus_one))), 0.0f);
+      y1 = fmax(fmin(y1, img_height - float(int(legacy_plus_one))), 0.0f);
+      x2 = fmax(fmin(x2, img_width - float(int(legacy_plus_one))), 0.0f);
+      y2 = fmax(fmin(y2, img_height - float(int(legacy_plus_one))), 0.0f);
 
       // Convert back to [x_ctr, y_ctr, w, h]
       box.x_ctr = (x1 + x2) / 2.f;
       box.y_ctr = (y1 + y2) / 2.f;
-      box.w = x2 - x1 + 1.f;
-      box.h = y2 - y1 + 1.f;
+      box.w = x2 - x1 + float(int(legacy_plus_one));
+      box.h = y2 - y1 + float(int(legacy_plus_one));
     }
 
     // Filter boxes.
@@ -491,7 +487,7 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
         d_im_info_vec,
         num_images,
         utils::BBOX_XFORM_CLIP_DEFAULT,
-        correct_transform_coords_,
+        legacy_plus_one_,
         reinterpret_cast<float4*>(d_boxes),
         nboxes_to_generate,
         d_sorted_scores,
@@ -514,6 +510,7 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
         d_im_info_vec,
         num_images,
         utils::BBOX_XFORM_CLIP_DEFAULT,
+        legacy_plus_one_,
         angle_bound_on_,
         angle_bound_lo_,
         angle_bound_hi_,
@@ -604,6 +601,7 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
         d_image_prenms_boxes,
         prenms_nboxes,
         rpn_nms_thresh_,
+        legacy_plus_one_,
         d_image_boxes_keep_list,
         &nkeep,
         dev_nms_mask_,
@@ -673,3 +671,7 @@ bool GenerateProposalsOp<CUDAContext>::RunOnDevice() {
 
 REGISTER_CUDA_OPERATOR(GenerateProposals, GenerateProposalsOp<CUDAContext>);
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(
+    GenerateProposals,
+    caffe2::GenerateProposalsOp<caffe2::CUDAContext>);

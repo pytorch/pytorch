@@ -20,7 +20,7 @@ class DistributedDataParallelCPU(Module):
 
     This module could be used in conjunction with the DistributedSampler,
     (see :class `torch.utils.data.distributed.DistributedSampler`)
-    which will load a subset of the original datset for each node with the same
+    which will load a subset of the original dataset for each node with the same
     batch size. So strong scaling should be configured like this:
         n = 1, batch size = 128
         n = 2, batch size = 64

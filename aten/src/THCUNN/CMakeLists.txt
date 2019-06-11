@@ -26,8 +26,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SmoothL1Criterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftMarginCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftPlus.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SoftShrink.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SparseLinear.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialAdaptiveMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialClassNLLCriterion.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialConvolutionLocal.cu
@@ -35,35 +33,20 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SpatialConvolutionMM.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialCrossMapLRN.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDepthwiseConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialDilatedMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialFullDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxPooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialMaxUnpooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialSubSampling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialUpSamplingBicubic.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialUpSamplingBilinear.cu
-${CMAKE_CURRENT_SOURCE_DIR}/SpatialUpSamplingNearest.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Sqrt.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Square.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Tanh.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalRowConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/TemporalUpSamplingLinear.cu
-${CMAKE_CURRENT_SOURCE_DIR}/TemporalUpSamplingNearest.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAdaptiveAveragePooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAdaptiveMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullDilatedConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxPooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxUnpooling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricUpSamplingNearest.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricUpSamplingTrilinear.cu
 PARENT_SCOPE)
 
 set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE}

@@ -80,6 +80,28 @@ class ExpLearningRate : public LearningRateFunctor<T> {
   T gamma_;
 };
 
+// Gate: return multiplier_1 if before num_iter, else multiplier_2
+template <typename T>
+class GateLearningRate : public LearningRateFunctor<T> {
+ public:
+  GateLearningRate(
+      const T multiplier_1,
+      const T multiplier_2,
+      const int64_t num_iter)
+      : multiplier_1_(multiplier_1),
+        multiplier_2_(multiplier_2),
+        num_iter_(num_iter) {}
+  T operator()(const int64_t iter) const override {
+    if (iter >= num_iter_) {
+      return T(multiplier_2_);
+    }
+    return T(multiplier_1_);
+  }
+  T multiplier_1_;
+  T multiplier_2_;
+  uint64_t num_iter_;
+};
+
 // Inv: return (1 + gamma * iter) ^ (-power)
 template <typename T>
 class InvLearningRate : public LearningRateFunctor<T> {
@@ -116,7 +138,8 @@ class LinearWarmupLearningRate : public LearningRateFunctor<T> {
     if (iter >= num_iter_) {
       return 1.;
     }
-    return start_multiplier_ + (1. - start_multiplier_) * T(iter) / T(num_iter_);
+    return start_multiplier_ +
+        (1. - start_multiplier_) * T(iter) / T(num_iter_);
   }
   T start_multiplier_;
   uint64_t num_iter_;

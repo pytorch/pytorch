@@ -21,6 +21,15 @@
     PyObject_IsInstance(obj, THPCharStorageClass)
 #define THPByteStorage_Check(obj) \
     PyObject_IsInstance(obj, THPByteStorageClass)
+#define THPBoolStorage_Check(obj) \
+    PyObject_IsInstance(obj, THPBoolStorageClass)
+#define THPQUInt8Storage_Check(obj) \
+    PyObject_IsInstance(obj, THPQUInt8StorageClass)
+#define THPQInt8Storage_Check(obj) \
+    PyObject_IsInstance(obj, THPQInt8StorageClass)
+#define THPQInt32Storage_Check(obj) \
+    PyObject_IsInstance(obj, THPQInt32StorageClass)
+
 
 #define THPDoubleStorage_CData(obj)  (obj)->cdata
 #define THPFloatStorage_CData(obj)   (obj)->cdata
@@ -30,6 +39,10 @@
 #define THPShortStorage_CData(obj)   (obj)->cdata
 #define THPCharStorage_CData(obj)    (obj)->cdata
 #define THPByteStorage_CData(obj)    (obj)->cdata
+#define THPBoolStorage_CData(obj)    (obj)->cdata
+#define THPQUInt8Storage_CData(obj)   (obj)->cdata
+#define THPQInt8Storage_CData(obj)   (obj)->cdata
+#define THPQInt32Storage_CData(obj)   (obj)->cdata
 
 #ifdef _THP_CORE
 #define THPStorageType TH_CONCAT_3(THP,Real,StorageType)
@@ -41,5 +54,11 @@
 
 #include <torch/csrc/generic/Storage.h>
 #include <TH/THGenerateHalfType.h>
+
+#include <torch/csrc/generic/Storage.h>
+#include <TH/THGenerateBoolType.h>
+
+#include <torch/csrc/generic/Storage.h>
+#include <TH/THGenerateQTypes.h>
 
 #endif

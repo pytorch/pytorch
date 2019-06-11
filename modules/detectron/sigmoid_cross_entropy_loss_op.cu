@@ -15,7 +15,7 @@
  */
 
 #include "caffe2/core/context_gpu.h"
-#include "sigmoid_cross_entropy_loss_op.h"
+#include "modules/detectron/sigmoid_cross_entropy_loss_op.h"
 
 namespace caffe2 {
 

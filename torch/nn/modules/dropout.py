@@ -63,8 +63,8 @@ class Dropout2d(_DropoutNd):
     r"""Randomly zero out entire channels (a channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 2D tensor :math:`\text{input}[i, j]`).
-    Each channel will be zeroed out independently on every forward call.
-    with probability :attr:`p` using samples from a Bernoulli distribution.
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
 
     Usually the input comes from :class:`nn.Conv2d` modules.
 
@@ -107,8 +107,8 @@ class Dropout3d(_DropoutNd):
     r"""Randomly zero out entire channels (a channel is a 3D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 3D tensor :math:`\text{input}[i, j]`).
-    Each channel will be zeroed out independently on every forward call.
-    with probability :attr:`p` using samples from a Bernoulli distribution.
+    Each channel will be zeroed out independently on every forward call with
+    probability :attr:`p` using samples from a Bernoulli distribution.
 
     Usually the input comes from :class:`nn.Conv3d` modules.
 

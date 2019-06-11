@@ -1,6 +1,6 @@
-#include <ATen/core/dispatch/KernelRegistration.h>
+#include <ATen/core/op_registration/op_registration.h>
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 #include "caffe2/operators/elementwise_ops_utils.h"
-#include "caffe2/operators/experimental/c10/schemas/add.h"
 #include "caffe2/utils/math.h"
 
 using caffe2::BaseContext;
@@ -16,9 +16,9 @@ void add_op_cpu_impl(
     const at::Tensor& C_,
     bool legacy_broadcast,
     int64_t axis) {
-  Tensor A{C10Tensor(A_)};
-  Tensor B{C10Tensor(B_)};
-  Tensor C{C10Tensor(C_)};
+  Tensor A(A_);
+  Tensor B(B_);
+  Tensor C(C_);
   CPUContext context;
   const DataType* A_data = A.template data<DataType>();
   const DataType* B_data = B.template data<DataType>();
@@ -69,11 +69,16 @@ void add_op_cpu_impl(
       C.mutable_data<DataType>(),
       static_cast<CPUContext*>(&context));
 }
-} // namespace
-} // namespace caffe2
 
-namespace c10 {
-C10_REGISTER_KERNEL(caffe2::ops::Add)
-    .kernel<decltype(caffe2::add_op_cpu_impl<float>), &caffe2::add_op_cpu_impl<float>>()
-    .dispatchKey(CPUTensorId());
-} // namespace c10
+static auto registry = c10::RegisterOperators().op(
+    "_c10_experimental::Add",
+    c10::RegisterOperators::options()
+      .kernel<decltype(add_op_cpu_impl<float>), &add_op_cpu_impl<float>>(CPUTensorId()));
+
+} // namespace
+
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
+    "_c10_experimental::Add",
+    C10Add_DontUseThisOpYet)
+
+} // namespace caffe2

@@ -36,9 +36,10 @@ class BatchGatherGradientOp final : public Operator<Context> {
 
   // Constructor to recieve axis in case it was passed for GatherOp gradient,
   // use default of 1 for batch gather otherwise.
-  BatchGatherGradientOp(const OperatorDef& operator_def, Workspace* ws)
-    : Operator<Context>(operator_def, ws),
-      OP_SINGLE_ARG(int, "axis", axis_, 1) { }
+  template <class... Args>
+  explicit BatchGatherGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        OP_SINGLE_ARG(int, "axis", axis_, 1) {}
   virtual ~BatchGatherGradientOp() noexcept {}
 
   bool RunOnDevice() override {

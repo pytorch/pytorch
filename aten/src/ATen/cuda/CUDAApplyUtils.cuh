@@ -5,6 +5,7 @@
 #include <THC/THCAtomics.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/macros/Macros.h>
+#include <ATen/LegacyTHFunctionsCUDA.h>
 
 #include <math.h>
 
@@ -273,7 +274,7 @@ template <typename Op,
           int ADims,
           int step>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
                                       IndexType totalElements, const Op op) {
@@ -357,7 +358,7 @@ template <typename Op,
           int ADims, int BDims,
           int step>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
@@ -466,7 +467,7 @@ template <typename Op,
           int ADims, int BDims, int CDims,
           int step>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply3(detail::TensorInfo<scalar1, IndexType> a,
@@ -589,7 +590,7 @@ template <typename Op,
           int ADims, int BDims, int CDims, int DDims,
           int step>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply4(detail::TensorInfo<scalar1, IndexType> a,
@@ -728,10 +729,6 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
 
     rearrangeDims(&aInfo);
     aInfo.collapseDims();
-#if CUDA_VERSION < 9000
-    if (!aInfo.isContiguous())
-        grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
 
     HANDLE_A_CASE(unsigned int, aInfo.dims);
   } else {
@@ -748,9 +745,6 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
     if (aInfo.dims == 1) {
       HANDLE_CASE(uint64_t, 1);
     } else {
-#if CUDA_VERSION < 9000
-      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
       HANDLE_CASE(uint64_t, -1);
     }
   }
@@ -761,7 +755,7 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_th_copy_ignoring_overlaps_(oldA, a);
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldA, a);
   }
 
   return true;
@@ -881,10 +875,6 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
     rearrangeDims(&aInfo, &bInfo);
     aInfo.collapseDims();
     bInfo.collapseDims();
-#if CUDA_VERSION < 9000
-    if (!(aInfo.isContiguous() && bInfo.isContiguous()))
-        grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
 
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims);
   } else {
@@ -904,9 +894,6 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
     if (aInfo.dims == 1 && bInfo.dims == 1) {
       HANDLE_CASE(uint64_t, 1, 1);
     } else {
-#if CUDA_VERSION < 9000
-      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
       HANDLE_CASE(uint64_t, -1, -1);
     }
   }
@@ -918,14 +905,14 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_th_copy_ignoring_overlaps_(oldA, a);
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldA, a);
   }
 
   if (oldB.defined()) {
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    at::_th_copy_ignoring_overlaps_(oldB, b);
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldB, b);
   }
 
   return true;
@@ -1071,10 +1058,6 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     bInfo.collapseDims();
     cInfo.collapseDims();
 
-#if CUDA_VERSION < 9000
-    if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()))
-      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims);
   } else {
     detail::TensorInfo<scalar1, uint64_t> aInfo =
@@ -1098,10 +1081,6 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1) {
       HANDLE_CASE(uint64_t, 1, 1, 1);
     } else {
-#if CUDA_VERSION < 9000
-  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
-
       HANDLE_CASE(uint64_t, -1, -1, -1);
     }
   }
@@ -1114,7 +1093,7 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_th_copy_ignoring_overlaps_(oldA, a);
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldA, a);
     a = oldA;
   }
 
@@ -1122,7 +1101,7 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    at::_th_copy_ignoring_overlaps_(oldB, b);
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldB, b);
     b = oldB;
   }
 
@@ -1130,7 +1109,7 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    at::_th_copy_ignoring_overlaps_(oldC, c);
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldC, c);
     c = oldC;
   }
 
@@ -1311,10 +1290,6 @@ inline bool CUDA_tensor_apply4(at::Tensor a,
     cInfo.collapseDims();
     dInfo.collapseDims();
 
-#if CUDA_VERSION < 9000
-    if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous() && dInfo.isContiguous()))
-      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims, dInfo.dims);
   } else {
     detail::TensorInfo<scalar1, uint64_t> aInfo =
@@ -1342,9 +1317,6 @@ inline bool CUDA_tensor_apply4(at::Tensor a,
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1 && dInfo.dims == 1) {
       HANDLE_CASE(uint64_t, 1, 1, 1, 1);
     } else {
-#if CUDA_VERSION < 9000
-  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
-#endif
       HANDLE_CASE(uint64_t, -1, -1, -1, -1);
     }
   }
@@ -1358,28 +1330,28 @@ inline bool CUDA_tensor_apply4(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    at::_th_copy_ignoring_overlaps_(oldA, a);
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldA, a);
   }
 
   if (oldB.defined()) {
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    at::_th_copy_ignoring_overlaps_(oldB, b);
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldB, b);
   }
 
   if (oldC.defined()) {
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    at::_th_copy_ignoring_overlaps_(oldC, c);
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldC, c);
   }
 
   if (oldD.defined()) {
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    at::_th_copy_ignoring_overlaps_(oldD, c);
+    at::native::legacy::cuda::_th_copy_ignoring_overlaps_(oldD, c);
   }
 
   return true;

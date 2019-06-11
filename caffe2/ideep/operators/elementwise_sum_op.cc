@@ -3,7 +3,9 @@
 #include "caffe2/operators/utility_ops.h"
 #include "caffe2/operators/elementwise_add_op.h"
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPSumOp final : public IDEEPOperator {
  public:
@@ -17,7 +19,7 @@ class IDEEPSumOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws),
         fallback_sum_(operator_def, ws),
         fallback_add_(operator_def, ws) {}
-  virtual ~IDEEPSumOp() {}
+  ~IDEEPSumOp() override {}
 
   bool RunOnDevice() override {
     itensor::dims input_dims;
@@ -76,4 +78,4 @@ class IDEEPSumOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(Sum, IDEEPSumOp);
 REGISTER_IDEEP_OPERATOR(Add, IDEEPSumOp);
 
-} // namespace caffe2
+} // namespace

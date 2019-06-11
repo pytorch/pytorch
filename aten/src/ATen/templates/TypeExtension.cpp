@@ -22,14 +22,6 @@ std::unique_ptr<Generator> ${Type}::generator() const {
   AT_ERROR("generator is not implemented for ${Type}");
 }
 
-ScalarType ${Type}::scalarType() const {
-  AT_ERROR("scalarType is not implemented for ${Type}");
-}
-
-caffe2::TypeMeta ${Type}::typeMeta() const {
-  AT_ERROR("typeMeta is not implemented for ${Type}");
-}
-
 Backend ${Type}::backend() const {
   return Backend::${Backend};
 }
@@ -40,10 +32,6 @@ const char * ${Type}::toString() const {
 
 TypeID ${Type}::ID() const {
   return ${TypeID};
-}
-
-size_t ${Type}::elementSizeInBytes() const {
-  AT_ERROR("elementSizeInBytes is not implemented for ${Type}");
 }
 
 ${type_method_definitions}

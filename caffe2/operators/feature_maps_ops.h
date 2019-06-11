@@ -11,10 +11,9 @@ class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeSingleScalarFeatureTensorsOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeSingleScalarFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
@@ -78,10 +77,9 @@ class MergeSingleScalarFeatureTensorsGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeSingleScalarFeatureTensorsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeSingleScalarFeatureTensorsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = InputSize() - 1; // Everything other than values_grad
   }
   virtual ~MergeSingleScalarFeatureTensorsGradientOp() noexcept {}
@@ -127,10 +125,9 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeSingleListFeatureTensorsOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeSingleListFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inValuesOffset_.resize(numInputs_);
     featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
@@ -216,10 +213,9 @@ class MergeSingleListOrMapFeatureTensorsGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeSingleListOrMapFeatureTensorsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeSingleListOrMapFeatureTensorsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = (InputSize() - 1) / kNumTensorsPerInput;
   }
   virtual ~MergeSingleListOrMapFeatureTensorsGradientOp() noexcept {}
@@ -283,8 +279,9 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeSingleMapFeatureTensorsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeSingleMapFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inValuesOffset_.resize(numInputs_);
     featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
@@ -385,10 +382,9 @@ class MergeMultiScalarFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeMultiScalarFeatureTensorsOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeMultiScalarFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inKeysOffset_.resize(numInputs_);
   }
@@ -455,10 +451,9 @@ class MergeMultiScalarFeatureTensorsGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeMultiScalarFeatureTensorsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeMultiScalarFeatureTensorsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = (InputSize() - 1) / kNumTensorsPerInput;
   }
   virtual ~MergeMultiScalarFeatureTensorsGradientOp() noexcept {}
@@ -516,8 +511,9 @@ class MergeMultiListFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeMultiListFeatureTensorsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeMultiListFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inKeysOffset_.resize(numInputs_);
     inValuesValuesOffset_.resize(numInputs_);
@@ -607,8 +603,9 @@ class MergeMultiMapFeatureTensorsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeMultiMapFeatureTensorsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeMultiMapFeatureTensorsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inKeysOffset_.resize(numInputs_);
     inValuesValuesOffset_.resize(numInputs_);
@@ -714,10 +711,9 @@ class MergeMultiListOrMapFeatureTensorsGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  MergeMultiListOrMapFeatureTensorsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit MergeMultiListOrMapFeatureTensorsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     numFeatureInputs_ = (InputSize() - 1) / kNumTensorsPerInput;
   }
   virtual ~MergeMultiListOrMapFeatureTensorsGradientOp() noexcept {}

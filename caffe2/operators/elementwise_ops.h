@@ -42,8 +42,9 @@ class UnaryElementwiseWithArgsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  UnaryElementwiseWithArgsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws), functor_(*this) {}
+  template <class... Args>
+  explicit UnaryElementwiseWithArgsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...), functor_(*this) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<InputTypes>::call(this, Input(0));
@@ -105,8 +106,9 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  BinaryElementwiseWithArgsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit BinaryElementwiseWithArgsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, "broadcast", legacy_broadcast_, false),
         OP_SINGLE_ARG(int, "axis", axis_, -1),
         OP_SINGLE_ARG(string, "axis_str", axis_str_, string("")),
@@ -216,10 +218,9 @@ class BinaryElementwiseWithArgsGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  BinaryElementwiseWithArgsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit BinaryElementwiseWithArgsGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, "broadcast", legacy_broadcast_, false),
         OP_SINGLE_ARG(int, "axis", axis_, -1),
         OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
@@ -484,8 +485,9 @@ template <class Context>
 class SumReduceLikeOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SumReduceLikeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SumReduceLikeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, -1),
         OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
         OP_SINGLE_ARG(string, "order", order_, "NCHW") {

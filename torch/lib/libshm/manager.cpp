@@ -9,8 +9,7 @@
 #include <memory>
 #include <unordered_map>
 
-#include <torch/csrc/utils/tempfile.h>
-#include <c10/util/Optional.h>
+#include <c10/util/tempfile.h>
 
 #include <libshm/err.h>
 #include <libshm/socket.h>
@@ -87,7 +86,7 @@ int main(int argc, char *argv[]) {
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
   const auto tempfile =
-      torch::utils::try_make_tempfile(/*name_prefix=*/"torch-shm-file-");
+      c10::try_make_tempfile(/*name_prefix=*/"torch-shm-file-");
   try {
     if (!tempfile.has_value()) {
       throw std::runtime_error(

@@ -88,7 +88,7 @@ class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
 
   /// The running variance.
   /// Only defined if the `stateful` option was `true` upon construction.
-  Tensor running_variance;
+  Tensor running_var;
 };
 
 /// A `ModuleHolder` subclass for `BatchNormImpl`.

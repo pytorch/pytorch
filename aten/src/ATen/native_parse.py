@@ -3,6 +3,7 @@ import re
 import yaml
 import pprint
 import sys
+import copy
 
 try:
     # use faster C loader if available
@@ -63,9 +64,21 @@ def type_argument_translations(arg):
         t = 'int64_t'
     elif t == 'int?':
         t = 'int64_t?'
+    elif t == 'int64_t':
+        raise RuntimeError("Please use int and not int64_t. "
+                           "See [temp translations] for details.")
+    elif t == 'int64_t?':
+        raise RuntimeError("Please use int? and not int64_t?. "
+                           "See [temp translations] for details.")
     # Enables float by translating to legacy double.
     elif t == 'float':
         t = 'double'
+    # Enables str by translating to legacy std::string.
+    elif t == 'str':
+        t = 'std::string'
+    elif t == 'double':
+        raise RuntimeError("Please use float and not double. "
+                           "See [temp translations] for details.")
     # Enables int[x] by translating to legacy IntArrayRef[x]. See [temp translations]
     elif re.match(r'int\[(\d+)\]', t):
         match = re.match(r'int\[(\d+)\]', t)
@@ -75,6 +88,9 @@ def type_argument_translations(arg):
     elif re.match(r'bool\[(\d+)\]', t):
         match = re.match(r'bool\[(\d+)\]', t)
         t = 'std::array<bool,{}>'.format(match.group(1))
+    elif re.match(r'std::array', t):
+        raise RuntimeError("Please use array notation, e.g. bool[3] and not std::array."
+                           "See [temp translations] for details.")
 
     # Legacy type sanitization. TODO: Do we really need this?
     if t == 'Generator*':
@@ -111,6 +127,8 @@ def type_argument_translations(arg):
     # we change this at either a JIT schema or C++ level.
     elif default == 'Mean':
         default = 'Reduction::Mean'
+    elif default == 'contiguous_format':
+        default = 'MemoryFormat::Contiguous'
     else:
         try:
             default = int(default)
@@ -171,6 +189,92 @@ def parse_arguments(args, func_variants, declaration, func_return):
     if is_out_fn:
         declaration['name'] += "_out"
 
+    # Reverse splat of TensorOptions
+    # As we move towards the JIT function schema for native_functions.yaml we need to support
+    # the expanded version of TensorOptions. For now we discover whether there are three
+    # types and names of keyword arguments: "ScalarType dtype", "Layout layout" and "Device device"
+    # Each, if set, must have default arguments set to long or float, strided and "cpu" respectively.
+    # They must appear in this order and in this order only in order for us to be able to process them.
+    # In the future we will get rid of this specific processing as downstream consumers start relying
+    # less on the content of Declarations.yaml. If you want to support more than this you'll
+    # potentially have to extend the JIT.
+
+    supported_topt_arguments = [
+        [
+            {'name': 'dtype', 'type': 'ScalarType', 'is_nullable': False, 'annotation': None},
+            {'name': 'layout', 'type': 'Layout', 'is_nullable': False, 'annotation': None},
+            {'name': 'device', 'type': 'Device', 'is_nullable': False, 'annotation': None},
+            {'name': 'pin_memory', 'type': 'bool', 'is_nullable': False, 'annotation': None, 'default': False},
+        ]
+    ]
+    supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[0]))
+    for arg in supported_topt_arguments[1]:
+        arg.update({'kwarg_only': True})
+    supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[1]))
+    for arg in supported_topt_arguments[2]:
+        arg.update({'default': 'c10::nullopt', 'is_nullable': True})
+    # add explicit support for what is needed for tril_indices / triu_indices
+    supported_topt_arguments.append(
+        [
+            {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True,
+             'default': 'long', 'is_nullable': True},
+            {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+        ]
+    )
+
+    corresponding_topts = [
+        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},
+    ]
+    corresponding_topts.append(corresponding_topts[0].copy())
+    corresponding_topts[1]['kwarg_only'] = True
+    corresponding_topts.append(corresponding_topts[1].copy())
+    corresponding_topts[2]['default'] = '{}'
+    corresponding_topts.append(
+        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
+         'kwarg_only': True, 'default': 'at::kLong'})
+
+    def check_topt_representation(topt_representation):
+        for idx, supported_topt in enumerate(supported_topt_arguments):
+            matches = all(topt_representation[i] == topt for i, topt in enumerate(supported_topt))
+            if matches:
+                return corresponding_topts[idx]
+        return None
+
+    def is_tensor_option(argument):
+        return argument['name'] in ['dtype', 'layout', 'device', 'pin_memory']
+
+    new_arguments = []
+    idx = 0
+    while idx < len(arguments):
+        argument = arguments[idx]
+        number_of_arguments = len(supported_topt_arguments[0])
+        if is_tensor_option(argument) and len(arguments) - idx >= number_of_arguments:
+            topt_representation = []
+            for i in range(number_of_arguments):
+                argument = arguments[idx]
+                if not is_tensor_option(argument):
+                    break
+                topt_representation.append(argument)
+                idx += 1
+            if len(topt_representation) == number_of_arguments:
+                merged_argument = check_topt_representation(topt_representation)
+                assert merged_argument, \
+                    "Unsupported combination of TensorOptions {}, the only currently supported combinations are {}"\
+                    .format(str(topt_representation), str(supported_topt_arguments))
+                new_arguments.append(merged_argument)
+            else:
+                new_arguments += topt_representation
+        else:
+            new_arguments.append(argument)
+            idx += 1
+
+    arguments = new_arguments
+
     # Sanity checks
 
     # TODO: convention is that the ith-argument correspond to the i-th return, but it would
@@ -209,7 +313,8 @@ def parse_arguments(args, func_variants, declaration, func_return):
                 assert argument['annotation'] == func_return[arg_idx]['annotation'], \
                     "Inplace function annotations of function {} need to match between " \
                     "input and correponding output.".format(name)
-                assert argument['name'] == func_return[arg_idx]['name']
+                assert argument['name'] == func_return[arg_idx]['name'] or \
+                    argument['name'] == func_return[arg_idx]['name'] + "_return"
                 assert argument['type'] == func_return[arg_idx]['type']
         assert found_self, "Inplace function \"{}\" needs Tensor argument named self.".format(name)
 
@@ -226,7 +331,12 @@ def parse_return_arguments(return_decl, inplace, func_decl):
 
     for arg_idx, arg in enumerate(return_decl.split(', ')):
         t, name, default, nullable, size, annotation = type_argument_translations(arg)
-        argument_dict = {'type': t, 'name': name, 'annotation': annotation}
+        # name of arguments and name of return sometimes have collision
+        # in this case, we rename the return name to <name>_return.
+        return_name = name
+        if name in func_decl['func'].split('->')[0]:
+            return_name = name + "_return"
+        argument_dict = {'type': t, 'name': return_name, 'annotation': annotation}
         if name:
             # See Note [field_name versus name]
             argument_dict['field_name'] = name
@@ -241,13 +351,6 @@ def parse_return_arguments(return_decl, inplace, func_decl):
         argument_dict['output'] = True
         arguments.append(argument_dict)
     return arguments
-
-
-def has_sparse_dispatches(dispatches):
-    for dispatch in dispatches:
-        if 'Sparse' in dispatch:
-            return True
-    return False
 
 
 def parse_native_yaml(path):
@@ -285,15 +388,16 @@ def run(paths):
                 declaration['return'] = return_arguments if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['function'])
                 declaration['requires_tensor'] = func.get('requires_tensor', False)
-                declaration['matches_jit_signature'] = func.get('matches_jit_signature', False)
+                declaration['matches_jit_signature'] = func.get('matches_jit_signature', True)
                 declaration['cpu_half'] = func.get('cpu_half', False)
+                declaration['cpu_bool'] = func.get('cpu_bool', False)
+                declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
+                declaration['named_guard'] = func.get('named_guard', True)
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')
-                declaration['aten_sparse'] = has_sparse_dispatches(
-                    declaration['type_method_definition_dispatch'])
                 declarations.append(declaration)
             except Exception as e:
                 msg = '''Exception raised in processing function:

@@ -5,7 +5,7 @@ namespace c10 {
 
 // should this use the globalContext?  Can it get a context passed in somehow?
 UndefinedTensorImpl::UndefinedTensorImpl()
-: TensorImpl(UndefinedTensorId(), caffe2::TypeMeta(), nullptr, /* is variable */ false) {
+: TensorImpl(UndefinedTensorId(), caffe2::TypeMeta(), c10::nullopt) {
 }
 
 IntArrayRef UndefinedTensorImpl::sizes() const {
@@ -22,6 +22,10 @@ int64_t UndefinedTensorImpl::stride(int64_t d) const {
 
 int64_t UndefinedTensorImpl::dim() const {
   AT_ERROR("dim() called on undefined Tensor");
+}
+
+bool UndefinedTensorImpl::has_storage() const {
+  AT_ERROR("has_storage() called on undefined Tensor");
 }
 
 const Storage& UndefinedTensorImpl::storage() const {

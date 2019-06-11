@@ -17,6 +17,10 @@
 #include <torch/csrc/generic/utils.cpp>
 #include <TH/THGenerateHalfType.h>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/generic/utils.cpp>
+#include <TH/THGenerateBoolType.h>
+
 int THPUtils_getCallable(PyObject *arg, PyObject **result) {
   if (!PyCallable_Check(arg))
     return 0;

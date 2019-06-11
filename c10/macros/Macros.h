@@ -29,26 +29,66 @@
   classname(const classname&) = delete;        \
   classname& operator=(const classname&) = delete
 
-#define CONCAT_IMPL(x, y) x##y
-#define MACRO_CONCAT(x, y) CONCAT_IMPL(x, y)
+#define C10_CONCATENATE_IMPL(s1, s2) s1##s2
+#define C10_CONCATENATE(s1, s2) C10_CONCATENATE_IMPL(s1, s2)
 
-#define MACRO_EXPAND(args) args
+#define C10_MACRO_EXPAND(args) args
+
+/**
+ * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
+ * str and ending with a number that varies with the line.
+ */
+#ifdef __COUNTER__
+#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
+#else
+#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
+#endif
+
 
 /// C10_NODISCARD - Warn if a type or return value is discarded.
+
+// Technically, we should check if __cplusplus > 201402L here, because
+// [[nodiscard]] is only defined in C++17.  However, some compilers
+// we care about don't advertise being C++17 (e.g., clang), but
+// support the attribute anyway.  In fact, this is not just a good idea,
+// it's the law: clang::warn_unused_result doesn't work on nvcc + clang
+// and the best workaround for this case is to use [[nodiscard]]
+// instead; see https://github.com/pytorch/pytorch/issues/13118
+//
+// Note to future editors: if you have noticed that a compiler is
+// misbehaving (e.g., it advertises support, but the support doesn't
+// actually work, or it is emitting warnings).  Some compilers which
+// are strict about the matter include MSVC, which will complain:
+//
+//  error C2429: attribute 'nodiscard' requires compiler flag '/std:c++latest'
+//
+// Exhibits:
+//  - MSVC 19.14: https://godbolt.org/z/Dzd7gn (requires /std:c++latest)
+//  - Clang 8.0.0: https://godbolt.org/z/3PYL4Z (always advertises support)
+//  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
 #define C10_NODISCARD
-#if __cplusplus > 201402L && defined(__has_cpp_attribute)
-#if __has_cpp_attribute(nodiscard)
-#undef C10_NODISCARD
-#define C10_NODISCARD [[nodiscard]]
-#endif
+#if defined(__has_cpp_attribute)
+# if __has_cpp_attribute(nodiscard)
+#  undef C10_NODISCARD
+#  define C10_NODISCARD [[nodiscard]]
+# endif
 // Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
 // error when __has_cpp_attribute is given a scoped attribute in C mode.
 #elif __cplusplus && defined(__has_cpp_attribute)
-#if __has_cpp_attribute(clang::warn_unused_result)
-#undef C10_NODISCARD
-#define C10_NODISCARD [[clang::warn_unused_result]]
+# if __has_cpp_attribute(clang::warn_unused_result)
+// TODO: It's possible this is still triggering https://github.com/pytorch/pytorch/issues/13118
+// on Windows; if it is, better fix it.
+#  undef C10_NODISCARD
+#  define C10_NODISCARD [[clang::warn_unused_result]]
+# endif
 #endif
-#endif
+
+// suppress an unused variable.
+#ifdef _MSC_VER
+#define C10_UNUSED
+#else
+#define C10_UNUSED __attribute__((__unused__))
+#endif //_MSC_VER
 
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
@@ -110,8 +150,8 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_DEVICE __device__
 #define C10_HOST __host__
 // constants from (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications)
-// The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5) 
-// but 2048 for previous architectures. You'll get warnings if you exceed these constants. 
+// The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5)
+// but 2048 for previous architectures. You'll get warnings if you exceed these constants.
 // Hence, the following macros adjust the input values from the user to resolve potential warnings.
 #if __CUDA_ARCH__ >= 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
@@ -121,27 +161,24 @@ constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
 // CUDA_MAX_THREADS_PER_BLOCK is same for all architectures currently
 constexpr uint32_t CUDA_MAX_THREADS_PER_BLOCK = 1024;
 // CUDA_THREADS_PER_BLOCK_FALLBACK is the "canonical fallback" choice of block size.
-// 256 is a good number for this fallback and should give good occupancy and 
+// 256 is a good number for this fallback and should give good occupancy and
 // versatility across all architectures.
 constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // NOTE: if you are thinking of constexpr-ify the inputs to launch bounds, it
-//       turns out that although __launch_bounds__ can take constexpr, it 
-//       can't take a constexpr that has anything to do with templates. 
-//       Currently we use launch_bounds that depend on template arguments in 
-//       Loops.cuh, Reduce.cuh and LossCTC.cuh. Hence, C10_MAX_THREADS_PER_BLOCK and 
+//       turns out that although __launch_bounds__ can take constexpr, it
+//       can't take a constexpr that has anything to do with templates.
+//       Currently we use launch_bounds that depend on template arguments in
+//       Loops.cuh, Reduce.cuh and LossCTC.cuh. Hence, C10_MAX_THREADS_PER_BLOCK and
 //       C10_MIN_BLOCKS_PER_SM are kept as macros.
-// Suppose you were planning to write __launch_bounds__(a, b), based on your performance tuning on a modern GPU. 
-// Instead, you should write __launch_bounds__(C10_MAX_THREADS_PER_BLOCK(a), C10_MIN_BLOCKS_PER_SM(a, b)), 
+// Suppose you were planning to write __launch_bounds__(a, b), based on your performance tuning on a modern GPU.
+// Instead, you should write __launch_bounds__(C10_MAX_THREADS_PER_BLOCK(a), C10_MIN_BLOCKS_PER_SM(a, b)),
 // which will also properly respect limits on old architectures.
 #define C10_MAX_THREADS_PER_BLOCK(val) (((val) <= CUDA_MAX_THREADS_PER_BLOCK) ? (val) : CUDA_THREADS_PER_BLOCK_FALLBACK)
 #define C10_MIN_BLOCKS_PER_SM(threads_per_block, blocks_per_sm) ((((threads_per_block)*(blocks_per_sm) <= CUDA_MAX_THREADS_PER_SM) ? (blocks_per_sm) : ((CUDA_MAX_THREADS_PER_SM + (threads_per_block) - 1) / (threads_per_block))))
 // C10_LAUNCH_BOUNDS is analogous to __launch_bounds__
-// https://stackoverflow.com/a/8814003 snippet to have macro with an optional argument
 #define C10_LAUNCH_BOUNDS_0 __launch_bounds__(256, 4) // default launch bounds that should give good occupancy and versatility across all architectures.
 #define C10_LAUNCH_BOUNDS_1(max_threads_per_block) __launch_bounds__((C10_MAX_THREADS_PER_BLOCK((max_threads_per_block))))
 #define C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm) __launch_bounds__((C10_MAX_THREADS_PER_BLOCK((max_threads_per_block))), (C10_MIN_BLOCKS_PER_SM((max_threads_per_block), (min_blocks_per_sm))))
-#define C10_LAUNCH_BOUNDS_X(x,max_threads_per_block,min_blocks_per_sm,FUNC, ...) FUNC
-#define C10_LAUNCH_BOUNDS(...) C10_LAUNCH_BOUNDS_X(,##__VA_ARGS__, C10_LAUNCH_BOUNDS_2(__VA_ARGS__), C10_LAUNCH_BOUNDS_1(__VA_ARGS__), C10_LAUNCH_BOUNDS_0(__VA_ARGS__))
 #else
 #define C10_HOST_DEVICE
 #define C10_HOST
@@ -154,6 +191,10 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_HIP_HOST_DEVICE
 #endif
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 #if defined(__ANDROID__)
 #define C10_ANDROID 1
 #define C10_MOBILE 1
@@ -164,9 +205,6 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_MOBILE 1
 #elif (defined(__APPLE__) && TARGET_OS_MAC)
 #define C10_IOS 1
-#define C10_MOBILE 0
-#else
-#define C10_MOBILE 0
 #endif // ANDROID / IOS / MACOS
 
 // Portably determine if a type T is trivially copyable or not.

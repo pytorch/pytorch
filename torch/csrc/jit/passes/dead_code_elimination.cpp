@@ -23,6 +23,9 @@ class DeadCodeEliminator {
   // we mark "live" nodes that are necessary for the output. Nodes that have
   // side effects are also marked.
   void run(Block* block, bool recurse) {
+    // clean up unused fork inputs before starting the main algorithm
+    eliminateDeadForkInputs(block, recurse);
+
     // Initialize by marking the return node and all its consumed values as live
     mark(block->return_node());
 
@@ -40,6 +43,26 @@ class DeadCodeEliminator {
   }
 
  private:
+  void eliminateDeadForkInputs(Block* block, bool recurse) {
+    for (Node* node : block->nodes()) {
+      if (recurse) {
+        for (Block* sb : node->blocks()) {
+          eliminateDeadForkInputs(sb, recurse);
+        }
+      }
+      if (node->kind() != prim::fork) {
+        continue;
+      }
+      Graph& g = *node->g(attr::Subgraph);
+      for (size_t i = 0; i < g.inputs().size(); ++i) {
+        if (!g.inputs().at(i)->hasUses()) {
+          g.eraseInput(i);
+          node->removeInput(i);
+        }
+      }
+    }
+  }
+
   // Special handling for block return nodes. Unlike other nodes, the block
   // return node doesn't really "use" its inputs. Consider:
   //
@@ -130,8 +153,7 @@ class DeadCodeEliminator {
     }
 
     if (aliasDb_) {
-      const auto writes = aliasDb_->getWrites(node);
-      if (aliasDb_->mayAlias(writes, liveValues_)) {
+      if (aliasDb_->writesToAlias(node, liveValues_)) {
         return mark(node);
       }
     }
@@ -194,7 +216,7 @@ class DeadCodeEliminator {
     if (!aliasDb_) {
       // If we don't have alias information, all mutable ops have unknown
       // effects and can't be considered for elimination.
-      if (!node->kind().is_aten()) {
+      if (!node->kind().is_aten() && !node->kind().is_prim()) {
         return false;
       }
       // onnx export calls EliminateDeadCode but sometimes passes invalid
@@ -203,7 +225,7 @@ class DeadCodeEliminator {
       auto schema = node->maybeSchema();
       return schema && schema->is_mutable();
     } else {
-      return aliasDb_->hasUntrackedEffects(node);
+      return aliasDb_->writesToWildcard(node);
     }
   }
 

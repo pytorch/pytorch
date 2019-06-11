@@ -51,7 +51,7 @@ TEST(BoundShapeInference, SparseLengthsSum) {
       "Weights", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {1000, 16}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape, "Weights", ShapeInfo::DimType::CONSTANT, {1000, 16});
@@ -86,7 +86,7 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
           ShapeInfo::DimType::CONSTANT, {1000, 58}, TensorProto_DataType_INT8));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape,
@@ -110,6 +110,85 @@ TEST(BoundShapeInference, SparseLengthsSumFused8BitRowwise) {
       out_shape, "Out", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 50});
 }
 
+TEST(BoundShapeInference, LengthsRangeFill) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+    "LengthsRangeFill",
+    "",
+    {"X"},
+    {"Y"},
+    {}));
+  net.add_op()->CopyFrom(CreateOperatorDef(
+    "Copy",
+    "",
+    {"Y"},
+    {"Z"},
+    {}));
+  ShapeInfoMap shape_map;
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "X",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "Y",
+      ShapeInfo::DimType::SEQ,
+      {spec.max_seq_size},
+      TensorProto_DataType_INT32);
+  verifyShapeInfo(
+      out_shape,
+      "Z",
+      ShapeInfo::DimType::SEQ,
+      {spec.max_seq_size},
+      TensorProto_DataType_INT32);
+}
+
+TEST(BoundShapeInference, Reshape) {
+  NetDef net;
+  std::vector<int> new_shape{-1, 8};
+  std::vector<int> new_shape2{2, 8};
+  net.add_op()->CopyFrom(
+      CreateOperatorDef("FC", "", {"X0", "W0", "B0"}, {"X1"}, {}));
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Reshape",
+      "",
+      {"X1"},
+      {"Y1", "old_shape"},
+      {MakeArgument<std::vector<int>>("shape", new_shape)}));
+
+  // Cannot infer shape for this one because input/output shape doesn't match
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Reshape",
+      "",
+      {"X1"},
+      {"Y2", "old_shape2"},
+      {MakeArgument<std::vector<int>>("shape", new_shape2)}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "W0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16, 1024}));
+  shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape, "X0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 1024});
+  verifyShapeInfo(
+      out_shape, "X1", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
+  verifyShapeInfo(
+      out_shape,
+      "Y1",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size * 16 / 8, 8});
+  EXPECT_TRUE(out_shape.find("Y2") == out_shape.end());
+}
+
 TEST(BoundShapeInference, ConcatMissingInput) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
@@ -124,7 +203,7 @@ TEST(BoundShapeInference, ConcatMissingInput) {
       "I0",
       makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60}));
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape, "I0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60});
@@ -133,6 +212,94 @@ TEST(BoundShapeInference, ConcatMissingInput) {
       "Cout",
       ShapeInfo::DimType::BATCH,
       {spec.max_batch_size, 2, 60});
+}
+
+TEST(BoundShapeInference, ConcatInferInputBackwards) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Concat",
+      "",
+      {"I0", "I1"},
+      {"Cout", "split_info"},
+      {MakeArgument<int>("axis", 1)}));
+  net.add_op()->CopyFrom(
+      CreateOperatorDef("FCTransposed", "", {"Cout", "W0", "B0"}, {"Y"}, {}));
+  BoundShapeSpec spec(20, 1000);
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "I0",
+      makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60}));
+  shape_map.emplace(
+      "W0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {101, 16}));
+  shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape, "I0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 60});
+  verifyShapeInfo(
+      out_shape, "Cout", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 101});
+  verifyShapeInfo(
+      out_shape, "Y", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
+  verifyShapeInfo(
+      out_shape,
+      "I1",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size, 101 - 60});
+}
+
+TEST(BoundShapeInference, Split) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Split", "", {"X"}, {"Y0", "Y1"}, {MakeArgument<int>("axis", 1)}));
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Split",
+      "",
+      {"X"},
+      {"Y2", "Y3", "Y4"},
+      {MakeArgument<int>("axis", 1),
+       MakeArgument<std::vector<int>>("split", {4, 30, 14})}));
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Split",
+      "",
+      {"X1"},
+      {"Y5", "Y6"},
+      {MakeArgument<int>("axis", 1), MakeArgument<int>("add_axis", 1)}));
+  BoundShapeSpec spec(20, 1000);
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "X",
+      makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48}));
+  shape_map.emplace(
+      "X1",
+      makeTensorInfo(ShapeInfo::DimType::BATCH, {spec.max_batch_size, 2, 48}));
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape, "X", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48});
+  verifyShapeInfo(
+      out_shape, "X1", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 2, 48});
+  verifyShapeInfo(
+      out_shape,
+      "Y0",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size, 48 / 2});
+  verifyShapeInfo(
+      out_shape,
+      "Y1",
+      ShapeInfo::DimType::BATCH,
+      {spec.max_batch_size, 48 / 2});
+  verifyShapeInfo(
+      out_shape, "Y2", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 4});
+  verifyShapeInfo(
+      out_shape, "Y3", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 30});
+  verifyShapeInfo(
+      out_shape, "Y4", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 14});
+  verifyShapeInfo(
+      out_shape, "Y5", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48});
+  verifyShapeInfo(
+      out_shape, "Y6", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 48});
 }
 
 TEST(BoundShapeInference, FC) {
@@ -150,7 +317,7 @@ TEST(BoundShapeInference, FC) {
   shape_map.emplace("B1", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {1024}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   verifyShapeInfo(
       out_shape, "X0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 1024});
@@ -165,8 +332,7 @@ TEST(BoundShapeInference, FC) {
       {spec.max_batch_size, 1024});
 }
 
-// We don't support inference input shape when Weight is not 2D
-TEST(BoundShapeInference, UnsupportedFC) {
+TEST(BoundShapeInference, FC3D) {
   NetDef net;
   net.add_op()->CopyFrom(
       CreateOperatorDef("FC", "", {"X0", "W0", "B0"}, {"Out0"}, {}));
@@ -176,7 +342,12 @@ TEST(BoundShapeInference, UnsupportedFC) {
   shape_map.emplace("B0", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {16}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  EXPECT_THROW(eng.InferBoundShapeAndType(net, shape_map), EnforceNotMet);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape, "X0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 1024});
+  verifyShapeInfo(
+      out_shape, "Out0", ShapeInfo::DimType::BATCH, {spec.max_batch_size, 16});
 }
 
 TEST(BoundShapeInference, Combo0) {
@@ -210,7 +381,7 @@ TEST(BoundShapeInference, Combo0) {
       "Indices", makeTensorInfo(ShapeInfo::DimType::CONSTANT, {2}));
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
-  eng.InferBoundShapeAndType(net, shape_map);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
   const auto& out_shape = eng.shape_info();
   LOG(INFO) << eng.PrintShapeInfo();
   verifyShapeInfo(

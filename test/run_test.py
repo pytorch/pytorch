@@ -3,7 +3,6 @@
 from __future__ import print_function
 
 import argparse
-from contextlib import contextmanager
 from datetime import datetime
 import os
 import shutil
@@ -11,7 +10,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import unittest
 
 import torch
 import torch._six
@@ -23,27 +21,36 @@ TESTS = [
     'autograd',
     'cpp_extensions',
     'c10d',
+    'c10d_spawn',
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
     'distributed',
     'distributions',
+    'docs_coverage',
     'expecttest',
     'indexing',
     'indexing_cuda',
     'jit',
+    'logging',
+    'mkldnn',
     'multiprocessing',
     'multiprocessing_spawn',
     'nccl',
     'nn',
     'numba_integration',
     'optim',
+    'quantized',
     'sparse',
     'thd_distributed',
     'torch',
     'type_info',
     'type_hints',
     'utils',
+    'namedtuple_return_api',
+    'jit_fuser',
+    'tensorboard',
+    'namedtensor',
 ]
 
 WINDOWS_BLACKLIST = [
@@ -89,8 +96,8 @@ THD_DISTRIBUTED_TESTS_CONFIG = {
 }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
-SIGNALS_TO_NAMES_DICT = dict((getattr(signal, n), n) for n in dir(signal)
-                             if n.startswith('SIG') and '_' not in n)
+SIGNALS_TO_NAMES_DICT = {getattr(signal, n): n for n in dir(signal)
+                         if n.startswith('SIG') and '_' not in n}
 
 CPP_EXTENSIONS_ERROR = """
 Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
@@ -135,18 +142,6 @@ def shell(command, cwd=None):
         p.wait()
 
 
-@contextmanager
-def cd(path):
-    if not os.path.isabs(path):
-        raise RuntimeError('Can only cd to absolute path, got: {}'.format(path))
-    orig_path = os.getcwd()
-    os.chdir(path)
-    try:
-        yield
-    finally:
-        os.chdir(orig_path)
-
-
 def run_test(executable, test_module, test_directory, options):
     unittest_args = options.additional_unittest_args
     if options.verbose:
@@ -155,16 +150,8 @@ def run_test(executable, test_module, test_directory, options):
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + '.py'] + unittest_args
 
-    # Forking after HIP is initialized could trigger random
-    # ihipException issue, see
-    # https://github.com/pytorch/pytorch/issues/14497
-    if TEST_WITH_ROCM:
-        with cd(test_directory):
-            res = unittest.main(argv=argv, module=test_module, exit=False).result
-        return int(bool(len(res.failures) + len(res.errors)))
-    else:
-        command = executable + argv
-        return shell(command, test_directory)
+    command = executable + argv
+    return shell(command, test_directory)
 
 
 def test_cpp_extensions(executable, test_module, test_directory, options):
@@ -281,6 +268,11 @@ def parse_args():
         '--verbose',
         action='store_true',
         help='print verbose information and test-by-test results')
+    parser.add_argument(
+        '--jit',
+        '--jit',
+        action='store_true',
+        help='run all jit tests')
     parser.add_argument(
         '-pt', '--pytest', action='store_true',
         help='If true, use `pytest` to execute the tests. E.g., this runs '
@@ -402,9 +394,8 @@ def get_selected_tests(options):
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
     if sys.platform == 'win32' and not options.ignore_win_blacklist:
-        ostype = os.environ.get('MSYSTEM')
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
-        if ostype != 'MINGW64' or target_arch != 'x64':
+        if target_arch != 'x64':
             WINDOWS_BLACKLIST.append('cpp_extensions')
 
         selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
@@ -427,6 +418,9 @@ def main():
 
     if options.coverage:
         shell(['coverage', 'erase'])
+
+    if options.jit:
+        selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     for test in selected_tests:
         test_name = 'test_{}'.format(test)

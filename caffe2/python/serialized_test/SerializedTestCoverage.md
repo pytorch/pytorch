@@ -1,11 +1,11 @@
 # Serialized Test Coverage Report
 This is an automatically generated file. Please see `caffe2/python/serialized_test/README.md` for details. In the case of merge conflicts, please rebase and regenerate.
 ## Summary
-Serialized tests have covered 217/684 (31.7%) operators
+Serialized tests have covered 219/688 (31.8%) operators
 
 ## Not covered operators
 <details>
-<summary>There are 467 not covered operators</summary>
+<summary>There are 469 not covered operators</summary>
 
 * APMeter
 * ATen
@@ -17,6 +17,7 @@ Serialized tests have covered 217/684 (31.7%) operators
 * Adam
 * Add
 * AddGradient
+* AdjustBatch
 * Alias
 * Allgather
 * Allreduce
@@ -96,6 +97,7 @@ Serialized tests have covered 217/684 (31.7%) operators
 * CubeGradient
 * DBExists
 * DataCouple
+* DenseVectorToIdList
 * DepthConcat
 * DepthSplit
 * DequeueBlobs
@@ -478,7 +480,7 @@ Serialized tests have covered 217/684 (31.7%) operators
 
 ## Covered operators
 <details>
-<summary>There are 217 covered operators</summary>
+<summary>There are 219 covered operators</summary>
 
 * Acos
 * AcosGradient
@@ -543,6 +545,8 @@ Serialized tests have covered 217/684 (31.7%) operators
 * ElementwiseLinearGradient
 * Elu
 * EluGradient
+* Erf
+* ErfGradient
 * Expand
 * ExpandGradient
 * FC
@@ -702,7 +706,7 @@ Serialized tests have covered 217/684 (31.7%) operators
 ## Excluded from coverage statistics
 ### Schemaless operators
 <details>
-<summary>There are 21 schemaless operators</summary>
+<summary>There are 22 schemaless operators</summary>
 
 * C10Add_DontUseThisOpYet
 * C10AveragedLoss_DontUseThisOpYet
@@ -718,6 +722,7 @@ Serialized tests have covered 217/684 (31.7%) operators
 * C10GivenTensorFill_DontUseThisOpYet
 * C10GivenTensorInt64Fill_DontUseThisOpYet
 * C10GivenTensorIntFill_DontUseThisOpYet
+* C10LayerNorm_DontUseThisOpYet
 * C10Mul_DontUseThisOpYet
 * C10Relu_DontUseThisOpYet
 * C10SigmoidCrossEntropyWithLogits_DontUseThisOpYet

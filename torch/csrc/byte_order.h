@@ -18,6 +18,7 @@ void THP_decodeInt64Buffer(int64_t* dst, const uint8_t* src, THPByteOrder order,
 void THP_decodeHalfBuffer(THHalf* dst, const uint8_t* src, THPByteOrder order, size_t len);
 void THP_decodeFloatBuffer(float* dst, const uint8_t* src, THPByteOrder order, size_t len);
 void THP_decodeDoubleBuffer(double* dst, const uint8_t* src, THPByteOrder order, size_t len);
+void THP_decodeBoolBuffer(bool* dst, const uint8_t* src, THPByteOrder order, size_t len);
 
 void THP_encodeInt16Buffer(uint8_t* dst, const int16_t* src, THPByteOrder order, size_t len);
 void THP_encodeInt32Buffer(uint8_t* dst, const int32_t* src, THPByteOrder order, size_t len);

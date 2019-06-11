@@ -28,8 +28,8 @@ void BatchNormImpl::reset() {
   if (options.stateful_) {
     running_mean =
         register_buffer("running_mean", torch::zeros({options.features_}));
-    running_variance =
-        register_buffer("running_variance", torch::ones({options.features_}));
+    running_var =
+        register_buffer("running_var", torch::ones({options.features_}));
   }
 }
 
@@ -42,12 +42,12 @@ void BatchNormImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor BatchNormImpl::forward(const Tensor& input) {
-  AT_CHECK(
+  TORCH_CHECK(
       options.stateful_,
       "Calling BatchNorm::forward is only permitted when "
       "the 'stateful' option is true (was false). "
       "Use BatchNorm::pure_forward instead.");
-  return pure_forward(input, running_mean, running_variance);
+  return pure_forward(input, running_mean, running_var);
 }
 
 Tensor BatchNormImpl::pure_forward(
@@ -56,7 +56,7 @@ Tensor BatchNormImpl::pure_forward(
     const Tensor& variance) {
   if (is_training()) {
     const auto num_channels = input.dim() > 1 ? input.size(1) : 1;
-    AT_CHECK(
+    TORCH_CHECK(
         input.numel() / num_channels > 1,
         "BatchNorm expected more than 1 value per channel when training!");
   }

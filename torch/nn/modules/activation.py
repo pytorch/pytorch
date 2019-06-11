@@ -1,7 +1,10 @@
 import warnings
 import torch
+from . import Linear
+from torch.nn.init import xavier_uniform_
+from torch.nn.init import constant_
+from torch.nn.init import xavier_normal_
 from torch.nn.parameter import Parameter
-
 from .module import Module
 from .. import functional as F
 from ..._jit_internal import weak_module, weak_script_method
@@ -9,7 +12,7 @@ from ..._jit_internal import weak_module, weak_script_method
 
 @weak_module
 class Threshold(Module):
-    r"""Thresholds each element of the input Tensor
+    r"""Thresholds each element of the input Tensor.
 
     Threshold is defined as:
 
@@ -50,18 +53,17 @@ class Threshold(Module):
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'threshold={}, value={}{}'.format(
             self.threshold, self.value, inplace_str
         )
 
 
 @weak_module
-class ReLU(Threshold):
-    r"""Applies the rectified linear unit function element-wise
-    :math:`\text{ReLU}(x)= \max(0, x)`
+class ReLU(Module):
+    r"""Applies the rectified linear unit function element-wise:
 
-    .. image:: scripts/activation_images/ReLU.png
+    :math:`\text{ReLU}(x)= \max(0, x)`
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -70,6 +72,8 @@ class ReLU(Threshold):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/ReLU.png
 
     Examples::
 
@@ -84,12 +88,18 @@ class ReLU(Threshold):
         >>> input = torch.randn(2).unsqueeze(0)
         >>> output = torch.cat((m(input),m(-input)))
     """
+    __constants__ = ['inplace']
 
     def __init__(self, inplace=False):
-        super(ReLU, self).__init__(0., 0., inplace)
+        super(ReLU, self).__init__()
+        self.inplace = inplace
+
+    @weak_script_method
+    def forward(self, input):
+        return F.relu(input, inplace=self.inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -146,7 +156,7 @@ class RReLU(Module):
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
 
 
@@ -166,8 +176,6 @@ class Hardtanh(Module):
     The range of the linear region :math:`[-1, 1]` can be adjusted using
     :attr:`min_val` and :attr:`max_val`.
 
-    .. image:: scripts/activation_images/Hardtanh.png
-
     Args:
         min_val: minimum value of the linear region range. Default: -1
         max_val: maximum value of the linear region range. Default: 1
@@ -180,6 +188,8 @@ class Hardtanh(Module):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/Hardtanh.png
 
     Examples::
 
@@ -208,7 +218,7 @@ class Hardtanh(Module):
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'min_val={}, max_val={}{}'.format(
             self.min_val, self.max_val, inplace_str
         )
@@ -242,7 +252,7 @@ class ReLU6(Hardtanh):
         super(ReLU6, self).__init__(0., 6., inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -335,7 +345,7 @@ class ELU(Module):
         return F.elu(input, self.alpha, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
@@ -380,7 +390,7 @@ class CELU(Module):
         return F.celu(input, self.alpha, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
@@ -394,8 +404,6 @@ class SELU(Module):
     with :math:`\alpha = 1.6732632423543772848170429916717` and
     :math:`\text{scale} = 1.0507009873554804934193349852946`.
 
-    .. image:: scripts/activation_images/SELU.png
-
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:
@@ -405,6 +413,8 @@ class SELU(Module):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/SELU.png
 
     Examples::
 
@@ -425,7 +435,7 @@ class SELU(Module):
         return F.selu(input, self.inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -433,7 +443,7 @@ class SELU(Module):
 class GLU(Module):
     r"""Applies the gated linear unit function
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where :math:`a` is the first half
-    of the input vector and :math:`b` is the second half.
+    of the input matrices and :math:`b` is the second half.
 
     Args:
         dim (int): the dimension on which to split the input. Default: -1
@@ -551,7 +561,7 @@ class LeakyReLU(Module):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
 
 
@@ -669,6 +679,107 @@ class Softshrink(Module):
 
 
 @weak_module
+class MultiheadAttention(Module):
+    r"""Allows the model to jointly attend to information
+    from different representation subspaces.
+    See reference: Attention Is All You Need
+
+    .. math::
+        \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
+        \text{where} head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)
+
+    Args:
+        embed_dim: total dimension of the model.
+        num_heads: parallel attention heads.
+        dropout: a Dropout layer on attn_output_weights. Default: 0.0.
+        bias: add bias as module parameter. Default: True.
+        add_bias_kv: add bias to the key and value sequences at dim=0.
+        add_zero_attn: add a new batch of zeros to the key and
+                       value sequences at dim=1.
+
+    Examples::
+
+        >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
+        >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
+    """
+
+    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False):
+        super(MultiheadAttention, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.dropout = dropout
+        self.head_dim = embed_dim // num_heads
+        assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
+
+        self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
+        if bias:
+            self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
+        else:
+            self.register_parameter('in_proj_bias', None)
+        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
+
+        if add_bias_kv:
+            self.bias_k = Parameter(torch.empty(1, 1, embed_dim))
+            self.bias_v = Parameter(torch.empty(1, 1, embed_dim))
+        else:
+            self.bias_k = self.bias_v = None
+
+        self.add_zero_attn = add_zero_attn
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        xavier_uniform_(self.in_proj_weight[:self.embed_dim, :])
+        xavier_uniform_(self.in_proj_weight[self.embed_dim:(self.embed_dim * 2), :])
+        xavier_uniform_(self.in_proj_weight[(self.embed_dim * 2):, :])
+
+        xavier_uniform_(self.out_proj.weight)
+        if self.in_proj_bias is not None:
+            constant_(self.in_proj_bias, 0.)
+            constant_(self.out_proj.bias, 0.)
+        if self.bias_k is not None:
+            xavier_normal_(self.bias_k)
+        if self.bias_v is not None:
+            xavier_normal_(self.bias_v)
+
+    @weak_script_method
+    def forward(self, query, key, value, key_padding_mask=None,
+                need_weights=True, attn_mask=None):
+        r"""
+    Args:
+        query, key, value: map a query and a set of key-value pairs to an output.
+            See "Attention Is All You Need" for more details.
+        key_padding_mask: if provided, specified padding elements in the key will
+            be ignored by the attention.
+        need_weights: output attn_output_weights.
+        attn_mask: mask that prevents attention to certain positions.
+
+
+    Shape:
+        - Inputs:
+        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
+        - attn_mask: :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+
+        - Outputs:
+        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
+          E is the embedding dimension.
+        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
+          L is the target sequence length, S is the source sequence length.
+        """
+        return F.multi_head_attention_forward(
+            query, key, value, self.embed_dim, self.num_heads,
+            self.in_proj_weight, self.in_proj_bias, self.bias_k, self.bias_v, self.add_zero_attn,
+            self.dropout, self.out_proj.weight, self.out_proj.bias, training=self.training,
+            key_padding_mask=key_padding_mask, need_weights=need_weights, attn_mask=attn_mask)
+
+
+@weak_module
 class PReLU(Module):
     r"""Applies the element-wise function:
 
@@ -708,8 +819,7 @@ class PReLU(Module):
         - Output: :math:`(N, *)`, same shape as the input
 
     Attributes:
-        weight (Tensor): the learnable weights of shape (attr:`num_parameters`).
-            The attr:`dtype` is default to
+        weight (Tensor): the learnable weights of shape (:attr:`num_parameters`).
 
     .. image:: scripts/activation_images/PReLU.png
 
@@ -719,6 +829,7 @@ class PReLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['num_parameters']
 
     def __init__(self, num_parameters=1, init=0.25):
         self.num_parameters = num_parameters
@@ -789,7 +900,9 @@ class Tanhshrink(Module):
 class Softmin(Module):
     r"""Applies the Softmin function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
-    lie in the range `(0, 1)` and sum to 1
+    lie in the range `[0, 1]` and sum to 1.
+
+    Softmin is defined as:
 
     .. math::
         \text{Softmin}(x_{i}) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}
@@ -828,7 +941,7 @@ class Softmin(Module):
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
-    lie in the range (0,1) and sum to 1
+    lie in the range [0,1] and sum to 1.
 
     Softmax is defined as:
 
@@ -855,7 +968,7 @@ class Softmax(Module):
 
     Examples::
 
-        >>> m = nn.Softmax()
+        >>> m = nn.Softmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -873,6 +986,9 @@ class Softmax(Module):
     @weak_script_method
     def forward(self, input):
         return F.softmax(input, self.dim, _stacklevel=5)
+
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
 
 
 @weak_module
@@ -918,8 +1034,7 @@ class LogSoftmax(Module):
         - Output: :math:`(*)`, same shape as the input
 
     Arguments:
-        dim (int): A dimension along which Softmax will be computed (so every slice
-            along dim will sum to 1).
+        dim (int): A dimension along which LogSoftmax will be computed.
 
     Returns:
         a Tensor of the same dimension and shape as the input with

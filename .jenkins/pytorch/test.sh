@@ -4,7 +4,9 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
+# shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
+
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
@@ -23,6 +25,11 @@ if [ -n "${IN_CIRCLECI}" ]; then
     sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
     sudo mkdir -p /var/run/sshd
   fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
+    export PYTORCH_TEST_WITH_SLOW=1
+    export PYTORCH_TEST_SKIP_FAST=1
+  fi
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
@@ -35,9 +42,23 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # TODO: move this to Docker
   pip install -q hypothesis --user
 
+  # TODO: move this to Docker
+  PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
+  echo $PYTHON_VERSION
+  # if [[ $PYTHON_VERSION == "2" ]]; then
+  #   pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl --user
+  # else
+  #   pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl --user
+  # fi
+  pip install -q tb-nightly --user
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
   pip install mypy --user || true
+fi
+
+# faulthandler become built-in since 3.3
+if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
+  pip install -q faulthandler --user
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -64,13 +85,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
-    function get_exit_code() {
-      set +e
-      "$@"
-      retcode=$?
-      set -e
-      return $retcode
-    }
     (cd test && python -c "import torch")
     echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
@@ -80,9 +94,6 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TEST_WITH_ROCM=1
-  # ROCm CI is using Caffe2 docker images, which doesn't have several packages
-  # needed in testing. We install them here.
-  pip install -q psutil "librosa>=0.6.2" --user
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
@@ -140,7 +151,7 @@ test_torchvision() {
   # this should be a transient requirement...)
   # See https://github.com/pytorch/pytorch/issues/7525
   #time python setup.py install
-  pip install -q --user .
+  pip install --user .
   popd
   rm -rf vision
 }
@@ -151,13 +162,13 @@ test_libtorch() {
     python test/cpp/jit/tests_setup.py setup
     CPP_BUILD="$PWD/../cpp-build"
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      "$CPP_BUILD"/caffe2/bin/test_jit
+      "$CPP_BUILD"/caffe2/build/bin/test_jit
     else
-      "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
+      "$CPP_BUILD"/caffe2/build/bin/test_jit "[cpu]"
     fi
     python test/cpp/jit/tests_setup.py shutdown
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/build/bin/test_api
     assert_git_not_dirty
   fi
 }
@@ -187,6 +198,9 @@ test_xla() {
   popd
   assert_git_not_dirty
 }
+
+(cd test && python -c "import torch; print(torch.__config__.show())")
+(cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   test_torchvision

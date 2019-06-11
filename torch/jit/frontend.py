@@ -5,10 +5,11 @@ import ast
 import inspect
 import string
 from textwrap import dedent
-from functools import partial
-from collections import namedtuple
 from torch._six import PY2
 from torch._C._jit_tree_views import *
+
+# Borrowed from cPython implementation 
+# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411# 
 
 _reserved_prefix = '__jit'
 _reserved_names = {'print'}
@@ -137,21 +138,42 @@ def _uses_true_division(fn):
             '_uses_true_division: expected function or method, got {}'.format(type(fn)))
 
 
-def get_jit_ast(fn, is_method):
-    source = dedent(inspect.getsource(fn))
-    py_ast = ast.parse(source)
+def get_jit_class_def(cls, self_name):
+    # Get defs for each method independently
+    methods = inspect.getmembers(
+        cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
+    method_defs = [get_jit_def(method[1],
+                   self_name=self_name) for method in methods]
+
+    sourcelines, file_lineno = inspect.getsourcelines(cls)
+    source = ''.join(sourcelines)
+    filename = inspect.getsourcefile(cls)
+    dedent_src = dedent(source)
+    py_ast = ast.parse(dedent_src)
+    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
+    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, False)
+    return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
+
+
+def get_jit_def(fn, self_name=None):
+    sourcelines, file_lineno = inspect.getsourcelines(fn)
+    source = ''.join(sourcelines)
+    filename = inspect.getsourcefile(fn)
+    dedent_src = dedent(source)
+    py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
+    leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, _uses_true_division(fn))
-    return build_def(ctx, py_ast.body[0], type_line, is_method)
+    ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
+    return build_def(ctx, py_ast.body[0], type_line, self_name)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
 class SourceContext(SourceRangeFactory):
-    def __init__(self, source, uses_true_division=True):
-        super(SourceContext, self).__init__(source)
+    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
+        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
 
 
@@ -163,17 +185,22 @@ class Builder(object):
         return method(ctx, node)
 
 
-def build_def(ctx, py_def, type_line, is_method):
-    returns = []
-    ret_body = []
+def build_class_def(ctx, py_def, methods, self_name):
+    r = ctx.make_range(py_def.lineno, py_def.col_offset,
+                       py_def.col_offset + len("class"))
+    return ClassDef(Ident(r, self_name), methods)
+
+
+def build_def(ctx, py_def, type_line, self_name=None):
     body = py_def.body
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("def"))
-    param_list = build_param_list(ctx, py_def.args)
+    param_list = build_param_list(ctx, py_def.args, self_name)
     return_type = None
     if getattr(py_def, 'returns', None) is not None:
         return_type = build_expr(ctx, py_def.returns)
     decl = Decl(r, param_list, return_type)
+    is_method = self_name is not None
     if type_line is not None:
         type_comment_decl = torch._C.parse_type_comment(type_line)
         decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
@@ -183,27 +210,32 @@ def build_def(ctx, py_def, type_line, is_method):
 
 
 _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments "
-                     "or keyword-only arguments")
+                     "or use keyword-only arguments with defaults")
 
 
-def build_param_list(ctx, py_args):
+def build_param_list(ctx, py_args, self_name):
     if py_args.vararg is not None or py_args.kwarg is not None:
         raise ValueError(_vararg_kwarg_err)
-    if not PY2 and (py_args.kw_defaults or py_args.kwonlyargs):
+    if not PY2 and py_args.kw_defaults:
         raise ValueError(_vararg_kwarg_err)
-    return [build_param(ctx, arg) for arg in py_args.args]
+    result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
+    if not PY2:
+        result += [build_params(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
+    return result
 
 
-def build_param(ctx, py_arg):
+def build_param(ctx, py_arg, self_name, kwarg_only):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     #     In Python2 py_arg is a Name (Expr subclass)
     name = py_arg.id if PY2 else py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     if getattr(py_arg, 'annotation', None) is not None:
         annotation_expr = build_expr(ctx, py_arg.annotation)
+    elif self_name is not None and name == 'self':
+        annotation_expr = Var(Ident(r, self_name))
     else:
-        annotation_expr = Var(Ident(r, 'Tensor'))
-    return Param(annotation_expr, Ident(r, name))
+        annotation_expr = EmptyTypeAnnotation(r)
+    return Param(annotation_expr, Ident(r, name), kwarg_only)
 
 
 def get_default_args(fn):
@@ -393,6 +425,11 @@ class ExprBuilder(Builder):
         return Apply(func, args, kwargs)
 
     @staticmethod
+    def build_Ellipsis(ctx, expr):
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 3)  # len("...") == 3
+        return Dots(r)
+
+    @staticmethod
     def build_Name(ctx, expr):
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(expr.id))
         if expr.id.startswith(_reserved_prefix):
@@ -489,10 +526,8 @@ class ExprBuilder(Builder):
         def build_SliceExpr(ctx, base, slice_expr):
             lower = build_expr(ctx, slice_expr.lower) if slice_expr.lower is not None else None
             upper = build_expr(ctx, slice_expr.upper) if slice_expr.upper is not None else None
-            if slice_expr.step is not None:
-                step = build_expr(ctx, slice_expr.step)
-                raise NotSupportedError(step.range(), "slices with ranges are not supported yet")
-            return SliceExpr(base.range(), lower, upper)
+            step = build_expr(ctx, slice_expr.step) if slice_expr.step is not None else None
+            return SliceExpr(base.range(), lower, upper, step)
 
         def build_Index(ctx, base, index_expr):
             if isinstance(index_expr.value, ast.Tuple) or \
@@ -510,6 +545,8 @@ class ExprBuilder(Builder):
                     sub_exprs.append(build_Index(ctx, base, expr))
                 elif sub_type is ast.Slice:
                     sub_exprs.append(build_SliceExpr(ctx, base, expr))
+                elif sub_type is ast.Ellipsis:
+                    sub_exprs.append(Dots(base.range()))
                 else:
                     raise NotSupportedError(base.range(),
                                             "slicing multiple dimensions with "
@@ -559,6 +596,41 @@ class ExprBuilder(Builder):
         value = str(expr.s)
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
         return StringLiteral(r, value)
+
+    @staticmethod
+    def build_JoinedStr(ctx, expr):
+        s = ''
+        args = []
+        for value in expr.values:
+            r = ctx.make_range(value.lineno, value.col_offset, value.col_offset + 1)
+            if isinstance(value, ast.FormattedValue):
+                if value.conversion != -1:
+                    raise NotSupportedError(r, 'Don\'t support conversion in JoinedStr')
+                if value.format_spec is not None:
+                    raise NotSupportedError(r, 'Don\'t support formatting in JoinedStr')
+                s += '{}'
+                args.append(build_expr(ctx, value.value))
+            elif isinstance(value, ast.Str):
+                s += value.s
+            else:
+                raise NotSupportedError(r, 'Unsupported value in JoinedStr')
+
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        return Apply(Select(StringLiteral(r, s), Ident(r, 'format')), args, [])
+
+    @staticmethod
+    def build_ListComp(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
+        if (len(stmt.generators) > 1):
+            raise NotSupportedError(r, "multiple comprehension generators not supported yet")
+
+        if (len(stmt.generators[0].ifs) != 0):
+            raise NotSupportedError(r, "comprehension ifs not supported yet")
+
+        elt_expr = build_expr(ctx, stmt.elt)
+        target_expr = build_expr(ctx, stmt.generators[0].target)
+        iter_expr = build_expr(ctx, stmt.generators[0].iter)
+        return ListComp(r, elt_expr, target_expr, iter_expr)
 
     @staticmethod
     def build_Starred(ctx, expr):

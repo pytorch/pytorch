@@ -6,6 +6,9 @@
 #include <TH/generic/THTensor.cpp>
 #include <TH/THGenerateHalfType.h>
 
+#include <TH/generic/THTensor.cpp>
+#include <TH/THGenerateBoolType.h>
+
 #include <ATen/native/Resize.h>
 
 #include <numeric>
@@ -53,9 +56,10 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
   }
 
   /* storageOffset */
-  if(storageOffset < 0)
+  if(storageOffset < 0) {
     THError("Tensor: invalid storage offset");
-    self->set_storage_offset(storageOffset);
+  }
+  self->set_storage_offset(storageOffset);
 
   /* size and stride */
   THTensor_resizeNd(self, nDimension, size, stride);
@@ -75,7 +79,7 @@ void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef strid
 
 void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
-  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
+  TORCH_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
   at::IntArrayRef sizes(size, nDimension);
   at::optional<at::IntArrayRef> strides;
   if (stride) {
@@ -157,5 +161,14 @@ void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // Caffe2 might have tensors whose storages are null, but we
   // don't allow it in PyTorch.
   AT_ASSERT(storage);
+  // Caffe2 also has uninitialized dtype states, which we disallow here
+  AT_ASSERT(tensor->storage().dtype() == storage->dtype());
+
+  // We used to allow this, but this breaks device caching.
+  // Let's put an actual error message for this one.
+  TORCH_CHECK(tensor->storage().device() == storage->device(),
+            "Attempted to set the storage of a tensor on device \"", tensor->storage().device(),
+             "\" to a storage on different device \"", storage->device(),
+            "\".  This is no longer allowed; the devices must match.");
   tensor->set_storage(at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage)));
 }

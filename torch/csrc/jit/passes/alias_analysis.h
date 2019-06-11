@@ -1,8 +1,9 @@
 #pragma once
 
+#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/passes/utils/alias_tracker.h>
+#include <torch/csrc/jit/passes/utils/memory_dag.h>
 
 namespace torch {
 namespace jit {
@@ -25,7 +26,6 @@ namespace jit {
  * we're not sure what this value may alias. To be conservative, we consider
  * the wildcard alias set as potentially aliasing any value.
  */
-
 class AliasDb {
  public:
   TORCH_API explicit AliasDb(std::shared_ptr<Graph> graph);
@@ -39,20 +39,30 @@ class AliasDb {
   //
   // These nodes are considered not safe to eliminate or mutate under any
   // circumstances.
-  bool hasUntrackedEffects(Node* n) const;
+  bool writesToWildcard(Node* n) const;
 
-  // Get all the values that `n` writes to.
-  // NOTE: this only returns values directly written to, not aliases thereof
-  //
-  // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
-  ValueSet getWrites(Node* n, bool recurseBlocks = false) const;
+  // Does `n` write to an alias of one of the values in `vs`?
+  // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
+  TORCH_API bool writesToAlias(Node* n, const ValueSet& vs) const;
 
+  // Does `a` and `b` potentially share a memory location or do either
+  // hold in memory any element that exists in the other
+  TORCH_API bool mayContainAlias(Value* a, Value* b) const;
+
+  // Do any values in group `a` share a memory location or hold in memory
+  // any element that exists in group `b`
+  TORCH_API bool mayContainAlias(
+      const at::ArrayRef<Value*>& a,
+      const at::ArrayRef<Value*>& b) const;
+
+  // Do `a` and `b` potentially share a memory location?
+  TORCH_API bool mayAlias(const Value* a, const Value* b) const;
   // Do any values in group `a` potentially share a memory location with any
-  // value in group `b`?
-  bool mayAlias(const ValueSet& a, const ValueSet& b) const;
+  // value in group `b`? i.e. may they overlap?
+  TORCH_API bool mayAlias(const ValueSet& a, const ValueSet& b) const;
 
   // Do any nodes write to an alias set inputed/outputed by `n`?
-  bool hasWriters(const Node* n) const;
+  TORCH_API bool hasWriters(const Node* n) const;
 
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
@@ -63,8 +73,8 @@ class AliasDb {
   //
   // Returns `false` if it's impossible to move `n` after `MovePoint` without
   // violating dependencies, otherwise executes the move and returns `true`
-  bool moveAfterTopologicallyValid(Node* n, Node* movePoint);
-  bool moveBeforeTopologicallyValid(Node* n, Node* movePoint);
+  TORCH_API bool moveAfterTopologicallyValid(Node* n, Node* movePoint);
+  TORCH_API bool moveBeforeTopologicallyValid(Node* n, Node* movePoint);
 
   bool couldMoveAfterTopologically(Node* n, Node* movePoint);
   bool couldMoveBeforeTopologically(Node* n, Node* movePoint);
@@ -80,31 +90,42 @@ class AliasDb {
   void move(Node* toMove, Node* movePoint, MoveSide moveSide);
   bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
-  ValueSet getWrites(Block* b) const;
-  void getWritesImpl(Block* b, ValueSet& ret, bool recurseBlocks = false) const;
-  void getWritesImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
-
+  /**
+   * Write and read internal API
+   */
+  // Get all the values that `n` writes to.
+  // NOTE: this only returns values directly written to, not aliases thereof
+  //
+  // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
+  MemoryLocations getWrites(Node* n) const;
+  void getWritesImpl(Node* n, MemoryLocations& ret) const;
+  // Do any nodes write to `v`s memory location?
+  TORCH_API bool hasWriters(const Value* v) const;
+  // Register the fact that `n` writes to `v`.
+  void registerWrite(const Value* v, Node* n);
+  void registerWrite(const Element* e, Node* n);
   // Get all the values that `n` reads from.
   // if `recurseBlocks` is true, gather reads on the nodes in `n`s sub-blocks
-  ValueSet getReads(Node* n, bool recurseBlocks = false) const;
+  MemoryLocations getReads(Node* n) const;
+  void getReadsImpl(Node* n, MemoryLocations& ret) const;
 
-  void getReadsImpl(Node* n, ValueSet& ret, bool recurseBlocks = false) const;
-  // Does `n` write to any alias sets?
-  bool hasWrites(Node* n) const;
+  /**
+   * Wildcard methods
+   */
+  // Register `v` as a wildcard value.
+  void setWildcard(const Value* v);
 
-  // Does `n` use or write to any wildcard aliases?
-  bool hasWildcard(const Node* n) const;
-  // Returns nullopt if there are no wildcard nodes
-  c10::optional<const Node*> getLastWildcard() const;
+  // Is the element a wildcard or an unhandled container type,
+  // or does the element contain an element for which that's true
+  bool cannotCheckAliasContainment(const Value* elem) const;
 
-  // Does `n` write to a value that may alias one of the graph inputs?
-  bool writesToInputAlias(Node* n) const;
-
+  /**
+   * Special analysis methods
+   */
   void analyze(const std::shared_ptr<Graph>& graph);
   void analyze(Block* block);
   void analyze(Node* node);
   void analyzeImpl(Node* node);
-
   void analyzeIf(Node* node);
   void analyzeLoop(Node* node);
   void analyzeSubgraph(Node* node);
@@ -114,19 +135,55 @@ class AliasDb {
   void analyzeBroadcastingChunk(Node* node);
   void analyzeFork(Node* node);
   void analyzeWait(Node* node);
+  void analyzeGradOf(Node* node);
+  void analyzeSetAttr(Node* node);
+  void analyzeTupleConstruct(Node* node);
+  void analyzeConservative(Node* node);
+  void analyzeContainerConstruct(Node* node);
+  bool tryRegisteredAnalysis(Node* node);
 
-  void makeAliasOf(const Value* value, const Value* to);
+  /**
+   * Alias manipulation methods
+   */
+  void makeAllAlias(const std::vector<Value*>& values);
+  void makePointerTo(const Value* value, const Value* to);
+  TORCH_API void addToContainedElements(
+      const Value* element,
+      const Value* container);
   void mapAliases(at::ArrayRef<Value*> to, at::ArrayRef<Value*> from);
   void giveFreshAlias(const Value* value);
+  Element* getOrCreateElement(const Value* value);
 
-  bool hasUsesAfter(Symbol alias, const Node* n) const;
-  bool writesTo(Node* n, const Value* v) const;
-  bool isBeforeSameGraph(const Node* lhs, const Node* rhs) const;
+  static bool shouldAnnotate(const Value* v);
+  static bool shouldAnnotate(const TypePtr& type);
+  static c10::optional<TypeKind> getMutableTypeKind(const TypePtr& type);
+
+  static bool isContainerType(const TypePtr& type);
 
   std::shared_ptr<Graph> graph_;
-  std::unordered_map<const Graph*, const Node*> subgraphToOwner_;
-  std::unordered_set<const Node*> wildcardNodes_;
-  std::unique_ptr<AliasTracker> aliasTracker_;
+
+  // The points-to graph that stores aliasing relationships
+  std::unique_ptr<MemoryDAG> memoryDAG_;
+  // Mapping of values to MemoryDAG elements
+  ska::flat_hash_map<const Value*, Element*> elementMap_;
+  // All wildcard elements (one for each unique mutable type).
+  std::map<TypeKind, Element*> wildcardIndex_;
+  Element* getWildcard(const TypePtr& type) const;
+  Element* getOrCreateWildcard(const TypePtr& type);
+  bool mayAliasWildcard(const Value* v) const;
+
+  /**
+   * State for tracking write info.
+   */
+  // Map of nodes to the memory locations that they write to
+  ska::flat_hash_map<Node*, MemoryLocations> writeIndex_;
+  // Set of all memory locations that may have been written to.
+  mutable MemoryLocations writeCache_;
+  mutable bool isWriteCacheStale_ = true;
+  void rebuildWriteCache() const;
 };
+
+// Used to assert that unschematized operators have an analysis method written
+TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
 } // namespace jit
 } // namespace torch

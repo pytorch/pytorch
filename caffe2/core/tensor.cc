@@ -1,4 +1,5 @@
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/tensor_int8.h"
 
 #include "caffe2/core/blob_stats.h"
 
@@ -57,9 +58,17 @@ TypeMeta GetTensorType(const void* c) {
   return tc->dtype();
 }
 
+TypeMeta GetInt8TensorType(const void* c) {
+  const int8::Int8TensorCPU* int8_tensor =
+      static_cast<const int8::Int8TensorCPU*>(c);
+  return (int8_tensor->t).dtype();
+}
+
 // TODO(jerryzh): Remove
 static CaffeMap<TypeIdentifier, TypeCall> type_call_registry_{
-    {TypeMeta::Id<Tensor>(), GetTensorType}};
+    {TypeMeta::Id<Tensor>(), GetTensorType},
+    {TypeMeta::Id<int8::Int8TensorCPU>(), GetInt8TensorType},
+};
 
 TypeCall GetTypeCallFunction(TypeIdentifier id) {
   auto f = type_call_registry_.find(id);
@@ -89,9 +98,18 @@ vector<int64_t> GetTensorInfo(
   return tc->sizes().vec();
 }
 
+vector<int64_t>
+GetInt8TensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
+  const int8::Int8TensorCPU* int8_tensor =
+      static_cast<const int8::Int8TensorCPU*>(c);
+  return GetTensorInfo(&(int8_tensor->t), capacity, device);
+}
+
 // since we only have one tensor, probably need to remove this at some point?
 static CaffeMap<TypeIdentifier, TensorInfoCall> tensor_info_call_registry_{
-    {TypeMeta::Id<Tensor>(), GetTensorInfo}};
+    {TypeMeta::Id<Tensor>(), GetTensorInfo},
+    {TypeMeta::Id<int8::Int8TensorCPU>(), GetInt8TensorInfo},
+};
 
 // TODO: Remove this code in a separate diff, since we only have one
 // GetTensorInfo function now
@@ -142,7 +160,7 @@ void ReinitializeTensor(
       if (tensor->dtype() == options.dtype()) {
         tensor->raw_mutable_data();
       } else {
-        C10_LOG_EVERY_MS(WARNING, 1000)
+        C10_LOG_FIRST_N(WARNING, 1)
             << "Changing the data type of Tensor is discouraged."
             << " Attempt to change data type from: " << tensor->dtype()
             << " to: " << options.dtype();

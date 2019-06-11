@@ -2,6 +2,11 @@ caffe2_binary_target("convert_caffe_image_db.cc")
 caffe2_binary_target("convert_db.cc")
 caffe2_binary_target("make_cifar_db.cc")
 caffe2_binary_target("make_mnist_db.cc")
+if (NOT ANDROID)
+  caffe2_binary_target("parallel_info.cc")
+  target_include_directories(parallel_info PUBLIC
+    ${CMAKE_BINARY_DIR}/aten/src) # provides "ATen/TypeExtendedInterface.h" to ATen.h
+endif()
 caffe2_binary_target("predictor_verifier.cc")
 caffe2_binary_target("print_registered_core_operators.cc")
 caffe2_binary_target("run_plan.cc")
@@ -10,6 +15,12 @@ caffe2_binary_target("split_db.cc")
 
 caffe2_binary_target("db_throughput.cc")
 
+
+if (BUILD_TEST AND NOT ANDROID)
+  # Core overhead benchmark
+  caffe2_binary_target("core_overhead_benchmark.cc")
+  target_link_libraries(core_overhead_benchmark benchmark)
+endif()
 
 if (USE_CUDA)
   caffe2_binary_target("inspect_gpu.cc")
@@ -60,6 +71,11 @@ endif()
 
 if (USE_OBSERVERS)
   caffe2_binary_target(caffe2_benchmark "caffe2_benchmark.cc" "benchmark_helper.cc")
+endif()
+
+if (USE_OBSERVERS AND USE_OPENCV)
+  caffe2_binary_target("convert_and_benchmark.cc")
+  target_link_libraries(convert_and_benchmark ${OpenCV_LIBS})
 endif()
 
 # ---[ tutorials

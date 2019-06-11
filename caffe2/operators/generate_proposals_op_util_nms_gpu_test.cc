@@ -76,6 +76,7 @@ TEST(UtilsNMSTest, TestNMSGPU) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -207,7 +208,13 @@ TEST(UtilsNMSTest, TestPerfNMS) {
   // Running ntests runs of CPU NMS
   auto cpu_start = std::chrono::steady_clock::now();
   for (int itest = 0; itest < ntests; ++itest) {
-    utils::nms_cpu(proposals, scores, indices, thresh);
+    utils::nms_cpu(
+        proposals,
+        scores,
+        indices,
+        thresh,
+        -1, /* topN */
+        true /* legacy_plus_one */);
   }
   auto cpu_stop = std::chrono::steady_clock::now();
 
@@ -244,6 +251,7 @@ TEST(UtilsNMSTest, TestPerfNMS) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -342,13 +350,19 @@ TEST(UtilsNMSTest, GPUEqualsCPUCorrectnessTest) {
 
     // Running ntests runs of CPU NMS
     for (int itest = 0; itest < ntests; ++itest) {
-      std::vector<int> keep =
-          utils::nms_cpu(eig_proposals, eig_scores, sorted_indices, thresh);
+      std::vector<int> keep = utils::nms_cpu(
+          eig_proposals,
+          eig_scores,
+          sorted_indices,
+          thresh,
+          -1, /* topN */
+          true /* legacy_plus_one */);
       int list_nitems;
       utils::nms_gpu(
           d_sorted_boxes,
           nboxes,
           thresh,
+          true, /* legacy_plus_one */
           d_list,
           &list_nitems,
           dev_delete_mask,
@@ -379,13 +393,9 @@ TEST(UtilsNMSTest, TestNMSGPURotatedAngle0) {
     return;
   const int box_dim = 5;
   // Same boxes in TestNMS with (x_ctr, y_ctr, w, h, angle) format
-  std::vector<float> boxes = {
-    30, 35, 41, 51, 0,
-    29.5, 36, 38, 49, 0,
-    24, 29.5, 33, 42, 0,
-    125, 120, 51, 41, 0,
-    127, 124.5, 57, 30, 0
-  };
+  std::vector<float> boxes = {30, 35, 41,   51,    0,  29.5, 36,  38,  49,
+                              0,  24, 29.5, 33,    42, 0,    125, 120, 51,
+                              41, 0,  127,  124.5, 57, 30,   0};
 
   std::vector<float> scores = {0.5f, 0.7f, 0.6f, 0.9f, 0.8f};
 
@@ -443,6 +453,7 @@ TEST(UtilsNMSTest, TestNMSGPURotatedAngle0) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -466,7 +477,6 @@ TEST(UtilsNMSTest, TestNMSGPURotatedAngle0) {
   cuda_context.FinishDeviceComputation();
 }
 
-#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
 TEST(UtilsNMSTest, TestPerfRotatedNMS) {
   if (!HasCudaGPU())
     return;
@@ -512,7 +522,13 @@ TEST(UtilsNMSTest, TestPerfRotatedNMS) {
   // Running ntests runs of CPU NMS
   auto cpu_start = std::chrono::steady_clock::now();
   for (int itest = 0; itest < ntests; ++itest) {
-    utils::nms_cpu(proposals, scores, indices, thresh);
+    utils::nms_cpu(
+        proposals,
+        scores,
+        indices,
+        thresh,
+        -1, /* topN */
+        true /* legacy_plus_one */);
   }
   auto cpu_stop = std::chrono::steady_clock::now();
 
@@ -549,6 +565,7 @@ TEST(UtilsNMSTest, TestPerfRotatedNMS) {
         d_sorted_boxes,
         nboxes,
         thresh,
+        true, /* legacy_plus_one */
         d_list,
         &list_nitems,
         dev_delete_mask,
@@ -647,13 +664,19 @@ TEST(UtilsNMSTest, GPUEqualsCPURotatedCorrectnessTest) {
 
     // Running ntests runs of CPU NMS
     for (int itest = 0; itest < ntests; ++itest) {
-      std::vector<int> keep =
-          utils::nms_cpu(eig_proposals, eig_scores, sorted_indices, thresh);
+      std::vector<int> keep = utils::nms_cpu(
+          eig_proposals,
+          eig_scores,
+          sorted_indices,
+          thresh,
+          -1, /* topN */
+          true /* legacy_plus_one */);
       int list_nitems;
       utils::nms_gpu(
           d_sorted_boxes,
           nboxes,
           thresh,
+          true, /* legacy_plus_one */
           d_list,
           &list_nitems,
           dev_delete_mask,
@@ -678,6 +701,5 @@ TEST(UtilsNMSTest, GPUEqualsCPURotatedCorrectnessTest) {
     }
   }
 }
-#endif // CV_MAJOR_VERSION >= 3
 
 } // namespace caffe2

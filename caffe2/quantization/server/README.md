@@ -51,6 +51,7 @@ The following quantized operators are currently implemented
 * Int8MaxPool
 * Int8Relu
 * Int8ResizeNearest
+* Int8SpatialBN
 * Int8Tanh : uses lookup table
 * Int8Sigmoid : reuses the same lookup table for Tanh
 * Int8Gather
@@ -77,3 +78,49 @@ To facilitate numerical debugging, setting measure_quantization_error argument w
 * Different precision
 
 Our operators also have some functionality to emulate different fixed-point HW implementations. For example, setting activation_quantization_precision and weight_quantization_precision operator attributes to 4 can emulate 4-bit HW. We can also emulate more than 8-bit. Using that requires a different engine DNNLOWP_16 (sorry about a poor choice of name because it's confusing with DNNLOWP_ACC16).
+
+* Pre-packing weights
+
+The FBGEMM needs the weight tensor pre-packed in its custom layout for high performance (note that this is not the case for activation and can stay in the standard NHWC layout because having custom activation layout will be complicated due to inter-operability with producer/consumer operators). We need other pre-processings like computing column offsets when input activations use asymmetric quantization, or separating out outliers as a sparse matrix for 16-bit accumulation. Having the results of these kind of pre-processing as a part of Conv/FC operator will duplicate the results when a weight tensor is shared among multiple operators (can happen if we run multiple copies of the same net sharing weights). fbgemm_pack_matrix_cache.h provides a quick workaround of caching the pre-processing results but we strongly recommend using pre-packing operators as shown in the following example.
+
+init_net:
+```
+op {
+  input: "Wq"
+  input: "bq"
+  output: "Wq_packed"
+  name: "Pack_Wq"
+  type: "Int8ConvPackWeight"
+  engine: "DNNLOWP"
+}
+...
+```
+
+predict_net:
+```
+...
+op {
+  input: "Xq"
+  input: "Wq_packed"
+  output: "Yq"
+  name: "Conv_example"
+  type: "Int8Conv"
+  arg {
+    name: "kernel"
+    i: 2
+  }
+  arg {
+    name: "order"
+    s: "NHWC"
+  }
+  arg {
+    name: "Y_scale"
+    f: 1.0
+  }
+  arg {
+    name: "Y_zero_point"
+    i: 0
+  }
+  engine: "DNNLOWP"
+}
+```

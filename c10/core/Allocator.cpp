@@ -16,12 +16,7 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
           device};
 }
 
-} // namespace c10
-
-namespace caffe2 {
-
-C10_API at::Allocator* allocator_array[static_cast<int>(
-    at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+C10_API at::Allocator* allocator_array[at::COMPILE_TIME_MAX_DEVICE_TYPES];
 
 void SetAllocator(at::DeviceType t, at::Allocator* alloc) {
   allocator_array[static_cast<int>(t)] = alloc;
@@ -33,4 +28,4 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
   return alloc;
 }
 
-} // namespace caffe2
+} // namespace c10

@@ -20,8 +20,9 @@ namespace caffe2 {
 template <class Context>
 class FillerOp : public Operator<Context> {
  public:
-  FillerOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit FillerOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         shape_(this->template GetRepeatedArgument<int64_t>("shape")),
         extra_shape_(ToVectorint64_t(
             this->template GetRepeatedArgument<int>("extra_shape"))),
@@ -104,8 +105,9 @@ template <typename T, class Context>
 class UniformFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  UniformFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : FillerOp<Context>(operator_def, ws),
+  template <class... Args>
+  explicit UniformFillOp(Args&&... args)
+      : FillerOp<Context>(std::forward<Args>(args)...),
         min_(this->template GetSingleArgument<T>("min", 0)),
         max_(this->template GetSingleArgument<T>("max", 1)) {
     if (InputSize() == 3) {
@@ -155,8 +157,9 @@ template <class Context>
 class UniqueUniformFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  UniqueUniformFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : FillerOp<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit UniqueUniformFillOp(Args&&... args)
+      : FillerOp<Context>(std::forward<Args>(args)...) {
     TensorProto_DataType dtype =
         static_cast<TensorProto_DataType>(this->template GetSingleArgument<int>(
             "dtype", TensorProto_DataType_INT32));
@@ -224,8 +227,9 @@ template <class Context>
 class ConstantFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ConstantFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : FillerOp<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit ConstantFillOp(Args&&... args)
+      : FillerOp<Context>(std::forward<Args>(args)...) {
     TensorProto_DataType dtype =
         static_cast<TensorProto_DataType>(this->template GetSingleArgument<int>(
             "dtype", TensorProto_DataType_FLOAT));
@@ -315,8 +319,9 @@ template <class Context>
 class DiagonalFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  DiagonalFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : FillerOp<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit DiagonalFillOp(Args&&... args)
+      : FillerOp<Context>(std::forward<Args>(args)...) {
     TensorProto_DataType dtype =
         static_cast<TensorProto_DataType>(this->template GetSingleArgument<int>(
             "dtype", TensorProto_DataType_FLOAT));
@@ -416,8 +421,9 @@ template <typename T, class Context>
 class GaussianFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  GaussianFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : FillerOp<Context>(operator_def, ws),
+  template <class... Args>
+  explicit GaussianFillOp(Args&&... args)
+      : FillerOp<Context>(std::forward<Args>(args)...),
         mean_(this->template GetSingleArgument<float>("mean", 0)),
         std_(this->template GetSingleArgument<float>("std", 1)) {
     DCHECK_GT(std_, 0) << "Standard deviation should be nonnegative.";
@@ -442,8 +448,9 @@ template <typename T, class Context>
 class XavierFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  XavierFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : FillerOp<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit XavierFillOp(Args&&... args)
+      : FillerOp<Context>(std::forward<Args>(args)...) {}
 
   bool Fill(Tensor* output) override {
     const int fan_in = output->numel() / output->dim32(0);
@@ -462,8 +469,9 @@ template <typename T, class Context>
 class MSRAFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  MSRAFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : FillerOp<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit MSRAFillOp(Args&&... args)
+      : FillerOp<Context>(std::forward<Args>(args)...) {}
 
   bool Fill(Tensor* output) override {
     const int fan_out = output->numel() / output->dim32(1);
@@ -485,8 +493,9 @@ template <typename T, class Context>
 class RangeFillOp final : public FillerOp<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  RangeFillOp(const OperatorDef& operator_def, Workspace* ws)
-      : FillerOp<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit RangeFillOp(Args&&... args)
+      : FillerOp<Context>(std::forward<Args>(args)...) {}
 
   bool Fill(Tensor* output) override;
 };

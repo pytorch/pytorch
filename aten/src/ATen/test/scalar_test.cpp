@@ -19,7 +19,7 @@ struct Foo {
   static void apply(Tensor a, Tensor b) {
     scalar_type s = 1;
     std::stringstream ss;
-    ss << "hello, dispatch: " << a.type().toString() << s << "\n";
+    ss << "hello, dispatch: " << a.dispatch_type().toString() << s << "\n";
     auto data = (scalar_type*)a.data_ptr();
     (void)data;
   }
@@ -90,8 +90,8 @@ TEST(TestScalar, TestScalar) {
   test_overflow();
 
   if (at::hasCUDA()) {
-    auto r = CUDA(Float).copy(next_h);
-    ASSERT_TRUE(CPU(Float).copy(r).equal(next_h));
+    auto r = next_h.to(at::Device(kCUDA), kFloat, /*non_blocking=*/ false, /*copy=*/ true);
+    ASSERT_TRUE(r.to(at::Device(kCPU), kFloat, /*non_blocking=*/ false, /*copy=*/ true).equal(next_h));
   }
   ASSERT_NO_THROW(randn({10, 10, 2}, options));
 
@@ -101,11 +101,11 @@ TEST(TestScalar, TestScalar) {
   ASSERT_EQ(scalar_to_tensor(ones({}).item()).scalar_type(), kDouble);
 
   if (x.scalar_type() != ScalarType::Half) {
-    AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
+    AT_DISPATCH_ALL_TYPES(x.scalar_type(), "foo", [&] {
       scalar_t s = 1;
       std::stringstream ss;
       ASSERT_NO_THROW(
-          ss << "hello, dispatch" << x.type().toString() << s << "\n");
+          ss << "hello, dispatch" << x.dispatch_type().toString() << s << "\n");
       auto data = (scalar_t*)x.data_ptr();
       (void)data;
     });

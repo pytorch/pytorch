@@ -1,6 +1,7 @@
 #pragma once
 
-#include <ATen/core/dispatch/DispatchTable.h>
+#include <ATen/core/dispatch/OperatorEntry.h>
+#include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <c10/util/Exception.h>
 #include <mutex>
 #include <list>
@@ -20,12 +21,14 @@ class CAFFE2_API OperatorHandle;
  * that is used by some kernels to get better performance when they're called
  * multiple times (mostly Caffe2 kernels do that).
  *
- * OpKernel is not threadsafe.
+ * OpKernel is only threadsafe if the kernel is threadsafe. There are no mutexes
+ * protecting the kernel cache, so if the kernel uses the cache and doesn't have
+ * mutexes for it, it will likely not be threadsafe.
  */
 class CAFFE2_API OpKernel final {
 public:
-  OpKernel(OpKernel&&) = default;
-  OpKernel& operator=(OpKernel&&) = default;
+  OpKernel(OpKernel&&) noexcept = default;
+  OpKernel& operator=(OpKernel&&) noexcept = default;
   OpKernel(const OpKernel&) = delete;
   OpKernel& operator=(const OpKernel&) = delete;
 
@@ -33,22 +36,16 @@ public:
    * Call the operator kernel with the given arguments.
    */
   void call(Stack* stack) const {
-    if (cache_.get() == nullptr) {
-      AT_ASSERT(cache_creator_ != nullptr);
-      cache_ = (*cache_creator_)();
-    }
     return (*kernel_)(stack, cache_.get());
   }
 
 private:
-  explicit OpKernel(KernelFunction* kernel, KernelCacheCreatorFunction* cache_creator)
-  : kernel_(kernel), cache_creator_(cache_creator) {}
+  explicit OpKernel(KernelFunction* kernel, const KernelCacheCreatorFunction& cache_creator)
+  : kernel_(kernel), cache_(cache_creator()) {}
   friend class Dispatcher;
 
   KernelFunction* kernel_;
-
-  KernelCacheCreatorFunction* cache_creator_;
-  mutable std::unique_ptr<c10::KernelCache> cache_;
+  std::unique_ptr<c10::KernelCache> cache_;
 };
 
 /**
@@ -67,6 +64,7 @@ public:
 namespace detail {
 class RegistrationListenerList;
 }
+class SchemaRegistrationHandleRAII;
 
 /**
  * Top-level dispatch interface for dispatching via the dynamic dispatcher.
@@ -74,12 +72,11 @@ class RegistrationListenerList;
 class CAFFE2_API Dispatcher final {
 private:
   struct OperatorDef final {
-    explicit OperatorDef(FunctionSchema schema_)
-    : dispatchTable(schema_)
-    , schema(std::move(schema_)) {}
+    explicit OperatorDef(FunctionSchema&& schema, OperatorOptions&& options)
+    : op(std::move(schema), std::move(options)), refcount(0) {}
 
-    DispatchTable dispatchTable;
-    FunctionSchema schema;
+    impl::OperatorEntry op;
+    size_t refcount;
   };
   friend class OperatorHandle;
 
@@ -93,26 +90,43 @@ public:
   static Dispatcher& singleton();
 
   /**
-   * Register a new operator schema. The handle returned can be used to register
-   * kernels to this operator or to call it.
+   * Register a new operator schema.
+   *
+   * If a schema with the same operator name and overload name already exists,
+   * this function will check that both schemas are exactly identical.
+   *
+   * @return An OperatorHandle for the registered schema which can be used to
+   *         register kernels for the operator and a RegistrationHandleRAII RAII
+   *         object that manages the lifetime of the registration. Once that
+   *         object is destructed, the kernel will be deregistered.
    */
-  OperatorHandle registerSchema(FunctionSchema schema);
+  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema, OperatorOptions options);
 
   /**
-   * Remove an operator from the dispatcher. Make sure you removed
-   * all kernels for this operatorbefore calling this.
+   * Looks for an operator schema with the given name and overload name
+   * and returns it if it is registered.
+   * Returns nullopt otherwise.
    */
-  void deregisterSchema(const OperatorHandle& op);
+  c10::optional<OperatorHandle> findSchema(const char* operator_name, const char* overload_name);
 
   /**
-   * Register an operator to the dispatch table for an operator.
+   * Register a kernel to the dispatch table for an operator.
+   * If dispatch_key is nullopt, then this registers a fallback kernel.
+   *
+   * @return A RAII object that manages the lifetime of the registration.
+   *         Once that object is destructed, the kernel will be deregistered.
    */
-  void registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction* cache_creator_func);
+  RegistrationHandleRAII registerKernel(const OperatorHandle& op, TensorTypeId dispatch_key, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
 
   /**
-   * Remove an operator from the dispatch table for an operator.
+   * Register a fallback kernel for an operator.
+   * After this, when trying to lookup a kernel for an unknown dispatch key,
+   * it will not fail anymore, but return the fallback kernel instead.
+   *
+   * @return A RAII object that manages the lifetime of the registration.
+   *         Once that object is destructed, the kernel will be deregistered.
    */
-  void deregisterKernel(const OperatorHandle& op, TensorTypeId dispatch_key);
+  RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction* kernel_func, KernelCacheCreatorFunction cache_creator_func);
 
   /**
    * Perform a dynamic dispatch and get the kernel for an operator.
@@ -130,6 +144,10 @@ public:
 private:
   Dispatcher();
 
+  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
+
+  void deregisterSchema_(const OperatorHandle& op);
+
   std::list<OperatorDef> operators_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
@@ -142,27 +160,45 @@ private:
  */
 class CAFFE2_API OperatorHandle final {
 public:
-  OperatorHandle(OperatorHandle&&) = default;
-  OperatorHandle& operator=(OperatorHandle&&) = default;
+  OperatorHandle(OperatorHandle&&) noexcept = default;
+  OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
 
   const FunctionSchema& schema() const {
-    return operatorDefIterator_->schema;
+    return operatorIterator_->op.schema();
+  }
+
+  const OperatorOptions& options() const {
+    return operatorIterator_->op.options();
   }
 
 private:
-  explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorDefIterator)
-  : operatorDefIterator_(std::move(operatorDefIterator)) {}
+  explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
+  : operatorIterator_(std::move(operatorIterator)) {}
   friend class Dispatcher;
 
-  std::list<Dispatcher::OperatorDef>::iterator operatorDefIterator_;
+  std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 
+class CAFFE2_API SchemaRegistrationHandleRAII final {
+public:
+  const OperatorHandle& opHandle() const {
+    return opHandle_;
+  }
+
+private:
+  friend class Dispatcher;
+  explicit SchemaRegistrationHandleRAII(OperatorHandle opHandle, RegistrationHandleRAII registrationHandle)
+    : opHandle_(std::move(opHandle)), registrationHandle_(std::move(registrationHandle)) {}
+
+  OperatorHandle opHandle_;
+  RegistrationHandleRAII registrationHandle_;
+};
 
 inline OpKernel Dispatcher::lookup(const OperatorHandle& op, const Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  const DispatchTableEntry& kernel = op.operatorDefIterator_->dispatchTable.lookup(stack);
+  const DispatchTableEntry& kernel = op.operatorIterator_->op.lookupKernel(stack);
   return OpKernel(kernel.kernel_func, kernel.cache_creator_func);
 }
 

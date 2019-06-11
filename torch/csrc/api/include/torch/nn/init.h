@@ -1,11 +1,30 @@
 #pragma once
 
-#include <torch/types.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/types.h>
 
 namespace torch {
 namespace nn {
 namespace init {
+
+enum class Nonlinearity {
+  Linear,
+  Conv1D,
+  Conv2D,
+  Conv3D,
+  ConvTranspose1D,
+  ConvTranspose2D,
+  ConvTranspose3D,
+  Sigmoid,
+  Tanh,
+  ReLU,
+  LeakyReLU
+};
+
+enum class FanMode { FanIn, FanOut };
+
+/// Return the recommended gain value for the given nonlinearity function.
+TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param = 0.01);
 
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
 /// No gradient will be recorded for this operation.
@@ -49,6 +68,28 @@ TORCH_API Tensor sparse_(Tensor tensor, double sparsity, double std = 0.01);
 /// distribution parameterized by `low` and `high`.
 /// No gradient will be recorded for this operation.
 TORCH_API Tensor uniform_(Tensor tensor, double low = 0, double high = 1);
+
+/// Fills the input `Tensor` with values according to the method
+/// described in "Delving deep into rectifiers: Surpassing human-level
+/// performance on ImageNet classification" - He, K. et al. (2015), using a
+/// normal distribution. Also known as He initialization.
+/// No gradient will be recorded for this operation.
+TORCH_API Tensor kaiming_normal_(
+    Tensor tensor,
+    double a = 0,
+    FanMode mode = FanMode::FanIn,
+    Nonlinearity nonlinearity = Nonlinearity::LeakyReLU);
+
+/// Fills the input `Tensor` with values according to the method
+/// described in "Delving deep into rectifiers: Surpassing human-level
+/// performance on ImageNet classification" - He, K. et al. (2015), using a
+/// uniform distribution. Also known as He initialization.
+/// No gradient will be recorded for this operation.
+TORCH_API Tensor kaiming_uniform_(
+    Tensor tensor,
+    double a = 0,
+    FanMode mode = FanMode::FanIn,
+    Nonlinearity nonlinearity = Nonlinearity::LeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Understanding the difficulty of training deep feedforward

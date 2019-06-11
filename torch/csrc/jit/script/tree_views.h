@@ -1,8 +1,11 @@
 #pragma once
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/strtod.h>
 #include <torch/csrc/jit/script/tree.h>
 
 #include <functional>
+#include <iostream>
 #include <string>
 
 namespace torch {
@@ -18,10 +21,11 @@ namespace script {
 // - Maybe<T> is really a Tree with kind TK_OPTION that has 0 or 1 subtree of type T
 // - Builtin types are: Ident (TK_IDENT), String (TK_STRING)
 //
-// Param = Param(Expr type, Ident name)                                 TK_PARAM
+// Param = Param(Maybe<Expr> type, Ident name)                          TK_PARAM
 //
 // Decl  = Decl(List<Param> params, Maybe<Expr> return_type)            TK_DECL
 // Def   = Def(Ident name, Decl decl, List<Stmt> body)                  TK_DEF
+// ClassDef = ClassDef(Ident name, List<Def> body)                      TK_CLASS_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
 //       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
@@ -107,6 +111,9 @@ struct TreeView {
   }
   int kind() const {
     return tree_->kind();
+  }
+  void dump() const {
+    std::cout << tree_;
   }
 
  protected:
@@ -290,6 +297,8 @@ struct Expr : public TreeView {
       case '&':
       case '^':
       case '|':
+      case TK_LIST_COMP:
+      case TK_DOTS:
         return;
       default:
         throw ErrorReport(tree)
@@ -327,21 +336,28 @@ struct Param : public TreeView {
   static Param create(
       const SourceRange& range,
       const Ident& ident,
-      const Expr& type,
-      const Maybe<Expr>& def) {
-    return Param(Compound::create(TK_PARAM, range, {ident, type, def}));
+      const Maybe<Expr>& type,
+      const Maybe<Expr>& def,
+      bool kwarg_only) {
+    TreeRef kwarg_only_tree =
+        Compound::create(kwarg_only ? TK_TRUE : TK_FALSE, range, {});
+    return Param(
+        Compound::create(TK_PARAM, range, {ident, type, def, kwarg_only_tree}));
   }
   Ident ident() const {
     return Ident(subtree(0));
   }
-  Expr type() const {
-    return Expr(subtree(1));
+  Maybe<Expr> type() const {
+    return Maybe<Expr>(subtree(1));
   }
   Maybe<Expr> defaultValue() const {
     return Maybe<Expr>(subtree(2));
   }
-  Param withType(const Expr& typ) const {
-    return Param::create(range(), ident(), typ, defaultValue());
+  bool kwarg_only() const {
+    return TK_TRUE == subtree(3)->kind();
+  }
+  Param withType(const Maybe<Expr>& typ) const {
+    return Param::create(range(), ident(), typ, defaultValue(), kwarg_only());
   }
 };
 
@@ -390,6 +406,28 @@ struct Def : public TreeView {
       const Decl& decl,
       const List<Stmt>& stmts) {
     return Def(Compound::create(TK_DEF, range, {name, decl, stmts}));
+  }
+};
+
+struct ClassDef : public TreeView {
+  explicit ClassDef(const TreeRef& tree) : TreeView(tree) {
+    tree->match(TK_CLASS_DEF);
+  }
+  ClassDef withName(std::string new_name) const {
+    auto new_ident = Ident::create(name().range(), std::move(new_name));
+    return create(range(), new_ident, defs());
+  }
+  Ident name() const {
+    return Ident(subtree(0));
+  }
+  List<Def> defs() const {
+    return List<Def>(subtree(1));
+  }
+  static ClassDef create(
+      const SourceRange& range,
+      const Ident& name,
+      const List<Def>& defs) {
+    return ClassDef(Compound::create(TK_CLASS_DEF, range, {name, defs}));
   }
 };
 
@@ -462,6 +500,30 @@ struct For : public Stmt {
       const List<Expr>& itrs,
       const List<Stmt>& body) {
     return For(Compound::create(TK_FOR, range, {targets, itrs, body}));
+  }
+};
+
+// TODO: supports only single comprehension for now
+struct ListComp : public Expr {
+  explicit ListComp(const TreeRef& tree) : Expr(tree) {
+    tree->match(TK_LIST_COMP);
+  }
+  Expr elt() const {
+    return Expr(subtree(0));
+  }
+  Expr target() const {
+    return Expr(subtree(1));
+  }
+  Expr iter() const {
+    return Expr(subtree(2));
+  }
+  // TODO: no ifs for now
+  static ListComp create(
+      const SourceRange& range,
+      const Expr& elt,
+      const Expr& target,
+      const Expr& iter) {
+    return ListComp(Compound::create(TK_LIST_COMP, range, {elt, target, iter}));
   }
 };
 
@@ -584,6 +646,15 @@ struct Pass : public Stmt {
   }
 };
 
+struct Dots : public Expr {
+  explicit Dots(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_DOTS);
+  }
+  static Dots create(const SourceRange& range) {
+    return Dots(Compound::create(TK_DOTS, range, {}));
+  }
+};
+
 struct ExprStmt : public Stmt {
   explicit ExprStmt(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_EXPR_STMT);
@@ -678,11 +749,12 @@ struct Const : public Expr {
     return !isFloatingPoint();
   }
   int64_t asIntegral() const {
-    return std::stoll(subtree(0)->stringValue());
+    return c10::stoll(subtree(0)->stringValue());
   }
   double asFloatingPoint() const {
-    return SharedParserData::strtod_c(
-        subtree(0)->stringValue().c_str(), nullptr);
+    char* dummy;
+    return torch::jit::script::strtod_c(
+        subtree(0)->stringValue().c_str(), &dummy);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();
@@ -758,6 +830,9 @@ struct SliceExpr : public Expr {
   Maybe<Expr> end() const {
     return Maybe<Expr>(subtree(1));
   }
+  Maybe<Expr> step() const {
+    return Maybe<Expr>(subtree(2));
+  }
   Expr startOr(int alternative) const {
     const auto startOption = start();
     return startOption.present() ? startOption.get() : createInt(alternative);
@@ -766,11 +841,16 @@ struct SliceExpr : public Expr {
     const auto endOption = end();
     return endOption.present() ? endOption.get() : createInt(alternative);
   }
+  Expr stepOr(int alternative) const {
+    const auto stepOption = step();
+    return stepOption.present() ? stepOption.get() : createInt(alternative);
+  }
   static SliceExpr create(
       const SourceRange& range,
       const Maybe<Expr>& start,
-      const Maybe<Expr>& end) {
-    return SliceExpr(Compound::create(TK_SLICE_EXPR, range, {start, end}));
+      const Maybe<Expr>& end,
+      const Maybe<Expr>& step) {
+    return SliceExpr(Compound::create(TK_SLICE_EXPR, range, {start, end, step}));
   }
 
  private:
@@ -875,7 +955,8 @@ struct DictLiteral : public Expr {
       const SourceRange& range,
       const List<Expr>& keys,
       const List<Expr>& values) {
-    return DictLiteral(Compound::create(TK_DICT_LITERAL, range, {keys, values}));
+    return DictLiteral(
+        Compound::create(TK_DICT_LITERAL, range, {keys, values}));
   }
 };
 

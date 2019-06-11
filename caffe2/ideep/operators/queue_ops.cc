@@ -1,7 +1,9 @@
 #include <caffe2/ideep/ideep_utils.h>
 #include <caffe2/queue/blobs_queue.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPCreateBlobsQueueOp final : public IDEEPOperator {
  public:
@@ -68,4 +70,4 @@ SHOULD_NOT_DO_GRADIENT(IDEEPCreateBlobsQueueOp);
 REGISTER_IDEEP_OPERATOR(SafeEnqueueBlobs, IDEEPSafeEnqueueBlobsOp);
 SHOULD_NOT_DO_GRADIENT(IDEEPSafeEnqueueBlobsOp);
 
-} // namespace caffe2
+} // namespace

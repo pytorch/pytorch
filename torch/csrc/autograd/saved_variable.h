@@ -1,12 +1,10 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/autograd/variable_version.h>
 
 #include <ATen/ATen.h>
 
 #include <cstdint>
-#include <list>
 #include <memory>
 
 namespace torch { namespace autograd {
@@ -47,7 +45,7 @@ class TORCH_API SavedVariable {
   // passed in to the unpack function when reconstructing the Variable.
   std::shared_ptr<Function> grad_fn_;
   std::weak_ptr<Function> grad_accumulator_;
-  VariableVersion version_counter_;
+  c10::VariableVersion version_counter_;
 
   uint32_t saved_version_ = 0;
   uint32_t output_nr_ = 0;

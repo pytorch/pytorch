@@ -15,8 +15,7 @@ shared_ptr<fbgemm::PackBMatrix<int8_t, ACC_T>> GetOrCreateFbgemmPackBMatrix(
     int32_t n,
     const void* orig_data,
     const int8_t* quantized_data,
-    int32_t ld,
-    int32_t zero_point) {
+    int32_t ld) {
   static std::map<
       std::tuple<int, int, const void*>,
       weak_ptr<fbgemm::PackBMatrix<int8_t, ACC_T>>>
@@ -65,8 +64,7 @@ GetOrCreateFbgemmPackBMatrix<int16_t>(
     int32_t n,
     const void* orig_data,
     const int8_t* quantized_data,
-    int32_t ld,
-    int32_t zero_point);
+    int32_t ld);
 
 template shared_ptr<fbgemm::PackBMatrix<int8_t, int32_t>>
 GetOrCreateFbgemmPackBMatrix<int32_t>(
@@ -75,7 +73,6 @@ GetOrCreateFbgemmPackBMatrix<int32_t>(
     int32_t n,
     const void* orig_data,
     const int8_t* quantized_data,
-    int32_t ld,
-    int32_t zero_point);
+    int32_t ld);
 
 } // namespace caffe2

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <fbgemm/Fbgemm.h>
-#include <fbgemm/src/FbgemmI8DepthwiseAvx2.h>
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
@@ -89,7 +88,6 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
 
   std::vector<std::int32_t> Y_int32_;
   std::vector<dnnlowp::TensorQuantizationParams> filter_qparams_;
-  std::vector<float> filter_scales_;
   std::vector<std::int32_t> filter_zero_points_;
 
   std::vector<float> requantization_multipliers_;
@@ -128,7 +126,8 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
   // pre-computed biases and offsets
   std::shared_ptr<std::vector<std::int32_t>> b_quantized_;
 
-  float in_qparams_scale_old_ = 0;
+  float in_qparams_scale_old_{0};
+  std::int32_t in_qparams_zero_point_old_{0};
 }; // class ConvDNNLowPOp
 
 } // namespace caffe2

@@ -1,5 +1,5 @@
 from __future__ import division
-import torch
+import torch  # noqa: F401
 
 
 def div_int_future():

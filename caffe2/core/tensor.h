@@ -8,7 +8,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include "ATen/core/Tensor.h"
 #include <c10/core/TensorOptions.h>
-#include <c10/core/Tensor.h>
 
 namespace caffe2 {
 
@@ -71,9 +70,8 @@ class CAFFE2_API Tensor final {
    */
   explicit Tensor(at::Device device)
     : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-        Storage(device),
-        c10::computeTensorTypeId(at::device(device).layout(at::kStrided)),
-        /*is_variable=*/ false
+        Storage::create_legacy(device, TypeMeta()),
+        c10::computeTensorTypeId(at::device(device).layout(at::kStrided))
       )) {
   }
 
@@ -117,8 +115,8 @@ class CAFFE2_API Tensor final {
    * The tensor will share the same instance (data, strides, sizes, etc) but
    * a different subset of APIs would be available
    */
-  explicit Tensor(const at::Tensor& tensor)
-      : impl_(std::move(tensor.getIntrusivePtr())) {
+  explicit Tensor(at::Tensor tensor)
+      : impl_(std::move(tensor.impl_)) {
     enforce_invariants();
   }
 
@@ -128,24 +126,6 @@ class CAFFE2_API Tensor final {
 
   explicit operator at::Tensor() && {
     return at::Tensor::wrap_tensor_impl(std::move(impl_));
-  }
-
-  /**
-   * @brief Mutual conversion with C10Tensor
-   *
-   * The tensor will share the same instance (data, strides, sizes, etc) but
-   * a different subset of APIs would be available
-   */
-  explicit Tensor(C10Tensor tensor) : impl_(std::move(tensor).impl()) {
-    enforce_invariants();
-  }
-
-  explicit operator C10Tensor() const & {
-    return C10Tensor(impl_);
-  }
-
-  explicit operator C10Tensor() && {
-    return C10Tensor(std::move(impl_));
   }
 
   bool is_same(const Tensor& other) const noexcept {
@@ -192,11 +172,11 @@ class CAFFE2_API Tensor final {
   }
 
   at::Device GetDevice() const {
-    return impl_.get()->GetDevice();
+    return impl_.get()->device();
   }
 
   /**
-   * @brief Copies the data from a source tensor, with a contex provided to
+   * @brief Copies the data from a source tensor, with a context provided to
    * carry out the underlying memcpy operation.  This method respects
    * caffe2_keep_on_shrink.
    *
@@ -228,7 +208,7 @@ class CAFFE2_API Tensor final {
     if (impl_->dtype() != src.impl_->dtype()) {
       // NB: copy preserves device_type
       // This storage will get initialized by the mutable_data call below.
-      impl_->set_storage(at::Storage(impl_->device_type(), src.impl_->dtype()));
+      impl_->set_storage(at::Storage::create_legacy(impl_->device_type(), src.impl_->dtype()));
     }
     impl_->Resize(src.impl_->sizes());
 
@@ -539,8 +519,8 @@ class CAFFE2_API Tensor final {
     return impl_.get()->strides();
   }
 
-  inline bool is_contiguous() const {
-    return impl_.get()->is_contiguous();
+  inline bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const {
+    return impl_.get()->is_contiguous(memory_format);
   }
 
   /**
@@ -668,6 +648,9 @@ Tensor TensorCPUFromValues(at::IntArrayRef dims, at::ArrayRef<T> values) {
       r.dtype(), values.size(), values.data(), r.mutable_data<T>());
   return r;
 }
+
+vector<int64_t>
+GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device);
 
 class CAFFE2_API TensorPrinter {
  public:

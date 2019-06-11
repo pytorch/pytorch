@@ -130,10 +130,9 @@ class BinaryElementwiseWithArgsGradientOp<
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
 
-  BinaryElementwiseWithArgsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit BinaryElementwiseWithArgsGradientOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, "broadcast", legacy_broadcast_, false),
         OP_SINGLE_ARG(int, "axis", axis_, -1),
         OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),

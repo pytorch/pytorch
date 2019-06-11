@@ -20,6 +20,7 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorRandom.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorFill.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMoreMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorEvenMoreMath.cpp
@@ -64,6 +65,7 @@ INSTALL(FILES
   THFilePrivate.h
   ${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h
   THGenerateAllTypes.h
+  THGenerateBoolType.h
   THGenerateDoubleType.h
   THGenerateFloatType.h
   THGenerateHalfType.h
@@ -74,6 +76,10 @@ INSTALL(FILES
   THGenerateByteType.h
   THGenerateFloatTypes.h
   THGenerateIntTypes.h
+  THGenerateQUInt8Type.h
+  THGenerateQInt8Type.h
+  THGenerateQInt32Type.h
+  THGenerateQTypes.h
   THLapack.h
   THLogAdd.h
   THMemoryFile.h
@@ -111,6 +117,8 @@ INSTALL(FILES
   generic/THTensor.hpp
   generic/THTensorConv.cpp
   generic/THTensorConv.h
+  generic/THTensorFill.cpp
+  generic/THTensorFill.h
   generic/THTensorLapack.cpp
   generic/THTensorLapack.h
   generic/THTensorMath.cpp

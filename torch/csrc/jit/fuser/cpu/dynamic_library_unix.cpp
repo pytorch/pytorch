@@ -3,6 +3,7 @@
 #include <torch/csrc/utils/disallow_copy.h>
 
 #include <dlfcn.h>
+#include <libgen.h>
 
 namespace torch {
 namespace jit {

@@ -6,7 +6,7 @@ from ..._jit_internal import weak_module, weak_script_method
 @weak_module
 class PixelShuffle(Module):
     r"""Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`
-    to a tensor of shape :math:`(C, H \times r, W \times r)`.
+    to a tensor of shape :math:`(*, C, H \times r, W \times r)`.
 
     This is useful for implementing efficient sub-pixel convolution
     with a stride of :math:`1/r`.
@@ -20,8 +20,9 @@ class PixelShuffle(Module):
 
     Shape:
         - Input: :math:`(N, L, H_{in}, W_{in})` where :math:`L=C \times \text{upscale\_factor}^2`
-        - Output: :math:`(N, C, H_{out}, W_{out})` where :math:`H \times \text{upscale\_factor}`
-          and :math:`W \times \text{upscale\_factor}`
+        - Output: :math:`(N, C, H_{out}, W_{out})` where
+          :math:`H_{out} = H_{in} \times \text{upscale\_factor}`
+          and :math:`W_{out} = W_{in} \times \text{upscale\_factor}`
 
     Examples::
 

@@ -27,6 +27,7 @@
 
 #include "c10/cuda/CUDAMacros.h"
 #include "c10/cuda/CUDAMathCompat.h"
+#include <c10/cuda/CUDAGuard.h>
 
 // Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this
 // corresponds to different declarations (dllexport and dllimport). On
@@ -371,21 +372,7 @@ inline dim3 CAFFE_GET_BLOCKS_2D(const int N, const int /* M */) {
   return grid;
 }
 
-class DeviceGuard {
- public:
-  explicit DeviceGuard(int newDevice) : previous_(CaffeCudaGetDevice()) {
-    if (previous_ != newDevice) {
-      CaffeCudaSetDevice(newDevice);
-    }
-  }
-
-  ~DeviceGuard() noexcept {
-    CaffeCudaSetDevice(previous_);
-  }
-
- private:
-  int previous_;
-};
+using CUDAGuard = c10::cuda::CUDAGuard;
 
 template <typename T, int N>
 struct SimpleArray {

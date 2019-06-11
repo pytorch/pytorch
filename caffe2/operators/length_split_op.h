@@ -14,8 +14,9 @@ class LengthsSplitOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  LengthsSplitOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit LengthsSplitOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         n_split_(OperatorBase::GetSingleArgument<int32_t>("n_split", 0)) {
     if (InputSize() == 1) {
       // If not specified, then must have this argument

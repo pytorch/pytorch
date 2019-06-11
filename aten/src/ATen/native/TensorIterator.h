@@ -64,13 +64,19 @@ struct DimCounter {
   DimVector values;
   int64_t offset;
 };
+
 struct CAFFE2_API OperandInfo {
   OperandInfo() {}
-  OperandInfo(const Tensor& t, const Type* type=nullptr)
-    : tensor(t), type(const_cast<Type*>(type)) {
-      if (t.defined() && !type) {
-        this->type = &t.type();
-      }
+  explicit OperandInfo(const Tensor& t) : tensor(t) {
+    if (t.defined()) {
+      device = t.device();
+      dtype = t.scalar_type();
+    }
+    validate();
+  }
+  OperandInfo(const Tensor& t, Device device, ScalarType dtype)
+    : tensor(t), device(device), dtype(dtype) {
+    validate();
   }
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
@@ -81,11 +87,17 @@ struct CAFFE2_API OperandInfo {
   /// coalescing.
   Tensor tensor;
 
-  /// The desired type for the operand. For inputs, this specifies that the
-  /// input should be converted to this type if necessary. For outputs, this
+  /// The desired device and type for the operand. For inputs, this specifies that
+  /// the input should be converted to this type if necessary. For outputs, this
   /// specifies which type to allocate. Note that there is very limited support
   /// for type conversions currently: they are only allowed for zero-dim tensors.
-  Type* type = nullptr;
+  Device device = kCPU;
+  ScalarType dtype = ScalarType::Undefined;
+
+  bool is_type_defined() const { return dtype != ScalarType::Undefined; }
+  TensorOptions options() const {
+    return TensorOptions(dtype).device(device);
+  }
 
   /// The data pointer. This may be different from tensor.data_ptr() if the
   /// iterator is split.
@@ -94,6 +106,12 @@ struct CAFFE2_API OperandInfo {
   bool is_output = false;
 
   bool is_read_write = false;
+
+  void validate() {
+    TORCH_CHECK(
+        !tensor.defined() || tensor.layout() == kStrided,
+        "unsupported tensor layout: ", tensor.layout());
+  }
 };
 
 struct SplitUntil32Bit;
@@ -126,12 +144,17 @@ struct CAFFE2_API TensorIterator {
   void foreach_reduced_elt(const loop_subiter_t& loop, bool parallelize=true);
 
   static std::unique_ptr<TensorIterator> binary_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static std::unique_ptr<TensorIterator> unary_op(Tensor& out, const Tensor& a);
+  static std::unique_ptr<TensorIterator> nullary_op(Tensor& out);
   static std::unique_ptr<TensorIterator> reduce_op(Tensor& out, const Tensor& a);
+  static std::unique_ptr<TensorIterator> reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
   int ndim() const { return shape_.size(); }
   IntArrayRef shape() const { return shape_; }
   int64_t numel() const;
   int ntensors() const { return operands_.size(); }
+  int noutputs() const { return num_outputs_; }
+  int ninputs() const { return ntensors() - noutputs(); }
 
   /// number of elements in the output operand. this is the same as numel() for
   /// operations that are not reductions.
@@ -142,18 +165,17 @@ struct CAFFE2_API TensorIterator {
 
   /// 1-dimensional iteration and no buffering or type conversion
   bool is_trivial_1d() const;
+  /// Reducible to 1-dimensional and all operands are contiguous
+  bool is_contiguous() const;
   bool is_dim_reduced(int dim) const;
 
   /// Accessors for each operand
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
-  const Type& type(int arg=0) const {
-    AT_ASSERT(operands_[arg].type);
-    return *operands_[arg].type;
-  }
-  ScalarType dtype(int arg) const { return type(arg).scalarType(); }
-  DeviceType device_type(int arg=0) const { return type(arg).device_type(); }
-  int64_t element_size(int arg) const { return type(arg).elementSizeInBytes(); }
+  ScalarType dtype(int arg=0) const { return operands_[arg].dtype; }
+  Device device(int arg=0) const { return operands_[arg].device; }
+  DeviceType device_type(int arg=0) const { return device(arg).type(); }
+  int64_t element_size(int arg) const { return elementSize(dtype(arg)); }
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
 
@@ -163,6 +185,11 @@ struct CAFFE2_API TensorIterator {
   Tensor output(int arg=0) const {
     AT_ASSERT(arg < num_outputs_);
     return operands_[arg].tensor;
+  }
+
+  Tensor input(int arg=0) const {
+    AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
+    return operands_[num_outputs_ + arg].tensor;
   }
 
   /// Removes an operand from this iterator
@@ -186,7 +213,7 @@ struct CAFFE2_API TensorIterator {
   template <typename T>
   T scalar_value(int arg) {
     auto& op = operands_[arg];
-    return at::detail::load<T>(op.data, op.tensor.type().scalarType());
+    return at::detail::load<T>(op.data, op.tensor.scalar_type());
   }
 
   void for_each(const loop_t& loop);
@@ -236,7 +263,7 @@ protected:
   void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);
   void compute_types();
-  Type& compute_common_type();
+  std::tuple<Device, ScalarType> compute_common_type();
   void allocate_outputs();
   void coalesce_dimensions();
 
@@ -260,13 +287,22 @@ struct TensorIterator::Builder {
 
   Builder() : iter_(new TensorIterator()) {};
 
-  void add_output(const Tensor& output, const Type* type=nullptr) {
-    iter_->operands_.emplace_back(output, type);
+  void add_output(const Tensor& output) {
+    iter_->operands_.emplace_back(output);
     iter_->num_outputs_++;
   }
 
-  void add_input(const Tensor& input, const Type* type=nullptr) {
-    iter_->operands_.emplace_back(input, type);
+  void add_output(const Tensor& input, Device device, ScalarType dtype) {
+    iter_->operands_.emplace_back(input, device, dtype);
+    iter_->num_outputs_++;
+  }
+
+  void add_input(const Tensor& input) {
+    iter_->operands_.emplace_back(input);
+  }
+
+  void add_input(const Tensor& input, Device device, ScalarType dtype) {
+    iter_->operands_.emplace_back(input, device, dtype);
   }
 
   void dont_compute_common_dtype() {

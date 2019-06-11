@@ -2,7 +2,9 @@
 #include <caffe2/ideep/ideep_utils.h>
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPExpandDimsOp final : public IDEEPOperator {
  public:
@@ -23,7 +25,7 @@ class IDEEPExpandDimsOp final : public IDEEPOperator {
     }
     CAFFE_ENFORCE_GE(dims_.front(), 0, "Dimension ids must be non-negative.");
   }
-  ~IDEEPExpandDimsOp() {}
+  ~IDEEPExpandDimsOp() override {}
 
   bool RunOnDevice() override {
     if (!OperatorBase::InputBlob(INPUT).template IsType<itensor>()) {
@@ -85,7 +87,7 @@ class IDEEPSqueezeOp final : public IDEEPOperator {
     }
     CAFFE_ENFORCE_GE(dims_.front(), 0, "Dimension ids must be non-negative.");
   }
-  ~IDEEPSqueezeOp() {}
+  ~IDEEPSqueezeOp() override {}
 
   bool RunOnDevice() override {
     if (!OperatorBase::InputBlob(INPUT).template IsType<itensor>()) {
@@ -126,4 +128,4 @@ class IDEEPSqueezeOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(ExpandDims, IDEEPExpandDimsOp);
 REGISTER_IDEEP_OPERATOR(Squeeze, IDEEPSqueezeOp);
 
-} // namespace caffe2
+} // namespace

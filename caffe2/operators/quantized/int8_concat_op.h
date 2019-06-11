@@ -12,8 +12,9 @@ namespace int8 {
 
 class Int8ConcatOp final : public Operator<CPUContext> {
  public:
-  Int8ConcatOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws) {
+  template <class... Args>
+  explicit Int8ConcatOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...) {
     // concat supports more than NHWC format
     if (this->template GetSingleArgument<string>("order", "") == "NHWC") {
       // Default to C axis

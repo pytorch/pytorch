@@ -9,13 +9,38 @@ from ..._jit_internal import weak_module, weak_script_method
 
 
 @weak_module
+class Identity(Module):
+    r"""A placeholder identity operator that is argument-insensitive.
+
+    Args:
+        args: any argument (unused)
+        kwargs: any keyword argument (unused)
+
+    Examples::
+
+        >>> m = nn.Identity(54, unused_argument1=0.1, unused_argument2=False)
+        >>> input = torch.randn(128, 20)
+        >>> output = m(input)
+        >>> print(output.size())
+        torch.Size([128, 20])
+
+    """
+    def __init__(self, *args, **kwargs):
+        super(Identity, self).__init__()
+
+    @weak_script_method
+    def forward(self, input):
+        return input
+
+
+@weak_module
 class Linear(Module):
     r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
 
     Args:
         in_features: size of each input sample
         out_features: size of each output sample
-        bias: If set to False, the layer will not learn an additive bias.
+        bias: If set to ``False``, the layer will not learn an additive bias.
             Default: ``True``
 
     Shape:
@@ -42,7 +67,7 @@ class Linear(Module):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    __constants__ = ['bias']
+    __constants__ = ['bias', 'in_features', 'out_features']
 
     def __init__(self, in_features, out_features, bias=True):
         super(Linear, self).__init__()
@@ -94,10 +119,10 @@ class Bilinear(Module):
 
     Attributes:
         weight: the learnable weights of the module of shape
-            :math:`(\text{out\_features} x \text{in1\_features} x \text{in2\_features})`.
+            :math:`(\text{out\_features}, \text{in1\_features}, \text{in2\_features})`.
             The values are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
             :math:`k = \frac{1}{\text{in1\_features}}`
-        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`
+        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized from
                 :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
                 :math:`k = \frac{1}{\text{in1\_features}}`

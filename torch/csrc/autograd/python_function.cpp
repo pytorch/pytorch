@@ -17,6 +17,7 @@
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/utils/auto_gil.h>
@@ -44,8 +45,9 @@ PyObject *THPFunctionClass = nullptr;
 namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
-  : type(&var.type())
+  : type(&var.dispatch_type())
   , device(var.device())
+  , scalar_type(var.scalar_type())
   , size(var.sizes().vec())
   , requires_grad(var.requires_grad()) {
 }
@@ -53,7 +55,7 @@ VariableInfo::VariableInfo(const Variable& var)
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   // NB: This will NOT work if we ever get mixed device gradients
   device_guard.reset_device(device);
-  return at::zeros(size, type->options());
+  return at::zeros(size, type->options(scalar_type));
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
@@ -81,7 +83,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
         msg += "')'";
         throw std::runtime_error(msg);
       }
-      tensor_results[i] = ((THPVariable*)obj)->cdata.data();
+      tensor_results[i] = ((THPVariable*)obj)->cdata.tensor_data();
     }
   }
 
@@ -671,8 +673,10 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 {
   HANDLE_TH_ERRORS
-  torch::autograd::profiler::RecordFunction record(Py_TYPE(self)->tp_name,
-                                                   Function::peek_at_next_sequence_nr());
+  RECORD_FUNCTION(
+    Py_TYPE(self)->tp_name,
+    std::vector<c10::IValue>(),
+    autograd::Function::peek_at_next_sequence_nr());
 
   auto info_pair = unpack_input<true>(_inputs);
   auto& unpacked_input = info_pair.first;
@@ -702,8 +706,10 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
 PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
-  torch::autograd::profiler::RecordFunction record(((PyTypeObject*)cls)->tp_name,
-                                                   Function::peek_at_next_sequence_nr());
+  RECORD_FUNCTION(
+    ((PyTypeObject*)cls)->tp_name,
+    std::vector<c10::IValue>(),
+    autograd::Function::peek_at_next_sequence_nr());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
@@ -987,7 +993,7 @@ PyObject* getMember(PyObject* obj, void* _unused) {
   return Convert(self->*ptr);
 }
 
-template<typename M, M Function::*ptr, PyObject* (*Convert)(long)>
+template<typename M, M autograd::Function::*ptr, PyObject* (*Convert)(long)>
 PyObject* getImplMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->cdata.*ptr);

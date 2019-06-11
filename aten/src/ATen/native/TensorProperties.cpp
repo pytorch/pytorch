@@ -26,7 +26,7 @@ int64_t stride(const Tensor& self, int64_t dim) {
 bool cudnn_is_acceptable(const Tensor& self) {
   if (!globalContext().userEnabledCuDNN()) return false;
   if (!self.is_cuda()) return false;
-  auto st = self.type().scalarType();
+  auto st = self.scalar_type();
   if (!(st == kDouble || st == kFloat || st == kHalf)) return false;
   if (!detail::getCUDAHooks().compiledWithCuDNN()) return false;
   // cuDNN functions like grid_sampler returns CUDNN_STATUS_BAD_PARAM on empty
@@ -53,11 +53,37 @@ Tensor & detach_(Tensor & self) {
 }
 
 Tensor contiguous(const Tensor & self) {
-  if (self.is_contiguous()) {
-    return self;
-  }
-  return self.clone();
+  return contiguous(self, MemoryFormat::Contiguous);
 }
 
+Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
+  if (self.is_contiguous(memory_format)) {
+    return self;
+  }
+  auto  result = at::empty_like(self);
+  switch (memory_format) {
+    case MemoryFormat::Any: // Back compatibility with old defaults
+    case MemoryFormat::Contiguous: {
+      break;
+    }
+    case MemoryFormat::ChannelsLast: {
+      TORCH_CHECK(
+          result.dim() == 4,
+          " required rank 4 tensor to use channels_last format");
+      std::vector<int64_t> newStrides(self.dim());
+      auto sizes = result.sizes();
+      newStrides[1] = 1;
+      newStrides[3] = sizes[1];
+      newStrides[2] = newStrides[3] * sizes[3];
+      newStrides[0] = newStrides[2] * sizes[2];
+      result = result.as_strided(sizes, newStrides);
+      break;
+    }
+    default: {
+      TORCH_CHECK(false, " unsupported memory format");
+    }
+  }
+  return result.copy_(self);
 }
+} // namespace native
 }

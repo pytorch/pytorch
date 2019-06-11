@@ -154,7 +154,7 @@ std::vector<std::vector<at::Tensor>> copyTensors(
   return outputs;
 }
 
-void testAllreduce(const std::string& path, const at::Backend b) {
+void testAllreduce(const std::string& path, const at::DeviceType b) {
   const auto size = 4;
   auto tests = CollectiveTest::initialize(path, size);
 
@@ -190,7 +190,7 @@ void testAllreduce(const std::string& path, const at::Backend b) {
   }
 }
 
-void testBroadcast(const std::string& path, const at::Backend b) {
+void testBroadcast(const std::string& path, const at::DeviceType b) {
   const auto size = 2;
   const auto stride = 2;
   auto tests = CollectiveTest::initialize(path, size);
@@ -206,7 +206,7 @@ void testBroadcast(const std::string& path, const at::Backend b) {
         // This won't work if we ever support sparse CUDA
         at::OptionalDeviceGuard deviceGuard;
         for (auto l = 0; l < stride; l++) {
-          if (b == at::Backend::CUDA) {
+          if (b == at::DeviceType::CUDA) {
             deviceGuard.reset_device(at::Device(at::kCUDA, l));
           }
           inputs[k][l] = at::ones({16, 16}, b) * (k * stride + l);
@@ -285,25 +285,25 @@ int main(int argc, char** argv) {
 
   {
     TemporaryFile file;
-    testAllreduce(file.path, at::Backend::CPU);
+    testAllreduce(file.path, at::DeviceType::CPU);
   }
 
 #ifdef USE_CUDA
   {
     TemporaryFile file;
-    testAllreduce(file.path, at::Backend::CUDA);
+    testAllreduce(file.path, at::DeviceType::CUDA);
   }
 #endif
 
   {
     TemporaryFile file;
-    testBroadcast(file.path, at::Backend::CPU);
+    testBroadcast(file.path, at::DeviceType::CPU);
   }
 
 #ifdef USE_CUDA
   {
     TemporaryFile file;
-    testBroadcast(file.path, at::Backend::CUDA);
+    testBroadcast(file.path, at::DeviceType::CUDA);
   }
 #endif
 

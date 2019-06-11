@@ -12,14 +12,11 @@ generated.  In the full build system, OUTPUT_DIR is
 torch/csrc/jit/generated/
 """
 
-import os
 import argparse
-import re
 import copy
-from itertools import count, combinations, groupby
-from ..autograd.utils import CodeTemplate, write, uninplace_api_name
+from itertools import groupby
+from ..autograd.utils import CodeTemplate, write
 from ..autograd.gen_autograd import load_aten_declarations
-from collections import OrderedDict
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 
 # JIT has a type system of
@@ -43,6 +40,7 @@ TYPE_MAP = {
     'std::array<bool,4>': 'bool[4]',
     'std::string': 'str',
     'Scalar': 'Scalar',
+    'MemoryFormat': 'MemoryFormat',
     'Scalar?': 'Scalar?',
     'Tensor': 'Tensor',
     'Tensor?': 'Tensor?',
@@ -53,13 +51,16 @@ TYPE_MAP = {
     'std::vector<Tensor>': 'Tensor[]',
     'IntArrayRef': 'int[]',
     'Layout': 'Layout',
+    'Layout?': 'Layout?',
     'Device': 'Device',
+    'Device?': 'Device?',
     'ScalarType': 'ScalarType',
     'ScalarType?': 'ScalarType?',
     'int64_t': 'int',
     'int64_t?': 'int?',
     'double': 'float',
     'bool': 'bool',
+    'bool?': 'bool?',
     'Generator': 'Generator?',
 }
 
@@ -92,8 +93,11 @@ def jit_type_of(arg):
 # that type
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
+    'Device?': '{}.toOptional<c10::Device>()',
     'IntArrayRef': '{}.toIntList()->elements()',
     'Layout': '{}.toLayout()',
+    'Layout?': '{}.toOptional<c10::Layout>()',
+    'MemoryFormat': '{}.toMemoryFormat()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
     'ScalarType': '{}.toScalarType()',
@@ -103,6 +107,7 @@ FROM_IVALUE = {
     'Tensor?[]': 'toListOfOptionalTensor({})',
     'TensorList': '{}.toTensorList()->elements()',
     'bool': '{}.toBool()',
+    'bool?': '{}.toOptional<bool>()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
@@ -133,20 +138,21 @@ CALL_NAMESPACE_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
-        .device(${device});
+        .device(${device})
+        .pinned_memory(${pin_memory});
 auto result_ = torch::${name}(${args_with_tensor_options});
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
-        .device(${device});
+        .device(${device})
+        .pinned_memory(${pin_memory});;
 auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
 [](Stack & stack) {
-    autograd::profiler::RecordFunction record("${name}");
     ${lvalues}
     ${call}
     drop(stack, ${num_inputs});
@@ -163,7 +169,7 @@ Operator(
 """)
 
 
-blacklisted_types = {'SparseTensorRef', 'Storage', 'void*'}
+blacklisted_types = {'Storage'}
 default_only_types = {'Generator'}
 
 
@@ -242,15 +248,18 @@ def gen_jit_dispatch(declarations, out, template_path):
             dtype = args[tensor_options_arg_index]
             layout = args[tensor_options_arg_index + 1]
             device = args[tensor_options_arg_index + 2]
+            pin_memory = args[tensor_options_arg_index + 3]
             args_with_tensor_options = args[:tensor_options_arg_index] + \
-                ['options'] + args[(tensor_options_arg_index + 3):]
+                ['options'] + args[(tensor_options_arg_index + 4):]
             if is_namespace_function:
                 return CALL_NAMESPACE_WITH_TENSOR_OPTIONS.substitute(
-                    name=decl['name'], dtype=dtype, layout=layout, device=device,
+                    name=decl['name'], dtype=dtype, layout=layout,
+                    device=device, pin_memory=pin_memory,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options))
             else:
                 return CALL_METHOD_WITH_TENSOR_OPTIONS.substitute(
-                    name=decl['name'], dtype=dtype, layout=layout, device=device,
+                    name=decl['name'], dtype=dtype, layout=layout,
+                    device=device, pin_memory=pin_memory,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options[1:]),
                     first=args_with_tensor_options[0], num_inputs=num_inputs)
         else:
@@ -338,19 +347,31 @@ def gen_jit_dispatch(declarations, out, template_path):
             return [arg]
         assert decl.get('tensor_options_arg_index') != i
         decl['tensor_options_arg_index'] = i
-        return [
+        tensor_options_expansion = [
             # XXX - until we actually have first-class interpreter types for these
             # concepts, the default values to be encoded in Tensors
             # If you change this, you also need to update [TensorOptions in script]
             # in the tracer code.
             # dtype is specified as an int64_t of at::ScalarType
-            {'name': 'dtype', 'simple_type': 'ScalarType', 'default': 'float', 'kwarg_only': True},
+            {'name': 'dtype', 'simple_type': 'ScalarType'},
             # layout is specified as an int64_t of at::Layout
-            {'name': 'layout', 'simple_type': 'Layout', 'default': 'strided', 'kwarg_only': True},
+            {'name': 'layout', 'simple_type': 'Layout'},
             # device is specified as an IntArrayRef of { at::Device::Type, device_id }
-            {'name': 'device', 'simple_type': 'Device', 'kwarg_only': True,
-                'default': '\\"cpu\\"'},
+            {'name': 'device', 'simple_type': 'Device'},
+            # pin_memory is specified as a boolean
+            {'name': 'pin_memory', 'simple_type': 'bool', 'default': False},
         ]
+        # TODO: Don't repack this into TensorOptions. Needs various changes in downstream code.
+        if 'default' in arg:
+            for el in tensor_options_expansion:
+                el['simple_type'] += '?'
+                el['default'] = 'None'
+        if 'default' in arg and arg['default'] == 'at::kLong':
+            tensor_options_expansion[0]['default'] = 'long'
+        if 'kwarg_only' in arg and arg['kwarg_only']:
+            for el in tensor_options_expansion:
+                el['kwarg_only'] = True
+        return tensor_options_expansion
 
     additional_jit_decls = []
 
@@ -449,17 +470,22 @@ def match_signature(decl, constructed_string, should_match_schema):
 
 def signature(decl, should_match_schema=True):
     def format_arg(arg):
-        name = arg['name'] if not arg.get('output') else 'out'
+        name = arg['name']
         typ = jit_type_of(arg)
         decl = '{} {}'.format(typ, name)
         if 'default' in arg:
             # clean up initializer lists {{true, true}} -> [true, true]
-            default = str(arg['default']) \
+            default = arg['default']
+            # NOTE: str(float) in python2 truncates, which makes JIT signatures not match native_functions
+            # signatures.  repr(float) doesn't seem to truncate in these cases.
+            default = str(default) if not isinstance(default, float) else repr(default)
+            default = default \
                 .replace('{{', '[') \
                 .replace('}}', ']') \
                 .replace('true', 'True') \
                 .replace('false', 'False') \
                 .replace('Reduction::Mean', 'Mean') \
+                .replace('MemoryFormat::Contiguous', 'contiguous_format') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
                 .replace('{', '[') \
                 .replace('}', ']')
@@ -481,6 +507,9 @@ def signature(decl, should_match_schema=True):
     arg_list = ', '.join(args)
     if len(decl['returns']) == 1:
         ret_list = jit_type_of(decl['returns'][0])
+        # Adding output name if it exists
+        if decl['returns'][0].get('field_name'):
+            ret_list += ' ' + decl['returns'][0]['field_name']
     else:
         def type_maybe_field(r):
             return '{} {}'.format(jit_type_of(r), r['field_name']) if 'field_name' in r else jit_type_of(r)

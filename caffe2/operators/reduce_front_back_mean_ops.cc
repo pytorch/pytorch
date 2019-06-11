@@ -193,7 +193,8 @@ Y: [4.3333335    2.1666667     6.]
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(true)
-    });
+    })
+    .InheritOnnxSchema("ReduceMean");
 OPERATOR_SCHEMA(ReduceFrontMeanGradient).NumInputs(2, 3).NumOutputs(1);
 
 REGISTER_CPU_OPERATOR(ReduceBackMean, SumReduceDimsOp<CPUContext, false, true>);
@@ -285,7 +286,8 @@ Y: [[3.7777777 4.888889 ]]
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(false)
-    });
+    })
+    .InheritOnnxSchema("ReduceMean");
 OPERATOR_SCHEMA(ReduceBackMeanGradient).NumInputs(2, 3).NumOutputs(1);
 
 #undef REDUCTION_OP_SHAPE_INFERENCE

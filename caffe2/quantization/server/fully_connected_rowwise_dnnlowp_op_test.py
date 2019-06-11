@@ -10,6 +10,7 @@ from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     avoid_vpmaddubsw_overflow_fc,
     check_quantized_results_close,
+    run_conv_or_fc,
 )
 from hypothesis import given
 
@@ -80,6 +81,9 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 W_max,
             )
 
+            if i % 2 == 0:
+                W[i, :] = (W[i, :] - W_min) * 2 + W_min
+
         b = np.random.randn(output_channels).astype(np.float32)
 
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
@@ -90,7 +94,6 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
             ("FC", "DNNLOWP_ROWWISE"),
             ("FC", "DNNLOWP_ROWWISE_16"),
             ("Int8FC", "DNNLOWP_ROWWISE"),
-            ("Int8FCRowWise", "DNNLOWP"),
         ]
 
         for op_type, engine in op_engine_list:
@@ -148,13 +151,8 @@ class RowWiseDNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(init_net)
-            self.ws.run(net)
-            outputs.append(
-                Output(Y=self.ws.blobs["Y"].fetch(), op_type=op_type, engine=engine)
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, None, gc, outputs
             )
 
         check_quantized_results_close(outputs)

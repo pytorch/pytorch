@@ -15,7 +15,7 @@ struct StridedData {
   StridedData(const Tensor & tensor)
     : data(tensor.data_ptr())
     , strides(tensor.strides())
-    , elementSize(tensor.type().elementSizeInBytes()) {}
+    , elementSize(tensor.element_size()) {}
 
   void* data;
   IntArrayRef strides;
@@ -57,7 +57,7 @@ Tensor & apply_(Tensor & self, PyObject* fn) {
   if (self.type().backend() != Backend::CPU) {
     throw TypeError("apply_ is only implemented on CPU tensors");
   }
-  auto scalarType = self.type().scalarType();
+  auto scalarType = self.scalar_type();
   recursive_apply<1>(self.sizes(), scalarType, 0, fn, {{ self }});
   return self;
 }
@@ -68,11 +68,11 @@ Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
   }
   if (other_.type() != self.type()) {
     throw TypeError("map_: expected %s for 'other' (got %s)",
-        self.type().toString(), other_.type().toString());
+        self.type().toString().c_str(), other_.type().toString().c_str());
   }
   Tensor other;
   std::tie(other) = expand_inplace(self, other_, "map_");
-  auto scalarType = self.type().scalarType();
+  auto scalarType = self.scalar_type();
   recursive_apply<2>(self.sizes(), scalarType, 0, fn, {{ self, other }});
   return self;
 }
@@ -83,15 +83,15 @@ Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn
   }
   if (x_.type() != self.type()) {
     throw TypeError("map2_: expected %s for argument 'x' (got %s)",
-        self.type().toString(), x_.type().toString());
+        self.type().toString().c_str(), x_.type().toString().c_str());
   }
   if (y_.type() != self.type()) {
     throw TypeError("map2_: expected %s for argument 'y' (got %s)",
-        self.type().toString(), y_.type().toString());
+        self.type().toString().c_str(), y_.type().toString().c_str());
   }
   Tensor other1, other2;
   std::tie(other1, other2) = expand_inplace(self, x_, y_, "map2_");
-  auto scalarType = self.type().scalarType();
+  auto scalarType = self.scalar_type();
   recursive_apply<3>(self.sizes(), scalarType, 0, fn, {{ self, other1, other2 }});
   return self;
 }

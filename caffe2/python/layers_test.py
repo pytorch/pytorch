@@ -113,6 +113,31 @@ class TestLayers(LayersTestCase):
         assert core.BlobReference('loss_blob_in_tuple_1')\
          in self.model.loss.field_blobs()
 
+    def testFilterMetricSchema(self):
+        self.model.add_metric_field("a:b", schema.Scalar())
+        self.model.add_metric_field("a:c", schema.Scalar())
+        self.model.add_metric_field("d", schema.Scalar())
+
+        self.assertEqual(
+            self.model.metrics_schema,
+            schema.Struct(
+                ("a", schema.Struct(
+                    ("b", schema.Scalar()),
+                    ("c", schema.Scalar()),
+                )),
+                ("d", schema.Scalar()),
+            ))
+
+        self.model.filter_metrics_schema({"a:b", "d"})
+        self.assertEqual(
+            self.model.metrics_schema,
+            schema.Struct(
+                ("a", schema.Struct(
+                    ("b", schema.Scalar()),
+                )),
+                ("d", schema.Scalar()),
+            ))
+
     def testAddOutputSchema(self):
         # add the first field
         self.model.add_output_schema('struct', schema.Struct())
@@ -701,77 +726,21 @@ class TestLayers(LayersTestCase):
             ]
         )
 
-    def testDistillBatchLRLoss(self):
-        input_record = self.new_record(schema.Struct(
-            ('label', schema.Scalar((np.float64, (1,)))),
-            ('logit', schema.Scalar((np.float32, (2,)))),
-            ('teacher_label', schema.Scalar((np.float32(1,)))),
-            ('weight', schema.Scalar((np.float64, (1,))))
-        ))
-        loss = self.model.BatchDistillLRLoss(input_record)
-        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
-
-    def testDistillBatchLRLossWithTeacherWeightScreen(self):
-        input_record = self.new_record(schema.Struct(
-            ('label', schema.Scalar((np.float32, (2,)))),
-            ('logit', schema.Scalar((np.float32, (2, 1)))),
-            ('teacher_label', schema.Scalar((np.float32(2,)))),
-            ('weight', schema.Scalar((np.float64, (2,))))
-        ))
-        label_items = np.array([1.0, 1.0], dtype=np.float32)
-        logit_items = np.array([[1.0], [1.0]], dtype=np.float32)
-        teacher_label_items = np.array([0.8, -1.0], dtype=np.float32)
-        weight_items = np.array([1.0, 1.0], dtype=np.float32)
-        schema.FeedRecord(
-            input_record,
-            [label_items, logit_items, teacher_label_items, weight_items]
-        )
-        loss = self.model.BatchDistillLRLoss(
-            input_record,
-            teacher_weight=0.5,
-            filter_invalid_teacher_label=True
-        )
-        self.run_train_net_forward_only()
-        tensor_loss = workspace.FetchBlob(loss.field_blobs()[0])
-
-        def cross_entropy(label, logit):
-            return logit - logit * label + np.log(1 + np.exp(-1.0 * logit))
-
-        def cal_cross_entropy(
-            label_items, logit_items, teacher_label_items, weight_items
-        ):
-            total_ce = 0
-            for i in range(label_items.shape[0]):
-                true_xent = cross_entropy(label_items[i], logit_items[i, 0])
-                if teacher_label_items[i] > 0:
-                    teacher_xent = cross_entropy(
-                        teacher_label_items[i], logit_items[i, 0]
-                    )
-                else:
-                    teacher_xent = 0
-                teacher_weight = 0.5 if teacher_label_items[i] > 0 else 0
-                total_ce += (true_xent * (1 - teacher_weight) +
-                            teacher_xent * teacher_weight) * weight_items[i]
-            return total_ce / label_items.shape[0]
-
-        correct_ace = cal_cross_entropy(
-            label_items,
-            logit_items,
-            teacher_label_items,
-            weight_items
-        )
-        self.assertAlmostEqual(
-            tensor_loss,
-            np.array(correct_ace),
-            delta=0.0000001,
-            msg="Wrong cross entropy {}".format(tensor_loss)
-        )
-
     def testBatchLRLoss(self):
         input_record = self.new_record(schema.Struct(
             ('label', schema.Scalar((np.float64, (1,)))),
             ('logit', schema.Scalar((np.float32, (2,)))),
             ('weight', schema.Scalar((np.float64, (1,))))
+        ))
+        loss = self.model.BatchLRLoss(input_record)
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+
+    def testBatchLRLossWithUncertainty(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float64, (1,)))),
+            ('logit', schema.Scalar((np.float32, (2,)))),
+            ('weight', schema.Scalar((np.float64, (1,)))),
+            ('log_variance', schema.Scalar((np.float64, (1,)))),
         ))
         loss = self.model.BatchLRLoss(input_record)
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
@@ -1278,7 +1247,6 @@ class TestLayers(LayersTestCase):
         assert len(ops[0].output) == 1
         assert ops[0].output[0] in ops[1].input
 
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     def testHalfToFloatTypeInference(self):
         input = self.new_record(schema.Scalar((np.float32, (32,))))
 
@@ -1376,11 +1344,15 @@ class TestLayers(LayersTestCase):
 
     @given(
         X=hu.arrays(dims=[5, 5]),  # Shape of X is irrelevant
+        dropout_for_eval=st.booleans(),
     )
-    def testDropout(self, X):
+    def testDropout(self, X, dropout_for_eval):
         input_record = self.new_record(schema.Scalar((np.float32, (1,))))
         schema.FeedRecord(input_record, [X])
-        d_output = self.model.Dropout(input_record)
+        d_output = self.model.Dropout(
+            input_record,
+            dropout_for_eval=dropout_for_eval
+        )
         self.assertEqual(schema.Scalar((np.float32, (1,))), d_output)
         self.model.output_schema = schema.Struct()
 
@@ -1389,14 +1361,14 @@ class TestLayers(LayersTestCase):
         input_blob = input_record.field_blobs()[0]
         output_blob = d_output.field_blobs()[0]
 
-        train_d_spec = OpSpec(
+        with_d_spec = OpSpec(
             "Dropout",
             [input_blob],
             [output_blob, None],
             {'is_test': 0, 'ratio': 0.5}
         )
 
-        test_d_spec = OpSpec(
+        without_d_spec = OpSpec(
             "Dropout",
             [input_blob],
             [output_blob, None],
@@ -1405,22 +1377,30 @@ class TestLayers(LayersTestCase):
 
         self.assertNetContainOps(
             train_net,
-            [train_d_spec]
+            [with_d_spec]
         )
 
         eval_net = self.get_eval_net()
-
-        self.assertNetContainOps(
-            eval_net,
-            [test_d_spec]
-        )
-
         predict_net = self.get_predict_net()
 
-        self.assertNetContainOps(
-            predict_net,
-            [test_d_spec]
-        )
+        if dropout_for_eval:
+            self.assertNetContainOps(
+                eval_net,
+                [with_d_spec]
+            )
+            self.assertNetContainOps(
+                predict_net,
+                [with_d_spec]
+            )
+        else:
+            self.assertNetContainOps(
+                eval_net,
+                [without_d_spec]
+            )
+            self.assertNetContainOps(
+                predict_net,
+                [without_d_spec]
+            )
 
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)

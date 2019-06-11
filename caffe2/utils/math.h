@@ -18,6 +18,7 @@ extern "C" {
 #include "caffe2/utils/math/broadcast.h"
 #include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math/reduce.h"
+#include "caffe2/utils/math/transpose.h"
 #include "caffe2/utils/math/utils.h"
 
 namespace caffe2 {
@@ -31,34 +32,34 @@ class CAFFE2_API DefaultEngine {};
 
 namespace math {
 
-#define C10_DECLARE_COMPARE_OP(Comp)                                         \
-  template <typename T, class Context, bool kBroadcast1st = false>           \
-  void Rowwise##Comp(                                                        \
-      const int rows,                                                        \
-      const int cols,                                                        \
-      const T* A,                                                            \
-      const T* B,                                                            \
-      bool* C,                                                               \
-      Context* context);                                                     \
-                                                                             \
-  template <typename T, class Context, bool kBroadcast1st = false>           \
-  void Colwise##Comp(                                                        \
-      const int rows,                                                        \
-      const int cols,                                                        \
-      const T* A,                                                            \
-      const T* B,                                                            \
-      bool* C,                                                               \
-      Context* context);                                                     \
-                                                                             \
-  template <typename T, class Context>                                       \
-  void Comp(                                                                 \
-      const int A_ndim,                                                      \
-      const int* A_dims,                                                     \
-      const int B_ndim,                                                      \
-      const int* B_dims,                                                     \
-      const T* A,                                                            \
-      const T* B,                                                            \
-      bool* C,                                                               \
+#define C10_DECLARE_COMPARE_OP(Comp)                               \
+  template <typename T, class Context, bool kBroadcast1st = false> \
+  void Rowwise##Comp(                                              \
+      const int rows,                                              \
+      const int cols,                                              \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      bool* C,                                                     \
+      Context* context);                                           \
+                                                                   \
+  template <typename T, class Context, bool kBroadcast1st = false> \
+  void Colwise##Comp(                                              \
+      const int rows,                                              \
+      const int cols,                                              \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      bool* C,                                                     \
+      Context* context);                                           \
+                                                                   \
+  template <typename T, class Context>                             \
+  void Comp(                                                       \
+      const int A_ndim,                                            \
+      const int* A_dims,                                           \
+      const int B_ndim,                                            \
+      const int* B_dims,                                           \
+      const T* A,                                                  \
+      const T* B,                                                  \
+      bool* C,                                                     \
       Context* context);
 
 C10_DECLARE_COMPARE_OP(EQ)
@@ -115,80 +116,6 @@ C10_DECLARE_BINARY_OP(BitwiseXor)
 
 #undef C10_DECLARE_BINARY_OP
 
-template <typename T, class Context>
-CAFFE2_API void
-ReduceMin(const int N, const T* x, T* y, Tensor* scratch_ptr, Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void
-ReduceMax(const int N, const T* x, T* y, Tensor* scratch_ptr, Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void ReduceMin(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T alpha,
-    const T* X,
-    T* Y,
-    Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void ReduceMax(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T alpha,
-    const T* X,
-    T* Y,
-    Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void ReduceSum(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T alpha,
-    const T* X,
-    T* Y,
-    Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void ReduceMean(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T alpha,
-    const T* X,
-    T* Y,
-    Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void ReduceL1(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T alpha,
-    const T* X,
-    T* Y,
-    Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void ReduceL2(
-    const int num_dims,
-    const int* dims,
-    const int num_axes,
-    const int* axes,
-    const T alpha,
-    const T* X,
-    T* Y,
-    Context* context);
-
 // Broadcasts X with X_dims to Y with Y_dims.
 template <typename T, class Context>
 CAFFE2_API void Broadcast(
@@ -237,16 +164,6 @@ ColwiseMax(const int N, const int D, const T* x, T* y, Context* context);
 template <typename T, class Context>
 CAFFE2_API void
 Maximum(const int N, const float alpha, const T* x, T* y, Context* context);
-
-// Transpose tensor X with dims by axes and write the result to tensor Y.
-template <typename T, class Context>
-CAFFE2_API void Transpose(
-    const int ndim,
-    const int* dims,
-    const int* axes,
-    const T* X,
-    T* Y,
-    Context* context);
 
 // Decaf gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
@@ -338,9 +255,6 @@ CAFFE2_API void Gemv(
     TensorProto::DataType math_type = TensorProto_DataType_FLOAT);
 
 template <typename T, class Context>
-CAFFE2_API void Set(const size_t N, const T alpha, T* X, Context* context);
-
-template <typename T, class Context>
 CAFFE2_API void
 RandUniform(const size_t n, const T a, const T b, T* r, Context* context);
 
@@ -407,54 +321,6 @@ CAFFE2_API void Select(
     const T* x,
     const int* idx,
     T* y,
-    Context* context);
-
-template <typename TAlpha, typename TData, class Context>
-CAFFE2_API void Scale(
-    const int N,
-    const TAlpha alpha,
-    const TData* x,
-    TData* y,
-    Context* context);
-
-// Different from the Scale function above, if alpha is passed in
-// as a pointer, we will assume that it lives on the Context device,
-// for example on GPU.
-template <typename TAlpha, typename TData, class Context>
-CAFFE2_API void Scale(
-    const int N,
-    const TAlpha* alpha,
-    const TData* x,
-    TData* y,
-    Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void
-Axpy(const int N, const float alpha, const T* x, T* y, Context* context);
-
-// Different from the Axpy function above, if alpha is passed in
-// as a pointer, we will assume that it lives on the Context device,
-// for example on GPU.
-template <typename T, class Context>
-CAFFE2_API void
-Axpy(const int N, const float* alpha, const T* x, T* y, Context* context);
-
-template <typename TCoeff, typename TData, class Context>
-CAFFE2_API void Axpby(
-    const int N,
-    const TCoeff alpha,
-    const TData* x,
-    const TCoeff b,
-    TData* y,
-    Context* context);
-
-template <typename TCoeff, typename TData, class Context>
-CAFFE2_API void Axpby(
-    const int N,
-    const TCoeff* alpha,
-    const TData* x,
-    const TCoeff* b,
-    TData* y,
     Context* context);
 
 // groups must be 1 for GPU
@@ -592,24 +458,6 @@ CAFFE2_API void CopyMatrix(
 
 template <typename T, class Context>
 CAFFE2_API void CopyVector(const int N, const T* A, T* B, Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void NCHW2NHWC(
-    const int N,
-    const int C,
-    const int HxW,
-    const T* X,
-    T* Y,
-    Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void NHWC2NCHW(
-    const int N,
-    const int C,
-    const int HxW,
-    const T* X,
-    T* Y,
-    Context* context);
 
 } // namespace math
 } // namespace caffe2
