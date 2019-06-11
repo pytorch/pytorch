@@ -216,8 +216,7 @@ struct TORCH_API ClassValue : public SugaredValue {
 };
 
 struct FunctionValue : public SugaredValue {
-  FunctionValue(std::shared_ptr<Function> callee)
-      : callee_(std::move(callee)) {}
+  FunctionValue(Function* callee) : callee_(std::move(callee)) {}
 
   std::string kind() const override {
     return "function";
@@ -238,7 +237,7 @@ struct FunctionValue : public SugaredValue {
   }
 
  private:
-  std::shared_ptr<Function> callee_;
+  Function* callee_;
 };
 
 // defines how a method obtained from a module behaves in script

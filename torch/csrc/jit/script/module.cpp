@@ -168,14 +168,13 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-std::pair<std::shared_ptr<Function>, std::vector<Slot>> Module::
-    lower_first_class_method(Function* fn) {
+std::pair<Function*, std::vector<Slot>> Module::lower_first_class_method(
+    Function* fn) {
   fn->ensure_defined();
   auto lowered = lower_graph(module_object(), *fn->graph());
   CompilationUnit cu;
   cu.set_optimized(fn->is_optimized());
-  std::shared_ptr<Function> new_func =
-      cu.create_function(fn->name(), lowered.first);
+  Function* new_func = cu.create_function(fn->name(), lowered.first);
 
   // generate the new schema
   // slice away the self argument
@@ -201,16 +200,14 @@ static FunctionSchema sliceFirst(const FunctionSchema& schema) {
   return schema.cloneWithArguments(std::move(sliced));
 }
 
-Method::Method(
-    Module* owner,
-    const std::shared_ptr<Function>& first_class_function)
+Method::Method(Module* owner, Function* first_class_function)
     : owner_(owner), schema_(sliceFirst(first_class_function->getSchema())) {
   if (experimental_run_as_first_class) {
     function_ = first_class_function;
     // initial_ivalues_ left blank
   } else {
     std::tie(function_, initial_ivalues_) =
-        owner->lower_first_class_method(first_class_function.get());
+        owner->lower_first_class_method(first_class_function);
   }
 }
 

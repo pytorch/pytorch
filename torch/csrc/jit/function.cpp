@@ -26,5 +26,12 @@ void Function::ensure_defined() {
   }
   check_single_output();
 }
+
+std::shared_ptr<CompilationArena> Function::getCompilationArena()
+    const {
+  auto ret = owner_.lock();
+  TORCH_INTERNAL_ASSERT(ret);
+  return ret;
+}
 } // namespace jit
 } // namespace torch

@@ -1,5 +1,6 @@
 #pragma once
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/compilation_arena.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/source_range.h>
@@ -41,9 +42,9 @@ struct TORCH_API CompilationUnit {
   // constructor that takes a set of functions to compile using the native
   // resolver
   explicit CompilationUnit(const std::string& source);
-  CompilationUnit() = default;
+  CompilationUnit() : arena_(torch::make_unique<CompilationArena>()) {}
 
-  std::shared_ptr<Function> find_function(const std::string& name) const {
+  Function* find_function(const std::string& name) const {
     auto it = dict_.find(name);
     if (it == dict_.end())
       return nullptr;
@@ -79,16 +80,17 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self& self);
 
-  std::shared_ptr<Function> create_function(
+  Function* create_function(
       std::string name,
       std::shared_ptr<Graph> graph) {
-    auto fn = std::make_shared<Function>(
+    auto fn = torch::make_unique<Function>(
         std::move(name), is_optimized(), std::move(graph), nullptr);
-    register_function(fn);
-    return fn;
+    auto ret = fn.get();
+    register_function(std::move(fn));
+    return ret;
   }
 
-  const std::vector<std::shared_ptr<Function>>& get_functions() const {
+  const std::vector<Function*>& get_functions() const {
     return functions_;
   }
 
@@ -151,17 +153,19 @@ struct TORCH_API CompilationUnit {
   }
 
  private:
-  Function& register_function(std::shared_ptr<Function> fn) {
+  Function& register_function(std::unique_ptr<Function> fn) {
     TORCH_CHECK(
         0 == dict_.count(fn->name()),
         "method '",
         fn->name(),
         "' already defined.");
-    functions_.emplace_back(std::move(fn));
+    functions_.emplace_back(fn.get());
+    arena_->getFunctions().emplace_back(std::move(fn));
     dict_[functions_.back()->name()] = functions_.size() - 1;
     return *functions_.back();
   }
-  std::vector<std::shared_ptr<Function>> functions_;
+  std::unique_ptr<CompilationArena> arena_;
+  std::vector<Function*> functions_;
   // for fast lookup
   std::unordered_map<std::string, size_t> dict_;
   bool optimized_ = true;
@@ -175,5 +179,15 @@ struct TORCH_API CompilationUnit {
 };
 
 } // namespace script
+
+// TODO doc
+struct StrongFunctionPtr {
+  StrongFunctionPtr(
+      std::shared_ptr<script::CompilationUnit> cu,
+      Function* function)
+      : cu_(std::move(cu)), function_(function) {}
+  std::shared_ptr<script::CompilationUnit> cu_;
+  Function* function_;
+};
 } // namespace jit
 } // namespace torch

@@ -5,6 +5,7 @@
 
 namespace torch {
 namespace jit {
+
 /**
  * class CompilationArena
  *
@@ -17,6 +18,8 @@ namespace jit {
  */
 class CompilationArena {
  public:
+  CompilationArena() : blob_(std::make_shared<OwnerBlob>()){};
+
   /**
    * Union this Arena with another one. After this now both Arenas own the same
    * stuff, and as long as one of the arenas is alive, that stuff will stay
@@ -24,19 +27,25 @@ class CompilationArena {
    */
   void unionWith(CompilationArena* other);
 
+  const std::vector<c10::ClassTypePtr>& getClasses() const;
+  const std::vector<std::unique_ptr<Function>>& getFunctions() const;
+  std::vector<c10::ClassTypePtr>& getClasses();
+  std::vector<std::unique_ptr<Function>>& getFunctions();
+
  private:
   // The actual owner of the classes/functions. We have a layer of indirection
   // here so that we can union Arenas transparently.
   struct OwnerBlob {
     // TODO: these are shared ptrs today, but eventually arenas will have unique
     // ptrs when they become the sole owners of classes/functions
-    std::unordered_set<c10::ClassTypePtr> classes_;
-    std::unordered_set<std::shared_ptr<Function>> functions_;
+    std::vector<c10::ClassTypePtr> classes_;
+    std::vector<std::unique_ptr<Function>> functions_;
     size_t size() const {
       return classes_.size() + functions_.size();
     }
   };
   std::shared_ptr<OwnerBlob> blob_;
+  std::weak_ptr<script::CompilationUnit> cu_;
 };
 } // namespace jit
 } // namespace torch

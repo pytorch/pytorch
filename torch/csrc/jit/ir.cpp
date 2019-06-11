@@ -1430,8 +1430,9 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
 }
 
 Value* Graph::insertFunctionCall(
-    std::shared_ptr<Function> callee,
+    Function* callee,
     script::MatchedSchema& matched) {
+      // TODO union the arenas
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->output()
                            ->setType(FunctionType::create(std::move(callee)));

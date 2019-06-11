@@ -1099,7 +1099,7 @@ struct Graph {
   }
 
   TORCH_API Value* insertFunctionCall(
-      std::shared_ptr<Function> callee,
+      Function* callee,
       script::MatchedSchema& matched);
   TORCH_API Value* insertMethodCall(
       std::string method_name,

@@ -3075,7 +3075,7 @@ struct to_ir {
 struct FunctionResolver : public Resolver {
   explicit FunctionResolver(
       const Resolver* otherResolver,
-      const std::unordered_map<std::string, std::shared_ptr<Function>>&
+      const std::unordered_map<std::string, Function*>&
           functionTable)
       : otherResolver_(otherResolver), functionTable_(functionTable) {}
 
@@ -3096,11 +3096,12 @@ struct FunctionResolver : public Resolver {
 
  private:
   const Resolver* otherResolver_;
-  const std::unordered_map<std::string, std::shared_ptr<Function>>&
+  const std::unordered_map<std::string, Function*>&
       functionTable_;
 };
 
-CompilationUnit::CompilationUnit(const std::string& source) {
+CompilationUnit::CompilationUnit(const std::string& source)
+    : CompilationUnit() {
   // calles the define with native resolver to generate the graph for functions
   define(source, nativeResolver(), nullptr);
 }
@@ -3112,7 +3113,7 @@ void CompilationUnit::define(
   AT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Function*> methods;
-  std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
+  std::unordered_map<std::string, Function*> function_table;
 
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
@@ -3140,9 +3141,9 @@ void CompilationUnit::define(
       AT_ASSERT(resolver);
       to_ir(def, resolver, self, method);
     };
-    std::shared_ptr<Function> fn(
+    std::unique_ptr<Function> fn(
         new Function(name, is_optimized(), std::make_shared<Graph>(), creator));
-    function_table[name] = fn;
+    function_table[name] = fn.get();
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }

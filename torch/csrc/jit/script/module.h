@@ -57,7 +57,7 @@ using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(Module* owner, const std::shared_ptr<Function>& function);
+  Method(Module* owner, Function* function);
 
   // the module that contains this method.
   Module& owner() const {
@@ -107,7 +107,7 @@ struct TORCH_API Method {
   // Underlying unbound function
   // This is the _lowered_ function and is different than the
   // first-class function in class_compilation_unit()
-  std::shared_ptr<Function> function_;
+  Function* function_;
 
   // parameters and attributes loaded from the Module and appending
   // before calling function_
@@ -300,8 +300,7 @@ struct TORCH_API Module {
       return methods_[*offset].get();
     }
 
-    if (const std::shared_ptr<Function>& fn =
-            class_compilation_unit().find_function(name)) {
+    if (const auto fn = class_compilation_unit().find_function(name)) {
       // lock because technically this is marked const,
       // but we have to update the internal Method cache.
       // This can be removed when class_compilation_unit() is the source of
@@ -441,8 +440,8 @@ struct TORCH_API Module {
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
  private:
-  std::pair<std::shared_ptr<Function>, std::vector<Slot>>
-  lower_first_class_method(Function* fn);
+  std::pair<Function*, std::vector<Slot>> lower_first_class_method(
+      Function* fn);
 
   void to_impl(
       const c10::optional<at::Device>& device,

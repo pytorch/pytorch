@@ -1090,10 +1090,9 @@ private:
 
 struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
-// This type represents a Python Function
+using ::torch::jit::Function;
 struct CAFFE2_API FunctionType : public Type {
-  static FunctionTypePtr create(
-      std::shared_ptr<torch::jit::Function> function) {
+  static FunctionTypePtr create(Function* function) {
     return FunctionTypePtr(
         new FunctionType(function)); // NOLINT(modernize-make-shared)
   }
@@ -1111,16 +1110,16 @@ struct CAFFE2_API FunctionType : public Type {
   std::string python_str() const override {
     throw "Function";
   }
-  std::shared_ptr<torch::jit::Function> function() const {
+  Function* function() const {
     return function_;
   }
   static const TypeKind Kind = TypeKind::FunctionType;
 
  private:
-  FunctionType(std::shared_ptr<torch::jit::Function> function)
+  FunctionType(Function* function)
       : Type(TypeKind::FunctionType), function_(function) {}
 
-  std::shared_ptr<torch::jit::Function> function_;
+  Function* function_;
 };
 
 struct NoneType;
@@ -1359,7 +1358,6 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
-using ::torch::jit::Function;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public Type {
@@ -1434,7 +1432,7 @@ struct CAFFE2_API ClassType : public Type {
     return attributeNames_[slot];
   }
 
-  std::shared_ptr<Function> getMethod(const std::string& name) const;
+  Function* getMethod(const std::string& name) const;
   CompilationUnit& compilation_unit();
   const CompilationUnit& compilation_unit() const;
   std::vector<Function*> methods() const;

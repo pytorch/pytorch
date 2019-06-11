@@ -34,7 +34,7 @@ file(GLOB C10_SRCS
         macros/*.cpp
         util/*.cpp
         )
-file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
+# file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
 file(GLOB_RECURSE C10_HEADERS *.h)
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
 # If building shared library, set dllimport/dllexport proper.
@@ -77,7 +77,7 @@ target_include_directories(
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
     $<INSTALL_INTERFACE:include>)
 
-add_subdirectory(test)
+# add_subdirectory(test)
 
 if(USE_CUDA)
   add_subdirectory(cuda)

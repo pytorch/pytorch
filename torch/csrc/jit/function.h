@@ -5,6 +5,7 @@
 
 namespace torch {
 namespace jit {
+struct CompilationArena;
 
 using Kwargs = std::unordered_map<std::string, IValue>;
 
@@ -12,7 +13,7 @@ using Kwargs = std::unordered_map<std::string, IValue>;
 // It contains schema information, and the executor that manages the
 // execution of the function. script::Method is a wrapper around a
 // underlying Function that also provides a `self` object.
-struct TORCH_API Function : public std::enable_shared_from_this<Function> {
+struct TORCH_API Function {
   Function(
       std::string name,
       bool optimize,
@@ -95,6 +96,10 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
     return executor_;
   }
 
+  // Getting an *owning* reference to this Functions's compilation unit
+  // TODO add a warning
+  std::shared_ptr<CompilationArena> getCompilationArena() const;
+
  private:
   static FunctionSchema defaultSchemaFor(const Function& function) {
     std::vector<Argument> args;
@@ -130,6 +135,7 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
   // mutable because getSchema caches the default schema if one is requested
   // before a call to setSchema
   mutable std::unique_ptr<FunctionSchema> schema_;
+  std::weak_ptr<CompilationArena> owner_;
 };
 } // namespace jit
 } // namespace torch
