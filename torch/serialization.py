@@ -276,7 +276,6 @@ def _save(obj, f, pickle_module, pickle_protocol):
                     location,
                     obj.size(),
                     view_metadata)
-
         return None
 
     sys_info = dict(

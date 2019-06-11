@@ -1,3 +1,4 @@
+import warnings
 import math
 import unittest
 import functools
@@ -527,6 +528,149 @@ class TestLRScheduler(TestCase):
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
 
+    def test_old_pattern_warning(self):
+        epochs = 35
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+        def old_pattern():
+            for e in range(epochs):
+                scheduler.step()
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_with_arg(self):
+        epochs = 35
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_resuming(self):
+        epochs = 35
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+        def old_pattern():
+            for e in range(epochs):
+                scheduler.step()
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_resuming_with_arg(self):
+        epochs = 35
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+
+    def test_old_pattern_warning_with_overriden_optim_step(self):
+        epochs = 35
+        for i, group in enumerate(self.opt.param_groups):
+            group['initial_lr'] = 0.01
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+        # emulate use-case with optimizer.step overriden
+        import types
+
+        old_step = self.opt.step
+
+        def new_step(o, *args, **kwargs):
+            retval = old_step(*args, **kwargs)
+            return retval
+
+        self.opt.step = types.MethodType(new_step, self.opt)
+
+        def old_pattern2():
+            for e in range(epochs):
+                scheduler.step(e)
+                self.opt.step()
+
+        self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
+
+    def test_new_pattern_no_warning(self):
+        epochs = 35
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            for e in range(epochs):                
+                self.opt.step()
+                scheduler.step()
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+    def test_new_pattern_no_warning_with_arg(self):
+        epochs = 35
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            for e in range(epochs):                
+                self.opt.step()
+                scheduler.step(e)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+    def test_new_pattern_no_warning_with_overriden_optim_step(self):
+        epochs = 35
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
+
+        # emulate use-case with optimizer.step overriden
+        import types
+
+        old_step = self.opt.step
+
+        def new_step(o, *args, **kwargs):
+            retval = old_step(*args, **kwargs)
+            return retval
+
+        self.opt.step = types.MethodType(new_step, self.opt)
+
+        def new_pattern():
+            for e in range(epochs):
+                self.opt.step()
+                scheduler.step()
+
+        self.assertWarnsRegex(new_pattern, r'`optimizer.step\(\)` has been overridden')
+
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3
         # lr = 0.005    if 30 <= epoch < 6
@@ -667,141 +811,6 @@ class TestLRScheduler(TestCase):
         scheduler = ReduceLROnPlateau(self.opt, mode='max', threshold_mode='rel', min_lr=[0.4, 0.3],
                                       threshold=0.1, patience=5, cooldown=5)
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
-
-    def test_compound_step_and_multistep_lr(self):
-        epochs = 10
-        schedulers = [None] * 2
-        schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
-        schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
-        targets = [[0.05] * 2 + [0.005] * 1 + [5e-4] * 2 + [5e-5] + [5e-6] * 3 + [5e-8]]
-        self._test(schedulers, targets, epochs)
-
-    def test_compound_step_and_exp_lr(self):
-        epochs = 10
-        schedulers = [None] * 2
-        single_targets = [0.05 * (0.9 ** x) for x in range(3)]
-        single_targets += [0.005 * (0.9 ** x) for x in range(3, 6)]
-        single_targets += [0.0005 * (0.9 ** x) for x in range(6, 9)]
-        single_targets += [0.00005 * (0.9 ** x) for x in range(9, 12)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
-        schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
-        schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
-        self._test(schedulers, targets, epochs)
-
-    def test_compound_exp_and_multistep_lr(self):
-        epochs = 10
-        schedulers = [None] * 2
-        single_targets = [0.05 * (0.9 ** x) for x in range(2)]
-        single_targets += [0.005 * (0.9 ** x) for x in range(2, 5)]
-        single_targets += [0.0005 * (0.9 ** x) for x in range(5, 9)]
-        single_targets += [0.00005 * (0.9 ** x) for x in range(9, 11)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
-        schedulers[0] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
-        schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
-        self._test(schedulers, targets, epochs)
-
-    def test_compound_cosanneal_and_step_lr(self):
-        epochs = 10
-        eta_min = 1e-10
-        single_targets = [eta_min + (0.05 - eta_min) *
-                          (1 + math.cos(math.pi * x / epochs)) / 2
-                          for x in range(epochs)]
-        single_targets = [x * 0.1 ** (i // 3) for i, x in enumerate(single_targets)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
-        schedulers = [None] * 2
-        schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        schedulers[1] = StepLR(self.opt, gamma=0.1, step_size=3)
-        self._test(schedulers, targets, epochs)
-
-    def test_compound_cosanneal_and_multistep_lr(self):
-        epochs = 10
-        eta_min = 1e-10
-        single_targets = [eta_min + (0.05 - eta_min) *
-                          (1 + math.cos(math.pi * x / epochs)) / 2
-                          for x in range(epochs)]
-        multipliers = [1] * 2 + [0.1] * 3 + [0.01] * 4 + [0.001]
-        single_targets = [x * y for x, y in zip(single_targets, multipliers)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
-        schedulers = [None] * 2
-        schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
-        self._test(schedulers, targets, epochs)
-
-    def test_compound_cosanneal_and_exp_lr(self):
-        epochs = 10
-        eta_min = 1e-10
-        single_targets = [eta_min + (0.05 - eta_min) *
-                          (1 + math.cos(math.pi * x / epochs)) / 2
-                          for x in range(epochs)]
-        multipliers = [0.1 ** i for i in range(epochs)]
-        single_targets = [x * y for x, y in zip(single_targets, multipliers)]
-        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
-        schedulers = [None] * 2
-        schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        schedulers[1] = ExponentialLR(self.opt, gamma=0.1)
-        self._test(schedulers, targets, epochs)
-
-    def test_compound_reduce_lr_on_plateau1(self):
-        epochs = 10
-        for param_group in self.opt.param_groups:
-            param_group['lr'] = 0.5
-        single_targets = [0.5] * 20
-        multipliers = [0.1 ** (i // 3) for i in range(20)]
-        single_targets = [x * y for x, y in zip(multipliers, single_targets)]
-        targets = [single_targets]
-        metrics = [10 - i * 0.0167 for i in range(20)]
-        schedulers = [None, None]
-        schedulers[0] = ReduceLROnPlateau(self.opt, threshold_mode='abs', mode='min',
-                                          threshold=0.01, patience=5, cooldown=5)
-        schedulers[1] = StepLR(self.opt, gamma=0.1, step_size=3)
-        self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
-
-    def test_compound_reduce_lr_on_plateau2(self):
-        epochs = 22
-        for param_group in self.opt.param_groups:
-            param_group['lr'] = 0.5
-        single_targets = [0.5] * 6 + [0.05] * 7 + [0.005] * 7 + [0.0005] * 2
-        multipliers = [1] * 3 + [0.1] * 5 + [0.01] * 4 + [0.001] * 10
-        single_targets = [x * y for x, y in zip(single_targets, multipliers)]
-        targets = [single_targets]
-        metrics = [10 - i * 0.0165 for i in range(22)]
-        schedulers = [None] * 2
-        schedulers[0] = ReduceLROnPlateau(self.opt, patience=5, cooldown=0, threshold_mode='abs',
-                                          mode='min', threshold=0.1)
-        schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[3, 8, 12])
-        self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
-
-    def test_compound_reduce_lr_on_plateau3(self):
-        epochs = 22
-        for param_group in self.opt.param_groups:
-            param_group['lr'] = 0.5
-        single_targets = [0.5] * (2 + 6) + [0.05] * (5 + 6) + [0.005] * 4
-        multipliers = [0.1 ** i for i in range(epochs)]
-        single_targets = [x * y for x, y in zip(multipliers, single_targets)]
-        targets = [single_targets]
-        metrics = [-0.8] * 2 + [-0.234] * 20
-        schedulers = [None, None]
-        schedulers[0] = ReduceLROnPlateau(self.opt, mode='max', patience=5, cooldown=5,
-                                          threshold_mode='abs')
-        schedulers[1] = ExponentialLR(self.opt, gamma=0.1)
-        self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
-
-    def test_compound_reduce_lr_on_plateau4(self):
-        epochs = 20
-        for param_group in self.opt.param_groups:
-            param_group['lr'] = 0.05
-        epochs = 10
-        eta_min = 1e-10
-        single_targets = [eta_min + (0.05 - eta_min) *
-                          (1 + math.cos(math.pi * x / epochs)) / 2
-                          for x in range(epochs)]
-        targets = [single_targets]
-        metrics = [1.5 * (1.025 ** i) for i in range(20)]  # 1.025 > 1.1**0.25
-        schedulers = [None, None]
-        schedulers[0] = ReduceLROnPlateau(self.opt, mode='max', patience=3,
-                                          threshold_mode='rel', threshold=0.1)
-        schedulers[1] = CosineAnnealingLR(self.opt, epochs, eta_min)
-        self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
     def test_cycle_lr_invalid_mode(self):
         with self.assertRaises(ValueError):

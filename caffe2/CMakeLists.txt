@@ -228,7 +228,7 @@ endif()
 
 
 
-if (NOT INTERN_BUILD_MOBILE)
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -383,6 +383,7 @@ if (NOT INTERN_BUILD_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/profiling_graph_executor_impl.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/bailout_graph.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/constant_pooling.cpp
@@ -390,12 +391,16 @@ if (NOT INTERN_BUILD_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/insert_guards.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/inliner.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/lift_closures.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/inline_forked_closures.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
@@ -421,6 +426,7 @@ if (NOT INTERN_BUILD_MOBILE)
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
@@ -440,6 +446,7 @@ if (NOT INTERN_BUILD_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
@@ -555,7 +562,7 @@ target_link_libraries(torch caffe2)
 # formerly-libtorch flags
 # ==========================================================
 
-if (NOT INTERN_BUILD_MOBILE)
+if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   # Forces caffe2.pb.h to be generated before its dependents are compiled.
   # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
@@ -633,8 +640,9 @@ if (NOT INTERN_BUILD_MOBILE)
       if (NOT NVTOOLEXT_HOME)
         set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
       endif()
-      if ($ENV{NVTOOLEXT_HOME})
-        set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+      if (DEFINED ENV{NVTOOLSEXT_PATH})
+        set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
+        file(TO_CMAKE_PATH ${NVTOOLEXT_HOME} NVTOOLEXT_HOME)
       endif()
       set(TORCH_CUDA_LIBRARIES
         ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
@@ -673,6 +681,13 @@ if (NOT INTERN_BUILD_MOBILE)
     ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
     ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
     ${CMAKE_BINARY_DIR}/aten/src)
+
+IF (USE_TBB)
+  list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
+  target_link_libraries(caffe2 PUBLIC tbb)
+ENDIF()
+
+
   target_include_directories(caffe2 PRIVATE ${ATen_CPU_INCLUDE})
 
   target_include_directories(caffe2 PRIVATE
@@ -684,13 +699,6 @@ if (NOT INTERN_BUILD_MOBILE)
 
   set_property(TARGET caffe2 PROPERTY CXX_STANDARD 11)
 
-
-  # Prevent the unused functions being optimized away
-  # Otherwise torch.dll will be linked without caffe2_gpu.dll
-  if (MSVC)
-    # TODO What to do with this line?
-    set_target_properties(caffe2 PROPERTIES LINK_FLAGS "/OPT:NOREF")
-  endif()
 
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
@@ -865,9 +873,12 @@ target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 
 # Parallelism settings
 #  OPENMP - OpenMP for intra-op, native thread pool for inter-op parallelism
+#  NATIVE - using native thread pool for intra- and inter-op parallelism
 set(PARALLEL_BACKEND "OPENMP" CACHE STRING "ATen parallel backend")
 if ("${PARALLEL_BACKEND}" STREQUAL "OPENMP")
   target_compile_definitions(caffe2 PUBLIC "-DAT_PARALLEL_OPENMP=1")
+elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE")
+  target_compile_definitions(caffe2 PUBLIC "-DAT_PARALLEL_NATIVE=1")
 else()
   message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
 endif()
@@ -961,6 +972,10 @@ endif()
 
 caffe2_interface_library(caffe2 caffe2_library)
 list(APPEND Caffe2_MAIN_LIBS caffe2_library)
+if (USE_TBB)
+  list(APPEND Caffe2_MAIN_LIB tbb)
+endif()
+
 # Install PDB files for MSVC builds
 if (MSVC AND BUILD_SHARED_LIBS)
   install(FILES $<TARGET_PDB_FILE:caffe2> DESTINATION lib OPTIONAL)
@@ -1086,10 +1101,10 @@ if (BUILD_TEST)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if (INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
-        # Install PDB files for MSVC builds
-        if (MSVC AND BUILD_SHARED_LIBS)
-          install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
-        endif()
+      # Install PDB files for MSVC builds
+      if (MSVC AND BUILD_SHARED_LIBS)
+        install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+      endif()
     endif()
   endforeach()
 
@@ -1151,8 +1166,9 @@ if (BUILD_PYTHON)
   pycmd(PYTHON_SITE_PACKAGES "
       import os
       from distutils import sysconfig
-      print(sysconfig.get_python_lib(prefix='').replace(os.sep, '/'))
+      print(sysconfig.get_python_lib(prefix=''))
   ")
+  file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
   SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
   SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")

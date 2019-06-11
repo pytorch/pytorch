@@ -16,9 +16,9 @@
 
 namespace torch {
 namespace jit {
+struct Function;
 namespace script {
 struct CompilationUnit;
-struct Function;
 }
 } // namespace jit
 } // namespace torch
@@ -45,6 +45,7 @@ _(OptionalType) \
 _(VarType) \
 _(ProfiledTensorType) \
 _(DeviceObjType) \
+_(FunctionType) \
 _(ClassType) \
 
 enum class TypeKind {
@@ -1087,6 +1088,41 @@ private:
   : Type(TypeKind::StringType) {}
 };
 
+struct FunctionType;
+using FunctionTypePtr = std::shared_ptr<FunctionType>;
+// This type represents a Python Function
+struct CAFFE2_API FunctionType : public Type {
+  static FunctionTypePtr create(
+      std::shared_ptr<torch::jit::Function> function) {
+    return FunctionTypePtr(
+        new FunctionType(function)); // NOLINT(modernize-make-shared)
+  }
+  DEFINE_IS_SUBCLASS(FunctionType);
+  bool operator==(const Type& rhs) const override {
+    if (auto func_type = rhs.cast<FunctionType>()) {
+      return func_type->function_ == function_;
+    }
+
+    return false;
+  }
+  std::string str() const override {
+    return "Function";
+  }
+  std::string python_str() const override {
+    throw "Function";
+  }
+  std::shared_ptr<torch::jit::Function> function() const {
+    return function_;
+  }
+  static const TypeKind Kind = TypeKind::FunctionType;
+
+ private:
+  FunctionType(std::shared_ptr<torch::jit::Function> function)
+      : Type(TypeKind::FunctionType), function_(function) {}
+
+  std::shared_ptr<torch::jit::Function> function_;
+};
+
 struct NoneType;
 using NoneTypePtr = std::shared_ptr<NoneType>;
 // This type represents a Python None
@@ -1218,7 +1254,7 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   } else if (type == IntType::get()) {
     return at::ScalarType::Long;
   } else if (type == BoolType::get()) {
-    return at::ScalarType::Byte;
+    return at::ScalarType::Bool;
   }
   AT_ASSERTM(
       0,
@@ -1323,7 +1359,7 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
-using ::torch::jit::script::Function;
+using ::torch::jit::Function;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public Type {
@@ -1342,12 +1378,6 @@ struct CAFFE2_API ClassType : public Type {
       return name_ == user_rhs->name_;
     }
     return false;
-  }
-
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    // XXX: We do not have inheritance implemented, only types that are the
-    // same can subtype from each other.
-    return *this == *rhs;
   }
 
   std::string str() const override {

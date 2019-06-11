@@ -1,6 +1,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Formatting.h>
+#include <c10/util/StringUtil.h>
 #include <cmath>
 #include <ATen/core/Dict.h>
 
@@ -91,6 +92,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:
       return out << "Future";
+    case IValue::Tag::Uninitialized:
+      return out << "Uninitialized";
     case IValue::Tag::Device:
       return out << v.toDevice();
     case IValue::Tag::GenericDict:
