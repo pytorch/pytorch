@@ -16,7 +16,7 @@ namespace {
 //
 // TODO: if we extend TensorIterator to accept 3 inputs,
 // we can probably make this a bit more performant.
-static Tensor do_trapz(const Tensor& y, const Tensor& dx, int64_t dim) {
+Tensor do_trapz(const Tensor& y, const Tensor& dx, int64_t dim) {
     Tensor left = y.slice(dim, 0, -1);
     Tensor right = y.slice(dim, 1);
 
@@ -25,11 +25,11 @@ static Tensor do_trapz(const Tensor& y, const Tensor& dx, int64_t dim) {
 
 // When dx is constant, the above formula simplifies
 // to dx * [(\sum_{i=1}^n y_i) - (y_1 + y_n)/2]
-static Tensor do_trapz(const Tensor& y, double dx, int64_t dim) {
+Tensor do_trapz(const Tensor& y, double dx, int64_t dim) {
     return (y.sum(dim) - (y.select(dim, 0) + y.select(dim, -1)) * (0.5)) * dx;
 }
 
-static Tensor zeros_like_except(const Tensor& y, int64_t dim) {
+Tensor zeros_like_except(const Tensor& y, int64_t dim) {
     auto sizes = y.sizes().vec();
     dim = maybe_wrap_dim(dim, y.dim());
     sizes.erase(sizes.begin() + dim);

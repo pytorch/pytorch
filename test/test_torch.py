@@ -10910,6 +10910,16 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             test_x((1, 10), 0, [1.0], device)
             test_x((0, 2), 0, [], device)
             test_x((0, 2), 1, [1.0, 2.0], device)
+            with self.assertRaisesRegex(
+                    IndexError,
+                    'Dimension out of range'):
+                test_x((2, 3), 2, [], device)
+                test_dx((2, 3), 2, 1.0, device)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    'There must be one `x` value for each sample point'):
+                test_x((2, 3), 1, [1.0, 2.0], device)
+                test_x((2, 3), 1, [1.0, 2.0, 3.0, 4.0], device)
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(
