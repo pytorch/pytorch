@@ -18,18 +18,6 @@ import torch.onnx.symbolic_opset9
 # release on 04/24/19
 
 
-# Blacklist operators for this opset version.
-# These operators have been updated in ONNX but not re-implemented here.
-# It is very important to blacklist these operators to avoid exporting
-# models with mixed versions of operators.
-# TODO : add support for the blacklisted operators in black_listed_operators
-black_listed_operators = []
-
-for black_listed_op in black_listed_operators:
-    vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
-
-
-# Add new operator here
 @parse_args('v', 'i', 'i', 'i', 'i')
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
