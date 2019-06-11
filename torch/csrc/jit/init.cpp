@@ -568,13 +568,9 @@ void initJITBindings(PyObject* module) {
   script::initJitScriptBindings(module);
 
   setPrintHandler([](const std::string& str) {
-    AutoGIL ag;
-    // TODO: I can't get the below to work without crashing.
-    //       figure out how to make this work. Otherwise,
-    //       WriteStdout will truncate to 1000 bytes.
-    // auto _stdout = py::module::import("sys").attr("stdout");
-    // _stdout.attr("write")(_stdout, str);
-    PySys_WriteStdout("%s", str.c_str());
+    py::gil_scoped_acquire acquire;
+    auto _stdout = py::module::import("sys").attr("stdout");
+    _stdout.attr("write")(str);
   });
 }
 } // namespace jit
