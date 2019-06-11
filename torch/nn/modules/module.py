@@ -189,7 +189,7 @@ class Module(object):
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
-    def _apply(self, fn, force_move_params_cpu_cuda=False):
+    def _apply(self, fn, force_move_params_cpu_cuda):
         for module in self.children():
             module._apply(fn, force_move_params_cpu_cuda)
 
@@ -299,7 +299,9 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.cuda(device), force_move_params_cpu_cuda=force_move_params_cpu_cuda)
+        return self._apply(
+            lambda t: t.cuda(device),
+            force_move_params_cpu_cuda=force_move_params_cpu_cuda)
 
     def cpu(self, force_move_params_cpu_cuda=False):
         r"""Moves all model parameters and buffers to the CPU.
@@ -307,9 +309,11 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.cpu(), force_move_params_cpu_cuda=force_move_params_cpu_cuda)
+        return self._apply(
+            lambda t: t.cpu(),
+            force_move_params_cpu_cuda=force_move_params_cpu_cuda)
 
-    def type(self, dst_type):
+    def type(self, dst_type, force_move_params_cpu_cuda=False):
         r"""Casts all parameters and buffers to :attr:`dst_type`.
 
         Arguments:
@@ -318,31 +322,39 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.type(dst_type))
+        return self._apply(
+            lambda t: t.type(dst_type),
+            force_move_params_cpu_cuda=force_move_params_cpu_cuda)
 
-    def float(self):
+    def float(self, force_move_params_cpu_cuda=False):
         r"""Casts all floating point parameters and buffers to float datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.float() if t.is_floating_point() else t)
+        return self._apply(
+            lambda t: t.float() if t.is_floating_point() else t,
+            force_move_params_cpu_cuda=force_move_params_cpu_cuda)
 
-    def double(self):
+    def double(self, force_move_params_cpu_cuda=False):
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.double() if t.is_floating_point() else t)
+        return self._apply(
+            lambda t: t.double() if t.is_floating_point() else t,
+            force_move_params_cpu_cuda=force_move_params_cpu_cuda)
 
-    def half(self):
+    def half(self, force_move_params_cpu_cuda=False):
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.half() if t.is_floating_point() else t)
+        return self._apply(
+            lambda t: t.half() if t.is_floating_point() else t,
+            force_move_params_cpu_cuda=force_move_params_cpu_cuda)
 
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
@@ -1056,8 +1068,10 @@ class Module(object):
                 p.grad.detach_()
                 p.grad.zero_()
 
-    def share_memory(self):
-        return self._apply(lambda t: t.share_memory_())
+    def share_memory(self, force_move_params_cpu_cuda=False):
+        return self._apply(
+            lambda t: t.share_memory_(),
+            force_move_params_cpu_cuda=force_move_params_cpu_cuda)
 
     def _get_name(self):
         return self.__class__.__name__
