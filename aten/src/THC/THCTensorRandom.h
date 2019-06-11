@@ -1,13 +1,16 @@
 #ifndef TH_CUDA_TENSOR_RANDOM_INC
 #define TH_CUDA_TENSOR_RANDOM_INC
 
-#include "THCTensor.h"
+#include <THC/THCTensor.h>
 
-#include "generic/THCTensorRandom.h"
-#include "THCGenerateAllTypes.h"
-#ifdef __HIP_PLATFORM_HCC__
-#include <hiprand_kernel.h>
-#endif
+#include <THC/generic/THCTensorRandom.h>
+#include <THC/THCGenerateAllTypes.h>
+
+#include <THC/generic/THCTensorRandom.h>
+#include <THC/THCGenerateBoolType.h>
+
+#include <curand.h>
+#include <curand_kernel.h>
 
 typedef struct THCGenerator THCGenerator;
 
@@ -28,7 +31,5 @@ THC_API void THCRandom_manualSeedAll(struct THCState *state, uint64_t the_seed_)
 THC_API uint64_t THCRandom_initialSeed(struct THCState *state);
 THC_API void THCRandom_getRNGState(struct THCState *state, THByteTensor *rng_state);
 THC_API void THCRandom_setRNGState(struct THCState *state, THByteTensor *rng_state);
-
-THC_API struct curandStateMtgp32* THCRandom_generatorStates(struct THCState* state);
 
 #endif

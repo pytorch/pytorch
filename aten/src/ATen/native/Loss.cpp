@@ -1,9 +1,15 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Dispatch.h"
-#include "ATen/CPUApplyUtils.h"
+// define constants like M_PI and C keywords for MSVC
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
+#include <ATen/CPUApplyUtils.h>
 
 #define EPSILON 1e-12
+#define _USE_MATH_DEFINES
 
 namespace {
   static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
@@ -70,7 +76,7 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
 Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
   auto grad_input = at::zeros_like(input);
   auto grad_expand = grad.expand_as(input);
-  AT_DISPATCH_FLOATING_TYPES(input.type(), "kl_div_backward", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "kl_div_backward_cpu", [&]() {
     at::CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(
         grad_input,
         target,
@@ -93,7 +99,7 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
     if (pos_weight.defined()) {
         // pos_weight need to be broadcasted, thus mul(target) is not inplace.
         auto log_weight = (pos_weight - 1).mul(target).add_(1);
-        loss = (1 - target).mul_(input).add_(log_weight.mul_((-max_val).exp_().mul_(1 + (-input).exp_()).log_().add_(max_val)));
+        loss = (1 - target).mul_(input).add_(log_weight.mul_(((-max_val).exp_().add_((-input - max_val).exp_())).log_().add_(max_val)));
     } else {
         loss = (1 - target).mul_(input).add_(max_val).add_((-max_val).exp_().add_((-input -max_val).exp_()).log_());
     }
@@ -124,5 +130,22 @@ Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tenso
     }
 
     return grad_input;
+}
+
+Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool log_input, const bool full, const double eps, const int64_t reduction)
+{
+    Tensor loss;
+    if (log_input) {
+        loss = at::exp(input) - target * input;
+    } else {
+        loss = input - target * at::log(input + eps);
+    }
+    
+    if (full) {
+        auto mask1 = (target > 1);
+        loss.masked_select(mask1) += (target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target)).masked_select(mask1);
+    }
+
+    return apply_loss_reduction(loss, reduction);
 }
 }}  // namespace at::native

@@ -284,17 +284,17 @@ template <>
 bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
-  auto* Y = Output(0); // RoI pooled data
 
   if (R.numel() == 0) {
+    std::vector<int64_t> sizes;
     // Handle empty rois
     if (order_ == StorageOrder::NCHW) {
-      Y->Resize(0, X.dim32(1), pooled_height_, pooled_width_);
+      sizes = {0, X.dim32(1), pooled_height_, pooled_width_};
     } else if (order_ == StorageOrder::NHWC) {
-      Y->Resize(0, pooled_height_, pooled_width_, X.dim32(3));
+      sizes = {0, pooled_height_, pooled_width_, X.dim32(3)};
     }
-    // The following mutable_data calls are needed to allocate the tensors
-    Y->mutable_data<float>();
+    // Output tensor is inititalized with proper sizes and data type
+    Output(0, sizes, at::dtype<float>());
     return true;
   }
 
@@ -306,7 +306,11 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   assert(sampling_ratio_ >= 0);
 
   if (order_ == StorageOrder::NCHW) {
-    Y->Resize(R.dim32(0), X.dim32(1), pooled_height_, pooled_width_);
+    auto* Y = Output(
+        0,
+        {R.dim32(0), X.dim32(1), pooled_height_, pooled_width_},
+        at::dtype<float>());  // RoI pooled data
+
     int output_size = Y->numel();
     ROIAlignRotatedForward<float>(
         output_size,
@@ -323,7 +327,10 @@ bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
         Y->mutable_data<float>(),
         order_);
   } else if (order_ == StorageOrder::NHWC) {
-    Y->Resize(R.dim32(0), pooled_height_, pooled_width_, X.dim32(3));
+    auto* Y = Output(
+        0,
+        {R.dim32(0), pooled_height_, pooled_width_, X.dim32(3)},
+        at::dtype<float>());   // RoI pooled data
     int output_size = Y->numel();
     ROIAlignRotatedForward<float>(
         output_size,

@@ -1,41 +1,29 @@
 #include "caffe2/operators/softmax_op.h"
-#include "caffe2/operators/softmax_shared.h"
+
+#include "caffe2/operators/softmax_utils.h"
 
 namespace caffe2 {
 
 // Implementation for the CPU context.
 template <>
 bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
-  auto& X = Input(0);
-  auto* Y = Output(0);
-  const auto canonical_axis = X.canonical_axis_index(axis_);
+  const auto& X = Input(0);
+  const int canonical_axis = X.canonical_axis_index(axis_);
   const int N = X.size_to_dim(canonical_axis);
   const int D = X.size_from_dim(canonical_axis);
-  Y->ResizeLike(X);
-  float* Ydata = Y->template mutable_data<float>();
-  // First, get scales
-  if (scale_.numel() != N) {
+  auto* Y = Output(0, X.sizes(), at::dtype<float>());
+  const float* X_data = X.data<float>();
+  float* Y_data = Y->mutable_data<float>();
+  if (N == 0) {
+    return true;
+  }
+  if (!scale_.defined()) {
+    scale_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (scale_.numel() != N) {
     scale_.Resize(N);
   }
-  if (rowmax_.numel() != N) {
-    rowmax_.Resize(N);
-  }
-  if (sum_multiplier_.numel() != D) {
-    sum_multiplier_.Resize(D);
-    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
-                                 &context_);
-  }
-
-  SoftmaxCPU(
-      context_,
-      N,
-      D,
-      X.data<float>(),
-      Ydata,
-      scale_.mutable_data<float>(),
-      sum_multiplier_.data<float>(),
-      false,
-      rowmax_.mutable_data<float>());
+  softmax_utils::SoftmaxCPU<float>(
+      N, D, false, X_data, Y_data, scale_.mutable_data<float>(), &context_);
   return true;
 }
 
@@ -44,20 +32,28 @@ template <>
 bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   auto& Y = Input(0);
   auto& dY = Input(1);
-  auto* dX = Output(0);
+
   const auto canonical_axis = Y.canonical_axis_index(axis_);
-  const int N = Y.size_to_dim(canonical_axis);
-  const int D = Y.size_from_dim(canonical_axis);
+  const int64_t N = Y.size_to_dim(canonical_axis);
+  const int64_t D = Y.size_from_dim(canonical_axis);
   // First, get scales
-  if (scale_.numel() != N) {
+  if (!scale_.defined()) {
+    scale_ = caffe2::empty({N}, at::dtype<float>().device(CPU));
+  } else if (scale_.numel() != N) {
     scale_.Resize(N);
   }
-  if (sum_multiplier_.numel() != D) {
+
+  if (!sum_multiplier_.defined()) {
+    sum_multiplier_ = caffe2::empty({D}, at::dtype<float>().device(CPU));
+    math::Set<float, CPUContext>(
+        D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
+  } else if (sum_multiplier_.numel() != D) {
     sum_multiplier_.Resize(D);
-    math::Set<float, CPUContext>(D, 1.f, sum_multiplier_.mutable_data<float>(),
-                                 &context_);
+    math::Set<float, CPUContext>(
+        D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
-  dX->ResizeLike(Y);
+
+  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
   const float* Ydata = Y.data<float>();
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->mutable_data<float>();
@@ -67,12 +63,21 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   context_.CopySameDevice<float>(Y.numel(), dYdata, dXdata);
   float* scaledata = scale_.mutable_data<float>();
   for (int i = 0; i < N; ++i) {
-    math::Dot<float, CPUContext>(D, Ydata + i * D, dYdata + i * D,
-                                 scaledata + i, &context_);
+    math::Dot<float, CPUContext>(
+        D, Ydata + i * D, dYdata + i * D, scaledata + i, &context_);
   }
-  math::Gemm<float, CPUContext>(CblasNoTrans, CblasNoTrans, N, D, 1, -1,
-                                scaledata, sum_multiplier_.data<float>(), 1,
-                                dXdata, &context_);
+  math::Gemm<float, CPUContext>(
+      CblasNoTrans,
+      CblasNoTrans,
+      N,
+      D,
+      1,
+      -1,
+      scaledata,
+      sum_multiplier_.data<float>(),
+      1,
+      dXdata,
+      &context_);
   math::Mul<float, CPUContext>(Y.numel(), dXdata, Ydata, dXdata, &context_);
   return true;
 }
@@ -170,7 +175,8 @@ class GetSoftmaxGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        def_.type() + "Gradient", "",
+        def_.type() + "Gradient",
+        "",
         vector<string>{O(0), GO(0)},
         vector<string>{GI(0)});
   }
@@ -178,4 +184,4 @@ class GetSoftmaxGradient : public GradientMakerBase {
 REGISTER_GRADIENT(Softmax, GetSoftmaxGradient);
 REGISTER_GRADIENT(SoftmaxFp16, GetSoftmaxGradient);
 
-}  // namespace caffe2
+} // namespace caffe2

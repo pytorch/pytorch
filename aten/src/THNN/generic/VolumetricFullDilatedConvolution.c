@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/VolumetricFullDilatedConvolution.c"
+#define TH_GENERIC_FILE "THNN/generic/VolumetricFullDilatedConvolution.c"
 #else
 
 static void THNN_(vol2col)(
@@ -274,7 +274,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
     const int64_t k_ = 1;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-	if (bias) {
+        if (bias) {
       THBlas_(gemm)(
         't', 'n',
         n_, m_, k_,

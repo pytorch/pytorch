@@ -50,7 +50,7 @@ struct ValidIterator : public IteratorImpl<Batch> {
   void next() override {
     // If we didn't get the very first batch yet, get it now.
     lazy_initialize();
-    AT_CHECK(
+    TORCH_CHECK(
         batch_.has_value(), "Attempted to increment iterator past the end");
     // Increment to the next batch.
     batch_ = next_batch_();
@@ -62,7 +62,7 @@ struct ValidIterator : public IteratorImpl<Batch> {
   Batch& get() override {
     // If we didn't get the very first batch yet, get it now.
     lazy_initialize();
-    AT_CHECK(
+    TORCH_CHECK(
         batch_.has_value(),
         "Attempted to dereference iterator that was past the end");
     return batch_.value();
@@ -136,7 +136,7 @@ class Iterator {
   using value_type = Batch;
   using pointer = Batch*;
   using reference = Batch&;
-  using iterator_category = std::output_iterator_tag;
+  using iterator_category = std::input_iterator_tag;
 
   explicit Iterator(std::unique_ptr<detail::IteratorImpl<Batch>> impl)
       : impl_(std::move(impl)) {}

@@ -10,8 +10,9 @@ template <class Context>
 class LengthsPadOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LengthsPadOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit LengthsPadOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(double, "padding_value", padding_value_, -1),
         OP_SINGLE_ARG(int, "target_length", target_length_, -1) {
     CAFFE_ENFORCE_GE(target_length_, 1, "target_length argument must be >= 1");
@@ -26,7 +27,6 @@ class LengthsPadOp : public Operator<Context> {
   bool DoRunWithType() {
     auto& data = Input(DATA);
     auto& lengths = Input(LENGTHS);
-    auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(lengths.dim(), 1, "LENGTHS must be 1-D");
     CAFFE_ENFORCE_GE(data.dim(), 1, "DATA should be at least 1-D");
@@ -48,7 +48,7 @@ class LengthsPadOp : public Operator<Context> {
 
     auto shape = data.sizes().vec();
     shape[0] = lengths_size * target_length_;
-    output->Resize(shape);
+    auto* output = Output(0, shape, at::dtype<T>());
 
     auto block_size = data.size_from_dim(1);
     auto src_data = data.template data<T>();

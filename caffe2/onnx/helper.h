@@ -29,6 +29,9 @@ class CAFFE2_API DummyName {
   size_t counter_{0};
 };
 
+::ONNX_NAMESPACE::TypeProto ExtraTypeProto(
+    const ::ONNX_NAMESPACE::TensorProto& tensor);
+
 inline AttributeProto MakeAttribute(
     const std::string& name,
     const std::vector<int64_t>& vals) {

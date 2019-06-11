@@ -190,7 +190,8 @@ class TestConversion(TestCase):
     def test_onnx_to_caffe2_if(self):
         true_nodes = [helper.make_node(
             "MatMul", ["X", "W"], ["Y"])]
-        false_nodes = [helper.make_node("Slice", ["X"], ["Y"], axes=[0, 1], starts=[0, 0], ends=[0, 2])]
+        false_nodes = [helper.make_node("Slice", ["X"], ["Y"], axes=[0, 1],
+                                        starts=[0, 0], ends=[2, 2])]
         nodes = self._make_fake_if_op(true_nodes, false_nodes, [(TensorProto.FLOAT, (2, 2), "Y")])
         X = np.random.rand(2, 3).astype(np.float32)
         W = np.random.rand(3, 2).flatten().astype(np.float32)
@@ -205,7 +206,9 @@ class TestConversion(TestCase):
                                             [3, 2],
                                             W.tolist())]
         )
-        model_def = helper.make_model(graph_def, producer_name='onnx-to-caffe2-test')
+        onnx_id = helper.make_opsetid("", 9)
+        model_def = helper.make_model(graph_def, producer_name='onnx-to-caffe2-test',
+                                      opset_imports=[onnx_id])
 
         p = c2.prepare(model_def)
         Y = np.matmul(X, W.reshape(3, 2))

@@ -1,14 +1,20 @@
 #include <caffe2/ideep/ideep_utils.h>
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/operators/concat_split_op.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPConcatOp final : public IDEEPOperator {
  public:
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_OPERATOR_FUNCTIONS();
+  using FALLBACK_OP = IDEEPFallbackOp<ConcatOp<CPUContext>, SkipIndices<0>>;
 
   IDEEPConcatOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPOperator(operator_def, ws) {
+      : IDEEPOperator(operator_def, ws),
+        fallback_(operator_def, ws) {
     CAFFE_ENFORCE(
       !(OperatorBase::HasArgument("axis") && OperatorBase::HasArgument("order")),
         "You shouldn't specify both the dim to concat, and the order "
@@ -20,42 +26,53 @@ class IDEEPConcatOp final : public IDEEPOperator {
       axis_ = 1;
       add_axis_ = 0;
     }
-    CAFFE_ENFORCE_GE(axis_, 0);
   }
-  virtual ~IDEEPConcatOp() {}
+  ~IDEEPConcatOp() override {}
 
   bool RunOnDevice() override {
-    auto* output = Output(OUTPUT);
-    TensorCPU* axis_info = OperatorBase::Output<TensorCPU>(AXIS_INFO, CPU);
+    bool fallback_to_cpu = false;
+    vector<itensor> inputs_itensor;
 
-    vector<itensor> inputs;
     for (int i = 0; i < InputSize(); ++i) {
       if (OperatorBase::InputBlob(i).template IsType<itensor>()) {
-        inputs.emplace_back(Input(i));
+        auto& tensor_ideep = Input(i);
+        if (tensor_ideep.ndims() == 0 || tensor_ideep.get_nelems() == 0)
+          continue;
+        inputs_itensor.emplace_back(tensor_ideep);
       } else {
         CAFFE_ENFORCE(
             BlobIsTensorType(OperatorBase::InputBlob(i), CPU),
             "Expect cpu tensor if not itensor");
         auto& tensor_cpu = OperatorBase::Input<Tensor>(i, CPU);
-        CAFFE_ENFORCE(
-            tensor_cpu.sizes().size() == 0 || tensor_cpu.numel() == 0,
-            "Expect zero dim tensor");
+        if (tensor_cpu.sizes().size() == 0 || tensor_cpu.numel() == 0)
+          continue;
+        fallback_to_cpu = true;
+        break;
       }
     }
 
-    auto axis_vdata = ideep::concat::compute(inputs, axis_, add_axis_, *output);
-    axis_info->Resize(vector<int64_t>(1, InputSize()));
-    int* axis_data = axis_info->template mutable_data<int>();
-    for (int i = 0; i < axis_vdata.size(); i++) {
-      axis_data[i] = axis_vdata[i];
+    if (!fallback_to_cpu) {
+      int adj_size = inputs_itensor[0].ndims() + (add_axis_ ? 1 : 0);
+      int canonical_axis = canonical_axis_index_(axis_, adj_size);
+      auto* output = Output(OUTPUT);
+      Tensor* axis_info = OutputTensor(AXIS_INFO,
+        vector<int64_t>(1, InputSize()), at::dtype<int>().device(CPU));
+      auto* axis_data = axis_info->template mutable_data<int>();
+      auto axis_vdata =
+        ideep::concat::compute(inputs_itensor, canonical_axis, add_axis_, *output);
+      for (int i = 0; i < axis_vdata.size(); i++) {
+        axis_data[i] = axis_vdata[i];
+      }
+      return true;
     }
 
-    return true;
+    return fallback_.Run(0);
   }
 
  private:
   int axis_;
   int add_axis_;
+  FALLBACK_OP fallback_;
 
   INPUT_TAGS(INPUT0);
   OUTPUT_TAGS(OUTPUT, AXIS_INFO);
@@ -81,14 +98,13 @@ class IDEEPSplitOp final : public IDEEPOperator {
       axis_ = 1;
       add_axis_ = 0;
     }
-    CAFFE_ENFORCE_GE(axis_, 0);
   }
-  virtual ~IDEEPSplitOp() {}
+  ~IDEEPSplitOp() override {}
 
   bool RunOnDevice() override {
     const auto& input = Input(INPUT);
-    CAFFE_ENFORCE_LT(axis_, input.ndims(), "Axis not in input ndim range.");
-    const int input_channels = input.get_dim(axis_);
+    int canonical_axis = canonical_axis_index_(axis_, input.ndims());
+    const int input_channels = input.get_dim(canonical_axis);
     vector<int> axis_vdata(OutputSize(), 0);
     if (InputSize() == 2) {
       // We obtain split from the input tensor.
@@ -127,7 +143,7 @@ class IDEEPSplitOp final : public IDEEPOperator {
         input_channels);
 
     auto iten_vector = ideep::spliter::compute(
-        input, axis_vdata, axis_, add_axis_);
+        input, axis_vdata, canonical_axis, add_axis_);
     CAFFE_ENFORCE_EQ(
         iten_vector.size(),
         OutputSize(),
@@ -154,4 +170,4 @@ class IDEEPSplitOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(Concat, IDEEPConcatOp);
 REGISTER_IDEEP_OPERATOR(Split, IDEEPSplitOp);
 
-} // namespace caffe2
+} // namespace

@@ -45,6 +45,7 @@ class HelperWrapper(object):
         'instance_norm': instance_norm,
         'spatial_bn': spatial_bn,
         'spatial_gn': spatial_gn,
+        'moments_with_running_stats': moments_with_running_stats,
         'relu': relu,
         'prelu': prelu,
         'tanh': tanh,

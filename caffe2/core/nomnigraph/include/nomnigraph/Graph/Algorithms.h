@@ -196,6 +196,17 @@ void induceEdges(SubgraphType* sg) {
   }
 }
 
+/// \brief Create subgraph object from graph.
+template <typename GraphType>
+typename GraphType::SubgraphType createSubgraph(GraphType* g) {
+  typename GraphType::SubgraphType subgraph;
+  for (auto& node : g->getMutableNodes()) {
+    subgraph.addNode(node);
+  }
+  induceEdges(&subgraph);
+  return subgraph;
+}
+
 } // namespace algorithm
 } // namespace nom
 

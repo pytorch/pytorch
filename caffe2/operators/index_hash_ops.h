@@ -11,8 +11,9 @@ template <class Context>
 class IndexHashOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  IndexHashOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit IndexHashOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         seed_(this->template GetSingleArgument<int64_t>("seed", 0)),
         modulo_(this->template GetSingleArgument<int64_t>("modulo", 0)) {
     CAFFE_ENFORCE_GT(modulo_, 0, "MODULO should be > 0");
@@ -26,8 +27,9 @@ class IndexHashOp : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& indices = Input(INDICES);
-    auto* hashed_indices = Output(HASHED_INDICES);
-    hashed_indices->ResizeLike(indices);
+
+    auto* hashed_indices =
+        Output(HASHED_INDICES, indices.sizes(), at::dtype<T>());
 
     CAFFE_ENFORCE_GE(
         static_cast<int64_t>(std::numeric_limits<T>::max()),

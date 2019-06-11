@@ -21,7 +21,7 @@ class TextFileReader(Reader):
             init_net   : Net that will be run only once at startup.
             filename   : Path to file to read from.
             schema     : schema.Struct representing the schema of the data.
-                         Currently, only support Struct of strings.
+                         Currently, only support Struct of strings and float32.
             num_passes : Number of passes over the data.
             batch_size : Number of rows to read at a time.
         """

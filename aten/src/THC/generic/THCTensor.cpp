@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensor.cpp"
+#define THC_GENERIC_FILE "THC/generic/THCTensor.cpp"
 #else
 
 #include <ATen/InferSize.h>
@@ -65,8 +65,7 @@ THCTensor *THCTensor_(new)(THCState *state)
 {
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
-    at::CUDATensorId(),
-    false
+    at::CUDATensorId()
   ).release();
 }
 
@@ -75,8 +74,7 @@ THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 {
   THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
-    at::CUDATensorId(),
-    false
+    at::CUDATensorId()
   ).release();
   THCTensor_(setStorageNd)(state,
                            self,
@@ -89,14 +87,13 @@ THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 }
 
 /* Storage init */
-THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset, at::IntList sizes, at::IntList strides) {
+THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset, at::IntArrayRef sizes, at::IntArrayRef strides) {
   if (strides.data()) {
-    AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
+    TORCH_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
   THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
-    at::CUDATensorId(),
-    false
+    at::CUDATensorId()
   ).release();
   THCTensor_(setStorageNd)(state, self, storage, storageOffset, sizes.size(),
                            const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
@@ -136,7 +133,7 @@ THCTensor *THCTensor_(newWithStorage4d)(THCState *state, THCStorage *storage, pt
                                             {stride0, stride1, stride2, stride3});
 }
 
-THCTensor *THCTensor_(newWithSize)(THCState *state, at::IntList size, at::IntList stride)
+THCTensor *THCTensor_(newWithSize)(THCState *state, at::IntArrayRef size, at::IntArrayRef stride)
 {
   return THCTensor_(newWithStorage)(state, NULL, 0, size, stride);
 }
@@ -200,26 +197,31 @@ THCTensor *THCTensor_(newTranspose)(THCState *state, THCTensor *tensor, int dime
   return self;
 }
 
-THCTensor *THCTensor_(newUnfold)(THCState *state, THCTensor *tensor, int dimension_, int64_t size_, int64_t step_)
-{
-  THCTensor *self = THCTensor_(newWithTensor)(state, tensor);
-  THCTensor_(unfold)(state, self, NULL, dimension_, size_, step_);
-  return self;
-}
-
-THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntList size)
+THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, at::IntArrayRef size)
 {
   ptrdiff_t numel = THCTensor_(nElement)(state, tensor);
-  THCTensor *self = THCTensor_(new)(state);
   auto inferred_size = at::infer_size(size, numel);
   auto stride = THTensor_compute_stride(tensor->sizes(),
                                         tensor->strides(),
                                         inferred_size);
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
-    "across two contiguous subspaces). Call .contiguous() before .view().");
+    "across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
+
+  // NOTE: This path of constructing the Tensor directly with the viewed Storage is necessary
+  // to allow `view` not to have a device_guard.  Taking the common TH path of allocating a storage
+  // on the current device [via THCTensor_(new)] and then swapping out the storage later can change
+  // the device out from under the tensor.  Having the device be consistent through a Tensor's lifetime
+  // is an invariant we wish to keep to support caching, simplicity, etc.
+  auto storage = tensor->storage();
+  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    std::move(storage),
+    at::CUDATensorId()
+  ).release();
+
   THCTensor_setStorage(state, self, THTensor_getStoragePtr(tensor), tensor->storage_offset(), inferred_size, stride_value);
+
   return self;
 }
 
@@ -240,7 +242,7 @@ THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input) {
 }
 
 /* Resize */
-void THCTensor_(resize)(THCState *state, THCTensor *self, at::IntList size, at::IntList stride)
+void THCTensor_(resize)(THCState *state, THCTensor *self, at::IntArrayRef size, at::IntArrayRef stride)
 {
   THCTensor_resize(state, self, size, stride);
 }
@@ -248,6 +250,11 @@ void THCTensor_(resize)(THCState *state, THCTensor *self, at::IntList size, at::
 void THCTensor_(resizeAs)(THCState *state, THCTensor *self, THCTensor *src)
 {
   THCTensor_resizeAs(state, self, src);
+}
+
+void THCTensor_(resize0d)(THCState *state, THCTensor *tensor)
+{
+  THCTensor_resizeNd(state, tensor, 0, {}, nullptr);
 }
 
 void THCTensor_(resize1d)(THCState *state, THCTensor *tensor, int64_t size0)
@@ -285,7 +292,7 @@ void THCTensor_(set)(THCState *state, THCTensor *self, THCTensor *src)
   THCTensor_set(state, self, src);
 }
 
-void THCTensor_(setStorage)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_) {
+void THCTensor_(setStorage)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_) {
   THCTensor_setStorage(state, self, storage_, storageOffset_, size_, stride_);
 }
 
@@ -361,12 +368,22 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
 
   THCTensor_(set)(state, self, src);
   THCTensor_(narrow)(state, self, NULL, dimension, sliceIndex, 1);
+
+  std::vector<int64_t> newSize(self->dim()-1);
+  std::vector<int64_t> newStride(self->dim()-1);
+
+  for (d = 0; d < dimension; d++)
+  {
+    newSize[d] = self->size(d);
+    newStride[d] = self->stride(d);
+  }
+
   for(d = dimension; d < self->dim()-1; d++)
   {
-    self->set_size(d, self->size(d+1));
-    self->set_stride(d, self->stride(d+1));
+    newSize[d] = self->size(d+1);
+    newStride[d] = self->stride(d+1);
   }
-  self->resize_dim((unsigned int)(self->dim() - 1));
+  self->set_sizes_and_strides(newSize, newStride);
 }
 
 void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int dimension1, int dimension2)
@@ -432,28 +449,23 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
 /* we have to handle the case where the result is a number */
 void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
 {
-  int ndim = 0;
-  int d;
-
   if(!src)
     src = self;
 
   THCTensor_(set)(state, self, src);
 
-  for(d = 0; d < src->dim(); d++)
+  std::vector<int64_t> newSize;
+  std::vector<int64_t> newStride;
+  for(int d = 0; d < src->dim(); ++d)
   {
     if(src->size(d) != 1)
     {
-      if(d != ndim)
-      {
-        self->set_size(ndim, src->size(d));
-        self->set_stride(ndim, src->stride(d));
-      }
-      ndim++;
+      newSize.push_back(src->size(d));
+      newStride.push_back(src->stride(d));
     }
   }
 
-  self->resize_dim(ndim);
+  self->set_sizes_and_strides(newSize, newStride);
 }
 
 void THCTensor_(squeeze1d)(THCState *state, THCTensor *self, THCTensor *src, int dimension)
@@ -534,6 +546,19 @@ void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *stor
 void THCTensor_(resizeNd)(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
   THCTensor_resizeNd(state, self, nDimension, size, stride);
+}
+
+void THCTensor_(set0d)(THCState *state, THCTensor *tensor, scalar_t value)
+{
+  THArgCheck(THTensor_nDimension(tensor) == 0, 1, "tensor must have no dimensions");
+  THCStorage_(set)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset(), value);
+}
+
+
+scalar_t THCTensor_(get0d)(THCState *state, const THCTensor *tensor)
+{
+  THArgCheck(THTensor_nDimension(tensor) == 0, 1, "tensor must have no dimensions dimension");
+  return THCStorage_(get)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset());
 }
 
 void THCTensor_(set1d)(THCState *state, THCTensor *tensor, int64_t x0, scalar_t value)

@@ -112,14 +112,13 @@ void GRUUnitGradient(
 template <typename T, typename Context>
 class GRUUnitOp : public Operator<Context> {
  public:
-  GRUUnitOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        drop_states_(this->template GetSingleArgument<bool>(
-            "drop_states",
-            false)),
-        sequence_lengths_(this->template GetSingleArgument<bool>(
-            "sequence_lengths",
-            true)) {}
+  template <class... Args>
+  explicit GRUUnitOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        drop_states_(
+            this->template GetSingleArgument<bool>("drop_states", false)),
+        sequence_lengths_(
+            this->template GetSingleArgument<bool>("sequence_lengths", true)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
@@ -168,14 +167,13 @@ class GRUUnitOp : public Operator<Context> {
 template <typename T, typename Context>
 class GRUUnitGradientOp : public Operator<Context> {
  public:
-  GRUUnitGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        drop_states_(this->template GetSingleArgument<bool>(
-            "drop_states",
-            false)),
-        sequence_lengths_(this->template GetSingleArgument<bool>(
-            "sequence_lengths",
-            true)) {}
+  template <class... Args>
+  explicit GRUUnitGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        drop_states_(
+            this->template GetSingleArgument<bool>("drop_states", false)),
+        sequence_lengths_(
+            this->template GetSingleArgument<bool>("sequence_lengths", true)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {

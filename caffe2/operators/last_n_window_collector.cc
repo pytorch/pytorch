@@ -11,8 +11,9 @@ template <class Context>
 class LastNWindowCollectorOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LastNWindowCollectorOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit LastNWindowCollectorOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         numToCollect_(
             OperatorBase::GetSingleArgument<int>("num_to_collect", -1)) {
     CAFFE_ENFORCE_GT(numToCollect_, 0);
@@ -71,7 +72,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     if (num_entries == 0) {
       if (!output_initialized) {
         // Get both shape and meta
-        output->CopyFrom(input, &context_);
+        output->CopyFrom(input, true /*async*/);
       }
       return true;
     }
@@ -83,7 +84,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
 
     // output_num is >= output_batch_size
     if (output_num > output_batch_size) {
-      output->ExtendTo(output_num, 50, &context_);
+      output->ExtendTo(output_num, 50);
     }
 
     auto* output_data =

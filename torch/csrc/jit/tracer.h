@@ -1,207 +1,336 @@
 #pragma once
 
-#include "torch/csrc/autograd/function_hook.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/stack.h"
-#include "torch/csrc/jit/tracing_state.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include <ATen/Backtrace.h>
+#include <ATen/core/stack.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <ATen/core/jit_type.h>
 
+#include <torch/csrc/utils/variadic.h>
+
+#include <cstdint>
+#include <iostream>
 #include <memory>
 #include <mutex>
-#include <vector>
-#include <iostream>
-#include <cstdint>
 #include <unordered_map>
+#include <vector>
 
-namespace torch { namespace jit { namespace tracer {
+namespace torch {
+namespace jit {
+struct Node;
+struct Value;
+struct Graph;
+
+namespace script {
+  struct Module;
+}
+
+namespace tracer {
+
+using ::c10::ivalue::List;
+using ::c10::ivalue::Shared;
+
+using ::c10::IValue;
+using ::c10::ivalue::Future;
+using ::c10::ivalue::Tuple;
+
+using ::c10::ivalue::BoolList;
+using ::c10::ivalue::DoubleList;
+using ::c10::ivalue::GenericList;
+using ::c10::ivalue::IntList;
+using ::c10::ivalue::TensorList;
+
+using ::c10::ivalue::ConstantString;
+using ::c10::TupleTypePtr;
+using ::c10::TupleType;
+using ::c10::ArrayRef;
 
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
+struct TORCH_API TracingState
+    : public std::enable_shared_from_this<TracingState> {
+  TracingState();
+  ~TracingState();
+
+  std::shared_ptr<Graph> graph;
+  bool warn = true;
+  bool force_outplace = false;
+  std::function<std::string(const Variable& var)> lookup_var_name_fn =
+      [](const Variable& var) { return ""; };
+
+  void enterFrame() {
+    env_stack.emplace_back();
+  }
+
+  void leaveFrame() {
+    env_stack.pop_back();
+  }
+
+  void setValue(const IValue& v, Value* value);
+  void delValue(const IValue& var);
+  Value* getValue(const IValue& var);
+  Value* getOutput(const IValue& var);
+  bool hasValue(const IValue& var) const;
+
+private:
+  using WeakTensor = at::WeakTensor;
+
+  struct WeakTensorHasher {
+    size_t operator()(const WeakTensor& t) const {
+      return std::hash<void*>()(t.unsafeGetTensorImpl());
+    }
+  };
+
+  struct WeakTensorEq {
+    bool operator()(const WeakTensor& t1, const WeakTensor& t2) const {
+      return t1.is_same(t2);
+    }
+  };
+
+  struct Frame {
+    std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq>
+        value_map;
+    // TODO weak refcount
+    std::unordered_map<c10::intrusive_ptr<c10::ivalue::Future>, Value*>
+        future_map;
+  };
+
+  std::vector<Frame> env_stack;
+
+};
+
+// This is meant to be used as a thread local place, where we can store extra
+// info that gets lost when we call into ATen from Python bindings. One example
+// for when this happens is when we get an IntArrayRef argument with e.g. sizes for
+// view. When tracing, those might be tensors, which let us encode extra data
+// dependencies, but once they get to the ATen call where we actually have the
+// tracing logic, they get converted into a raw IntArrayRef, and we loose all
+// information. To prevent this, we temporarily stash it in here.
+struct ArgumentStash {
+  struct IntArrayRefTrace : std::vector<Value*> {
+    IntArrayRefTrace(int size) : std::vector<Value*>(size, nullptr) {}
+  };
+
+  static bool empty() {
+    return stash.intlists.empty();
+  }
+
+  TORCH_API static void stashIntArrayRefElem(
+      const std::string& arg_name,
+      size_t size,
+      size_t idx,
+      const Variable& var);
+
+  static bool hasIntArrayRef(const std::string& arg_name) {
+    return stash.intlists.count(arg_name) > 0;
+  }
+
+  static IntArrayRefTrace popIntArrayRef(const std::string& arg_name) {
+    auto info = std::move(stash.intlists.at(arg_name));
+    stash.intlists.erase(arg_name);
+    return info;
+  }
+
+  // Value stashing: Use these methods to stash arguments which correspond
+  // to regular Value*'s in the graph. i.e. they don't require special
+  // handling like in the case of IntArrayRefs
+  TORCH_API static void stashValue(
+      const std::string& arg_name,
+      size_t idx,
+      const Variable& var,
+      const c10::TypePtr& type = nullptr);
+
+  static bool hasValue(const std::string& arg_name) {
+    return stash.values.count(arg_name) > 0;
+  }
+
+  static Value* popValue(const std::string& arg_name) {
+    auto info = stash.values.at(arg_name);
+    stash.values.erase(arg_name);
+    return info;
+  }
+
+ private:
+  static thread_local ArgumentStash stash;
+  std::unordered_map<std::string, IntArrayRefTrace> intlists;
+  std::unordered_map<std::string, Value*> values;
+};
+
+// Retrieve or set the current tracing state. Returns a nullptr if tracing is
+// disabled.
+TORCH_API const std::shared_ptr<TracingState>& getTracingState();
+TORCH_API void setTracingState(std::shared_ptr<TracingState> state);
+
+inline bool isTracing() {
+  return static_cast<bool>(getTracingState());
+}
+
+using warn_fn_type = void (*)(const std::string& msg);
+TORCH_API extern const char* WARN_PYTHON_DATAFLOW;
+TORCH_API extern const char* WARN_CONSTRUCTOR;
+TORCH_API extern const char* WARN_RESIZE;
+TORCH_API void _do_warn(const char* _reason, const char* _kind);
+inline void warn(const char* _reason, const char* _kind = nullptr) {
+  if (const auto& state = getTracingState()) {
+    if (!state->warn)
+      return;
+    _do_warn(_reason, _kind);
+  }
+}
+TORCH_API void setWarn(warn_fn_type fn);
+
+struct TORCH_API NoWarn {
+  NoWarn() : state(getTracingState()) {
+    if (state) {
+      prev = state->warn;
+      state->warn = false;
+    }
+  }
+  ~NoWarn() {
+    if (state) {
+      state->warn = prev;
+    }
+  }
+  std::shared_ptr<TracingState> state;
+  bool prev;
+};
+
+struct WithNestedTracingFrame {
+  WithNestedTracingFrame() {
+    getTracingState()->enterFrame();
+  }
+
+  ~WithNestedTracingFrame() {
+    getTracingState()->leaveFrame();
+  }
+};
 TORCH_API void recordSourceLocation(Node* n);
 TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 
-// Having finished adding a new 'node' to the graph IR 'setValueTrace' associates
-// this node with an output variable, so that further operations involving this
-// variable know which node in the IR to reference.
-inline void setValueTrace(const Variable& var, Value *value) {
-  JIT_ASSERT(var.defined());
-  getTracingState()->value_map[var] = value;
-}
+// Having finished adding a new 'node' to the graph IR 'setValueTrace'
+// associates this node with an output variable, so that further operations
+// involving this variable know which node in the IR to reference.
+TORCH_API void setValueTrace(const IValue& v, Value* value);
 
-inline void delValueTrace(const Variable& var) {
-  JIT_ASSERT(var.defined());
-  getTracingState()->value_map.erase(var);
-}
+TORCH_API void delValueTrace(const IValue& var);
 
-// Given a variable 'var', return the 'node' which represents the instruction
-// which computes the value of this variable in the IR.
-// Here, we interpret untraced variables as constants that are just embedded
-// in the graph.  This is useful to handle code which does things like this
-// (from torch.autograd.variable, now moved to C++):
-//
-//    def mm(self, matrix):
-//      output = Variable(self.data.new(self.data.size(0), matrix.data.size(1)))
-//      return Addmm.apply(output, self, matrix, 0, 1, True)
-//
-// Here, mm fakes up a dummy variable with uninitialized data to do an inplace
-// update on, but subsequently ignores it because the alpha scaling factor is zero.
-// This is one of the cases where a Variable can be created inside of a trace, and
-// if we treat it as a constant, everything will work out.
-inline Value* getValueTrace(const Variable& var) {
-  auto &state = getTracingState();
-  if (!var.defined()) {
-    Node *n = state->graph->createUndefined();
-    return state->graph->appendNode(n)->output();
+TORCH_API std::function<void()> pauseTracing();
+
+TORCH_API Value* getValueTrace(const IValue& var);
+
+struct TypedStack : public std::pair<Stack, TupleTypePtr>
+{
+  using pair::pair;
+
+  // NB: The inherited default constructor gives nullptr for |type|,
+  //     so we provide a saner one.
+  TypedStack()
+    : pair({}, TupleType::create({}))
+  {}
+
+  Stack& stack() {
+    return this->first;
   }
-
-  auto & value_map = getTracingState()->value_map;
-  auto it = value_map.find(var);
-  if (it == value_map.end()) {
-    Value *constant = state->graph->insertConstant(var.data());
-    recordSourceLocation(constant->node());
-    constant->inferTypeFrom(var.data());
-    it = value_map.emplace_hint(it, var, constant);
+  TupleTypePtr& types() {
+    return this->second;
   }
-  return it->second;
-}
-
-inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const Variable& var, size_t output_no) {
-  if (!var.defined()) {
-    Node *n = state->graph->createUndefined();
-    return state->graph->appendNode(n)->output();
+  size_t size() {
+    auto s = stack().size();
+    AT_ASSERT(s == types()->elements().size());
+    return s;
   }
+};
 
-  auto & value_map = getTracingState()->value_map;
-  auto it = value_map.find(var);
-  if (it == value_map.end()) {
-    std::ostringstream os;
-    os << "output " << output_no << " of traced region did not have observable "
-       << "data dependence with trace inputs; this probably indicates your program "
-       << "cannot be understood by the tracer.";
-    throw std::runtime_error(os.str());
-  }
-  return it->second;
-}
+TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(TypedStack inputs, const std::shared_ptr<script::Module>& self=nullptr);
 
-// Start tracing, treating 'inputs' as inputs to the trace, which can be
-// varied on subsequent invocations of the trace.  Any other variables
-// will be treated as constants.
-inline std::pair<std::shared_ptr<TracingState>, Stack> enter(Stack inputs) {
-  if (isTracing()) {
-    AT_ERROR("Tracing can't be nested");
-  }
-  auto state = std::make_shared<TracingState>();
-  setTracingState(state);
-  // XXX: this function mutates input
-  const std::function<IValue(IValue, TypePtr, Value*)> add_input = [&](IValue input, TypePtr type, Value* value) -> IValue {
-    value->setType(type);
-    if (type->isSubtypeOf(DynamicType::get())) {
-      auto input_tensor = input.toTensor();
-      auto name = Variable(input_tensor).name();
-      if (state->value_map.find(input_tensor) != state->value_map.end()) {
-        input_tensor = input_tensor.view(input_tensor.sizes());
-      }
-      value->setUniqueName(name);
-      state->value_map[input_tensor] = value;
-      return input_tensor;
-    } else if (auto tuple_type = type->cast<TupleType>()) {
-      auto unpack_node = state->graph->insertNode(state->graph->createTupleUnpack(value));
-      auto elem_values = unpack_node->outputs();
-      auto elem_types = tuple_type->elements();
-      Stack elems = input.toTuple()->elements();
-      size_t num_elems = elems.size();
-      AT_ASSERT(elem_values.size() == num_elems && elem_types.size() == num_elems);
-      for (size_t i = 0; i < num_elems; ++i) {
-        elems[i] = add_input(elems[i], elem_types[i], elem_values[i]);
-      }
-      return Tuple::create(std::move(elems));
-    } else {
-      AT_ERROR("Only tensors or tuples of tensors can be inputs to traced functions");
-    }
-  };
-  for (IValue& input : inputs) {
-    input = add_input(input, inferTypeFrom(input), state->graph->addInput());
-  }
-  return std::make_pair(state, inputs);
-}
+TORCH_API void exit(const Stack& outputs);
 
-// Exit a trace, treating 'outputs' as the outputs of the trace.  These
-// are the variables whose values will be computed upon subsequent
-// invocations of the trace.
-inline void exit(const Stack& outputs) {
-  auto & state = getTracingState();
-  size_t i = 0;
-  std::function<Value*(const IValue&)> reduce_ivalue = [&](const IValue& iv) -> Value* {
-    if (iv.isTensor()) {
-      return getOutputTrace(state, iv.toTensor(), i);
-    } else if (iv.isTuple()) {
-      const auto & elems = iv.toTuple()->elements();
-      auto tuple_node = state->graph->createTuple(fmap(elems, reduce_ivalue));
-      state->graph->appendNode(tuple_node);
-      return tuple_node->output();
-    } else {
-      AT_ERROR("Only tensors or tuples of tensors can be output from traced functions");
-    }
-  };
-  for (auto& output : outputs) {
-    state->graph->registerOutput(reduce_ivalue(output));
-    i++;
-  }
-  setTracingState(nullptr);
-}
-
-// Abort tracing. Used to reset the state in case of errors.
-inline void abandon() {
-  setTracingState(nullptr);
-}
+TORCH_API void abandon();
 
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
-TORCH_API void addInputs(Node *n, const char * name, int64_t value);
-TORCH_API void addInputs(Node *n, const char * name, bool value);
-TORCH_API void addInputs(Node *n, const char * name, double value);
-TORCH_API void addInputs(Node *n, const char * name, const at::Scalar& value);
-TORCH_API void addInputs(Node *n, const char * name, const c10::optional<at::Scalar>& value);
-TORCH_API void addInputs(Node *n, const char * name, const at::Tensor& value);
-TORCH_API void addInputs(Node *n, const char * name, at::IntList value);
-TORCH_API void addInputs(Node *n, const char * name, at::TensorList value);
-TORCH_API void addInputs(Node *n, const char * name, const ArrayRef<double>& value);
-TORCH_API void addInputs(Node *n, const char * name, const std::string& value);
-TORCH_API void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
-TORCH_API void addInputs(Node *n, const char * name, const at::TensorOptions& value);
-TORCH_API void addInputs(Node *n, const char * name, at::Device value);
-TORCH_API void addInputs(Node *n, const char * name, at::Layout value);
-TORCH_API void addInputs(Node *n, const char * name, at::ScalarType value);
-TORCH_API void addInputs(Node *n, const char * name, at::Generator * value);
+TORCH_API void addInputs(Node* n, const char* name, int64_t value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    c10::optional<int64_t> value);
+TORCH_API void addInputs(Node* n, const char* name, bool value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<bool>& value);
+TORCH_API void addInputs(Node* n, const char* name, double value);
+TORCH_API void addInputs(Node* n, const char* name, const at::Scalar& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Scalar>& value);
+TORCH_API void addInputs(Node* n, const char* name, const at::Tensor& value);
+TORCH_API void addInputs(Node* n, const char* name, at::IntArrayRef value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    at::TensorList value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const ArrayRef<double>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const std::vector<double>& value);
+TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const at::TensorOptions& value);
+TORCH_API void addInputs(Node* n, const char* name, at::Device value);
+TORCH_API void addInputs(Node* n, const char* name, at::Layout value);
+TORCH_API void addInputs(Node* n, const char* name, at::ScalarType value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::ScalarType>& value);
+TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
+TORCH_API void addInputs(Node* n, const char* name, at::Generator* value);
 
-template<size_t N>
-void addInputs(Node *n, const char * name, std::array<bool, N> value) {
-  throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
+template<typename T>
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const std::vector<T>& value);
+
+template<typename K, typename V>
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const std::unordered_map<K, V>& value);
+
+template<typename T>
+void addInputs(
+    Node* n,
+    const char* name,
+    const std::vector<T>& value) {
+  AT_ERROR("Tracing a list of arbitrary type is currently not supported!");
+}
+template<typename K, typename V>
+void addInputs(
+    Node* n,
+    const char* name,
+    const std::unordered_map<K, V>& value) {
+  AT_ERROR("Tracing a dict of arbitrary types is currently not supported!");
 }
 
-inline void ensureUnique(const char * name, const at::Tensor& tensor) {
-  auto aliases = tensor.storage().use_count();
-  if (isTracing() && aliases > 1) {
-    std::stringstream ss;
-    ss << "There are " << aliases
-       << " live references to the data region being modified when tracing in-place operator "
-       << name << ". This might cause the trace to be incorrect, because all other views "
-       << "that also reference this data will not not reflect this change in the trace! "
-       << "On the other hand, if all other views use the same memory chunk, but are disjoint (e.g. "
-       << "are outputs of torch.split), this might still be safe.";
-    warn(ss.str().c_str());
-  }
+template <size_t N>
+void addInputs(Node* n, const char* name, std::array<bool, N> value) {
+  throw std::runtime_error(
+      "Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
+TORCH_API void ensureUniqueIfOutOfPlaced(
+    const char* name,
+    const at::Tensor& tensor);
 
 template <
     typename T,
@@ -215,8 +344,13 @@ void addOutput(Node* node, T&&) {
       " in the JIT tracer. File a bug report.");
 }
 TORCH_API void addOutput(Node* node, const at::Tensor& tensor);
+TORCH_API void setOutput(Value* value, const at::Tensor& output);
 TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 
-TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
+TORCH_API autograd::Variable getSizeOf(
+    const autograd::Variable& var,
+    int64_t dim);
 
-}}} // namespace torch::jit::tracer
+} // namespace tracer
+} // namespace jit
+} // namespace torch

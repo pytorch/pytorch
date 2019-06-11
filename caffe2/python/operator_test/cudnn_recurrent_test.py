@@ -15,7 +15,7 @@ import unittest
 class TestLSTMs(unittest.TestCase):
 
     def testEqualToCudnn(self):
-        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA)):
+        with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType)):
             T = 8
             batch_size = 4
             input_dim = 8

@@ -109,6 +109,9 @@ function(caffe2_binary_target target_name_or_src)
   if (DEFINED Caffe2_MODULES)
     target_link_libraries(${__target} ${Caffe2_MODULES})
   endif()
+  if (USE_TBB)
+    target_include_directories(${__target} PUBLIC ${TBB_ROOT_DIR}/include)
+  endif()
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
@@ -121,17 +124,10 @@ function(caffe2_hip_binary_target target_name_or_src)
     prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
   endif()
 
-  # These two lines are the only differences between
-  # caffe2_hip_binary_target and caffe2_binary_target
-  set_source_files_properties(${__srcs} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-  hip_add_executable(${__target} ${__srcs})
+  caffe2_binary_target(${target_name_or_src})
 
-  target_link_libraries(${__target} ${Caffe2_MAIN_LIBS})
-  # If we have Caffe2_MODULES defined, we will also link with the modules.
-  if (DEFINED Caffe2_MODULES)
-    target_link_libraries(${__target} ${Caffe2_MODULES})
-  endif()
-  install(TARGETS ${__target} DESTINATION bin)
+  target_compile_options(${__target} PRIVATE ${HIP_CXX_FLAGS})
+  target_include_directories(${__target} PRIVATE ${Caffe2_HIP_INCLUDE})
 endfunction()
 
 ##############################################################################
@@ -209,7 +205,7 @@ function(torch_compile_options libname)
     -Wno-unused-parameter
     -Wno-unknown-warning-option
     -Wno-unknown-pragmas)
-  if ($ENV{WERROR})
+  if (WERROR)
     target_compile_options(${libname} PRIVATE -Werror)
   endif()
 endfunction()

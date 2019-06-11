@@ -1,12 +1,42 @@
 #include <caffe2/core/event_cpu.h>
 #include <caffe2/core/operator.h>
 #include <caffe2/proto/caffe2_pb.h>
-#include <ideep_pin_singletons.hpp>
+#include <ideep/tensor.hpp>
 #include "ideep_context.h"
 
 namespace at {
 REGISTER_CONTEXT(DeviceType::IDEEP, caffe2::IDEEPContext);
+
+namespace {
+void CopyBytesWrapper(
+    size_t nbytes,
+    const void* src,
+    Device src_device,
+    void* dst,
+    Device dst_device) {
+  if (nbytes == 0) {
+    return;
+  }
+  CAFFE_ENFORCE(src);
+  CAFFE_ENFORCE(dst);
+  memcpy(dst, src, nbytes);
+}
+} // namespace
+
+REGISTER_COPY_BYTES_FUNCTION(
+    DeviceType::IDEEP,
+    DeviceType::CPU,
+    CopyBytesWrapper);
+REGISTER_COPY_BYTES_FUNCTION(
+    DeviceType::CPU,
+    DeviceType::IDEEP,
+    CopyBytesWrapper);
+REGISTER_COPY_BYTES_FUNCTION(
+    DeviceType::IDEEP,
+    DeviceType::IDEEP,
+    CopyBytesWrapper);
 } // namespace at
+
 namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(ideep::tensor);

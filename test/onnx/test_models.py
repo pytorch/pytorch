@@ -5,29 +5,20 @@ from torchvision.models.resnet import resnet50
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 
 from model_defs.mnist import MNIST
-from model_defs.word_language_model import RNNModel
 from model_defs.squeezenet import SqueezeNet
 from model_defs.super_resolution import SuperResolutionNet
 from model_defs.srresnet import SRResNet
 from model_defs.dcgan import _netD, _netG, weights_init, bsz, imgsz, nz
 from model_defs.op_test import DummyNet, ConcatNet, PermuteNet, PReluNet
 
-from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, skipIfCI
+from test_pytorch_common import TestCase, run_tests, skipIfNoLapack
 
 import torch
 import torch.onnx
 import torch.onnx.utils
-from torch.autograd import Variable, Function
-from torch.nn import Module
+from torch.autograd import Variable
 from torch.onnx import OperatorExportTypes
 
-import onnx
-import onnx.checker
-import onnx.helper
-
-import google.protobuf.text_format
-
-import io
 import unittest
 
 import caffe2.python.onnx.backend as backend
@@ -77,8 +68,8 @@ class TestModels(TestCase):
         x = Variable(torch.randn(1, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(SRResNet(rescale_factor=4, n_filters=64, n_blocks=8)), toC(x))
 
-    @skipIfCI
     @skipIfNoLapack
+    @unittest.skip("This model is broken, see https://github.com/pytorch/pytorch/issues/18429")
     def test_super_resolution(self):
         x = Variable(
             torch.randn(BATCH_SIZE, 1, 224, 224).fill_(1.0)
@@ -96,25 +87,21 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 1, 28, 28).fill_(1.0))
         self.exportTest(toC(MNIST()), toC(x))
 
-    @skipIfCI
     def test_vgg16(self):
         # VGG 16-layer model (configuration "D")
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg16()), toC(x))
 
-    @skipIfCI
     def test_vgg16_bn(self):
         # VGG 16-layer model (configuration "D") with batch normalization
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg16_bn()), toC(x))
 
-    @skipIfCI
     def test_vgg19(self):
         # VGG 19-layer model (configuration "E")
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg19()), toC(x))
 
-    @skipIfCI
     def test_vgg19_bn(self):
         # VGG 19-layer model (configuration 'E') with batch normalization
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
@@ -143,6 +130,7 @@ class TestModels(TestCase):
         sqnet_v1_1 = SqueezeNet(version=1.1)
         self.exportTest(toC(sqnet_v1_1), toC(x))
 
+    @unittest.skip("Temporary - waiting for https://github.com/onnx/onnx/pull/1773.")
     def test_densenet(self):
         # Densenet-121 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))

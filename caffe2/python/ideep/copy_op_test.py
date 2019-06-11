@@ -9,6 +9,7 @@ from random import randint
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
+
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class CopyTest(unittest.TestCase):
     def _get_deep_device(self):
@@ -19,7 +20,7 @@ class CopyTest(unittest.TestCase):
             "CopyCPUToIDEEP",
             ["X"],
             ["X_ideep"],
-            )
+        )
         op.device_option.CopyFrom(self._get_deep_device())
         n = randint(1, 128)
         c = randint(1, 64)
@@ -33,10 +34,10 @@ class CopyTest(unittest.TestCase):
 
     def test_copy_to_ideep_zero_dim(self):
         op = core.CreateOperator(
-                "CopyCPUToIDEEP",
-                ["X"],
-                ["X_ideep"],
-            )
+            "CopyCPUToIDEEP",
+            ["X"],
+            ["X_ideep"],
+        )
         op.device_option.CopyFrom(self._get_deep_device())
         n = 0
         c = randint(1, 128)
@@ -51,7 +52,7 @@ class CopyTest(unittest.TestCase):
             "CopyIDEEPToCPU",
             ["X_ideep"],
             ["X"],
-            )
+        )
         op.device_option.CopyFrom(self._get_deep_device())
         n = randint(1, 128)
         c = randint(1, 64)
@@ -65,10 +66,10 @@ class CopyTest(unittest.TestCase):
 
     def test_copy_from_ideep_zero_dim(self):
         op = core.CreateOperator(
-                "CopyIDEEPToCPU",
-                ["X_ideep"],
-                ["X"],
-            )
+            "CopyIDEEPToCPU",
+            ["X_ideep"],
+            ["X"],
+        )
         op.device_option.CopyFrom(self._get_deep_device())
         n = 0
         c = randint(1, 64)
@@ -93,3 +94,6 @@ class CopyTest(unittest.TestCase):
         workspace.RunOperatorOnce(op)
         X_ideep = workspace.FetchBlob("X")
         np.testing.assert_allclose(X, X_ideep)
+
+if __name__ == "__main__":
+    unittest.main()

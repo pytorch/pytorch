@@ -21,6 +21,7 @@ constexpr auto kInt8 = at::kChar;
 constexpr auto kInt16 = at::kShort;
 constexpr auto kInt32 = at::kInt;
 constexpr auto kInt64 = at::kLong;
+constexpr auto kFloat16 = at::kHalf;
 constexpr auto kFloat32 = at::kFloat;
 constexpr auto kFloat64 = at::kDouble;
 
@@ -30,6 +31,7 @@ constexpr auto kI8 = kInt8;
 constexpr auto kI16 = kInt16;
 constexpr auto kI32 = kInt32;
 constexpr auto kI64 = kInt64;
+constexpr auto kF16 = kFloat16;
 constexpr auto kF32 = kFloat32;
 constexpr auto kF64 = kFloat64;
 } // namespace torch

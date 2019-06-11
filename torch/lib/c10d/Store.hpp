@@ -35,7 +35,7 @@ class Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) = 0;
 
-  void setTimeout(const std::chrono::seconds& timeoutSec);
+  void setTimeout(const std::chrono::milliseconds& timeout);
 
  protected:
   std::chrono::milliseconds timeout_;

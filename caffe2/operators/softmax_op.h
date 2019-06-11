@@ -11,32 +11,35 @@ namespace caffe2 {
 template <typename T, class Context>
 class SoftmaxOp final : public Operator<Context> {
  public:
-  SoftmaxOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-      axis_(this->template GetSingleArgument<int>("axis", 1)) {}
+  template <class... Args>
+  explicit SoftmaxOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
+
   bool RunOnDevice() override;
 
  protected:
   int axis_;
-  Tensor scale_{Context::GetDeviceType()};
-  Tensor rowmax_{Context::GetDeviceType()};
-  Tensor sum_multiplier_{Context::GetDeviceType()};
+  Tensor scale_;
+  Tensor rowmax_;
+  Tensor sum_multiplier_;
 };
 
 template <typename T, class Context>
 class SoftmaxGradientOp final : public Operator<Context> {
  public:
-  SoftmaxGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SoftmaxGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         axis_(this->template GetSingleArgument<int>("axis", 1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
  protected:
   int axis_;
-  Tensor scale_{Context::GetDeviceType()};
-  Tensor sum_multiplier_{Context::GetDeviceType()};
+  Tensor scale_;
+  Tensor sum_multiplier_;
 };
 
 } // namespace caffe2

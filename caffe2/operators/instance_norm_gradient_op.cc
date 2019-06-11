@@ -11,9 +11,7 @@ bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const auto& output_grad = Input(OUTPUT_GRAD);
   const auto& mean = InputSize() >= 5 ? Input(MEAN) : mean_;
   const auto& inv_stdev = InputSize() >= 6 ? Input(INV_STDEV) : inv_stdev_;
-  auto input_grad = Output(INPUT_GRAD);
-  auto scale_grad = Output(SCALE_GRAD);
-  auto bias_grad = Output(BIAS_GRAD);
+
   CAFFE_ENFORCE_EQ(4, input.dim());
   const int N = input.dim32(0);
   const int H = input.dim32(1);
@@ -28,9 +26,9 @@ bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   CAFFE_ENFORCE_EQ(H, output_grad.dim32(1));
   CAFFE_ENFORCE_EQ(W, output_grad.dim32(2));
   CAFFE_ENFORCE_EQ(C, output_grad.dim32(3));
-  input_grad->ResizeLike(input);
-  scale_grad->ResizeLike(scale);
-  bias_grad->ResizeLike(bias);
+  auto input_grad = Output(INPUT_GRAD, input.sizes(), at::dtype<T>());
+  auto scale_grad = Output(SCALE_GRAD, scale.sizes(), at::dtype<T>());
+  auto bias_grad = Output(BIAS_GRAD, bias.sizes(), at::dtype<T>());
 
   ConstEigenVectorArrayMap<T> scale_arr(scale.template data<T>(), C);
   ConstEigenVectorArrayMap<T> bias_arr(bias.template data<T>(), C);
@@ -41,10 +39,12 @@ bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
   // Resize before we get into the per-instance loop
   if (InputSize() < 5) {
-    mean_.Resize(N, C);
+    ReinitializeTensor(
+        &mean_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
   }
   if (InputSize() < 6) {
-    inv_stdev_.Resize(N, C);
+    ReinitializeTensor(
+        &inv_stdev_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
   }
 
   // looping over per-instance and using Eigen blocks to extract out
@@ -92,13 +92,23 @@ bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
     // for each channel
     // dl/dbias = sum_j dl/dy_j
-    bias_grad_arr += output_grad_mat.rowwise().sum();
+    auto bias_grad_delta = output_grad_mat.rowwise().sum();
+    if (n == 0) {
+      bias_grad_arr = bias_grad_delta;
+    } else {
+      bias_grad_arr += bias_grad_delta;
+    }
     // for each channel
     // dl/dscale = sum_j dl/dy_j (x_j - mu) / stdev
-    scale_grad_arr +=
+    auto scale_grad_delta =
         ((input_grad_mat.colwise() * inv_stdev_arr) * output_grad_mat)
             .rowwise()
             .sum();
+    if (n == 0) {
+      scale_grad_arr = scale_grad_delta;
+    } else {
+      scale_grad_arr += scale_grad_delta;
+    }
 
     // dl/dx_j = this gross thing
     // Derived gradient and manually massaged it to minimize extra storage
@@ -132,9 +142,7 @@ bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const auto& output_grad = Input(OUTPUT_GRAD);
   const auto& mean = InputSize() >= 5 ? Input(MEAN) : mean_;
   const auto& inv_stdev = InputSize() >= 6 ? Input(INV_STDEV) : inv_stdev_;
-  auto input_grad = Output(INPUT_GRAD);
-  auto scale_grad = Output(SCALE_GRAD);
-  auto bias_grad = Output(BIAS_GRAD);
+
   CAFFE_ENFORCE_EQ(4, input.dim());
   const int N = input.dim32(0);
   const int C = input.dim32(1);
@@ -149,9 +157,9 @@ bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE_EQ(C, output_grad.dim32(1));
   CAFFE_ENFORCE_EQ(H, output_grad.dim32(2));
   CAFFE_ENFORCE_EQ(W, output_grad.dim32(3));
-  input_grad->ResizeLike(input);
-  scale_grad->ResizeLike(scale);
-  bias_grad->ResizeLike(bias);
+  auto input_grad = Output(INPUT_GRAD, input.sizes(), at::dtype<T>());
+  auto scale_grad = Output(SCALE_GRAD, scale.sizes(), at::dtype<T>());
+  auto bias_grad = Output(BIAS_GRAD, bias.sizes(), at::dtype<T>());
 
   ConstEigenArrayMap<T> input_mat(input.template data<T>(), H * W, N * C);
   ConstEigenVectorArrayMap<T> scale_arr(scale.template data<T>(), C);
@@ -168,7 +176,8 @@ bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   // Compute mean if it wasn't passed in
   if (InputSize() < 5) {
-    mean_.Resize(N, C);
+    ReinitializeTensor(
+        &mean_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
     EigenVectorArrayMap<T> mean_mutable_arr(
         mean_.template mutable_data<T>(), N * C);
     mean_mutable_arr = input_mat.colwise().mean();
@@ -183,7 +192,8 @@ bool InstanceNormGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   // compute 1 / stdev if not passed in
   if (InputSize() < 6) {
-    inv_stdev_.Resize(N, C);
+    ReinitializeTensor(
+        &inv_stdev_, {N, C}, at::dtype<T>().device(Context::GetDeviceType()));
     EigenVectorArrayMap<T> inv_stdev_mutable_arr(
         inv_stdev_.template mutable_data<T>(), N * C);
 

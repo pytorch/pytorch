@@ -4,7 +4,7 @@ namespace at { namespace native {
 
 static Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
                                 int64_t dim) {
-  IntList self_sizes = self.sizes();
+  IntArrayRef self_sizes = self.sizes();
   std::vector<int64_t> result_sizes;
   result_sizes.insert(result_sizes.end(), self_sizes.begin(), self_sizes.end());
   result_sizes[dim] = 1;
@@ -49,7 +49,7 @@ static c10::optional<Tensor> _allreduce_return_trivial(
     Scalar ident) {
   // Return identity
   if (self.numel() == 0) {
-    return self.type().scalarTensor(ident);
+    return at::scalar_tensor(ident, self.options());
   }
   return c10::nullopt;
 }

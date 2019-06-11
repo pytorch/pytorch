@@ -2,6 +2,7 @@ r"""
 The following constraints are implemented:
 
 - ``constraints.boolean``
+- ``constraints.cat``
 - ``constraints.dependent``
 - ``constraints.greater_than(lower_bound)``
 - ``constraints.integer_interval(lower_bound, upper_bound)``
@@ -15,15 +16,16 @@ The following constraints are implemented:
 - ``constraints.real``
 - ``constraints.real_vector``
 - ``constraints.simplex``
+- ``constraints.stack``
 - ``constraints.unit_interval``
 """
 
 import torch
-from torch.distributions.utils import batch_tril
 
 __all__ = [
     'Constraint',
     'boolean',
+    'cat',
     'dependent',
     'dependent_property',
     'greater_than',
@@ -42,6 +44,7 @@ __all__ = [
     'real',
     'real_vector',
     'simplex',
+    'stack',
     'unit_interval',
 ]
 
@@ -248,7 +251,7 @@ class _Simplex(Constraint):
     Specifically: `x >= 0` and `x.sum(-1) == 1`.
     """
     def check(self, value):
-        return (value >= 0).all() & ((value.sum(-1, True) - 1).abs() < 1e-6).all()
+        return torch.all(value >= 0, dim=-1) & ((value.sum(-1) - 1).abs() < 1e-6)
 
 
 class _LowerTriangular(Constraint):
@@ -256,7 +259,7 @@ class _LowerTriangular(Constraint):
     Constrain to lower-triangular square matrices.
     """
     def check(self, value):
-        value_tril = batch_tril(value)
+        value_tril = value.tril()
         return (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
 
 
@@ -265,12 +268,10 @@ class _LowerCholesky(Constraint):
     Constrain to lower-triangular square matrices with positive diagonals.
     """
     def check(self, value):
-        value_tril = batch_tril(value)
+        value_tril = value.tril()
         lower_triangular = (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
 
-        n = value.size(-1)
-        diag_mask = torch.eye(n, n, dtype=value.dtype, device=value.device)
-        positive_diagonal = (value * diag_mask > (diag_mask - 1)).min(-1)[0].min(-1)[0]
+        positive_diagonal = (value.diagonal(dim1=-2, dim2=-1) > 0).min(-1)[0]
         return lower_triangular & positive_diagonal
 
 
@@ -294,8 +295,51 @@ class _RealVector(Constraint):
     but additionally reduces across the `event_shape` dimension.
     """
     def check(self, value):
-        return (value == value).all()  # False for NANs.
+        return torch.all(value == value, dim=-1)  # False for NANs.
 
+
+class _Cat(Constraint):
+    """
+    Constraint functor that applies a sequence of constraints
+    `cseq` at the submatrices at dimension `dim`,
+    each of size `lengths[dim]`, in a way compatible with :func:`torch.cat`.
+    """
+    def __init__(self, cseq, dim=0, lengths=None):
+        assert all(isinstance(c, Constraint) for c in cseq)
+        self.cseq = list(cseq)
+        if lengths is None:
+            lengths = [1] * len(self.cseq)
+        self.lengths = list(lengths)
+        assert len(self.lengths) == len(self.cseq)
+        self.dim = dim
+
+    def check(self, value):
+        assert -value.dim() <= self.dim < value.dim()
+        checks = []
+        start = 0
+        for constr, length in zip(self.cseq, self.lengths):
+            v = value.narrow(self.dim, start, length)
+            checks.append(constr.check(v))
+            start = start + length  # avoid += for jit compat
+        return torch.cat(checks, self.dim)
+
+
+class _Stack(Constraint):
+    """
+    Constraint functor that applies a sequence of constraints
+    `cseq` at the submatrices at dimension `dim`,
+    in a way compatible with :func:`torch.stack`.
+    """
+    def __init__(self, cseq, dim=0):
+        assert all(isinstance(c, Constraint) for c in cseq)
+        self.cseq = list(cseq)
+        self.dim = dim
+
+    def check(self, value):
+        assert -value.dim() <= self.dim < value.dim()
+        vs = [value.select(self.dim, i) for i in range(value.size(self.dim))]
+        return torch.stack([constr.check(v)
+                            for v, constr in zip(vs, self.cseq)], self.dim)
 
 # Public interface.
 dependent = _Dependent()
@@ -317,3 +361,5 @@ simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
 positive_definite = _PositiveDefinite()
+cat = _Cat
+stack = _Stack

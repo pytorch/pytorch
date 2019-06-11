@@ -4,11 +4,11 @@
 #include <math.h>
 #endif
 
-#include "ATen/ATen.h"
-#include "ATen/Config.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/detail/CUDAHooksInterface.h"
-#include "ATen/native/SpectralOpsUtils.h"
+#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/SpectralOpsUtils.h>
 
 #include <algorithm>
 #include <vector>
@@ -21,13 +21,13 @@ namespace at { namespace native {
 // at::_fft_with_size which dispatches to _fft_cufft (CUDA) or _fft_mkl (CPU).
 static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
            const bool complex_input, const bool complex_output,
-           const bool inverse, IntList signal_sizes, const bool normalized,
+           const bool inverse, IntArrayRef signal_sizes, const bool normalized,
            const bool onesided) {
 
-  AT_CHECK(signal_ndim >= 1 && signal_ndim <= 3,
+  TORCH_CHECK(signal_ndim >= 1 && signal_ndim <= 3,
            "Expected signal_ndim to be 1, 2, or 3, but got signal_ndim=",
            signal_ndim);
-  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
            "Expected an input tensor of floating types, but got input=",
            self.type(), self.sizes());
 
@@ -62,14 +62,14 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
   // now we assume that input is batched as [ B x signal_dims... ]
 
   if (complex_input) {
-    AT_CHECK(input.size(signal_ndim + 1) == 2,
+    TORCH_CHECK(input.size(signal_ndim + 1) == 2,
              "Expected an input tensor with a last dimension of size 2 "
              "representing real + imaginary components, but got input ",
              self.type(), self.sizes());
   }
 
   // build signal_sizes and output_size
-  AT_CHECK(signal_sizes.size() == 0 || static_cast<int64_t>(signal_sizes.size()) == signal_ndim,
+  TORCH_CHECK(signal_sizes.size() == 0 || static_cast<int64_t>(signal_sizes.size()) == signal_ndim,
            "Expected signal_sizes to be empty (default) or of signal_ndim=",
            signal_ndim, "D, but got signal_sizes=", signal_sizes);
   std::vector<int64_t> output_sizes(signal_ndim + 1 + static_cast<int64_t>(complex_output));
@@ -98,7 +98,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
         output_sizes[i + 1] = input_size;
       }
       checked_signal_sizes[i] = input_size;
-      AT_CHECK(signal_sizes.size() == 0 || signal_sizes[i] == checked_signal_sizes[i],
+      TORCH_CHECK(signal_sizes.size() == 0 || signal_sizes[i] == checked_signal_sizes[i],
                "Expected given signal_sizes=", signal_sizes," to have same "
                "shape with input at signal dimension ", i, ", but got "
                "signal_sizes=", signal_sizes, " and input=", self.type(),
@@ -130,20 +130,20 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
 
 // We call the following methods via CUDA hooks because they are really only
 // valid when CUDA is available. See native/cuda/CuFFTPlanCache.h for more details.
-int64_t _cufft_get_plan_cache_max_size() {
-  return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize();
+int64_t _cufft_get_plan_cache_max_size(int64_t device_index) {
+  return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize(device_index);
 }
 
-void _cufft_set_plan_cache_max_size(int64_t max_size) {
-  detail::getCUDAHooks().cuFFTSetPlanCacheMaxSize(max_size);
+void _cufft_set_plan_cache_max_size(int64_t device_index, int64_t max_size) {
+  detail::getCUDAHooks().cuFFTSetPlanCacheMaxSize(device_index, max_size);
 }
 
-int64_t _cufft_get_plan_cache_size() {
-  return detail::getCUDAHooks().cuFFTGetPlanCacheSize();
+int64_t _cufft_get_plan_cache_size(int64_t device_index) {
+  return detail::getCUDAHooks().cuFFTGetPlanCacheSize(device_index);
 }
 
-void _cufft_clear_plan_cache() {
-  detail::getCUDAHooks().cuFFTClearPlanCache();
+void _cufft_clear_plan_cache(int64_t device_index) {
+  detail::getCUDAHooks().cuFFTClearPlanCache(device_index);
 }
 
 Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
@@ -166,15 +166,15 @@ Tensor rfft(const Tensor& self, const int64_t signal_ndim, const bool normalized
 }
 
 Tensor irfft(const Tensor& self, const int64_t signal_ndim, const bool normalized,
-             const bool onesided,  IntList signal_sizes) {
+             const bool onesided,  IntArrayRef signal_sizes) {
   return _fft(self, signal_ndim, /* complex_input */ true,
               /* complex_output */ false, /* inverse */ true, signal_sizes,
               normalized, onesided);
 }
 
 
-Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
-            const int64_t win_length, const Tensor& window,
+Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
+            const optional<int64_t> win_lengthOpt, const Tensor& window,
             const bool normalized, const bool onesided) {
   #define REPR(SS) \
     SS << "stft(" << self.type() << self.sizes() << ", n_fft=" << n_fft \
@@ -187,7 +187,11 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
     } \
     SS << ", normalized=" << normalized << ", onesided=" << onesided << ")"
 
-  if (!at::isFloatingType(self.type().scalarType()) || self.dim() > 2 || self.dim() < 1) {
+  // default_init hop_length and win_length
+  auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
+  auto win_length = win_lengthOpt.value_or(n_fft);
+
+  if (!at::isFloatingType(self.scalar_type()) || self.dim() > 2 || self.dim() < 1) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D or 2D tensor of floating types";
     AT_ERROR(ss.str());

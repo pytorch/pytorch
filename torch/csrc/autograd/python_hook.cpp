@@ -1,13 +1,13 @@
-#include "torch/csrc/autograd/python_hook.h"
+#include <torch/csrc/autograd/python_hook.h>
 
 #include <sstream>
 
-#include "THP.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/Exceptions.h"
+#include <torch/csrc/THP.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/Exceptions.h>
 
 using torch::autograd::variable_list;
 using torch::autograd::Variable;
@@ -157,10 +157,10 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw python_error();
   }
 
-  auto& original = ((THPVariable*)_original)->cdata.data();
-  auto& result = ((THPVariable*)_result)->cdata.data();
+  auto& original = ((THPVariable*)_original)->cdata;
+  auto& result = ((THPVariable*)_result)->cdata;
 
-  if (original.type().ID() != result.type().ID()) {
+  if (original.type() != result.type()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the type of value (";

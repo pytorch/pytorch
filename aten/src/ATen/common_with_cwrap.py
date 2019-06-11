@@ -23,6 +23,10 @@ def parse_arguments(args):
 
 
 def set_declaration_defaults(declaration):
+    if 'schema_string' not in declaration:
+        declaration['schema_string'] = ''
+    if 'matches_jit_signature' not in declaration:
+        declaration['matches_jit_signature'] = False
     declaration.setdefault('arguments', [])
     declaration.setdefault('return', 'void')
     if 'cname' not in declaration:
@@ -91,7 +95,10 @@ def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
 
 
 def enumerate_options_due_to_default(declaration,
-                                     allow_kwarg=True, type_to_signature=[], remove_self=True):
+                                     allow_kwarg=True, type_to_signature=None, remove_self=True):
+
+    if type_to_signature is None:
+        type_to_signature = []
 
     # Checks to see if an argument with a default keyword is a Tensor that
     # by default can be NULL. In this case, instead of generating another
@@ -183,14 +190,14 @@ def parse_header(path):
     generic_functions = []
     for l, c in lines:
         if l.startswith('TH_API void THNN_'):
-            fn_name = l.lstrip('TH_API void THNN_')
+            fn_name = l[len('TH_API void THNN_'):]
             if fn_name[0] == '(' and fn_name[-2] == ')':
                 fn_name = fn_name[1:-2]
             else:
                 fn_name = fn_name[:-1]
             generic_functions.append(Function(fn_name))
         elif l.startswith('THC_API void THNN_'):
-            fn_name = l.lstrip('THC_API void THNN_')
+            fn_name = l[len('THC_API void THNN_'):]
             if fn_name[0] == '(' and fn_name[-2] == ')':
                 fn_name = fn_name[1:-2]
             else:

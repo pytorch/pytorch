@@ -11,7 +11,7 @@ class ProtoDBCursor : public Cursor {
  public:
   explicit ProtoDBCursor(const TensorProtos* proto)
     : proto_(proto), iter_(0) {}
-  ~ProtoDBCursor() {}
+  ~ProtoDBCursor() override {}
 
   void Seek(const string& /*str*/) override {
     CAFFE_THROW("ProtoDB is not designed to support seeking.");
@@ -39,7 +39,9 @@ class ProtoDBTransaction : public Transaction {
       existing_names_.insert(tensor.name());
     }
   }
-  ~ProtoDBTransaction() { Commit(); }
+  ~ProtoDBTransaction() override {
+    Commit();
+  }
   void Put(const string& key, const string& value) override {
     if (existing_names_.count(key)) {
       CAFFE_THROW("An item with key ", key, " already exists.");
@@ -77,7 +79,9 @@ class ProtoDB : public DB {
     }
     LOG(INFO) << "Opened protodb " << source;
   }
-  ~ProtoDB() { Close(); }
+  ~ProtoDB() override {
+    Close();
+  }
 
   void Close() override {
     if (mode_ == NEW || mode_ == WRITE) {

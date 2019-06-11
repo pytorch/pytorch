@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/RReLU.c"
+#define TH_GENERIC_FILE "THNN/generic/RReLU.c"
 #else
 
 void THNN_(RReLU_updateOutput)(

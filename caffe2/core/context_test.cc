@@ -6,15 +6,10 @@
 
 namespace caffe2 {
 
-TEST(CPUContextTest, ATenCoreTest) {
-  int i = at::CoreTest();
-  EXPECT_EQ(i + 1, at::CoreTest());
-}
-
 TEST(CPUContextTest, TestAllocAlignment) {
   for (int i = 1; i < 10; ++i) {
     auto data = CPUContext::New(i);
-    EXPECT_EQ((reinterpret_cast<size_t>(data.get()) % gCaffe2Alignment), 0);
+    EXPECT_EQ((reinterpret_cast<size_t>(data.get()) % gAlignment), 0);
     // data is freed when out of scope
   }
 }

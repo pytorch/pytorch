@@ -1,3 +1,5 @@
+// copied and pasted from pytorch to test if this passes the build.
+
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/upsample_op.h"
 #include "caffe2/utils/math.h"
@@ -19,7 +21,7 @@ inline __device__ int idx(
 
 // input is X, output is Y
 __global__ void UpsampleBilinearKernel(
-    const int output_size,
+    const int num_batch,
     const int num_channels,
     const int input_height,
     const int input_width,
@@ -27,25 +29,23 @@ __global__ void UpsampleBilinearKernel(
     const int output_width,
     const float height_scale,
     const float width_scale,
-    const float* X,
-    float* Y) {
-  CUDA_1D_KERNEL_LOOP(index, output_size) {
+    const float* __restrict__ X,
+    float* __restrict__ Y) {
+
+
+    const int size = output_height * output_width;
+    CUDA_1D_KERNEL_LOOP(index, size) {
     int indexTemp = index;
     const int out_x = indexTemp % output_width;
     indexTemp /= output_width;
     const int out_y = indexTemp % output_height;
     indexTemp /= output_height;
-    const int c = indexTemp % num_channels;
     indexTemp /= num_channels;
-    const int n = indexTemp;
-
-    const int in_y = fminf(out_y / height_scale, input_height - 1);
-    const int in_x = fminf(out_x / width_scale, input_width - 1);
 
     const float rheight =
-        output_height > 1 ? (input_height - 1.f) / (output_height - 1.f) : 0.f;
+         output_height > 1 ? (input_height - 1.f) / (output_height - 1.f) : 0.f;
     const float rwidth =
-        output_width > 1 ? (input_width - 1.f) / (output_width - 1.f) : 0.f;
+         output_width > 1 ? (input_width - 1.f) / (output_width - 1.f) : 0.f;
 
     // Compute Y axis lambdas
     const float h1r = rheight * out_y;
@@ -61,42 +61,21 @@ __global__ void UpsampleBilinearKernel(
     const float w1lambda = w1r - w1;
     const float w0lambda = 1.f - w1lambda;
 
-    Y[index] =
-        (h0lambda *
-             (w0lambda *
-                  X[idx(
-                      n, num_channels, c, input_height, input_width, h1, w1)] +
-              w1lambda *
-                  X[idx(
-                      n,
-                      num_channels,
-                      c,
-                      input_height,
-                      input_width,
-                      h1,
-                      w1 + w1p)]) +
-         h1lambda *
-             (w0lambda *
-                  X[idx(
-                      n,
-                      num_channels,
-                      c,
-                      input_height,
-                      input_width,
-                      h1 + h1p,
-                      w1)] +
-              w1lambda *
-                  X[idx(
-                      n,
-                      num_channels,
-                      c,
-                      input_height,
-                      input_width,
-                      h1 + h1p,
-                      w1 + w1p)]));
+    for (int n = 0; n < num_batch; n++){
+      for (int c = 0; c < num_channels; c++) {
+
+        float X0 = X[idx(n, num_channels, c, input_height, input_width, h1, w1)];
+        float X1 = X[idx(n, num_channels, c, input_height, input_width, h1, w1 + w1p)];
+        float X2 = X[idx(n, num_channels, c, input_height, input_width, h1 + h1p, w1)];
+        float X3 = X[idx(n, num_channels, c, input_height, input_width, h1 + h1p, w1 + w1p)];
+
+        Y[idx(n, num_channels, c, output_height, output_width, out_y, out_x)] =
+                    h0lambda * (w0lambda * X0 + w1lambda * X1) +
+                    h1lambda * (w0lambda * X2 + w1lambda * X3);
+      }
+    }
   }
 }
-
 // input is dY, output is dX
 __global__ void UpsampleBilinearGradientKernel(
     const int input_size,
@@ -174,16 +153,15 @@ __global__ void UpsampleBilinearGradientKernel(
 template <>
 bool UpsampleBilinearOp<float, CUDAContext>::RunOnDevice() {
   const auto& X = Input(0);
-  auto* Y = Output(0);
 
-  const auto inputDims = X.dims();
+  const auto inputDims = X.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = X.dim32(0), num_channels = X.dim32(1),
             input_height = X.dim32(2), input_width = X.dim32(3);
   if (InputSize() == 2) {
     const auto& scales = Input(1);
-    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     float scales_data[2];
     context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);
     height_scale_ = scales_data[0];
@@ -191,15 +169,18 @@ bool UpsampleBilinearOp<float, CUDAContext>::RunOnDevice() {
   }
   int output_width = input_width * width_scale_;
   int output_height = input_height * height_scale_;
-  Y->Resize(batch_size, num_channels, output_height, output_width);
+  auto* Y = Output(
+      0,
+      {batch_size, num_channels, output_height, output_width},
+      at::dtype<float>());
 
-  const auto size = Y->size();
+  const auto size = output_height * output_width;
   UpsampleBilinearKernel<<<
       CAFFE_GET_BLOCKS(size),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      size,
+      batch_size,
       num_channels,
       input_height,
       input_width,
@@ -209,17 +190,13 @@ bool UpsampleBilinearOp<float, CUDAContext>::RunOnDevice() {
       width_scale_,
       X.data<float>(),
       Y->template mutable_data<float>());
-
   return true;
 }
-
 template <>
 bool UpsampleBilinearGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto& dY = Input(0);
   const auto& X = Input(1);
-  auto* dX = Output(0);
-
-  const auto inputDims = dY.dims();
+  const auto inputDims = dY.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = dY.dim32(0);
   const int num_channels = dY.dim32(1);
@@ -229,18 +206,20 @@ bool UpsampleBilinearGradientOp<float, CUDAContext>::RunOnDevice() {
   const int output_width = X.dim32(3);
   if (InputSize() == 3) {
     const auto& scales = Input(2);
-    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    CAFFE_ENFORCE_EQ(scales.dim(), 1);
+    CAFFE_ENFORCE_EQ(scales.numel(), 2);
     float scales_data[2];
     context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);
     height_scale_ = scales_data[0];
     width_scale_ = scales_data[1];
   }
-  dX->Resize(batch_size, num_channels, output_height, output_width);
+  auto* dX = Output(
+      0,
+      {batch_size, num_channels, output_height, output_width},
+      at::dtype<float>());
   math::Set<float, CUDAContext>(
-      dX->size(), 0.0f, dX->mutable_data<float>(), &context_);
-
-  const auto size = dY.size();
+      dX->numel(), 0.0f, dX->mutable_data<float>(), &context_);
+  const auto size = dY.numel();
   UpsampleBilinearGradientKernel<<<
       CAFFE_GET_BLOCKS(size),
       CAFFE_CUDA_NUM_THREADS,
@@ -256,10 +235,8 @@ bool UpsampleBilinearGradientOp<float, CUDAContext>::RunOnDevice() {
       width_scale_,
       dY.data<float>(),
       dX->template mutable_data<float>());
-
   return true;
 }
-
 REGISTER_CUDA_OPERATOR(
     UpsampleBilinear,
     UpsampleBilinearOp<float, CUDAContext>);

@@ -25,7 +25,9 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
-#include "c10/cuda/math_compat.h"
+#include "c10/cuda/CUDAMacros.h"
+#include "c10/cuda/CUDAMathCompat.h"
+#include <c10/cuda/CUDAGuard.h>
 
 // Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this
 // corresponds to different declarations (dllexport and dllimport). On
@@ -69,13 +71,20 @@
 // CAFFE_HAS_CUDA_FP16 manually.
 
 #ifndef CAFFE_HAS_CUDA_FP16
-#if CUDA_VERSION >= 7050
+#if CUDA_VERSION >= 7050 || defined(__HIP_PLATFORM_HCC__)
 #define CAFFE_HAS_CUDA_FP16
 #endif // CUDA_VERSION >= 7050
 #endif // CAFFE_HAS_CUDA_FP16
 
 #ifdef CAFFE_HAS_CUDA_FP16
 #include <cuda_fp16.h>
+#endif
+
+// cuda major revision number below which fp16 compute is not supoorted
+#ifndef __HIP_PLATFORM_HCC__
+constexpr int kFp16CUDADevicePropMajor = 6;
+#else
+constexpr int kFp16CUDADevicePropMajor = 3;
 #endif
 
 // Re-enable strict aliasing diagnostic if it was disabled.
@@ -87,10 +96,6 @@
 #endif // __GNUC__
 #endif // CUDA_VERSION >= 9000
 
-/**
- * The maximum number of GPUs that caffe2 recognizes.
- */
-#define CAFFE2_COMPILE_TIME_MAX_GPUS 16
 /**
  * The maximum number of peers that each gpu can have when doing p2p setup.
  * Currently, according to NVidia documentation, each device can support a
@@ -279,10 +284,16 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
   for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (n); \
        i += blockDim.x * gridDim.x)
 
+#define CUDA_2D_KERNEL_LOOP(i, n, j, m)                             \
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (n);   \
+       i += blockDim.x * gridDim.x)                                 \
+    for (size_t j = blockIdx.y * blockDim.y + threadIdx.y; j < (m); \
+         j += blockDim.y * gridDim.y)
+
 // CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
 // kernels. This is not supported by Apple platforms so we special case it.
 // See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
-#if defined(__APPLE__) || defined(__HIPCC__)
+#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
 #define CUDA_KERNEL_ASSERT(...)
 #else // __APPLE__
 #define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
@@ -302,13 +313,22 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
 // The number of cuda threads to use. Since work is assigned to SMs at the
 // granularity of a block, 128 is chosen to allow utilizing more SMs for
 // smaller input sizes.
+// 1D grid
 constexpr int CAFFE_CUDA_NUM_THREADS = 128;
+// 2D grid
+constexpr int CAFFE_CUDA_NUM_THREADS_2D_DIMX = 16;
+constexpr int CAFFE_CUDA_NUM_THREADS_2D_DIMY = 16;
+
 // The maximum number of blocks to use in the default kernel call. We set it to
 // 4096 which would work for compute capability 2.x (where 65536 is the limit).
 // This number is very carelessly chosen. Ideally, one would like to look at
 // the hardware at runtime, and pick the number of blocks that makes most
 // sense for the specific runtime environment. This is a todo item.
+// 1D grid
 constexpr int CAFFE_MAXIMUM_NUM_BLOCKS = 4096;
+// 2D grid
+constexpr int CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMX = 128;
+constexpr int CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMY = 128;
 
 constexpr int kCUDAGridDimMaxX = 2147483647;
 constexpr int kCUDAGridDimMaxY = 65535;
@@ -326,21 +346,33 @@ inline int CAFFE_GET_BLOCKS(const int N) {
       1);
 }
 
-class DeviceGuard {
- public:
-  explicit DeviceGuard(int newDevice) : previous_(CaffeCudaGetDevice()) {
-    if (previous_ != newDevice) {
-      CaffeCudaSetDevice(newDevice);
-    }
-  }
+/**
+ * @brief Compute the number of blocks needed to run N threads for a 2D grid
+ */
+inline dim3 CAFFE_GET_BLOCKS_2D(const int N, const int /* M */) {
+  dim3 grid;
+  // Not calling the 1D version for each dim to keep all constants as literals
 
-  ~DeviceGuard() noexcept {
-    CaffeCudaSetDevice(previous_);
-  }
+  grid.x = std::max(
+      std::min(
+          (N + CAFFE_CUDA_NUM_THREADS_2D_DIMX - 1) /
+              CAFFE_CUDA_NUM_THREADS_2D_DIMX,
+          CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMX),
+      // Use at least 1 block, since CUDA does not allow empty block
+      1);
 
- private:
-  int previous_;
-};
+  grid.y = std::max(
+      std::min(
+          (N + CAFFE_CUDA_NUM_THREADS_2D_DIMY - 1) /
+              CAFFE_CUDA_NUM_THREADS_2D_DIMY,
+          CAFFE_MAXIMUM_NUM_BLOCKS_2D_DIMY),
+      // Use at least 1 block, since CUDA does not allow empty block
+      1);
+
+  return grid;
+}
+
+using CUDAGuard = c10::cuda::CUDAGuard;
 
 template <typename T, int N>
 struct SimpleArray {

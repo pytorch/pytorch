@@ -1,5 +1,4 @@
 import torch
-import importlib
 import warnings
 from collections import defaultdict
 
@@ -125,10 +124,9 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 
 
 def _rebuild_tensor(storage, storage_offset, size, stride):
-    class_name = storage.__class__.__name__.replace('Storage', 'Tensor')
-    module = importlib.import_module(storage.__module__)
-    tensor_class = getattr(module, class_name)
-    return tensor_class().set_(storage, storage_offset, size, stride)
+    # first construct a tensor with the correct dtype/device
+    t = torch.tensor([], dtype=storage.dtype, device=storage.device)
+    return t.set_(storage, storage_offset, size, stride)
 
 
 def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks):
@@ -140,6 +138,15 @@ def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, bac
     tensor._backward_hooks = backward_hooks
     return tensor
 
+def _rebuild_qtensor(storage, storage_offset, size, stride, scale, zero_point, requires_grad, backward_hooks):
+    tensor = torch._empty_affine_quantized(size, scale=scale, zero_point=zero_point, dtype=storage.dtype)
+    tensor.set_(storage, storage_offset, size, stride)
+    tensor.requires_grad = requires_grad
+    # NB: This line exists only for backwards compatibility; the
+    # general expectation is that backward_hooks is an empty
+    # OrderedDict.  See Note [Don't serialize hooks]
+    tensor._backward_hooks = backward_hooks
+    return tensor
 
 def _rebuild_parameter(data, requires_grad, backward_hooks):
     param = torch.nn.Parameter(data, requires_grad)
@@ -309,3 +316,13 @@ def _take_tensors(tensors, size_limit):
     for buf, _ in buf_dict.values():
         if len(buf) > 0:
             yield buf
+
+
+# annotation decorator to get annotations in a way that is compatible
+# with both Python 2 and 3
+def annotate(ret, **kwargs):
+    def dec(fun):
+        fun.__annotations__ = dict(kwargs)
+        fun.__annotations__['return'] = ret
+        return fun
+    return dec

@@ -5,23 +5,9 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
-
-namespace {
-inline int GetDimFromOrderString(const string& str) {
-  auto order = StringToStorageOrder(str);
-  switch (order) {
-    case StorageOrder::NHWC:
-      return 3;
-    case StorageOrder::NCHW:
-      return 1;
-    default:
-      CAFFE_THROW("Unsupported storage order: ", str);
-      return -1;
-  }
-}
-} // namespace
 
 template <class Context>
 class SplitOp final : public Operator<Context> {
@@ -29,8 +15,9 @@ class SplitOp final : public Operator<Context> {
   static const int kSplitOpInputSize = 2;
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SplitOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit SplitOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         split_(this->template GetRepeatedArgument<int>("split")) {
     CAFFE_ENFORCE(
         !(OperatorBase::HasArgument("axis") &&
@@ -62,8 +49,9 @@ template <class Context>
 class SplitByLengthsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SplitByLengthsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit SplitByLengthsOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     CAFFE_ENFORCE(
         !(OperatorBase::HasArgument("axis") &&
           OperatorBase::HasArgument("order")),
@@ -91,8 +79,9 @@ template <class Context>
 class ConcatOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  ConcatOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit ConcatOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     CAFFE_ENFORCE(
         !(OperatorBase::HasArgument("axis") &&
           OperatorBase::HasArgument("order")),
@@ -244,16 +233,20 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
 template <class Context>
 bool ConcatOp<Context>::RunOnDevice() {
   auto* output = Output(0);
-  Tensor* split = this->template Output<Tensor>(1, CPU);
-  split->Resize(vector<int64_t>(1, InputSize()));
+
+  // We can override default options(Context::GetDeviceType())
+  // by explictly passing in device type we want
+  Tensor* split = Output(
+      1, std::vector<int64_t>(1, InputSize()), at::dtype<int>().device(CPU));
   int* axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
   int adj_size = input_zero.dim() + (add_axis_ ? 1 : 0);
   int canonical_axis = canonical_axis_index_(axis_, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
   for (int i = 1; i < InputSize(); ++i) {
-    CAFFE_ENFORCE(
-        Input(i).dtype() == input_zero.dtype(),
+    CAFFE_ENFORCE_EQ(
+        Input(i).dtype(),
+        input_zero.dtype(),
         "All inputs must have the same type, expected: ",
         input_zero.dtype().name(),
         " but got: ",
@@ -277,8 +270,9 @@ bool ConcatOp<Context>::RunOnDevice() {
     // check the input dims are compatible.
     for (int j = 1; j < InputSize(); ++j) {
       int dim_j = Input(j).dim32(i);
-      CAFFE_ENFORCE(
-          dim == dim_j,
+      CAFFE_ENFORCE_EQ(
+          dim,
+          dim_j,
           "Expect dimension = ",
           dim,
           " got ",
@@ -328,6 +322,14 @@ bool ConcatOp<Context>::RunOnDevice() {
   }
   return true;
 }
+
+OpSchema::Cost CostInferenceForConcat(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in);
+
+std::vector<TensorShape> TensorInferenceForConcat(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in);
 
 } // namespace caffe2
 

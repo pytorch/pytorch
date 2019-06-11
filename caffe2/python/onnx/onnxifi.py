@@ -19,33 +19,26 @@ import numpy as np
 def onnxifi_caffe2_net(
         pred_net,
         input_shapes,
-        infer_shapes=False,
-        debug=False):
+        max_batch_size=1,
+        max_seq_size=1,
+        debug=False,
+        use_onnx=True,
+        adjust_batch=True,
+        black_list=None):
     """
     Transform the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
     """
-    # Inject an fake input tensor to help popluate the shape if we
-    # do not do shape inference
     shape_hints = {}
-    external_inputs = []
-    if not infer_shapes:
-        for k, v in input_shapes.items():
-            need_input_tensor = True
-            if workspace.HasBlob(k):
-                itensor = workspace.FetchBlob(k)
-                if itensor.shape == v:
-                    need_input_tensor = False
-            if need_input_tensor:
-                workspace.FeedBlob(k, np.random.randn(*v).astype(np.float32))
-                external_inputs.append(k)
-
     for k, v in input_shapes.items():
         shape_hints[k] = v
     pred_net_str = C.onnxifi(pred_net.SerializeToString(),
-                             external_inputs,
                              shape_hints,
-                             infer_shapes,
-                             debug)
+                             black_list if black_list else [],
+                             max_batch_size,
+                             max_seq_size,
+                             adjust_batch,
+                             debug,
+                             use_onnx)
     pred_net_cut = caffe2_pb2.NetDef()
     pred_net_cut.ParseFromString(pred_net_str)
     return pred_net_cut

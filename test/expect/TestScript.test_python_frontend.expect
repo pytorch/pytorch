@@ -4,20 +4,27 @@
     (list
       (param
         (ident x)
-        (variable (ident Tensor)))
+        (option)
+        (option)
+        (False))
       (param
         (ident y)
-        (variable (ident Tensor)))
+        (option)
+        (option)
+        (False))
       (param
         (ident z)
-        (variable (ident Tensor))))
+        (option)
+        (option)
+        (False)))
     (option))
   (list
     (assign
-      (list (variable (ident q)))
-      (None))
+      (variable (ident q))
+      (None)
+      (option))
     (assign
-      (list (variable (ident q)))
+      (variable (ident q))
       (-
         (+
           (variable (ident x))
@@ -27,17 +34,18 @@
             (variable (ident z))
             (ident sigmoid))
           (list)
-          (list))))
+          (list)))
+      (option))
     (expression statement
-      (list
-        (apply
-          (variable (ident print))
-          (list (variable (ident q)))
-          (list))))
+      (apply
+        (variable (ident print))
+        (list (variable (ident q)))
+        (list)))
     (assign
-      (list (variable (ident w)))
+      (variable (ident w))
       (unary minus
-        (variable (ident z))))
+        (variable (ident z)))
+      (option))
     (if
       (and
         (and
@@ -46,11 +54,12 @@
         (variable (ident z)))
       (list
         (assign
-          (list (variable (ident m)))
+          (variable (ident m))
           (if
             (not (variable (ident z)))
             (variable (ident x))
-            (variable (ident y)))))
+            (variable (ident y)))
+          (option)))
       (list))
     (while
       (and
@@ -62,10 +71,10 @@
           (variable (ident z))))
       (list
         (assign
-          (list (variable (ident q)))
-          (variable (ident x)))))
+          (variable (ident q))
+          (variable (ident x))
+          (option))))
     (assert
       (eq (const 1) (const 1))
       (option (string_literal hello)))
-    (return
-      (list (variable (ident x))))))
+    (return (variable (ident x)))))

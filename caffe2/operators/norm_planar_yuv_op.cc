@@ -12,12 +12,12 @@ class NormalizePlanarYUVOp : public Operator<CPUContext> {
   USE_OPERATOR_FUNCTIONS(CPUContext);
   using Operator<CPUContext>::Operator;
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     const auto& X = Input(0);
     const auto& M = Input(1); // mean
     const auto& S = Input(2); // standard deviation
-    auto* Z = Output(0);
-    Z->ResizeLike(X);
+
+    auto* Z = Output(0, X.sizes(), at::dtype<float>());
 
     CAFFE_ENFORCE(X.sizes().size() == 4);
 

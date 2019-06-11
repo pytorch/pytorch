@@ -1,6 +1,7 @@
 #pragma once
 
 #include "caffe2/core/common.h"
+#include "caffe2/core/tensor.h"
 #include "caffe2/onnx/helper.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "onnx/onnx_pb.h"
@@ -28,6 +29,9 @@ using ConvertedResult =
 CAFFE2_API std::unordered_map<std::string, std::string> SsaRewrite(
     caffe2::NetDef* init_net,
     caffe2::NetDef* pred_net);
+
+::ONNX_NAMESPACE::TensorProto::DataType Caffe2TypeToOnnxType(
+    caffe2::TensorProto::DataType t);
 
 class CAFFE2_API OnnxExporter {
   using SpecialOpConverter = ConvertedResult (OnnxExporter::*)(
@@ -63,6 +67,10 @@ class CAFFE2_API OnnxExporter {
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 
+  ConvertedResult CreateElementwiseLinearNodes(
+      const caffe2::OperatorDef& def,
+      const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
+
   ConvertedResult CreateConvPoolNodes(
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
@@ -83,7 +91,15 @@ class CAFFE2_API OnnxExporter {
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 
+  ConvertedResult CreateReduceMeanNodes(
+      const caffe2::OperatorDef& def,
+      const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
+
   ConvertedResult CreateConcatNodes(
+      const caffe2::OperatorDef& def,
+      const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
+
+  ConvertedResult CreateMergeDimNodes(
       const caffe2::OperatorDef& def,
       const std::unordered_map<std::string, caffe2::TensorShape>& shapes);
 

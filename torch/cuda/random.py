@@ -1,14 +1,19 @@
-from torch import _C
+from torch import _C, device
 from . import _lazy_init, _lazy_call, device_count, device as device_ctx_manager
 
+__all__ = ['get_rng_state', 'get_rng_state_all',
+           'set_rng_state', 'set_rng_state_all',
+           'manual_seed', 'manual_seed_all',
+           'seed', 'seed_all', 'initial_seed']
 
-def get_rng_state(device=-1):
+
+def get_rng_state(device=device('cuda')):
     r"""Returns the random number generator state of the current
     GPU as a ByteTensor.
 
     Args:
-        device (int, optional): The device to return the RNG state of.
-            Default: -1 (i.e., use the current device).
+        device (torch.device or int, optional): The device to return the RNG state of.
+            Default: ``torch.device('cuda')`` (i.e., the current CUDA device).
 
     .. warning::
         This function eagerly initializes CUDA.
@@ -28,13 +33,14 @@ def get_rng_state_all():
     return results
 
 
-def set_rng_state(new_state, device=-1):
+def set_rng_state(new_state, device=device('cuda')):
     r"""Sets the random number generator state of the current GPU.
 
     Args:
         new_state (torch.ByteTensor): The desired state
+        device (torch.device or int, optional): The device to set the RNG state.
+            Default: ``torch.device('cuda')`` (i.e., the current CUDA device).
     """
-    new_state_copy = new_state.clone()
 
     # NB: What if device=-1?  You might be afraid that the "current"
     # device would change by the time we actually get around to invoking
@@ -44,7 +50,7 @@ def set_rng_state(new_state, device=-1):
     # immediately.
     def cb():
         with device_ctx_manager(device):
-            _C._cuda_setRNGState(new_state_copy)
+            _C._cuda_setRNGState(new_state)
 
     _lazy_call(cb)
 

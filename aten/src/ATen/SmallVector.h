@@ -1,2 +1,2 @@
 #pragma once
-#include <ATen/core/SmallVector.h>
+#include <c10/util/SmallVector.h>

@@ -8,8 +8,6 @@ PyTorch is a Python package that provides two high-level features:
 
 You can reuse your favorite Python packages such as NumPy, SciPy and Cython to extend PyTorch when needed.
 
-We are in an early-release beta. Expect some adventures and rough edges.
-
 - [More about PyTorch](#more-about-pytorch)
 - [Installation](#installation)
   - [Binaries](#binaries)
@@ -26,30 +24,30 @@ We are in an early-release beta. Expect some adventures and rough edges.
 | :---: | :---: | :---: | :--: |
 | Linux CPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
 | Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
-| Windows GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/) |  <center>—</center> |
+| Windows CPU / GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/) |  <center>—</center> |
 | Linux (ppc64le) CPU | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py2-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py2-linux-ppc64le/) | — | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/) |
 | Linux (ppc64le) GPU | [![Build Status](https://powerci.osuosl.org/job/pytorch-linux-cuda9-cudnn7-py2-mpi-build-test-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-linux-cuda9-cudnn7-py2-mpi-build-test-gpu/) | — | [![Build Status](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-linux-cuda92-cudnn7-py3-mpi-build-test-gpu/) |
 
 See also the [ci.pytorch.org HUD](https://ezyang.github.io/pytorch-ci-hud/build/pytorch-master).
 
 
-## More about PyTorch
+## More About PyTorch
 
 At a granular level, PyTorch is a library that consists of the following components:
 
 | Component | Description |
 | ---- | --- |
-| **torch** | a Tensor library like NumPy, with strong GPU support |
-| **torch.autograd** | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
-| **torch.nn** | a neural networks library deeply integrated with autograd designed for maximum flexibility |
-| **torch.multiprocessing** | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
-| **torch.utils** | DataLoader, Trainer and other utility functions for convenience |
-| **torch.legacy(.nn/.optim)** | legacy code that has been ported over from torch for backward compatibility reasons |
+| [**torch**](https://pytorch.org/docs/stable/torch.html) | a Tensor library like NumPy, with strong GPU support |
+| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
+| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | a compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
+| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | a neural networks library deeply integrated with autograd designed for maximum flexibility |
+| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
+| [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
 
 Usually one uses PyTorch either as:
 
 - a replacement for NumPy to use the power of GPUs.
-- a deep learning research platform that provides maximum flexibility and speed
+- a deep learning research platform that provides maximum flexibility and speed.
 
 Elaborating further:
 
@@ -57,7 +55,7 @@ Elaborating further:
 
 If you use NumPy, then you have used Tensors (a.k.a ndarray).
 
-![Tensor illustration](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/tensor_illustration.png)
+![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
 
 PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerates the
 computation by a huge amount.
@@ -117,7 +115,7 @@ We've written custom memory allocators for the GPU to make sure that
 your deep learning models are maximally memory efficient.
 This enables you to train bigger deep learning models than before.
 
-### Extensions without Pain
+### Extensions Without Pain
 
 Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
 and with minimal abstractions.
@@ -133,86 +131,148 @@ There is no wrapper code that needs to be written. You can see [a tutorial here]
 
 ### Binaries
 Commands to install from binaries via Conda or pip wheels are on our website:
-
 [https://pytorch.org](https://pytorch.org)
+
+
+#### NVIDIA Jetson platforms
+
+Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are available via the following URLs:
+
+- Stable binaries:
+  - Python 2.7: https://nvidia.box.com/v/torch-stable-cp27-jetson-jp42
+  - Python 3.6: https://nvidia.box.com/v/torch-stable-cp36-jetson-jp42
+- Rolling weekly binaries:
+  - Python 2.7: https://nvidia.box.com/v/torch-weekly-cp27-jetson-jp42
+  - Python 3.6: https://nvidia.box.com/v/torch-weekly-cp36-jetson-jp42
+
+They requires JetPack 4.2 and above and are maintained by @dusty-nv
+
 
 ### From Source
 
-If you are installing from source, we highly recommend installing an [Anaconda](https://www.continuum.io/downloads) environment.
-You will get a high-quality BLAS library (MKL) and you get a controlled compiler version regardless of your Linux distro.
+If you are installing from source, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
+You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
-Once you have [Anaconda](https://www.continuum.io/downloads) installed, here are the instructions.
+Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
-- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v6.x or above
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9 or above
+- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
 
-If you want to build on Windows, Visual Studio 2017 14.11 toolset and NVTX are also needed.
-Especially, for CUDA 8 build on Windows, there will be an additional requirement for VS 2015 Update 3 and a patch for it.
-The details of the patch can be found out [here](https://support.microsoft.com/en-gb/help/4020481/fix-link-exe-crashes-with-a-fatal-lnk1000-error-when-you-use-wholearch).
+If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to [are available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
-#### Install optional dependencies
+
+#### Install Dependencies
+
+Common
+```
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
+```
 
 On Linux
 ```bash
-export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
-
-# Install basic dependencies
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-conda install -c mingfeima mkldnn
-
-# Add LAPACK support for the GPU
-conda install -c pytorch magma-cuda92 # or [magma-cuda80 | magma-cuda91] depending on your cuda version
+# Add LAPACK support for the GPU if needed
+conda install -c pytorch magma-cuda90 # or [magma-cuda92 | magma-cuda100 ] depending on your cuda version
 ```
 
-On macOS
-```bash
-export CMAKE_PREFIX_PATH=[anaconda root directory]
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-```
-
-On Windows
-```cmd
-conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
-```
-#### Get the PyTorch source
+#### Get the PyTorch Source
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
+# if you are updating an existing checkout
+git submodule sync
+git submodule update --init --recursive
 ```
 
 #### Install PyTorch
 On Linux
 ```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py install
 ```
 
 On macOS
 ```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
 On Windows
+
+At least Visual Studio 2017 Update 3 (version 15.3.3 with the toolset 14.11) and [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) are needed.
+
+If the version of Visual Studio 2017 is higher than 15.4.5, installing of "VC++ 2017 version 15.4 v14.11 toolset" is strongly recommended.
+<br/> If the version of Visual Studio 2017 is lesser than 15.3.3, please update Visual Studio 2017 to the latest version along with installing "VC++ 2017 version 15.4 v14.11 toolset".
+<br/> There is no guarantee of the correct building with VC++ 2017 toolsets, others than version 15.4 v14.11.
+<br/> "VC++ 2017 version 15.4 v14.11 toolset" might be installed onto already installed Visual Studio 2017 by running its installation once again and checking the corresponding checkbox under "Individual components"/"Compilers, build tools, and runtimes".
+
+NVTX is a part of CUDA distributive, where it is called "Nsight Compute". For installing it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
+Be sure that CUDA with Nsight Compute is installed after Visual Studio 2017.
+
+Currently VS 2017, VS 2019 and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise it will use VS 2017.
+<br/> If Ninja is selected as the generator, the latest MSVC which is newer than VS 2015 (14.0) will get selected as the underlying toolchain if you have Python > 3.5, otherwise VS 2015 will be selected so you'll have to activate the environment. If you use CMake <= 3.14.2 and has VS 2019 installed, then even if you specify VS 2017 as the generator, VS 2019 will get selected as the generator.
+
+CUDA and MSVC has strong version dependencies, so even if you use VS 2017 / 2019, you will get build errors like `nvcc fatal : Host compiler targets unsupported OS`. For this kind of problem, please install the corresponding VS toolchain in the table below and then you can either specify the toolset during activation (recommended) or set `CUDAHOSTCXX` to override the cuda host compiler (not recommended if there are big version differences).
+
+| CUDA version | Newest supported VS version                             |
+| ------------ | ------------------------------------------------------- |
+| 9.0 / 9.1    | Visual Studio 2017 Update 4 (15.4) (`_MSC_VER` <= 1911) |
+| 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |
+| 10.0         | Visual Studio 2017 (15.X) (`_MSC_VER` < 1920)           |
+| 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |
+
 ```cmd
-set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
-set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
-set DISTUTILS_USE_SDK=1
-REM The following two lines are needed for Python 2.7, but the support for it is very experimental.
+cmd
+:: [Optional] Only add the next two lines if you need Python 2.7. If you use Python 3, ignore these two lines.
 set MSSdk=1
 set FORCE_PY27_BUILD=1
-REM As for CUDA 8, VS2015 Update 3 is also required to build PyTorch. Use the following line.
-set "CUDAHOSTCXX=%VS140COMNTOOLS%\..\..\VC\bin\amd64\cl.exe"
 
-call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
+:: [Optional] If you want to build with VS 2019 generator, please change the value in the next line to `Visual Studio 16 2019`.
+:: Note: This value is useless if Ninja is detected. However, you can force that by using `set USE_NINJA=OFF`.
+set CMAKE_GENERATOR=Visual Studio 15 2017
+
+:: Read the content in the previous section carefully before you preceed.
+:: [Optional] If you want to override the underlying toolset used by Ninja and Visual Studio with CUDA, please run the following script block.
+:: "Visual Studio 2017 Developer Command Prompt" will be run automatically.
+:: Make sure you have CMake >= 3.12 before you do this when you use the Visual Studio generator.
+:: It's an essential step if you use Python 3.5.
+set CMAKE_GENERATOR_TOOLSET_VERSION=14.11
+set DISTUTILS_USE_SDK=1
+for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,16^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
+
+:: [Optional] If you want to override the cuda host compiler
+set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Tools\MSVC\14.11.25503\bin\HostX64\x64\cl.exe
+
 python setup.py install
+
 ```
 
-### Docker image
+##### Adjust Build Options (Optional)
 
-Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specificy which python to be used by Miniconda, or leave it unset to use the default. Build as usual
+You can adjust the configuration of cmake variables optionally (without building first), by doing
+the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
+with such a step.
+
+On Linux
+```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+python setup.py build --cmake-only
+ccmake build  # or cmake-gui build
+```
+
+On macOS
+```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
+ccmake build  # or cmake-gui build
+```
+
+### Docker Image
+
+Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specify which Python version is to be used by Miniconda, or leave it unset to use the default. Build from pytorch repo directory as docker needs to copy git repo into docker filesystem while building the image.
 ```
 docker build -t pytorch -f docker/pytorch/Dockerfile .
 ```
@@ -254,13 +314,12 @@ Three pointers to get you started:
 ## Communication
 * forums: discuss implementations, research, etc. https://discuss.pytorch.org
 * GitHub issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* Slack: general chat, online discussions, collaboration etc. https://pytorch.slack.com/ . Our slack channel is invite-only to promote a healthy balance between power-users and beginners. If you need a slack invite, ping us at slack@pytorch.org
+* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
 * newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: https://eepurl.com/cbG0rv
 
 ## Releases and Contributing
 
-PyTorch has a 90 day release cycle (major releases).
-Its current state is Beta, we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+PyTorch has a 90 day release cycle (major releases). Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
 We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 
@@ -271,7 +330,7 @@ Sending a PR without discussion might end up resulting in a rejected PR, because
 
 PyTorch is a community driven project with several skillful engineers and researchers contributing to it.
 
-PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [Sam Gross](https://github.com/colesbury), [Soumith Chintala](http://soumith.ch) and [Gregory Chanan](https://github.com/gchanan) with major contributions coming from 10s of talented individuals in various forms and means.
+PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [Sam Gross](https://github.com/colesbury), [Soumith Chintala](http://soumith.ch) and [Gregory Chanan](https://github.com/gchanan) with major contributions coming from hundreds of talented individuals in various forms and means.
 A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Kopf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
 
 Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor in the Torch community and has helped with many things Torch and PyTorch.

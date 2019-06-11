@@ -4,7 +4,9 @@ import contextlib
 import ctypes
 import sys
 import types
+
 import torch.jit
+import torch._utils_internal
 
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
@@ -92,6 +94,7 @@ class _Ops(types.ModuleType):
         Arguments:
             path (str): A path to a shared library to load.
         """
+        path = torch._utils_internal.resolve_library_path(path)
         with dl_open_guard():
             # Import the shared library into the process, thus running its
             # static (global) initialization code in order to register custom

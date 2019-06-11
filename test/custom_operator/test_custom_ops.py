@@ -1,4 +1,3 @@
-import argparse
 import os.path
 import tempfile
 import unittest
@@ -16,6 +15,12 @@ class TestCustomOperators(unittest.TestCase):
 
     def test_custom_library_is_loaded(self):
         self.assertIn(self.library_path, ops.loaded_libraries)
+
+    def test_calling_custom_op_string(self):
+        output = ops.custom.op2("abc", "def")
+        self.assertLess(output, 0)
+        output = ops.custom.op2("abc", "abc")
+        self.assertEqual(output, 0)
 
     def test_calling_custom_op(self):
         output = ops.custom.op(torch.ones(5), 2.0, 3)

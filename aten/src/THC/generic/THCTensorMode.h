@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMode.h"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMode.h"
 #else
 
 /* Returns the mode, and index of the mode, for the set of values

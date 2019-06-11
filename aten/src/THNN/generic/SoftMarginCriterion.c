@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SoftMarginCriterion.c"
+#define TH_GENERIC_FILE "THNN/generic/SoftMarginCriterion.c"
 #else
 
 void THNN_(SoftMarginCriterion_updateOutput)(
@@ -19,7 +19,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
     return;
   }
 
-  THTensor_(resize1d)(output, 1);
+  THTensor_(resize0d)(output);
 
   scalar_t sum;
 
@@ -31,7 +31,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
   if (reduction == Reduction::Mean)
     sum /= THTensor_(nElement)(input);
 
-  THTensor_(set1d)(output, 0, sum);
+  THTensor_(set0d)(output, sum);
 }
 
 void THNN_(SoftMarginCriterion_updateGradInput)(

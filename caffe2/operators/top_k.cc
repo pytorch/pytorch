@@ -94,7 +94,7 @@ bool TopKOp<T, Context>::RunOnDevice() {
   auto* indices = Output(1);
   auto* flatten_indices = OutputSize() > 2 ? Output(2) : nullptr;
 
-  at::IntList input_dims = input.sizes();
+  at::IntArrayRef input_dims = input.sizes();
   if (axis_ == -1) {
     axis_ = input_dims.size() - 1;
   }
@@ -162,8 +162,8 @@ bool TopKGradientOp<T, Context>::RunOnDevice() {
   const auto& indices = Input(1);
   const auto& original_input = Input(2);
   auto* output = Output(0);
-  at::IntList values_dims = values.sizes();
-  at::IntList origin_dims = original_input.sizes();
+  at::IntArrayRef values_dims = values.sizes();
+  at::IntArrayRef origin_dims = original_input.sizes();
   CAFFE_ENFORCE_EQ(values_dims.size(), origin_dims.size());
   output->Resize(origin_dims);
   const T* values_data = values.template data<T>();
