@@ -161,6 +161,14 @@ int64_t factorial(int n) {
   loop(n, p, r);
   return r << nminussumofbits(n);
 }
+static const double degToRad = std::acos(-1.0) / 180.0;
+static const double radToDeg = 180.0 / std::acos(-1.0);
+double degrees(double x) {
+  return x * radToDeg;
+}
+double radians(double x) {
+  return x * degToRad;
+}
 
 // reference function THPVariable_to in python_variable_methods.cpp
 static at::Tensor to_dispatch(
@@ -218,6 +226,14 @@ RegisterOperators reg(
          [](const Node* node) {
            return [](Stack& stack) {
              AT_ERROR("Should be replaced by prim::BailOut");
+             return 0;
+           };
+         }),
+     Operator(
+         "prim::BailOut(...) -> Tensor(a)",
+         [](const Node* /* node */) {
+           return [](Stack& /* stack */) {
+             AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
              return 0;
            };
          }),
@@ -1008,13 +1024,17 @@ RegisterOperators reg(
      Operator(
          "aten::wait(Future(t) self) -> t",
          [](Stack& stack) {
-           auto future = pop(stack).toFuture();
-           if (future->completed()) {
-             push(stack, future->value());
-           } else {
-             throw Suspend(future);
-           }
+           TORCH_CHECK(
+               false, "wait is implemented directly in the interpreter");
            return 0;
+         }),
+     Operator(
+         prim::Uninitialized,
+         [](const Node* node) {
+           return [](Stack& stack) {
+             push(stack, IValue::uninitialized());
+             return 0;
+           };
          }),
      Operator(
          prim::CreateObject,
@@ -1715,7 +1735,6 @@ int dictSetItem(Stack& stack) {
   auto idx = pop(stack);
   auto dict = pop(stack).toGenericDict();
   dict->elements().insert_or_assign(std::move(idx), std::move(value));
-  push(stack, std::move(dict));
   return 0;
 }
 
@@ -2222,8 +2241,13 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
     DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
     DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
+    DEFINE_UNARY_OP(aten::degrees, degrees(a), float, float),
+    DEFINE_UNARY_OP(aten::radians, radians(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
     DEFINE_UNARY_INT_OP(aten::factorial, factorial(a), int),
+    DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
+    DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
+    DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
     Operator(
         "aten::modf(float a) -> (float, float)",
         [](Stack& stack) {
@@ -2232,6 +2256,26 @@ RegisterOperators reg2({
           double b, c;
           b = modf(a, &c);
           push(stack, b, c);
+          return 0;
+        }),
+    Operator(
+        "aten::frexp(float a) -> (float, int)",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          double m;
+          int e;
+          m = std::frexp(a, &e);
+          push(stack, m, e);
+          return 0;
+        }),
+    Operator(
+        "aten::ldexp(float x, int i) -> float",
+        [](Stack& stack) {
+          double a;
+          int64_t b;
+          pop(stack, a, b);
+          push(stack, std::ldexp(a, b));
           return 0;
         }),
     DEFINE_BINARY_FLOAT_OP(aten::mathremainder, std::remainder(a, b)),
@@ -2270,13 +2314,13 @@ RegisterOperators reg2({
     DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
 
     Operator(
-    "aten::isnan(float a) -> bool",
-    [](Stack& stack) {
-      double a;
-      pop(stack, a);
-      push(stack, std::isnan(a));
-      return 0;
-    }),
+        "aten::isnan(float a) -> bool",
+        [](Stack& stack) {
+          double a;
+          pop(stack, a);
+          push(stack, std::isnan(a));
+          return 0;
+        }),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b),
     DEFINE_COMPARISON_OP(aten::eq, a == b),
@@ -2364,6 +2408,60 @@ RegisterOperators reg2({
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("float"),
 #undef CREATE_DICT_OPS
+
+    Operator(
+        "aten::divmod(int x, int y) -> (int, int)",
+        [](Stack& stack) {
+          int64_t a, b;
+          lldiv_t divresult = {};
+          pop(stack, a, b);
+          if (b == 0) {
+            throw std::runtime_error("ZeroDivisionError: integer division or modulo by zero");
+          }
+          divresult = lldiv(a, b);
+          if (divresult.rem && (a < 0) != (b < 0)) {
+            divresult.quot -= 1;
+            divresult.rem  += b;
+          }
+          push(stack, static_cast<int64_t>(divresult.quot), \
+            static_cast<int64_t>(divresult.rem));
+          return 0;
+        }),
+    Operator(
+        "aten::divmod(float x, float y) -> (float, float)",
+        [](Stack& stack) {
+          double a, b;
+          pop(stack, a, b);
+          if (b == 0) {
+            throw std::runtime_error("ZeroDivisionError: float divmod()");
+          }
+          double rem = fmod(a, b);
+          if (rem && (a < 0) != (b < 0)) {
+            rem  += b;
+          }
+          push(stack, (a - rem)/b, rem);
+          return 0;
+        }),
+#define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                              \
+    Operator(                                                               \
+        "aten::divmod(" #type_a " x," #type_b " y) -> (float, float)",      \
+        [](Stack& stack) {                                                  \
+          type_a a;                                                         \
+          type_b b;                                                         \
+          pop(stack, a, b);                                                 \
+          if (b == 0) {                                                     \
+            throw std::runtime_error("ZeroDivisionError: float divmod()");  \
+          }                                                                 \
+          double quot = floor(a / b);                                       \
+          double rem = a - (quot * b);                                      \
+          push(stack, quot, rem);                                           \
+          return 0;                                                         \
+        })
+
+    DEFINE_DIVMOD_MIXED_OP(int, float),
+    DEFINE_DIVMOD_MIXED_OP(float, int),
+
+#undef DEFINE_DIVMOD_MIXED_OP
 
     Operator("aten::hash(str t) -> int", hashValue<std::string>),
     Operator("aten::hash(int t) -> int", hashValue<int>),
