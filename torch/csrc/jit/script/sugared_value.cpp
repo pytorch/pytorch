@@ -46,6 +46,7 @@ builtin_cast_methods() {
 // The current supported iterable/builtin function
 static const std::unordered_set<c10::Symbol> iterable_funcs = {
   prim::range,
+  prim::enumerate,
 };
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
@@ -369,6 +370,43 @@ std::vector<Value*> IterableValue::fillInLoopInfo(
       }
       return {cur_elem};
     }
+  } else if (symbol_ == prim::enumerate) {
+    // fill in max_trip_count_val
+    WithInsertPoint guard(n);
+    Value* start_index = nullptr;
+    size_t iter_inputs_size = iter_inputs_.size();
+    if (iter_inputs_size == 0) {
+      throw ErrorReport(loc) << "enumerate expected at least 1 arguments, got 0";
+    }
+    Value* list_val = iter_inputs_[0];
+    Value* max_trip_count_val = g.insert(aten::len, {list_val}, {}, loc);
+
+    if (iter_inputs_size == 2) {
+      start_index = iter_inputs_[1];
+    }
+
+    if (iter_inputs_size > 2) {
+      throw ErrorReport(loc)
+          << "enumerate expected at most 2 arguments, got " << iter_inputs_size;
+    }
+    n->insertInput(0, max_trip_count_val);
+
+    // fill in the target element assignment value in the beginning of the FOR loop
+    {
+      Block* body_block = n->blocks()[0];
+      Value* trip_count = body_block->inputs()[0]; // Iteration num
+
+      auto it = body_block->nodes().begin();
+      WithInsertPoint it_guard(*it);
+      Value * index_val = trip_count;
+      if (start_index) {
+        index_val = g.insert(aten::add, {trip_count, start_index}, {}, loc);
+      }
+
+      Value* cur_elem = g.insert(aten::select, {iter_inputs_[0], trip_count}, {}, loc);
+      return {index_val, cur_elem};
+    }
+
   } else {
       throw ErrorReport(loc)
           << "Iterable " << symbol_.toDisplayString() << " does not have loop information to fill";

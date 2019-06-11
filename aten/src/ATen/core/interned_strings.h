@@ -87,6 +87,7 @@ namespace c10 {
   _(aten, divmod)                  \
   _(prim, range)                   \
   _(prim, rangelist)               \
+  _(prim, enumerate)               \
   _(aten, _grad_sum_to_size)       \
   _(aten, _size_if_not_equal)      \
   _(aten, _ncf_unsqueeze)          \

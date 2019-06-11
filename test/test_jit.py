@@ -9789,6 +9789,28 @@ a")
                     x += 1
                 return x
 
+    def test_for_in_enumerate(self):
+        def fn(x):
+            # type: (List[int]) -> int
+            sum = 0
+            for i, v in enumerate(x):
+                sum += i * v
+
+            return sum
+
+        self.checkScript(fn, ([1, 2, 3, 4, 5],))
+
+        with self.assertRaisesRegex(RuntimeError, r'enumerate expected at least 1 arguments, got 0'):
+            @torch.jit.script
+            def enumerate_no_arg(x):
+                # type: (List[int]) -> int
+                sum = 0
+                for _ in enumerate():
+                    sum += 1
+
+                return sum
+
+
     def test_list_iterables(self):
         with self.assertRaisesRegex(RuntimeError, 'List of iterables is not supported currently'):
             cu = torch.jit.CompilationUnit('''

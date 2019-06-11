@@ -373,6 +373,7 @@ struct Environment {
                std::make_shared<BuiltinFunction>(aten::len, at::nullopt))},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"range", std::make_shared<BuiltinFunction>(prim::range, at::nullopt)},
+          {"enumerate", std::make_shared<BuiltinFunction>(prim::enumerate, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
@@ -1314,17 +1315,6 @@ struct to_ir {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
     }
-    if (targets.size() != 1) {
-      throw ErrorReport(stmt)
-          << "Iteration variable unpacking is not supported";
-    }
-
-    if (targets[0].kind() != TK_VAR) {
-      throw ErrorReport(targets[0])
-          << "unexpected expression in variable initialization of for loop";
-    }
-    auto target = Var(targets[0]).name();
-
     // Emit loop information for builtinFunction values like range(), zip(), 
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
     auto sv = emitSugaredExpr(itrs[0], 1);
@@ -1338,9 +1328,13 @@ struct to_ir {
     if ((siv && (siv->getValue()->type()->kind() == TypeKind::ListType
         || siv->getValue()->type()->isSubtypeOf(TensorType::get()))
         ) || iterable_val) {
+      List<Expr> target_vars = targets;
+      if (targets.size() == 1 && targets[0].kind() == TK_TUPLE_LITERAL) {
+        target_vars = TupleLiteral(targets[0]).inputs();
+      }
       // collect all iterable names to fill in the value table
-      for(size_t i = 0; i < targets.size(); ++ i) {
-        std::string iter_name = Var(targets[i]).name().name();
+      for(size_t i = 0; i < target_vars.size(); ++ i) {
+        std::string iter_name = Var(target_vars[i]).name().name();
         iter_names.emplace_back(iter_name);
       }
       emitLoopCommon(stmt.range(), body, iter_names, sv, {});
@@ -1352,6 +1346,16 @@ struct to_ir {
     // each module inside the list may be different types, so FOR .. in ModuleList
     // essentially should emit different stmts for each iteration, which we shouldn't
     // emit the prim::Loop node for it, the same rule applies for the Tuple case. 
+    if (targets.size() != 1) {
+      throw ErrorReport(stmt)
+          << "Iteration variable unpacking on Tuple or ModuleList is not supported";
+    }
+    if (targets[0].kind() != TK_VAR) {
+      throw ErrorReport(targets[0])
+          << "unexpected expression in variable initialization of for loop";
+    }
+    auto target = Var(targets[0]).name();
+
     auto instances = sv->asTuple(stmt.range(), method);
     const std::string& target_name = target.name();
     pushFrame(environment_stack->block());
