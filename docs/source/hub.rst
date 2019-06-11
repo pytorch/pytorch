@@ -47,7 +47,7 @@ You can see the full script in
 - ``args`` and ``kwargs`` are passed along to the real callable function.
 - Docstring of the function works as a help message. It explains what does the model do and what
   are the allowed positional/keyword arguments. It's highly recommended to add a few examples here.
-- Entrypoint function should **ALWAYS** return a model(nn.module).
+- Entrypoint function can either return a model(nn.module), or auxiliary tools to make the user workflow smoother, e.g. tokenizers.
 - Pretrained weights can either be stored locally in the github repo, or loadable by
   ``torch.hub.load_state_dict_from_url()``. In the example above ``torchvision.models.resnet.resnet18``
   handles ``pretrained``, alternatively you can put the following logic in the entrypoint definition.
