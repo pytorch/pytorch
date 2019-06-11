@@ -130,15 +130,17 @@ void THCTensor_(multinomial)(struct THCState *state,
 
     // Prefix sum along rows
     THCTensor_(cumsum)(state, prefixSum, normDist, 1);
+ 
+    std::pair<uint64_t, uint64_t> rng_engine_inputs;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen->mutex_);
 
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-
-    // each thread will utilize one random, however, since we have to use
-    // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
-    // offset is 4.
-    auto philox_engine_inputs = gen->philox_engine_inputs(4);
-
+      // each thread will utilize one random, however, since we have to use
+      // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
+      // offset is 4.
+      rng_engine_inputs = gen->philox_engine_inputs(4);
+    }
     if (with_replacement) {
       // Sample with replacement
 
@@ -153,7 +155,7 @@ void THCTensor_(multinomial)(struct THCState *state,
 
       sampleMultinomialWithReplacement
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          philox_engine_inputs,
+          rng_engine_inputs,
           n_sample,
           THCudaLongTensor_data(state, self),
           numDist, numCategories,
@@ -187,7 +189,7 @@ void THCTensor_(multinomial)(struct THCState *state,
         // recalculate our distribution
         sampleMultinomialWithoutReplacement
           <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-            philox_engine_inputs,
+            rng_engine_inputs,
             n_sample,
             sample,
             THCudaLongTensor_data(state, self),

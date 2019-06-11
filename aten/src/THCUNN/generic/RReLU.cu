@@ -17,8 +17,6 @@ void THNN_(RReLU_updateOutput)(
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
   auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator();
-  // See Note [Acquire lock when using random generators]
-  std::lock_guard<std::mutex> lock(gen->mutex_);
   if (train)
   {
     input = THCTensor_(newContiguous)(state, input);
@@ -31,12 +29,16 @@ void THNN_(RReLU_updateOutput)(
     const uint32_t curand4_engine_calls = 4;
     dim3 grid = NUM_BLOCKS(n);
     uint64_t counter_offset = ((n - 1) / (BLOCK_SIZE * grid.x) + 1) * curand4_engine_calls;
-    auto philox_engine_inputs = gen->philox_engine_inputs(counter_offset);
-
+    std::pair<uint64_t, uint64_t> rng_engine_inputs;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen->mutex_);
+      rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
+    }
     if (inplace)
     {
       rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, philox_engine_inputs, input_data, noise_data, input_data, lower, upper);
+        n, rng_engine_inputs, input_data, noise_data, input_data, lower, upper);
       THCTensor_(set)(state, output, input);
     }
     else
@@ -44,7 +46,7 @@ void THNN_(RReLU_updateOutput)(
       THCTensor_(resizeAs)(state, output, input);
       scalar_t *output_data = THCTensor_(data)(state, output);
       rreluUpdateOutputTrain<<<grid, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, philox_engine_inputs, input_data, noise_data, output_data, lower, upper);
+        n, rng_engine_inputs, input_data, noise_data, output_data, lower, upper);
     }
     THCudaCheck(cudaGetLastError());
     THCTensor_(free)(state, input);

@@ -1,10 +1,11 @@
 #pragma once
 
 #include <ATen/core/Generator.h>
+#include <ATen/cuda/ATenCUDAGeneral.h>
 
 namespace at {
 
-struct CAFFE2_API CUDAGenerator : public Generator {
+struct AT_CUDA_API CUDAGenerator : public Generator {
   // Constructors
   CUDAGenerator(DeviceIndex device_index = -1);
   ~CUDAGenerator() = default;

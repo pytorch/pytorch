@@ -52,18 +52,21 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   torch::ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
-  TORCH_CHECK(device.type() == at::kCPU || device.type() == at::kCUDA,
-              "Device type ", c10::DeviceTypeName(device.type()),
-              " is not supported for torch.Generator() api.");
 
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
 #ifdef USE_CUDA
   if (device.type() == at::kCPU) {
     self->cdata = new CPUGenerator();
-  } else {
+  } else if (device.type() == at::kCUDA){
     self->cdata = new CUDAGenerator(device.index());
+  } else {
+    AT_ERROR("Device type ", c10::DeviceTypeName(device.type()),
+             " is not supported for torch.Generator() api.");
   }
 #else
+  TORCH_CHECK(device.type() == at::kCPU,
+              "Device type ", c10::DeviceTypeName(device.type()),
+              " is not supported for torch.Generator() api.");
   self->cdata = new CPUGenerator();
 #endif
   self->owner = true;
