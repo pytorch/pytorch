@@ -1,4 +1,5 @@
 #include <aten/src/ATen/Context.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -1734,6 +1735,42 @@ int hashValue(Stack& stack) {
   return 0;
 }
 
+int64_t string_find_impl(
+    std::string string,
+    std::string substr,
+    int64_t start,
+    int64_t end,
+    bool reverse = false) {
+  int64_t size = string.size();
+  if (start < 0) {
+    start = std::max(0L, size + start);
+  }
+  if (end < 0) {
+    end = std::max(0L, size + end + 1);
+  }
+  if (end > start) {
+    string = string.substr(start, end - start);
+  } else {
+    string = "";
+  }
+
+  int64_t result = -1;
+  if (string.size() >= substr.size()) {
+    auto pos = string.find(substr, 0);
+    if (reverse) {
+      auto rpos = pos;
+      do {
+        pos = rpos;
+        rpos = string.find(substr, pos + 1);
+      } while (rpos != std::string::npos);
+    }
+    if (pos != std::string::npos) {
+      result = pos + start;
+    }
+  }
+  return result;
+}
+
 RegisterOperators reg2({
 
 #define DEFINE_STRING_OP(op_name, string_op, result)                \
@@ -1947,19 +1984,6 @@ RegisterOperators reg2({
         "aten::slice(str string, int start, int end=9223372036854775807, int step=1) -> str",
         stringSlice),
 
-// python string is methods return false if empty
-#define DEFINE_STRING_IS_OP(op_name, char_op)                      \
-  Operator(#op_name "(str self) -> bool", [](Stack& stack) {       \
-    auto string = pop(stack).toStringRef();                        \
-    push(                                                          \
-        stack,                                                     \
-        string.size() != 0 &&                                      \
-            std::all_of(string.begin(), string.end(), [](char c) { \
-              return char_op(c);                                   \
-            }));                                                   \
-    return 0;                                                      \
-  })
-
     // upper and lower require there to be at least one alpha character,
     // and ignore all other characters
     Operator(
@@ -1991,10 +2015,443 @@ RegisterOperators reg2({
           return 0;
         }),
 
+    Operator(
+        "aten::capitalize(str self) -> str",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          std::stringstream ss;
+          auto first_char = true;
+          for (char c : string) {
+            if (first_char) {
+              ss << static_cast<char>(std::toupper(c));
+              first_char = false;
+            } else {
+              ss << static_cast<char>(std::tolower(c));
+            }
+          }
+          push(stack, ss.str());
+          return 0;
+        }),
+
+    Operator(
+        "aten::title(str self) -> str",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          std::stringstream ss;
+          bool prev_is_nonalpha = true;
+          for (char c : string) {
+            if (prev_is_nonalpha) {
+              ss << static_cast<char>(std::toupper(c));
+            } else {
+              ss << static_cast<char>(std::tolower(c));
+            }
+            if (std::isalpha(c)) {
+              prev_is_nonalpha = false;
+            } else {
+              prev_is_nonalpha = true;
+            }
+          }
+          push(stack, ss.str());
+          return 0;
+        }),
+
+    Operator(
+        "aten::center(str self, size_t width, str fillchar=' ') -> str",
+        [](Stack& stack) {
+          auto fillchar = pop(stack).toStringRef();
+          auto width = pop(stack).toInt();
+          auto string = pop(stack).toStringRef();
+          if (fillchar.size() != 1) {
+            // TODO: this should be a TypeError
+            throw std::runtime_error(
+                "TypeError: The fill character must be exactly one character long");
+          }
+          if (string.size() > width) {
+            push(stack, string);
+            return 0;
+          }
+          std::stringstream ss;
+          auto full_padding = width - string.size();
+          auto l_pad = full_padding / 2;
+          auto r_pad = (full_padding + 1) / 2;
+          if (width % 2) {
+            auto tmp = r_pad;
+            r_pad = l_pad;
+            l_pad = tmp;
+          }
+          for (auto i = 0; i < l_pad; ++i) {
+            ss << fillchar;
+          }
+          ss << string;
+          for (auto i = 0; i < r_pad; ++i) {
+            ss << fillchar;
+          }
+          push(stack, ss.str());
+          return 0;
+        }),
+
+    // Adapted from
+    // https://stackoverflow.com/questions/22489073/counting-the-number-of-occurrences-of-a-string-within-a-string
+    Operator(
+        "aten::count(str self, str substr, int start=0, int end=-1) -> int",
+        [](Stack& stack) {
+          auto end = pop(stack).toInt();
+          auto start = pop(stack).toInt();
+          auto substr = pop(stack).toStringRef();
+          auto string = pop(stack).toStringRef();
+
+          int64_t size = string.size();
+          if (start > size) {
+            push(stack, 0);
+            return 0;
+          }
+          if (start < 0) {
+            start = std::max(0L, size + start);
+          }
+          if (end < 0) {
+            end = std::max(0L, size + end + 1);
+          }
+
+          int occurrences = 0;
+          std::string::size_type pos = start;
+          while ((pos = string.find(substr, pos)) != std::string::npos) {
+            if (pos < end) {
+              ++occurrences;
+            } else {
+              break;
+            }
+            pos += substr.length();
+          }
+          push(stack, occurrences);
+          return 0;
+        }),
+
+    Operator(
+        "aten::endswith(str self, str substr, int start=0, int end=-1) -> bool",
+        [](Stack& stack) {
+          auto end = pop(stack).toInt();
+          auto start = pop(stack).toInt();
+          auto substr = pop(stack).toStringRef();
+          auto string = pop(stack).toStringRef();
+
+          int64_t size = string.size();
+          if (start < 0) {
+            start = std::max(0L, size + start);
+          }
+          if (end < 0) {
+            end = std::max(0L, size + end + 1);
+          }
+
+          string = string.substr(start, end - start);
+
+          auto result = false;
+          if (string.length() >= substr.length()) {
+            result = !string.compare(
+                string.length() - substr.length(), substr.length(), substr);
+          }
+          push(stack, result);
+          return 0;
+        }),
+
+    Operator(
+        "aten::expandtabs(str self, int tabsize=8) -> str",
+        [](Stack& stack) {
+          auto tabsize = pop(stack).toInt();
+          auto string = pop(stack).toStringRef();
+
+          std::stringstream ss;
+          size_t index = 0;
+          for (const auto& c : string) {
+            if (c != '\t') {
+              ss << c;
+              index++;
+            } else {
+              if (tabsize <= 0) {
+                continue;
+              }
+              do {
+                ss << ' ';
+                index++;
+              } while (index % tabsize);
+            }
+          }
+          push(stack, ss.str());
+          return 0;
+        }),
+
+    Operator(
+        "aten::find(str self, str substr, int start=0, int end=-1) -> int",
+        [](Stack& stack) {
+          auto end = pop(stack).toInt();
+          auto start = pop(stack).toInt();
+          auto substr = pop(stack).toStringRef();
+          auto string = pop(stack).toStringRef();
+          push(stack, string_find_impl(string, substr, start, end));
+          return 0;
+        }),
+
+    Operator(
+        "aten::rfind(str self, str substr, int start=0, int end=-1) -> int",
+        [](Stack& stack) {
+          auto end = pop(stack).toInt();
+          auto start = pop(stack).toInt();
+          auto substr = pop(stack).toStringRef();
+          auto string = pop(stack).toStringRef();
+          push(stack, string_find_impl(string, substr, start, end, true));
+          return 0;
+        }),
+
+    Operator(
+        "aten::index(str self, str substr, int start=0, int end=-1) -> int",
+        [](Stack& stack) {
+          auto end = pop(stack).toInt();
+          auto start = pop(stack).toInt();
+          auto substr = pop(stack).toStringRef();
+          auto string = pop(stack).toStringRef();
+          auto result = string_find_impl(string, substr, start, end);
+          if (result < 0) {
+            throw std::runtime_error("ValueError: substring not found");
+          }
+          push(stack, result);
+          return 0;
+        }),
+
+    Operator(
+        "aten::rindex(str self, str substr, int start=0, int end=-1) -> int",
+        [](Stack& stack) {
+          auto end = pop(stack).toInt();
+          auto start = pop(stack).toInt();
+          auto substr = pop(stack).toStringRef();
+          auto string = pop(stack).toStringRef();
+          auto result = string_find_impl(string, substr, start, end, true);
+          if (result < 0) {
+            throw std::runtime_error("ValueError: substring not found");
+          }
+          push(stack, result);
+          return 0;
+        }),
+
+    Operator(
+        "aten::isidentifier(str self) -> bool",
+        [](Stack& stack) {
+          LOG(WARNING)
+              << "The isidentifier() implementation being used is from Python 2\n";
+          auto string = pop(stack).toStringRef();
+          if (string.size() < 1) {
+            push(stack, false);
+            return 0;
+          }
+          if (std::isdigit(string[0])) {
+            push(stack, false);
+            return 0;
+          }
+          auto result = std::all_of(string.begin(), string.end(), [](char c) {
+            return std::isalnum(c);
+          });
+          push(stack, result);
+          return 0;
+        }),
+
+    Operator(
+        "aten::istitle(str self) -> bool",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          auto result = false;
+
+          bool prev_is_alpha = false;
+          for (char c : string) {
+            if (prev_is_alpha) {
+              if (c != static_cast<char>(std::tolower(c))) {
+                result = false;
+                break;
+              }
+            } else {
+              if (c != static_cast<char>(std::toupper(c))) {
+                result = false;
+                break;
+              }
+              // Only true if there exists at least one alpha
+              if (std::isalpha(c)) {
+                result = true;
+              }
+            }
+            if (std::isalpha(c)) {
+              prev_is_alpha = true;
+            } else {
+              prev_is_alpha = false;
+            }
+          }
+          push(stack, result);
+          return 0;
+        }),
+
+    // Can't reuse DEFINE_STRING_IS_OP because "" is printable
+    Operator(
+        "aten::isprintable(str self) -> bool",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          auto result = std::all_of(string.begin(), string.end(), [](char c) {
+            return std::isalnum(c) || std::ispunct(c) || c == ' ';
+          });
+          push(stack, result);
+          return 0;
+        }),
+
+    Operator(
+        "aten::ljust(str self, int width, str fillchar=' ') -> str",
+        [](Stack& stack) {
+          auto fillchar = pop(stack).toStringRef();
+          if (fillchar.size() != 1) {
+            // TODO: this should be a TypeError
+            throw std::runtime_error(
+                "TypeError: The fill character must be exactly one character long");
+          }
+          auto width = pop(stack).toInt();
+          auto string = pop(stack).toStringRef();
+          auto to_append = std::max(0L, width - static_cast<int64_t>(string.size()));
+
+          std::stringstream ss;
+          ss << string;
+          for (auto i = 0; i < to_append; ++i) {
+            ss << fillchar;
+          }
+
+          push(stack, ss.str());
+          return 0;
+        }),
+
+    Operator(
+        "aten::rjust(str self, int width, str fillchar=' ') -> str",
+        [](Stack& stack) {
+          auto fillchar = pop(stack).toStringRef();
+          if (fillchar.size() != 1) {
+            // TODO: this should be a TypeError
+            throw std::runtime_error(
+                "TypeError: The fill character must be exactly one character long");
+          }
+          auto width = pop(stack).toInt();
+          auto string = pop(stack).toStringRef();
+          auto to_append = std::max(0L, width - static_cast<int64_t>(string.size()));
+
+          std::stringstream ss;
+          for (auto i = 0; i < to_append; ++i) {
+            ss << fillchar;
+          }
+          ss << string;
+
+          push(stack, ss.str());
+          return 0;
+        }),
+
+    Operator(
+        "aten::zfill(str self, int width) -> str",
+        [](Stack& stack) {
+          auto width = pop(stack).toInt();
+          auto string = pop(stack).toStringRef();
+          auto to_append = std::max(0L, width - static_cast<int64_t>(string.size()));
+
+          std::stringstream ss;
+          for (auto i = 0; i < to_append; ++i) {
+            ss << '0';
+          }
+          ss << string;
+
+          push(stack, ss.str());
+          return 0;
+        }),
+
+    Operator(
+        "aten::lstrip(str self, str chars=' \\n\\t\\f\\v') -> str",
+        [](Stack& stack) {
+          auto chars = pop(stack).toStringRef();
+          auto string = pop(stack).toStringRef();
+          auto index = string.find_first_not_of(chars);
+          if (index != std::string::npos) {
+            string = string.substr(index, string.size());
+          } else {
+            string = "";
+          }
+          push(stack, string);
+          return 0;
+        }),
+
+    Operator(
+        "aten::rstrip(str self, str chars=' \\n\\t\\f\\v') -> str",
+        [](Stack& stack) {
+          auto chars = pop(stack).toStringRef();
+          auto string = pop(stack).toStringRef();
+          auto index = string.find_last_not_of(chars);
+          if (index != std::string::npos) {
+            string = string.substr(0, index + 1);
+          } else {
+            string = "";
+          }
+          push(stack, string);
+          return 0;
+        }),
+
+    Operator(
+        "aten::strip(str self, str chars=' \\n\\t\\f\\v') -> str",
+        [](Stack& stack) {
+          auto chars = pop(stack).toStringRef();
+          auto string = pop(stack).toStringRef();
+          auto rindex = string.find_last_not_of(chars);
+          if (rindex != std::string::npos) {
+            string = string.substr(0, rindex + 1);
+          } else {
+            string = "";
+          }
+          auto lindex = string.find_first_not_of(chars);
+          if (lindex != std::string::npos) {
+            string = string.substr(lindex, string.size());
+          } else {
+            string = "";
+          }
+          push(stack, string);
+          return 0;
+        }),
+
+    Operator(
+        "aten::replace(str self, str old, str new, int max=-1) -> str",
+        [](Stack& stack) {
+          auto max = pop(stack).toInt();
+          auto new_str = pop(stack).toStringRef();
+          auto old_str = pop(stack).toStringRef();
+          auto string = pop(stack).toStringRef();
+
+          int occurrences = 0;
+          std::string::size_type pos = 0;
+          while ((pos = string.find(old_str, pos)) != std::string::npos) {
+            if (max >= 0 && ++occurrences > max) {
+              break;
+            }
+            string = string.replace(pos, old_str.length(), new_str);
+            pos += new_str.length();
+          }
+
+          push(stack, string);
+          return 0;
+        }),
+
+// python string is methods return false if empty
+#define DEFINE_STRING_IS_OP(op_name, char_op)                      \
+  Operator(#op_name "(str self) -> bool", [](Stack& stack) {       \
+    auto string = pop(stack).toStringRef();                        \
+    push(                                                          \
+        stack,                                                     \
+        string.size() != 0 &&                                      \
+            std::all_of(string.begin(), string.end(), [](char c) { \
+              return char_op(c);                                   \
+            }));                                                   \
+    return 0;                                                      \
+  })
+
     DEFINE_STRING_IS_OP(aten::isdigit, std::isdigit),
     DEFINE_STRING_IS_OP(aten::isspace, std::isspace),
     DEFINE_STRING_IS_OP(aten::isalnum, std::isalnum),
     DEFINE_STRING_IS_OP(aten::isalpha, std::isalpha),
+    DEFINE_STRING_IS_OP(aten::isdecimal, std::isdigit),
+    DEFINE_STRING_IS_OP(aten::isnumeric, std::isdigit),
 
 #define DEFINE_STRING_CHAR_MAP_OP(op_name, char_op)         \
   Operator(#op_name "(str self) -> str", [](Stack& stack) { \
