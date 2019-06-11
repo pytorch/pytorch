@@ -160,7 +160,9 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
+#ifdef NAMEDTENSOR_ENABLED
 NamedTensorMetaInterface::~NamedTensorMetaInterface() {}
+#endif
 
 /// NOTE [ Treating Variables as non-Variables in type dispatch ]
 ///
