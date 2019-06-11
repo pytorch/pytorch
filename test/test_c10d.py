@@ -2538,7 +2538,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         del ddp
         del process_group
-        del store # this will delete self.file
+        del store  # this will delete self.file
 
         store = c10d.FileStore(recovery_filename, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)

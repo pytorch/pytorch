@@ -46,11 +46,6 @@ class Reducer {
     return backward_stats_;
   }
 
-  // Remove all hooks on variables registered by this Reducer. This is necessary
-  // to make DDP failure recoverable. Otherwise, multiple Reducer instances
-  // (from recoveries) will append add their hooks to the original model.
-  void remove_all_hooks() const;
-
  protected:
   std::mutex mutex_;
   std::vector<std::vector<torch::autograd::Variable>> replicas_;

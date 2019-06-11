@@ -141,17 +141,17 @@ Reducer::Reducer(
   }
 }
 
-void Reducer::remove_all_hooks() const {
+Reducer::~Reducer() noexcept(false) {
+  // Remove all hooks on variables registered by this Reducer. This is necessary
+  // to make DDP failure recoverable. Otherwise, multiple Reducer instances
+  // (from recoveries) will add their hooks to the original model, and those
+  // hooks will try to invoke methods on a deleted Reducer objects.
   for (auto& hook : hooks_) {
     auto& key = hook.first;
     auto& grad_accumulator = hook.second;
     AT_ASSERTM(grad_accumulator->del_post_hook(key),
         "Reducer attempts to delete a non-existing hook.");
   }
-}
-
-Reducer::~Reducer() noexcept(false) {
-  remove_all_hooks();
 }
 
 // Called when the gradient for the specified variable is ready.
