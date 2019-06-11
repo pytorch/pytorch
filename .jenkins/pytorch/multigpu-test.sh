@@ -29,4 +29,5 @@ fi
 
 time python test/run_test.py --verbose -i distributed
 time python test/run_test.py --verbose -i c10d
+time python test/run_test.py --verbose -i c10d_spawn
 assert_git_not_dirty
