@@ -1,5 +1,5 @@
 #include <ATen/core/op_registration/op_registration.h>
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
 
@@ -14,12 +14,12 @@ class expand_dims_cpu final : public c10::OperatorKernel {
   void operator()(
       const at::Tensor& input_,
       const at::Tensor& output_,
-      ArrayRef<int64_t> dims) {
+      std::vector<int64_t> dims) {
     Tensor input(input_);
     Tensor output(output_);
 
     if (!initialized_) {
-      dims_ = dims.vec();
+      dims_ = std::move(dims);
       auto originalSize = dims_.size();
       CAFFE_ENFORCE(originalSize > 0, "Parameter `dims` must be provided.");
       std::sort(dims_.begin(), dims_.end());
@@ -55,19 +55,13 @@ class expand_dims_cpu final : public c10::OperatorKernel {
 };
 
 static auto registry = c10::RegisterOperators().op(
-    FunctionSchema(
-        "_c10_experimental::ExpandDims",
-        "",
-        (std::vector<c10::Argument>{c10::Argument("input"),
-                                    c10::Argument("output"),
-                                    c10::Argument("dims", ListType::ofInts())}),
-        (std::vector<c10::Argument>{})),
-    c10::kernel<expand_dims_cpu<float>>(),
-    c10::dispatchKey(CPUTensorId()));
+    "_c10_experimental::ExpandDims",
+    c10::RegisterOperators::options()
+      .kernel<expand_dims_cpu<float>>(CPUTensorId()));
 
 } // namespace
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_c10_experimental::ExpandDims",
     C10ExpandDims_DontUseThisOpYet)
 

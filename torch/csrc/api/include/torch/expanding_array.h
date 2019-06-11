@@ -31,7 +31,7 @@ class ExpandingArray {
   /// at runtime.
   /*implicit*/ ExpandingArray(at::ArrayRef<T> values) {
     // clang-format off
-    AT_CHECK(
+    TORCH_CHECK(
         values.size() == D,
         "Expected ", D, " values, but instead got ", values.size());
     // clang-format on

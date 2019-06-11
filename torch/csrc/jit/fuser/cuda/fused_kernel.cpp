@@ -39,18 +39,6 @@ namespace cuda {
 // INSTEAD USE, e.g. nvrtc().cuLoadModule(...)
 // If a function is missing add it to the list in thnvrtc.
 
-void checkCUDAVersion(const cudaDeviceProp& prop) {
-  if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
-      (prop.major >= 7 && CUDA_VERSION < 9000)) {
-    std::stringstream err_string;
-    err_string
-        << "In CUDAFusedKernel, PyTorch compiled with insufficient CUDA version: "
-        << CUDA_VERSION << " for the current GPU device " << prop.name
-        << " with device capability " << prop.major << "." << prop.minor;
-    throw std::runtime_error(err_string.str());
-  }
-}
-
 #ifdef USE_DIRECT_NVRTC
 std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
   return std::make_pair(nullptr, torch_load_nvrtc());
@@ -76,10 +64,16 @@ const THNVRTC& nvrtc() {
 }
 
 // We're using three CUDA APIs, so define a few helpers for error handling
+// Note: As of CUDA 10, nvrtc error code 7, NVRTC_ERROR_BUILTIN_OPERATION_FAILURE, incorrectly produces the error string
+// "NVRTC unknown error." The following maps it correctly.  
 static inline void nvrtcCheck(nvrtcResult result, const char* file, int line) {
   if (result != NVRTC_SUCCESS) {
     std::stringstream ss;
-    ss << file << ":" << line << ": " << nvrtc().nvrtcGetErrorString(result);
+    ss << file << ":" << line << ": ";
+    if (static_cast<int>(result) != 7)
+      ss << nvrtc().nvrtcGetErrorString(result);
+    else 
+      ss << "NVRTC_ERROR_BUILTIN_OPERATION_FAILURE";
     throw std::runtime_error(ss.str());
   }
 }

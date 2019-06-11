@@ -176,7 +176,7 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
       osize = output_sizes[i];
       istride = complex_input ? input.stride(i) >> 1 : input.stride(i);
       ostride = onumel;
-      AT_CHECK(isize <= MKL_LONG_MAX && osize <= MKL_LONG_MAX && ostride <= MKL_LONG_MAX,
+      TORCH_CHECK(isize <= MKL_LONG_MAX && osize <= MKL_LONG_MAX && ostride <= MKL_LONG_MAX,
                "MKL FFT: input signal numel exceeds allowed range [1 ~ ", MKL_LONG_MAX, "]");
       if (!need_contiguous && istride > MKL_LONG_MAX) {
         // If we didn't plan to contiguous-fy but the `istride` exceeds bound,
@@ -186,7 +186,7 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
         // fine as `inumel` is non-decreasing.
         need_contiguous = true;
       }
-      AT_CHECK(!need_contiguous || inumel <= MKL_LONG_MAX,
+      TORCH_CHECK(!need_contiguous || inumel <= MKL_LONG_MAX,
                "MKL FFT: input signal numel exceeds allowed range [1 ~ ", MKL_LONG_MAX, "]");
       inumel *= isize;
       onumel *= osize;

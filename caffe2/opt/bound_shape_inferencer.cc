@@ -4,11 +4,6 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
-C10_DEFINE_bool(
-    caffe2_extract_feature_length_for_shape_inference,
-    false,
-    "If true, infer shape information instead of using global flag");
-
 namespace caffe2 {
 
 namespace {
@@ -38,17 +33,48 @@ int64_t SizeToDim(const TensorShape& shape, int axis) {
   }
   return r;
 }
+} // namespace
 
-void EnsureShapeNames(std::unordered_map<std::string, ShapeInfo>* info) {
+void BoundShapeInferencer::EnsureShapeNames(
+    std::unordered_map<std::string, ShapeInfo>* info) const {
   for (auto& kv : *info) {
     kv.second.shape.set_name(kv.first);
   }
 }
-} // namespace
+
+void BoundShapeInferencer::InferOps(
+    const OperatorDef& op,
+    caffe2::Workspace* /* ws */) {
+  if (op.type() == "SparseLengthsSum" ||
+      op.type() == "SparseLengthsSumFused8BitRowwise" ||
+      op.type() == "SparseLengthsWeightedSum" ||
+      op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
+    InferSparseLengthsSum(op);
+  } else if (op.type() == "FC" || op.type() == "FCTransposed") {
+    InferFC(op);
+  } else if (op.type() == "Concat") {
+    InferConcat(op);
+  } else if (op.type() == "Reshape") {
+    InferReshape(op);
+  } else if (op.type() == "LengthsRangeFill") {
+    InferLengthsRangeFill(op);
+  } else if (
+      (caffe2::StartsWith(op.type(), "GivenTensor") &&
+       caffe2::EndsWith(op.type(), "Fill")) ||
+      op.type() == "ConstantFill" || op.type() == "Int8GivenTensorFill" ||
+      op.type() == "Int8GivenIntTensorFill") {
+    InferGivenTensorFill(op);
+  } else if (op.type() == "Shape") {
+    InferShape(op);
+  } else {
+    InferCommonOp(op);
+  }
+}
 
 void BoundShapeInferencer::InferBoundShapeAndType(
     const NetDef& net,
-    const std::unordered_map<std::string, ShapeInfo>& info) {
+    const std::unordered_map<std::string, ShapeInfo>& info,
+    caffe2::Workspace* ws) {
   const static std::unordered_set<std::string> unsupported{"Tile"};
   shape_info_ = info;
 
@@ -57,35 +83,7 @@ void BoundShapeInferencer::InferBoundShapeAndType(
     if (unsupported.count(op.type())) {
       continue;
     }
-
-    if (op.type() == "SparseLengthsSum" ||
-        op.type() == "SparseLengthsSumFused8BitRowwise" ||
-        op.type() == "SparseLengthsWeightedSum" ||
-        op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
-      InferSparseLengthsSum(op);
-    } else if (op.type() == "FC" || op.type() == "FCTransposed") {
-      InferFC(op);
-    } else if (op.type() == "Concat") {
-      InferConcat(op);
-    } else if (op.type() == "Reshape") {
-      InferReshape(op);
-    } else if (op.type() == "LengthsRangeFill") {
-      InferLengthsRangeFill(op);
-    } else if (
-        (caffe2::StartsWith(op.type(), "GivenTensor") &&
-         caffe2::EndsWith(op.type(), "Fill")) ||
-        op.type() == "ConstantFill" || op.type() == "Int8GivenTensorFill" ||
-        op.type() == "Int8GivenIntTensorFill") {
-      InferGivenTensorFill(op);
-    } else if (op.type() == "Shape") {
-      InferShape(op);
-    } else if (
-        op.type() == "ClipRangesGatherSigridHash" &&
-        FLAGS_caffe2_extract_feature_length_for_shape_inference) {
-      InferClipRangesGatherSigridHash(op);
-    } else {
-      InferCommonOp(op);
-    }
+    InferOps(op, ws);
   }
 
   // Doing a reverse pass to infer the input shapes if applicable
@@ -125,8 +123,11 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorShapeAndType(
   TensorShape& shape = shape_info.shape;
   if (is_quantized) {
     shape_info.is_quantized = true;
-    shape_info.q_info.scale = 1;
-    shape_info.q_info.offset = 0;
+    shape_info.q_info.scale.clear();
+    shape_info.q_info.scale.push_back(1);
+    shape_info.q_info.offset.clear();
+    shape_info.q_info.offset.push_back(0);
+    shape_info.q_info.axis = 1;
   }
   if (!rt.second) {
     // Check shape consistency
@@ -229,7 +230,7 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
   if (weight) {
     CAFFE_ENFORCE_EQ(
         op.input_size(), 4, "SparseLengthsWeightedSum must have 4 inputs");
-    CheckAndSetTensorShapeAndType(
+    SetTensorShapeAndTypeIfNotExist(
         op.input(weight),
         ShapeInfo::DimType::SEQ,
         {spec_.max_seq_size},
@@ -340,9 +341,9 @@ void BoundShapeInferencer::InferConcatInputs(const OperatorDef& op) {
   }
 }
 
-// For concat net, if some inputs are missing and we have add_axis argument, it
-// means that all the inputs should be of the same dimension. In this case, we
-// can infer the shape of the missing inputs
+// For concat net, if some inputs are missing and we have add_axis argument,
+// it means that all the inputs should be of the same dimension. In this case,
+// we can infer the shape of the missing inputs
 void BoundShapeInferencer::InferConcat(const OperatorDef& op) {
   ArgumentHelper helper(op);
   auto add_axis = helper.GetSingleArgument<int32_t>("add_axis", 0);
@@ -418,7 +419,8 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
   const ShapeInfo& b_shape_info = b_it->second;
   auto x_it = shape_info_.find(op.input(0));
   if (x_it == shape_info_.end()) {
-    // We don't have a hint at the x input we try to deduce it from weight shape
+    // We don't have a hint at the x input we try to deduce it from weight
+    // shape
     ArgumentHelper helper(op);
     auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
     auto axis_w = helper.GetSingleArgument<int32_t>("axis_w", 1);
@@ -464,104 +466,67 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
       false);
 }
 
-void BoundShapeInferencer::InferClipRangesGatherSigridHash(
-    const OperatorDef& op) {
-  CAFFE_ENFORCE(
-      op.output_size() % 2 == 0,
-      "ClipRangesGatherSigridHash has to have even number of outputs");
-  ArgumentHelper helper(op);
-  auto max_lengths_arg = helper.GetRepeatedArgument<int>("max_lengths");
-  CAFFE_ENFORCE_EQ(
-      max_lengths_arg.size() * 2,
-      op.output_size(),
-      "Output size of ClipRangesGatherSigridHash has to be the same with 2 * length of max_lengths arg");
-  for (int i = 0; i < op.output_size(); i++) {
-    auto output_name = op.output(i);
-    if (i % 2 == 0) {
-      CAFFE_ENFORCE(
-          output_name.find("lengths") != std::string::npos,
-          "In ClipRangesGatherSigridHash, name of output in even index has to contain 'lengths'");
-      CheckAndSetTensorShapeAndType(
-          output_name,
-          ShapeInfo::DimType::BATCH,
-          {spec_.max_batch_size},
-          TensorProto_DataType_INT32,
-          false);
-    } else {
-      CAFFE_ENFORCE(
-          output_name.find("values") != std::string::npos,
-          "In ClipRangesGatherSigridHash, name of output in odd index has to contain 'values'");
-      CheckAndSetTensorShapeAndType(
-          output_name,
-          ShapeInfo::DimType::SEQ,
-          {max_lengths_arg[i / 2] * spec_.max_batch_size},
-          TensorProto_DataType_INT64,
-          false);
-    }
-  }
-}
-
 void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   // First, we need to check that all the input shape/types are already
   // presented
   try {
-  std::vector<TensorShape> input_shapes;
-  for (const auto& input : op.input()) {
-    const auto it = shape_info_.find(input);
-    if (it == shape_info_.end()) {
-      LOG(WARNING) << "Cannot find shape info for " << input << ". Skipping "
-                   << op.type();
-      return;
+    std::vector<TensorShape> input_shapes;
+    for (const auto& input : op.input()) {
+      const auto it = shape_info_.find(input);
+      if (it == shape_info_.end()) {
+        LOG(WARNING) << "Cannot find shape info for " << input << ". Skipping "
+                     << op.type();
+        return;
+      }
+      input_shapes.emplace_back(it->second.shape);
     }
-    input_shapes.emplace_back(it->second.shape);
-  }
 
-  const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
-  CAFFE_ENFORCE(schema);
-  std::vector<TensorShape> output_shapes;
+    const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
+    CAFFE_ENFORCE(schema);
+    std::vector<TensorShape> output_shapes;
     output_shapes = schema->InferTensor(op, input_shapes);
-  int i = 0;
-  bool is_quantized =
-      !(op.type().compare(0, 4, "Int8")) && (op.type() != "Int8Dequantize");
-  TensorProto::DataType infered_data_type = TensorProto::UNDEFINED;
-  if (is_quantized) {
-    const static std::map<std::string, int> type_info_from_input = {
-        {"Int8Quantize", -1}, // Force this op's output to be uint8
-        {"Int8ConvRelu", 1},
-        {"Int8MaxPool", 0},
-        {"Int8AveragePool", 0},
-        {"Int8FC", 1},
-        {"Int8Conv", 1},
-        {"Int8SumRelu", 0}};
-    CAFFE_ENFORCE(
-        type_info_from_input.find(op.type()) != type_info_from_input.end(),
-        "Undefined quantized output data type, add it into type_info_from_input");
-    int target = type_info_from_input.find(op.type())->second;
-    if (target == -1) {
-      infered_data_type = TensorProto::UINT8;
-    } else {
-      CAFFE_ENFORCE(target < input_shapes.size());
-      infered_data_type = input_shapes[target].data_type();
+    int i = 0;
+    bool is_quantized =
+        !(op.type().compare(0, 4, "Int8")) && (op.type() != "Int8Dequantize");
+    TensorProto::DataType infered_data_type = TensorProto::UNDEFINED;
+    if (is_quantized) {
+      const static std::map<std::string, int> type_info_from_input = {
+          {"Int8Quantize", -1}, // Force this op's output to be uint8
+          {"Int8ConvRelu", 1},
+          {"Int8MaxPool", 0},
+          {"Int8AveragePool", 0},
+          {"Int8FC", 1},
+          {"Int8Conv", 1},
+          {"Int8SumRelu", 0}};
+      CAFFE_ENFORCE(
+          type_info_from_input.find(op.type()) != type_info_from_input.end(),
+          "Undefined quantized output data type, add it into type_info_from_input");
+      int target = type_info_from_input.find(op.type())->second;
+      if (target == -1) {
+        infered_data_type = TensorProto::UINT8;
+      } else {
+        CAFFE_ENFORCE(target < input_shapes.size());
+        infered_data_type = input_shapes[target].data_type();
+      }
+    } else if (op.type() == "Int8Dequantize") {
+      infered_data_type = TensorProto::FLOAT;
     }
-  } else if (op.type() == "Int8Dequantize") {
-    infered_data_type = TensorProto::FLOAT;
-  }
 
-  for (const auto& shape : output_shapes) {
-    if (infered_data_type == TensorProto::UNDEFINED) {
-      infered_data_type = shape.data_type();
+    for (const auto& shape : output_shapes) {
+      if (infered_data_type == TensorProto::UNDEFINED) {
+        infered_data_type = shape.data_type();
+      }
+      if (shape.unknown_shape()) {
+        ++i;
+        continue;
+      }
+      CheckAndSetTensorShapeAndType(
+          op.output(i++),
+          current_dim_type_,
+          ConvertToVec(shape.dims()),
+          infered_data_type,
+          is_quantized);
     }
-    if (shape.unknown_shape()) {
-      ++i;
-      continue;
-    }
-    CheckAndSetTensorShapeAndType(
-        op.output(i++),
-        current_dim_type_,
-        ConvertToVec(shape.dims()),
-        infered_data_type,
-        is_quantized);
-  }
   } catch (const caffe2::EnforceNotMet& e) {
     LOG(ERROR) << "Enforce not met while inferring shapes for " << op.type()
                << ": " << e.msg();

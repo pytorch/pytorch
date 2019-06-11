@@ -112,7 +112,7 @@ class BatchDataBuffer {
           batch_example_indices.value().size() == example_count)
       BatchRequestType& indices = batch_example_indices.value();
       for (size_t i : indices) {
-        AT_CHECK(i < data_size, "Index out of range");
+        TORCH_CHECK(i < data_size, "Index out of range");
         batch.emplace_back(std::move(data[i]));
       }
       remaining_size -= example_count;
@@ -249,16 +249,16 @@ struct ChunkDatasetOptions {
       : preloader_count_(preloader_count),
         batch_size_(batch_size),
         cache_size_(cache_size) {
-    AT_CHECK(
+    TORCH_CHECK(
         preloader_count_ > 0,
         "Preloader count is 0. At least one preloader needs to be specified.");
-    AT_CHECK(
+    TORCH_CHECK(
         batch_size_ > 0,
         "Batch size is 0. A positive batch size needs to be specified.");
-    AT_CHECK(
+    TORCH_CHECK(
         cache_size_ > 0,
         "Cache size is 0. A positive cache size needs to be specified.");
-    AT_CHECK(
+    TORCH_CHECK(
         cache_size_ >= batch_size_,
         "Cache size is less than batch size. Cache needs to be large enough to "
         "hold at least one batch.");
@@ -323,11 +323,11 @@ class ChunkDataset final
   /// is dataset agnostic and does not need overriding in different chunk
   /// datasets.
   BatchType get_batch(size_t batch_size) override {
-    AT_CHECK(
+    TORCH_CHECK(
       batch_buffer_ != nullptr,
       "Dataset needs to call reset() before calling get_batch().");
 
-    AT_CHECK(
+    TORCH_CHECK(
       batch_size == options_.batch_size_,
       "The requested batch size does not match with the initialized batch size.\n"
       " The requested batch size is ", batch_size,

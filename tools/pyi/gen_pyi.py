@@ -56,6 +56,7 @@ blacklist = [
     # defined in functional
     'einsum',
     # reduction argument; these bindings don't make sense
+    'binary_cross_entropy_with_logits',
     'ctc_loss',
     'cosine_embedding_loss',
     'hinge_embedding_loss',
@@ -112,7 +113,6 @@ def type_to_python(typename, size=None):
         'Storage': 'Storage',
         'BoolTensor': 'Tensor',
         'IndexTensor': 'Tensor',
-        'SparseTensorRef': 'Tensor',
         'Tensor': 'Tensor',
         'IntArrayRef': '_size',
         'IntArrayRef[]': 'Union[_int, _size]',
@@ -335,6 +335,8 @@ def gen_pyi(declarations_path, out):
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
         'get_num_threads': ['def get_num_threads() -> _int: ...'],
         'set_num_threads': ['def set_num_threads(num: _int) -> None: ...'],
+        'get_num_interop_threads': ['def get_num_interop_threads() -> _int: ...'],
+        'set_num_interop_threads': ['def set_num_interop_threads(num: _int) -> None: ...'],
         # These functions are explicitly disabled by
         # SKIP_PYTHON_BINDINGS because they are hand bound.
         # Correspondingly, we must hand-write their signatures.
@@ -429,9 +431,10 @@ def gen_pyi(declarations_path, out):
         'type': ['def type(self, dtype: Union[None, str, _dtype]=None, non_blocking: bool=False)'
                  ' -> Union[str, Tensor]: ...'],
         'get_device': ['def get_device(self) -> _int: ...'],
+        'contiguous': ['def contiguous(self) -> Tensor: ...'],
         'is_contiguous': ['def is_contiguous(self) -> bool: ...'],
-        'is_cuda': ['def is_cuda(self) -> bool: ...'],
-        'is_leaf': ['def is_leaf(self) -> bool: ...'],
+        'is_cuda': ['is_cuda: bool'],
+        'is_leaf': ['is_leaf: bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: bool=False, copy: bool=False) -> Tensor: ...',
                'def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, '

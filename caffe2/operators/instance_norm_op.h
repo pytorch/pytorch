@@ -41,8 +41,8 @@ class InstanceNormOp : public Operator<Context> {
   StorageOrder order_;
 
   // temp results that get passed to the gradient, but are otherwise stored here
-  Tensor mean_{Context::GetDeviceType()};
-  Tensor inv_stdev_{Context::GetDeviceType()};
+  Tensor mean_;
+  Tensor inv_stdev_;
 
   INPUT_TAGS(INPUT, SCALE, BIAS);
   OUTPUT_TAGS(OUTPUT, MEAN, INV_STDEV);

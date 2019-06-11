@@ -1,5 +1,6 @@
 #!/bin/bash
 # Do NOT set -x
+set -eu -o pipefail
 set +x
 export AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}"
 export AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
@@ -16,7 +17,7 @@ chmod +x /Users/distiller/project/login_to_anaconda.sh
 #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
 # DO NOT TURN -x ON BEFORE THIS LINE
 #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
-set -ex
+set -eux -o pipefail
 
 source "/Users/distiller/project/env"
 export "PATH=$workdir/miniconda/bin:$PATH"

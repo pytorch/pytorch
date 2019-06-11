@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/pickler.h>
 #include <ATen/ATen.h>
 #include <string>
+#include <ATen/core/Dict.h>
 
 namespace torch {
 namespace jit {
@@ -16,6 +17,12 @@ PicklerClass getClass(const std::string& str) {
     return PicklerClass::TENSOR;
   } else if (str == "build_intlist") {
     return PicklerClass::INTLIST;
+  } else if (str == "build_tensorlist") {
+    return PicklerClass::TENSORLIST;
+  } else if (str == "build_doublelist") {
+    return PicklerClass::DOUBLELIST;
+  } else if (str == "build_boollist") {
+    return PicklerClass::BOOLLIST;
   }
 
   // TODO [unpickler refactor]
@@ -30,11 +37,20 @@ PicklerClass getClass(const std::string& str) {
 const std::string& getClassName(PicklerClass cls) {
   static const std::string tensor_class("build_tensor_from_id\n");
   static const std::string intlist_class("build_intlist\n");
+  static const std::string tensorlist_class("build_tensorlist\n");
+  static const std::string doublelist_class("build_doublelist\n");
+  static const std::string boollist_class("build_boollist\n");
   switch (cls) {
     case PicklerClass::TENSOR:
       return tensor_class;
     case PicklerClass::INTLIST:
       return intlist_class;
+    case PicklerClass::TENSORLIST:
+      return tensorlist_class;
+    case PicklerClass::DOUBLELIST:
+      return doublelist_class;
+    case PicklerClass::BOOLLIST:
+      return boollist_class;
     default:
       AT_ERROR("Unknown class for pickler");
   }
@@ -158,13 +174,39 @@ void Pickler::addIValue(const IValue& ivalue) {
   } else if (ivalue.isString()) {
     pushMemoizedString(ivalue);
   } else if (ivalue.isGenericList()) {
-    pushList(ivalue);
+    pushGenericList(ivalue);
   } else if (ivalue.isGenericDict()) {
     pushDict(ivalue);
   } else if (ivalue.isNone()) {
     push<OpCode>(OpCode::NONE);
   } else if (ivalue.isIntList()) {
-    pushIntList(ivalue);
+    pushSpecializedList(
+        ivalue, PicklerClass::INTLIST, [=](const IValue& ivalue) {
+          for (const auto& item : ivalue.toIntListRef()) {
+            addIValue(item);
+          }
+        });
+  } else if (ivalue.isTensorList()) {
+    pushSpecializedList(
+        ivalue, PicklerClass::TENSORLIST, [=](const IValue& ivalue) {
+          for (const auto& item : ivalue.toTensorListRef()) {
+            addIValue(item);
+          }
+        });
+  } else if (ivalue.isDoubleList()) {
+    pushSpecializedList(
+        ivalue, PicklerClass::DOUBLELIST, [=](const IValue& ivalue) {
+          for (const auto& item : ivalue.toDoubleListRef()) {
+            addIValue(item);
+          }
+        });
+  } else if (ivalue.isBoolList()) {
+    pushSpecializedList(
+        ivalue, PicklerClass::BOOLLIST, [=](const IValue& ivalue) {
+          for (const auto& item : ivalue.toBoolListRef()) {
+            addIValue(bool(item));
+          }
+        });
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -185,6 +227,12 @@ const void* Pickler::getPointer(const IValue& ivalue) {
     return ivalue.toString().get();
   } else if (ivalue.isIntList()) {
     return ivalue.toIntList().get();
+  } else if (ivalue.isTensorList()) {
+    return ivalue.toTensorList().get();
+  } else if (ivalue.isDoubleList()) {
+    return ivalue.toDoubleList().get();
+  } else if (ivalue.isBoolList()) {
+    return ivalue.toBoolList().get();
   }
 
   return nullptr;
@@ -342,9 +390,11 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
   push<OpCode>(OpCode::REDUCE);
 }
 
-void Pickler::pushIntList(const IValue& ivalue) {
-  pushClass(PicklerClass::INTLIST);
-
+void Pickler::pushSpecializedList(
+    const IValue& ivalue,
+    PicklerClass cls,
+    const std::function<void(const IValue&)>& item_pusher) {
+  pushClass(cls);
 
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
@@ -354,10 +404,8 @@ void Pickler::pushIntList(const IValue& ivalue) {
   // Mark list
   push<OpCode>(OpCode::MARK);
 
-  // Add items
-  for (const auto& item : ivalue.toIntListRef()) {
-    addIValue(item);
-  }
+  // Add all items
+  item_pusher(ivalue);
 
   // Finish list
   push<OpCode>(OpCode::APPENDS);
@@ -398,7 +446,7 @@ void Pickler::pushDict(const IValue& ivalue) {
 }
 
 void Pickler::pushMemoization(const void* item) {
-  AT_CHECK(item != nullptr, "Pickler cannot memoize a nullptr");
+  TORCH_CHECK(item != nullptr, "Pickler cannot memoize a nullptr");
   memo_map_[item] = pushNextBinPut();
 }
 
@@ -419,7 +467,7 @@ size_t Pickler::pushNextBinPut() {
 void Pickler::pushMemoization(const IValue& ivalue) {
   auto ptr = getPointer(ivalue);
   memoized_ivalues_.push_back(ivalue);
-  AT_CHECK(
+  TORCH_CHECK(
       ptr != nullptr,
       "Pickler cannot memoize ",
       ivalue.tagKind(),
@@ -428,7 +476,7 @@ void Pickler::pushMemoization(const IValue& ivalue) {
   pushMemoization(ptr);
 }
 
-void Pickler::pushList(const IValue& ivalue) {
+void Pickler::pushGenericList(const IValue& ivalue) {
   auto list = ivalue.toGenericListRef();
   push<OpCode>(OpCode::EMPTY_LIST);
   pushMemoization(ivalue);
@@ -457,7 +505,7 @@ void Pickler::pushTuple(const IValue& ivalue) {
 
 std::vector<IValue> Unpickler::parse_ivalue_list() {
   run();
-  AT_CHECK(
+  TORCH_CHECK(
       stack_.size() == 1,
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
@@ -487,12 +535,12 @@ double Unpickler::readFloat() {
 
 void Unpickler::run() {
   // Expect a PROTO opcode and protocol number at the start of blob
-  AT_CHECK(
+  TORCH_CHECK(
       readOpCode() == OpCode::PROTO,
       "Expected PROTO opcode at the start"
       " of pickle archive");
   uint8_t protocol = read<uint8_t>();
-  AT_CHECK(
+  TORCH_CHECK(
       protocol == 2,
       "Only Pickle protocol 2 is supported, found protocol = ",
       protocol);
@@ -508,7 +556,6 @@ void Unpickler::run() {
   AT_ERROR("Overran buffer while unpickling data, didn't find STOP opcode");
 }
 
-
 OpCode Unpickler::readInstruction() {
   auto opcode = readOpCode();
   switch (opcode) {
@@ -516,11 +563,11 @@ OpCode Unpickler::readInstruction() {
       if (last_opcode_ == OpCode::NEWOBJ) {
         // TODO [unpickler refactor] remove this case
         // It's a list specialization, the enum ID of which is on the stack
-        AT_CHECK(
+        TORCH_CHECK(
             stack_.size() > 0,
             "Unpickler found an empty stack when it expected a value");
         auto value = stack_.back().ivalue().toInt();
-        AT_CHECK(
+        TORCH_CHECK(
             value >= 0 && value <= std::numeric_limits<uint8_t>::max(),
             "Unpickler could not decode PicklerClass for ",
             value);
@@ -533,6 +580,14 @@ OpCode Unpickler::readInstruction() {
         // specialization
         if (stack_.back().pickler_class() == PicklerClass::INTLIST) {
           stack_.emplace_back(std::vector<int64_t>());
+        } else if (stack_.back().pickler_class() == PicklerClass::INTLIST) {
+          stack_.emplace_back(std::vector<int64_t>());
+        } else if (stack_.back().pickler_class() == PicklerClass::TENSORLIST) {
+          stack_.emplace_back(std::vector<at::Tensor>());
+        } else if (stack_.back().pickler_class() == PicklerClass::DOUBLELIST) {
+          stack_.emplace_back(std::vector<double>());
+        } else if (stack_.back().pickler_class() == PicklerClass::BOOLLIST) {
+          stack_.emplace_back(std::vector<bool>());
         } else {
           AT_ERROR("Unknown list specialization");
         }
@@ -545,19 +600,19 @@ OpCode Unpickler::readInstruction() {
     } break;
     case OpCode::BINPUT: {
       size_t memo_id = read<uint8_t>();
-      if (memo_table_.size() <= memo_id) {
+      if (memo_table_.capacity() <= memo_id) {
         memo_table_.reserve(1 + 2 * memo_id);
       }
       memo_table_.push_back(stack_.back());
     } break;
     case OpCode::LONG_BINPUT: {
-      AT_CHECK(
+      TORCH_CHECK(
           std::numeric_limits<size_t>::max() >=
               std::numeric_limits<uint32_t>::max(),
           "Found a LONG_BINPUT opcode, but size_t on this system is "
           "not big enough to decode it");
       size_t memo_id = read<uint32_t>();
-      if (memo_table_.size() <= memo_id) {
+      if (memo_table_.capacity() <= memo_id) {
         memo_table_.reserve(1 + 2 * memo_id);
       }
       memo_table_.push_back(stack_.back());
@@ -571,6 +626,9 @@ OpCode Unpickler::readInstruction() {
     } break;
     case OpCode::NEWFALSE: {
       stack_.emplace_back(false);
+    } break;
+    case OpCode::NONE: {
+      stack_.emplace_back(IValue());
     } break;
     case OpCode::BININT1: {
       int8_t value = read<int8_t>();
@@ -609,7 +667,7 @@ OpCode Unpickler::readInstruction() {
       stack_.emplace_back(IValue(tuple));
     } break;
     case OpCode::EMPTY_DICT:
-      stack_.emplace_back(c10::ivalue::UnorderedMap());
+      stack_.emplace_back(c10::impl::make_generic_dict());
       break;
     case OpCode::APPENDS: {
       readList();
@@ -619,7 +677,7 @@ OpCode Unpickler::readInstruction() {
       marks_.pop_back();
       auto dict = stack_.at(start - 1).ivalue().toGenericDict();
       for (size_t i = start; i < stack_.size(); i += 2) {
-        dict->elements()[stack_[i].ivalue()] = stack_[i + 1].ivalue();
+        dict->elements().insert_or_assign(stack_[i].ivalue(), stack_[i + 1].ivalue());
       }
       stack_.erase(stack_.begin() + start, stack_.end());
     } break;
@@ -651,20 +709,19 @@ OpCode Unpickler::readInstruction() {
       auto setitem_data = stack_.back().ivalue();
       stack_.pop_back();
 
-
       auto class_name =
-        static_cast<PicklerClass>(uint8_t(stack_.back().ivalue().toInt()));
+          static_cast<PicklerClass>(uint8_t(stack_.back().ivalue().toInt()));
       stack_.pop_back();
 
       switch (class_name) {
-      case PicklerClass::TENSOR:
-        stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
-        break;
-      case PicklerClass::INTLIST:
-        stack_.emplace_back(setitem_data);
-        break;
-      default:
-        AT_ERROR("Unknown pickler class id");
+        case PicklerClass::TENSOR:
+          stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
+          break;
+        case PicklerClass::INTLIST:
+          stack_.emplace_back(setitem_data);
+          break;
+        default:
+          AT_ERROR("Unknown pickler class id");
       }
     } break;
     case OpCode::REDUCE: {
@@ -684,33 +741,69 @@ OpCode Unpickler::readInstruction() {
         case PicklerClass::INTLIST:
           stack_.emplace_back(data->elements().at(0).toIntListRef());
           break;
+        case PicklerClass::TENSORLIST:
+          stack_.emplace_back(data->elements().at(0).toTensorListRef());
+          break;
+        case PicklerClass::DOUBLELIST:
+          stack_.emplace_back(data->elements().at(0).toDoubleListRef());
+          break;
+        case PicklerClass::BOOLLIST:
+          stack_.emplace_back(data->elements().at(0).toBoolListRef());
+          break;
         default:
           AT_ERROR("Unknown pickler class id");
       }
     } break;
     default:
-      AT_ERROR("Unknown opcode for unpickling at ", reinterpret_cast<void*>(opcode),": ", static_cast<uint8_t>(opcode));
+      AT_ERROR(
+          "Unknown opcode for unpickling at ",
+          reinterpret_cast<void*>(opcode),
+          ": ",
+          static_cast<uint8_t>(opcode));
   }
   return opcode;
 }
 
+// Pop all the list items off of the stack and append them to the list at the
+// corresponding MARK
 void Unpickler::readList() {
   size_t start = marks_.back();
   marks_.pop_back();
-  auto list_ivalue = stack_.at(start - 1);
+  auto list_ivalue = stack_.at(start - 1).ivalue();
   auto num_elements = stack_.size() - start;
-  if (list_ivalue.ivalue().isIntList()) {
-    auto list = stack_.at(start - 1).ivalue().toIntList();
-    list->elements().reserve(num_elements);
-    for (auto it = stack_.begin() + start; it != stack_.end(); ++it) {
-      list->elements().emplace_back(it->ivalue().toInt());
+  auto elements = at::ArrayRef<StackItem>(stack_).slice(start);
+  if (list_ivalue.isIntList()) {
+    auto& list = list_ivalue.toIntList()->elements();
+    list.reserve(num_elements);
+    for (const auto& elem : elements) {
+      list.emplace_back(elem.ivalue().toInt());
+    }
+  } else if (list_ivalue.isTensorList()) {
+    auto& list = list_ivalue.toTensorList()->elements();
+    list.reserve(num_elements);
+    for (const auto& elem : elements) {
+      list.emplace_back(elem.ivalue().toTensor());
+    }
+  } else if (list_ivalue.isDoubleList()) {
+    auto& list = list_ivalue.toDoubleList()->elements();
+    list.reserve(num_elements);
+    for (const auto& elem : elements) {
+      list.emplace_back(elem.ivalue().toDouble());
+    }
+  } else if (list_ivalue.isBoolList()) {
+    auto& list = list_ivalue.toBoolList()->elements();
+    list.reserve(num_elements);
+    for (const auto& elem : elements) {
+      list.push_back(elem.ivalue().toBool());
+    }
+  } else if (list_ivalue.isGenericList()) {
+    auto& list = list_ivalue.toGenericList()->elements();
+    list.reserve(num_elements);
+    for (const auto& elem : elements) {
+      list.emplace_back(elem.ivalue());
     }
   } else {
-    auto list = stack_.at(start - 1).ivalue().toGenericList();
-    list->elements().reserve(num_elements);
-    for (auto it = stack_.begin() + start; it != stack_.end(); ++it) {
-      list->elements().emplace_back(it->ivalue());
-    }
+    AT_ERROR("Unknown IValue list kind: ", list_ivalue.tagKind());
   }
 
   stack_.erase(stack_.begin() + start, stack_.end());
@@ -733,7 +826,7 @@ std::string Unpickler::readString() {
     }
 
     // Simple check just in case there is no terminating '\n'
-    AT_CHECK(
+    TORCH_CHECK(
         is_valid_python_id_char(c),
         "Found character '",
         uint8_t(c),
@@ -742,7 +835,7 @@ std::string Unpickler::readString() {
 
     // Increment after to exclude newline from string
     ++n;
-    AT_CHECK(
+    TORCH_CHECK(
         chars + n < char_end_ptr,
         "Unpickler overran buffer while reading a string (expected a newline)");
   }
@@ -772,7 +865,7 @@ std::pair<at::Tensor, uint64_t> getWriteableTensor(const at::Tensor& tensor) {
                              {static_cast<int64_t>(tensor.storage().size())},
                              /* stride = */ {1})
                          .cpu();
-    AT_CHECK(
+    TORCH_CHECK(
         storage_tensor.element_size() * storage_tensor.storage().size() ==
             record_size,
         "Storage tensor size did not match record size");

@@ -21,7 +21,7 @@ from ._pytorch_graph import graph
 from ._utils import figure_to_image
 from .summary import (
     scalar, histogram, histogram_raw, image, audio, text,
-    pr_curve, pr_curve_raw, video, custom_scalars, image_boxes
+    pr_curve, pr_curve_raw, video, custom_scalars, image_boxes, mesh
 )
 
 
@@ -35,30 +35,30 @@ class FileWriter(object):
     training.
     """
 
-    def __init__(self, logdir, max_queue=10, flush_secs=120, filename_suffix=''):
+    def __init__(self, log_dir, max_queue=10, flush_secs=120, filename_suffix=''):
         """Creates a `FileWriter` and an event file.
-        On construction the writer creates a new event file in `logdir`.
+        On construction the writer creates a new event file in `log_dir`.
         The other arguments to the constructor control the asynchronous writes to
         the event file.
 
         Args:
-          logdir: A string. Directory where event file will be written.
+          log_dir: A string. Directory where event file will be written.
           max_queue: Integer. Size of the queue for pending events and
             summaries before one of the 'add' calls forces a flush to disk.
             Default is ten items.
           flush_secs: Number. How often, in seconds, to flush the
             pending events and summaries to disk. Default is every two minutes.
           filename_suffix: A string. Suffix added to all event filenames
-            in the logdir directory. More details on filename construction in
+            in the log_dir directory. More details on filename construction in
             tensorboard.summary.writer.event_file_writer.EventFileWriter.
         """
         # Sometimes PosixPath is passed in and we need to coerce it to
         # a string in all cases
         # TODO: See if we can remove this in the future if we are
         # actually the ones passing in a PosixPath
-        logdir = str(logdir)
+        log_dir = str(log_dir)
         self.event_writer = EventFileWriter(
-            logdir, max_queue, flush_secs, filename_suffix)
+            log_dir, max_queue, flush_secs, filename_suffix)
 
     def get_logdir(self):
         """Returns the directory where event file will be written."""
@@ -147,7 +147,7 @@ class FileWriter(object):
 
 
 class SummaryWriter(object):
-    """Writes entries directly to event files in the logdir to be
+    """Writes entries directly to event files in the log_dir to be
     consumed by TensorBoard.
 
     The `SummaryWriter` class provides a high-level API to create an event file
@@ -157,31 +157,31 @@ class SummaryWriter(object):
     training.
     """
 
-    def __init__(self, logdir=None, comment='', purge_step=None, max_queue=10,
+    def __init__(self, log_dir=None, comment='', purge_step=None, max_queue=10,
                  flush_secs=120, filename_suffix=''):
         """Creates a `SummaryWriter` that will write out events and summaries
         to the event file.
 
         Args:
-            logdir (string): Save directory location. Default is
+            log_dir (string): Save directory location. Default is
               runs/**CURRENT_DATETIME_HOSTNAME**, which changes after each run.
               Use hierarchical folder structure to compare
               between runs easily. e.g. pass in 'runs/exp1', 'runs/exp2', etc.
               for each new experiment to compare across them.
-            comment (string): Comment logdir suffix appended to the default
-              ``logdir``. If ``logdir`` is assigned, this argument has no effect.
+            comment (string): Comment log_dir suffix appended to the default
+              ``log_dir``. If ``log_dir`` is assigned, this argument has no effect.
             purge_step (int):
               When logging crashes at step :math:`T+X` and restarts at step :math:`T`,
               any events whose global_step larger or equal to :math:`T` will be
               purged and hidden from TensorBoard.
-              Note that crashed and resumed experiments should have the same ``logdir``.
+              Note that crashed and resumed experiments should have the same ``log_dir``.
             max_queue (int): Size of the queue for pending events and
               summaries before one of the 'add' calls forces a flush to disk.
               Default is ten items.
             flush_secs (int): How often, in seconds, to flush the
               pending events and summaries to disk. Default is every two minutes.
             filename_suffix (string): Suffix added to all event filenames in
-              the logdir directory. More details on filename construction in
+              the log_dir directory. More details on filename construction in
               tensorboard.summary.writer.event_file_writer.EventFileWriter.
 
         Examples::
@@ -201,13 +201,13 @@ class SummaryWriter(object):
             # folder location: runs/May04_22-14-54_s-MacBook-Pro.localLR_0.1_BATCH_16/
 
         """
-        if not logdir:
+        if not log_dir:
             import socket
             from datetime import datetime
             current_time = datetime.now().strftime('%b%d_%H-%M-%S')
-            logdir = os.path.join(
+            log_dir = os.path.join(
                 'runs', current_time + '_' + socket.gethostname() + comment)
-        self.logdir = logdir
+        self.log_dir = log_dir
         self.purge_step = purge_step
         self.max_queue = max_queue
         self.flush_secs = flush_secs
@@ -246,7 +246,7 @@ class SummaryWriter(object):
     def _get_file_writer(self):
         """Returns the default FileWriter instance. Recreates it if closed."""
         if self.all_writers is None or self.file_writer is None:
-            self.file_writer = FileWriter(self.logdir, self.max_queue,
+            self.file_writer = FileWriter(self.log_dir, self.max_queue,
                                           self.flush_secs, self.filename_suffix)
             self.all_writers = {self.file_writer.get_logdir(): self.file_writer}
             if self.purge_step is not None:
@@ -257,6 +257,10 @@ class SummaryWriter(object):
                     Event(step=most_recent_step, session_log=SessionLog(status=SessionLog.START)))
                 self.purge_step = None
         return self.file_writer
+
+    def get_logdir(self):
+        """Returns the directory where event files will be written."""
+        return self.log_dir
 
     def add_scalar(self, tag, scalar_value, global_step=None, walltime=None):
         """Add scalar data to summary.
@@ -322,7 +326,7 @@ class SummaryWriter(object):
         walltime = time.time() if walltime is None else walltime
         fw_logdir = self._get_file_writer().get_logdir()
         for tag, scalar_value in tag_scalar_dict.items():
-            fw_tag = fw_logdir + "/" + main_tag + "/" + tag
+            fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
             if fw_tag in self.all_writers.keys():
                 fw = self.all_writers[fw_tag]
             else:
@@ -381,13 +385,48 @@ class SummaryWriter(object):
             num (int): Number of values
             sum (float or int): Sum of all values
             sum_squares (float or int): Sum of squares for all values
-            bucket_limits (torch.Tensor, numpy.array): Upper value per bucket
+            bucket_limits (torch.Tensor, numpy.array): Upper value per bucket.
+              The number of elements of it should be the same as `bucket_counts`.
             bucket_counts (torch.Tensor, numpy.array): Number of values per bucket
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
             see: https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/histogram/README.md
+
+        Examples::
+
+            from torch.utils.tensorboard import SummaryWriter
+            import numpy as np
+            writer = SummaryWriter()
+            dummy_data = []
+            for idx, value in enumerate(range(50)):
+                dummy_data += [idx + 0.001] * value
+
+            bins = list(range(50+2))
+            bins = np.array(bins)
+            values = np.array(dummy_data).astype(float).reshape(-1)
+            counts, limits = np.histogram(values, bins=bins)
+            sum_sq = values.dot(values)
+            writer.add_histogram_raw(
+                tag='histogram_with_raw_data',
+                min=values.min(),
+                max=values.max(),
+                num=len(values),
+                sum=values.sum(),
+                sum_squares=sum_sq,
+                bucket_limits=limits[1:].tolist(),
+                bucket_counts=counts.tolist(),
+                global_step=0)
+            writer.close()
+
+        Expected result:
+
+        .. image:: _static/img/tensorboard/add_histogram_raw.png
+           :scale: 50 %
+
         """
+        if len(bucket_limits) != len(bucket_counts):
+            raise ValueError('len(bucket_limits) != len(bucket_counts), see the document.')
         self._get_file_writer().add_summary(
             histogram_raw(tag,
                           min,
@@ -832,6 +871,69 @@ class SummaryWriter(object):
             writer.add_custom_scalars(layout)
         """
         self._get_file_writer().add_summary(custom_scalars(layout))
+
+    def add_mesh(self, tag, vertices, colors=None, faces=None, config_dict=None, global_step=None, walltime=None):
+        """Add meshes or 3D point clouds to TensorBoard. The visualization is based on Three.js,
+        so it allows users to interact with the rendered object. Besides the basic definitions
+        such as vertices, faces, users can further provide camera parameter, lighting condition, etc.
+        Please check https://threejs.org/docs/index.html#manual/en/introduction/Creating-a-scene for
+        advanced usage. Note that currently this depends on tb-nightly to show.
+
+        Args:
+            tag (string): Data identifier
+            vertices (torch.Tensor): List of the 3D coordinates of vertices.
+            colors (torch.Tensor): Colors for each vertex
+            faces (torch.Tensor): Indices of vertices within each triangle. (Optional)
+            config_dict: Dictionary with ThreeJS classes names and configuration.
+            global_step (int): Global step value to record
+            walltime (float): Optional override default walltime (time.time())
+              seconds after epoch of event
+
+        Shape:
+            vertices: :math:`(B, N, 3)`. (batch, number_of_vertices, channels)
+
+            colors: :math:`(B, N, 3)`. The values should lie in [0, 255] for type `uint8` or [0, 1] for type `float`.
+
+            faces: :math:`(B, N, 3)`. The values should lie in [0, number_of_vertices] for type `uint8`.
+
+        Examples::
+
+            from torch.utils.tensorboard import SummaryWriter
+            vertices_tensor = torch.as_tensor([
+                [1, 1, 1],
+                [-1, -1, 1],
+                [1, -1, -1],
+                [-1, 1, -1],
+            ], dtype=torch.float).unsqueeze(0)
+            colors_tensor = torch.as_tensor([
+                [255, 0, 0],
+                [0, 255, 0],
+                [0, 0, 255],
+                [255, 0, 255],
+            ], dtype=torch.int).unsqueeze(0)
+            faces_tensor = torch.as_tensor([
+                [0, 2, 3],
+                [0, 3, 1],
+                [0, 1, 2],
+                [1, 3, 2],
+            ], dtype=torch.int).unsqueeze(0)
+
+            writer = SummaryWriter()
+            writer.add_mesh('my_mesh', vertices=vertices_tensor, colors=colors_tensor, faces=faces_tensor)
+
+            writer.close()
+        """
+        self._get_file_writer().add_summary(mesh(tag, vertices, colors, faces, config_dict), global_step, walltime)
+
+    def flush(self):
+        """Flushes the event file to disk.
+        Call this method to make sure that all pending events have been written to
+        disk.
+        """
+        if self.all_writers is None:
+            return
+        for writer in self.all_writers.values():
+            writer.flush()
 
     def close(self):
         if self.all_writers is None:

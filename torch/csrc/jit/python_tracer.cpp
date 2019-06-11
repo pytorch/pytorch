@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/pybind.h>
 #include <torch/csrc/jit/python_tracer.h>
@@ -22,18 +23,30 @@ namespace tracer {
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
-std::string getPythonInterpreterStackTrace() {
+SourceRange getPythonInterpreterSourceRange() {
+  c10::optional<std::string> source_filename;
+  size_t source_line = 0;
   std::stringstream stack_trace;
+
   AutoGIL gil;
   PyFrameObject* frame = PyEval_GetFrame();
+
   while (nullptr != frame) {
     int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
     std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
     std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
     stack_trace << filename << "(" << line << "): " << funcname << "\n";
+    if (!source_filename) {
+      source_filename = filename;
+      source_line = line;
+    }
     frame = frame->f_back;
   }
-  return stack_trace.str();
+
+  auto stack_trace_text = stack_trace.str();
+  auto source =
+      std::make_shared<Source>(stack_trace_text, source_filename, source_line);
+  return SourceRange(source, 0, stack_trace_text.size());
 }
 
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
@@ -42,6 +55,8 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     const py::function& var_name_lookup_fn,
     bool force_outplace,
     const std::shared_ptr<script::Module>& self) {
+  C10_LOG_API_USAGE_ONCE("torch.tracer");
+
   auto enter_info = tracer::enter(std::move(trace_inputs), self);
   auto graph = enter_info.first->graph;
 
@@ -64,9 +79,11 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
           "captured in traces, so it would be a no-op.");
     }
     tracer::exit({toIValue(out)});
-    EliminateDeadCode(graph);
+    if (!script::getFirstClassMode()) {
+      Inline(*graph);
+    }
     LowerSimpleTuples(graph);
-
+    EliminateDeadCode(graph);
     return graph;
   } catch (...) {
     tracer::abandon();
@@ -101,7 +118,7 @@ Node* preRecordPythonTrace(
 }
 
 void pythonRecordSourceLocation(Node* n) {
-  n->setSourceRange(SourceRange(getPythonInterpreterStackTrace()));
+  n->setSourceRange(getPythonInterpreterSourceRange());
 }
 
 void pythonWarn(const std::string& reason) {

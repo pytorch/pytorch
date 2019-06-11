@@ -250,7 +250,7 @@ void broadcast(
     const auto stream = (streams.empty() || !streams[i])
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
-    AT_CHECK(
+    TORCH_CHECK(
         static_cast<uint64_t>(numel) <= static_cast<uint64_t>(count_max),
         "Broadcast tensor has ",
         numel,
@@ -275,7 +275,7 @@ void reduce(
     const comm_list& user_comms) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
-  AT_CHECK(
+  TORCH_CHECK(
       root >= 0 && static_cast<size_t>(root) < inputs.size(), "invalid root");
 
   _check_inputs(inputs, outputs, 1, 1);

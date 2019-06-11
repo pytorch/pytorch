@@ -20,7 +20,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   int64_t t, d;
   scalar_t sum;
 
-  AT_CHECK(!input->is_empty() && input->dim() <= 2,
+  TORCH_CHECK(!input->is_empty() && input->dim() <= 2,
            "non-empty vector or matrix expected, got size: ", input->sizes());
 
   if (input->dim() <= 1)
@@ -32,7 +32,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
+    TORCH_CHECK(!target->is_empty() && (THTensor_nDimensionLegacyNoScalars(target) == 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
              "inconsistent target size, got: ", target->sizes());
   }
 
@@ -136,7 +136,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   int64_t t, d;
   scalar_t g;
 
-  AT_CHECK(!input->is_empty() && (input->dim() <= 2),
+  TORCH_CHECK(!input->is_empty() && (input->dim() <= 2),
            "non-empty vector or matrix expected, got size: ", input->sizes());
 
   if (input->dim() <= 1)
@@ -148,7 +148,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   {
     nframe = input->size(0);
     dim = input->size(1);
-    AT_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
+    TORCH_CHECK(!target->is_empty() && (target->dim() <= 1) && (THTensor_sizeLegacyNoScalars(target, 0) == nframe),
              "inconsistent target size, got: ", target->sizes());
   }
 
