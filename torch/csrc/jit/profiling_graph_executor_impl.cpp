@@ -29,13 +29,12 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   if (!pr_->ready()) {
     return profiling_plan_;
   }
-  
+
   auto copy = pr_->graph()->copy();
   InsertGuards(copy);
-  EliminateGuards(copy);
+  EliminateRedundantGuards(copy);
   InsertBailOuts(copy);
   optimized_plan_ = ExecutionPlan(copy);
-
   return *optimized_plan_;
 }
 
