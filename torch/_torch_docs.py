@@ -6589,7 +6589,7 @@ As above, but the sample points are spaced uniformly at a distance of `dx`.
 
 Arguments:
     y (Tensor): The values of the function to integrate
-    x (Tensor): The distance between points at which `y` is sampled.
+    dx (float): The distance between points at which `y` is sampled.
     dim (int): The dimension along which to integrate.
         By default, use the last dimension.
 
