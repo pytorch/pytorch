@@ -25,7 +25,7 @@ from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, enable_profiling_mode
+    _trace, enable_cpu_fuser_if, enable_profiling_mode, enable_first_class_mode
 from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -229,6 +229,7 @@ def _sum_of_list(tensorlist):
     for t in tensorlist:
         s += t.sum()
     return s
+
 
 # helper function to generate test qparam
 def _helper_generate_qparam(script_module, input_data):
@@ -838,21 +839,21 @@ graph(%x : Tensor,
         m(x1, y1)
 
         # Check what we collected
-        self.assertTrue('x' in value_stats and 'y' in value_stats)
-        self.assertTrue('p' in value_stats and 'z' in value_stats)
+        self.assertTrue('x.1' in value_stats and 'y.1' in value_stats)
+        self.assertTrue('p.1' in value_stats and 'z.1' in value_stats)
         self.assertEqual(len(value_stats), 5)
-        self.assertEqual(len(value_stats['p']), 1)
-        self.assertEqual(len(value_stats['z']), 1)
-        self.assertEqual(value_stats['p'][0], x1 + y1)
-        self.assertEqual(value_stats['z'][0], x1 - y1)
+        self.assertEqual(len(value_stats['p.1']), 1)
+        self.assertEqual(len(value_stats['z.1']), 1)
+        self.assertEqual(value_stats['p.1'][0], x1 + y1)
+        self.assertEqual(value_stats['z.1'][0], x1 - y1)
 
         # Run one more time and check the updated statistics
         m(x2, y2)
-        self.assertTrue('x' in value_stats and 'y' in value_stats)
-        self.assertEqual(len(value_stats['p']), 2)
-        self.assertEqual(len(value_stats['z']), 2)
-        self.assertEqual(value_stats['p'][1], x2 + y2)
-        self.assertEqual(value_stats['z'][1], x2 - y2)
+        self.assertTrue('x.1' in value_stats and 'y.1' in value_stats)
+        self.assertEqual(len(value_stats['p.1']), 2)
+        self.assertEqual(len(value_stats['z.1']), 2)
+        self.assertEqual(value_stats['p.1'][1], x2 + y2)
+        self.assertEqual(value_stats['z.1'][1], x2 - y2)
 
     def test_insert_quantdequant_consecutive_qnodes_script(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -2969,6 +2970,42 @@ def foo(x):
 
         self.assertEqual(D()(v), v + v)
 
+    def test_first_class_module(self):
+        with enable_first_class_mode():
+            class Foo(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(Foo, self).__init__()
+                    self.foo = nn.Parameter(torch.rand(3, 4))
+
+                @torch.jit.script_method
+                def forward(self, input):
+                    self.foo = input
+                    return self.foo
+            foo = Foo()
+            input = torch.rand(3, 4)
+            foo.forward(input)
+            self.assertEqual(input, foo.foo)
+
+    def test_first_class_calls(self):
+        with enable_first_class_mode():
+            @torch.jit.script
+            class Foo(object):
+                def __init__(self, x):
+                    self.bar = x
+
+                def stuff(self, x):
+                    return self.bar + x
+
+            @torch.jit.script
+            def foo(x):
+                return x * x + Foo(x).stuff(2 * x)
+
+            @torch.jit.script
+            def bar(x):
+                return foo(x) * foo(x)
+
+            x = torch.rand(3, 4)
+            self.assertEqual(bar(x), (x * x + 3 * x) * (x * x + 3 * x))
 
     def test_invalid_prefix_annotation(self):
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
@@ -2991,6 +3028,64 @@ def foo(x):
                 def invalid_prefix_annotation3(a):
                     #     type: (Int) -> Int
                     return a + 2
+
+    def test_interpreter_fuzz(self):
+        # This test generates random tree-like programs to fuzz test
+        # that the interpreter does not have a bug in its stack manipulation
+        # code. An assert in that code ensures individual operators are
+        # not reordered.
+        templates = [
+            "torch.rand(3, 4)",
+            "({} + {})",
+            "-{}",
+            "({} * {})",
+            "torch.tanh({})",
+            "VAR {}",
+        ]
+
+        def gen_code():
+            src_lines = ['def f():']
+            exprs = []
+            n_variables = 0
+
+            def get_expr(idx):
+                elem = exprs[idx]
+                exprs[idx] = exprs[-1]
+                exprs.pop()
+                return elem
+
+            def select_expr_or_var():
+                idx = random.randrange(0, len(exprs) + n_variables)
+                if idx < len(exprs):
+                    return get_expr(idx)
+                else:
+                    return 'v{}'.format(idx - len(exprs))
+
+            for i in range(50):
+                n = None
+                while n is None or n > len(exprs) + n_variables:
+                    template = random.choice(templates)
+                    n = template.count('{}')
+
+                if 'VAR' in template:
+                    src_lines.append('  v{} = {}'.format(n_variables, select_expr_or_var()))
+                    n_variables += 1
+                else:
+                    exprs.append(template.format(*(select_expr_or_var() for _ in range(n))))
+
+            src_lines.append('  return ({})\n'.format(''.join('v{},'.format(i) for i in range(n_variables))))
+            return '\n'.join(src_lines)
+
+        for i in range(100):
+            g = {'torch': torch}
+            code = gen_code()
+            torch._six.exec_(code, g, None)
+            cu = torch.jit.CompilationUnit(code)
+            with freeze_rng_state():
+                o1 = g['f']()
+            with freeze_rng_state():
+                o2 = cu.f()
+            self.assertEqual(o1, o2)
 
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
@@ -4911,6 +5006,19 @@ a")
 
         test_resize_as()
 
+    def test_uninitialized(self):
+        graph_str = """graph():
+          %1 : int = prim::Uninitialized()
+          %2 : int = prim::Constant[value=1]()
+          %3 : int = aten::add(%1, %2)
+          return (%3)
+        """
+        g = parse_ir(graph_str)
+        m = self.createFunctionFromGraph(g)
+        self.getExportImportCopy(m)
+        with self.assertRaisesRegex(RuntimeError, "isInt"):
+            m()
+
     def test_requires_grad_loop(self):
         @torch.jit.script
         def test(x, y, z):
@@ -5641,6 +5749,50 @@ a")
 
         inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
         self.checkScript(func, inputs, optimize=True)
+
+    def test_divmod(self):
+        def func_int(a, b):
+            # type: (int, int) -> Tuple[int, int]
+            return divmod(a, b)
+
+        def func_float(a, b):
+            # type: (float, float) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def func_int_float(a, b):
+            # type: (int, float) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def func_float_int(a, b):
+            # type: (float, int) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def divmod_test_iterator(func, num, den):
+            for i in num:
+                for j in den:
+                    self.checkScript(func, (i, j))
+
+        num_int = [1024, -1024]
+        den_int = [10, -10]
+        num_float = [5.3, -5.3]
+        den_float = [2.0, -2.0]
+        divmod_test_iterator(func_int, num_int, den_int)
+        divmod_test_iterator(func_float, num_float, den_float)
+        divmod_test_iterator(func_int_float, num_int, den_float)
+        divmod_test_iterator(func_float_int, num_float, den_int)
+
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: integer division or modulo by zero"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int)))
+            cu.func_int(1024, 0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float)))
+            cu.func_float(5.3, 0.0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int_float)))
+            cu.func_int_float(1024, 0.0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float_int)))
+            cu.func_float_int(5.3, 0)
 
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
@@ -12537,6 +12689,18 @@ a")
 
         self.assertEqual(fn(), {'ok': 10})
 
+    def test_dict_loop(self):
+        @torch.jit.script
+        def fn(x):
+            # type: (int) -> Dict[str, int]
+            a = torch.jit.annotate(Dict[str, int], {})
+            for i in range(x):
+                a['ok'] = i
+            return a
+
+        self.assertEqual(fn(10), {'ok': 9})
+
+
     def test_dict_membership(self):
         def fn(x, y):
             # type: (Dict[int, int], int) -> int
@@ -14210,8 +14374,8 @@ graph(%0 : Double(5, 5)):
         def func(x):
             return torch.ops.aten.relu(x)
         self.assertExpectedInline(canonical(func.graph), '''\
-graph(%x : Tensor):
-  %1 : Tensor = aten::relu(%x)
+graph(%x.1 : Tensor):
+  %1 : Tensor = aten::relu(%x.1)
   return (%1)
 ''')
 
@@ -15942,6 +16106,17 @@ class TestClassType(JitTestCase):
                 other = LSTMStateStack(self.num_layers, self.hidden_size)
                 other.stack = list(self.stack)
                 return other
+
+    def test_optional_type_promotion(self):
+        # should not throw
+        @torch.jit.script  # noqa: B903
+        class Tree(object):
+            def __init__(self):
+                self.parent = torch.jit.annotate(Optional[Tree], None)
+
+            def add_child(self, child):
+                # type: (Tree) -> None
+                child.parent = torch.jit.annotate(Optional[Tree], self)
 
 
 class TestLogging(JitTestCase):

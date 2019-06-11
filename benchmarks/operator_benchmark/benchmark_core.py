@@ -22,7 +22,7 @@ An example input is:
 TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1', 
     tag='long', run_backward=False)
 """
-TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
+TestConfig = namedtuple("TestConfig", "test_name input_config tag use_jit run_backward")
 
 
 BENCHMARK_TESTER = {}
@@ -111,8 +111,8 @@ class BenchmarkRunner(object):
                      "# Input: {}\n" \
                      "{} Execution Time (us) : {:.3f}\n"
             if test_case.framework == "PyTorch":
-                # FIXME: add JIT 
-                output = "# Mode: Eager\n" + output
+                output = "# Mode: {}\n". \
+                    format("JIT" if test_case.test_config.use_jit else "Eager") + output
             print(output.format(
                 test_case.test_config.test_name,
                 test_case.test_config.input_config,
@@ -135,6 +135,9 @@ class BenchmarkRunner(object):
     def _launch_forward(self, test_case, iters):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
+        func = test_case.run_forward
+        if test_case.test_config.use_jit:
+            func = test_case.run_jit_forward
         forward_time = timeit.timeit(functools.partial(test_case.run_forward, iters), number=1)
         return forward_time
 
