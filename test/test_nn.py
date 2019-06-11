@@ -1568,14 +1568,6 @@ class TestNN(NNTestCase):
         self.assertNotEqual(weight_ref.device, m.weight.device)
         self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
 
-        # yf225 TODO: add comment for this
-        m = nn.Linear(20, 10).float()
-        m_view = m.weight[:]
-        m_view_mul = m_view.mul(m_view)
-        m.to("cuda", force_move_params_cpu_cuda=True)
-        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
-            m_view_mul.backward(torch.randn(10, 20, dtype=torch.float))
-
         # Test that `cpu_module.to("cuda", force_move_params_cpu_cuda=True)` invalidates
         # `cpu_module`'s original parameters in any autograd graph they participate in.
         m = nn.Linear(20, 10).float()
