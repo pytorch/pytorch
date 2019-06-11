@@ -54,8 +54,8 @@
 
 #include <ATen/core/function_schema.h>
 
-#include <Python.h>
 #include <pybind11/functional.h>
+#include <pybind11/iostream.h>
 
 #include <memory>
 #include <sstream>
@@ -570,7 +570,7 @@ void initJITBindings(PyObject* module) {
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
     auto _stdout = py::module::import("sys").attr("stdout");
-    _stdout.attr("write")(str);
+    _stdout.attr("write")(py::bytes(str));
   });
 }
 } // namespace jit
