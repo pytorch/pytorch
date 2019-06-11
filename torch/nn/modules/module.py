@@ -214,7 +214,7 @@ class Module(object):
                         self.register_parameter(key, Parameter(param_applied, param.requires_grad))
                         # Bump up the version counter of the original parameter, to invalidate
                         # any previous references of it in the autograd graph.
-                        param.add_(0.0)  # yf225 TODO: create a Variable function to do the version bumping
+                        param._bump_version()
                 else:
                     # Tensors stored in modules are graph leaves, and we don't
                     # want to create copy nodes, so we have to unpack the data.
@@ -227,7 +227,7 @@ class Module(object):
                             self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
                             # Bump up the version counter of the original parameter's gradient,
                             # to invalidate any previous references of it in the autograd graph.
-                            param.grad.add_(0.0)  # yf225 TODO: create a Variable function to do the version bumping
+                            param.grad._bump_version()
                     else:
                         param.grad.data = grad_applied
 
