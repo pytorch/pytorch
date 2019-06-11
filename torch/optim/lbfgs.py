@@ -211,6 +211,8 @@ class LBFGS(Optimizer):
                     # the reason we do this: in a stochastic setting,
                     # no use to re-evaluate that function here
                     loss = float(closure())
+                    if not loss == loss:  # Detect NaN.
+                        self._sub_grad(-t, d)
                     flat_grad = self._gather_flat_grad()
                     abs_grad_sum = flat_grad.abs().sum()
                     ls_func_evals = 1
