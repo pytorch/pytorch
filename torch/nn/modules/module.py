@@ -190,33 +190,44 @@ class Module(object):
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
-    def _apply(self, fn, update_params_inplace=True):
+    def _apply(self, fn, force_move_params_cpu_cuda=False):
         for module in self.children():
-            module._apply(fn, update_params_inplace)
+            module._apply(fn, force_move_params_cpu_cuda)
+
+        def compute_should_move_tensor(tensor, tensor_applied):
+            # yf225 TODO: add comment in this function!
+            if param.device != param_applied.device:
+                if (param.is_cuda and param_applied.device == torch.device('cpu')) or (param.device == torch.device('cpu') and param_applied.is_cuda):
+                    return force_move_params_cpu_cuda
+                else:
+                    return True
+            else:
+                return False
 
         for key, param in self._parameters.items():
             if param is not None:
                 param_applied = fn(param.data)
-                if not update_params_inplace:
+                if compute_should_move_tensor(param, param_applied):
                     # Tensors stored in modules are graph leaves, and we don't want to
                     # create copy nodes, so we have to use `with torch.no_grad():`
                     with torch.no_grad():
                         self.register_parameter(key, Parameter(param_applied, param.requires_grad))
                         # Bump up the version counter of the original parameter, to invalidate
                         # any previous references of it in the autograd graph.
-                        param.add_(0.0)
+                        param.add_(0.0)  # yf225 TODO: create a Variable function to do the version bumping
                 else:
                     # Tensors stored in modules are graph leaves, and we don't
                     # want to create copy nodes, so we have to unpack the data.
                     param.data = param_applied
+
                 if param.grad is not None:
                     grad_applied = fn(param.grad.data)
-                    if not update_params_inplace:
+                    if compute_should_move_tensor(param.grad, grad_applied):
                         with torch.no_grad():
                             self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
                             # Bump up the version counter of the original parameter's gradient,
                             # to invalidate any previous references of it in the autograd graph.
-                            param.grad.add_(0.0)
+                            param.grad.add_(0.0)  # yf225 TODO: create a Variable function to do the version bumping
                     else:
                         param.grad.data = grad_applied
 
@@ -268,7 +279,7 @@ class Module(object):
         fn(self)
         return self
 
-    def cuda(self, device=None):
+    def cuda(self, device=None, force_move_params_cpu_cuda=False):
         r"""Moves all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -282,15 +293,15 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.cuda(device))
+        return self._apply(lambda t: t.cuda(device), force_move_params_cpu_cuda=force_move_params_cpu_cuda)
 
-    def cpu(self):
+    def cpu(self, force_move_params_cpu_cuda=False):
         r"""Moves all model parameters and buffers to the CPU.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.cpu())
+        return self._apply(lambda t: t.cpu(), force_move_params_cpu_cuda=force_move_params_cpu_cuda)
 
     def type(self, dst_type):
         r"""Casts all parameters and buffers to :attr:`dst_type`.
@@ -359,6 +370,9 @@ class Module(object):
                 the floating point parameters and buffers in this module
             tensor (torch.Tensor): Tensor whose dtype and device are the desired
                 dtype and device for all parameters and buffers in this module
+            force_move_params_cpu_cuda (bool): whether to move the parameters
+                instead of updating the parameters in-place when moving the model
+                from CPU to CUDA (or vice versa).
 
         Returns:
             Module: self
@@ -393,12 +407,7 @@ class Module(object):
 
         """
 
-        warnings.warn("The current behavior of `model.to()` is incorrect because it changes \
-`model`'s parameters in-place instead of creating a new model. In future releases of PyTorch, \
-we will fix this behavior and return a new model, without changing the current model's parameters. \
-If you want to change the current model's parameters, please use the in-place version `model.to_()`.")
-
-        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking, force_move_params_cpu_cuda = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:
             if not dtype.is_floating_point:
@@ -408,85 +417,7 @@ If you want to change the current model's parameters, please use the in-place ve
         def convert(t):
             return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
-        return self._apply(convert)
-
-    def to_(self, *args, **kwargs):
-        r"""Moves and/or casts the parameters and buffers.
-
-        This can be called as
-
-        .. function:: to_(device=None, dtype=None, non_blocking=False)
-
-        .. function:: to_(dtype, non_blocking=False)
-
-        .. function:: to_(tensor, non_blocking=False)
-
-        Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
-        floating point desired :attr:`dtype` s. In addition, this method will
-        only cast the floating point parameters and buffers to :attr:`dtype`
-        (if given). The integral parameters and buffers will be moved
-        :attr:`device`, if that is given, but with dtypes unchanged. When
-        :attr:`non_blocking` is set, it tries to convert/move asynchronously
-        with respect to the host if possible, e.g., moving CPU Tensors with
-        pinned memory to CUDA devices.
-
-        See below for examples.
-
-        .. note::
-            This method modifies the module in-place.
-
-        Args:
-            device (:class:`torch.device`): the desired device of the parameters
-                and buffers in this module
-            dtype (:class:`torch.dtype`): the desired floating point type of
-                the floating point parameters and buffers in this module
-            tensor (torch.Tensor): Tensor whose dtype and device are the desired
-                dtype and device for all parameters and buffers in this module
-
-        Returns:
-            Module: self
-
-        Example::
-
-            >>> linear = nn.Linear(2, 2)
-            >>> linear.weight
-            Parameter containing:
-            tensor([[ 0.1913, -0.3420],
-                    [-0.5113, -0.2325]])
-            >>> linear.to_(torch.double)
-            Linear(in_features=2, out_features=2, bias=True)
-            >>> linear.weight
-            Parameter containing:
-            tensor([[ 0.1913, -0.3420],
-                    [-0.5113, -0.2325]], dtype=torch.float64)
-            >>> gpu1 = torch.device("cuda:1")
-            >>> linear.to_(gpu1, dtype=torch.half, non_blocking=True)
-            Linear(in_features=2, out_features=2, bias=True)
-            >>> linear.weight
-            Parameter containing:
-            tensor([[ 0.1914, -0.3420],
-                    [-0.5112, -0.2324]], dtype=torch.float16, device='cuda:1')
-            >>> cpu = torch.device("cpu")
-            >>> linear.to_(cpu)
-            Linear(in_features=2, out_features=2, bias=True)
-            >>> linear.weight
-            Parameter containing:
-            tensor([[ 0.1914, -0.3420],
-                    [-0.5112, -0.2324]], dtype=torch.float16)
-
-        """
-
-        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
-
-        if dtype is not None:
-            if not dtype.is_floating_point:
-                raise TypeError('nn.Module.to_ only accepts floating point '
-                                'dtypes, but got desired dtype={}'.format(dtype))
-
-        def convert(t):
-            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
-
-        return self._apply(convert, update_params_inplace=False)
+        return self._apply(convert, force_move_params_cpu_cuda=force_move_params_cpu_cuda)
 
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.

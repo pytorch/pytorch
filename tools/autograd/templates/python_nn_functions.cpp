@@ -28,6 +28,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
+  auto force_move_params_cpu_cuda = std::get<3>(parsed);
   auto tuple = THPObjectPtr{PyTuple_New(3)};
   if (!tuple) throw python_error();
   if (device) {
@@ -43,6 +44,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
     PyTuple_SET_ITEM(tuple.get(), 1, Py_None);
   }
   PyTuple_SET_ITEM(tuple.get(), 2, torch::autograd::utils::wrap(non_blocking));
+  PyTuple_SET_ITEM(tuple.get(), 3, torch::autograd::utils::wrap(force_move_params_cpu_cuda));
   return tuple.release();
   END_HANDLE_TH_ERRORS
 }
