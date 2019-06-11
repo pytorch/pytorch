@@ -569,8 +569,17 @@ void initJITBindings(PyObject* module) {
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
-    auto _stdout = py::module::import("sys").attr("stdout");
-    _stdout.attr("write")(py::bytes(str));
+    try {
+      auto _stdout = py::module::import("sys").attr("stdout");
+      _stdout.attr("write")(str);
+    } catch (pybind11::error_already_set e) {
+      TORCH_WARN(
+          "Exception occured when printing to Python stdout: ",
+          e.what(),
+          ". Falling back to C++ stdout."
+          " Please report a bug to PyTorch");
+      std::cout << str << std::endl;
+    }
   });
 }
 } // namespace jit

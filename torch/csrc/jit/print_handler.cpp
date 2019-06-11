@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/print_handler.h>
 
 #include <iostream>
+#include <string>
 
 namespace torch {
 namespace jit {

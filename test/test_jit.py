@@ -12934,16 +12934,22 @@ a")
         def foo():
             print('foo')
 
-        old_stdout = sys.stdout
-        with tempfile.TemporaryFile() as f:
-            try:
-                sys.stdout = f
-                foo()
-            finally:
-                sys.stdout = old_stdout
+        class Redirect(object):
+            def __init__(self):
+                self.s = ''
 
-            f.seek(0)
-            FileCheck().check('foo').run(f.read())
+            def write(self, s : str):
+                self.s += s
+
+        old_stdout = sys.stdout
+        redirect = Redirect()
+        try:
+            sys.stdout = redirect
+            foo()
+        finally:
+            sys.stdout = old_stdout
+
+        FileCheck().check('foo').run(redirect.s)
 
     def test_optional_tuple(self):
         def fn(x=None):
