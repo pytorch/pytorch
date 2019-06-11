@@ -11561,8 +11561,9 @@ a")
 
         self.assertIsNot(other_strong_mod.weak, other_strong_mod.weak2)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
-            strong_mod = Strong()
+        strong_mod = Strong()
+        # the first weak is a ScriptModule while the other is a Python value
+        FileCheck().check_count("python_value", 1).run(strong_mod.graph)
 
     def test_weak_module_copying(self):
         class Submodule(torch.nn.Module):
@@ -11606,9 +11607,11 @@ a")
         self.assertIs(strong_mod.weak.buffer, weak_mod.buffer)
         self.assertIs(strong_mod.weak.submodule, weak_mod.submodule)
 
-        # Test lookup fallback
         weak_mod.new_attribute = 10
-        self.assertIs(strong_mod.weak.new_attribute, weak_mod.new_attribute)
+        # Since WeakScriptModuleProxy was deleted, the `weak` on strong_mod is
+        # not linked to the original module at all, so modifying it doesn't
+        # affect its copy
+        self.assertFalse(hasattr(strong_mod.weak, 'new_attribute'))
 
         weak_mod.weight.data += torch.ones(5, 5) * 100
         self.assertTrue(strong_mod(inp).allclose(weak_mod(inp)))
@@ -11617,8 +11620,7 @@ a")
         weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
-    @unittest.skipIf(hasattr(torch.jit, 'WeakScriptModuleProxy'), "# TODO: re-enable"
-                                                                  "this when WeakScriptModuleProxy has been deleted")
+    @unittest.skipIf(not torch._C._jit_recursive_script(), "# TODO: re-enable when recursive script is default")
     def test_weak_module_isinstance(self):
         tester = self
 

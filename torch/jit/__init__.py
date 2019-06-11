@@ -1566,74 +1566,18 @@ if _enabled:
         def graph_for(self, *args, **kwargs):
             return self.forward.graph_for(*args, **kwargs)
 
-    class WeakScriptModuleProxy(ScriptModule):
-        # TODO: [weak script refactor]
-        # WeakScriptModule proxy should be deleted since its functionality is
-        # subsumed by recursive scripting, and the copying code in init moved
-        # to a function to create a ScriptModule from an nn.Module without
-        # making a WeakScriptModuleProxy
-        """
-        Copies the parameters, buffers, constants, attributes, and submodules
-        of an nn.Module into itself.
-        """
-        def __init__(self, original, stubs):
-            # Guards behavior of __setattr__ and __getattr__ so ScriptModule
-            # __init__ can run correctly
-            self.__dict__['_initialized'] = False
-            super(WeakScriptModuleProxy, self).__init__()
-
-            # Store a weak reference to the original module
-            self.__dict__['_original'] = weakref.ref(original)
-            _copy_module_to_script_module(original, script_module=self)
-
-            self.__dict__["_initialized"] = True
-            _create_methods_from_stubs(self, stubs)
-
-        def __getattr__(self, attr):
-            # Try to get the attribute directly, if that fails, fall back to the
-            # weak module itself
-            try:
-                return ScriptModule.__getattr__(self, attr)
-            except AttributeError as e:
-                # unwrap the original
-                original_module = self.__dict__["_original"]()
-                if original_module and self.__dict__["_initialized"]:
-                    # get attr from original if it is still alive
-                    return getattr(original_module, attr)
-
-                # If it's not on this module and it wasn't on the original
-                # module (or the original is dead), throw the exception
-                raise e
-
-        def __setattr__(self, attr, value):
-            # Once constructed, no new properties can be set
-
-            if not self.__dict__["_initialized"]:
-                # If constructing, don't fall back to original module
-                return ScriptModule.__setattr__(self, attr, value)
-
-            if hasattr(self, attr):
-                return ScriptModule.__setattr__(self, attr, value)
-            else:
-                raise AttributeError("Cannot set new attribute '{}' on "
-                                     "weak script module once it has been "
-                                     "created".format(attr))
-
 else:
     class ScriptModule(torch.nn.Module):
         def __init__(self, optimize=True):
             super(ScriptModule, self).__init__()
 
 
-def _copy_module_to_script_module(module, script_module=None):
+def _copy_module_to_script_module(module):
     """
     This copies Parameters, buffers, submodules, attributes, and constants from
     an nn.Module into a fresh ScriptModule
     """
-    if script_module is None:
-        # TODO: Delete this parameter (a new ScriptModule should always be made)
-        # when WeakScriptModuleProxy is deleted
-        script_module = ScriptModule()
+    script_module = ScriptModule()
 
     # A quick check that the module's super() is called so everything is set up
     # for this method to do the copying it needs to
@@ -1654,7 +1598,6 @@ def _copy_module_to_script_module(module, script_module=None):
         value = getattr(module, name)
         if isinstance(value, Attribute):
             setattr(script_module, name, item)
-
 
     def copy_tensors(the_list, setter):
         for name in the_list:
@@ -1696,6 +1639,14 @@ def _copy_module_to_script_module(module, script_module=None):
     # Copy overloads
     script_module.__dict__["_overloads"] = dict(getattr(module, "__overloads__", {}))
 
+    # Copy python ops
+    for name in dir(module):
+        if hasattr(script_module, name):
+            # Skip Python class stuff and don't re-assign anything
+            continue
+        value = getattr(module, name)
+        setattr(script_module, name, value)
+
     return script_module
 
 def _get_weak_stubs(cls):
@@ -1711,6 +1662,12 @@ def _get_weak_stubs(cls):
             stub = script_method(entry["original_method"], entry["rcb"])
             stubs.append(stub)
     return stubs
+
+
+def _make_script_module(mod, stubs):
+    script_module = _copy_module_to_script_module(mod)
+    _create_methods_from_stubs(script_module, stubs)
+    return script_module
 
 
 def _convert_to_script_module(mod, methods=None):
@@ -1740,10 +1697,7 @@ def _convert_to_script_module(mod, methods=None):
 
     stubs = list(map(make_stub, methods))
 
-    script_module = _copy_module_to_script_module(mod)
-
-    _create_methods_from_stubs(script_module, stubs)
-    return script_module
+    return _make_script_module(mod, stubs)
 
 
 def _make_strong(mod):
@@ -1763,11 +1717,7 @@ def _make_strong(mod):
         stubs = _get_weak_stubs(cls)
         _jit_internal.weak_types[cls]["method_stubs"] = stubs
 
-    proxy = WeakScriptModuleProxy(mod, stubs)
-
-    _jit_internal.weak_modules[mod] = proxy
-
-    return proxy
+    return _make_script_module(mod, stubs)
 
 
 def _get_methods(cls):
