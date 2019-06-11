@@ -479,10 +479,6 @@ struct CodeImpl {
         bailout_instructions.end(),
         instructions_.begin() + jf_index + 1,
         instructions_.end());
-    // for (size_t i = jf_index + 1; i < instructions_.size(); i++)
-    // {
-    //   bailout_instructions.push_back(instructions_[i]);
-    // }
     truncateInstructions(jf_index + 1);
   }
 
