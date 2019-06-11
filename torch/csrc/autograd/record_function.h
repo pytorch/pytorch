@@ -77,6 +77,10 @@ struct TORCH_API RecordFunction {
     return parent_;
   }
 
+  void setRunSampled(bool run_sampled) {
+    run_sampled_ = run_sampled;
+  }
+
  private:
   void processCallbacks();
 
@@ -87,19 +91,30 @@ struct TORCH_API RecordFunction {
   RecordFunction* parent_ = nullptr;
 
   bool initialized_ = false;
+  bool run_sampled_ = false;
 };
 
 TORCH_API bool hasCallbacks();
 TORCH_API bool needsInputs();
+TORCH_API bool hasNonSampledCallbacks();
+
+TORCH_API void setSamplingProbability(double);
+TORCH_API double getSamplingProbability();
+
+TORCH_API bool shouldRunSampledCallbacks();
 
 // optional argument - function's seq_no
 #define RECORD_FUNCTION(fn, inputs, ...) \
   torch::autograd::profiler::RecordFunction guard; \
   if (torch::autograd::profiler::hasCallbacks()) { \
-    if (torch::autograd::profiler::needsInputs()) { \
-      guard.before(fn, inputs, ##__VA_ARGS__); \
-    } else { \
-      guard.before(fn, ##__VA_ARGS__); \
+    auto run_sampled = torch::autograd::profiler::shouldRunSampledCallbacks(); \
+    if (run_sampled || torch::autograd::profiler::hasNonSampledCallbacks()) { \
+      guard.setRunSampled(run_sampled); \
+      if (torch::autograd::profiler::needsInputs()) { \
+        guard.before(fn, inputs, ##__VA_ARGS__); \
+      } else { \
+        guard.before(fn, ##__VA_ARGS__); \
+      } \
     } \
   }
 
@@ -109,7 +124,8 @@ using RecordFunctionCallback = std::function<void(const RecordFunction&)>;
 TORCH_API void pushCallback(
     RecordFunctionCallback start,
     RecordFunctionCallback end = [](const RecordFunction&){},
-    bool needs_inputs = false);
+    bool needs_inputs = false,
+    bool sampled = false);
 TORCH_API void popCallback();
 
 } // namespace profiler

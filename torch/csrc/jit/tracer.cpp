@@ -1,5 +1,9 @@
 #include <torch/csrc/jit/tracer.h>
 
+#include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/jit/constants.h>
+#include <ATen/core/functional.h>
+#include <ATen/Backtrace.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
@@ -7,6 +11,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/script/module.h>
+#include <ATen/core/Dict.h>
 
 #include <memory>
 #include <sstream>
@@ -47,22 +52,24 @@ std::function<void()> pauseTracing() {
   return [state]() { tracer::setTracingState(state); };
 }
 
-void delValueTrace(const Variable& var) {
-  AT_ASSERT(var.defined());
-  auto& env_stack = getTracingState()->env_stack;
+void delValueTrace(const IValue& var) {
+  getTracingState()->delValue(var);
+}
+void TracingState::delValue(const IValue& var) {
+  at::Tensor t = var.toTensor();
+  AT_ASSERT(t.defined());
   for (size_t i = 0; i < env_stack.size(); ++i) {
     auto& value_map = env_stack.at(env_stack.size() - 1 - i).value_map;
 
-    auto it = value_map.find(var);
+    auto it = value_map.find(t);
     if (it == value_map.end()) {
       continue;
     }
     value_map.erase(it);
   }
-  getTracingState()->env_stack.back().value_map.erase(var);
 }
 
-// Given a variable 'var', return the 'node' which represents the instruction
+// Given a IValue 'var', return the 'node' which represents the instruction
 // which computes the value of this variable in the IR.
 // Here, we interpret untraced variables as constants that are just embedded
 // in the graph.  This is useful to handle code which does things like this
@@ -77,14 +84,29 @@ void delValueTrace(const Variable& var) {
 // zero. This is one of the cases where a Variable can be created inside of a
 // trace, and if we treat it as a constant, everything will work out.
 Value* getValueTrace(const IValue& var) {
-  auto& state = getTracingState();
-  auto& env_stack = getTracingState()->env_stack;
-
-  if (var.isTensor()) {
+  return getTracingState()->getValue(var);
+}
+Value* TracingState::getValue(const IValue& var) {  
+  // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...] arguments
+  if (var.isTensorList()) {
+    return graph
+        ->insertNode(graph->createList(
+            TensorType::get(),
+            fmap(
+                var.toTensorListRef(),
+                [](const IValue& val) { return getValueTrace(val); })))
+        ->output();
+  } else if (var.isTuple()) {
+    return graph
+        ->insertNode(graph->createTuple(fmap(
+            var.toTuple()->elements(),
+            [](const IValue& val) { return getValueTrace(val); })))
+        ->output(); 
+  } if (var.isTensor()) {
     auto ten = var.toTensor();
     if (!ten.defined()) {
-      Node* n = state->graph->createNone(TensorType::get());
-      return state->graph->insertNode(n)->output();
+      Node* n = graph->createNone(TensorType::get());
+      return graph->insertNode(n)->output();
     }
     for (size_t i = 0; i < env_stack.size(); ++i) {
       auto& value_map = env_stack.at(env_stack.size() - 1 - i).value_map;
@@ -112,7 +134,7 @@ Value* getValueTrace(const IValue& var) {
       throw std::runtime_error(oss.str());
     }
 
-    Value* constant = state->graph->insertConstant(ten);
+    Value* constant = graph->insertConstant(ten);
     recordSourceLocation(constant->node());
     constant->inferTypeFrom(ten);
     auto it = env_stack.back().value_map.find(ten);
@@ -133,67 +155,59 @@ Value* getValueTrace(const IValue& var) {
     oss << "Tried to trace Future that the tracer was not aware of.";
     throw std::runtime_error(oss.str());
   } else {
-    std::ostringstream oss;
-    oss << "Unknown type used in value trace lookup!";
-    throw std::runtime_error(oss.str());
-  }
-}
-
-// allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...] arguments
-// One might merge getValueTrace and getNestedValueTrace after checking that
-// casting to IValue instead  of Variable is OK
-Value* getNestedValueTrace(const IValue& v) {
-  auto& state = getTracingState();
-  if (v.isTensorList()) {
-    return state->graph
-        ->insertNode(state->graph->createList(
-            TensorType::get(),
-            fmap(
-                v.toTensorListRef(),
-                [](const IValue& val) { return getNestedValueTrace(val); })))
-        ->output();
-  } else if (v.isTuple()) {
-    return state->graph
-        ->insertNode(state->graph->createTuple(fmap(
-            v.toTuple()->elements(),
-            [](const IValue& val) { return getNestedValueTrace(val); })))
-        ->output();
-  }
-  return getValueTrace(v.toTensor());
-}
-
-Value* getOutputTrace(
-    const std::shared_ptr<TracingState>& state,
-    const Variable& var) {
-  if (!var.defined()) {
-    Node* n = state->graph->createNone(TensorType::get());
-    return state->graph->insertNode(n)->output();
-  }
-
-  auto& value_map = getTracingState()->env_stack.back().value_map;
-  auto it = value_map.find(var);
-  if (it == value_map.end()) {
+    // If the values are non-tensors, we try to create constants 
+    // and bake those constants into the traced graph
+    auto constant = tryInsertConstant(*graph, var);
+    if (constant) {
+      recordSourceLocation(constant.value()->node());
+      return *constant;
+    }
     std::ostringstream os;
-    os << "output of traced region did not have observable "
-       << "data dependence with trace inputs; this probably indicates your program "
-       << "cannot be understood by the tracer.";
+    os << "Tracer cannot get value trace for type " << var.tagKind() << ". "
+       << "The below value could not be materialized as a constant:\n"
+       << var;
     throw std::runtime_error(os.str());
   }
-  return it->second;
+}
+bool TracingState::hasValue(const IValue& var) const {
+  if (var.isTensor()) {
+    at::Tensor t = var.toTensor();
+    for(const auto & frame : env_stack) {
+      if (frame.value_map.count(t)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
-Value* getNestedOutputTrace(
-    const std::shared_ptr<TracingState>& state,
-    const IValue& iv) {
-  if (iv.isTensor()) {
-    return getOutputTrace(state, iv.toTensor());
+
+Value* TracingState::getOutput(const IValue& iv) {
+   if (iv.isTensor()) {
+     at::Tensor var = iv.toTensor();
+     if (!var.defined()) {
+       Node *n = graph->createNone(TensorType::get());
+       return graph->insertNode(n)->output();
+     }
+
+     auto &value_map = getTracingState()->env_stack.back().value_map;
+     auto it = value_map.find(var);
+     if (it == value_map.end()) {
+       std::ostringstream os;
+       os << "output of traced region did not have observable "
+          << "data dependence with trace inputs; this probably indicates your "
+             "program "
+          << "cannot be understood by the tracer.";
+       throw std::runtime_error(os.str());
+     }
+     return it->second;
   } else if (iv.isTuple()) {
     const auto& elems = iv.toTuple()->elements();
     auto tuple_node =
-        state->graph->createTuple(fmap(elems, [&state](const IValue& ival) {
-          return getNestedOutputTrace(state, ival);
+        graph->createTuple(fmap(elems, [&](const IValue& ival) {
+          return getOutput(ival);
         }));
-    state->graph->insertNode(tuple_node);
+    graph->insertNode(tuple_node);
     return tuple_node->output();
   } else {
     AT_ERROR(
@@ -207,12 +221,11 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
   if (type->isSubtypeOf(TensorType::get())) {
     auto input_tensor = input.toTensor();
     auto name = Variable(input_tensor).name();
-    auto& value_map = state->env_stack.back().value_map;
-    if (value_map.find(input_tensor) != value_map.end()) {
+    if (state->hasValue(input)) {
       input_tensor = input_tensor.view(input_tensor.sizes());
     }
     value->setUniqueName(name);
-    value_map[input_tensor] = value;
+    state->setValue(input_tensor, value);
     return input_tensor;
   } else if (auto tuple_type = type->cast<TupleType>()) {
     auto unpack_node =
@@ -229,6 +242,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
     return Tuple::create(std::move(elems));
   } else if (auto dict_type = type->cast<DictType>()) {
     auto dict = input.toGenericDict();
+
     auto dict_size = dict->elements().size();
     auto unpack_to_list = state->graph->insert(aten::values, {value});
     auto list_unpack = state->graph->createListUnpack(unpack_to_list, dict_size);
@@ -240,7 +254,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
 
     size_t i = 0;
     for (const auto &pair : order) {
-      dict->elements()[pair.first] = addInput(state, pair.second, dict_type->getValueType(), elem_values[i++]);
+      dict->elements().insert_or_assign(pair.first, addInput(state, pair.second, dict_type->getValueType(), elem_values[i++]));
     }
 
     return c10::ivalue::GenericDict::create(std::move(dict->elements()));
@@ -323,7 +337,7 @@ void exit(const Stack& outputs) {
   auto& state = getTracingState();
   size_t i = 0;
   for (auto& output : outputs) {
-    state->graph->registerOutput(getNestedOutputTrace(state, output));
+    state->graph->registerOutput(state->getOutput(output));
     i++;
   }
   setTracingState(nullptr);
@@ -335,36 +349,36 @@ void abandon() {
 }
 
 void setValueTrace(const IValue& v, Value* value) {
+  return getTracingState()->setValue(v, value);
+}
+void TracingState::setValue(const IValue& v, Value* value) {
   if (v.isTensor()) {
     auto var = v.toTensor();
     AT_ASSERT(var.defined());
-    getTracingState()->env_stack.back().value_map[var] = value;
+    env_stack.back().value_map[var] = value;
   } else if (v.isTensorList()) {
     auto& outputs = v.toTensorList()->elements();
-    auto graph = getTracingState()->graph;
     Node* unpack_node =
         graph->insertNode(graph->createListUnpack(value, outputs.size()));
     for (size_t i = 0; i < outputs.size(); ++i) {
-      setValueTrace(outputs[i], unpack_node->outputs()[i]);
+      setValue(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
     auto& outputs = v.toTuple()->elements();
-    auto graph = getTracingState()->graph;
     Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
     for (size_t i = 0; i < outputs.size(); ++i) {
-      setValueTrace(outputs[i], unpack_node->outputs()[i]);
+      setValue(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isGenericList()) {
     auto elements = v.toGenericListRef();
-    auto graph = getTracingState()->graph;
     Node* unpack_node =
         graph->insertNode(graph->createListUnpack(value, elements.size()));
     for (size_t i = 0; i < elements.size(); ++i) {
-      setValueTrace(elements[i], unpack_node->outputs()[i]);
+      setValue(elements[i], unpack_node->outputs()[i]);
     }
   } else if (v.isFuture()) {
     auto fut = v.toFuture();
-    getTracingState()->env_stack.back().future_map[fut] = value;
+    env_stack.back().future_map[fut] = value;
   } else {
     std::ostringstream os;
     os << "Tracer cannot set value trace for type " << v.tagKind() << ". "
@@ -428,9 +442,6 @@ void addInputs(Node* n, const char* name, const std::string& value) {
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
   n->addInput(getValueTrace(value));
 }
-void addInputs(Node* n, const char* name, const at::SparseTensorRef& value) {
-  detail::badArgType(value);
-}
 void addInputs(Node* n, const char* name, at::Generator* value) {
   if (value) {
     detail::badArgType(value);
@@ -447,6 +458,9 @@ void addInputs(Node* n, const char* name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
 void addInputs(Node* n, const char* name, at::ScalarType value) {
+  detail::genericAddInput(n, static_cast<int64_t>(value));
+}
+void addInputs(Node* n, const char* name, at::MemoryFormat value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
 }
 void addInputs(
@@ -553,7 +567,7 @@ void setTracingState(std::shared_ptr<TracingState> state) {
 }
 
 TracingState::TracingState()
-    : env_stack{TracingEnvironmentFrame()}, graph(new Graph()) {}
+    : graph(new Graph()), env_stack{Frame()} {}
 
 TracingState::~TracingState() = default;
 

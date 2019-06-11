@@ -635,7 +635,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
 
   // Work will take over barrierTensors
   auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());
-  AT_CHECK(ncclWork);
+  TORCH_CHECK(ncclWork);
   ncclWork->barrierTensors_ = std::move(barrierTensors);
 
   return work;

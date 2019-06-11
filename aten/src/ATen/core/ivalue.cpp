@@ -1,7 +1,9 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Formatting.h>
+#include <c10/util/StringUtil.h>
 #include <cmath>
+#include <ATen/core/Dict.h>
 
 namespace c10 {
 namespace ivalue {
@@ -38,7 +40,7 @@ std::ostream& printDict(std::ostream& out, const Dict& v) {
     if (!first) {
       out << ", ";
     }
-    out << pair.first << ": " << pair.second;
+    out << pair.key() << ": " << pair.value();
     first = false;
   }
 
@@ -90,6 +92,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:
       return out << "Future";
+    case IValue::Tag::Uninitialized:
+      return out << "Uninitialized";
     case IValue::Tag::Device:
       return out << v.toDevice();
     case IValue::Tag::GenericDict:
@@ -143,7 +147,10 @@ static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
 }
 
 const ivalue::GenericDict::IterationOrder ivalue::GenericDict::iterationOrder() const {
-  IterationOrder ordered(elements().begin(), elements().end());
+  IterationOrder ordered;
+  for (auto element : elements()) {
+    ordered.emplace_back(element.key(), element.value());
+  }
   std::sort(ordered.begin(), ordered.end(), CompareIValue);
   return ordered;
 }

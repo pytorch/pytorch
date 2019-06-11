@@ -18,8 +18,10 @@ namespace {
 std::unordered_set<Symbol> skip_list = {
     prim::If,
     prim::Loop,
+    prim::Function,
     prim::Constant,
     prim::AutogradZero,
+    prim::Uninitialized,
     prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
@@ -40,7 +42,7 @@ std::vector<IValue> runNode(Node* n) {
           // error gets caught within propagateNode()
           throw c10::Error("Can't insert requires grad as constant", "");
         }
-        return IValue(autograd::as_variable_ref(t).data());
+        return IValue(t);
       } else {
         return t;
       }
@@ -63,7 +65,6 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-
     auto new_output = tryInsertConstant(*graph, outputs[i]);
     if (new_output) {
       if (outputs[i].isNone()) {
@@ -132,7 +133,7 @@ void replaceAndRemoveIfOutput(Node* n, size_t i, Value* replacement) {
 
 // remove extra outputs from the node
 bool removeExtraIfOutputs(Node* n) {
-  AT_CHECK(n->kind() == prim::If, "Only supported for If nodes");
+  TORCH_CHECK(n->kind() == prim::If, "Only supported for If nodes");
   auto true_block = n->blocks()[0];
   auto false_block = n->blocks()[1];
   auto graph = n->owningGraph();

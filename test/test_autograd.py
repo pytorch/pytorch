@@ -19,7 +19,7 @@ from torch.autograd.profiler import profile, format_time, EventList, FunctionEve
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
-                          load_tests, random_symmetric_pd_matrix)
+                          load_tests, random_symmetric_pd_matrix, IS_WINDOWS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -202,6 +202,32 @@ class TestAutograd(TestCase):
         # Accumulate out-of-place when create_graph is False
         x_grad, x_grad_clone = compute_grad(create_graph=True)
         self.assertEqual(x_grad, x_grad_clone)
+
+    def test_accumulate_grad_tensor_reference(self):
+        def _test_grad_tensor(params_grad_tensor, backward_grad_tensor, should_preserve_reference):
+            params = torch.tensor([1.5, 1.5]).requires_grad_()
+            params.grad = params_grad_tensor
+            grad_saved = params.grad
+            params.backward(backward_grad_tensor)
+            self.assertEqual(id(grad_saved) == id(params.grad), should_preserve_reference)
+
+        # Accumulate dense gradient to sparse gradient will change the `params.grad` reference
+        _test_grad_tensor(
+            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+            torch.tensor([1.5, 1.5]),
+            False)
+
+        # Accumulate dense gradient to dense gradient will preserve the `params.grad` reference
+        _test_grad_tensor(
+            torch.tensor([1.5, 1.5]),
+            torch.tensor([1.5, 1.5]),
+            True)
+
+        # Accumulate sparse gradient to sparse gradient will preserve the `params.grad` reference
+        _test_grad_tensor(
+            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+            torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.])),
+            True)
 
     def test_slogdet_sign(self):
         a = torch.randn(3, 3, requires_grad=True)
@@ -1555,7 +1581,7 @@ class TestAutograd(TestCase):
             input_lengths = [(torch.randint(input_length // 2, input_length + 1, ()).item()
                               if vary_lengths or i == 0 else input_length) for i in range(batch_size)]
             target_lengths = [(torch.randint(target_length // 2, target_length + 1, ()).item()
-                               if vary_lengths or i == 0 else target_length) for i in range(batch_size)]
+                               if vary_lengths else target_length) for i in range(batch_size)]
 
             def ctc_after_softmax(x):
                 x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
@@ -1563,7 +1589,7 @@ class TestAutograd(TestCase):
                 log_probs = torch.log_softmax(x_full, 2)
                 return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-            gradcheck(ctc_after_softmax, [x])
+            gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
 
     def _test_sparse_gather(self, size_x, size_ind, dim):
         x = torch.randn(size_x, requires_grad=True)
@@ -1597,6 +1623,19 @@ class TestAutograd(TestCase):
 
     def test_sparse_gather_both_scalar(self):
         self._test_sparse_gather((), (), 0)
+
+    # autograd tests via common_method_invocations don't allow input tensors to
+    # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when
+    # check_sparse_nnz is set to False.)
+    def test_sparse_mask_autograd(self):
+        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
+            tensor = torch.randn(3, requires_grad=True, device=device)
+            mask = torch.ones(3, device=device)
+            mask[1] = 0
+            mask = mask.to_sparse()
+            converted = tensor.sparse_mask(mask).to_dense()
+            converted.sum().backward()
+            self.assertEqual(tensor.grad, mask.to_dense())
 
     def test_gc_in_destructor(self):
         """
@@ -2161,6 +2200,24 @@ class TestAutograd(TestCase):
             f_args_tensor = deepcopy(unpack_variables(f_args_variable))
             run_functional_checks(self, "test_cdist", "cdist", f,
                                   True, f_args_variable, f_args_tensor)
+
+    def test_var_mean_differentiable(self):
+        dim = [2, 4]
+        keepdim = False
+        input1 = torch.randn(3, 4, 5, 6, 2, 3, requires_grad=True)
+        input2 = deepcopy(input1)
+        var1, mean1 = torch.var_mean(input1, dim=dim, keepdim=keepdim)
+        var2 = input2.var(dim=dim, keepdim=keepdim)
+        mean2 = input2.mean(dim=dim, keepdim=keepdim)
+        grad = torch.randn(3, 4, 6, 3, requires_grad=True)
+
+        r1 = var1 * var1 * mean1 * mean1
+        r2 = var2 * var2 * mean2 * mean2
+        self.assertTrue(torch.allclose(r1, r2, rtol=0.01, atol=0.0))
+
+        torch.autograd.backward(r1, grad)
+        torch.autograd.backward(r2, grad)
+        self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
 
     @skipIfNoLapack
     def test_cholesky(self):
@@ -2976,6 +3033,27 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
             gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
 
+    def test_gradcheck_nondeterministic(self):
+        class NonDetFunc(Function):
+            @staticmethod
+            def forward(ctx, x, jitter=0.0):
+                ctx._jitter = jitter
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return NonDetFunc.apply(grad_out, ctx._jitter) * (1 + torch.rand_like(grad_out) * ctx._jitter), None
+
+        inp = torch.randn(5, 5, requires_grad=True)
+        gradcheck(lambda x: NonDetFunc.apply(x, 0.0), inp)
+        with self.assertRaisesRegex(RuntimeError, 'Backward is not reentrant'):
+            gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp)
+        with self.assertRaisesRegex(RuntimeError, 'Backward is not reentrant'):
+            gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp)
+        gradcheck(lambda x: NonDetFunc.apply(x, 0.0), inp, nondet_tol=1e-5)
+        gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp, nondet_tol=1e-5)
+        gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp, nondet_tol=1e-5)
+
     @unittest.skipIf(not TEST_CUDA, "Requires cuda for multi device")
     def test_multi_device_reentrant_autograd(self):
         # Output on gpu so that this task will be associated with the gpu thread
@@ -3006,6 +3084,68 @@ class TestAutograd(TestCase):
         # gpu thread ReadyQueue
         out.sum().backward()
 
+    def test_version_counter(self):
+        x = torch.randn(1, 2)
+
+        # In-place op bumps version
+        x_saved_version = x._version
+        x.add_(1).add_(1)
+        self.assertTrue(x._version > x_saved_version)
+
+        # Differentiable view shares version counter
+        xz = x[:]
+        self.assertTrue(x._version == xz._version)
+        xz.add_(1)
+        self.assertTrue(x._version == xz._version)
+
+        # `x.data = y` preserves version counter of `x`
+        x_saved_version = x._version
+        x.data = torch.randn(2, 3)
+        self.assertTrue(x._version == x_saved_version)
+        x.add_(1)
+        self.assertTrue(x._version > x_saved_version)
+        # Make sure `x` is still using the same version counter it shares with `xz`
+        self.assertTrue(x._version == xz._version)
+
+        # In-place op on `xz` also updates version of `x`,
+        # because they share the version counter
+        xz.add_(1)
+        self.assertTrue(x._version == xz._version)
+
+    def test_set_data_tensorimpl_type(self):
+        # Dense tensor has impl of type `TensorImpl`, while sparse tensor has impl
+        # of type `SparseTensorImpl`.
+        x = torch.randn(1, 2)
+        x_s = torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1]))
+        with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
+            x.data = x_s
+
+    def test_set_data_preserve_pyobj(self):
+        a = torch.randn(1, 2)
+        b = torch.randn(1, 2)
+        b_id_saved = id(b)
+        b.data = a
+        self.assertTrue(b_id_saved == id(b))
+
+    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+    def test_thread_shutdown(self):
+        code = """import torch
+from torch.autograd import Function
+class MyFunction(Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad
+
+for shape in [(1,), ()]:
+    v = torch.ones(shape, requires_grad=True)
+    MyFunction.apply(v).backward()
+"""
+        s = TestCase.runWithPytorchAPIUsageStderr(code)
+        self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -3160,7 +3300,11 @@ def add_test(
                     args_variable, kwargs_variable = create_input(args, requires_grad=False, call_kwargs=kwargs)
                     output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                     if isinstance(output_variable, torch.autograd.Variable):
-                        output_variable.backward(randn_like(output_variable))
+                        if output_variable.is_sparse:
+                            rand = randn_like(output_variable.to_dense()).to_sparse()
+                        else:
+                            rand = randn_like(output_variable)
+                        output_variable.backward(rand)
                         self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
                         self.assertTrue(self_variable.size() == self_variable.grad.size())
 

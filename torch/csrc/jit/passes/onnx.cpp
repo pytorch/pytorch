@@ -177,8 +177,8 @@ void BlockToONNX(
   // Returns a node that n maps to in the new graph
   auto envFn = [&env](Value* n) -> Value* {
     auto it = env.find(n);
-    AT_CHECK(it != env.end(), "Dangling node reference");
-    AT_CHECK(it->second, "Unused node was subsequently used");
+    TORCH_CHECK(it != env.end(), "Dangling node reference");
+    TORCH_CHECK(it->second, "Unused node was subsequently used");
     return it->second;
   };
 
@@ -312,13 +312,13 @@ void BlockToONNX(
     for (auto arg_type : op->cconv) {
       py::object obj;
       if (arg_type == 'c') {
-        AT_CHECK(
+        TORCH_CHECK(
             scalar_it != op->scalar_args.end(),
             "expected too many scalar args");
         obj = py::reinterpret_borrow<py::object>(
             py::handle((scalar_it++)->get()));
       } else if (arg_type == 'd') {
-        AT_CHECK(node_it != inputs.end(), "expected too many inputs");
+        TORCH_CHECK(node_it != inputs.end(), "expected too many inputs");
         obj = py::cast(envFn(*node_it++));
       } else {
         throw std::runtime_error("unexpected calling convention");

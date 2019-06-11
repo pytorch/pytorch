@@ -89,7 +89,12 @@ struct C10_API Device final {
  private:
   DeviceType type_;
   DeviceIndex index_ = -1;
-  void validate();
+  void validate() {
+    TORCH_CHECK(index_ == -1 || index_ >= 0,
+        "Device index must be -1 or non-negative, got ", index_);
+    TORCH_CHECK(!is_cpu() || index_ <= 0,
+        "CPU device index must be -1 or zero, got ", index_);
+  }
 };
 
 C10_API std::ostream& operator<<(

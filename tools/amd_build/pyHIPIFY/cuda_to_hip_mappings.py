@@ -2073,6 +2073,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("curandSetQuasiRandomGeneratorDimensions", ("hiprandSetQuasiRandomGeneratorDimensions", CONV_MATH_FUNC, API_RAND)),
     ("curandSetStream", ("hiprandSetStream", CONV_MATH_FUNC, API_RAND)),
     ("curand", ("hiprand", CONV_DEVICE_FUNC, API_RAND)),
+    ("curand4", ("hiprand4", CONV_DEVICE_FUNC, API_RAND)),
     ("curand_init", ("hiprand_init", CONV_DEVICE_FUNC, API_RAND)),
     ("curand_log_normal", ("hiprand_log_normal", CONV_DEVICE_FUNC, API_RAND)),
     ("curand_log_normal_double", ("hiprand_log_normal_double", CONV_DEVICE_FUNC, API_RAND)),

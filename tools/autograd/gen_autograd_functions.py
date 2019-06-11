@@ -138,6 +138,7 @@ def process_function(func):
 
     def save_arg(arg, is_output):
         name = arg['name']
+
         if arg['type'] == 'Tensor' or (arg['type'] == 'Scalar' and is_output):
             saved_variables.append('SavedVariable {}_;'.format(name))
             release_variables.append('{}_.reset_data();'.format(name))

@@ -69,6 +69,7 @@ class TestModels(TestCase):
         self.exportTest(toC(SRResNet(rescale_factor=4, n_filters=64, n_blocks=8)), toC(x))
 
     @skipIfNoLapack
+    @unittest.skip("This model is broken, see https://github.com/pytorch/pytorch/issues/18429")
     def test_super_resolution(self):
         x = Variable(
             torch.randn(BATCH_SIZE, 1, 224, 224).fill_(1.0)

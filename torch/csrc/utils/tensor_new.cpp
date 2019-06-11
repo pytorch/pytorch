@@ -124,8 +124,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     return ScalarType::Long;
   }
   if (PyBool_Check(obj)) {
-    // TODO: infer Bool when we have Bool ScalarType
-    return ScalarType::Byte;
+    return ScalarType::Bool;
   }
   if (THPVariable_Check(obj)) {
     auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
@@ -205,7 +204,7 @@ Tensor internal_new_from_data(
   }
 
   if (THPVariable_Check(data)) {
-    AT_CHECK(!pin_memory, "Can't pin tensor constructed from a variable");
+    TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from a variable");
     auto var = reinterpret_cast<THPVariable*>(data)->cdata;
     if (copy_variables) {
       var = var.detach();
@@ -220,8 +219,18 @@ Tensor internal_new_from_data(
   }
 
 #ifdef USE_NUMPY
+  if (PyObject_HasAttrString(data, "__cuda_array_interface__")) {
+    TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from __cuda_array_interface__");
+    auto tensor = autograd::make_variable(tensor_from_cuda_array_interface(data), /*requires_grad=*/false);
+    const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
+    auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
+    AutoNoGIL no_gil;
+    maybe_initialize_cuda(device);
+    return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
+  }
+
   if (PyArray_Check(data)) {
-    AT_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
+    TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
@@ -264,7 +273,7 @@ Tensor legacy_new_from_sequence(
 
 void check_legacy_ctor_device(const Type& type, c10::optional<Device> device) {
   if (device.has_value()) {
-    AT_CHECK(type.device_type() == device.value().type(),
+    TORCH_CHECK(type.device_type() == device.value().type(),
              "legacy constructor for device type: ", type.device_type(),
              " was passed device type: ", device.value().type(),
              ", but device type must be: ", type.device_type());
@@ -467,7 +476,7 @@ Tensor indexing_tensor_from_data(
   // Specific to tensor indexing, converts an indexing list to an
   // indexing tensor (type Byte or Long)
   ScalarType inferred_scalar_type = infer_scalar_type(data);
-  if (inferred_scalar_type == ScalarType::Byte) {
+  if (inferred_scalar_type == ScalarType::Byte || inferred_scalar_type == ScalarType::Bool) {
     auto& idx_type = type.toScalarType(inferred_scalar_type);
     return internal_new_from_data(idx_type, inferred_scalar_type, std::move(device), data, false, false, false);
   } else {
