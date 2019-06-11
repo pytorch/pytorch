@@ -1,3 +1,4 @@
+import sys
 import tempfile
 import unittest
 
@@ -28,9 +29,7 @@ NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 
 class ProcessGroupShareTensorTest(TestCase):
 
-    @property
-    def world_size(self):
-        return 2
+    world_size = 2
 
     @classmethod
     def opts(cls, threads=2):
@@ -51,42 +50,37 @@ class ProcessGroupShareTensorTest(TestCase):
         store = c10d.FileStore(filename, world_size)
         return c10d.ProcessGroupNCCL(store, rank, world_size)
 
-    @classmethod
-    def assert_equal(cls, expected, value):
-        assert (expected == value).all().item() == 1, (
-            "Expecting tensor value {} but got {}."
-        ).format(expected, value)
-
     def _test_multiprocess(self, f, shared_tensors, init_pg, n_output):
         ws = self.world_size
-        with tempfile.NamedTemporaryFile(delete=False) as file:
-            ctx = mp.get_context('spawn')
-            c2p = ctx.Queue(2)
-            p2c = ctx.Queue(2)
-            ps = []
-            for i in range(ws):
-                p = ctx.Process(
-                    target=f,
-                    args=(i, file.name, shared_tensors, ws, init_pg, c2p, p2c))
+        # file store will delete the test file on destruction
+        file = tempfile.NamedTemporaryFile(delete=False)
+        ctx = mp.get_context('spawn')
+        c2p = ctx.Queue(2)
+        p2c = ctx.Queue(2)
+        ps = []
+        for i in range(ws):
+            p = ctx.Process(
+                target=f,
+                args=(i, file.name, shared_tensors, ws, init_pg, c2p, p2c))
 
-                p.start()
-                ps.append(p)
+            p.start()
+            ps.append(p)
 
-            for _ in range(ws * n_output):
-                pid, expected, result = c2p.get()
-                self.assertEqual(
-                    expected,
-                    result,
-                    (
-                        "Expect rank {} to broadcast result {} but got {}."
-                    ).format(pid, expected, result)
-                )
+        for _ in range(ws * n_output):
+            pid, expected, result = c2p.get()
+            self.assertEqual(
+                expected,
+                result,
+                (
+                    "Expect rank {} to broadcast result {} but got {}."
+                ).format(pid, expected, result)
+            )
 
-            for _ in range(ws):
-                p2c.put(0)
+        for _ in range(ws):
+            p2c.put(0)
 
-            for p in ps:
-                p.join(2)
+        for p in ps:
+            p.join(2)
 
     # Why classmethod? multiprocessing cannot pickle TestCase subclass when in
     # spawn mode. See https://bugs.python.org/issue33884.

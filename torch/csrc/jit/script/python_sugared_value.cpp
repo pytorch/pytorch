@@ -252,16 +252,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // it adds a buffer 'training' to the model if one doesn't exist
   // and then loads that parameter, casting it to bool
   if (field == "training") {
-    Slot* v = module_->find_buffer(field);
+    Slot* v = module_->find_attribute(field);
     if (!v) {
       bool training = py::cast<bool>(py::getattr(py_module_, "training"));
-      auto t =
-          autograd::make_variable(at::full({}, training ? 1 : 0, at::kLong));
-      module_->register_buffer("training", std::move(t));
-      v = module_->find_buffer(field);
+      module_->register_attribute(
+          "training", BoolType::get(), std::move(training));
+      v = module_->find_attribute(field);
     }
-    Value* the_tensor = m.graph()->insertGetAttr(self_, "training");
-    Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
+    Value* the_bool = m.graph()->insertGetAttr(self_, "training");
     return std::make_shared<SimpleValue>(the_bool);
   }
 
@@ -277,7 +275,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // This can also be a call to a non-script module, or a plain
   // python method. If so return this as a python value.
-
   py::object overloads =
       py_module_.attr("_overloads").attr("get")(field, py::none());
   if (!overloads.is_none()) {
@@ -320,7 +317,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
               .attr("_make_strong_submodule")(field, attr, py_module_);
       if (!result.is_none()) {
         auto submodule = as_module(result);
-        AT_CHECK(
+        TORCH_CHECK(
             submodule,
             "Result of torch.jit._make_strong_submodule "
             "was not a ScriptModule");
@@ -329,7 +326,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         module_->register_module(field, submodule);
         auto v = module_->find_module(field);
         return std::make_shared<ModuleValue>(
-            m.graph()->insertGetAttr(self_, field), v, attr);
+            m.graph()->insertGetAttr(self_, field), v, result);
       }
     } else if (py::isinstance<py::function>(attr)) {
       auto stub = py::module::import("torch.jit")
