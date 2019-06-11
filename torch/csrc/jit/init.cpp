@@ -572,13 +572,8 @@ void initJITBindings(PyObject* module) {
     try {
       auto _stdout = py::module::import("sys").attr("stdout");
       _stdout.attr("write")(str);
-    } catch (pybind11::error_already_set e) {
-      TORCH_WARN(
-          "Exception occured when printing to Python stdout: ",
-          e.what(),
-          ". Falling back to C++ stdout."
-          " Please report a bug to PyTorch");
-      std::cout << str << std::endl;
+    } catch (py::error_already_set& e) {
+      throw std::runtime_error(e.what());
     }
   });
 }
