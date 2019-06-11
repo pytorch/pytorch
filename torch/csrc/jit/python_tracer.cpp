@@ -79,7 +79,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
           "captured in traces, so it would be a no-op.");
     }
     tracer::exit({toIValue(out)});
-    if (true || !script::getFirstClassMode()) {
+    if (!script::getFirstClassMode()) {
       Inline(*graph);
     }
     LowerSimpleTuples(graph);

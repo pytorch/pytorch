@@ -10097,9 +10097,6 @@ a")
             def traced_fn(x):
                 return sm(x) + 1.0
 
-            # parameter turns into constant and loop is perserved
-            FileCheck().check("prim::Constant[value=<Tensor>]").check("Loop") \
-                .run(str(traced_fn.graph))
 
     def test_call_python_fn_from_traced_module(self):
         def python_fn(x):
