@@ -408,27 +408,6 @@ THC_API void THNN_(IndexLinear_updateParameters)(
                   accreal weightDecay,
                   accreal learningRate);
 
-THC_API void THNN_(SpatialAveragePooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  bool ceil_mode,
-                  bool count_include_pad);
-
-THC_API void THNN_(SpatialAveragePooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  bool ceil_mode,
-                  bool count_include_pad);
-
 THC_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
