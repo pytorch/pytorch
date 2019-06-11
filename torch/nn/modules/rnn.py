@@ -122,8 +122,8 @@ class RNNBase(Module):
                     self.input_size, rnn.get_cudnn_mode(self.mode), self.hidden_size, self.num_layers,
                     self.batch_first, bool(self.bidirectional))
 
-    def _apply(self, fn):
-        ret = super(RNNBase, self)._apply(fn)
+    def _apply(self, fn, force_move_params_cpu_cuda=False):
+        ret = super(RNNBase, self)._apply(fn, force_move_params_cpu_cuda)
         self.flatten_parameters()
         return ret
 
