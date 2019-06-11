@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
 namespace jit {
@@ -228,18 +229,36 @@ struct FunctionValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    return std::make_shared<SimpleValue>(
-        callee_->emit_call(*f.graph(), loc, inputs, attributes));
+    callee_->ensure_defined();
+    MatchedSchema match =
+        matchSchema(callee_->getSchema(), loc, *f.graph(), inputs, attributes);
+    Value* output = f.graph()->insertFunctionCall(callee_, match);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
   }
 
  private:
   std::shared_ptr<Function> callee_;
 };
 
+struct TORCH_API ClosureValue : public SugaredValue {
+  ClosureValue(Value* value) : value_(value) {
+    TORCH_INTERNAL_ASSERT(value_->node()->kind() == prim::Function);
+  }
+  std::string kind() const override {
+    return "closure";
+  }
+  Value* asValue(const SourceRange& range, Function& m) override {
+    return value_;
+  }
+  Value* value_;
+};
+
 // defines how a method obtained from a module behaves in script
 struct MethodValue : public SugaredValue {
-  MethodValue(NamedValue self, std::shared_ptr<Function> method)
-      : self_(std::move(self)), method_(std::move(method)) {}
+  MethodValue(Value* self, std::string method_name)
+      : self_(std::move(self)), method_name_(std::move(method_name)) {}
+
   std::string kind() const override {
     return "method";
   }
@@ -250,16 +269,21 @@ struct MethodValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    std::vector<NamedValue> inputsWithSelf;
-    inputsWithSelf.emplace_back(loc, self_.value(*f.graph()));
+    std::vector<NamedValue> inputsWithSelf = {self_};
     inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
-    return FunctionValue(method_).call(
-        loc, f, inputsWithSelf, attributes, n_binders);
+    auto method = self_->type()->expect<ClassType>()->getMethod(method_name_);
+    TORCH_INTERNAL_ASSERT(method);
+    method->ensure_defined();
+    MatchedSchema match = matchSchema(
+        method->getSchema(), loc, *f.graph(), inputsWithSelf, attributes);
+    Value* output = f.graph()->insertMethodCall(method_name_, match);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
   }
 
  private:
-  NamedValue self_;
-  std::shared_ptr<Function> method_;
+  Value* self_;
+  std::string method_name_;
 };
 
 struct TORCH_API PrintValue : public SugaredValue {
@@ -318,19 +342,17 @@ struct TORCH_API MagicMethod : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    if (inputs.size() > 0 && attributes.size() == 0) {
-      auto class_ptr = inputs[0].value(*m.graph())->type()->cast<ClassType>();
-      if (class_ptr) {
-        if (auto method = class_ptr->getMethod(desugared_name_)) {
-          return std::make_shared<SimpleValue>(
-              method->emit_call(*m.graph(), loc, inputs, attributes));
-        } else {
-          ErrorReport e(loc);
-          e << "Cannot call " << desugared_name_ << " on "
-            << class_ptr->python_str() << " because it does not "
-            << " define a " << desugared_name_ << " method";
-          throw e;
+    if (inputs.size() > 0) {
+      Value* self = inputs[0].value(*m.graph());
+
+      if (auto class_ptr = self->type()->cast<ClassType>()) {
+        if (!class_ptr->getMethod(desugared_name_)) {
+          throw ErrorReport(loc)
+              << class_ptr->python_str() << " does not define a "
+              << desugared_name_ << " method";
         }
+        return MethodValue(self, desugared_name_)
+            .call(loc, m, inputs.slice(1), attributes, n_binders);
       }
     }
     return base_value_->call(loc, m, inputs, attributes, n_binders);
@@ -356,6 +378,13 @@ struct TORCH_API AnnotateValue : public SugaredValue {
   AnnotateValue() = default;
   std::string kind() const override {
     return "annotate";
+  }
+};
+
+struct TORCH_API UninitializedValue : public SugaredValue {
+  UninitializedValue() = default;
+  std::string kind() const override {
+    return "uninitialized";
   }
 };
 

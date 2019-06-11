@@ -201,11 +201,11 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
 }
 
 SourceRange Node::sourceRange() const {
- if(source_range_) {
-   return *source_range_;
- }
- std::stringstream ss;
- return SourceRange(ss.str());
+  if (source_range_) {
+    return *source_range_;
+  }
+  std::stringstream ss;
+  return SourceRange(ss.str());
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
@@ -218,7 +218,8 @@ static std::ostream& indent(std::ostream& out, size_t level) {
 std::ostream& Node::print(
     std::ostream& out,
     size_t level,
-    std::vector<const Node*>* groups) const {
+    std::vector<const Node*>* groups,
+    bool print_source_locations) const {
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
@@ -235,7 +236,6 @@ std::ostream& Node::print(
 
       groups->push_back(this);
     } else {
-
       out << kind().toQualString();
       if (hasAttributes()) {
         printAttributes(out);
@@ -245,12 +245,23 @@ std::ostream& Node::print(
 
   out << "(" << inputs() << ")";
   std::string scName = scopeName();
-  if (scName.empty()) {
-    out << "\n";
-  } else {
+  if (!scName.empty()) {
     out << ", ";
-    out << "scope: " << scName << "\n";
+    out << "scope: " << scName;
   }
+
+  // In debug print, append file:line:col as a comment after each node
+  if (print_source_locations && source_range_ &&
+      source_range_->source()->filename()) {
+    const auto& range = sourceRange();
+    const auto& source = range.source();
+    auto lineno = source->lineno_for_offset(range.start());
+    auto col_offset = (int)range.start() - (int)source->offset_for_line(lineno);
+    out << " # " << source->filename().value() << ":"
+        << source->lineno_to_source_lineno(lineno) << ":" << col_offset;
+  }
+
+  out << "\n";
 
   for (size_t i = 0; i < blocks().size(); ++i) {
     auto b = blocks()[i];
@@ -270,14 +281,15 @@ std::ostream& operator<<(std::ostream& out, const Node& n) {
   return n.print(out, 0, nullptr);
 }
 
-std::ostream& operator<<(std::ostream& out, const Graph& g) {
-  out << "graph(" << const_value_list_with_types(g.inputs(), ",\n      ")
+std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
+    const {
+  out << "graph(" << const_value_list_with_types(inputs(), ",\n      ")
       << "):\n";
   std::vector<const Node*> groups;
-  for (auto n : g.nodes()) {
-    n->print(out, 1, &groups);
+  for (auto n : nodes()) {
+    n->print(out, 1, &groups, print_source_locations);
   }
-  out << "  return (" << g.outputs() << ")\n";
+  out << "  return (" << outputs() << ")\n";
   size_t i = 0;
   for (auto fg : groups) {
     out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
@@ -288,12 +300,16 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
   {
     out << "\n";
     out << "all_nodes:\n";
-    for (auto& n : g.all_nodes) {
+    for (auto& n : all_nodes) {
       printNode(out, const_cast<Node*>(n), nullptr);
     }
   }
   */
   return out;
+}
+
+std::ostream& operator<<(std::ostream& out, const Graph& g) {
+  return g.print(out, true);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -875,6 +891,7 @@ bool Node::hasSideEffects() const {
     case prim::AddStatValue:
     case prim::TimePoint:
     case prim::CallFunction:
+    case prim::CallMethod:
       return true;
   }
   // All other builtin ops are known to be safe.
@@ -1231,8 +1248,7 @@ void Node::removeFromList() {
 }
 
 inline const SourceRange& fakeRange() {
-  static SourceRange range(
-      std::make_shared<std::string>("<internally-created-node>"), 0, 1);
+  static SourceRange range(std::make_shared<Source>(""), 0, 1);
   return range;
 }
 
@@ -1278,6 +1294,12 @@ Node* Graph::createAutogradZero() {
 Node* Graph::createNone(TypePtr typ) {
   Node* n = create(prim::Constant);
   n->output()->setType(OptionalType::create(std::move(typ)));
+  return n;
+}
+
+Node* Graph::createUninitialized(TypePtr typ) {
+  Node* n = create(prim::Uninitialized);
+  n->output()->setType(std::move(typ));
   return n;
 }
 
@@ -1413,6 +1435,43 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
   return n;
 }
 
+Node* Graph::createStore(const std::string& name, Value* v) {
+  auto n = create(prim::Store, {v}, /*num_outputs*/ 0);
+  n->s_(attr::name, name);
+  return n;
+}
+
+Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
+  auto n = create(prim::Load, {}, /*num_outputs*/ 1);
+  n->s_(attr::name, name);
+  n->output()->setType(type);
+  return n;
+}
+
+Value* Graph::insertFunctionCall(
+    std::shared_ptr<Function> callee,
+    script::MatchedSchema& matched) {
+  Value* fn_constant = insertNode(create(prim::Constant))
+                           ->output()
+                           ->setType(FunctionType::create(std::move(callee)));
+  std::vector<Value*> inputs = {fn_constant};
+  inputs.insert(inputs.end(), matched.inputs.begin(), matched.inputs.end());
+  Value* result = insertNode(create(prim::CallFunction, inputs))
+                      ->output()
+                      ->setType(matched.return_types.at(0));
+  return result;
+}
+
+Value* Graph::insertMethodCall(
+    std::string method_name,
+    script::MatchedSchema& matched) {
+  Value* result = insertNode(create(prim::CallMethod, matched.inputs))
+                      ->s_(attr::name, std::move(method_name))
+                      ->output()
+                      ->setType(matched.return_types.at(0));
+  return result;
+}
+
 Node* Graph::createClone(
     Node* n,
     const std::function<Value*(Value*)>& value_map,
@@ -1443,9 +1502,9 @@ Value* Graph::insertConstant(
       *this, std::move(val), result_type, std::move(loc), std::move(scope));
 }
 
-std::string Graph::toString() const {
+std::string Graph::toString(bool print_source_locations) const {
   std::ostringstream oss;
-  oss << *this;
+  print(oss, print_source_locations);
   return oss.str();
 }
 

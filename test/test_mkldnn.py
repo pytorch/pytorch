@@ -45,7 +45,7 @@ class TestMkldnn(TestCase):
             with self.assertRaises(RuntimeError) as context:
                 torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cuda')).to_mkldnn()
         # some factory functions
-        for creator in [torch.empty, torch.ones, torch.zeros, torch.randn, torch.rand]:
+        for creator in [torch.ones, torch.zeros, torch.randn, torch.rand]:
             with self.assertRaises(RuntimeError) as context:
                 creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
 
@@ -126,16 +126,21 @@ class TestMkldnn(TestCase):
     def test_max_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 10, (1,)).item()
-        x = torch.randn(N, C, 64, 64, dtype=torch.float32) * 10
 
-        max_pool2d = torch.nn.MaxPool2d(
-            kernel_size=3,
-            stride=2,
-            padding=1)
+        for stride in [1, 2, 3]:
+            for H, W in [(64, 64), (35, 39), (16, 19), [7, 8]]:
+                x = torch.randn(N, C, H, W, dtype=torch.float32) * 10
 
-        self.assertEqual(
-            max_pool2d(x),
-            max_pool2d(x.to_mkldnn()).to_dense())
+                for ceil_mode in [False, True]:
+                    max_pool2d = torch.nn.MaxPool2d(
+                        kernel_size=3 if not ceil_mode else 7,
+                        stride=stride,
+                        padding=1,
+                        ceil_mode=ceil_mode)
+
+                    self.assertEqual(
+                        max_pool2d(x),
+                        max_pool2d(x.to_mkldnn()).to_dense())
 
     def test_avg_pool2d(self):
         N = torch.randint(3, 10, (1,)).item()
@@ -255,6 +260,14 @@ class TestMkldnn(TestCase):
             self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
             self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
+    def test_softmax(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
+        for dim in range(x.ndim):
+            softmax = torch.nn.Softmax(dim=dim)
+            self.assertEqual(
+                softmax(x),
+                softmax(x.to_mkldnn()).to_dense())
+
     def test_sigmoid(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10
         mkldnn_x = x.to_mkldnn()
@@ -289,6 +302,11 @@ class TestMkldnn(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'different types of TensorImpl'):
             x.data = x_mkldnn
 
+    def test_empty(self):
+        x1 = torch.empty(4, 5, 2, 3, dtype=torch.float32)
+        x2 = torch.empty(4, 5, 2, 3, dtype=torch.float32, layout=torch._mkldnn)
+        self.assertEqual(x1.size(), x2.to_dense().size())
+        self.assertEqual(x1.dtype, x2.to_dense().dtype)
 
 if __name__ == '__main__':
     run_tests()

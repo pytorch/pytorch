@@ -72,8 +72,8 @@ class SchemaRegistrationHandleRAII;
 class CAFFE2_API Dispatcher final {
 private:
   struct OperatorDef final {
-    explicit OperatorDef(FunctionSchema&& schema)
-    : op(std::move(schema)), refcount(0) {}
+    explicit OperatorDef(FunctionSchema&& schema, OperatorOptions&& options)
+    : op(std::move(schema), std::move(options)), refcount(0) {}
 
     impl::OperatorEntry op;
     size_t refcount;
@@ -100,7 +100,7 @@ public:
    *         object that manages the lifetime of the registration. Once that
    *         object is destructed, the kernel will be deregistered.
    */
-  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema);
+  SchemaRegistrationHandleRAII registerSchema(FunctionSchema schema, OperatorOptions options);
 
   /**
    * Looks for an operator schema with the given name and overload name
@@ -144,7 +144,7 @@ public:
 private:
   Dispatcher();
 
-  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
+  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
 
   void deregisterSchema_(const OperatorHandle& op);
 
@@ -167,6 +167,10 @@ public:
 
   const FunctionSchema& schema() const {
     return operatorIterator_->op.schema();
+  }
+
+  const OperatorOptions& options() const {
+    return operatorIterator_->op.options();
   }
 
 private:

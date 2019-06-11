@@ -5,6 +5,10 @@
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensor.h>
+#endif
+
 
 namespace at {
 
@@ -434,6 +438,9 @@ inline Tensor Tensor::narrow(int64_t dim, int64_t start, int64_t length) const {
 inline Tensor Tensor::permute(IntArrayRef dims) const {
     return dispatch_type().permute(*this, dims);
 }
+inline Tensor Tensor::numpy_T() const {
+    return dispatch_type().numpy_T(*this);
+}
 inline Tensor Tensor::pin_memory() const {
     return dispatch_type().pin_memory(*this);
 }
@@ -758,9 +765,6 @@ inline Tensor Tensor::to_sparse() const {
 inline Tensor Tensor::to_mkldnn() const {
     return dispatch_type().to_mkldnn(*this);
 }
-inline Tensor Tensor::quantize_linear(double scale, int64_t zero_point, ScalarType dtype) const {
-    return dispatch_type().quantize_linear(*this, scale, zero_point, dtype);
-}
 inline Tensor Tensor::dequantize() const {
     return dispatch_type().dequantize(*this);
 }
@@ -787,9 +791,6 @@ inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) con
 }
 inline Scalar Tensor::item() const {
     return dispatch_type().item(*this);
-}
-inline void* Tensor::data_ptr() const {
-    return dispatch_type().data_ptr(*this);
 }
 inline Tensor & Tensor::set_(Storage source) {
     return dispatch_type().set_(*this, source);
@@ -1115,6 +1116,9 @@ inline Tensor Tensor::masked_select(const Tensor & mask) const {
 inline Tensor Tensor::nonzero() const {
     return dispatch_type().nonzero(*this);
 }
+inline std::vector<Tensor> Tensor::nonzero_numpy() const {
+    return dispatch_type().nonzero_numpy(*this);
+}
 inline Tensor Tensor::gather(int64_t dim, const Tensor & index, bool sparse_grad) const {
     return dispatch_type().gather(*this, dim, index, sparse_grad);
 }
@@ -1289,6 +1293,17 @@ inline bool Tensor::is_cuda() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_cuda();
 }
+
+#ifdef NAMEDTENSOR_ENABLED
+inline NamedTensorMeta* Tensor::get_named_tensor_meta() const {
+  return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+}
+
+inline bool Tensor::is_named() const {
+  auto* named_tensor_meta = get_named_tensor_meta();
+  return named_tensor_meta != nullptr && named_tensor_meta->has_names();
+}
+#endif
 
 inline bool is_cuda(Tensor self) {
   return self.is_cuda();

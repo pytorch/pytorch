@@ -478,6 +478,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return false;
   }
 
+  virtual void CancelAsyncCallback() {}
+
   // RunAsync, if implemenented by the specific operators, will schedule the
   // computation on the corresponding context and record the event in its
   // event_ member object. If the specific operator does not support RunAsync,
@@ -1318,6 +1320,13 @@ C10_DECLARE_REGISTRY(
   C10_MACRO_EXPAND(REGISTER_CPU_OPERATOR(__VA_ARGS__))
 #endif
 
+#ifdef CAFFE2_NO_GRADIENT_OPS
+#define REGISTER_CPU_GRADIENT_OPERATOR_WITH_ENGINE(...) /* No gradients. */
+#else
+#define REGISTER_CPU_GRADIENT_OPERATOR_WITH_ENGINE(...) \
+  C10_MACRO_EXPAND(REGISTER_CPU_OPERATOR_WITH_ENGINE(__VA_ARGS__))
+#endif
+
 C10_DECLARE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
@@ -1501,7 +1510,7 @@ class ExternalTensorFunctionsBase {
       const Blob* blob,
       std::vector<std::vector<uint64_t>>* shapes,
       std::vector<std::vector<float>>* all_scales,
-      std::vector<std::vector<float>>* all_offsets,
+      std::vector<std::vector<int32_t>>* all_offsets,
       ExternalTensorDescriptor* desc) = 0;
   virtual void LoadInfoOfBlob(
       const Blob* blob,

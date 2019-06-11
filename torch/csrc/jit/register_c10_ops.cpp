@@ -8,9 +8,6 @@ namespace jit {
 namespace {
 
 at::Tensor unwrap_tensor(at::Tensor&& tensor) {
-  if (tensor.requires_grad()) {
-    throw std::runtime_error("Autograd not yet supported for c10 ops.");
-  }
   if (tensor.is_variable()) {
     return torch::autograd::Variable(std::move(tensor)).tensor_data();
   } else {
@@ -76,7 +73,7 @@ IValue wrap(IValue&& ivalue) {
 // TODO This currently only handles tensors with requires_grad==False correctly.
 //      It should also handle autograd.
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
-  return Operator(op.schema(), [op](Stack& stack) {
+  return Operator(op, [op](Stack& stack) {
       RECORD_FUNCTION(op.schema().name(), stack);
 
       const auto input_size = op.schema().arguments().size();
