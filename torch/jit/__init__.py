@@ -1696,6 +1696,10 @@ def _convert_to_script_module(mod, methods=None):
         # Create constant versions for the iterable modules
         return _create_constant_iterable_module(mod)
 
+    if not hasattr(mod, '_parameters'):
+        raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
+            .format(type(mod).__name__))
+
     if methods is None:
         methods = ('forward',)
     exported = []
