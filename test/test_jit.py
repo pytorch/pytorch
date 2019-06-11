@@ -3229,6 +3229,35 @@ def foo(x):
         self.checkScript(annotate_none, ())
         self.checkScript(annotate_none_no_optional, ())
 
+    @unittest.skipIf(PY2, "Python 3 required")
+    def test_type_annotate_py3(self):
+        code = dedent("""
+        import torch
+        def fn():
+            a : List[int] = []
+            b : torch.Tensor = torch.ones(2, 2)
+            for _ in range(10):
+                a.append(4)
+            return a, b
+        """)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            script_path = os.path.join(tmp_dir, 'script.py')
+            with open(script_path, 'w') as f:
+                f.write(code)
+            fn = get_fn('test_type_annotate_py3', script_path)
+
+            self.checkScript(fn, ())
+
+        code = dedent("""
+        def wrong_type():
+            wrong : List[int] = [0.5]
+            return wrong
+        """)
+
+        with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
+            cu = torch.jit.CompilationUnit(code)
+
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
 
