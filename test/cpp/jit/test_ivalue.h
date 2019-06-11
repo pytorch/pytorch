@@ -40,6 +40,7 @@ void testIValue() {
   ASSERT_TRUE(dlist.isDoubleList());
   ASSERT_TRUE(dlist.toDoubleListRef()
                   .equals({3.5}));
+  std::move(dlist).toDoubleList();
   ASSERT_TRUE(dlist.isNone());
   dlist = IValue(c10::make_list<double>({3.4}));
   ASSERT_TRUE(dlist.toDoubleListRef().equals({3.4}));

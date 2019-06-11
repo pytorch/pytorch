@@ -155,7 +155,7 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
       case ENTER_TUPLE: {
         // consume tuple
         const IValue* iv = stack[stack_top]++;
-        AT_ASSERT(iv->isTuple());
+        AT_ASSERT(iv->isTuple(), "Expected Tuple but got ", iv->tagKind());
         // see [argspec refcounting]
         auto p = *reinterpret_cast<const at::ivalue::TuplePtr* const*>(iv);
         auto tup_ptr = c10::impl::ptr_to_first_element(p->elements());
@@ -165,7 +165,7 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
       case ENTER_OBJECT: {
         // consume object
         const IValue* iv = stack[stack_top]++;
-        AT_ASSERT(iv->isObject());
+        AT_ASSERT(iv->isObject(), "Expected Object but got ", iv->tagKind());
         // see [argspec refcounting]
         auto p = *reinterpret_cast<const at::ivalue::Object* const*>(iv);
         auto obj_ptr = &p->slots()[0];

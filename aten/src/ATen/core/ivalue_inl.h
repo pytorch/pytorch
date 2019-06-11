@@ -597,9 +597,12 @@ inline IValue::IValue(std::vector<IValue> v)
 : IValue(c10::impl::toList(std::move(v))) {}
 
 template<class T> inline IValue::IValue(c10::ListPtr<T> v)
-: IValue(impl::toGenericList<T>(std::move(v))) {}
+: IValue(impl::toGenericList<T>(std::move(v))) {
+  static_assert(std::is_same<IValue, typename c10::ListPtr<T>::StorageT>::value, "Can only use this constructor for generic list types");
+}
 template<class T> inline IValue::IValue(std::vector<T> v)
 : IValue(impl::make_generic_list()) {
+  static_assert(std::is_same<IValue, typename c10::ListPtr<T>::StorageT>::value, "Can only use this constructor for generic list types");
   auto list = to<c10::ListPtr<T>>();
   list.reserve(v.size());
   for (auto& e : v) {
