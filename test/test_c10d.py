@@ -2496,6 +2496,16 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
+        # need to create a separate file for the recovered FileStore, because
+        # the original one will be deleted when destructing the first FileStore.
+        recovery_filename = self.file.name + "_recovery"
+
+        if self.rank == 0:
+            # the file will be deleted by the recovered FileStore
+            open(recovery_filename, "w").close()
+
+        # not necessary to run barrier here, as DDP will synchronize
+
         class TestModel(nn.Module):
             def __init__(self):
                 super(TestModel, self).__init__()
@@ -2528,9 +2538,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         del ddp
         del process_group
-        del store
+        del store # this will delete self.file
 
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(recovery_filename, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         ddp = DistributedDataParallel(
             model,
@@ -2540,7 +2550,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         input = torch.rand([batch_size, 2], dtype=torch.float)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
-        for i in range(6):
+        for _ in range(6):
             output = ddp(input)
             loss = criterion(output, target)
             loss.backward()
