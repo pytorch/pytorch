@@ -4,7 +4,7 @@
 namespace at {
 namespace internal {
 // This parameter is heuristically chosen to determine the minimum number of
-// work that warrants paralellism. For example, when summing an array, it is
+// work that warrants parallelism. For example, when summing an array, it is
 // deemed inefficient to parallelise over arrays shorter than 32768. Further,
 // no parallel algorithm (such as parallel_reduce) should split work into
 // smaller than GRAIN_SIZE chunks.
