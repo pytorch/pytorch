@@ -4677,14 +4677,14 @@
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool2d_forward_out
+    CPU: avg_pool2d_out_cpu
     CUDA: legacy::cuda::_thnn_avg_pool2d_forward_out
     MkldnnCPU: mkldnn_avg_pool2d_out
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool2d_forward
+    CPU: avg_pool2d_cpu
     CUDA: legacy::cuda::_thnn_avg_pool2d_forward
     MkldnnCPU: mkldnn_avg_pool2d
 
