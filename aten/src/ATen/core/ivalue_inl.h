@@ -352,6 +352,11 @@ using _guarded_unsigned_long = c10::guts::conditional_t<
 
 } // namespace detail
 
+inline const ivalue::Object& IValue::toObjectRef() const {
+  AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
+  return *static_cast<const c10::ivalue::Object*>(payload.as_intrusive_ptr);
+}
+
 // note: when adding a DEFINE_TO case here you should also add a
 // toX method to IValue. These named methods are much more discoverable
 // than the to templated function.

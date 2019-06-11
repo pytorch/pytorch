@@ -276,6 +276,7 @@ struct CAFFE2_API IValue final {
   bool isObject() const { return tag == Tag::Object; }
   c10::intrusive_ptr<ivalue::Object> toObject() &&;
   c10::intrusive_ptr<ivalue::Object> toObject() const & ;
+  const ivalue::Object& toObjectRef() const;
 
   // None
   bool isNone() const {

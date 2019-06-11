@@ -156,9 +156,7 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
         // consume tuple
         const IValue* iv = stack[stack_top]++;
         AT_ASSERT(iv->isTuple(), "Expected Tuple but got ", iv->tagKind());
-        // see [argspec refcounting]
-        auto p = *reinterpret_cast<const at::ivalue::TuplePtr* const*>(iv);
-        auto tup_ptr = c10::impl::ptr_to_first_element(p->elements());
+        auto* tup_ptr = &iv->toTupleRef()[0];
         // push list of tuple elements to the stack
         stack[++stack_top] = tup_ptr;
       } break;
@@ -166,9 +164,7 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
         // consume object
         const IValue* iv = stack[stack_top]++;
         AT_ASSERT(iv->isObject(), "Expected Object but got ", iv->tagKind());
-        // see [argspec refcounting]
-        auto p = *reinterpret_cast<const at::ivalue::Object* const*>(iv);
-        auto obj_ptr = &p->slots()[0];
+        auto obj_ptr = &iv->toObjectRef().slots()[0];
         // push list of object elements to the stack
         stack[++stack_top] = obj_ptr;
       } break;
