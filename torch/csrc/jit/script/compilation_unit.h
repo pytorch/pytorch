@@ -1,7 +1,6 @@
 #pragma once
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/function.h>
-#include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/source_range.h>
 

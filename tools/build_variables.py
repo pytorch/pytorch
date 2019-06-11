@@ -53,6 +53,7 @@ libtorch_sources = [
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/attributes.cpp",
     "torch/csrc/jit/argument_spec.cpp",
+    "torch/csrc/jit/compilation_arena.cpp",
     "torch/csrc/jit/constants.cpp",
     "torch/csrc/jit/node_hashing.cpp",
     "torch/csrc/jit/export.cpp",
