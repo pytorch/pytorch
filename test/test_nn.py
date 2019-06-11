@@ -3495,6 +3495,21 @@ class TestNN(NNTestCase):
         test_multihead_attn_no_masking()   # Test MultiheadAttention without masking
         test_multihead_attn_key_padding_mask()  # Test MultiheadAttention with src lengths
 
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_multihead_attention_dtype(self, dtype=torch.float):
+        embed_dim = 128
+        num_heads = 8
+        sl = 10
+        bs = 8
+        model = nn.MultiheadAttention(embed_dim, num_heads).cuda().to(dtype)
+        q = torch.randn(sl, bs, embed_dim, device="cuda", dtype=dtype)
+        k = torch.randn(sl, bs, embed_dim, device="cuda", dtype=dtype)
+        v = torch.randn(sl, bs, embed_dim, device="cuda", dtype=dtype)
+        out = model(q, k, v)
+        self.assertEqual(q.size(), out[0].size())
+        self.assertEqual(dtype, out[0].dtype)
+
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
