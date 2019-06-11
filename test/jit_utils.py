@@ -20,7 +20,6 @@ from contextlib import contextmanager
 from functools import reduce
 from itertools import chain
 import errno
-import fcntl
 import inspect
 import io
 import math
@@ -412,6 +411,7 @@ class JitTestCase(TestCase):
         if IS_WINDOWS:
             yield ['']
             return
+        import fcntl
         sys.stdout.flush()
         stdout_fd = os.dup(1)
         r, w = os.pipe()
