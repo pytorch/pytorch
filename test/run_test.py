@@ -60,7 +60,6 @@ WINDOWS_BLACKLIST = [
 
 ROCM_BLACKLIST = [
     'c10d',
-    'c10d_spawn',
     'cpp_extensions',
     'distributed',
     'multiprocessing',
