@@ -10,13 +10,13 @@ namespace torch {
 namespace jit {
 namespace {
 // QuantizerUtils
-struct param_info_t {
+struct ParamInfo {
   Value* v;
-  Node* n; // Value consumer
-  size_t idx; // Index in input param vector
+  Use consumer;
+  at::Tensor value;
 };
 
-Operator* checkIfNodeQuantizable(Node* n) {
+bool nodeQuantizable(Node* n) {
   TORCH_INTERNAL_ASSERT(n != nullptr);
   // This is map for quantizable nodes. It will be expanded in future to
   // support more ops and patterns.
@@ -27,7 +27,7 @@ stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
       "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] \
 stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, \
 int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor"};
-  return quantnodeLookup.find(n);
+  return quantnodeLookup.find(n) != nullptr;
 }
 
 Value* getScaleValue(Node* n) {
@@ -48,59 +48,56 @@ Node* traverseToQuantNode(Node* dq) {
   return intrepr->inputs()[0]->node();
 }
 
-// Look for index of particular param in op schema
-size_t getParamIndexinOpArgs(Node* n, const std::string& param_name) {
-  TORCH_INTERNAL_ASSERT(n != nullptr);
-  Operator* optr = checkIfNodeQuantizable(n);
-  if (optr == nullptr) {
-    return static_cast<size_t>(-1);
-  }
-  auto& opargs = optr->schema().arguments();
-  for (size_t idx = 0; idx < opargs.size(); idx++) {
-    if (opargs[idx].name() == param_name) {
-      return idx;
+struct ParamValue {
+  Value* definition;
+  IValue value;
+};
+static void gatherParamsFirstClass(script::Module& module, Value* module_value, std::vector<ParamValue>& params) {
+  for(const Use& u : module_value->uses()) {
+    if (u.user->kind() != prim::GetAttr) {
+      continue;
+    }
+    const std::string& field = u.user->s(attr::name);
+    if(const auto& sub = module.find_module(field)) {
+      gatherParamsFirstClass(*sub, u.user->output(), params);
+    } else if(script::Slot* slot = module.find_parameter(field)) {
+      params.emplace_back(ParamValue{u.user->output(), slot->value()});
     }
   }
-  return static_cast<size_t>(-1);
 }
 
-std::vector<param_info_t> getQuantizableParamsofName(
+static void gatherParamsLowered(script::Method& method, std::vector<ParamValue>& params) {
+  auto slot_it = method.initial_ivalues().begin();
+  for(Value* param : method.graph()->inputs().slice(method.num_inputs())) {
+    params.emplace_back(ParamValue{param, slot_it->value()});
+    ++slot_it;
+  }
+}
+
+std::vector<ParamInfo> getQuantizableParamsofName(
     script::Method& method,
     const std::string& param_name) {
-  std::vector<param_info_t> params_to_insert_qdq;
-  auto graph = method.graph();
-  // Parameters input to this method
-  size_t param_input_len = method.initial_ivalues().size();
-  // External inputs to this method
-  size_t ext_input_len = method.num_inputs();
-  std::unordered_map<Node*, size_t> node_paramidx_map;
-
-  for (size_t idx = 0; idx < param_input_len; idx++) {
-    auto& v = graph->inputs()[idx + ext_input_len];
-    if (!v->type()->isSubtypeOf(TensorType::get()) || !v->hasUses()) {
-      continue;
-    }
-    Node* n = v->uses()[0].user;
-
-    // For every param name, we match it against the quantizable op schema and
-    // find its position. if the param is present we store it in vector so
-    // later we can insert quant-dequant nodes. Caching the param index helps
-    // faster lookup for same kind of node visited multiple timees.
-    size_t param_idx;
-    auto it = node_paramidx_map.find(n);
-    if (it != node_paramidx_map.end()) {
-      param_idx = it->second;
-    } else {
-      param_idx = getParamIndexinOpArgs(n, param_name);
-      node_paramidx_map.emplace(n, param_idx);
-    }
-    if (param_idx >= n->inputs().size() || n->inputs()[param_idx] != v) {
-      // Either node does not contain param or this Value
-      // is not of type param_name
-      continue;
-    }
-    params_to_insert_qdq.emplace_back(param_info_t{v, n, idx});
+  std::vector<ParamValue> params;
+  if (script::getFirstClassMode()) {
+    gatherParamsFirstClass(method.owner(), method.graph()->inputs().at(0), params);
+  } else {
+    gatherParamsLowered(method, params);
   }
+  std::vector<ParamInfo> params_to_insert_qdq;
+  for(const ParamValue& pv : params) {
+    if (!pv.definition->type()->isSubtypeOf(TensorType::get())) {
+      continue;
+    }
+    for(const Use& u : pv.definition->uses()) {
+      if (!nodeQuantizable(u.user) ||
+          u.user->schema().arguments().at(u.offset).name() != param_name) {
+        continue;
+      }
+      params_to_insert_qdq.emplace_back(
+          ParamInfo{pv.definition, u, pv.value.toTensor().detach()});
+    }
+  }
+
   return params_to_insert_qdq;
 }
 
@@ -347,7 +344,7 @@ void InsertQuantDequantNodes(
   blocks_to_visit.push(graph->block());
   // For storing quantizable values - node pairs that are external
   // or intermediate inputs to quantizable nodes
-  std::vector<param_info_t> quantInputs;
+  std::vector<Use> quantInputs;
   // For storing quantizable values that are output of quantizable nodes
   // Since same value can go to multiple nodes, we use set so that
   // we insert quant-dequant node pairs for value only once
@@ -386,13 +383,14 @@ void InsertQuantDequantNodes(
 
       // We iterate over node inputs to identify which Values
       // need to be quantized depending on node type
-      for (auto& v : n->inputs()) {
+      for (size_t i = 0; i <  n->inputs().size(); ++i) {
+        Value* v = n->inputs().at(i);
         if (!v->type()->isSubtypeOf(TensorType::get())) {
           // Skip quantization for non tensors
           continue;
         }
 
-        if (checkIfNodeQuantizable(v->node())) {
+        if (nodeQuantizable(v->node())) {
           // Goal of this iteration is to identify the parent node for V
           // that is quantizable and replace all uses of Value with
           // quant-dequant output. Usage of set helps adding single
@@ -404,7 +402,7 @@ void InsertQuantDequantNodes(
             valueLookup.emplace(v);
             quantOutputs.emplace_back(v);
           }
-        } else if (checkIfNodeQuantizable(n)) {
+        } else if (nodeQuantizable(n)) {
           // Goal of this iteration is to identify nodes that are
           // quantizable but input value originate from non quantizable
           // node. This requires selectively inserting q-dq nodes for
@@ -414,7 +412,7 @@ void InsertQuantDequantNodes(
           //           N1 is not quantizable node but N4 and N7 are
           //           quantizable nodes. So we add the (V1, N4) and
           //           (V2, N7) as insertion points for quant-dequant nodes
-          quantInputs.emplace_back(param_info_t{v, n, 0});
+          quantInputs.emplace_back(Use(n, i));
         }
       }
     } // End Loop for nodes within block
@@ -424,7 +422,7 @@ void InsertQuantDequantNodes(
     // node, we push to quantOutputs set
     auto outputVals = b->outputs();
     for (auto& v : outputVals) {
-      if (checkIfNodeQuantizable(v->node()) &&
+      if (nodeQuantizable(v->node()) &&
           v->type()->isSubtypeOf(TensorType::get())) {
         quantOutputs.emplace_back(v);
       }
@@ -455,15 +453,16 @@ void InsertQuantDequantNodes(
   }
 
   // Insert the quant-dequant pair for values inputs to quantizable nodes
-  for (auto& param_info : quantInputs) {
-    if (qparam_value_dict.count(param_info.v) != 0) {
+  for (const Use& u : quantInputs) {
+    Value* v = u.user->inputs().at(u.offset);
+    if (qparam_value_dict.count(v) != 0) {
       Node* dq = addQuantDeQuantNodesFor(
-          param_info.v,
-          param_info.v->node(),
-          qparam_value_dict[param_info.v],
+          v,
+          v->node(),
+          qparam_value_dict[v],
           at::ScalarType::QUInt8);
       TORCH_INTERNAL_ASSERT(dq != nullptr);
-      param_info.n->replaceInputWith(param_info.v, dq->output());
+      u.user->replaceInput(u.offset, dq->output());
     }
   }
 }
@@ -495,14 +494,11 @@ void InsertQuantDequantNodesForParam(
   auto params_to_insert_qdq = getQuantizableParamsofName(method, param_name);
 
   for (auto& param_info : params_to_insert_qdq) {
-    auto& param_slot = method.initial_ivalues()[param_info.idx];
-    const auto& itensor = param_slot.value();
-    at::Tensor tensor_var = itensor.toTensor().detach();
-    auto qparam = getQParamFunc(tensor_var);
+    auto qparam = getQParamFunc(param_info.value);
     Node* dq = addQuantDeQuantNodesFor(
         param_info.v, param_info.v->node()->next(), qparam, t);
     TORCH_INTERNAL_ASSERT(dq != nullptr);
-    param_info.n->replaceInputWith(param_info.v, dq->output());
+    param_info.consumer.user->replaceInput(param_info.consumer.offset, dq->output());
   }
 }
 
@@ -515,20 +511,17 @@ void InsertQuantDequantNodesForParam(
   TORCH_CHECK(getQParamFunc != nullptr);
   auto params_to_insert_qdq = getQuantizableParamsofName(method, param_name);
 
-  for (param_info_t& param_info : params_to_insert_qdq) {
+  for (const ParamInfo& param_info : params_to_insert_qdq) {
     // This getQParamFunc requires scale for weight and activation because for
     // quantized ops that involve matmul with weight and bias(WX+b), input scale
     // for bias is computed from input activation and weight. if weight attr
     // not present we skip inserting q-dq node.
-    Node* n = param_info.n;
-    // Check if this node has weight attr as input
-    size_t param_index = getParamIndexinOpArgs(n, std::string("weight"));
-    if (param_index >= n->inputs().size()) {
-      // No attribute by name weight
+    Node* n = param_info.consumer.user;
+    auto param_index = n->schema().argumentIndexWithName("weight");
+    if (!param_index) {
       continue;
     }
-
-    std::vector<size_t> node_inputs_idx{0, param_index};
+    std::vector<size_t> node_inputs_idx{0, (size_t)*param_index};
     std::array<float, 2> scale_factors = {0, 0};
     bool skip_node = false;
     for (size_t idx = 0; idx < node_inputs_idx.size(); idx++) {
@@ -553,7 +546,7 @@ void InsertQuantDequantNodesForParam(
     Node* dq = addQuantDeQuantNodesFor(
         param_info.v, param_info.v->node()->next(), bias_qparam, t);
     TORCH_INTERNAL_ASSERT(dq != nullptr);
-    param_info.n->replaceInputWith(param_info.v, dq->output());
+    param_info.consumer.user->replaceInput(param_info.consumer.offset, dq->output());
   }
 }
 
