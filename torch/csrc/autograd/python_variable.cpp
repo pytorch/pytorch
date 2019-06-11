@@ -188,9 +188,7 @@ PyObject *THPVariable_bump_version(THPVariable *self)
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
   var.bump_version();
-  auto self_obj = reinterpret_cast<PyObject*>(self);
-  Py_INCREF(self_obj);
-  return self_obj;
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
