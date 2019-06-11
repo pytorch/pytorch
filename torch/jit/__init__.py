@@ -1717,7 +1717,9 @@ def _make_strong(mod):
         stubs = _get_weak_stubs(cls)
         _jit_internal.weak_types[cls]["method_stubs"] = stubs
 
-    return _make_script_module(mod, stubs)
+    proxy = _make_script_module(mod, stubs)
+    _jit_internal.weak_modules[mod] = proxy
+    return proxy
 
 
 def _get_methods(cls):
