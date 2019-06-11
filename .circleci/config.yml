@@ -2557,16 +2557,10 @@ workflows:
       - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build:
           requires:
             - setup
-          filters:
-            branches:
-              only: master
       - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_test:
           requires:
             - setup
             - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build
-          filters:
-            branches:
-              only: master
       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
           requires:
             - setup

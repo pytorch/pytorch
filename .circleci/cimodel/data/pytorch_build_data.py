@@ -44,7 +44,7 @@ CONFIG_TREE_DATA = [
                 X("2.7"),
                 XImportant("3.6"),
                 ("2.7", [
-                    ("namedtensor", [X(True)]),
+                    ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
             ("9.2", [X("3.6")]),
