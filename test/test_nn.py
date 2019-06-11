@@ -1556,31 +1556,41 @@ class TestNN(NNTestCase):
         with self.assertRaises(TypeError):
             net.to(cpu, torch.tensor(3, dtype=torch.long), non_blocking=True)
 
-    def test_module_to_(self):
-        # Test that `module.to_()` doesn't preserve previous references to
-        # `module`'s parameters or gradients.
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_module_to_move_params(self):
+        # Test that `cpu_module.to("cuda", force_move_params_cpu_cuda=True)` doesn't
+        # preserve previous references to `cpu_module`'s parameters or gradients.
         m = nn.Linear(20, 10).float()
         m.weight.grad = torch.randn(10, 20, dtype=torch.float)
         weight_ref = m.weight
         weight_grad_ref = m.weight.grad
-        m.to_(torch.double)
-        self.assertNotEqual(weight_ref.dtype, m.weight.dtype)
-        self.assertNotEqual(weight_grad_ref.dtype, m.weight.grad.dtype)
+        m.to("cuda", force_move_params_cpu_cuda=True)
+        self.assertNotEqual(weight_ref.device, m.weight.device)
+        self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
 
-        # Test that `module.to_()` invalidates `module`'s original parameters
-        # in any autograd graph they participate in.
+        # yf225 TODO: add comment for this
+        m = nn.Linear(20, 10).float()
+        m_view = m.weight[:]
+        m_view_mul = m_view.mul(m_view)
+        m.to("cuda", force_move_params_cpu_cuda=True)
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            m_view_mul.backward(torch.randn(10, 20, dtype=torch.float))
+
+        # Test that `cpu_module.to("cuda", force_move_params_cpu_cuda=True)` invalidates
+        # `cpu_module`'s original parameters in any autograd graph they participate in.
         m = nn.Linear(20, 10).float()
         pvm = m.weight.mul(m.weight)
-        m.to_(torch.double)
+        m.to("cuda", force_move_params_cpu_cuda=True)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pvm.backward(torch.randn(10, 20, dtype=torch.float))
 
-        # Test that `module.to_()` invalidates `module`'s original parameters' gradients
-        # in any autograd graph they participate in.
+        # Test that `cpu_module.to("cuda", force_move_params_cpu_cuda=True)` invalidates
+        # `cpu_module`'s original parameters' gradients in any autograd graph they
+        # participate in.
         m = nn.Linear(20, 10).float()
         m.weight.grad = torch.randn(10, 20, dtype=torch.float).requires_grad_()
         pgm = m.weight.grad.mul(m.weight.grad)
-        m.to_(torch.double)
+        m.to("cuda", force_move_params_cpu_cuda=True)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pgm.backward(torch.randn(10, 20, dtype=torch.float))
 
