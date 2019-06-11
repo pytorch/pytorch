@@ -2,6 +2,9 @@
 set -eux -o pipefail
 export TZ=UTC
 
+echo "Using Pytorch from "
+git --no-pager log --max-count 1
+
 # We need to write an envfile to persist these variables to following
 # steps, but the location of the envfile depends on the circleci executor
 if [[ "$(uname)" == Darwin ]]; then
@@ -46,12 +49,12 @@ if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
     exit 1
   fi
 else
-  export PIP_UPLOAD_FOLDER='nightly/'
+  export PIP_UPLOAD_FOLDER=''
 fi
 
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
-export PYTORCH_BUILD_VERSION="1.2.0.dev$DATE"
+export PYTORCH_BUILD_VERSION="1.1.0"
 export PYTORCH_BUILD_NUMBER=1
 
 cat >>"$envfile" <<EOL
@@ -67,13 +70,11 @@ export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.2.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
-export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
 
-export TORCH_PACKAGE_NAME='torch-nightly'
-export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
+export TORCH_PACKAGE_NAME='torch'
+export TORCH_CONDA_BUILD_FOLDER='pytorch'
 
 export NO_FBGEMM=1
 export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
