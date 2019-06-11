@@ -376,6 +376,7 @@ struct Environment {
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
+          {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"rangelist",
@@ -2113,11 +2114,15 @@ struct to_ir {
     });
   }
 
-  void checkApplyExpr(Apply& apply, SourceRange& loc) {
-    if (apply.inputs().size() != 2) {
-      throw ErrorReport(loc) << Var(apply.callee()).name().name()
-                             << " expected exactly two arguments but found "
-                             << apply.inputs().size();
+  void checkApplyExpr(
+      Apply& apply,
+      SourceRange& loc,
+      size_t expected_inputs = 2) {
+    if (apply.inputs().size() != expected_inputs) {
+      throw ErrorReport(loc)
+          << Var(apply.callee()).name().name() << " expected exactly "
+          << expected_inputs << " arguments but found "
+          << apply.inputs().size();
     }
     if (apply.attributes().size() > 0) {
       throw ErrorReport(loc)
@@ -2173,6 +2178,14 @@ struct to_ir {
       }
       const std::string& name = StringLiteral(selector).text();
       return obj->attr(apply.range(), method, name);
+    } else if (
+        auto uninitialized_value =
+            dynamic_cast<UninitializedValue*>(sv.get())) {
+      checkApplyExpr(apply, loc, 1);
+      TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+      auto out = graph->insertNode(graph->createUninitialized(type))
+                     ->setSourceRange(loc);
+      return std::make_shared<SimpleValue>(out->output());
     } else if (auto isinstance = dynamic_cast<IsInstanceValue*>(sv.get())) {
       // NOTE: for `isinstance` builtin call in JIT, we only check the static
       // types on the inputs to evaluate, and insert the corresponding constant

@@ -5006,6 +5006,19 @@ a")
 
         test_resize_as()
 
+    def test_uninitialized(self):
+        graph_str = """graph():
+          %1 : int = prim::Uninitialized()
+          %2 : int = prim::Constant[value=1]()
+          %3 : int = aten::add(%1, %2)
+          return (%3)
+        """
+        g = parse_ir(graph_str)
+        m = self.createFunctionFromGraph(g)
+        self.getExportImportCopy(m)
+        with self.assertRaisesRegex(RuntimeError, "isInt"):
+            m()
+
     def test_requires_grad_loop(self):
         @torch.jit.script
         def test(x, y, z):
@@ -5736,6 +5749,50 @@ a")
 
         inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
         self.checkScript(func, inputs, optimize=True)
+
+    def test_divmod(self):
+        def func_int(a, b):
+            # type: (int, int) -> Tuple[int, int]
+            return divmod(a, b)
+
+        def func_float(a, b):
+            # type: (float, float) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def func_int_float(a, b):
+            # type: (int, float) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def func_float_int(a, b):
+            # type: (float, int) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def divmod_test_iterator(func, num, den):
+            for i in num:
+                for j in den:
+                    self.checkScript(func, (i, j))
+
+        num_int = [1024, -1024]
+        den_int = [10, -10]
+        num_float = [5.3, -5.3]
+        den_float = [2.0, -2.0]
+        divmod_test_iterator(func_int, num_int, den_int)
+        divmod_test_iterator(func_float, num_float, den_float)
+        divmod_test_iterator(func_int_float, num_int, den_float)
+        divmod_test_iterator(func_float_int, num_float, den_int)
+
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: integer division or modulo by zero"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int)))
+            cu.func_int(1024, 0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float)))
+            cu.func_float(5.3, 0.0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int_float)))
+            cu.func_int_float(1024, 0.0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float_int)))
+            cu.func_float_int(5.3, 0)
 
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):

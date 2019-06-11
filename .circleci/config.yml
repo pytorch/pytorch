@@ -243,6 +243,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
         if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
           export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
+          NAMED_FLAG="export USE_NAMEDTENSOR=1"
         else
           export COMMIT_DOCKER_IMAGE=$output_image
         fi
@@ -254,9 +255,9 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
           export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         fi
         if [ -n "${MULTI_GPU}" ]; then
-          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         else
-          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"'&& echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
         fi
         echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
