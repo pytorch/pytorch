@@ -17,9 +17,9 @@ SmallVector<int64_t, 4> convOutputShape(
     int W, // input width
     int K, // output channels
     const std::vector<int64_t>& kernel,
-    const std::vector<int64_t>& stride,
-    const std::vector<int64_t>& padding,
-    const std::vector<int64_t>& dilation) {
+    const torch::ListPtr<int64_t>& stride,
+    const torch::ListPtr<int64_t>& padding,
+    const torch::ListPtr<int64_t>& dilation) {
   SmallVector<int64_t, 4> out_shape;
   out_shape.push_back(N);
 
@@ -70,9 +70,9 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       Tensor act,
       Tensor packed_weight,
       Tensor bias,
-      const std::vector<int64_t>& stride,
-      const std::vector<int64_t>& padding,
-      const std::vector<int64_t>& dilation,
+      torch::ListPtr<int64_t> stride,
+      torch::ListPtr<int64_t> padding,
+      torch::ListPtr<int64_t> dilation,
       int64_t groups,
       double output_scale,
       int64_t output_zero_point) {
@@ -189,10 +189,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       Tensor /* activation */,
       Tensor /* packed_weight */,
       Tensor /* bias */,
-      const std::vector<int64_t>& /* stride */,
-      const std::vector<int64_t>& /* padding */,
-      const std::vector<int64_t>& /* dilation */,
-      const std::vector<int64_t>& /* output padding */,
+      torch::ListPtr<int64_t> /* stride */,
+      torch::ListPtr<int64_t> /* padding */,
+      torch::ListPtr<int64_t> /* dilation */,
+      torch::ListPtr<int64_t> /* output padding */,
       int64_t /* groups */,
       double /* output scale */,
       int64_t /* output_zero_point */) {

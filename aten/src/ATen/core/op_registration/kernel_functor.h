@@ -56,7 +56,9 @@ namespace detail {
   };
 
   template<class Key, class Value, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<std::unordered_map<Key, Value>, AllowDeprecatedTypes>
+  struct
+  C10_DEPRECATED_MESSAGE("Registering operators taking std::unordered_map<K, V> as inputs is slow and deprecated. Please use torch::DictPtr<K, V> instead.")
+  assert_is_valid_input_type<std::unordered_map<Key, Value>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<Value, AllowDeprecatedTypes> {
     static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::unordered_map<Key, Value>. Please use DictPtr<Key, Value> instead.");
     static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported input type: std::unordered_map<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
@@ -69,10 +71,12 @@ namespace detail {
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<std::vector<T>, AllowDeprecatedTypes>
+  struct
+  C10_DEPRECATED_MESSAGE("Registering operators taking std::vector<T> as inputs is potentially slow and deprecated. Please use torch::ListPtr<T> instead.")
+  assert_is_valid_input_type<std::vector<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
     static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: std::vector<Scalar>. Please use ListPtr<int64_t>, ListPtr<double> or Tensor instead.");
-    // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::vector<T>. Please use ListPtr<T> instead.");
+    static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::vector<T>. Please use ListPtr<T> instead.");
   };
 
   // The following specialisations of assert_is_valid_input_type are technically not
@@ -118,7 +122,9 @@ namespace detail {
   };
 
   template<class Key, class Value, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<std::unordered_map<Key, Value>, AllowDeprecatedTypes>
+  struct
+  C10_DEPRECATED_MESSAGE("Registering operators returning std::unordered_map<K, V> as output is slow and deprecated. Please use torch::DictPtr<K, V> instead.")
+  assert_is_valid_output_type<std::unordered_map<Key, Value>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<Value, AllowDeprecatedTypes> {
     static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Value>. Please use DictPtr<Key, Value> instead.");
     static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
@@ -132,10 +138,12 @@ namespace detail {
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<std::vector<T>, AllowDeprecatedTypes>
+  struct
+  C10_DEPRECATED_MESSAGE("Registering operators returning std::vector<T> as outputs is potentially slow and deprecated. Please use torch::ListPtr<T> instead.")
+  assert_is_valid_output_type<std::vector<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {
     static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: std::vector<Scalar>. Please use ListPtr<int64_t>, ListPtr<double> or Tensor instead.");
-    // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::vector<T>. Please use ListPtr<T> instead.");
+    static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::vector<T>. Please use ListPtr<T> instead.");
   };
 
   // The following specialisations of assert_is_valid_output_type are technically not

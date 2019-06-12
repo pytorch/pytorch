@@ -100,7 +100,8 @@ public:
       static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
       static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
-      return std::move(*this).kernelFunctor<KernelFunctor, false>(dispatch_key, std::forward<ConstructorParameters>(constructorParameters)...);
+      constexpr bool AllowLegacyTypes = false;
+      return std::move(*this).kernelFunctor<KernelFunctor, AllowLegacyTypes>(dispatch_key, std::forward<ConstructorParameters>(constructorParameters)...);
     }
 
     /**
@@ -145,7 +146,8 @@ public:
       static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
       static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
-      return std::move(*this).kernelFunctor<KernelFunctor, false>(c10::nullopt, std::forward<ConstructorParameters>(constructorParameters)...);
+      constexpr bool AllowLegacyTypes = false;
+      return std::move(*this).kernelFunctor<KernelFunctor, AllowLegacyTypes>(c10::nullopt, std::forward<ConstructorParameters>(constructorParameters)...);
     }
 
     /**
@@ -166,7 +168,8 @@ public:
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel(TensorTypeId dispatch_key) && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
 
-      return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(dispatch_key);
+      constexpr bool AllowLegacyTypes = false;
+      return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type, AllowLegacyTypes>(dispatch_key);
     }
 
     /**
@@ -187,7 +190,8 @@ public:
     guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> catchAllKernel() && {
       static_assert(!std::is_same<FuncType, KernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
 
-      return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>(c10::nullopt);
+      constexpr bool AllowLegacyTypes = false;
+      return std::move(*this).kernelFunctor<typename detail::WrapKernelFunction<FuncType, kernel_func>::type, AllowLegacyTypes>(c10::nullopt);
     }
 
     /**
@@ -218,7 +222,8 @@ public:
       // issues this causes), let's just forbid stateful lambdas alltogether.
       static_assert(guts::is_stateless_lambda<guts::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel only works for stateless lambdas (i.e. lambdas without captures). If you need a cache, please use the functor based API kernel<Functor>() instead.");
 
-      return std::move(*this).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(dispatch_key, std::forward<Lambda>(functor));
+      constexpr bool AllowLegacyTypes = false;
+      return std::move(*this).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>, AllowLegacyTypes>(dispatch_key, std::forward<Lambda>(functor));
     }
 
     /**
@@ -249,7 +254,8 @@ public:
       // issues this causes), let's just forbid stateful lambdas alltogether.
       static_assert(guts::is_stateless_lambda<guts::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel only works for stateless lambdas (i.e. lambdas without captures). If you need a cache, please use the functor based API kernel<Functor>() instead.");
 
-      return std::move(*this).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(c10::nullopt, std::forward<Lambda>(functor));
+      constexpr bool AllowLegacyTypes = false;
+      return std::move(*this).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>, AllowLegacyTypes>(c10::nullopt, std::forward<Lambda>(functor));
     }
 
     Options&& aliasAnalysis(AliasAnalysisKind aliasAnalysisKind) && {
@@ -269,7 +275,7 @@ public:
       return std::move(*this);
     }
 
-    template<class KernelFunctor, bool AllowDeprecatedTypes = false, class... ConstructorParameters>
+    template<class KernelFunctor, bool AllowDeprecatedTypes, class... ConstructorParameters>
     Options&& kernelFunctor(c10::optional<TensorTypeId>&& dispatch_key, ConstructorParameters&&... constructorParameters) && {
       return std::move(*this).kernel(
         std::move(dispatch_key),
