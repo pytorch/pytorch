@@ -140,24 +140,18 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 }
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
-WRAPPER_FORMAL = CodeTemplate("""\
-${return_type} (*_op)(${formal_types})""")
-
-WRAPPER_FORMAL_TYPE = CodeTemplate("""\
-${return_type} (${formal_types})""")
-
 METHOD_DECLARATION = CodeTemplate("""\
-static ${return_type} ${api_name}(${variable_formals}) ;
+static ${return_type} ${api_name}(${type_method_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${api_name}(${variable_formals}) {
+${return_type} VariableType::${api_name}(${type_method_formals}) {
   ${type_definition_body}
 }
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-.registerVariableWrapper<${registration_template_types}>("${schema_string}", &VariableType::${api_name})
+.registerVariableWrapper<${return_type} (${formal_types})>("${schema_string}", &VariableType::${api_name})
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -181,13 +175,16 @@ grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteFunction);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
-CALL_VIA_TYPE = CodeTemplate("""\
-(*_op)(${type_method_args})""")
+CALL_DEFAULT = CodeTemplate("""\
+TypeDefault::${api_name}(${type_method_args})""")
 
-CALL_VIA_DERIVED = CodeTemplate("""\
-(*_op)(${unpacked_args})""")
+CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
+at::${api_name}(${unpacked_args})""")
 
-# If the `baseType` operation has return values, we use the `tmp` variable to hold the
+CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
+self_.${api_name}(${unpacked_method_args})""")
+
+# If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
@@ -201,22 +198,6 @@ ${return_values} = ${rhs_value};
 DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
 {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
-  ${base_type_call};
-}
-""")
-
-# If the `baseType` operation has return values, we use the `tmp` variable to hold the
-# values temporarily and pass the values to the return variables outside of the
-# `at::AutoNonVariableTypeMode` guard block.
-DISPATCH_TO_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
-auto tmp = ([&]() {
-  return ${base_type_call};
-})();
-${return_values} = ${rhs_value};
-""")
-
-DISPATCH_TO_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
-{
   ${base_type_call};
 }
 """)
@@ -469,19 +450,13 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
 
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
-        wrapper_formal = WRAPPER_FORMAL.substitute(declaration, formal_types=formal_types)
-        variable_formals = [wrapper_formal] + declaration['type_method_formals']
-        registration_template_types = [
-            WRAPPER_FORMAL_TYPE.substitute(declaration, formal_types=formal_types),
-            declaration['return_type']
-        ] + formal_types
-        type_declarations.append(METHOD_DECLARATION.substitute(declaration, variable_formals=variable_formals))
+        type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
-                declaration, type_definition_body=body, variable_formals=variable_formals))
+                declaration, type_definition_body=body))
         wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-            declaration, registration_template_types=registration_template_types))
+            declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
@@ -790,12 +765,17 @@ def emit_body(declaration):
         combined = nested_dict(env, declaration)
         extra_wrapping_stmts = []
         if strategy == 'use_derived':
-            # We only care about adding `at::AutoNonVariableTypeMode` guard for `baseType` dispatch
+            # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
             # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
             # the baseType operations still dispatch to non-Variable type, even if the arguments passed
             # in are now Variables.
             # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
-            base_type_call = CALL_VIA_DERIVED.substitute(combined)
+            if 'namespace' in declaration['method_of']:
+                base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(combined)
+            else:
+                unpacked_method_args = combined['unpacked_args'][1:]
+                base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(
+                    combined, unpacked_method_args=unpacked_method_args)
             if not modifies_arguments and not returns_void:
                 rhs_value, extra_wrapping_stmts = wrap_output('tmp')
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
@@ -806,16 +786,10 @@ def emit_body(declaration):
                 call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                     base_type_call=base_type_call)
         else:
-            base_type_call = CALL_VIA_TYPE.substitute(declaration)
+            call = CALL_DEFAULT.substitute(declaration)
             if not modifies_arguments and not returns_void:
-                rhs_value, extra_wrapping_stmts = wrap_output('tmp')
-                call = DISPATCH_TO_VAR_TYPE_WITH_RETURN_VALUES.substitute(
-                    base_type_call=base_type_call,
-                    return_values=tie_return_values(),
-                    rhs_value=rhs_value)
-            else:
-                call = DISPATCH_TO_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
-                    base_type_call=base_type_call)
+                call = '{} = {}'.format(tie_return_values(), call)
+            call = call + ';'
         for stmt in extra_wrapping_stmts:
             call += '\n' + stmt
         call = enforce_same_tensorimpl_and_storage(env, call)
