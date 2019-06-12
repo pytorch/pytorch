@@ -51,8 +51,8 @@ struct LoopTransformer {
     auto true_block = node->blocks().at(0);
     auto false_block = node->blocks().at(1);
 
-    auto true_status = handleBreaks(true_block);
-    auto false_status = handleBreaks(false_block);
+    auto true_status = handleTransforms(true_block);
+    auto false_status = handleTransforms(false_block);
 
     if (true_status == WONT && false_status == WONT) {
       return WONT;
@@ -118,7 +118,7 @@ struct LoopTransformer {
 
   void handleLoop(Node* n) {
     Block* body_block = n->blocks().at(0);
-    auto ret_status = handleBreaks(body_block);
+    auto ret_status = handleTransforms(body_block);
 
     // When we're transforming breaks:
     // the body condition has not yet been inlined. If we we are not breaking
@@ -158,14 +158,14 @@ struct LoopTransformer {
     body_block->registerOutput(new_loop_condition->output());
   };
 
-  LoopStatus handleBreaks(Block* block) {
+  LoopStatus handleTransforms(Block* block) {
     auto loop_status = WONT;
     for (auto it = block->nodes().begin(); it != block->nodes().end();) {
       Node* node = *it;
       it++;
       switch (node->kind()) {
         case prim::Function: {
-          handleBreaks(node->blocks().at(0));
+          handleTransforms(node->blocks().at(0));
         } break;
         case prim::ContinueStmt:
         case prim::BreakStmt: {
@@ -210,7 +210,7 @@ struct LoopTransformer {
   }
 
   void run() {
-    handleBreaks(graph->block());
+    handleTransforms(graph->block());
   }
 
   Transform transform;

@@ -6782,7 +6782,8 @@ a")
         self.assertEqual(script_output, eager_output)
 
     def test_breaks_continues(self):
-        def assign_after_break(y: int):
+        def assign_after_break(y):
+            # type: (int)
             x = 0
             for i in range(y):
                 x = y * 2 + i
@@ -6794,7 +6795,8 @@ a")
         self.checkScript(assign_after_break, (2,))
         self.checkScript(assign_after_break, (3,))
 
-        def assign_after_break_nested(y: int):
+        def assign_after_break_nested(y):
+            # type: (int)
             x = 0
             for i in range(y):
                 if y == 1:
@@ -6813,7 +6815,8 @@ a")
         self.checkScript(assign_after_break_nested, (2,))
         self.checkScript(assign_after_break_nested, (3,))
 
-        def may_break(y: int):
+        def may_break(y):
+            # type: (int)
             x = 0
             for i in range(y):
                 if y == 1:
@@ -6828,7 +6831,8 @@ a")
         self.checkScript(may_break, (2,))
         self.checkScript(may_break, (3,))
 
-        def test(x: int, y: int):
+        def test(x, y):
+            # type: (int, int)
             a = 1
             while (x > 0):
                 if y == 3:
@@ -6853,7 +6857,8 @@ a")
         self.checkScript(test, (5, 3))
         self.checkScript(test, (2, 3))
 
-        def test_delete_after_break(x: int):
+        def test_delete_after_break(x):
+            # type: (int)
             a = 1
             b = 1
             for i in range(x):
@@ -6865,7 +6870,8 @@ a")
         self.checkScript(test_delete_after_break, (0,))
         self.checkScript(test_delete_after_break, (1,))
 
-        def test_will_break_after_guard(x: int):
+        def test_will_break_after_guard(x):
+            # type: (int)
             a = 1
             for i in range(x):
                 if i == 4:
@@ -6881,7 +6887,8 @@ a")
         self.checkScript(test_will_break_after_guard, (2,))
         self.checkScript(test_will_break_after_guard, (4,))
 
-        def foo(cond: int):
+        def foo(cond):
+            # type: (int)
             j = 1
             for i in range(5):
                 if i == cond:
@@ -6893,7 +6900,8 @@ a")
         self.checkScript(foo, (2,))
         self.checkScript(foo, (3,))
 
-        def test_varexit(cond: int):
+        def test_varexit(cond):
+            # type: (int)
             m = 0
             for i in range(3):
                 if cond == 2:
