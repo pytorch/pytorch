@@ -4,6 +4,7 @@ import io
 import os
 import math
 import random
+import re
 import copy
 import shutil
 import torch
@@ -16,7 +17,6 @@ import pickle
 import gzip
 import types
 import textwrap
-import re
 from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
