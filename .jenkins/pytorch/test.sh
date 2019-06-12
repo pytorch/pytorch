@@ -146,6 +146,7 @@ test_torchvision() {
   # PyTorch CI
   git clone https://github.com/pytorch/vision --quiet
   pushd vision
+  git checkout 2f64dd90e14fe5463b4e5bd152d56e4a6f0419de
   # python setup.py install with a tqdm dependency is broken in the
   # Travis Python nightly (but not in latest Python nightlies, so
   # this should be a transient requirement...)
