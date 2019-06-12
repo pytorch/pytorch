@@ -247,6 +247,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   // 7. take after_nms_topN (e.g. 300)
   // 8. return the top proposals (-> RoIs top)
   if (post_nms_topN > 0 && post_nms_topN < keep.size()) {
+    std::cout << "if statement " <<  post_nms_topN <<  " - " << keep.size() << " -- " << legacy_plus_one_<< std::endl;
     keep = utils::nms_cpu(
         proposals,
         scores_sorted,
@@ -255,6 +256,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
         post_nms_topN,
         legacy_plus_one_);
   } else {
+    std::cout << "else statement " <<  post_nms_topN << " - " << keep.size() << " -- " << legacy_plus_one_ << std::endl;
     keep = utils::nms_cpu(
         proposals, scores_sorted, keep, nms_thresh, -1, legacy_plus_one_);
   }
@@ -307,6 +309,7 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
 
   std::vector<ERArrXXf> im_boxes(num_images);
   std::vector<EArrXf> im_probs(num_images);
+  int debug2 = 0;
   for (int i = 0; i < num_images; i++) {
     auto cur_im_info = im_info.row(i);
     auto cur_bbox_deltas = GetSubTensorView<float>(bbox_deltas, i);
@@ -321,12 +324,18 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
         cur_scores,
         &im_i_boxes,
         &im_i_probs);
+    debug2 += im_i_boxes.rows();
   }
+  std::cout << "debug im_i_boxes " << debug2 << std::endl;
 
   int roi_counts = 0;
+  string debug;
   for (int i = 0; i < num_images; i++) {
     roi_counts += im_boxes[i].rows();
+    debug += ' ';
+    debug += std::to_string(roi_counts);
   }
+  std::cout << "debug roi_counts" << debug << std::endl;
   const int roi_col_count = box_dim + 1;
   auto* out_rois = Output(0, {roi_counts, roi_col_count}, at::dtype<float>());
   auto* out_rois_probs = Output(1, {roi_counts}, at::dtype<float>());
