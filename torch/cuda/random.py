@@ -20,6 +20,8 @@ def get_rng_state(device=device('cuda')):
         This function eagerly initializes CUDA.
     """
     _lazy_init()
+    if isinstance(device, int):
+        device = device('cuda', device)
     with device_ctx_manager(device):
         idx = device.index
         if idx is None:
@@ -33,8 +35,7 @@ def get_rng_state_all():
 
     results = []
     for i in range(device_count()):
-        with device_ctx_manager(i):
-            results.append(get_rng_state())
+        results.append(get_rng_state(i))
     return results
 
 
@@ -55,6 +56,8 @@ def set_rng_state(new_state, device=device('cuda')):
     # immediately.
     def cb():
         with device_ctx_manager(device):
+            if isinstance(device, int):
+                device = device('cuda', device)
             idx = device.index
             if idx is None:
                 idx = current_device()
