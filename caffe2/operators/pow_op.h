@@ -72,8 +72,9 @@ class PowOp : public Operator<Context> {
   bool DoRunWithType() {
     if ((InputSize() == 1) && HasArgument("exponent")) { // UnaryElementwiseOp
       const auto& A = Input(0);
-      auto* C = Output(0);
-      C->ResizeLike(A);
+
+      auto* C =
+          Output(0, A.sizes(), at::dtype<typename TypeMap::template type<T>>());
       const T* Adata = A.template data<T>();
       auto* Cdata =
           C->template mutable_data<typename TypeMap::template type<T>>();
@@ -82,11 +83,11 @@ class PowOp : public Operator<Context> {
     } else if (InputSize() == 2) { // BinaryElementwiseOp
       const auto& A = Input(0);
       const auto& B = Input(1);
-      auto* C = Output(0);
       CAFFE_ENFORCE(
-          &B != C || !enable_broadcast_,
+          !IsInputOutputAlias(1, 0) || !enable_broadcast_,
           "In-place is allowed only with the first tensor when broadcasting");
-      C->ResizeLike(A);
+      auto* C =
+          Output(0, A.sizes(), at::dtype<typename TypeMap::template type<T>>());
       const T* Adata = A.template data<T>();
       const T* Bdata = B.template data<T>();
       auto* Cdata =

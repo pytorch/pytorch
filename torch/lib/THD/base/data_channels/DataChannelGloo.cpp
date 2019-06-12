@@ -1,13 +1,13 @@
-#include "DataChannelGloo.hpp"
-#include "DataChannelUtils.hpp"
-#include "GlooCache.hpp"
-#include "Store.hpp"
+#include <THD/base/data_channels/DataChannelGloo.hpp>
+#include <THD/base/data_channels/DataChannelUtils.hpp>
+#include <THD/base/data_channels/GlooCache.hpp>
+#include <THD/base/data_channels/Store.hpp>
 
 #if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
-#include "gloo/transport/ibverbs/device.h"
+#include <gloo/transport/ibverbs/device.h>
 #endif
 
-#include "gloo/transport/tcp/device.h"
+#include <gloo/transport/tcp/device.h>
 
 #include <unistd.h>
 #include <algorithm>

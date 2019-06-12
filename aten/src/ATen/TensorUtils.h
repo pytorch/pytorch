@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ATen/Tensor.h"
-#include "ATen/TensorGeometry.h"
-#include "ATen/Utils.h"
+#include <ATen/Tensor.h>
+#include <ATen/TensorGeometry.h>
+#include <ATen/Utils.h>
 
 // These functions are NOT in Utils.h, because this file has a dep on Tensor.h
 

@@ -10,11 +10,10 @@
 #include "caffe2/core/context_base.h"
 #include "caffe2/core/event.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/typeid.h"
+#include <c10/util/typeid.h>
 #include "caffe2/proto/caffe2_pb.h"
 
-#include <ATen/core/ATenCoreTest.h>
-#include <ATen/core/ArrayRef.h>
+#include <c10/util/ArrayRef.h>
 
 C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
 
@@ -79,14 +78,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
     return GetCPUAllocator()->allocate(nbytes);
   }
 
-  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
-    if (nbytes == 0) {
-      return;
-    }
-    CAFFE_ENFORCE(src);
-    CAFFE_ENFORCE(dst);
-    memcpy(dst, src, nbytes);
-  }
+  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override;
 
   void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst) override {
     CopyBytesSameDevice(nbytes, src, dst);

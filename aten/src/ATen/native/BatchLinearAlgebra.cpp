@@ -1,11 +1,12 @@
-#include "ATen/ATen.h"
-#include "ATen/CPUApplyUtils.h"
-#include "ATen/Dispatch.h"
-#include "ATen/NativeFunctions.h"
+#include <ATen/ATen.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/LegacyTHFunctions.h>
 
-#include "ATen/native/LinearAlgebraUtils.h"
+#include <ATen/native/LinearAlgebraUtils.h>
 
-#include "TH.h"  // for USE_LAPACK
+#include <TH/TH.h>  // for USE_LAPACK
 
 #include <vector>
 
@@ -27,6 +28,10 @@ extern "C" void sgetri_(int *n, float *a, int *lda, int *ipiv, float *work, int 
 // potrs
 extern "C" void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
 extern "C" void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
+
+// potrf
+extern "C" void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
+extern "C" void spotrf_(char *uplo, int *n, float *a, int *lda, int *info);
 #endif
 
 namespace at {
@@ -52,6 +57,11 @@ void lapackGetri(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwo
 template<class scalar_t>
 void lapackPotrs(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
   AT_ERROR("potrs only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info) {
+  AT_ERROR("cholesky only takes float or double Tensors");
 }
 
 #ifdef USE_LAPACK
@@ -86,6 +96,14 @@ template<> void lapackPotrs<double>(char uplo, int n, int nrhs, double *a, int l
 template<> void lapackPotrs<float>(char uplo, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
   spotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
 }
+
+template<> void lapackCholesky<double>(char uplo, int n, double *a, int lda, int *info) {
+  dpotrf_(&uplo, &n, a, &lda, info);
+}
+
+template<> void lapackCholesky<float>(char uplo, int n, float *a, int lda, int *info) {
+  spotrf_(&uplo, &n, a, &lda, info);
+}
 #endif
 
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
@@ -97,7 +115,7 @@ template<typename scalar_t>
 static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("gesv: LAPACK library not found in compilation");
-#endif
+#else
   auto A_data = A.data<scalar_t>();
   auto b_data = b.data<scalar_t>();
   auto A_mat_stride = matrixStride(A);
@@ -109,8 +127,8 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 
   auto ipiv = at::empty({n}, b.type().toScalarType(kInt));
 
+  int info;
   for (int64_t i = 0; i < batch_size; i++) {
-    int info;
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
     lapackGesv<scalar_t>(n, nrhs, A_working_ptr, n, ipiv.data<int>(), b_working_ptr, n, &info);
@@ -119,6 +137,7 @@ static void apply_gesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
       return;
     }
   }
+#endif
 }
 
 std::tuple<Tensor, Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
@@ -138,7 +157,7 @@ std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
     // TODO: #7102: It's not necessary to have gesv (single) bindings for both
     // TH and ATen. We should remove the TH gesv bindings, especially
     // since the lapackGesv function is already in ATen.
-    return at::_th_gesv_single(self, A);
+    return at::legacy::th::_th_gesv_single(self, A);
   }
 
   Tensor self_broadcasted, A_broadcasted;
@@ -150,7 +169,7 @@ std::tuple<Tensor&,Tensor&> gesv_out(Tensor& solution, Tensor& lu, const Tensor&
   AT_CHECK(self.dim() == 2 && A.dim() == 2, 
            "torch.gesv() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
-  return at::_th_gesv_single_out(solution, lu, self, A);
+  return at::legacy::th::_th_gesv_single_out(solution, lu, self, A);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -159,7 +178,7 @@ template <typename scalar_t>
 static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("inverse: LAPACK library not found in compilation");
-#endif
+#else
   auto self_data = self.data<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
 
@@ -194,6 +213,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
       return;
     }
   }
+#endif
 }
 
 Tensor _inverse_helper_cpu(const Tensor& self) {
@@ -211,9 +231,9 @@ Tensor inverse(const Tensor &self) {
     return at::empty_like(self);
   }
   if (self.dim() == 2) {
-    return at::_th_getri_single(self);
+    return at::legacy::th::_th_getri_single(self);
   }
-  inverseCheckInputs(self);
+  squareCheckInputs(self);
   return at::_inverse_helper(self);
 }
 
@@ -231,7 +251,7 @@ template<typename scalar_t>
 static void apply_potrs(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("potrs: LAPACK library not found in compilation");
-#endif
+#else
   char uplo = upper ? 'U' : 'L';
 
   auto A_data = A.data<scalar_t>();
@@ -253,6 +273,7 @@ static void apply_potrs(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& 
       return;
     }
   }
+#endif
 }
 
 Tensor _potrs_helper_cpu(const Tensor& self, const Tensor& A, bool upper) {
@@ -269,7 +290,7 @@ Tensor _potrs_helper_cpu(const Tensor& self, const Tensor& A, bool upper) {
 // Supports arbitrary batch dimensions for self and A
 Tensor potrs(const Tensor& self, const Tensor& A, bool upper) {
   if (self.dim() <= 2 && A.dim() <= 2) {
-    return at::_th_potrs_single(self, A, upper);
+    return at::legacy::th::_th_potrs_single(self, A, upper);
   }
 
   Tensor self_broadcasted, A_broadcasted;
@@ -281,7 +302,77 @@ Tensor& potrs_out(Tensor& result, const Tensor& self, const Tensor& A, bool uppe
   AT_CHECK(self.dim() == 2 && A.dim() == 2,
            "torch.potrs() with the `out` keyword does not support batching. "
            "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
-  return at::_th_potrs_single_out(result, self, A, upper);
+  return at::legacy::th::_th_potrs_single_out(result, self, A, upper);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template<typename scalar_t>
+static void apply_cholesky(Tensor& self, bool upper, std::vector<int64_t>& infos) {
+#ifndef USE_LAPACK
+  AT_ERROR("cholesky: LAPACK library not found in compilation");
+#else
+  char uplo = upper ? 'U' : 'L';
+
+  auto self_data = self.data<scalar_t>();
+  auto self_matrix_stride = matrixStride(self);
+
+  auto batch_size = batchCount(self);
+  auto n = self.size(-2);
+
+  int info;
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    lapackCholesky<scalar_t>(uplo, n, self_working_ptr, n, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
+  std::vector<int64_t> infos(batchCount(self), 0);
+  auto self_working_copy = cloneBatchedColumnMajor(self);
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "cholesky", [&]{
+    apply_cholesky<scalar_t>(self_working_copy, upper, infos);
+  });
+  batchCheckErrors(infos, "cholesky");
+  return self_working_copy;
+}
+
+Tensor cholesky(const Tensor &self, bool upper) {
+  if (self.size(-1) == 0) {
+    return at::empty_like(self);
+  }
+  if (self.dim() == 2) {
+    return at::legacy::th::_th_potrf_single(self, upper);
+  }
+  squareCheckInputs(self);
+
+  // TODO: (#14071) Once `triu`, `tril` is implemented for batched tensors,
+  // this can be simplified. Currently, we are zero-ing out values in the
+  // batch of matrices by using a mask and the `where` function.
+  // The simplification with batched `triu` and `tril` would be this:
+  // if (upper) {
+  //   return raw_cholesky_output.triu();
+  // } else {
+  //   return raw_cholesky_output.tril();
+  // }
+  auto raw_cholesky_output = at::_cholesky_helper(self, upper);
+  int64_t n = self.size(-1);
+  auto indices = at::ones({n, n}, self.options().dtype(at::kByte));
+  indices = upper ? indices.tril(-1).expand_as(self) : indices.triu(1).expand_as(self);
+  return at::where(indices, at::zeros({}, self.options()), raw_cholesky_output);
+}
+
+Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
+  if (self.size(-1) == 0) {
+    return result.resize_as_(self);
+  }
+  result.copy_(native::cholesky(self, upper));
+  return result;
 }
 
 }}  // namespace at::native

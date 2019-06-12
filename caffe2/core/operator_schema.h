@@ -371,7 +371,21 @@ class CAFFE2_API OpSchema {
     return device_inference_function_(def);
   }
 
-  // The helper is build sparse input with values, keys, and lengths; e.g.:
+  // The helper is build sparse input with values, keys, weights and lengths;
+  // e.g.:
+  // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+  // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
+  // weights = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  //            \_____/  \________/  \__/
+  // lengths =    [3,        4,       2]
+  OpSchema& WeightedValueKeyLengthInputFillers(
+      size_t value_index,
+      size_t key_index,
+      size_t length_index,
+      size_t weight_index);
+
+  // The helper is build sparse input with values, keys, weights and lengths;
+  // e.g.:
   // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
   // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
   //            \_____/  \________/  \__/

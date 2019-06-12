@@ -104,7 +104,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// Special cloning function for `Sequential` because it does not use
   /// `reset()`.
   std::shared_ptr<Module> clone(
-      optional<Device> device = nullopt) const override {
+      const optional<Device>& device = nullopt) const override {
     auto clone = std::make_shared<SequentialImpl>();
     for (const auto& module : modules_) {
       clone->push_back(module.clone(device));

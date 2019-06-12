@@ -55,7 +55,7 @@ def force_unicode(s):
 
 def get_device_option(device):
     m = {DeviceType.CPU: caffe2_pb2.CPU,
-         DeviceType.CUDA: caffe2_pb2.CUDA}
+         DeviceType.CUDA: workspace.GpuDeviceType}
     return core.DeviceOption(m[device.type], device.device_id)
 
 
@@ -915,8 +915,8 @@ class Caffe2Backend(Backend):
         device = Device(device_str)
         if device.type == DeviceType.CPU:
             return True
-        elif device.type == DeviceType.CUDA:
-            return workspace.has_gpu_support
+        elif core.IsGPUDeviceType(device.type):
+            return workspace.has_gpu_support or workspace.has_hip_support
         return False
 
     @classmethod

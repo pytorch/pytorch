@@ -282,8 +282,8 @@ std::unique_ptr<DataLoader<Dataset, Sampler>> make_data_loader(
 /// Creates a new `DataLoader`, inferring the necessary template types from
 /// the given arguments.
 template <
-    typename Dataset,
     typename Sampler = samplers::RandomSampler,
+    typename Dataset,
     typename =
         torch::enable_if_t<std::is_constructible<Sampler, size_t>::value>>
 std::unique_ptr<DataLoader<Dataset, Sampler>> make_data_loader(

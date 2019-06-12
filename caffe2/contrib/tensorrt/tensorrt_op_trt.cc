@@ -15,7 +15,7 @@ namespace {
 // Otherwise, return the product of CHW dimensions
 int64_t CheckDims(
     const nvinfer1::Dims& nv_dims,
-    const std::vector<int64_t>& c2_dims) {
+    at::ArrayRef<int64_t> c2_dims) {
   if (nv_dims.nbDims + 1 != c2_dims.size()) {
     CAFFE_THROW(
         "Mismatched dimensions between TRT input (",
@@ -51,7 +51,7 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
       logger_(
           (nvinfer1::ILogger::Severity)(OperatorBase::GetSingleArgument<int>(
               "log_verbosity",
-              FLAGS_minloglevel))),
+              FLAGS_caffe2_log_level))),
       max_batch_size_(
           OperatorBase::GetSingleArgument<int>("max_batch_size", 1)) {
   {

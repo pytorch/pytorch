@@ -6,8 +6,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/memory.h"
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/utils/memory.h>
 
 namespace torch { namespace jit { namespace detail {
 

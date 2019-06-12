@@ -28,7 +28,7 @@ set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}
         )
 
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS}
-        utils/hip/math_hip.cc
+        utils/hip/math_gpu.hip
         )
 
 set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS}
@@ -47,8 +47,8 @@ set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS}
         )
 
 set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS}
-        utils/hip/math_hip_test.cc
-        utils/hip/math_blas_hip_test.cc
+        utils/hip/math_gpu_test.cc
+        utils/hip/math_blas_gpu_test.cc
         )
 
 # TODO Remove the CMake_xxx variables above and add them to the variables for the local library target below instead

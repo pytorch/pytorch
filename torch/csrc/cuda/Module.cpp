@@ -1,25 +1,24 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
-#include <stdbool.h>
 #include <unordered_map>
 #include <thread>
 #include <chrono>
 #include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/CUDAContext.h>
 #include <THC/THCCachingAllocator.h>
 #ifdef USE_NCCL
 #include <nccl.h>
 #endif
 
-#include "THCP.h"
+#include <torch/csrc/cuda/THCP.h>
 
-#include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/autograd/generated/VariableType.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/cuda/python_comm.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/cuda/python_comm.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 
 using namespace torch;
 
@@ -71,8 +70,7 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
 PyObject * THCPModule_getCurrentStream_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
-  THCStream* stream = THCState_getStream(state);
-  return PyLong_FromVoidPtr(stream);
+  return PyLong_FromUnsignedLongLong(at::cuda::getCurrentCUDAStream().pack());
   END_HANDLE_TH_ERRORS
 }
 
@@ -80,8 +78,11 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(PyLong_Check(obj), "invalid stream");
-  THCStream* stream = (THCStream *)PyLong_AsVoidPtr(obj);
-  THCState_setStream(state, stream);
+  uint64_t bits = PyLong_AsUnsignedLongLong(obj);
+  if (bits == static_cast<uint64_t>(-1) && PyErr_Occurred()) {
+    throw python_error();
+  }
+  at::cuda::setCurrentCUDAStream(at::cuda::CUDAStream::unpack(bits));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -362,7 +363,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
 }
 
 #ifdef USE_NCCL
-#include "python_nccl.h"
+#include <torch/csrc/cuda/python_nccl.h>
 
 void THCPModule_useNccl()
 {

@@ -1,4 +1,5 @@
 import torch
+import torch._six
 
 
 def _get_device_index(device, optional=False):
@@ -15,6 +16,8 @@ def _get_device_index(device, optional=False):
     If :attr:`device` is ``None``, this will return the current default CUDA
     device if :attr:`optional` is ``True``.
     """
+    if isinstance(device, torch._six.string_classes):
+        device = torch.device(device)
     if isinstance(device, torch.device):
         dev_type = device.type
         if device.type != 'cuda':

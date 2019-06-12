@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/LookupTable.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/LookupTable.cu"
 #else
 
 void THNN_(LookupTable_accGradParameters)(

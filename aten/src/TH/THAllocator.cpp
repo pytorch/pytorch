@@ -1,4 +1,4 @@
-#include "THAllocator.h"
+#include <TH/THAllocator.h>
 
 /* stuff for mapped files */
 #ifdef _WIN32

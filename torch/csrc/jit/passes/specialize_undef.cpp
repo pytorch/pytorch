@@ -1,5 +1,5 @@
-#include "torch/csrc/jit/passes/specialize_undef.h"
-#include "torch/csrc/jit/symbolic_variable.h"
+#include <torch/csrc/jit/passes/specialize_undef.h>
+#include <torch/csrc/jit/symbolic_variable.h>
 
 namespace torch { namespace jit {
 
@@ -15,7 +15,7 @@ void specializeUndef(Graph & g) {
   std::unordered_map<Value*, State> state;
 
   for (Value* input : g.inputs()) {
-    auto tp = input->type();
+    const auto& tp = input->type();
     if (tp->isSubtypeOf(UndefinedTensorType::get())) {
       state[input] = State::Undefined;
     } else if (tp->isSubtypeOf(DynamicType::get())) {

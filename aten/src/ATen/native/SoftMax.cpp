@@ -1,10 +1,10 @@
-#include "ATen/ATen.h"
-#include "ATen/AccumulateType.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/Parallel.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/native/cpu/SoftmaxKernel.h"
+#include <ATen/ATen.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/native/cpu/SoftmaxKernel.h>
 
 namespace at {
 namespace native {

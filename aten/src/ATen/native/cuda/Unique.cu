@@ -1,5 +1,5 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
 #include <thrust/execution_policy.h>

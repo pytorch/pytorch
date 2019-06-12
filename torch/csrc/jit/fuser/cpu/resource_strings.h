@@ -1,8 +1,8 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CPU_FUSER
 
-#include "torch/csrc/jit/code_template.h"
+#include <torch/csrc/jit/code_template.h>
 
 namespace torch { namespace jit { namespace fuser { namespace cpu {
 
@@ -32,6 +32,12 @@ static auto cpu_compilation_unit_template = CodeTemplate(R"(
 #include <cstddef>
 #include <cstdint>
 #include <math.h>
+
+template <typename scalar_t>
+scalar_t rsqrtf(scalar_t x) {
+  return 1.0/sqrtf(x);
+}
+
 ${type_declarations}
 
 #define OMP_THRESHOLD 100000

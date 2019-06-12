@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/utils/functional.h"
+#include <torch/csrc/utils/functional.h>
 
 #include <ATen/ATen.h>
 #include <utility>

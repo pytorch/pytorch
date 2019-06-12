@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/utils.h"
+#define TH_GENERIC_FILE "torch/csrc/generic/utils.h"
 #else
 
 #if defined(THD_GENERIC_FILE) || defined(TH_REAL_IS_HALF)

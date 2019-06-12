@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/Sigmoid.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/Sigmoid.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 void THNN_(Sigmoid_updateOutput)(
            THCState *state,

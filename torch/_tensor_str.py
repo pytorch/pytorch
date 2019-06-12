@@ -190,6 +190,8 @@ def _tensor_str(self, indent):
         return '[]'
 
     summarize = self.numel() > PRINT_OPTS.threshold
+    if self.dtype is torch.float16:
+        self = self.float()
     formatter = _Formatter(get_summarized_data(self) if summarize else self)
     return _tensor_str_with_formatter(self, indent, formatter, summarize)
 
@@ -220,12 +222,12 @@ def get_summarized_data(self):
         else:
             return self
     if self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        start = [get_summarized_data(self[i]).reshape(-1) for i in range(0, PRINT_OPTS.edgeitems)]
-        end = ([get_summarized_data(self[i]).reshape(-1)
+        start = [self[i] for i in range(0, PRINT_OPTS.edgeitems)]
+        end = ([self[i]
                for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
-        return torch.cat((start + end))
+        return torch.stack([get_summarized_data(x) for x in (start + end)])
     else:
-        return self
+        return torch.stack([get_summarized_data(x) for x in self])
 
 
 def _str(self):
@@ -280,7 +282,7 @@ def _str(self):
     if self.grad_fn is not None:
         name = type(self.grad_fn).__name__
         if name == 'CppFunction':
-            name = self.grad_fn.name().rsplit('::', maxsplit=1)[-1]
+            name = self.grad_fn.name().rsplit('::', 1)[-1]
         suffixes.append('grad_fn=<{}>'.format(name))
     elif self.requires_grad:
         suffixes.append('requires_grad=True')

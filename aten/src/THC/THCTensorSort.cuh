@@ -1,14 +1,14 @@
 #ifndef THC_TENSORSORT_CUH
 #define THC_TENSORSORT_CUH
 
-#include "THCTensorMath.h"
-#include "THCGeneral.h"
-#include "THCReduceApplyUtils.cuh"
-#include "THCSortUtils.cuh"
-#include "THCTensorCopy.h"
-#include "THCTensorTypeUtils.cuh"
+#include <THC/THCTensorMath.h>
+#include <THC/THCGeneral.h>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCSortUtils.cuh>
+#include <THC/THCTensorCopy.h>
+#include <THC/THCTensorTypeUtils.cuh>
 
-#include "THCThrustAllocator.cuh"
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #if CUDA_VERSION >= 7000 || defined(__HIP_PLATFORM_HCC__)

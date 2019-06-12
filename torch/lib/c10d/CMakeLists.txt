@@ -41,7 +41,6 @@ endif()
 if(MPI_FOUND)
   option(USE_C10D_MPI "USE C10D MPI" ON)
 endif()
-configure_file(cmake/Def.hpp.in ${CMAKE_BINARY_DIR}/include/c10d/Def.hpp @ONLY)
 
 set(C10D_SRCS
   FileStore.cpp
@@ -64,12 +63,12 @@ else()
 endif()
 
 
-if(USE_NCCL)
+if(USE_C10D_NCCL)
   list(APPEND C10D_SRCS ProcessGroupNCCL.cpp)
   list(APPEND C10D_LIBS __caffe2_nccl)
 endif()
 
-if(MPI_FOUND)
+if(USE_C10D_MPI)
   list(APPEND C10D_SRCS ProcessGroupMPI.cpp)
   list(APPEND C10D_LIBS ${MPI_LIBRARIES})
 endif()
@@ -98,17 +97,22 @@ if (USE_GLOO)
 endif()
 
 target_include_directories(c10d PUBLIC
-  ${CMAKE_SOURCE_DIR}/aten/src/TH # provides "THAllocator.h" to THCGeneral.h
-  ${CMAKE_SOURCE_DIR}/aten/src/THC # provides "THC.h" to ProcessGroupGloo.cpp
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src/THC # provides "THCGeneral.h" to THC.h
   )
 
 # For <c10d/...>
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # For torch/csrc/utils/hash.h and torch/csrc/utils/functional.h
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
+
+if(USE_C10D_NCCL)
+  target_compile_definitions(c10d INTERFACE USE_C10D_NCCL)
+endif()
+
+if(USE_C10D_MPI)
+  target_compile_definitions(c10d INTERFACE USE_C10D_MPI)
+endif()
 
 copy_header(FileStore.hpp)
 copy_header(PrefixStore.hpp)
@@ -119,22 +123,17 @@ copy_header(Types.hpp)
 copy_header(Utils.hpp)
 copy_header(ProcessGroupGloo.hpp)
 
-if(USE_NCCL)
+if(USE_C10D_NCCL)
   copy_header(ProcessGroupNCCL.hpp)
   copy_header(NCCLUtils.hpp)
 endif()
 
-if(MPI_FOUND)
+if(USE_C10D_MPI)
   target_include_directories(c10d PUBLIC ${MPI_INCLUDE_PATH})
   copy_header(ProcessGroupMPI.hpp)
-  file(WRITE ${CMAKE_BINARY_DIR}/include/c10d/mpi_include_path "")
-  foreach(MPI_INC ${MPI_INCLUDE_PATH})
-    file(APPEND ${CMAKE_BINARY_DIR}/include/c10d/mpi_include_path ${MPI_INC}\n)
-  endforeach()
 endif()
 
 target_link_libraries(c10d PUBLIC ${C10D_LIBS})
-target_include_directories(c10d PRIVATE ${CMAKE_BINARY_DIR}/include)
 
 install(TARGETS c10d
   RUNTIME DESTINATION bin

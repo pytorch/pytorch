@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathPointwise.h"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathPointwise.h"
 #else
 
 THC_API void THCTensor_(pow)(THCState *state, THCTensor *self, THCTensor *src, scalar_t value);

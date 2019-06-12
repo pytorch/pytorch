@@ -44,11 +44,15 @@ is_asan = C.is_asan
 has_gpu_support = C.has_gpu_support
 has_hip_support = C.has_hip_support
 if has_gpu_support:
+    GpuDeviceType = caffe2_pb2.CUDA
     NumCudaDevices = C.num_cuda_devices
+    # This is a duplicate of NumCudaDevices. Remove
+    # NumCudaDevices once replaced everywhere in the code
+    NumGpuDevices = C.num_cuda_devices
     GetCUDAVersion = C.get_cuda_version
     GetCuDNNVersion = C.get_cudnn_version
 
-    def GetCudaPeerAccessPattern():
+    def GetGpuPeerAccessPattern():
         return np.asarray(C.get_cuda_peer_access_pattern())
 
     GetDeviceProperties = C.get_device_properties
@@ -56,8 +60,22 @@ else:
     NumCudaDevices = lambda: 0 # noqa
     GetCUDAVersion = lambda: 0 # noqa
     GetCuDNNVersion = lambda: 0 # noqa
-    GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
+
+if has_hip_support:
+    GpuDeviceType = caffe2_pb2.HIP
+    NumGpuDevices = C.num_hip_devices
+
+    def GetGpuPeerAccessPattern():
+        return np.asarray(C.get_hip_peer_access_pattern())
+    GetDeviceProperties = C.get_device_properties
+
+if not has_gpu_support and not has_hip_support:
+    # setting cuda as the default GpuDeviceType as some tests
+    # like core, scope tests use GpuDeviceType even without gpu support
+    GpuDeviceType = caffe2_pb2.CUDA
+    NumGpuDevices = lambda: 0 # noqa
     GetDeviceProperties = lambda x: None # noqa
+    GetGpuPeerAccessPattern = lambda: np.array([]) # noqa
 
 IsNUMAEnabled = C.is_numa_enabled
 GetNumNUMANodes = C.get_num_numa_nodes
@@ -81,7 +99,6 @@ def _GetFreeFlaskPort():
         # don't do much here as this is mostly for convenience in research
         # rather than 24x7 service.
         return port
-
 
 def StartMint(root_folder=None, port=None):
     """Start a mint instance.

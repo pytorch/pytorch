@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/TemporalReflectionPadding.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/TemporalReflectionPadding.cu"
 #else
 
 void THNN_(TemporalReflectionPadding_updateOutput)(THCState *state,

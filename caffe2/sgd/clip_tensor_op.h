@@ -51,7 +51,7 @@ class ClipTensorByScalingOp final : public Operator<Context> {
           &context_);
     } else {
       if (input_tensor_data != clipped_tensor_data) {
-        clipped->CopyFrom(input_tensor, &context_);
+        clipped->CopyFrom(input_tensor, /*async*/ true);
       }
     }
 

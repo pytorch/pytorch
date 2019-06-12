@@ -1,7 +1,7 @@
 #pragma once
 
-#include "intrinsics.h"
-#include "vec256_base.h"
+#include <ATen/cpu/vec256/intrinsics.h>
+#include <ATen/cpu/vec256/vec256_base.h>
 #if defined(__AVX__) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
@@ -213,14 +213,24 @@ Vec256<double> inline operator/(const Vec256<double>& a, const Vec256<double>& b
   return _mm256_div_pd(a, b);
 }
 
+// Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
+// either input is a NaN.
 template <>
-Vec256<double> inline max(const Vec256<double>& a, const Vec256<double>& b) {
-  return _mm256_max_pd(a, b);
+Vec256<double> inline maximum(const Vec256<double>& a, const Vec256<double>& b) {
+  Vec256<double> max = _mm256_max_pd(a, b);
+  Vec256<double> isnan = _mm256_cmp_pd(a, b, _CMP_UNORD_Q);
+  // Exploit the fact that all-ones is a NaN.
+  return _mm256_or_pd(max, isnan);
 }
 
+// Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
+// either input is a NaN.
 template <>
-Vec256<double> inline min(const Vec256<double>& a, const Vec256<double>& b) {
-  return _mm256_min_pd(a, b);
+Vec256<double> inline minimum(const Vec256<double>& a, const Vec256<double>& b) {
+  Vec256<double> min = _mm256_min_pd(a, b);
+  Vec256<double> isnan = _mm256_cmp_pd(a, b, _CMP_UNORD_Q);
+  // Exploit the fact that all-ones is a NaN.
+  return _mm256_or_pd(min, isnan);
 }
 
 template <>
@@ -236,6 +246,19 @@ Vec256<double> inline operator|(const Vec256<double>& a, const Vec256<double>& b
 template <>
 Vec256<double> inline operator^(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_xor_pd(a, b);
+}
+
+template <>
+void convert(const double* src, double* dst, int64_t n) {
+  int64_t i;
+#pragma unroll
+  for (i = 0; i <= (n - Vec256<double>::size); i += Vec256<double>::size) {
+    _mm256_storeu_pd(dst + i, _mm256_loadu_pd(src + i));
+  }
+#pragma unroll
+  for (; i < n; i++) {
+    dst[i] = src[i];
+  }
 }
 
 #ifdef __AVX2__

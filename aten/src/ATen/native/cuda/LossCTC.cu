@@ -12,8 +12,8 @@
 #include <c10/util/Exception.h>
 
 #include <ATen/ATen.h>
-#include "ATen/Dispatch.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
+#include <ATen/Dispatch.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 
 #include <type_traits>
 #include <numeric>

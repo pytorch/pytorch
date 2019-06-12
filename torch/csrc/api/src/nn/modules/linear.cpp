@@ -10,7 +10,7 @@ namespace torch {
 namespace nn {
 LinearOptions::LinearOptions(int64_t in, int64_t out) : in_(in), out_(out) {}
 
-LinearImpl::LinearImpl(LinearOptions options) : options(std::move(options)) {
+LinearImpl::LinearImpl(LinearOptions options) : options(options) {
   reset();
 }
 
@@ -28,7 +28,7 @@ void LinearImpl::reset() {
   }
 }
 
-Tensor LinearImpl::forward(Tensor input) {
+Tensor LinearImpl::forward(const Tensor& input) {
   AT_ASSERT(!options.with_bias_ || bias.defined());
   return torch::linear(input, weight, bias);
 }

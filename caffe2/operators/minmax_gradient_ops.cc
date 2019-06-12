@@ -26,8 +26,7 @@ bool SelectGradientOpBase<T, Context>::RunOnDevice() {
     ConstEigenArrayMap<T> input_array(
         input.template data<T>(), 1, input.numel());
 
-    auto* grad_input = Output(i);
-    grad_input->ResizeLike(input);
+    auto* grad_input = Output(i, input.sizes(), at::dtype<T>());
     EigenArrayMap<T> grad_in_array(
         grad_input->template mutable_data<T>(), 1, grad_input->numel());
     grad_in_array = grad_out_array *

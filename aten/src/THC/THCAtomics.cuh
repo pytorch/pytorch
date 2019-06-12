@@ -1,10 +1,10 @@
 #ifndef THC_ATOMICS_INC
 #define THC_ATOMICS_INC
 
-#include "THC.h"
-#include "TH/THHalf.h"
-#include "THCNumerics.cuh"
-#include "ATen/ATen.h"
+#include <THC/THC.h>
+#include <TH/THHalf.h>
+#include <THC/THCNumerics.cuh>
+#include <ATen/ATen.h>
 
 template <typename T, size_t n>
 struct AtomicAddIntegerImpl;

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THStorageCopy.cpp"
+#define TH_GENERIC_FILE "TH/generic/THStorageCopy.cpp"
 #else
 
 void THStorage_(rawCopy)(THStorage *storage, scalar_t *src)

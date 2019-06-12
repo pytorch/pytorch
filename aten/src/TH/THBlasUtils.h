@@ -1,5 +1,5 @@
 #include <TH/THBlas.h>
-#include <ATen/ScalarType.h>
+#include <c10/core/ScalarType.h>
 
 // This header file shouldn't be anything permanent; it's just a temporary
 // dumping ground to help you get access to utilities in THBlas.h via templates,

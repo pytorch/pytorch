@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathMagma.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathMagma.cu"
 #else
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)

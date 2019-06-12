@@ -1,18 +1,17 @@
-#include "kl_minimization.h"
 #include "caffe2/core/logging.h"
+#include "kl_minimization.h"
 
-#include <iostream>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 
 using namespace std;
 using namespace dnnlowp;
 
-int main(int argc, const char *argv[])
-{
+int main(int argc, const char* argv[]) {
   if (argc < 3) {
-    cerr <<
-      "Usage: " << argv[0] << " in_file out_file [preserve_sparsity]" << endl;
+    cerr << "Usage: " << argv[0] << " in_file out_file [preserve_sparsity]"
+         << endl;
     return -1;
   }
 
@@ -29,8 +28,8 @@ int main(int argc, const char *argv[])
     float min, max;
     int nbins;
 
-    ist >>
-      op_index >> op_type >> output_index >> tensor_name >> min >> max >> nbins;
+    ist >> op_index >> op_type >> output_index >> tensor_name >> min >> max >>
+        nbins;
 
     vector<uint64_t> bins;
     for (int i = 0; i < nbins; ++i) {
@@ -42,13 +41,11 @@ int main(int argc, const char *argv[])
 
     Histogram hist = Histogram(min, max, bins);
     TensorQuantizationParams qparams =
-      KLDivergenceMinimization().ChooseQuantizationParams(
-        hist, preserve_sparsity);
+        KLDivergenceMinimization().ChooseQuantizationParams(
+            hist, preserve_sparsity);
 
-    out <<
-      op_index << " " << op_type << " " <<
-      output_index << " " << tensor_name << " " <<
-      qparams.Min() << " " << qparams.Max() << endl;
+    out << op_index << " " << op_type << " " << output_index << " "
+        << tensor_name << " " << qparams.Min() << " " << qparams.Max() << endl;
   }
 
   return 0;

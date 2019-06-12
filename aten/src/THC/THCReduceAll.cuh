@@ -9,7 +9,7 @@
 // entire tensor to one value.
 //
 
-#include "THCReduceApplyUtils.cuh"
+#include <THC/THCReduceApplyUtils.cuh>
 
 // Size per each reduction block
 #define THC_REDUCE_ALL_BLOCK_SIZE 1024L

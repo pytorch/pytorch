@@ -1,11 +1,11 @@
 #pragma once
 
-#include "intrinsics.h"
+#include <ATen/cpu/vec256/intrinsics.h>
 
-#include "vec256_base.h"
-#include "vec256_float.h"
-#include "vec256_double.h"
-#include "vec256_int.h"
+#include <ATen/cpu/vec256/vec256_base.h>
+#include <ATen/cpu/vec256/vec256_float.h>
+#include <ATen/cpu/vec256/vec256_double.h>
+#include <ATen/cpu/vec256/vec256_int.h>
 
 #include <algorithm>
 #include <cstddef>

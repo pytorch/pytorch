@@ -1,12 +1,12 @@
-#include "ATen/native/cpu/TensorCompareKernel.h"
+#include <ATen/native/cpu/TensorCompareKernel.h>
 
 #include <numeric>
 #include <iterator>
 #include <algorithm>
 
-#include "ATen/Dispatch.h"
-#include "ATen/Parallel.h"
-#include "c10/util/Optional.h"
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#include <c10/util/Optional.h>
 
 namespace at { namespace native { namespace {
 

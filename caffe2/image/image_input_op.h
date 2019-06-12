@@ -83,6 +83,9 @@ class ImageInputOp final
   void DecodeAndTransposeOnly(
       const std::string& value, uint8_t *image_data, int item_id,
       const int channels, std::size_t thread_index);
+  bool ApplyTransformOnGPU(
+      const std::vector<std::int64_t>& dims,
+      const c10::Device& type);
 
   unique_ptr<db::DBReader> owned_reader_;
   const db::DBReader* reader_;
@@ -1206,7 +1209,7 @@ bool ImageInputOp<Context>::Prefetch() {
       max_decode_error_ratio_) {
     throw std::runtime_error(
         "max_decode_error_ratio exceeded " +
-        caffe2::to_string(max_decode_error_ratio_));
+        c10::to_string(max_decode_error_ratio_));
   }
 
   // If the context is not CPUContext, we will need to do a copy in the
@@ -1240,12 +1243,14 @@ bool ImageInputOp<Context>::CopyPrefetched() {
   // Note(jiayq): The if statement below should be optimized away by the
   // compiler since std::is_same is a constexpr.
   if (std::is_same<Context, CPUContext>::value) {
-    OperatorBase::OutputTensorCopyFrom(0, options, prefetched_image_, &context_);
-    OperatorBase::OutputTensorCopyFrom(1, options, prefetched_label_, &context_);
+    OperatorBase::OutputTensorCopyFrom(
+        0, options, prefetched_image_, /* async */ true);
+    OperatorBase::OutputTensorCopyFrom(
+        1, options, prefetched_label_, /* async */ true);
 
     for (int i = 2; i < OutputSize(); ++i) {
       OperatorBase::OutputTensorCopyFrom(
-          i, options, prefetched_additional_outputs_[i - 2], &context_);
+          i, options, prefetched_additional_outputs_[i - 2], /* async */ true);
     }
   } else {
     // TODO: support color jitter and color lighting in gpu_transform
@@ -1267,32 +1272,23 @@ bool ImageInputOp<Context>::CopyPrefetched() {
       const int N = X.dim32(0), C = X.dim32(3), H = X.dim32(1), W = X.dim32(2);
       // data goes out as NCHW
       auto dims = std::vector<int64_t>{N, C, H, W};
-      // GPU transform kernel allows explicitly setting output type
-      if (output_type_ == TensorProto_DataType_FLOAT) {
-        auto* image_output = OperatorBase::OutputTensor(
-            0, dims, at::dtype<float>().device(type));
-        TransformOnGPU<uint8_t,float,Context>(prefetched_image_on_device_,
-                                              image_output, mean_gpu_,
-                                              std_gpu_, &context_);
-      } else if (output_type_ == TensorProto_DataType_FLOAT16) {
-        auto* image_output = OperatorBase::OutputTensor(
-            0, dims, at::dtype<at::Half>().device(type));
-        TransformOnGPU<uint8_t,at::Half,Context>(prefetched_image_on_device_,
-                                                image_output, mean_gpu_,
-                                                std_gpu_, &context_);
-      }  else {
+      if (!ApplyTransformOnGPU(dims, type)) {
         return false;
       }
+
     } else {
       OperatorBase::OutputTensorCopyFrom(
-          0, type, prefetched_image_on_device_, &context_);
+          0, type, prefetched_image_on_device_, /* async */ true);
     }
     OperatorBase::OutputTensorCopyFrom(
-        1, type, prefetched_label_on_device_, &context_);
+        1, type, prefetched_label_on_device_, /* async */ true);
 
     for (int i = 2; i < OutputSize(); ++i) {
       OperatorBase::OutputTensorCopyFrom(
-          i, type, prefetched_additional_outputs_on_device_[i - 2], &context_);
+          i,
+          type,
+          prefetched_additional_outputs_on_device_[i - 2],
+          /* async */ true);
     }
   }
   return true;

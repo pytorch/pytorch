@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricUpSamplingNearest.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricUpSamplingNearest.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 static inline void THNN_(VolumetricUpSamplingNearest_shapeCheck)
                         (THCState *state,

@@ -1,26 +1,26 @@
-#include "ATen/native/cpu/UnaryOpsKernel.h"
+#include <ATen/native/cpu/UnaryOpsKernel.h>
 
 #include <cmath>
 #include <type_traits>
-#include "ATen/Config.h"
-#include "ATen/Dispatch.h"
-#include "ATen/CPUGenerator.h"
-#include "ATen/CheckGenerator.h"
-#include "ATen/Generator.h"
-#include "ATen/cpu/vml.h"
-#include "ATen/CPUApplyUtils.h"
-#include "ATen/native/DispatchStub.h"
-#include "ATen/native/Distributions.h"
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/CPUGenerator.h>
+#include <ATen/CheckGenerator.h>
+#include <ATen/Generator.h>
+#include <ATen/cpu/vml.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/Distributions.h>
 #ifdef __AVX2__
-#include "ATen/native/cpu/avx_mathfun.h"
+#include <ATen/native/cpu/avx_mathfun.h>
 #endif
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
 
-#include "TH/THGenerator.hpp"
-#include "TH/THRandom.h"
+#include <TH/THGenerator.hpp>
+#include <TH/THRandom.h>
 
 namespace at { namespace native {
 namespace {

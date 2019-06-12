@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/LookupTableBag.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/LookupTableBag.cu"
 #else
 
 

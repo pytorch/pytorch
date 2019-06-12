@@ -1,10 +1,10 @@
-#include "THCUNN.h"
-#include "common.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCDeviceUtils.cuh"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/common.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCDeviceUtils.cuh>
 
 #include <stdio.h>
 #include <assert.h>
@@ -181,5 +181,5 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
   }
 }
 
-#include "generic/ClassNLLCriterion.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/ClassNLLCriterion.cu>
+#include <THC/THCGenerateFloatTypes.h>

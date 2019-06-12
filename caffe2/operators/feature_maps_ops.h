@@ -40,13 +40,9 @@ class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
       }
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValues = Output(2);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValues->Resize(totalNumFeatures);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValues = Output(2, {totalNumFeatures}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -165,15 +161,11 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
       }
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesValues = Output(3);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesValues = Output(3, {totalNumValues}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -330,17 +322,12 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
       }
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesKeys = Output(3);
-    auto* outValuesValues = Output(4);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesKeys->Resize(totalNumValues);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesKeys = Output(3, {totalNumValues}, at::dtype<K>());
+    auto* outValuesValues = Output(4, {totalNumValues}, at::dtype<V>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -421,13 +408,9 @@ class MergeMultiScalarFeatureTensorsOp : public Operator<Context> {
       totalNumFeatures += Input(kNumTensorsPerInput * inputIndex + 1).numel();
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValues = Output(2);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValues->Resize(totalNumFeatures);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValues = Output(2, {totalNumFeatures}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -557,15 +540,11 @@ class MergeMultiListFeatureTensorsOp : public Operator<Context> {
       totalNumValues += Input(kNumTensorsPerInput * inputIndex + 3).numel();
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesValues = Output(3);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesValues = Output(3, {totalNumValues}, at::dtype<T>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();
@@ -659,17 +638,12 @@ class MergeMultiMapFeatureTensorsOp : public Operator<Context> {
       totalNumValues += Input(kNumTensorsPerInput * inputIndex + 4).numel();
     }
 
-    auto* outLengths = Output(0);
-    auto* outKeys = Output(1);
-    auto* outValuesLengths = Output(2);
-    auto* outValuesKeys = Output(3);
-    auto* outValuesValues = Output(4);
-
-    outLengths->Resize(numExamples);
-    outKeys->Resize(totalNumFeatures);
-    outValuesLengths->Resize(totalNumFeatures);
-    outValuesKeys->Resize(totalNumValues);
-    outValuesValues->Resize(totalNumValues);
+    auto* outLengths = Output(0, {numExamples}, at::dtype<int32_t>());
+    auto* outKeys = Output(1, {totalNumFeatures}, at::dtype<int64_t>());
+    auto* outValuesLengths =
+        Output(2, {totalNumFeatures}, at::dtype<int32_t>());
+    auto* outValuesKeys = Output(3, {totalNumValues}, at::dtype<K>());
+    auto* outValuesValues = Output(4, {totalNumValues}, at::dtype<V>());
 
     int32_t* outLengthsData = outLengths->template mutable_data<int32_t>();
     int64_t* outKeysData = outKeys->template mutable_data<int64_t>();

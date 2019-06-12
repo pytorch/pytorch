@@ -1,4 +1,4 @@
-#include "Descriptors.h"
+#include <ATen/miopen/Descriptors.h>
 #include <ATen/ATen.h>
 
 namespace at { namespace native {

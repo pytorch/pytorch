@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialAdaptiveMaxPooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialAdaptiveMaxPooling.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 // 4d tensor B x D x H x W
 

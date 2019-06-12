@@ -8,7 +8,7 @@
 #include <caffe2/core/common_gpu.h>
 #endif
 #if __HIP_DEVICE_COMPILE__
-#include <caffe2/core/hip/common_hip.h>
+#include <caffe2/core/hip/common_gpu.h>
 #endif
 
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)

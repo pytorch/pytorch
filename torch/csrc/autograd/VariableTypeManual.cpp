@@ -1,6 +1,6 @@
-#include "c10/util/Optional.h"
-#include "torch/csrc/autograd/VariableTypeUtils.h"
-#include "torch/csrc/utils/memory.h"
+#include <c10/util/Optional.h>
+#include <torch/csrc/autograd/VariableTypeUtils.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <torch/csrc/utils/memory.h>
 
@@ -30,12 +30,6 @@ Allocator* VariableType::allocator() const {
 }
 Device VariableType::getDeviceFromPtr(void * data) const {
   return baseType->getDeviceFromPtr(data);
-}
-Storage VariableType::storage(bool resizable) const {
-  return baseType->storage();
-}
-Storage VariableType::storage(size_t size, bool resizable) const {
-  return baseType->storage(size);
 }
 Storage VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   return baseType->storageFromBlob(data, size, deleter);
@@ -222,8 +216,7 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
     if (!t.defined()) {
-      AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor at position #", i, " "
-                    "for iterable argument #", pos, " '", name, "'");
+      continue;
     }
     if (!isVariableType(t.type())) {
       AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
@@ -255,7 +248,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
     jit::tracer::addInputs(node, "src", src);
     jit::tracer::addInputs(node, "self", self);
     graph->appendNode(node);
-    jit::tracer::ensureUnique("copy_ (possibly due to an assignment)", self);
+    jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
   }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
@@ -282,7 +275,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   return self;
 }
 
-Tensor & VariableType::_s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const {
+Tensor VariableType::_s_copy_from(const Tensor & self, const Tensor & dst, bool non_blocking) const {
   AT_ERROR("copy_from does not support automatic differentiation; use copy_ instead");
 }
 
@@ -343,7 +336,7 @@ Tensor & VariableType::detach_(Tensor & self) const {
     jit::tracer::recordSourceLocation(node);
     jit::tracer::addInputs(node, "self", self);
     graph->appendNode(node);
-    jit::tracer::ensureUnique("detach_", self);
+    jit::tracer::ensureUniqueIfOutOfPlaced("detach_", self);
   }
   // <NON_GENERATED_CODE>
   as_variable_ref(self).detach_();

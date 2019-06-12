@@ -1,12 +1,12 @@
 #include <cmath>
 #include <iostream>
-#include "ATen/Dispatch.h"
-#include "ATen/Parallel.h"
-#include "ATen/cpu/vec256/vec256.h"
-#include "ATen/cpu/vec256/functional.h"
-#include "ATen/native/TensorIterator.h"
-#include "ATen/native/BinaryOps.h"
-#include "ATen/native/cpu/Loops.h"
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec256/functional.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/BinaryOps.h>
+#include <ATen/native/cpu/Loops.h>
 
 namespace at { namespace native {
 namespace {

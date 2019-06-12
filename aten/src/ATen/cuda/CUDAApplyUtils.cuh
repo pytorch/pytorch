@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ATen/cuda/detail/IndexUtils.cuh"
-#include "ATen/TensorUtils.h"
-#include "THC/THCAtomics.cuh"
-#include "ATen/cuda/CUDAContext.h"
+#include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/TensorUtils.h>
+#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <math.h>
 
@@ -247,8 +247,8 @@ template <typename Op,
           typename Offset>
 struct ApplyOp1<Op, scalar, IndexType, ADims, 0, Offset> {
 __device__ __forceinline__
-static void apply(detail::TensorInfo<scalar, IndexType> &a, int n,
-                  const Op &op, IndexType linearIndex, Offset offset) {
+static void apply(detail::TensorInfo<scalar, IndexType> &a, const Op &op,
+                  int n, IndexType linearIndex, Offset offset) {
   op(a.data[offset]);
 }
 };
@@ -271,7 +271,7 @@ template <typename Op,
           typename IndexType,
           int ADims,
           int step>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
@@ -355,7 +355,7 @@ template <typename Op,
           typename IndexType,
           int ADims, int BDims,
           int step>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
@@ -464,7 +464,7 @@ template <typename Op,
           typename IndexType,
           int ADims, int BDims, int CDims,
           int step>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
@@ -587,7 +587,7 @@ template <typename Op,
           typename IndexType,
           int ADims, int BDims, int CDims, int DDims,
           int step>
-#if __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
@@ -635,7 +635,7 @@ inline dim3 getApplyBlock() {
 
 template <typename scalar, int step, typename Op>
 inline bool CUDA_tensor_apply1(at::Tensor a,
-                               Op op,
+                               const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite) {
   checkBackend("CUDA_tensor_apply1", {a}, Backend::CUDA);
   auto dim = a.dim();

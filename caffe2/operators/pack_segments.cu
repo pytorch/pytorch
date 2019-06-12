@@ -15,11 +15,15 @@ __global__ void PackSegmentsKernel(
     const int64_t num_seq,
     const int64_t cell_size,
     Data_T padding,
+    bool* presence_ptr,
     Data_T* out_ptr) {
   CUDA_1D_KERNEL_LOOP(i, num_seq * max_length * cell_size) {
     int seq = (i / cell_size) / max_length;
     int cell = (i / cell_size) % max_length;
     int offset = i % cell_size;
+    if (presence_ptr && offset == 0) {
+      presence_ptr[i / cell_size] = cell < lengths_ptr[seq];
+    }
     if (cell >= lengths_ptr[seq]) {
       out_ptr[i] = padding;
     } else {
@@ -176,10 +180,11 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
   const Data_T* data_ptr = data.data<Data_T>();
   const T* lengths_ptr = lengths.data<T>();
   auto* out = Output(0);
-
+  Tensor* presence_mask = nullptr;
   if (return_presence_mask_) {
-    CAFFE_THROW("CUDA version of PackSegments does not support presence mask.");
+    presence_mask = Output(1);
   }
+
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
   CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
 
@@ -206,6 +211,12 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
   // Compute prefix sum over the lengths
   array_prefix_sum_exclusive<T>(
       lengths_ptr, num_seq, dev_buffer_, dev_lengths_prefix_sum_, context_);
+  bool* presence_mask_data = nullptr;
+  if (return_presence_mask_) {
+    std::vector<int64_t> presence_shape{lengths.numel(), max_length};
+    presence_mask->Resize(presence_shape);
+    presence_mask_data = presence_mask->template mutable_data<bool>();
+  }
 
   // create output tensor
   auto shape = data.dims().vec(); // Shape of out is batch_size x max_len x ...
@@ -234,7 +245,9 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
       num_seq,
       cell_size,
       padding,
+      presence_mask_data,
       out_ptr);
+
   return true;
 }
 

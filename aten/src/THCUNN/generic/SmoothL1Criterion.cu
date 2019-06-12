@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SmoothL1Criterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SmoothL1Criterion.cu"
 #else
 
 void THNN_(SmoothL1Criterion_updateOutput)(

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensor.hpp"
+#define TH_GENERIC_FILE "TH/generic/THTensor.hpp"
 #else
 
 // STOP!!! Thinking of including this header directly?  Please

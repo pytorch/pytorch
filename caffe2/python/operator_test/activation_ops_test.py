@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import numpy as np
 
-from hypothesis import given
+from hypothesis import given, assume
 import hypothesis.strategies as st
 
 from caffe2.python import core, workspace
@@ -41,11 +41,14 @@ class TestActivations(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
-    @unittest.skipIf(not workspace.has_gpu_support,
+    @unittest.skipIf(not workspace.has_gpu_support and
+                    not workspace.has_hip_support,
                      "Relu for float16 can only run on GPU now.")
     @given(X=hu.tensor(dtype=np.float16), in_place=st.booleans(),
-           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs_gpu_only)
+           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
     def test_relu_fp16(self, X, in_place, engine, gc, dc):
+        # fp16 is only supported on CUDA/HIP
+        assume(core.IsGPUDeviceType(gc.device_type))
         op = core.CreateOperator(
             "Relu",
             ["X"],
@@ -68,7 +71,7 @@ class TestActivations(serial.SerializedTestCase):
         X[X == 0.0] += 0.02
 
         self.assertReferenceChecks(
-            hu.gpu_do,
+            gc,
             op,
             [X],
             relu_ref,

@@ -1,4 +1,5 @@
 #include <mutex>
+#include <thread>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
@@ -30,11 +31,11 @@ class AtomicFetchAddOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     auto& mutex = OperatorBase::Input<std::unique_ptr<std::mutex>>(0);
+    std::lock_guard<std::mutex> lg(*mutex);
     auto& a = Input(1);
     auto& b = Input(2);
     auto* c = Output(0);
     auto* d = Output(1);
-    std::lock_guard<std::mutex> lg(*mutex);
     c->Resize();
     d->Resize();
     auto* aPtr = a.data<int32_t>();

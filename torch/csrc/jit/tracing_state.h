@@ -1,16 +1,16 @@
 #pragma once
 
-#include "torch/csrc/autograd/function_hook.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/constants.h"
-#include "torch/csrc/jit/stack.h"
-#include "torch/csrc/jit/type.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/stack.h>
+#include <torch/csrc/jit/type.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/utils/functional.h>
+#include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/utils/variadic.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/Backtrace.h>
 
@@ -47,6 +47,7 @@ struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState
   std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq> value_map;
   std::shared_ptr<Graph> graph;
   bool warn = true;
+  bool force_outplace = false;
   std::function<std::string(const Variable& var)> lookup_var_name_fn =
     [](const Variable& var) {return "";};
 };
@@ -90,7 +91,7 @@ struct ArgumentStash {
   TORCH_API static void stashValue(const std::string& arg_name,
                                    size_t idx,
                                    const Variable& var,
-                                   TypePtr type=nullptr);
+                                   const TypePtr& type=nullptr);
 
   static bool hasValue(const std::string& arg_name) {
     return stash.values.count(arg_name) > 0;
@@ -122,7 +123,7 @@ TORCH_API extern const char * WARN_CONSTRUCTOR;
 TORCH_API extern const char * WARN_RESIZE;
 TORCH_API void _do_warn(const char * _reason, const char * _kind);
 inline void warn(const char * _reason, const char * _kind=nullptr) {
-  if (auto state = getTracingState()) {
+  if (const auto& state = getTracingState()) {
     if (!state->warn) return;
     _do_warn(_reason, _kind);
   }

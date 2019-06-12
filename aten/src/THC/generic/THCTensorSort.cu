@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorSort.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorSort.cu"
 #else
 
 // In alignment with default sort on a c++ map, this function

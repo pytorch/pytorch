@@ -1,16 +1,16 @@
 // updateOutput, updateGradInput Kernels ported from Sergey Zagoruyko's pyinn, which itself was a
 // port from Caffe
 
-#include "THCUNN.h"
-#include "THCTensor.hpp"
-#include "THCDeviceTensor.cuh"
-#include "THCDeviceTensorUtils.cuh"
-#include "THCNumerics.cuh"
-#include "THCReduceApplyUtils.cuh"
-#include "THCSortUtils.cuh"
-#include "THCTensorMathReduce.cuh"
-#include "SharedMem.cuh"
-#include "common.h"
+#include <THCUNN/THCUNN.h>
+#include <THC/THCTensor.hpp>
+#include <THC/THCDeviceTensor.cuh>
+#include <THC/THCDeviceTensorUtils.cuh>
+#include <THC/THCNumerics.cuh>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCSortUtils.cuh>
+#include <THC/THCTensorMathReduce.cuh>
+#include <THCUNN/SharedMem.cuh>
+#include <THCUNN/common.h>
 #include <algorithm>
 
 
@@ -254,5 +254,5 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   }
 }
 
-#include "generic/SpatialDepthwiseConvolution.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialDepthwiseConvolution.cu>
+#include <THC/THCGenerateFloatTypes.h>

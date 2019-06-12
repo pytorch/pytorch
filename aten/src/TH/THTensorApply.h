@@ -247,10 +247,13 @@
 
 #ifdef _OPENMP
 
-#ifndef _WIN32
-#define PRAGMA(P) _Pragma(#P)
+#ifdef _WIN32  
+// MSVC doesn't support loop pragmas, but does support others. Create a new macro to account for those differences.  
+#define PRAGMA_LOOP(P)    // Noop  
+#define PRAGMA(P)         __pragma(P)
 #else
-#define PRAGMA(P) __pragma(P)
+#define PRAGMA_LOOP(P)    _Pragma(#P)  
+#define PRAGMA(P)         _Pragma(#P)
 #endif
 
 #include <omp.h>
@@ -369,7 +372,7 @@
     TYPE2 *tp = THTensor_getStoragePtr(TENSOR2)->data<TYPE2>()+TENSOR2->storage_offset();                        \
     ptrdiff_t iter = 0;                                                                        \
     if(tp != (TYPE2*)rp) {                                                                             \
-      PRAGMA(ivdep) \
+      PRAGMA_LOOP(ivdep) \
       PRAGMA( omp parallel for if (SIZE > OMP_THRESHOLD * 10) firstprivate(rp, tp)) \
       for (iter = 0; iter < SIZE; iter++) {                             \
         TYPE2 *TENSOR2##_data = tp+iter;                                \
@@ -377,7 +380,7 @@
         CODE                                                            \
       }\
     } else {\
-      PRAGMA(simd) \
+      PRAGMA_LOOP(simd) \
       PRAGMA( omp parallel for if (SIZE > OMP_THRESHOLD * 10) firstprivate(rp, tp) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE2* TENSOR2##_data = tp+iter;\
@@ -449,7 +452,7 @@
     TYPE3 *srcp = THTensor_getStoragePtr(TENSOR3)->data<TYPE3>()+TENSOR3->storage_offset();                               \
     ptrdiff_t iter = 0;\
     if(tp != (TYPE2*)rp) {                                                                             \
-      PRAGMA(ivdep) \
+      PRAGMA_LOOP(ivdep) \
       PRAGMA( omp parallel for if (SIZE > OMP_THRESHOLD * 10) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE1 *TENSOR1##_data = rp+iter;\
@@ -458,7 +461,7 @@
         CODE                                \
       } \
     } else {\
-      PRAGMA(simd) \
+      PRAGMA_LOOP(simd) \
       PRAGMA( omp parallel for if (SIZE > OMP_THRESHOLD * 10) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE1 *TENSOR1##_data = rp+iter;\

@@ -1,11 +1,11 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CUDA_FUSER || USE_CPU_FUSER
 
-#include "ATen/ATen.h"
-#include "torch/csrc/utils/disallow_copy.h"
-#include "torch/csrc/jit/fuser/tensor_desc.h"
-#include "torch/csrc/jit/fuser/partition_desc.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/utils/disallow_copy.h>
+#include <torch/csrc/jit/fuser/tensor_desc.h>
+#include <torch/csrc/jit/fuser/partition_desc.h>
 
 #include <string>
 #include <cstdint>

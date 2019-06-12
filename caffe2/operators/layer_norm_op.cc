@@ -1,6 +1,7 @@
 #include "caffe2/operators/layer_norm_op.h"
-
+#include "caffe2/operators/experimental/c10/schemas/layer_norm.h"
 #include "caffe2/utils/eigen_utils.h"
+#include <c10/core/dispatch/KernelRegistration.h>
 
 namespace caffe2 {
 
@@ -12,12 +13,14 @@ void LayerNormOp<CPUContext>::ComputeStdDevAndFusedParams(
     const T* var,
     T* stddev,
     T* scale,
-    T* bias) {
+    T* bias,
+    float epsilon,
+    CPUContext* /*context*/) {
   ConstEigenVectorArrayMap<T> var_arr(var, N);
   EigenVectorArrayMap<T> stddev_arr(stddev, N);
   EigenVectorArrayMap<T> scale_arr(scale, N);
-  scale_arr = (var_arr + static_cast<T>(epsilon_)).rsqrt();
-  stddev_arr = scale_arr * (var_arr + static_cast<T>(epsilon_));
+  scale_arr = (var_arr + static_cast<T>(epsilon)).rsqrt();
+  stddev_arr = scale_arr * (var_arr + static_cast<T>(epsilon));
   EigenVectorArrayMap<T>(bias, N) =
       -scale_arr * ConstEigenVectorArrayMap<T>(mean, N);
 }
@@ -30,7 +33,8 @@ void LayerNormOp<CPUContext>::LayerNormForward(
     const T* X,
     const T* scale,
     const T* bias,
-    T* Y) {
+    T* Y,
+    CPUContext* context) {
   EigenArrayMap<T>(Y, N, M) =
       (ConstEigenArrayMap<T>(X, N, M).rowwise() *
        ConstEigenVectorArrayMap<T>(scale, M).transpose())
@@ -177,3 +181,36 @@ to the end.)
     .Output(2, "stddev", "Standard deviations for each feature vector");
 
 } // namespace caffe2
+
+
+// Register layer norm with c10
+namespace {
+template <class DataType>
+void layer_norm_c10(
+    const caffe2::Tensor& X,
+    caffe2::Tensor* Y,
+    caffe2::Tensor* mean,
+    caffe2::Tensor* sig,
+    int axis,
+    float epsilon,
+    caffe2::ops::LayerNorm::Cache* cache,
+    caffe2::BaseContext* context) {
+  const int canonical_axis = X.canonical_axis_index(axis);
+  std::vector<int64_t> moments_dims(
+      X.sizes().cbegin(), X.sizes().cbegin() + canonical_axis);
+  moments_dims.push_back(1);
+  mean->Resize(moments_dims);
+  sig->Resize(moments_dims);
+  caffe2::LayerNormOp<caffe2::CPUContext>::runLayerNorm<DataType>(
+    X, Y, mean, sig, canonical_axis, epsilon, &cache->scale, &cache->bias, static_cast<caffe2::CPUContext*>(context)
+  );
+}
+}
+namespace c10 {
+C10_REGISTER_KERNEL(caffe2::ops::LayerNorm)
+    .kernel(&layer_norm_c10<float>)
+    .dispatchKey(c10::DispatchKey<1>{
+        c10::details::TensorParameterDispatchKey{DeviceTypeId::CPU,
+                                                 LayoutId(0),
+                                                 caffe2::TypeMeta::Id<float>()}});
+} // namespace c10

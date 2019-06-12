@@ -33,12 +33,18 @@ class OnnxifiOp final : public Operator<Context> {
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
 
     // Setup input/output descriptor templates
-    for (const auto& input : operator_def.input()) {
+    input_names_ =
+        this->template GetRepeatedArgument<std::string>("input_names");
+    output_names_ =
+        this->template GetRepeatedArgument<std::string>("output_names");
+    CAFFE_ENFORCE_EQ(input_names_.size(), operator_def.input_size());
+    CAFFE_ENFORCE_EQ(output_names_.size(), operator_def.output_size());
+    for (const auto& input : input_names_) {
       input_desc_.push_back(onnxTensorDescriptorV1());
       input_desc_.back().name = input.c_str();
     }
     int output_idx = 0;
-    for (const auto& output : operator_def.output()) {
+    for (const auto& output : output_names_) {
       output_desc_.push_back(onnxTensorDescriptorV1());
       output_desc_.back().name = output.c_str();
 
@@ -174,6 +180,14 @@ class OnnxifiOp final : public Operator<Context> {
   // input/output descriptors
   std::vector<onnxTensorDescriptorV1> input_desc_;
   std::vector<onnxTensorDescriptorV1> output_desc_;
+
+  // We bind the op input/output by position while ONNXIFI binds input/output by
+  // names. In addition, op input/output names can be writtten by, for example,
+  // memonger. We cache the original input/output name of ONNX object here and
+  // bind them by position.
+  std::vector<std::string> input_names_;
+  std::vector<std::string> output_names_;
+
   std::vector<std::vector<uint64_t>> input_shapes_;
   std::vector<std::vector<uint64_t>> output_shapes_;
 

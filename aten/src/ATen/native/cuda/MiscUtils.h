@@ -1,5 +1,5 @@
-#include "ATen/ATen.h"
-#include "THC.h"  // for USE_MAGMA
+#include <ATen/ATen.h>
+#include <THC/THC.h>  // for USE_MAGMA
 
 #ifdef USE_MAGMA
 #include <magma.h>

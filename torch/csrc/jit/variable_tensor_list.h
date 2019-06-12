@@ -1,5 +1,5 @@
 #pragma once
-#include "ATen/ATen.h"
+#include <ATen/ATen.h>
 
 namespace torch { namespace jit {
 

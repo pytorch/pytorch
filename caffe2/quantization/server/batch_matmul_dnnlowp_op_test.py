@@ -6,7 +6,7 @@ from itertools import product
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep
+from caffe2.python import core, dyndep, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
 from dnnlowp_test_utils import (
     avoid_vpmaddubsw_overflow_fc,
@@ -16,6 +16,7 @@ from hypothesis import given
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
+workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
@@ -47,7 +48,7 @@ class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
 
         for i in range(batch_size):
             avoid_vpmaddubsw_overflow_fc(
-                m, k, n, A[i, ], A_min, A_max, B[i, ], B_min, B_max
+                m, k, n, A[i,], A_min, A_max, B[i,], B_min, B_max
             )
 
         for trans_a, trans_b in product([0, 1], [0, 1]):

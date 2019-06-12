@@ -5,13 +5,13 @@
 #include <string>
 #include <type_traits>
 #include <ATen/ATen.h>
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/utils/python_numbers.h"
-#include "torch/csrc/utils/python_compat.h"
+#include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_compat.h>
 
 #ifdef USE_CUDA
 #include <THC/THC.h>
-#include <ATen/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAStream.h>
 #endif
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)
@@ -140,10 +140,10 @@ typedef THPPointer<THPGenerator> THPGeneratorPtr;
 template <typename T>
 struct THPUtils_typeTraits {};
 
-#include "generic/utils.h"
+#include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateAllTypes.h>
 
-#include "generic/utils.h"
+#include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateHalfType.h>
 
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);

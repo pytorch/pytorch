@@ -1,13 +1,13 @@
-#include "THCStorage.hpp"
+#include <THC/THCStorage.hpp>
 
-#include "THCThrustAllocator.cuh"
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/fill.h>
 #if CUDA_VERSION >= 7000 || defined(__HIP_PLATFORM_HCC__)
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
-#include "TH/THHalf.h"
+#include <TH/THHalf.h>
 
-#include "generic/THCStorage.cu"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCStorage.cu>
+#include <THC/THCGenerateAllTypes.h>

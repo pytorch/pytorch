@@ -3,10 +3,10 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THCTensor.h"
-#include "THTensor.hpp"
-#include "THCStorage.hpp"
-#include "THCGeneral.hpp"
+#include <THC/THCTensor.h>
+#include <TH/THTensor.hpp>
+#include <THC/THCStorage.hpp>
+#include <THC/THCGeneral.hpp>
 
 #include <atomic>
 #include <ATen/ATen.h>
@@ -54,5 +54,5 @@ THC_API void THCTensor_preserveReduceDimSemantics(THCState *state, THCTensor *te
 /* true otherwise.                                             */
 THC_API bool THCTensor_maybeOverlappingIndices(THCState* state, const THCTensor* t);
 
-#include "generic/THCTensor.hpp"
-#include "THCGenerateAllTypes.h"
+#include <THC/generic/THCTensor.hpp>
+#include <THC/THCGenerateAllTypes.h>

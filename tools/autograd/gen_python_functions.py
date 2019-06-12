@@ -21,13 +21,15 @@ SKIP_PYTHON_BINDINGS = [
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
-    '_sparse_add.*', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
+    '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
     'index',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
-    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
-    'arange.*', 'range.*', '_gesv.*', '_getri.*', '_inverse.*', '_potrs.*',
+    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
+    '_th_.*', '_thnn_.*',
+    'arange.*', 'range.*', '_gesv.*', '_getri.*', '_inverse.*',
+    '_potrs.*', '_cholesky.*',
     'slice', 'randint(_out)?',
-    '_local_scalar', '_local_scalar_dense',
+    'item', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
     'copy_sparse_to_sparse_',
 ]
@@ -168,6 +170,7 @@ def gen_py_variable_methods(out, declarations, template_path):
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
+                declaration.get('python_module') != 'nn' and
                 'Tensor' in declaration['method_of'])
 
     py_variable_methods = group_declarations_by_name(declarations, should_bind)
@@ -184,7 +187,7 @@ def gen_py_nn_functions(out, declarations, template_path):
 
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
-                declaration['mode'] == 'NN')
+                (declaration['mode'] == 'NN' or declaration.get('python_module') == 'nn'))
 
     py_nn_functions = group_declarations_by_name(declarations, should_bind)
 
@@ -201,6 +204,7 @@ def gen_py_torch_functions(out, declarations, template_path):
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
+                declaration.get('python_module') != 'nn' and
                 'namespace' in declaration['method_of'])
 
     py_torch_functions = group_declarations_by_name(declarations, should_bind)
@@ -224,7 +228,9 @@ def group_declarations_by_name(declarations, should_bind_fn):
 
 
 def get_type_default(declaration):
-    if declaration['name'].startswith('randperm'):
+    if declaration['name'].startswith('randperm') or \
+            declaration['name'] == 'tril_indices' or \
+            declaration['name'] == 'triu_indices':
         return 'torch.int64'
     else:
         return 'None'

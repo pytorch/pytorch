@@ -50,6 +50,33 @@ def test_success_first_then_exception_func(i, arg):
     raise ValueError("legitimate exception")
 
 
+def test_nested_child_body(i, ready_queue, nested_child_sleep):
+    ready_queue.put(None)
+    time.sleep(nested_child_sleep)
+
+
+def test_nested_spawn(i, pids_queue, nested_child_sleep):
+    context = mp.get_context("spawn")
+    nested_child_ready_queue = context.Queue()
+    nprocs = 2
+    spawn_context = mp.spawn(
+        fn=test_nested_child_body,
+        args=(nested_child_ready_queue, nested_child_sleep),
+        nprocs=nprocs,
+        join=False,
+        daemon=False,
+    )
+    pids_queue.put(spawn_context.pids())
+
+    # Wait for both children to have spawned, to ensure that they
+    # have called prctl(2) to register a parent death signal.
+    for _ in range(nprocs):
+        nested_child_ready_queue.get()
+
+    # Kill self. This should take down the child processes as well.
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
 @unittest.skipIf(
     NO_MULTIPROCESSING_SPAWN,
     "Disabled for environments that don't support the spawn start method")
@@ -117,6 +144,40 @@ class SpawnTest(TestCase):
             "ValueError: legitimate exception",
         ):
             mp.spawn(test_success_first_then_exception_func, args=(exitcode,), nprocs=2)
+
+    @unittest.skipIf(
+        sys.platform != "linux",
+        "Only runs on Linux; requires prctl(2)",
+    )
+    def test_nested_spawn(self):
+        context = mp.get_context("spawn")
+        pids_queue = context.Queue()
+        nested_child_sleep = 20.0
+        spawn_context = mp.spawn(
+            fn=test_nested_spawn,
+            args=(pids_queue, nested_child_sleep),
+            nprocs=1,
+            join=False,
+            daemon=False,
+        )
+
+        # Wait for nested children to terminate in time
+        pids = pids_queue.get()
+        start = time.time()
+        while len(pids) > 0:
+            for pid in pids:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    pids.remove(pid)
+                    break
+
+            # This assert fails if any nested child process is still
+            # alive after (nested_child_sleep / 2) seconds. By
+            # extension, this test times out with an assertion error
+            # after (nested_child_sleep / 2) seconds.
+            self.assertLess(time.time() - start, nested_child_sleep / 2)
+            time.sleep(0.1)
 
 
 if __name__ == '__main__':

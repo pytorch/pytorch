@@ -2,6 +2,7 @@ from common_utils import TestCase, run_tests
 import torch
 import warnings
 from torch import tensor
+import unittest
 
 
 class TestIndexing(TestCase):
@@ -43,6 +44,12 @@ class TestIndexing(TestCase):
 
         v = torch.tensor([1.])
         self.assertEqual(v[v == 0], torch.tensor([]))
+
+    def test_byte_mask_accumulate(self):
+        mask = torch.zeros(size=(10, ), dtype=torch.uint8)
+        y = torch.ones(size=(10, 10))
+        y.index_put_((mask, ), y[mask], accumulate=True)
+        self.assertEqual(y, torch.ones(size=(10, 10)))
 
     def test_multiple_byte_mask(self):
         v = torch.randn(5, 7, 3)
@@ -102,6 +109,12 @@ class TestIndexing(TestCase):
             x = torch.randn(2, 3, 4, 5, device=device)
             self.assertEqual(torch.empty(2, 0, 6, 4, 5, device=device),
                              x[:, torch.empty(0, 6, dtype=torch.int64, device=device)])
+
+        x = torch.empty(10, 0)
+        self.assertEqual(x[[1, 2]].shape, (2, 0))
+        self.assertEqual(x[[], []].shape, (0,))
+        with self.assertRaisesRegex(RuntimeError, 'for dim with size 0'):
+            x[:, [0, 1]]
 
     def test_empty_ndim_index_bool(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
@@ -448,9 +461,9 @@ class NumpyTests(TestCase):
         def f(a, v):
             a[a > -1] = tensor(v)
 
-        self.assertRaisesRegex(Exception, "expand", f, a, [])
-        self.assertRaisesRegex(Exception, 'expand', f, a, [1, 2, 3])
-        self.assertRaisesRegex(Exception, 'expand', f, a[:1], [1, 2, 3])
+        self.assertRaisesRegex(Exception, 'shape mismatch', f, a, [])
+        self.assertRaisesRegex(Exception, 'shape mismatch', f, a, [1, 2, 3])
+        self.assertRaisesRegex(Exception, 'shape mismatch', f, a[:1], [1, 2, 3])
 
     def test_boolean_indexing_twodim(self):
         # Indexing a 2-dimensional array with
@@ -503,12 +516,14 @@ class NumpyTests(TestCase):
 
     def test_broaderrors_indexing(self):
         a = torch.zeros(5, 5)
-        self.assertRaisesRegex(RuntimeError, 'match the size', a.__getitem__, ([0, 1], [0, 1, 2]))
-        self.assertRaisesRegex(RuntimeError, 'match the size', a.__setitem__, ([0, 1], [0, 1, 2]), 0)
+        self.assertRaisesRegex(RuntimeError, 'shape mismatch', a.__getitem__, ([0, 1], [0, 1, 2]))
+        self.assertRaisesRegex(RuntimeError, 'shape mismatch', a.__setitem__, ([0, 1], [0, 1, 2]), 0)
 
     def test_trivial_fancy_out_of_bounds(self):
         a = torch.zeros(5)
         ind = torch.ones(20, dtype=torch.int64)
+        if a.is_cuda:
+            raise unittest.SkipTest('CUDA asserts instead of raising an exception')
         ind[-1] = 10
         self.assertRaises(RuntimeError, a.__getitem__, ind)
         self.assertRaises(RuntimeError, a.__setitem__, ind, 0)

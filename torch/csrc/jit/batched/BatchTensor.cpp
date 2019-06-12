@@ -1,4 +1,4 @@
-#include "BatchTensor.h"
+#include <torch/csrc/jit/batched/BatchTensor.h>
 
 namespace torch { namespace jit {
 
@@ -8,12 +8,12 @@ BatchTensor::BatchTensor(at::Tensor data, at::Tensor mask, at::Tensor dims){
       + std::to_string(data.dim()) + ", mask.dim(): " + std::to_string(mask.dim())
       + ", dims.size(0): " + std::to_string(dims.size(0)));
   }
-  this->data = data;
-  this->mask = mask;
-  this->dims = dims;
+  this->data = std::move(data);
+  this->mask = std::move(mask);
+  this->dims = std::move(dims);
 }
 
-BatchTensor::BatchTensor(at::Tensor data, int64_t batch_size){
+BatchTensor::BatchTensor(const at::Tensor& data, int64_t batch_size){
   dims = at::empty(data.dim(), data.options().dtype(at::kByte));
   dims.fill_(0);
   std::vector<int64_t> sizes(data.dim() + 1, -1);
@@ -25,13 +25,13 @@ BatchTensor::BatchTensor(at::Tensor data, int64_t batch_size){
   mask.fill_(1);
 }
 
-BatchTensor::BatchTensor(const std::vector<at::Tensor> datalist, at::Tensor dims) {
+BatchTensor::BatchTensor(const std::vector<at::Tensor>& datalist, at::Tensor dims) {
   auto bs = datalist.size();
   std::vector<int64_t> sizes(dims.size(0) + 1, 0), mask_sizes(dims.size(0) + 1, 0);
   sizes[0] = bs;
   mask_sizes[0] = bs;
   for(int64_t i = 1; i < dims.size(0) + 1; i++){
-    for(auto x : datalist){
+    for(const auto& x : datalist){
       sizes[i] = std::max(sizes[i], x.size(i));
     }
     mask_sizes[i] = *dims[i - 1].data<uint8_t>() ? sizes[i] : 1;
@@ -52,7 +52,7 @@ BatchTensor::BatchTensor(const std::vector<at::Tensor> datalist, at::Tensor dims
     data_item += datalist[i];
     mask_item.fill_(1);
   }
-  this->dims = dims;
+  this->dims = std::move(dims);
 }
 
 std::vector<at::Tensor> BatchTensor::examples() {

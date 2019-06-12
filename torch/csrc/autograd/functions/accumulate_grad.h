@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/variable.h>
 
 namespace torch { namespace autograd {
 

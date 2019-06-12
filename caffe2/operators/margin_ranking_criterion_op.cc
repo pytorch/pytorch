@@ -11,14 +11,14 @@ bool MarginRankingCriterionOp<CPUContext>::RunOnDevice() {
   auto& X1 = Input(0);
   auto& X2 = Input(1);
   auto& Y = Input(2);
-  auto* loss = Output(0);
+
   CAFFE_ENFORCE_EQ(
       X1.numel(),
       X2.numel(),
       "The two inputs for computing ranking loss should have the same size.");
   CAFFE_ENFORCE_EQ(
       X1.numel(), Y.numel(), "The input and label should have the same size.");
-  loss->ResizeLike(X1);
+  auto* loss = Output(0, X1.sizes(), at::dtype<float>());
 
   const float* X1data = X1.data<float>();
   const float* X2data = X2.data<float>();
@@ -36,11 +36,9 @@ bool MarginRankingCriterionGradientOp<CPUContext>::RunOnDevice() {
   auto& X2 = Input(1);
   auto& Y = Input(2);
   auto& dLoss = Input(3);
-  auto* dX1 = Output(0);
-  auto* dX2 = Output(1);
 
-  dX1->ResizeLike(X1);
-  dX2->ResizeLike(X2);
+  auto* dX1 = Output(0, X1.sizes(), at::dtype<float>());
+  auto* dX2 = Output(1, X2.sizes(), at::dtype<float>());
 
   const float* X1data = X1.data<float>();
   const float* X2data = X2.data<float>();

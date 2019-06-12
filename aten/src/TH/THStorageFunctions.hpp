@@ -3,10 +3,10 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include <ATen/StorageImpl.h>
-#include "THStorageFunctions.h"
+#include <c10/core/StorageImpl.h>
+#include <TH/THStorageFunctions.h>
 
-#include <ATen/ScalarType.h>
+#include <c10/core/ScalarType.h>
 
 // Note [Weak references for intrusive refcounting]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

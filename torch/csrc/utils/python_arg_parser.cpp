@@ -1,9 +1,9 @@
-#include "torch/csrc/utils/python_arg_parser.h"
+#include <torch/csrc/utils/python_arg_parser.h>
 
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/Layout.h"
-#include "torch/csrc/utils/invalid_arguments.h"
-#include "torch/csrc/utils/python_strings.h"
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Layout.h>
+#include <torch/csrc/utils/invalid_arguments.h>
+#include <torch/csrc/utils/python_strings.h>
 
 #include <ATen/ATen.h>
 
@@ -47,6 +47,7 @@ static bool should_allow_numbers_as_tensors(const std::string& name) {
   return allowed.find(name) != allowed.end();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   : optional(false)
   , allow_none(false)
@@ -285,7 +286,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
   while (!done) {
     auto offset = fmt.find(", ", last_offset);
     if (offset == std::string::npos) {
-      offset = fmt.find(")", last_offset);
+      offset = fmt.find(')', last_offset);
       done = true;
       next_offset = offset + 1;
     } else {
@@ -519,7 +520,7 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
  , traceable(traceable)
 {
   for (auto& fmt : fmts) {
-    signatures_.push_back(FunctionSignature(fmt));
+    signatures_.emplace_back(fmt);
   }
   for (auto& signature : signatures_) {
     if (signature.max_args > max_args) {

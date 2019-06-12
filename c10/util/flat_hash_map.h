@@ -17,6 +17,10 @@
 #include <utility>
 #include <type_traits>
 
+#ifndef _MSC_VER
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#endif
 #ifdef _MSC_VER
 #define SKA_NOINLINE(...) __declspec(noinline) __VA_ARGS__
 #else
@@ -1453,3 +1457,7 @@ namespace ska
     };
 
 } // end namespace ska
+
+#ifndef _MSC_VER
+#pragma GCC diagnostic pop
+#endif

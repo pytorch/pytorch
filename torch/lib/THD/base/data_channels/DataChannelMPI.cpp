@@ -1,5 +1,5 @@
-#include "DataChannelMPI.hpp"
-#include "DataChannelUtils.hpp"
+#include <THD/base/data_channels/DataChannelMPI.hpp>
+#include <THD/base/data_channels/DataChannelUtils.hpp>
 
 #include <ATen/ATen.h>
 

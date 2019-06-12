@@ -2042,18 +2042,23 @@ class TestAutograd(TestCase):
 
     @skipIfNoLapack
     def test_cholesky(self):
-        root = torch.tril(torch.rand(S, S)).requires_grad_()
+        def func(root):
+            x = torch.matmul(root, root.transpose(-1, -2)) + 1e-05
+            return torch.cholesky(x, upper)
 
-        def run_test(upper):
-            def func(root):
-                x = torch.mm(root, root.t())
-                return torch.cholesky(x, upper)
+        def run_test(upper, dims):
+            root = torch.rand(*dims)
+            indices = torch.ones(dims[-1], dims[-1], dtype=torch.uint8).tril()
+            indices = indices.expand_as(root)
+            root[indices] = 0
+            root.requires_grad_()
 
             gradcheck(func, [root])
             gradgradcheck(func, [root])
 
-        run_test(upper=True)
-        run_test(upper=False)
+        for upper, dims in product([True, False], [(3, 3), (4, 3, 2, 2)]):
+            run_test(upper, dims)
+            run_test(upper, dims)
 
     @skipIfNoLapack
     def test_trtrs(self):
@@ -2698,6 +2703,14 @@ class TestAutograd(TestCase):
 
         gradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
         gradgradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
+
+    def test_gradcheck_sparse_input(self):
+        def fn(sparse):
+            return torch.sparse.sum(sparse)
+
+        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True)
+        with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
+            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
 
 
 def index_variable(shape, max_indices):

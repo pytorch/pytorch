@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensor.cpp"
+#define THC_GENERIC_FILE "THC/generic/THCTensor.cpp"
 #else
 
 #include <ATen/InferSize.h>

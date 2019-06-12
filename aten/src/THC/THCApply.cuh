@@ -1,10 +1,10 @@
 #ifndef THC_APPLY_INC
 #define THC_APPLY_INC
 
-#include "THCTensorCopy.h"
-#include "THCReduceApplyUtils.cuh"
-#include "THCTensorTypeUtils.cuh"
-#include "THCTensorCopy.hpp"
+#include <THC/THCTensorCopy.h>
+#include <THC/THCReduceApplyUtils.cuh>
+#include <THC/THCTensorTypeUtils.cuh>
+#include <THC/THCTensorCopy.hpp>
 
 //
 // This file contains pointwise operation functions and kernels that

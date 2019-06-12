@@ -26,7 +26,7 @@ class ExpandDimsOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    output->CopyFrom(input, &context_);
+    output->CopyFrom(input, true /*async*/);
     if (dims_.empty()) {
       return true;
     }
@@ -70,7 +70,7 @@ class SqueezeOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    output->CopyFrom(input, &context_);
+    output->CopyFrom(input, true /*async*/);
 
     CAFFE_ENFORCE_GT(
         input.dim(),

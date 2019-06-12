@@ -1,5 +1,5 @@
 #pragma once
-#include "vec256.h"
+#include <ATen/cpu/vec256/vec256.h>
 
 namespace at { namespace vec256 {
 

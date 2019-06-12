@@ -36,11 +36,11 @@ class UpsampleNearestOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-    auto* Y = Output(0);
+
     auto out_shape = X.sizes().vec();
     out_shape[X.dim() - 1] *= scale_;
     out_shape[X.dim() - 2] *= scale_;
-    Y->Resize(out_shape);
+    auto* Y = Output(0, out_shape, at::dtype<T>());
 
     int d1;
     int d2;

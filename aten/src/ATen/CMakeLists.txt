@@ -17,7 +17,14 @@ IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DI
 ENDIF()
 
 CONFIGURE_FILE(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
-CONFIGURE_FILE(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
+# TODO: Don't unconditionally generate CUDAConfig.h.in.  Unfortuantely,
+# this file generates AT_ROCM_ENABLED() which is required by the miopen
+# files, which are compiled even if we are doing a vanilla CUDA build.
+# Once we properly split CUDA and HIP in ATen, we can remove this code.
+configure_file(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
+if(USE_ROCM)
+  configure_file(hip/HIPConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/hip/HIPConfig.h")
+endif()
 
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
 FILE(GLOB base_h "*.h" "detail/*.h" "cpu/*.h")
@@ -28,21 +35,33 @@ FILE(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
 FILE(GLOB cuda_cu "cuda/*.cu" "cuda/detail/*.cu")
 FILE(GLOB cudnn_h "cudnn/*.h" "cudnn/*.cuh")
 FILE(GLOB cudnn_cpp "cudnn/*.cpp")
+
+FILE(GLOB hip_h "hip/*.h" "hip/detail/*.h" "hip/*.cuh" "hip/detail/*.cuh")
+FILE(GLOB hip_cpp "hip/*.cpp" "hip/detail/*.cpp" "hip/impl/*.cpp")
+FILE(GLOB hip_hip "hip/*.hip" "hip/detail/*.hip" "hip/impl/*.hip")
 FILE(GLOB miopen_h "miopen/*.h")
 FILE(GLOB miopen_cpp "miopen/*.cpp")
+
 FILE(GLOB mkl_cpp "mkl/*.cpp")
 FILE(GLOB mkldnn_cpp "mkldnn/*.cpp")
 
 FILE(GLOB native_cpp "native/*.cpp")
-FILE(GLOB native_sparse_cpp "native/sparse/*.cpp")
-FILE(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
-FILE(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
-FILE(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
-FILE(GLOB native_miopen_cpp "native/miopen/*.cpp")
-FILE(GLOB native_cuda_cu "native/cuda/*.cu")
-FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
 FILE(GLOB native_mkl_cpp "native/mkl/*.cpp")
 FILE(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
+FILE(GLOB native_sparse_cpp "native/sparse/*.cpp")
+
+FILE(GLOB native_cuda_cu "native/cuda/*.cu")
+FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
+FILE(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
+FILE(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
+FILE(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
+
+FILE(GLOB native_hip_hip "native/hip/*.hip")
+FILE(GLOB native_hip_cpp "native/hip/*.cpp")
+FILE(GLOB native_miopen_cpp "native/miopen/*.cpp")
+FILE(GLOB native_cudnn_hip_cpp "native/cudnn/hip/*.cpp")
+FILE(GLOB native_sparse_hip_hip "native/sparse/hip/*.hip")
+FILE(GLOB native_sparse_hip_cpp "native/sparse/hip/*.cpp")
 
 set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
@@ -52,22 +71,32 @@ if(AT_MKLDNN_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkldnn_cpp})
 endif()
 
-IF(USE_CUDA OR USE_ROCM)
+if(USE_CUDA AND USE_ROCM)
+  message(FATAL_ERROR "ATen doesn't not currently support simultaneously building with CUDA and ROCM")
+endif()
+
+IF(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
   set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu} ${native_sparse_cuda_cu})
   set(all_cuda_cpp ${native_sparse_cuda_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
-  IF(USE_CUDA)
-    SET(all_cuda_cpp ${native_cudnn_cpp} ${native_miopen_cpp} ${all_cuda_cpp})
-    IF(CUDNN_FOUND)
-      SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
-    ENDIF()
-  ELSEIF(USE_ROCM)
-    SET(all_cuda_cpp ${native_cudnn_cpp} ${native_miopen_cpp} ${miopen_cpp} ${all_cuda_cpp})
+  SET(all_cuda_cpp ${native_cudnn_cpp} ${native_miopen_cpp} ${all_cuda_cpp})
+  IF(CUDNN_FOUND)
+    SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
   ENDIF()
+endif()
+
+IF(USE_ROCM)
+  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
+  set(ATen_HIP_SRCS ${ATen_HIP_SRCS} ${hip_hip} ${native_hip_hip} ${native_sparse_hip_hip})
+  # TODO: Codegen separate files for HIP and use those (s/cuda_generated_cpp/hip_generated_cpp)
+  set(all_hip_cpp ${native_sparse_hip_cpp} ${hip_cpp} ${native_hip_cpp} ${cuda_generated_cpp} ${ATen_HIP_SRCS})
+  set(all_hip_cpp ${native_miopen_cpp} ${native_cudnn_hip_cpp} ${miopen_cpp} ${all_hip_cpp})
 endif()
 
 filter_list(generated_h generated_cpp "\\.h$")
 filter_list(cuda_generated_h cuda_generated_cpp "\\.h$")
+# TODO: When we have hip_generated_cpp
+#filter_list(hip_generated_h hip_generated_cpp "\\.h$")
 
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # so the build can find the generated header files
@@ -81,21 +110,28 @@ IF(BLAS_FOUND)
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
     list(APPEND ATen_CPU_DEPENDENCY_LIBS
       "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-    if(USE_CUDA OR USE_ROCM)
+    if(USE_CUDA)
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+        "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+    endif()
+    if(USE_ROCM)
+      list(APPEND ATen_HIP_DEPENDENCY_LIBS
         "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
     endif()
   ELSE ($ENV{TH_BINARY_BUILD})
     list(APPEND ATen_CPU_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
-    if(USE_CUDA OR USE_ROCM)
+    if(USE_CUDA)
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${BLAS_LIBRARIES}")
+    endif()
+    if(USE_ROCM)
+      list(APPEND ATen_HIP_DEPENDENCY_LIBS "${BLAS_LIBRARIES}")
     endif()
   ENDIF ($ENV{TH_BINARY_BUILD})
 ENDIF(BLAS_FOUND)
 
 IF(LAPACK_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
-  if(USE_CUDA OR USE_ROCM)
+  if(USE_CUDA)
     # Although Lapack provides CPU (and thus, one might expect that ATen_cuda
     # would not need this at all), some of our libraries (magma in particular)
     # backend to CPU BLAS/LAPACK implementations, and so it is very important
@@ -103,6 +139,11 @@ IF(LAPACK_FOUND)
     # same, LAPACK implementions may have different calling conventions.
     # This caused https://github.com/pytorch/pytorch/issues/7353
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
+  endif()
+  if(USE_ROCM)
+    # It's not altogether clear that HIP behaves the same way, but it
+    # seems safer to assume that it needs it too
+    list(APPEND ATen_HIP_DEPENDENCY_LIBS ${LAPACK_LIBRARIES})
   endif()
 ENDIF(LAPACK_FOUND)
 
@@ -206,6 +247,12 @@ IF(USE_CUDA AND NOT USE_ROCM)
 	--generate-code arch=compute_50,code=sm_50
 	--generate-code arch=compute_60,code=sm_60
 	--generate-code arch=compute_70,code=sm_70)
+    elseif(${CUDA_VERSION_MAJOR} EQUAL "10")
+      SET(CUFFT_FAKELINK_OPTIONS
+	--generate-code arch=compute_35,code=sm_35
+	--generate-code arch=compute_50,code=sm_50
+	--generate-code arch=compute_60,code=sm_60
+	--generate-code arch=compute_70,code=sm_70)
     else()
       MESSAGE(FATAL_ERROR "Unhandled major cuda version ${CUDA_VERSION_MAJOR}")
     endif()
@@ -252,22 +299,21 @@ IF(USE_CUDA AND NOT USE_ROCM)
   ENDIF($ENV{ATEN_STATIC_CUDA})
 ENDIF()
 
-IF(USE_ROCM)
- ### Link in the ROCm libraries BLAS / RNG.
- FIND_LIBRARY(ROCBLAS_LIBRARY rocblas HINTS ${ROCBLAS_PATH}/lib)
- FIND_LIBRARY(HIPRAND_LIBRARY hiprand HINTS ${HIPRAND_PATH}/lib)
+# NB: We're relying on cmake/Dependencies.cmake to appropriately setup HIP dependencies.
+# In principle we could duplicate them, but handling the rocblas
+# dependency is nontrivial.  So better not to copy-paste.
+# Look for Note [rocblas cmake bug]
 
- list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${ROCBLAS_LIBRARY} ${HIPRAND_LIBRARY})
-ENDIF()
-
-# Include CPU paths for CUDA as well
+# Include CPU paths for CUDA/HIP as well
 list(APPEND ATen_CUDA_INCLUDE ${ATen_CPU_INCLUDE})
+list(APPEND ATen_HIP_INCLUDE ${ATen_CPU_INCLUDE})
 
 # We have two libraries: libATen_cpu.so and libATen_cuda.so,
 # with libATen_cuda.so depending on libATen_cpu.so.  The CPU library
 # contains CPU code only.  libATen_cpu.so is invariant to the setting
 # of USE_CUDA (it always builds the same way); libATen_cuda.so is only
-# built when USE_CUDA=1 and CUDA is available.
+# built when USE_CUDA=1 and CUDA is available.  (libATen_hip.so works
+# the same way as libATen_cuda.so)
 set(ATen_CPU_SRCS ${all_cpu_cpp})
 if(AT_LINK_STYLE STREQUAL "INTERFACE")
   # Source code can't be added to an interface library, so it is
@@ -291,7 +337,7 @@ else()
   set(ATen_CPU_SRCS)
 endif()
 
-if(USE_CUDA OR USE_ROCM)
+if(USE_CUDA)
   set(ATen_CUDA_SRCS ${all_cuda_cpp})
   if(AT_LINK_STYLE STREQUAL "INTERFACE")
     # Source code can't be added to an interface library, so it is
@@ -299,41 +345,24 @@ if(USE_CUDA OR USE_ROCM)
     add_library(ATen_cuda INTERFACE)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
   else()
-    # A hack to deal with cuda library dependencies and modern CMake: the
-    # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
-    # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
-    # hack adds the PRIVATE keywords to CUDA_LIBRARIES so we can deal with
-    # it. We will then manually add the cudart library as interface libs.
-    set(__tmp ${CUDA_LIBRARIES})
-    set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
-    torch_cuda_based_add_library(ATen_cuda ${AT_LINK_STYLE} ${ATen_CUDA_SRCS})
-    set(CUDA_LIBRARIES ${__tmp})
-    target_link_libraries(ATen_cuda INTERFACE caffe2::cudart)
-
-    target_include_directories(
-        ATen_cuda INTERFACE $<INSTALL_INTERFACE:include>)
-    target_include_directories(
-        ATen_cuda PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
-    target_include_directories(
-        ATen_cuda PRIVATE ${ATen_CUDA_INCLUDE})
-    target_link_libraries(
-        ATen_cuda PRIVATE ${ATen_CUDA_DEPENDENCY_LIBS} ATEN_CUDA_FILES_GEN_LIB)
-
-    # These public dependencies must go after the previous dependencies, as the
-    # order of the libraries in the linker call matters here when statically
-    # linking; libculibos and cublas must be last.
-    target_link_libraries(
-        ATen_cuda PUBLIC ATen_cpu ${ATen_PUBLIC_CUDA_DEPENDENCY_LIBS})
-
-    # Set standard properties on the target
-    torch_set_target_props(ATen_cuda)
-
-    caffe2_interface_library(ATen_cuda ATen_cuda_library)
-
-    # Make sure these don't get built by parent
-    set(ATen_CUDA_SRCS)
+    message(FATAL_ERROR "Non-INTERFACE AT_LINK_STYLE no longer supported")
   endif()
 endif()
+
+if(USE_ROCM)
+  set(ATen_HIP_SRCS ${all_hip_cpp})
+  if(AT_LINK_STYLE STREQUAL "INTERFACE")
+    # Source code can't be added to an interface library, so it is
+    # passed back to be compiled into the containing library
+    add_library(ATen_hip INTERFACE)
+    # NB: Instead of adding it to this list, we add it by hand
+    # to caffe2_hip, because it needs to be a PRIVATE dependency
+    # list(APPEND ATen_HIP_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
+  else()
+    message(FATAL_ERROR "Non-INTERFACE AT_LINK_STYLE not (yet) supported for ROCm build")
+  endif()
+endif()
+
 
 if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
   if(USE_CUDA)
@@ -345,15 +374,21 @@ if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
 
   if(NOT MSVC)
     torch_compile_options(ATen_cpu)
-    if(USE_CUDA OR USE_ROCM)
+    if(USE_CUDA)
       torch_compile_options(ATen_cuda)
+    endif()
+    if(USE_ROCM)
+      torch_compile_options(ATen_hip)
     endif()
   endif()
 
   if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
     set_property(TARGET ATen_cpu PROPERTY CXX_STANDARD 11)
-    if(USE_CUDA OR USE_ROCM)
+    if(USE_CUDA)
       set_property(TARGET ATen_cuda PROPERTY CXX_STANDARD 11)
+    endif()
+    if(USE_ROCM)
+      set_property(TARGET ATen_hip PROPERTY CXX_STANDARD 11)
     endif()
   endif()
 endif()
@@ -364,11 +399,12 @@ INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
   DESTINATION "${AT_INSTALL_SHARE_DIR}/cmake/ATen")
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
-FOREACH(HEADER ${base_h} ${ATen_CORE_HEADERS} ${cuda_h} ${cudnn_h})
+FOREACH(HEADER ${base_h} ${ATen_CORE_HEADERS} ${cuda_h} ${cudnn_h} ${hip_h} ${miopen_h})
   string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
   GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
 ENDFOREACH()
+# TODO: Install hip_generated_h when we have it
 FOREACH(HEADER ${generated_h} ${cuda_generated_h})
   # NB: Assumed to be flat
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
@@ -386,10 +422,15 @@ endif()
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
+set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
+set(ATen_CORE_TEST_SRCS ${ATen_CORE_TEST_SRCS} PARENT_SCOPE)
+set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
 set(ATen_THIRD_PARTY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE} PARENT_SCOPE)
 set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE} PARENT_SCOPE)
+set(ATen_HIP_INCLUDE ${ATen_HIP_INCLUDE} PARENT_SCOPE)
 set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
+set(ATen_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS} PARENT_SCOPE)

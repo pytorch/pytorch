@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/TemporalReplicationPadding.c"
+#define TH_GENERIC_FILE "THNN/generic/TemporalReplicationPadding.c"
 #else
 
 static void THNN_(TemporalReplicationPadding_updateOutput_frame)(

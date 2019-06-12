@@ -21,6 +21,8 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "ideep" : "IDEEP";
     case DeviceType::HIP:
       return lower_case ? "hip" : "HIP";
+    case DeviceType::FPGA:
+      return lower_case ? "fpga" : "FPGA";
     default:
       AT_ERROR(
           "Unknown device: ",
@@ -31,6 +33,29 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       // The below code won't run but is needed to suppress some compiler
       // warnings.
       return "";
+  }
+}
+
+// NB: Per the C++ standard (e.g.,
+// https://stackoverflow.com/questions/18195312/what-happens-if-you-static-cast-invalid-value-to-enum-class)
+// as long as you cast from the same underlying type, it is always valid to cast
+// into an enum class (even if the value would be invalid by the enum.)  Thus,
+// the caller is allowed to cast a possibly invalid int16_t to DeviceType and
+// then pass it to this function.  (I considered making this function take an
+// int16_t directly, but that just seemed weird.)
+bool isValidDeviceType(DeviceType d) {
+  switch (d) {
+    case DeviceType::CPU:
+    case DeviceType::CUDA:
+    case DeviceType::OPENGL:
+    case DeviceType::OPENCL:
+    case DeviceType::MKLDNN:
+    case DeviceType::IDEEP:
+    case DeviceType::HIP:
+    case DeviceType::FPGA:
+      return true;
+    default:
+      return false;
   }
 }
 

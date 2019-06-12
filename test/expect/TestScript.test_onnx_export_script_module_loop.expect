@@ -15,7 +15,7 @@ ModelProto {
         Node {type: "Loop", inputs: [2,1,x.1], outputs: [4], attributes: [{ name: 'body', type: graph, value:
             GraphProto {
               name: "torch-jit-export1"
-              inputs: [{name: "_", type:Tensor dims: },{name: "cond.1", type:Tensor dims: },{name: "7", type:Tensor dims: }]
+              inputs: [{name: "5", type:Tensor dims: },{name: "cond.1", type:Tensor dims: },{name: "7", type:Tensor dims: }]
               outputs: [{name: "1", type:Tensor dims: },{name: "8", type:Tensor dims: }]
               initializers: []
               nodes: [

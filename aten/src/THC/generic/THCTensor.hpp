@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensor.hpp"
+#define THC_GENERIC_FILE "THC/generic/THCTensor.hpp"
 #else
 
 // STOP!!! Thinking of including this header directly?  Please

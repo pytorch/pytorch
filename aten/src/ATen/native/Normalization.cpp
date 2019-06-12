@@ -1,11 +1,11 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/AccumulateType.h"
-#include "ATen/CPUApplyUtils.h"
-#include "ATen/Parallel.h"
-#include "ATen/Config.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/CPUApplyUtils.h>
+#include <ATen/Parallel.h>
+#include <ATen/Config.h>
 
-#include "ATen/detail/CUDAHooksInterface.h"
+#include <ATen/detail/CUDAHooksInterface.h>
 
 #include <vector>
 
@@ -265,7 +265,7 @@ Tensor batch_norm(
   bool use_miopen = (input.is_cuda()
                && input.dim() <= MIOPEN_DIM_MAX
                && input.type().scalarType() != at::kDouble
-               && (input.type().scalarType() == weight.type().scalarType())
+               && (weight.type().scalarType() != at::kHalf)
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))

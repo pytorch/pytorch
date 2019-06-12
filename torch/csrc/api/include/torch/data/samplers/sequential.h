@@ -1,8 +1,8 @@
 #pragma once
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/data/samplers/base.h>
 #include <torch/types.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstddef>
 #include <vector>
@@ -26,7 +26,7 @@ class SequentialSampler : public Sampler<> {
   TORCH_API explicit SequentialSampler(size_t size);
 
   /// Resets the `SequentialSampler` to zero.
-  TORCH_API void reset() override;
+  TORCH_API void reset(optional<size_t> new_size = nullopt) override;
 
   /// Returns the next batch of indices.
   TORCH_API optional<std::vector<size_t>> next(size_t batch_size) override;

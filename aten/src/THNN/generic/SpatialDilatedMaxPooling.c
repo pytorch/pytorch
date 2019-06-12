@@ -1,6 +1,9 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SpatialDilatedMaxPooling.c"
+#define TH_GENERIC_FILE "THNN/generic/SpatialDilatedMaxPooling.c"
 #else
+
+#include <THNN/generic/pooling_shape.h>
+#include <algorithm>
 
 static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
 	THTensor *input, THTensor *gradOutput, THIndexTensor *indices,
@@ -37,29 +40,10 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
   int64_t nInputPlane = input->size(dimh-1);
   int64_t inputHeight = input->size(dimh);
   int64_t inputWidth = input->size(dimw);
-  int64_t outputHeight, outputWidth;
   int64_t nOutputPlane = nInputPlane;
 
-  if (ceil_mode)
-  {
-    outputHeight = (int64_t)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int64_t)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
-  }
-  else
-  {
-    outputHeight = (int64_t)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int64_t)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
-  }
-
-  if (padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
+  int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
   if (outputWidth < 1 || outputHeight < 1)
     THError("Given input size: (%dx%dx%d). "
@@ -110,8 +94,8 @@ static void THNN_(SpatialDilatedMaxPooling_updateOutput_frame)(
       {
         int64_t hstart = i * dH - padH;
         int64_t wstart = j * dW - padW;
-        int64_t hend = fminf(hstart + (kH - 1) * dilationH + 1, iheight);
-        int64_t wend = fminf(wstart + (kW - 1) * dilationW + 1, iwidth);
+        int64_t hend = std::min(hstart + (kH - 1) * dilationH + 1, iheight);
+        int64_t wend = std::min(wstart + (kW - 1) * dilationW + 1, iwidth);
         while(hstart < 0)
           hstart += dilationH;
         while(wstart < 0)
@@ -193,26 +177,8 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   nInputPlane = input->size(dimh-1);
   inputHeight = input->size(dimh);
   inputWidth = input->size(dimw);
-  if (ceil_mode)
-  {
-    outputHeight = (int64_t)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int64_t)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
-  }
-  else
-  {
-    outputHeight = (int64_t)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int64_t)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
-  }
-
-  if (padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
+  outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);

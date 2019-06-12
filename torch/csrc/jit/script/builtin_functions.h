@@ -1,7 +1,7 @@
 #pragma once
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/jit/script/module.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/script/module.h>
 
 namespace torch { namespace jit { namespace script {
 

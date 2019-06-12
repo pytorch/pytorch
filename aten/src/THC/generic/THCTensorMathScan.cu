@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMathScan.cu"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMathScan.cu"
 #else
 
 #ifndef THC_REAL_IS_HALF

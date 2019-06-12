@@ -1,9 +1,13 @@
 #pragma once
 
-#include "ATen/core/WrapDimMinimal.h"
-#include "ATen/core/TensorImpl.h"
+#include <c10/core/WrapDimMinimal.h>
+#include <c10/core/TensorImpl.h>
 
 namespace at {
+
+static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wrap_scalar=true) {
+  return c10::maybe_wrap_dim(dim, dim_post_expr, wrap_scalar);
+}
 
 static inline int64_t maybe_wrap_dim(int64_t dim, TensorImpl *tensor) {
   return maybe_wrap_dim(dim, tensor->dim());

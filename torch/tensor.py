@@ -251,20 +251,6 @@ class Tensor(torch._C._TensorBase):
         r"""See :func: `torch.norm`"""
         return torch.norm(self, p, dim, keepdim)
 
-    def btrifact(self, info=None, pivot=True):
-        r"""See :func:`torch.btrifact`
-        """
-        if info is not None:
-            warnings.warn("info option in btrifact is deprecated and will be removed in v0.4, "
-                          "consider using btrifact_with_info instead", stacklevel=2)
-            factorization, pivots, _info = super(Tensor, self).btrifact_with_info(pivot=pivot)
-            if info.type() != _info.type():
-                raise ValueError('btrifact expects info to be an IntTensor')
-            info.resize_as_(_info).copy_(_info)
-            return factorization, pivots
-        else:
-            return super(Tensor, self).btrifact(pivot=pivot)
-
     def potrf(self, upper=True):
         r"""See :func:`torch.cholesky`"""
         warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed "

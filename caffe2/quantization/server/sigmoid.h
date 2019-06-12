@@ -1,5 +1,4 @@
-#ifndef DNNLOWP_SIGMOID_H
-#define DNNLOWP_SIGMOID_H
+#pragma once
 
 #include "tanh.h"
 
@@ -10,7 +9,7 @@ namespace dnnlowp {
  * Quantized sigmoid is computed as tanh under the hood, we just use different
  * input/output quantization parameters.
  */
-template<typename T>
+template <typename T>
 class Sigmoid {
  public:
   Sigmoid(double max_abs_err_ = Tanh<T>::DEFAULT_MAX_ABS_ERR);
@@ -32,5 +31,3 @@ class Sigmoid {
 }; // class Sigmoid
 
 } // namespace dnnlowp
-
-#endif // DNNLOWP_SIGMOID_H

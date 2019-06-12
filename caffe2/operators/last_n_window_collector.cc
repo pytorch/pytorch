@@ -71,7 +71,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
     if (num_entries == 0) {
       if (!output_initialized) {
         // Get both shape and meta
-        output->CopyFrom(input, &context_);
+        output->CopyFrom(input, true /*async*/);
       }
       return true;
     }
@@ -83,7 +83,7 @@ class LastNWindowCollectorOp : public Operator<Context> {
 
     // output_num is >= output_batch_size
     if (output_num > output_batch_size) {
-      output->ExtendTo(output_num, 50, &context_);
+      output->ExtendTo(output_num, 50);
     }
 
     auto* output_data =

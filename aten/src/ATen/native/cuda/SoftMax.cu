@@ -1,14 +1,14 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtils.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtils.h>
 #include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
-#include "ATen/AccumulateType.h"
-#include "ATen/cuda/NumericLimits.cuh"
+#include <ATen/AccumulateType.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <type_traits>
 
 namespace at {

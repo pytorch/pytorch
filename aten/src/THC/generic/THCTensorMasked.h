@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/THCTensorMasked.h"
+#define THC_GENERIC_FILE "THC/generic/THCTensorMasked.h"
 #else
 
 THC_API void THCTensor_(maskedFill)(THCState *state,

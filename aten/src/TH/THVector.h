@@ -2,13 +2,13 @@
 #define TH_VECTOR_INC
 
 #include <TH/THGeneral.h>
-#include "THMath.h"
+#include <TH/THMath.h>
 
 #define THVector_(NAME) TH_CONCAT_4(TH,Real,Vector_,NAME)
 
 /* We are going to use dynamic dispatch, and want only to generate declarations
  * of the vector functions */
-#include "generic/THVector.h"
-#include "THGenerateAllTypes.h"
+#include <TH/generic/THVector.h>
+#include <TH/THGenerateAllTypes.h>
 
 #endif // TH_VECTOR_INC

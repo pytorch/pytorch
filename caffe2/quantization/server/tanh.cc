@@ -1,6 +1,6 @@
 #include "tanh.h"
-#include "caffe2/core/logging.h"
 #include <cassert>
+#include "caffe2/core/logging.h"
 
 namespace dnnlowp {
 
@@ -8,32 +8,31 @@ static double GetSaturationRegionBegin_(double max_abs_err) {
   // smallest x_s s.t. 1 - tanh(x_s) < max_abs_err_ and is an integer
   double x_s = atanh(1 - max_abs_err);
   if (x_s < 1) {
-    return 1/floor(1/x_s);
-  }
-  else {
+    return 1 / floor(1 / x_s);
+  } else {
     return ceil(x_s);
   }
 }
 
 static int GetPassRegionEnd_(
-  TensorQuantizationParams in_qparams,
-  TensorQuantizationParams out_qparams,
-  double max_abs_err, int num_in_bits) {
+    TensorQuantizationParams in_qparams,
+    TensorQuantizationParams out_qparams,
+    double max_abs_err,
+    int num_in_bits) {
   return 0;
 
   // largest x s.t. |tanh(x) - x| < max_abs_err_
   int in_pos_qmax = (1 << (num_in_bits - 1)) - 1;
 
   float scale_multiplier = in_qparams.scale / out_qparams.scale;
-  int log2_scale_multiplier = (int)round(log2(scale_multiplier));
+  int log2_scale_multiplier = nearbyint(log2(scale_multiplier));
 
   int x_q;
   for (x_q = 0; x_q < in_pos_qmax; ++x_q) {
     int y_q;
     if (log2_scale_multiplier < 0) {
       y_q = x_q >> (-log2_scale_multiplier);
-    }
-    else {
+    } else {
       y_q = x_q << (log2_scale_multiplier);
     }
     float y = y_q * out_qparams.scale;
@@ -48,25 +47,25 @@ static int GetPassRegionEnd_(
   return x_q - 1;
 }
 
-template<typename T>
+template <typename T>
 Tanh<T>::Tanh(double max_abs_err) : max_abs_err_(max_abs_err) {
   // Choose saturation region
   double x_sq = GetSaturationRegionBegin_(max_abs_err);
 
   // Choose input/output quantization parameters
-  in_qparams_.scale = x_sq/((1 << (num_in_bits_ - 1)) - 1);
+  in_qparams_.scale = x_sq / ((1 << (num_in_bits_ - 1)) - 1);
   in_qparams_.zero_point = 1 << (num_in_bits_ - 1);
   in_qparams_.precision = num_in_bits_;
   // -x_sq is mapped to -127, 0 is mapped to 0, x_sq is mapped to 127
 
-  out_qparams_.scale = 1./((1 << (num_out_bits_ - 1)) - 1);
+  out_qparams_.scale = 1. / ((1 << (num_out_bits_ - 1)) - 1);
   out_qparams_.zero_point = 1 << (num_out_bits_ - 1);
   out_qparams_.precision = num_out_bits_;
   // -1 is mapped to -127, 0 is mapped to 0, x_sq is mapped to 127
 
   // Choose pass region
-  x_pq_index_ = GetPassRegionEnd_(
-    in_qparams_, out_qparams_, max_abs_err, num_in_bits_);
+  x_pq_index_ =
+      GetPassRegionEnd_(in_qparams_, out_qparams_, max_abs_err, num_in_bits_);
 
   int in_pos_qmax = (1 << (num_in_bits_ - 1)) - 1;
   processing_region_lut_.resize(in_pos_qmax - x_pq_index_ + 2);
@@ -76,9 +75,9 @@ Tanh<T>::Tanh(double max_abs_err) : max_abs_err_(max_abs_err) {
     double y_begin = tanh((i - 0.5) * in_qparams_.scale);
     double y_end = tanh((i + 0.5) * in_qparams_.scale);
 
-    int y_avg_q = (int)round((y_begin + y_end) / 2 / out_qparams_.scale);
-    assert(y_avg_q*out_qparams_.scale - y_begin < max_abs_err);
-    assert(y_end - y_avg_q*out_qparams_.scale < max_abs_err);
+    int y_avg_q = nearbyint((y_begin + y_end) / 2 / out_qparams_.scale);
+    assert(y_avg_q * out_qparams_.scale - y_begin < max_abs_err);
+    assert(y_end - y_avg_q * out_qparams_.scale < max_abs_err);
     assert(y_avg_q >= 0);
     assert(y_avg_q < (1 << (num_out_bits_ - 1)));
     processing_region_lut_[i - x_pq_index_] = y_avg_q;
@@ -97,11 +96,12 @@ Tanh<T>::Tanh(double max_abs_err) : max_abs_err_(max_abs_err) {
 #endif
 }
 
-template <typename T> int sgn(T val) {
+template <typename T>
+int sgn(T val) {
   return (T(0) < val) - (val < T(0));
 }
 
-template<typename T>
+template <typename T>
 T Tanh<T>::Compute(T x) const {
   int32_t x_adjusted = x - in_qparams_.zero_point;
   int32_t x_sgn = sgn(x_adjusted), x_mag = std::abs(x_adjusted);
@@ -110,15 +110,13 @@ T Tanh<T>::Compute(T x) const {
   if (x_mag < x_pq_index_) {
     // pass region
     float scale_multiplier = in_qparams_.scale / out_qparams_.scale;
-    int log2_scale_multiplier = (int)round(log2(scale_multiplier));
+    int log2_scale_multiplier = nearbyint(log2(scale_multiplier));
     if (log2_scale_multiplier < 0) {
       y = x_sgn * (x_mag >> (-log2_scale_multiplier));
-    }
-    else {
+    } else {
       y = x_sgn * (x_mag << log2_scale_multiplier);
     }
-  }
-  else {
+  } else {
     // processing and saturation region
     y = x_sgn * processing_region_lut_[x_mag - x_pq_index_];
   }

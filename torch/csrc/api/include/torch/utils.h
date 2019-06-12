@@ -14,5 +14,5 @@ struct TORCH_API NoGradGuard : public AutoGradMode {
 };
 
 /// Sets the global random seed for all newly created CPU and CUDA tensors.
-void TORCH_API manual_seed(uint64_t seed);
+using at::manual_seed;
 } // namespace torch

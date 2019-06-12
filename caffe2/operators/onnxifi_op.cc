@@ -34,43 +34,27 @@ void SetInputTensorDescriptorTypeAndBuffer(
   }
 }
 
+TypeMeta OnnixfiTypeToDataType(uint64_t onnxifi_type) {
+  static std::map<uint64_t, TypeMeta> data_type_map {
+    {ONNXIFI_DATATYPE_FLOAT32, TypeMeta::Make<float>()},
+    {ONNXIFI_DATATYPE_INT32, TypeMeta::Make<int>()},
+    {ONNXIFI_DATATYPE_INT8, TypeMeta::Make<int8_t>()},
+    {ONNXIFI_DATATYPE_UINT8, TypeMeta::Make<uint8_t>()},
+    {ONNXIFI_DATATYPE_INT64, TypeMeta::Make<int64_t>()},
+    {ONNXIFI_DATATYPE_INT16, TypeMeta::Make<int16_t>()},
+    {ONNXIFI_DATATYPE_UINT16, TypeMeta::Make<uint16_t>()},
+  };
+  const auto it = data_type_map.find(onnxifi_type);
+  CAFFE_ENFORCE(it != data_type_map.end(), "Unsupported ONXNIFI data type: ", onnxifi_type);
+  return it->second;
+}
+
 void SetOutputTensorDescriptorTypeAndBuffer(
     uint64_t onnxifi_type,
     Tensor* cpu_tensor,
     onnxTensorDescriptorV1* desc) {
   desc->dataType = onnxifi_type;
-  switch (onnxifi_type) {
-    case (ONNXIFI_DATATYPE_FLOAT32):
-      desc->buffer =
-          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<float>());
-      break;
-    case (ONNXIFI_DATATYPE_INT32):
-      desc->buffer =
-          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<int32_t>());
-      break;
-    case (ONNXIFI_DATATYPE_INT8):
-      desc->buffer =
-          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<int8_t>());
-      break;
-    case (ONNXIFI_DATATYPE_UINT8):
-      desc->buffer =
-          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<uint8_t>());
-      break;
-    case (ONNXIFI_DATATYPE_INT64):
-      desc->buffer =
-          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<int64_t>());
-      break;
-    case (ONNXIFI_DATATYPE_INT16):
-      desc->buffer =
-          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<int16_t>());
-      break;
-    case (ONNXIFI_DATATYPE_UINT16):
-      desc->buffer =
-          reinterpret_cast<onnxPointer>(cpu_tensor->mutable_data<uint16_t>());
-      break;
-    default:
-      CAFFE_THROW("Unsupported ONXNIFI data type: ", onnxifi_type);
-  }
+  desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor->raw_mutable_data(OnnixfiTypeToDataType(onnxifi_type)));
 }
 
 void BlobToTensorDescriptor(
@@ -134,10 +118,11 @@ OnnxifiOp<float, CPUContext>::BuildInitializationList(
 
 template <>
 bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
+  CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
   for (unsigned i = 0U; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
     const auto tensor_dims = input_tensor.sizes();
-    auto& tensor_descriptor = input_desc_.at(i);
+    auto& tensor_descriptor = input_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
@@ -146,12 +131,11 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
     SetInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
   }
 
+  CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
   for (unsigned i = 0U; i < OutputSize(); ++i) {
-    auto* output_tensor = Output(i);
     std::vector<size_t> tensor_dims;
     uint64_t type = SetOutputShapeAndType(i, &tensor_dims);
-    output_tensor->Resize(tensor_dims);
-    auto& tensor_descriptor = output_desc_.at(i);
+    auto& tensor_descriptor = output_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
@@ -161,6 +145,9 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
         " has 0 dim");
     output_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
     tensor_descriptor.shape = output_shapes_.back().data();
+    std::vector<int64_t> tensor_dims_int64;
+    std::copy(tensor_dims.cbegin(), tensor_dims.cend(), std::back_inserter(tensor_dims_int64));
+    auto* output_tensor = Output(i, tensor_dims_int64, at::dtype(OnnixfiTypeToDataType(type)).device(CPU));
     SetOutputTensorDescriptorTypeAndBuffer(
         type, output_tensor, &tensor_descriptor);
   }

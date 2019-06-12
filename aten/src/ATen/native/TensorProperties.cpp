@@ -1,9 +1,9 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/detail/CUDAHooksInterface.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 namespace at {
 namespace native {
 

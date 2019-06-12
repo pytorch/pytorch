@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SpatialFractionalMaxPooling.c"
+#define TH_GENERIC_FILE "THNN/generic/SpatialFractionalMaxPooling.c"
 #else
 
 static int64_t* THNN_(SpatialFractionalMaxPooling_generateIntervals)(

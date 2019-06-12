@@ -1,6 +1,6 @@
-#include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/WrapDimUtilsMulti.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/WrapDimUtilsMulti.h>
 
 #include <array>
 #include <cctype>
@@ -33,7 +33,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList
   if (sum_dims_.size() == 0)
     return at::mul(left_, right_);
   int64_t dim = left_.dim();
-  auto sum_dims = dim_list_to_bitset(sum_dims_, dim);
+  auto sum_dims = at::dim_list_to_bitset(sum_dims_, dim);
   // dimensions that will be part of the output (i.e. not summed over) in three vectors
   // dims in lro appear in left, right and output, similarly lo: left and output, ro: right and output
   // also the sizes are kept track of for reshaping
@@ -364,10 +364,10 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 		  IntList sumdim_, int64_t unroll_dim) {
   int64_t total_dim = i1_.dim()+expand1_.size();
   AT_CHECK((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,", total_dim-1, "]");
-  auto expand1 = dim_list_to_bitset(expand1_, total_dim);
-  auto expand2 = dim_list_to_bitset(expand2_, total_dim);
-  auto expand3 = dim_list_to_bitset(expand3_, total_dim);
-  auto sumdim  = dim_list_to_bitset(sumdim_,  total_dim);
+  auto expand1 = at::dim_list_to_bitset(expand1_, total_dim);
+  auto expand2 = at::dim_list_to_bitset(expand2_, total_dim);
+  auto expand3 = at::dim_list_to_bitset(expand3_, total_dim);
+  auto sumdim  = at::dim_list_to_bitset(sumdim_,  total_dim);
   Tensor i1 = i1_;
   Tensor i2 = i2_;
   Tensor i3 = i3_;
@@ -478,8 +478,8 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntList dims1, IntL
     }
   }
 
-  auto cdims1 = dim_list_to_bitset(dims1, input1.dim());
-  auto cdims2 = dim_list_to_bitset(dims2, input2.dim());
+  auto cdims1 = at::dim_list_to_bitset(dims1, input1.dim());
+  auto cdims2 = at::dim_list_to_bitset(dims2, input2.dim());
   std::vector<int64_t> p1, p2, rsizes;  // p1, p2: input permutations, rsizes: sizes of the result
   p1.reserve(input1.dim());
   p2.reserve(input2.dim());

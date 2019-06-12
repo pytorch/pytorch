@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/FeatureLPPooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/FeatureLPPooling.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
 
 // non-batch mode:
 // [feature dim]

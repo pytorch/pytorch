@@ -1,12 +1,12 @@
 #pragma once
-#include "torch/csrc/jit/fuser/config.h"
+#include <torch/csrc/jit/fuser/config.h>
 #if USE_CPU_FUSER
 
-#include "ATen/ATen.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/utils/disallow_copy.h"
-#include "torch/csrc/jit/fuser/cpu/dynamic_library.h"
-#include "torch/csrc/jit/fuser/fused_kernel.h"
+#include <ATen/ATen.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/utils/disallow_copy.h>
+#include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
+#include <torch/csrc/jit/fuser/fused_kernel.h>
 
 #include <string>
 #include <cstdint>

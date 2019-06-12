@@ -27,8 +27,8 @@ class ReplaceNaNOp final : public Operator<Context> {
     T value = this->template GetSingleArgument<T>("value", 0);
 
     auto& input = Input(0);
-    auto* output = Output(0);
-    output->ResizeLike(input);
+
+    auto* output = Output(0, input.sizes(), at::dtype<T>());
 
     const T* input_data = input.template data<T>();
     T* output_data = output->template mutable_data<T>();

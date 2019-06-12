@@ -30,7 +30,7 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
 
   /// Performs a lookup on the embedding table stored in `weight` using the
   /// `indices` supplied and returns the result.
-  Tensor forward(Tensor indices);
+  Tensor forward(const Tensor& indices);
 
   /// The `Options` used to configure this `Embedding` module.
   /// Changes to `EmbeddingOptions` *after construction* have no effect.

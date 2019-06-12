@@ -41,7 +41,7 @@ class TORCH_API DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
   using detail::DropoutImplBase<DropoutImpl>::DropoutImplBase;
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
-  Tensor forward(Tensor input);
+  Tensor forward(const Tensor& input);
 };
 
 /// Applies spatial [Dropout](https://arxiv.org/abs/1207.0580) to inputs with
@@ -58,7 +58,7 @@ class TORCH_API FeatureDropoutImpl : public detail::DropoutImplBase<FeatureDropo
   using detail::DropoutImplBase<FeatureDropoutImpl>::DropoutImplBase;
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
-  Tensor forward(Tensor input);
+  Tensor forward(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `DropoutImpl`.

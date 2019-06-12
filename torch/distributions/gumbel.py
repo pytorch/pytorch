@@ -5,7 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.uniform import Uniform
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
-from torch.distributions.utils import _finfo, broadcast_all
+from torch.distributions.utils import broadcast_all
 
 euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
 
@@ -29,7 +29,7 @@ class Gumbel(TransformedDistribution):
 
     def __init__(self, loc, scale, validate_args=None):
         self.loc, self.scale = broadcast_all(loc, scale)
-        finfo = _finfo(self.loc)
+        finfo = torch.finfo(self.loc.dtype)
         if isinstance(loc, Number) and isinstance(scale, Number):
             base_dist = Uniform(finfo.tiny, 1 - finfo.eps)
         else:

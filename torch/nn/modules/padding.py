@@ -1,17 +1,21 @@
 from .module import Module
 from .utils import _pair, _quadruple, _ntuple
 from .. import functional as F
+from ..._jit_internal import weak_module, weak_script_method
 
 
 # TODO: grad_output size asserts in THNN
 
 
+@weak_module
 class _ConstantPadNd(Module):
+    __constants__ = ['padding', 'value']
 
     def __init__(self, value):
         super(_ConstantPadNd, self).__init__()
         self.value = value
 
+    @weak_script_method
     def forward(self, input):
         return F.pad(input, self.padding, 'constant', self.value)
 
@@ -19,6 +23,7 @@ class _ConstantPadNd(Module):
         return 'padding={}, value={}'.format(self.padding, self.value)
 
 
+@weak_module
 class ConstantPad1d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
@@ -67,6 +72,7 @@ class ConstantPad1d(_ConstantPadNd):
         self.padding = _pair(padding)
 
 
+@weak_module
 class ConstantPad2d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
@@ -114,12 +120,14 @@ class ConstantPad2d(_ConstantPadNd):
                  [ 3.5000,  3.5000,  3.5000,  3.5000,  3.5000]]])
 
     """
+    __constants__ = ['padding', 'value']
 
     def __init__(self, padding, value):
         super(ConstantPad2d, self).__init__(value)
         self.padding = _quadruple(padding)
 
 
+@weak_module
 class ConstantPad3d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
@@ -155,8 +163,11 @@ class ConstantPad3d(_ConstantPadNd):
         self.padding = _ntuple(6)(padding)
 
 
+@weak_module
 class _ReflectionPadNd(Module):
+    __constants__ = ['padding']
 
+    @weak_script_method
     def forward(self, input):
         return F.pad(input, self.padding, 'reflect')
 
@@ -164,6 +175,7 @@ class _ReflectionPadNd(Module):
         return '{}'.format(self.padding)
 
 
+@weak_module
 class ReflectionPad1d(_ReflectionPadNd):
     r"""Pads the input tensor using the reflection of the input boundary.
 
@@ -205,6 +217,7 @@ class ReflectionPad1d(_ReflectionPadNd):
         self.padding = _pair(padding)
 
 
+@weak_module
 class ReflectionPad2d(_ReflectionPadNd):
     r"""Pads the input tensor using the reflection of the input boundary.
 
@@ -254,8 +267,11 @@ class ReflectionPad2d(_ReflectionPadNd):
         self.padding = _quadruple(padding)
 
 
+@weak_module
 class _ReplicationPadNd(Module):
+    __constants__ = ['padding']
 
+    @weak_script_method
     def forward(self, input):
         return F.pad(input, self.padding, 'replicate')
 
@@ -263,6 +279,7 @@ class _ReplicationPadNd(Module):
         return '{}'.format(self.padding)
 
 
+@weak_module
 class ReplicationPad1d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
@@ -301,6 +318,7 @@ class ReplicationPad1d(_ReplicationPadNd):
         self.padding = _pair(padding)
 
 
+@weak_module
 class ReplicationPad2d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
@@ -349,6 +367,7 @@ class ReplicationPad2d(_ReplicationPadNd):
         self.padding = _quadruple(padding)
 
 
+@weak_module
 class ReplicationPad3d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
@@ -384,6 +403,7 @@ class ReplicationPad3d(_ReplicationPadNd):
         self.padding = _ntuple(6)(padding)
 
 
+@weak_module
 class ZeroPad2d(ConstantPad2d):
     r"""Pads the input tensor boundaries with zero.
 
@@ -428,4 +448,4 @@ class ZeroPad2d(ConstantPad2d):
     """
 
     def __init__(self, padding):
-        super(ZeroPad2d, self).__init__(padding, 0)
+        super(ZeroPad2d, self).__init__(padding, 0.)
