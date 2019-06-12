@@ -807,10 +807,10 @@ inline Tensor Tensor::to_mkldnn() const {
 inline Tensor Tensor::dequantize() const {
     return dispatch_type().dequantize(*this);
 }
-inline Scalar Tensor::q_scale() const {
+inline double Tensor::q_scale() const {
     return dispatch_type().q_scale(*this);
 }
-inline Scalar Tensor::q_zero_point() const {
+inline int64_t Tensor::q_zero_point() const {
     return dispatch_type().q_zero_point(*this);
 }
 inline Tensor Tensor::int_repr() const {

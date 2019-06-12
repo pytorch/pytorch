@@ -53,16 +53,16 @@ Tensor dequantize_linear_cpu(
   return f;
 }
 
-Scalar q_scale_quant(const Tensor& self) {
+double q_scale_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
-  return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale());
+  return static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale();
 }
 
-Scalar q_zero_point_quant(const Tensor& self) {
+int64_t q_zero_point_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
-  return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point());
+  return static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point();
 }
 
 Quantizer* quantizer(const Tensor& self) {

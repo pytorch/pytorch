@@ -115,9 +115,9 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     // TODO: uncomment after qscheme diff is landed
     // TORCH_CHECK(self.qscheme() == src.qscheme(),
     //             "Quantized Copy only works with same qscheme");
-    TORCH_CHECK(self.q_scale().toFloat() == src.q_scale().toFloat(),
+    TORCH_CHECK(self.q_scale() == src.q_scale(),
                 "Quantized Copy only works with same scale");
-    TORCH_CHECK(self.q_zero_point().toInt() == src.q_zero_point().toInt(),
+    TORCH_CHECK(self.q_zero_point() == src.q_zero_point(),
                 "Quantized Copy only works with same zero_point");
   }
 
