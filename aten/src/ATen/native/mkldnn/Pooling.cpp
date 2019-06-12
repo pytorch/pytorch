@@ -28,7 +28,7 @@ Tensor mkldnn_avg_pool2d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    int divisor) {
+    Scalar divisor) {
   AT_ERROR("mkldnn_avg_pool2d: ATen not compiled with MKLDNN support");
 }
 
