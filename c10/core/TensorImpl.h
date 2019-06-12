@@ -683,7 +683,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     strides_.resize(ndim, 0);
     refresh_numel();
     refresh_contiguous();
-    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -699,7 +698,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
-    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -713,7 +711,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
-    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -793,7 +790,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
     refresh_numel();
     refresh_contiguous();
-    is_channels_last_contiguous_ = false;
   }
 
   /**
@@ -914,7 +910,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       /*dest_impl=*/impl.get(),
       /*version_counter=*/version_counter,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-    impl->is_channels_last_contiguous_ = is_channels_last_contiguous_;
     impl->refresh_numel();
     impl->refresh_contiguous();
     return impl;
@@ -1375,11 +1370,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             "required rank 4 tensor to use channels_last format");
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
         is_channels_last_contiguous_ = true;
+        is_channels_last_ = true;
         return;
       }
       case MemoryFormat::Preserve:
         TORCH_CHECK(false, "unsupported memory format ", memory_format);
     }
+  }
+
+  bool vitalyf_is_channels_last() const {
+    return is_channels_last_;
   }
 
 private:
@@ -1458,6 +1458,10 @@ private:
    */
   bool compute_contiguous() const;
 
+  bool compute_channels_last_contiguous() const;
+
+  bool compute_strides_like_channels_last() const;
+
 protected:
   /**
    * Recompute the cached numel of a tensor.  Call this if you modify sizes.
@@ -1472,6 +1476,8 @@ protected:
    */
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
+    is_channels_last_contiguous_ = compute_channels_last_contiguous();
+    is_channels_last_ = is_channels_last_contiguous_ || compute_strides_like_channels_last();
   }
 
   /**
@@ -1552,6 +1558,7 @@ protected:
   TensorTypeId type_id_;
   bool is_contiguous_ = true;
   bool is_channels_last_contiguous_ = false;
+  bool is_channels_last_ = false;
   bool is_wrapped_number_ = false;
 
   // NOTE [ Metadata Change for a Detached Tensor ]

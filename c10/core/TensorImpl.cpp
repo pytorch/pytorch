@@ -85,6 +85,18 @@ bool TensorImpl::compute_contiguous() const {
   return is_contiguous;
 }
 
+bool TensorImpl::compute_channels_last_contiguous() const {
+  return dim() == 4 && strides() == get_channels_last_strides(sizes());
+}
+
+bool TensorImpl::compute_strides_like_channels_last() const {
+  if (dim() == 4)
+  {
+    return stride(1) < stride(3) < stride(2) < stride(0);
+  }
+  return false;
+}
+
 void TensorImpl::release_resources() {
   autograd_meta_.reset();
   if (storage_) {

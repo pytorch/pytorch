@@ -68,7 +68,7 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   if (memory_format == MemoryFormat::ChannelsLast && self.dim() == 4 &&
       self.strides() == get_channels_last_strides(self.sizes())) {
     auto result = self.alias();
-    result.unsafeGetTensorImpl()->update_strides_to_format(
+    result.unsafeGetTensorImpl()->empty_tensor_restride(
         MemoryFormat::ChannelsLast);
     return result;
   }
