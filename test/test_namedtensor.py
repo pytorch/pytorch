@@ -58,6 +58,21 @@ class TestNamedTensor(TestCase):
         self._test_factory(torch.empty, 'cuda')
 
     @skipIfNamedTensorDisabled
+    def test_using_seen_interned_string_doesnt_bump_refcount(self):
+        def see_name():
+            seen_name = 'N'
+            pass_name_to_python_arg_parser(seen_name)
+
+        see_name()
+        seen_name = 'N'
+        old_refcnt = sys.getrefcount(seen_name)
+
+        pass_name_to_python_arg_parser(seen_name)
+
+        new_refcnt = sys.getrefcount(seen_name)
+        self.assertEqual(new_refcnt, old_refcnt)
+
+    @skipIfNamedTensorDisabled
     def test_using_unseen_interned_string_bumps_refcount_permanently(self):
         # Please don't use this as a name in a different test.
         unseen_name = 'abcdefghi'
