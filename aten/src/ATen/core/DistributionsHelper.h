@@ -166,7 +166,7 @@ struct bernoulli_distribution {
     p = p_in;
   }
 
-  inline T operator()(at::CPUGenerator* generator) { 
+  inline int operator()(at::CPUGenerator* generator) { 
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return uniform(generator) <= p;
   }
