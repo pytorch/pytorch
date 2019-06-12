@@ -1003,7 +1003,7 @@ const std::vector<std::string> functions = {
                        ceil_mode: bool,
                        count_include_pad: bool):
             def backward(grad_output):
-                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
+                grad_self = torch.avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, 0)
                 return grad_self, None, None, None, None, None
 
             return torch.avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad), backward
