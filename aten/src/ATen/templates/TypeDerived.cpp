@@ -12,6 +12,9 @@ $storage_tensor_headers
 #include <c10/core/Allocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/NativeFunctions.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/Dispatch.h>

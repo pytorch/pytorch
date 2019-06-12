@@ -314,3 +314,7 @@ namespace detail {
 }
 
 }
+
+namespace torch {
+  using OperatorKernel = c10::OperatorKernel;
+}

@@ -20,6 +20,7 @@ from setuptools.command.build_ext import build_ext
 
 IS_WINDOWS = sys.platform == 'win32'
 
+NAMEDTENSOR_ENABLED = os.getenv('USE_NAMEDTENSOR', '').upper() == '1'
 
 def _find_cuda_home():
     '''Finds the CUDA install path.'''
@@ -232,6 +233,8 @@ class BuildExtension(build_ext, object):
         self._check_abi()
         for extension in self.extensions:
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
+            if NAMEDTENSOR_ENABLED:
+                self._add_compile_flag(extension, '-DNAMEDTENSOR_ENABLED')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
@@ -1011,6 +1014,8 @@ def _write_ninja_file(path,
 
     common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
     common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
+    if NAMEDTENSOR_ENABLED:
+        common_cflags.append('-DNAMEDTENSOR_ENABLED')
     common_cflags += ['-I{}'.format(include) for include in user_includes]
     common_cflags += ['-isystem {}'.format(include) for include in system_includes]
 
