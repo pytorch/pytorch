@@ -572,7 +572,7 @@ struct to_ir {
     cu.define({def}, {resolver}, nullptr);
     Stack stack;
     cu.get_function("defaults").run(stack);
-    return stack.at(0).toTuple()->elements();
+    return stack.at(0).toTupleRef().vec();
   }
 
   std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {
