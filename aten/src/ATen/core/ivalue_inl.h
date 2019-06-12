@@ -636,6 +636,8 @@ template<class T> inline IValue::IValue(c10::optional<T> v): IValue() {
   }
 }
 
+inline IValue::IValue(c10::nullopt_t): IValue() {}
+
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();

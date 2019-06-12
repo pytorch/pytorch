@@ -269,6 +269,7 @@ struct CAFFE2_API IValue final {
 
   template<class T>
   IValue(c10::optional<T> v);
+  IValue(c10::nullopt_t);
 
   // ClassType
   IValue(c10::intrusive_ptr<ivalue::Object> v);
