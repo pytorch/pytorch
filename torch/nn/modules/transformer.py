@@ -14,7 +14,7 @@ class Transformer(Module):
         is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
         Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
         Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
-        Processing Systems, pages 6000–6010.
+        Processing Systems, pages 6000-6010.
 
     Args:
         d_model: the number of expected features in the encoder/decoder inputs (default=512).
@@ -81,7 +81,7 @@ class Transformer(Module):
                   (i.e. target) length of the decode.
 
             where S is the source sequence length, T is the target sequence length,
-            N is the batch size, E is the feature number
+                N is the batch size, E is the feature number
 
         Examples:
             >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
@@ -197,7 +197,7 @@ class TransformerEncoderLayer(Module):
         This standard encoder layer is based on the paper "Attention Is All You Need".
         Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, 
         Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in 
-        Neural Information Processing Systems, pages 6000–6010.
+        Neural Information Processing Systems, pages 6000-6010.
 
         Users may modify or implement in a different way during application.
 
@@ -248,7 +248,7 @@ class TransformerDecoderLayer(Module):
         This standard decoder layer is based on the paper "Attention Is All You Need".
         Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, 
         Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in 
-        Neural Information Processing Systems, pages 6000–6010.
+        Neural Information Processing Systems, pages 6000-6010.
 
         Users may modify or implement in a different way during application.
 
