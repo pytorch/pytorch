@@ -10051,7 +10051,7 @@ a")
         FileCheck().check("aten::neg").check_same("scope: traced_fn1").check("aten::add") \
             .run(str(traced_fn.graph))
 
-    @unittest.skip
+    @unittest.skip("error in first class mode")
     def test_call_traced_mod_from_tracing_fn(self):
         class TracedModule(torch.nn.Module):
             def __init__(self):
@@ -10079,7 +10079,7 @@ a")
 
         FileCheck().check("aten::neg").check("aten::add").run(str(traced_fn.graph))
 
-    @unittest.skip
+    @unittest.skip("error in first class mode")
     def test_call_script_mod_from_tracing_fn(self):
         with self.assertRaisesRegex(RuntimeError, "must be registered as submodules"):
             class ScriptMod(torch.jit.ScriptModule):
