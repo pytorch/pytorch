@@ -10,7 +10,8 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler
+from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, \
+    ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, _LRScheduler
 from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, skipIfRocm, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -29,7 +30,10 @@ def drosenbrock(tensor):
 
 
 class TestOptim(TestCase):
-    def _test_rosenbrock_sparse(self, constructor, scheduler_constructors = [], sparse_only=False):
+    def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
+                                sparse_only=False):
+        if scheduler_constructors is None:
+            scheduler_constructors = []
         params_t = torch.Tensor([1.5, 1.5])
 
         params = Variable(params_t, requires_grad=True)
@@ -105,7 +109,7 @@ class TestOptim(TestCase):
             return loss
 
         initial_value = fn().item()
-        for i in range(200):
+        for _i in range(200):
             for scheduler in schedulers:
                 if isinstance(scheduler, ReduceLROnPlateau):
                     val_loss = fn()
@@ -131,7 +135,7 @@ class TestOptim(TestCase):
         fn = functools.partial(fn_base, optimizer, weight, bias)
 
         # Prime the optimizer
-        for i in range(20):
+        for _i in range(20):
             optimizer.step(fn)
         # Clone the weights and construct new optimizer for them
         weight_c = Variable(weight.data.clone(), requires_grad=True)
@@ -143,7 +147,7 @@ class TestOptim(TestCase):
         state_dict_c = deepcopy(optimizer.state_dict())
         optimizer_c.load_state_dict(state_dict_c)
         # Run both optimizations in parallel
-        for i in range(20):
+        for _i in range(20):
             optimizer.step(fn)
             optimizer_c.step(fn_c)
             self.assertEqual(weight, weight_c)
@@ -169,13 +173,16 @@ class TestOptim(TestCase):
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
 
-        for i in range(20):
+        for _i in range(20):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
             self.assertEqual(weight, weight_cuda)
             self.assertEqual(bias, bias_cuda)
 
-    def _test_basic_cases(self, constructor, scheduler_constructors = [], ignore_multidevice=False):
+    def _test_basic_cases(self, constructor, scheduler_constructors=None,
+                          ignore_multidevice=False):
+        if scheduler_constructors is None:
+            scheduler_constructors = []
         self._test_state_dict(
             torch.randn(10, 5),
             torch.randn(10),
@@ -219,7 +226,7 @@ class TestOptim(TestCase):
         )
 
     def _build_params_dict(self, weight, bias, **kwargs):
-        return [dict(params=[weight]), dict(params=[bias], **kwargs)]
+        return [{'params': [weight]}, dict(params=[bias], **kwargs)]
 
     def _build_params_dict_single(self, weight, bias, **kwargs):
         return [dict(params=bias, **kwargs)]
@@ -244,17 +251,17 @@ class TestOptim(TestCase):
         )
         self._test_basic_cases(
             lambda weight, bias: optim.SGD([weight, bias], lr=1e-3),
-            [lambda opt: StepLR(opt, gamma = 0.9, step_size = 10)]
+            [lambda opt: StepLR(opt, gamma=0.9, step_size=10)]
         )
         self._test_basic_cases(
             lambda weight, bias: optim.SGD([weight, bias], lr=1e-3),
-            [lambda opt: StepLR(opt, gamma = 0.9, step_size = 10),
+            [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
              lambda opt: ReduceLROnPlateau(opt)]
         )
         self._test_basic_cases(
             lambda weight, bias: optim.SGD([weight, bias], lr=1e-3),
-            [lambda opt: StepLR(opt, gamma = 0.99, step_size = 10),
-             lambda opt: ExponentialLR(opt, gamma = 0.99),
+            [lambda opt: StepLR(opt, gamma=0.99, step_size=10),
+             lambda opt: ExponentialLR(opt, gamma=0.99),
              lambda opt: ReduceLROnPlateau(opt)]
         )
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
@@ -266,7 +273,7 @@ class TestOptim(TestCase):
         )
         self._test_rosenbrock_sparse(
             lambda params: optim.SGD(params, lr=0.005),
-            [lambda opt: StepLR(opt, gamma = 0.99999, step_size = 300)]
+            [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
         )
 
     def test_adam(self):
@@ -291,19 +298,19 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adam(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3),
-            [lambda opt: ExponentialLR(opt, gamma = 0.9)]
+            [lambda opt: ExponentialLR(opt, gamma=0.9)]
         )
         self._test_basic_cases(
             lambda weight, bias: optim.Adam([weight, bias], lr=1e-3,
                                             amsgrad=True),
-            [lambda opt: ExponentialLR(opt, gamma = 0.9),
+            [lambda opt: ExponentialLR(opt, gamma=0.9),
              lambda opt: ReduceLROnPlateau(opt)]
         )
         self._test_basic_cases(
             lambda weight, bias: optim.Adam(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3, amsgrad=True),
-            [lambda opt: StepLR(opt, gamma=0.9, step_size = 10),
+            [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
              lambda opt: ReduceLROnPlateau(opt)]
         )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
@@ -329,7 +336,7 @@ class TestOptim(TestCase):
         self._test_basic_cases(
             lambda weight, bias: optim.Adadelta(
                 self._build_params_dict(weight, bias, rho=0.95)),
-            [lambda opt: StepLR(opt, gamma = 0.9, step_size = 10),
+            [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
              lambda opt: ReduceLROnPlateau(opt)]
         )
         with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
@@ -359,7 +366,7 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-1),
             [lambda opt: ReduceLROnPlateau(opt),
-             lambda opt: ExponentialLR(opt, gamma = 0.99)]
+             lambda opt: ExponentialLR(opt, gamma=0.99)]
         )
         with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
             optim.Adagrad(None, lr=1e-2, lr_decay=-0.5)
@@ -370,8 +377,8 @@ class TestOptim(TestCase):
         )
         self._test_rosenbrock_sparse(
             lambda params: optim.Adagrad(params, lr=0.1),
-            [lambda opt: StepLR(opt, gamma = 1 - 1e-5, step_size = 500),
-             lambda opt: ReduceLROnPlateau(opt, threshold = 1e-4)]
+            [lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
+             lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
         )
 
     @skipIfRocm
@@ -471,10 +478,12 @@ class LambdaLRTestObject:
         else:
             return False
 
+
 class LegacyStepLR(StepLR):
     def get_lr(self):
         return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
                 for base_lr in self.base_lrs]
+
 
 class LegacyMultiStepLR(MultiStepLR):
     def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
@@ -486,10 +495,12 @@ class LegacyMultiStepLR(MultiStepLR):
         return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
                 for base_lr in self.base_lrs]
 
+
 class LegacyExponentialLR(ExponentialLR):
     def get_lr(self):
         return [base_lr * self.gamma ** self.last_epoch
                 for base_lr in self.base_lrs]
+
 
 class LegacyCosineAnnealingLR(CosineAnnealingLR):
     def get_lr(self):
@@ -545,7 +556,7 @@ class TestLRScheduler(TestCase):
 
     def test_legacy_step_lr(self):
         scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
-        legacy_scheduler = LegacyStepLR(self.opt, gamma = 0.1, step_size = 3)
+        legacy_scheduler = LegacyStepLR(self.opt, gamma=0.1, step_size=3)
         self._test_against_legacy(scheduler, legacy_scheduler, 20)
 
     def test_legacy_multi_step_lr(self):
@@ -649,7 +660,7 @@ class TestLRScheduler(TestCase):
         epochs = 10
         schedulers = [None] * 2
         schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
-        schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones = [2, 5, 9])
+        schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         targets = [[0.05] * 2 + [0.005] * 1 + [5e-4] * 2 + [5e-5] + [5e-6] * 3 + [5e-8]]
         self._test(schedulers, targets, epochs)
 
@@ -661,7 +672,7 @@ class TestLRScheduler(TestCase):
         single_targets += [0.0005 * (0.9 ** x) for x in range(6, 9)]
         single_targets += [0.00005 * (0.9 ** x) for x in range(9, 12)]
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
-        schedulers[0] = StepLR(self.opt, gamma = 0.1, step_size = 3)
+        schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
         schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
         self._test(schedulers, targets, epochs)
 
@@ -673,7 +684,7 @@ class TestLRScheduler(TestCase):
         single_targets += [0.0005 * (0.9 ** x) for x in range(5, 9)]
         single_targets += [0.00005 * (0.9 ** x) for x in range(9, 11)]
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
-        schedulers[0] = MultiStepLR(self.opt, gamma = 0.1, milestones = [2, 5, 9])
+        schedulers[0] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         schedulers[1] = ExponentialLR(self.opt, gamma=0.9)
         self._test(schedulers, targets, epochs)
 
@@ -687,7 +698,7 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         schedulers = [None] * 2
         schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        schedulers[1] = StepLR(self.opt, gamma = 0.1, step_size = 3)
+        schedulers[1] = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test(schedulers, targets, epochs)
 
     def test_compound_cosanneal_and_multistep_lr(self):
@@ -701,7 +712,7 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         schedulers = [None] * 2
         schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        schedulers[1] = MultiStepLR(self.opt, gamma = 0.1, milestones = [2, 5, 9])
+        schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test(schedulers, targets, epochs)
 
     def test_compound_cosanneal_and_exp_lr(self):
@@ -715,7 +726,7 @@ class TestLRScheduler(TestCase):
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         schedulers = [None] * 2
         schedulers[0] = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
-        schedulers[1] = ExponentialLR(self.opt, gamma = 0.1)
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.1)
         self._test(schedulers, targets, epochs)
 
     def test_compound_reduce_lr_on_plateau1(self):
@@ -729,8 +740,8 @@ class TestLRScheduler(TestCase):
         metrics = [10 - i * 0.0167 for i in range(20)]
         schedulers = [None, None]
         schedulers[0] = ReduceLROnPlateau(self.opt, threshold_mode='abs', mode='min',
-                                      threshold=0.01, patience=5, cooldown=5)
-        schedulers[1] = StepLR(self.opt, gamma = 0.1, step_size = 3)
+                                          threshold=0.01, patience=5, cooldown=5)
+        schedulers[1] = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
     def test_compound_reduce_lr_on_plateau2(self):
@@ -744,8 +755,8 @@ class TestLRScheduler(TestCase):
         metrics = [10 - i * 0.0165 for i in range(22)]
         schedulers = [None] * 2
         schedulers[0] = ReduceLROnPlateau(self.opt, patience=5, cooldown=0, threshold_mode='abs',
-                                      mode='min', threshold=0.1)
-        schedulers[1] = MultiStepLR(self.opt, gamma = 0.1, milestones = [3, 8, 12])
+                                          mode='min', threshold=0.1)
+        schedulers[1] = MultiStepLR(self.opt, gamma=0.1, milestones=[3, 8, 12])
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
     def test_compound_reduce_lr_on_plateau3(self):
@@ -759,8 +770,8 @@ class TestLRScheduler(TestCase):
         metrics = [-0.8] * 2 + [-0.234] * 20
         schedulers = [None, None]
         schedulers[0] = ReduceLROnPlateau(self.opt, mode='max', patience=5, cooldown=5,
-                                      threshold_mode='abs')
-        schedulers[1] = ExponentialLR(self.opt, gamma = 0.1)
+                                          threshold_mode='abs')
+        schedulers[1] = ExponentialLR(self.opt, gamma=0.1)
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
     def test_compound_reduce_lr_on_plateau4(self):
@@ -776,7 +787,7 @@ class TestLRScheduler(TestCase):
         metrics = [1.5 * (1.025 ** i) for i in range(20)]  # 1.025 > 1.1**0.25
         schedulers = [None, None]
         schedulers[0] = ReduceLROnPlateau(self.opt, mode='max', patience=3,
-                                      threshold_mode='rel', threshold=0.1)
+                                          threshold_mode='rel', threshold=0.1)
         schedulers[1] = CosineAnnealingLR(self.opt, epochs, eta_min)
         self._test_reduce_lr_on_plateau(schedulers, targets, metrics, epochs)
 
@@ -865,7 +876,7 @@ class TestLRScheduler(TestCase):
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
                                            epoch, target[epoch], param_group['lr']), delta=1e-5)
 
-    def _test_against_legacy(self, scheduler, legacy_scheduler, epochs = 10):
+    def _test_against_legacy(self, scheduler, legacy_scheduler, epochs=10):
         self.setUp()
         targets = []
         for epoch in range(epochs):
