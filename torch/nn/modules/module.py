@@ -199,7 +199,7 @@ class Module(object):
                 # `torch.__future__.change_nn_module_params_inplace_cpu_cuda`
                 # into account only if we are moving the model between CPU and CUDA.
                 # Otherwise, we always replace the existing tensor.
-                if (tensor.is_cuda and tensor_applied.device == torch.device('cpu')) or
+                if (tensor.is_cuda and tensor_applied.device == torch.device('cpu')) or \
                    (tensor.device == torch.device('cpu') and tensor_applied.is_cuda):
                     return torch.__future__.change_nn_module_params_inplace_cpu_cuda
                 else:
