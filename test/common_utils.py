@@ -19,6 +19,7 @@ import random
 import contextlib
 import socket
 import time
+import subprocess
 from collections import OrderedDict
 from contextlib import contextmanager
 from functools import wraps
@@ -770,16 +771,25 @@ class TestCase(expecttest.TestCase):
     # returns captured stderr
     @staticmethod
     def runWithPytorchAPIUsageStderr(code):
-        import subprocess
-
         env = os.environ.copy()
         env["PYTORCH_API_USAGE_STDERR"] = "1"
-        pipes = subprocess.Popen(
+        popen = subprocess.Popen(
             [sys.executable, '-c', code],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env)
-        return pipes.communicate()[1].decode('ascii')
+        return popen.communicate()[1].decode('ascii')
+
+    @staticmethod
+    def run_out_of_process(code):
+        popen = subprocess.Popen(
+            [sys.executable, '-c', code],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+        pipes = popen.communicate()
+        if popen.returncode != 0:
+            raise RuntimeError("run_out_of_process raised non-zero exit code {}".format(popen.returncode))
+        return pipes
 
     if sys.version_info < (3, 2):
         # assertRegexpMatches renamed to assertRegex in 3.2

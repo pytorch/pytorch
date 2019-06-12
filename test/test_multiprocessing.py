@@ -468,6 +468,48 @@ class TestMultiprocessing(TestCase):
         p.join()
         self.assertIsInstance(outq.get(), RuntimeError)
 
+
+    @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
+    def test_cuda_bad_fork_cuda_tensor(self):
+        # Oddly enough, this program returns with exit code 0 (probably because
+        # it's the subprocess that died, not the parent process)
+        results = self.run_out_of_process("""\
+import multiprocessing, torch
+
+def mp_worker():
+    print(torch.cuda.get_device_properties(0))
+
+x = torch.zeros(2, device='cuda')
+
+process = multiprocessing.Process(target=mp_worker)
+process.start()
+process.join()
+""")
+        self.assertRegex(results[1].decode('ascii'), r'Cannot re-initialize CUDA in forked subprocess')
+
+
+    @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
+    def test_cuda_bad_fork_device_count(self):
+        # Test for https://github.com/pytorch/pytorch/issues/15734
+        results = self.run_out_of_process("""\
+import multiprocessing, torch
+
+def mp_worker(gpu):
+    print(torch.cuda.get_device_properties(gpu))
+
+gpus = list(range(torch.cuda.device_count()))
+
+processes = [multiprocessing.Process(target=mp_worker, args=(gpui,)) for gpui in gpus]
+for process in processes:
+    process.start()
+for process in processes:
+    process.join()
+""")
+        self.assertRegex(results[1].decode('ascii'), r'Cannot re-initialize CUDA in forked subprocess')
+
+
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
