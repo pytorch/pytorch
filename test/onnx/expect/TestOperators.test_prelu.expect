@@ -1,0 +1,89 @@
+ir_version: 4
+producer_name: "pytorch"
+producer_version: "1.1"
+graph {
+  node {
+    input: "weight"
+    output: "2"
+    op_type: "Unsqueeze"
+    attribute {
+      name: "axes"
+      ints: 1
+      ints: 2
+      type: INTS
+    }
+  }
+  node {
+    input: "input"
+    input: "2"
+    output: "3"
+    op_type: "PRelu"
+  }
+  name: "torch-jit-export"
+  initializer {
+    dims: 2
+    data_type: 1
+    name: "weight"
+    raw_data: "\000\000\200>\000\000\200>"
+  }
+  input {
+    name: "input"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "weight"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "3"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

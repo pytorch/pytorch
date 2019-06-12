@@ -20,28 +20,6 @@ namespace script {
 thread_local bool inline_everything = true;
 bool &getInlineEverythingMode() { return inline_everything; }
 
-struct RecursiveMethodCallError : public std::exception {};
-void placeholderCreator(Function&) {
-  throw RecursiveMethodCallError();
-}
-
-void Function::ensure_defined() {
-  try {
-    if (function_creator_) {
-      auto creator = function_creator_;
-      function_creator_ = placeholderCreator;
-      creator(*this);
-      function_creator_ = nullptr;
-    }
-  } catch (RecursiveMethodCallError&) {
-    throw ErrorReport() // TODO: once lower_first_class methods is removed
-                        // re-establish callsite info for debugging
-        << " method '" << name() << "' is called recursively. "
-        << "Recursive calls are not supported";
-  }
-  check_single_output();
-}
-
 void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
   to_impl(device, dtype, non_blocking);
 }
@@ -157,7 +135,7 @@ lower_graph(const ModulePtr &self, Graph &g_, size_t self_offset = 0) {
     }
     Slot slot(e.mod, e.mod->type()->getAttributeSlot(e.n->s(attr::name)));
     if (ClassTypePtr c = e.n->output()->type()->cast<ClassType>()) {
-      if (c->qualname() == "__torch__.$Module") {
+      if (c->is_module()) {
         auto obj = slot.value().toObject();
         for (Use use : e.n->output()->uses()) {
           to_scan.emplace_back(ToScan{obj, use.user, use.offset});
@@ -182,8 +160,8 @@ lower_graph(const ModulePtr &self, Graph &g_, size_t self_offset = 0) {
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-Method::Method(Module *owner, const std::shared_ptr<Function> &function)
-    : owner_(owner), function_(function) {}
+Method::Method(Module *owner, std::shared_ptr<Function> function)
+    : owner_(owner), function_(std::move(function)) {}
 
 void Method::run(Stack& stack) {
   stack.insert(stack.begin(), owner().module_object());
@@ -234,7 +212,7 @@ void Module::copy_into(
   }
 
   for (auto& mod : get_modules()) {
-    names.push_back(mod->name());
+    names.push_back(mod->field_name());
     // Submodules must be translated first, otherwise parameter_remap entries
     // will not be filled in for methods of this module.
     mod->copy_into(module_lookup, type_remap, names);
@@ -285,7 +263,7 @@ void Module::clone_method(const Module& orig, const std::string& name) {
         entry.second->module_object()->type();
     for (const auto& sub : entry.first->get_modules()) {
       to_scan.emplace_back(
-          sub.get(), entry.second->get_module(sub->name()).get());
+          sub.get(), entry.second->get_module(sub->field_name()).get());
     }
   }
   return clone_method(orig, name, type_remap);

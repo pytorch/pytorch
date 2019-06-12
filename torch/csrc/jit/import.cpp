@@ -410,7 +410,7 @@ std::shared_ptr<script::Module> load(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     script::ExtraFilesMap& extra_files) {
-  auto module = std::make_shared<script::Module>();
+  auto module = std::make_shared<script::Module>("TODO");
 
   auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
     std::shared_ptr<script::Module> curr = module;

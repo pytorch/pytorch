@@ -16,9 +16,9 @@
 
 namespace torch {
 namespace jit {
+struct Function;
 namespace script {
 struct CompilationUnit;
-struct Function;
 }
 } // namespace jit
 } // namespace torch
@@ -1091,7 +1091,7 @@ using FunctionTypePtr = std::shared_ptr<FunctionType>;
 // This type represents a Python Function
 struct CAFFE2_API FunctionType : public Type {
   static FunctionTypePtr create(
-      std::shared_ptr<torch::jit::script::Function> function) {
+      std::shared_ptr<torch::jit::Function> function) {
     return FunctionTypePtr(
         new FunctionType(function)); // NOLINT(modernize-make-shared)
   }
@@ -1109,16 +1109,16 @@ struct CAFFE2_API FunctionType : public Type {
   std::string python_str() const override {
     throw "Function";
   }
-  std::shared_ptr<torch::jit::script::Function> function() const {
+  std::shared_ptr<torch::jit::Function> function() const {
     return function_;
   }
   static const TypeKind Kind = TypeKind::FunctionType;
 
  private:
-  FunctionType(std::shared_ptr<torch::jit::script::Function> function)
+  FunctionType(std::shared_ptr<torch::jit::Function> function)
       : Type(TypeKind::FunctionType), function_(function) {}
 
-  std::shared_ptr<torch::jit::script::Function> function_;
+  std::shared_ptr<torch::jit::Function> function_;
 };
 
 struct NoneType;
@@ -1299,7 +1299,15 @@ template<class T> struct getTypePtr_<std::vector<T>> final {
     return type;
   }
 };
-template<class T> struct getTypePtr_<ArrayRef<T>> final {
+template <class T>
+struct getTypePtr_<c10::ArrayRef<T>> final {
+  static TypePtr call() {
+    static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template <class T>
+struct getTypePtr_<c10::ListPtr<T>> final {
   static TypePtr call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
@@ -1357,18 +1365,14 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
-using ::torch::jit::script::Function;
+using ::torch::jit::Function;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public Type {
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       QualifiedName qualifiedName,
-      std::shared_ptr<CompilationUnit> cu);
-
-  // Create a type representing a Module,
-  // These do not have methods, and are not globally registered
-  static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
+      std::shared_ptr<CompilationUnit> cu, bool is_module = false);
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
@@ -1480,10 +1484,14 @@ struct CAFFE2_API ClassType : public Type {
   // that would invalidate the refinement.
   // These variants are not registered in the global class table.
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
+
+  bool is_module() const {
+    return is_module_;
+  }
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu);
+  ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu, bool is_module);
 
   // Fully qualified name of type (note that this has to be globally unique).
   // Looks like: "foo.bar.Baz".
@@ -1500,5 +1508,6 @@ struct CAFFE2_API ClassType : public Type {
   // Holds method attributes
   std::shared_ptr<CompilationUnit> compilation_unit_;
 
+  bool is_module_;
 };
 } // namespace c10

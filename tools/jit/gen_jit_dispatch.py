@@ -94,7 +94,7 @@ def jit_type_of(arg):
 FROM_IVALUE = {
     'Device': '{}.toDevice()',
     'Device?': '{}.toOptional<c10::Device>()',
-    'IntArrayRef': '{}.toIntList()->elements()',
+    'IntArrayRef': '{}.toIntListRef()',
     'Layout': '{}.toLayout()',
     'Layout?': '{}.toOptional<c10::Layout>()',
     'MemoryFormat': '{}.toMemoryFormat()',
@@ -105,17 +105,17 @@ FROM_IVALUE = {
     'Tensor': '{}.toTensor()',
     'Tensor?': 'toOptionalTensor({})',
     'Tensor?[]': 'toListOfOptionalTensor({})',
-    'TensorList': '{}.toTensorList()->elements()',
+    'TensorList': '{}.toTensorListRef()',
     'bool': '{}.toBool()',
     'bool?': '{}.toOptional<bool>()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
     'int64_t?': '{}.toOptional<int64_t>()',
-    'std::string': '{}.toString()->string()',
+    'std::string': '{}.toStringRef()',
     'Generator': 'nullptr',
-    'std::array<bool,2>': 'as_bool_array<2>({}.toBoolListRef())',
-    'std::array<bool,3>': 'as_bool_array<3>({}.toBoolListRef())',
-    'std::array<bool,4>': 'as_bool_array<4>({}.toBoolListRef())',
+    'std::array<bool,2>': 'as_bool_array<2>({}.toBoolList())',
+    'std::array<bool,3>': 'as_bool_array<3>({}.toBoolList())',
+    'std::array<bool,4>': 'as_bool_array<4>({}.toBoolList())',
 }
 
 

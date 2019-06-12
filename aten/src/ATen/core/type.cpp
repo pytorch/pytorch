@@ -155,7 +155,7 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
   } else if (value.isDoubleList()) {
     return ListType::ofFloats();
   } else if (value.isTuple()) {
-    return TupleType::create(fmap(value.toTuple()->elements(), incompleteInferTypeFrom));
+    return TupleType::create(fmap(value.toTupleRef(), incompleteInferTypeFrom));
   } else if (value.isDevice()) {
     return DeviceObjType::get();
   } else if (value.isObject()) {
@@ -171,14 +171,14 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
 // XXX: only used for better error messages, should not be used elsewhere
 TypePtr attemptToRecoverType(const IValue& ivalue) {
   if (ivalue.isGenericList()) {
-    auto& ivalue_list = ivalue.toGenericListRef();
+    auto ivalue_list = ivalue.toGenericListRef();
     if (ivalue_list.size() == 0) {
       return ListType::create(VarType::create("t"));
     }
     return ListType::create(attemptToRecoverType(ivalue_list[0]));
   }
   if (ivalue.isGenericDict()) {
-    const auto& dict = ivalue.toGenericDictRef();
+    auto dict = ivalue.toGenericDict();
     if (dict.size() == 0) {
       return DictType::create(VarType::create("t"), VarType::create("t"));
     }
@@ -201,15 +201,15 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   }
 
   if (ivalue.isTuple()) {
-    const auto& ivalue_elem = ivalue.toTuple()->elements();
+    auto elems = ivalue.toTupleRef();
     auto tuple_type = type->cast<TupleType>();
-    if (!tuple_type || tuple_type->elements().size() != ivalue_elem.size()) {
+    if (!tuple_type || tuple_type->elements().size() != elems.size()) {
       return false;
     }
     auto type_elem = tuple_type->elements();
     bool is_subvalue = true;
     for (size_t i = 0; i < type_elem.size() && is_subvalue; ++i) {
-      is_subvalue = isSubvalueOf(ivalue_elem[i], type_elem[i]);
+      is_subvalue = isSubvalueOf(elems[i], type_elem[i]);
     }
     return is_subvalue;
   }
@@ -218,7 +218,7 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     if (!list_type) {
       return false;
     }
-    auto& ivalue_list = ivalue.toGenericListRef();
+    auto ivalue_list = ivalue.toGenericListRef();
     auto element_type = list_type->getElementType();
     return std::all_of(ivalue_list.begin(), ivalue_list.end(), [&](const IValue& list_elem) {
       return isSubvalueOf(list_elem, element_type);
@@ -226,7 +226,7 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   }
   if (ivalue.isGenericDict()) {
     auto dict_type = type->expect<DictType>();
-    const auto& dict = ivalue.toGenericDictRef();
+    const auto dict = ivalue.toGenericDict();
     return std::all_of(
         dict.begin(), dict.end(), [=](const c10::impl::GenericDictPtr::const_iterator::value_type& item) {
           return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
@@ -478,17 +478,13 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
 
 ClassTypePtr ClassType::create(
     QualifiedName qualifiedName,
-    std::shared_ptr<CompilationUnit> cu) {
-  return ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
-}
-
-ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
-  return ClassTypePtr(new ClassType(
-      QualifiedName(QualifiedName("__torch__"), "$Module"), std::move(cu)));
+    std::shared_ptr<CompilationUnit> cu,
+    bool is_module) {
+  return ClassTypePtr(new ClassType(std::move(qualifiedName), std::move(cu), is_module));
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassTypePtr(new ClassType(name_, compilation_unit_));
+  auto ptr = ClassType::create(name_, compilation_unit_);
   AT_ASSERT(numAttributes() == refined_slots.size());
   for(size_t i = 0; i < attributeNames_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
@@ -544,9 +540,11 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
 
 ClassType::ClassType(
     QualifiedName name,
-    std::shared_ptr<CompilationUnit> cu)
+    std::shared_ptr<CompilationUnit> cu,
+    bool is_module)
     : Type(TypeKind::ClassType),
       name_(std::move(name)),
-      compilation_unit_(std::move(cu)) {}
+      compilation_unit_(std::move(cu)),
+      is_module_(is_module) {}
 
 } // namespace c10
