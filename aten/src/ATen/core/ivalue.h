@@ -204,6 +204,7 @@ struct CAFFE2_API IValue final {
   // IntList
   IValue(c10::ListPtr<int64_t> v);
   IValue(c10::ArrayRef<int64_t> v);
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are deprecated. Please use c10::ListPtr<T> instead.")
   IValue(std::vector<int64_t> v);
   bool isIntList() const { return Tag::IntList == tag; }
   c10::ListPtr<int64_t> toIntList() &&;
@@ -221,6 +222,7 @@ struct CAFFE2_API IValue final {
 
   // DoubleList
   IValue(c10::ListPtr<double> v);
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are deprecated. Please use c10::ListPtr<T> instead.")
   IValue(std::vector<double> v);
   bool isDoubleList() const { return Tag::DoubleList == tag; }
   c10::ListPtr<double> toDoubleList() &&;
@@ -229,6 +231,7 @@ struct CAFFE2_API IValue final {
 
   // BoolList
   IValue(c10::ListPtr<bool> v);
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are deprecated. Please use c10::ListPtr<T> instead.")
   IValue(std::vector<bool> v);
   bool isBoolList() const { return Tag::BoolList == tag; }
   c10::ListPtr<bool> toBoolList() &&;
@@ -243,6 +246,7 @@ struct CAFFE2_API IValue final {
   c10::ArrayRef<at::Tensor> toTensorListRef() const;
 
   //GenericList
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are deprecated. Please use c10::ListPtr<T> instead.")
   IValue(std::vector<IValue> v);
   IValue(c10::ListPtr<IValue> v);
   bool isGenericList() const { return Tag::GenericList == tag; }
@@ -253,6 +257,7 @@ struct CAFFE2_API IValue final {
   template<class T>
   IValue(c10::ListPtr<T> v);
   template<class T>
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are deprecated. Please use c10::ListPtr<T> instead.")
   IValue(std::vector<T> v);
 
   // GenericDict
@@ -265,6 +270,7 @@ struct CAFFE2_API IValue final {
   IValue(c10::DictPtr<Key, Value> v);
 
   template<class Key, class Value>
+  C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::DictPtr<K, V> instead.")
   IValue(std::unordered_map<Key, Value> v);
 
   template<class T>
