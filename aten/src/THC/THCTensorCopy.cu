@@ -1,9 +1,9 @@
 #include <THC/THCApply.cuh>
 #include <TH/THHalf.h>
-#include <TH/THBFloat16.h>
 #include <THC/THCNumerics.cuh>
 #include <THC/THCTensorCopy.hpp>
 #include <type_traits>
+#include <c10/util/BFloat16.h>
 
 // Copy operator for the pointwise apply kernel
 template <typename T>

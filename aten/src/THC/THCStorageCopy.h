@@ -4,7 +4,6 @@
 #include <THC/THCStorage.h>
 #include <THC/THCGeneral.h>
 #include <TH/THHalf.h>
-#include <TH/THBFloat16.h>
 
 #include <THC/generic/THCStorageCopy.h>
 #include <THC/THCGenerateAllTypes.h>

@@ -2,8 +2,8 @@
 #error "You must define TH_GENERIC_FILE before including THGenerateBFloat16Type.h"
 #endif
 
-#include <TH/THBFloat16.h>
-#define scalar_t THBFloat16
+#include <c10/util/BFloat16.h>
+#define scalar_t at::BFloat16
 #define TH_CONVERT_ACCREAL_TO_REAL(_val) (scalar_t)(_val)
 #define Real BFloat16
 #define TH_REAL_IS_BFLOAT16

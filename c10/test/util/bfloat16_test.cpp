@@ -14,7 +14,10 @@ namespace {
       bytes |= exponent;
       bytes <<= 23;
       bytes |= fraction;
-      return *(float*)&bytes;
+
+      float res;
+      std::memcpy(&res, &bytes, sizeof(float));
+      return res;
   }
 
   TEST(BFloat16Conversion, FloatToBFloat16AndBack) {

@@ -1,10 +1,9 @@
 #ifndef THC_GENERIC_FILE
 #error "You must define THC_GENERIC_FILE before including THCGenerateBFloat16Type.h"
 #endif
+#include <c10/util/BFloat16.h>
 
-#include <TH/THBFloat16.h>
-
-#define scalar_t THBFloat16
+#define scalar_t at::BFloat16
 #define Real BFloat16
 
 #define CReal CudaBFloat16
