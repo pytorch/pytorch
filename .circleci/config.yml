@@ -930,6 +930,21 @@ jobs:
     resource_class: large
     <<: *pytorch_linux_test_defaults
 
+  pytorch_namedtensor_linux_xenial_py3_clang5_asan_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3-clang5-asan-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:300"
+      PYTHON_VERSION: "3.6"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_namedtensor_linux_xenial_py3_clang5_asan_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-py3-clang5-asan-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:300"
+      PYTHON_VERSION: "3.6"
+    resource_class: large
+    <<: *pytorch_linux_test_defaults
+
   pytorch_linux_xenial_cuda9_cudnn7_py2_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda9-cudnn7-py2-build
@@ -1005,6 +1020,22 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:300"
       PYTHON_VERSION: "3.6"
     resource_class: large
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2-build
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:300"
+      PYTHON_VERSION: "2.7"
+    <<: *pytorch_linux_build_defaults
+
+  pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2-test
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:300"
+      PYTHON_VERSION: "2.7"
+      USE_CUDA_DOCKER_RUNTIME: "1"
+    resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
@@ -2470,6 +2501,13 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_py3_clang5_asan_build
+      - pytorch_namedtensor_linux_xenial_py3_clang5_asan_build:
+          requires:
+            - setup
+      - pytorch_namedtensor_linux_xenial_py3_clang5_asan_test:
+          requires:
+            - setup
+            - pytorch_namedtensor_linux_xenial_py3_clang5_asan_build
       - pytorch_linux_xenial_cuda9_cudnn7_py2_build:
           requires:
             - setup
@@ -2516,6 +2554,13 @@ workflows:
       - pytorch_doc_push:
           requires:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build:
+          requires:
+            - setup
+      - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_test:
+          requires:
+            - setup
+            - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build
       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build:
           requires:
             - setup
