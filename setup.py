@@ -722,7 +722,7 @@ build_update_message = """
       $ python setup.py install
     To develop locally:
       $ python setup.py develop
-    To force cmake to re-run (off by default):
+    To force cmake to re-generate native build files (off by default):
       $ python setup.py develop --cmake
 """
 

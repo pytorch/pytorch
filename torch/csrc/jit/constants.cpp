@@ -55,17 +55,17 @@ c10::optional<Value*> tryInsertConstant(
     n->i_(attr::value, val.toBool());
     n->output()->setType(BoolType::get());
   } else if (val.isBoolList()) {
-    auto bool_list = val.toBoolList()->elements();
+    auto bool_list = val.toBoolList();
     n->is_(
         attr::value, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
     n->output()->setType(ListType::ofBools());
   } else if (val.isIntList()) {
-    n->is_(attr::value, val.toIntList()->elements());
+    n->is_(attr::value, val.toIntListRef().vec());
     n->output()->setType(ListType::ofInts());
   } else if (val.isTensorList()) {
     n->ts_(
         attr::value,
-        fmap(val.toTensorList()->elements(), [](const at::Tensor& t) {
+        fmap(val.toTensorListRef(), [](const at::Tensor& t) {
           AT_ASSERT(t.is_variable() && !t.requires_grad());
           return t;
         }));

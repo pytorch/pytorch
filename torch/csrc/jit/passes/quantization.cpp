@@ -333,7 +333,7 @@ void InsertObserverNodes(
 }
 
 void InsertObserverNodes(
-    std::shared_ptr<script::Function>& function_var,
+    std::shared_ptr<Function>& function_var,
     Node* observer_node) {
   InsertObserverNodes(
       function_var->graph(), observer_node, function_var->num_inputs());
