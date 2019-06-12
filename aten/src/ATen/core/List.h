@@ -43,7 +43,7 @@ void swap(ListElementReference<T, Iterator, StorageT>&& lhs, ListElementReferenc
 template<class T, class Iterator, class StorageT>
 class ListElementReference final {
 public:
-  operator T() &&;
+  operator T() const;
 
   ListElementReference& operator=(T&& new_value) &&;
 

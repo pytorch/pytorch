@@ -62,8 +62,9 @@ namespace detail {
 }
 
 namespace impl {
+
 template<class T, class Iterator, class StorageT>
-ListElementReference<T, Iterator, StorageT>::operator T() && {
+ListElementReference<T, Iterator, StorageT>::operator T() const {
   return detail::list_element_to<T>(*iterator_);
 }
 
