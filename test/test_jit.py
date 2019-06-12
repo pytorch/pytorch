@@ -11710,9 +11710,8 @@ a")
 
         self.assertIsNot(other_strong_mod.weak, other_strong_mod.weak2)
 
-        strong_mod = Strong()
-        # the first weak is a ScriptModule while the other is a Python value
-        FileCheck().check_count("python_value", 1).run(strong_mod.graph)
+        with self.assertRaisesRegex(RuntimeError, "Cannot call a ScriptModule that is not a submodule of the caller"):
+             strong_mod = Strong()
 
     def test_weak_module_copying(self):
         class Submodule(torch.nn.Module):
@@ -12551,7 +12550,7 @@ a")
 
         src = torch.randn(seq_length, bsz, d_model)
         tgt = torch.randn(tgt_length, bsz, d_model)
-        transformer = nn.Transformer(d_model, nhead, num_encoder_layers, 
+        transformer = nn.Transformer(d_model, nhead, num_encoder_layers,
                                      num_decoder_layers, dim_feedforward, dropout=0.0)
         model = MyModule(transformer, tgt, src)
 
