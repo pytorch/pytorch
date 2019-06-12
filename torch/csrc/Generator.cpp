@@ -16,7 +16,7 @@
 
 #ifdef USE_CUDA
 #include <THC/THCTensorRandom.h>
-#include <ATen/cuda/CUDAGenerator.h>
+#include <ATen/CUDAGenerator.h>
 #endif
 
 using namespace at;

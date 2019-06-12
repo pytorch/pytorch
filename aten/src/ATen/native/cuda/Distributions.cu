@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
-#include <ATen/cuda/CUDAGenerator.h>
+#include <ATen/CUDAGenerator.h>
 
 #include <curand.h>
 #include <curand_kernel.h>

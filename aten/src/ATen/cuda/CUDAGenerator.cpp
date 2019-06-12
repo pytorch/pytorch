@@ -1,4 +1,4 @@
-#include <ATen/cuda/CUDAGenerator.h>
+#include <ATen/CUDAGenerator.h>
 
 namespace at {
 

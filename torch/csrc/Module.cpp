@@ -741,18 +741,20 @@ PyObject* initModule() {
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
 #endif
 
+  auto cpu_generator_tuple = PyTuple_New(1);
   auto defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator = (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
+  PyTuple_SetItem(cpu_generator_tuple, 0, (PyObject*)THPDefaultCPUGenerator);
   // This reference is meant to be given away, so no need to incref here.
-  ASSERT_TRUE(set_module_attr("default_generator", (PyObject*)THPDefaultCPUGenerator, /* incref= */ false));
+  ASSERT_TRUE(set_module_attr("default_generator", cpu_generator_tuple, /* incref= */ false));
 
   auto num_gpus = at::detail::getCUDAHooks().getNumGPUs();
-  auto default_cuda_generators = PyList_New(static_cast<Py_ssize_t>(num_gpus));
+  auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for(int i = 0; i < num_gpus; i++) {
     auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(i);
     auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
     // This reference is meant to be given away, so no need to incref here.
-    PyList_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
+    PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
   }
   // This reference is meant to be given away, so no need to incref here.
   ASSERT_TRUE(set_module_attr("default_cuda_generators", default_cuda_generators, /* incref= */ false));

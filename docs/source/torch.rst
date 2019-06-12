@@ -88,9 +88,9 @@ Random sampling
 .. autofunction:: get_rng_state
 .. autofunction:: set_rng_state
 .. autoattribute:: torch.default_generator
-   :annotation:  Returns the default CPU torch.Generator
+   :annotation:  Returns a tuple containing the default CPU torch.Generator
 .. autoattribute:: torch.default_cuda_generators
-   :annotation: If cuda is available, returns an array of default CUDA torch.Generator-s.
+   :annotation: If cuda is available, returns a tuple of default CUDA torch.Generator-s.
                 The number of CUDA torch.Generator-s returned is equal to the number of
                 GPUs available in the system.
 .. autofunction:: bernoulli

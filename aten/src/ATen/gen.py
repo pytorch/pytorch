@@ -291,7 +291,7 @@ def generate_storage_type_and_tensor(backend, density, declarations):
         env['state'] = ['globalContext().getTHCState()']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
-        env['Generator'] = 'cuda/CUDAGenerator'
+        env['Generator'] = 'CUDAGenerator'
         env['allocator'] = 'at::cuda::getCUDADeviceAllocator()'
     else:
         env['th_headers'] = [
