@@ -3,6 +3,7 @@ import io
 import os
 import math
 import random
+import re
 import copy
 import shutil
 import torch
@@ -15,7 +16,6 @@ import pickle
 import gzip
 import types
 import textwrap
-import re
 from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
@@ -11828,15 +11828,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         with self.assertRaises(RuntimeError):
             x = torch.empty((3, 3), memory_format=torch.channels_last)
         x = torch.empty((3, 3, 3, 3), memory_format=torch.channels_last)
-        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
-
-    def test_memory_format_empty_out(self):
-        o = torch.empty(3, 3, 3, 3).contiguous(memory_format=torch.channels_last)
-        x = torch.empty((3, 3, 3, 3), out=o, memory_format=torch.channels_last)
-        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
-
-        o = torch.empty(3, 3, 2, 1)
-        x = torch.empty((3, 3, 3, 3), out=o, memory_format=torch.channels_last)
         self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')

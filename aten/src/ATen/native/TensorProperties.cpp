@@ -61,12 +61,15 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
     return self;
   }
   TORCH_CHECK(
-      memory_format != MemoryFormat::Preserve, " unsupported memory format");
+      memory_format != MemoryFormat::Preserve,
+      "preserve memory format is unsupported by the contiguous operator");
 
   // Quick path to mark Tensor as channels last, without making data copy
-  if (memory_format == MemoryFormat::ChannelsLast && self.dim() == 4 && self.strides() == get_channels_last_strides(self.sizes())){
+  if (memory_format == MemoryFormat::ChannelsLast && self.dim() == 4 &&
+      self.strides() == get_channels_last_strides(self.sizes())) {
     auto result = self.alias();
-    result.unsafeGetTensorImpl()->update_strides_to_format(MemoryFormat::ChannelsLast);
+    result.unsafeGetTensorImpl()->update_strides_to_format(
+        MemoryFormat::ChannelsLast);
     return result;
   }
 
