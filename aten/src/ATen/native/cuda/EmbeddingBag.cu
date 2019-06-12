@@ -118,24 +118,14 @@ __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
     scalar_t* per_sample_weights, int64_t per_sample_weights_stride) {
 
   using accscalar_t = acc_type<scalar_t, true>;
-  int idx = blockIdx.x * 4 + threadIdx.y;
-
-  // Each warp is responsible for an input into the LookupTable.
-  // If the preceding input has the same as this input, then the warp
-  // exits immediately. The warp also processes subsequent inputs with the
-  // same value.  //
-  // Input Warp
-  // 1     <warp 1>
-  // 1     <warp 1> (<warp 2> exits without doing any work)
-  // 5     <warp 3>
-  // 8     <warp 4>
-
-  // Number of values proceessed by each thread (grain size)
-  const int SZ = 4;
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  const int startFeature = blockIdx.y * blockDim.y + threadIdx.y;
+  if (startFeature >= stride) {
+    return;
+  }
 
   if (idx < numel && (idx == 0 || input[idx] != input[idx - 1])) {
     do {
-      const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
       const int weightRow = ((int)input[idx]) * stride;
 
       // Note: only this line changes from LookupTable_accgradParametersKernel
@@ -148,36 +138,16 @@ __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
         scale *= per_sample_weights[origRow * per_sample_weights_stride];
       }
 
-      accscalar_t gradient[SZ];
-      accscalar_t weight[SZ];
+      accscalar_t gradient = static_cast<accscalar_t>(gradOutput[gradOutputRow + startFeature]);
 
-#pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
-        int featureDim = startFeature + ii * WARP_SIZE;
-        if (featureDim < stride) {
-          gradient[ii] =
-              static_cast<accscalar_t>(gradOutput[gradOutputRow + featureDim]);
-          if (mode == MODE_MEAN) {
-            gradient[ii] /= bag_size[seq_number];
-          }
-          weight[ii] =
-              static_cast<accscalar_t>(gradWeight[weightRow + featureDim]);
-        }
+      if (mode == MODE_MEAN) {
+        gradient /= bag_size[seq_number];
       }
+      accscalar_t weight = static_cast<accscalar_t>(gradWeight[weightRow + startFeature]);
+      weight += gradient * scale;
 
-#pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
-        weight[ii] += gradient[ii] * scale;
-      }
-
-#pragma unroll
-      for (int ii = 0; ii < SZ; ii++) {
-        int featureDim = startFeature + ii * WARP_SIZE;
-        if (featureDim < stride) {
-          gradWeight[weightRow + featureDim] =
-              static_cast<scalar_t>(weight[ii]);
-        }
-      }
+      int featureDim = startFeature;
+      gradWeight[weightRow + startFeature] = static_cast<scalar_t>(weight);
 
       idx++;
     } while (idx < numel && input[idx] == input[idx - 1]);
@@ -258,8 +228,10 @@ Tensor embedding_bag_backward_cuda_sum_avg(
         thrust::equal_to<int64_t>(), thrust::maximum<int64_t>());
   }
 
-  dim3 grid(THCCeilDiv(numel, (ptrdiff_t)4), THCCeilDiv(stride, (int64_t)128));
-  dim3 block(32, 4);
+
+
+  dim3 grid(THCCeilDiv(numel, (ptrdiff_t)32), THCCeilDiv(stride, (int64_t)32));
+  dim3 block(32, 32);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad.scalar_type(), "embedding_bag_backward_cuda_sum_avg_kernel", [&] {
         EmbeddingBag_accGradParametersKernel_sum_avg<
