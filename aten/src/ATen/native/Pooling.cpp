@@ -90,7 +90,7 @@ Tensor avg_pool1d(
       {1, stride[0]},
       {0, padding[0]},
       ceil_mode,
-      count_include_pad);
+      count_include_pad, 0);
 
   return output.squeeze(2);
 }
