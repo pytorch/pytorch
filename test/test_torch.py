@@ -4164,7 +4164,7 @@ class _TestTorchMixin(object):
         for args in [(3,), (1, 3)]:  # (low,) and (low, high)
             self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
             self.assertIs(torch.int64, torch.randint(*args, size=size, layout=torch.strided).dtype)
-            self.assertIs(torch.int64, torch.randint(*args, size=size, generator=torch.default_generator).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, generator=torch.default_generator[0]).dtype)
             self.assertIs(torch.float32, torch.randint(*args, size=size, dtype=torch.float32).dtype)
             out = torch.empty(size, dtype=torch.float32)
             self.assertIs(torch.float32, torch.randint(*args, size=size, out=out).dtype)
@@ -9551,7 +9551,7 @@ class _TestTorchMixin(object):
 
     def test_generator_cpu(self):
         # test default generators are equal
-        self.assertEqual(torch.default_generator, torch.default_generator)
+        self.assertEqual(torch.default_generator[0], torch.default_generator[0])
 
         # tests Generator API
         # manual_seed, seed, initial_seed, get_state, set_state
@@ -9572,7 +9572,7 @@ class _TestTorchMixin(object):
         g1_randn = torch.randn(1, generator=g1)
         self.assertEqual(g1_randn, g2_randn)
 
-        default_state = torch.default_generator.get_state()
+        default_state = torch.default_generator[0].get_state()
         q = torch.Tensor(100)
         g1_normal = q.normal_()
         g2 = torch.Generator()
