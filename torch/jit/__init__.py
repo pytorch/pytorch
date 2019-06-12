@@ -1147,6 +1147,9 @@ class OrderedDictWrapper(object):
     def values(self):
         return [v for k, v in self.items()]
 
+    def __len__(self):
+        return len(self.values())
+
     def __delitem__(self, k):
         raise RuntimeError("cannot delete methods or parameters of a script module")
 

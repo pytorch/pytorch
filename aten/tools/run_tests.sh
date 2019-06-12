@@ -21,6 +21,8 @@ VALGRIND=${VALGRIND:=ON}
 ./xla_tensor_test
 ./tensor_iterator_test
 ./Dimname_test
+./NamedTensor_test
+./cpu_generator_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi
