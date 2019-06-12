@@ -256,43 +256,33 @@ void initJitScriptBindings(PyObject* module) {
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
-      .def(
-          "save",
-          [](std::shared_ptr<Module> m,
-             const std::string& filename,
-             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            m->save(filename, _extra_files);
-          },
-          py::arg("filename"),
-          py::arg("_extra_files") = ExtraFilesMap())
-      .def(
-          "save_to_buffer",
-          [](std::shared_ptr<Module> m,
-             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            std::ostringstream buf;
-            m->save(buf, _extra_files);
-            return py::bytes(buf.str());
-          },
-          py::arg("_extra_files") = ExtraFilesMap())
+      .def("save", [](std::shared_ptr<Module> m, const std::string &filename,
+                      const ExtraFilesMap &_extra_files =
+                          ExtraFilesMap()) { m->save(filename, _extra_files); },
+           py::arg("filename"), py::arg("_extra_files") = ExtraFilesMap())
+      .def("save_to_buffer",
+           [](std::shared_ptr<Module> m,
+              const ExtraFilesMap &_extra_files = ExtraFilesMap()) {
+             std::ostringstream buf;
+             m->save(buf, _extra_files);
+             return py::bytes(buf.str());
+           },
+           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
-      .def(
-          "_define",
-          [](std::shared_ptr<Module> m,
-             py::object py_m,
-             const std::string& script,
-             ResolutionCallback rcb) {
-            c10::optional<Self> self;
-            m->class_compilation_unit().define(
-                script, pythonResolver(rcb), moduleSelf(m, py_m));
-            didFinishEmitModule(m);
-          })
+      .def("_define",
+           [](std::shared_ptr<Module> m, py::object py_m,
+              const std::string &script, ResolutionCallback rcb) {
+             c10::optional<Self> self;
+             m->class_compilation_unit().define(script, pythonResolver(rcb),
+                                                moduleSelf(m, py_m));
+             didFinishEmitModule(m);
+           })
       .def(
           "_create_methods",
-          [](std::shared_ptr<Module> m,
-             py::object py_m,
-             const std::vector<Def>& defs,
-             const std::vector<ResolutionCallback>& rcbs,
-             const std::vector<FunctionDefaults>& defaults) {
+          [](std::shared_ptr<Module> m, py::object py_m,
+             const std::vector<Def> &defs,
+             const std::vector<ResolutionCallback> &rcbs,
+             const std::vector<FunctionDefaults> &defaults) {
             std::vector<ResolverPtr> resolvers;
             resolvers.reserve(rcbs.size());
             for (auto& callback : rcbs) {
@@ -316,117 +306,99 @@ void initJitScriptBindings(PyObject* module) {
             }
             didFinishEmitModule(m);
           })
-      .def(
-          "_get_method",
-          [](Module& self, const std::string& name) -> const Method& {
-            return self.get_method(name);
-          },
-          py::return_value_policy::reference_internal)
+      .def("_get_method",
+           [](Module &self, const std::string &name) -> Method {
+             return self.get_method(name);
+           },
+           py::return_value_policy::reference_internal)
       .def("_register_parameter", &Module::register_parameter)
-      .def(
-          "_get_functions",
-          [](Module& self) {
-            return self.class_compilation_unit().get_functions();
-          })
-      .def(
-          "_register_attribute",
-          [](Module& self, std::string name, TypePtr type, py::object value) {
-            self.register_attribute(name, type, toIValue(value, type));
-          })
+      .def("_get_functions",
+           [](Module &self) {
+             return self.class_compilation_unit().get_functions();
+           })
+      .def("_register_attribute",
+           [](Module &self, std::string name, TypePtr type, py::object value) {
+             self.register_attribute(name, type, toIValue(value, type));
+           })
       .def("_register_module", &Module::register_module)
       .def("_register_buffer", &Module::register_buffer)
-      .def(
-          "_set_attribute",
-          [](Module& self, const std::string& name, py::object value) {
-            auto attr = self.find_attribute(name);
-            AT_CHECK(attr != nullptr, "Could not find attribute '", name, "'");
-            auto ivalue = toIValue(value, attr->type());
-            attr->setValue(ivalue);
-          })
+      .def("_set_attribute",
+           [](Module &self, const std::string &name, py::object value) {
+             auto attr = self.find_attribute(name);
+             AT_CHECK(attr != nullptr, "Could not find attribute '", name, "'");
+             auto ivalue = toIValue(value, attr->type());
+             attr->setValue(ivalue);
+           })
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
       .def("_get_buffer", &Module::get_buffer)
       .def("_get_attribute", &Module::get_attribute)
       .def("_get_module", &Module::get_module)
-      .def(
-          "_get_modules",
-          [](Module& self) -> py::tuple {
-            auto modules = self.get_modules();
-            py::tuple result(modules.size());
-            for (size_t i = 0; i < modules.size(); ++i) {
-              auto& item = modules[i];
-              result[i] = std::make_pair(item->name(), item);
-            }
-            return result;
-          })
-      .def(
-          "_get_parameters",
-          [](Module& self) -> py::tuple {
-            auto parameters = self.get_parameters();
-            py::tuple result(parameters.size());
-            for (size_t i = 0; i < parameters.size(); ++i) {
-              auto& p = parameters[i];
-              py::tuple r(2);
-              result[i] = std::make_tuple(
-                  p.name(), autograd::as_variable_ref(p.value().toTensor()));
-            }
-            return result;
-          })
-      .def(
-          "_get_attributes",
-          [](Module& self) -> py::tuple {
-            auto attributes = self.get_attributes();
-            py::tuple result(attributes.size());
-            for (size_t i = 0; i < attributes.size(); ++i) {
-              auto& buffer = attributes[i];
-              py::tuple r(3);
-              IValue v = buffer.value();
-              result[i] = std::make_tuple(
-                  buffer.name(), buffer.type(), toPyObject(std::move(v)));
-            }
-            return result;
-          })
-      .def(
-          "_has_attribute",
-          [](Module& self, const std::string& name) -> bool {
-            return self.find_attribute(name);
-          })
-      .def(
-          "_has_parameter",
-          [](Module& self, const std::string& name) -> bool {
-            return self.find_parameter(name);
-          })
-      .def(
-          "_has_buffer",
-          [](Module& self, const std::string& name) -> bool {
-            return self.find_buffer(name);
-          })
-      .def(
-          "_has_module",
-          [](Module& self, const std::string& name) {
-            return bool(self.find_module(name));
-          })
-      .def(
-          "_has_method",
-          [](Module& self, const std::string& name) {
-            return bool(self.find_method(name));
-          })
-      .def(
-          "_method_names",
-          [](Module& self) {
-            return fmap(
-                self.get_methods(), [](const std::unique_ptr<Method>& method) {
-                  return method->name();
-                });
-          })
+      .def("_get_modules",
+           [](Module &self) -> py::tuple {
+             auto modules = self.get_modules();
+             py::tuple result(modules.size());
+             for (size_t i = 0; i < modules.size(); ++i) {
+               auto &item = modules[i];
+               result[i] = std::make_pair(item->name(), item);
+             }
+             return result;
+           })
+      .def("_get_parameters",
+           [](Module &self) -> py::tuple {
+             auto parameters = self.get_parameters();
+             py::tuple result(parameters.size());
+             for (size_t i = 0; i < parameters.size(); ++i) {
+               auto &p = parameters[i];
+               py::tuple r(2);
+               result[i] = std::make_tuple(
+                   p.name(), autograd::as_variable_ref(p.value().toTensor()));
+             }
+             return result;
+           })
+      .def("_get_attributes",
+           [](Module &self) -> py::tuple {
+             auto attributes = self.get_attributes();
+             py::tuple result(attributes.size());
+             for (size_t i = 0; i < attributes.size(); ++i) {
+               auto &buffer = attributes[i];
+               py::tuple r(3);
+               IValue v = buffer.value();
+               result[i] = std::make_tuple(buffer.name(), buffer.type(),
+                                           toPyObject(std::move(v)));
+             }
+             return result;
+           })
+      .def("_has_attribute",
+           [](Module &self, const std::string &name) -> bool {
+             return self.find_attribute(name);
+           })
+      .def("_has_parameter",
+           [](Module &self, const std::string &name) -> bool {
+             return self.find_parameter(name);
+           })
+      .def("_has_buffer",
+           [](Module &self, const std::string &name) -> bool {
+             return self.find_buffer(name);
+           })
+      .def("_has_module",
+           [](Module &self, const std::string &name) {
+             return bool(self.find_module(name));
+           })
+      .def("_has_method",
+           [](Module &self, const std::string &name) {
+             return bool(self.find_method(name));
+           })
+      .def("_method_names",
+           [](Module &self) {
+             return fmap(self.get_methods(),
+                         [](const Method &method) { return method.name(); });
+           })
       .def(
           "_create_method_from_trace",
-          [](std::shared_ptr<Module> self,
-             const std::string& name,
-             py::function func,
-             py::tuple input_tuple,
-             py::function var_lookup_fn,
-             bool force_outplace) {
+          [](std::shared_ptr<Module> self, const std::string &name,
+             py::function func, py::tuple input_tuple,
+             py::function var_lookup_fn, bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
             auto typed_inputs = toTypedStack(input_tuple);
@@ -438,36 +410,27 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "get_debug_state",
-          [](Module& self) {
-            if (self.find_method("forward")) {
-              Method& m = self.get_method("forward");
-              return m.get_executor().getDebugState();
+          [](Module &self) {
+            if (auto m = self.find_method("forward")) {
+              return m->get_executor().getDebugState();
             }
             throw std::runtime_error(
                 "Attempted to call get_debug_state on a Module without a compiled forward()");
           })
-      .def_property_readonly(
-          "code",
-          [](Module& self) {
-            std::ostringstream ss;
-            std::vector<at::Tensor> tensors;
-            std::vector<ClassTypePtr> classes;
-            PythonPrint(
-                ss,
-                self.class_compilation_unit(),
-                true,
-                tensors,
-                classes,
-                false);
-            return ss.str();
-          })
+      .def_property_readonly("code",
+                             [](Module &self) {
+                               std::ostringstream ss;
+                               std::vector<at::Tensor> tensors;
+                               std::vector<ClassTypePtr> classes;
+                               PythonPrint(ss, self.class_compilation_unit(),
+                                           true, tensors, classes, false);
+                               return ss.str();
+                             })
       .def("apply", &Module::apply)
       .def("_copy_into", &Module::copy_into)
-      .def(
-          "clone_method",
-          [](std::shared_ptr<Module> m,
-             std::shared_ptr<Module> orig,
-             const std::string& name) { m->clone_method(*orig, name); });
+      .def("clone_method",
+           [](std::shared_ptr<Module> m, std::shared_ptr<Module> orig,
+              const std::string &name) { m->clone_method(*orig, name); });
 
   py::class_<CompilationUnit, std::shared_ptr<CompilationUnit>>(
       m, "CompilationUnit")
