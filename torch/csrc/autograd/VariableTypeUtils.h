@@ -160,14 +160,6 @@ inline std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
 //
 // In the near future, once we make every tensor a Variable, these two
 // `as_variable()` functions are no-op and we can remove them.
-inline int64_t as_variable(int64_t n) {
-  return n;
-}
-
-inline double as_variable(double n) {
-  return n;
-}
-
 inline Tensor as_variable(Tensor tensor) {
   return tensor.is_variable() ? tensor : make_variable(std::move(tensor), /*requires_grad=*/false);
 }

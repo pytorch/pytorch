@@ -508,7 +508,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'formals_with_defaults': List[str],
     'formals': List[str],
     'formals_types': List[str],
-    'id': int,
     'inferred_backend': str,
     'inferred_is_variable': str,
     'inplace': bool,
@@ -528,7 +527,6 @@ FunctionOption = TypedDict('FunctionOption', {
     # options should be List[FunctionOption]
     'options': Any,
     'schema_string': str,
-    'id': int,
     'requires_tensor': bool,
     'return_call': str,
     'return_type': str,
@@ -554,7 +552,6 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
     ('matches_jit_signature', bool),
     ('schema_string', str),
-    ('id', int),
     ('method_prefix_derived', str),
     ('arguments', List[AtFormal]),
     ('method_of', List[str]),
@@ -1118,7 +1115,6 @@ def create_generic(top_env, declarations):
             name=option['api_name'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
-            id=option['id'],
             method_prefix_derived=option['method_prefix_derived'],
             arguments=formals,
             method_of=method_of,
@@ -1136,7 +1132,6 @@ def create_generic(top_env, declarations):
             deprecated=option['deprecated'],
         ))
 
-    id = 0
     output_declarations = []  # type: List[OutputDeclaration]
     for declaration in declarations:
         output_options = []  # type: List[OutputDeclaration]
@@ -1147,8 +1142,6 @@ def create_generic(top_env, declarations):
                 if option['mode'] != 'native':
                     process_option(option, output_options)
                 else:
-                    option['id'] = id
-                    id += 1
                     process_native(option, output_options)
             except NYIError:
                 option['skip'] = True
@@ -1600,6 +1593,8 @@ def create_extension_backend(backend_type_env, declarations):
                         NATIVE_DISPATCH_DECLARATION.substitute(env))
                     type_object_definitions.append(
                         NATIVE_DISPATCH_DEFINITION_EXTENSION_BACKEND.substitute(env))
+                    function_registrations.append(
+                        BACKEND_FUNCTION_REGISTRATION.substitute(env))
                 except NYIError:
                     pass
     return type_object_declarations, type_object_definitions, function_registrations
