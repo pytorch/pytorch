@@ -1987,6 +1987,10 @@
 - func: rot90(Tensor self, int k=1, int[] dims=[0,1]) -> Tensor
   variants: function, method
 
+- func: trapz(Tensor y, Tensor x, *, int dim=-1) -> Tensor
+
+- func: trapz(Tensor y, *, float dx=1, int dim=-1) -> Tensor
+
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
 
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor
