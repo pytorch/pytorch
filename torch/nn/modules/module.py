@@ -216,7 +216,7 @@ class Module(object):
                     # Tensors stored in modules are graph leaves, and we don't want to
                     # create copy nodes, so we have to use `with torch.no_grad():`
                     with torch.no_grad():
-                        self.register_parameter(key, Parameter(param_applied, param.requires_grad))
+                        self._parameters[key] = Parameter(param_applied, param.requires_grad)
                         # Bump up the version counter of the original parameter, to invalidate
                         # any previous references of it in the autograd graph.
                         param._bump_version()
