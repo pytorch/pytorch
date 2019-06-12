@@ -180,35 +180,41 @@ static Self moduleSelf(
 
 static TypePtr getTensorType(
     const at::Tensor& t,
-    bool isDimensionedTensor) {
-  if (isDimensionedTensor) {
-    return DimensionedTensorType::create(t);
+    const TypeKind type_kind) {
+  AT_ASSERT(type_kind == TypeKind::DimensionedTensorType || type_kind == TypeKind::CompleteTensorType);
+  switch (type_kind) {
+    case TypeKind::DimensionedTensorType:
+      return DimensionedTensorType::create(t);
+    case TypeKind::CompleteTensorType:
+      auto scalar_type = t.scalar_type();
+      auto sizes = t.sizes();
+      return CompleteTensorType::create(scalar_type, at::kCPU, sizes);
   }
-  auto scalar_type = t.scalar_type();
-  auto sizes = t.sizes();
-  return CompleteTensorType::create(scalar_type, at::kCPU, sizes);
 }
 
 static TupleTypePtr getTupleTensorType(
     const Stack::const_iterator& s_iter,
     const Stack::const_iterator& s_iter_end,
     const TypePtr& tupleType,
-    bool isDimensionedTensor) {
+    const TypeKind type_kind) {
   AT_ASSERT(tupleType->kind() == TupleType::Kind);
   AT_ASSERT(s_iter != s_iter_end);
 
   std::vector<TypePtr> types;
   for (const auto& subType : tupleType->containedTypes()) {
     if (subType->kind() == TupleType::Kind) {
-      types.push_back(getTupleTensorType(s_iter+1, s_iter_end, subType, isDimensionedTensor));
+      types.push_back(getTupleTensorType(s_iter+1, s_iter_end, subType, type_kind));
     } else {
-      types.push_back(getTensorType(s_iter->toTensor(), isDimensionedTensor));
+      types.push_back(getTensorType(s_iter->toTensor(), type_kind));
     }
   }
   return TupleType::create(types);
 }
 
-static void setInputTensorTypes(Graph& g, const Stack& stack, bool isDimensionedTensor=true) {
+static void setInputTensorTypes(
+    Graph& g,
+    const Stack& stack,
+    const TypeKind type_kind = TypeKind::DimensionedTensorType) {
   at::ArrayRef<Value*> input_values = g.inputs();
   auto s_iter = stack.begin();
   for (auto v : input_values) {
@@ -216,9 +222,9 @@ static void setInputTensorTypes(Graph& g, const Stack& stack, bool isDimensioned
     if (v->type()->kind() == TupleType::Kind) {
       AT_ASSERT(v->node()->kind() == prim::Param);
       v->setType(
-          getTupleTensorType(s_iter, stack.end(), v->type(), isDimensionedTensor));
+          getTupleTensorType(s_iter, stack.end(), v->type(), type_kind));
     } else {
-      v->setType(getTensorType(s_iter->toTensor(), isDimensionedTensor));
+      v->setType(getTensorType(s_iter->toTensor(), type_kind));
       s_iter++;
     }
   }
@@ -242,10 +248,10 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
     bool propagate = true) {
   auto retval = graph.copy();
   if (propagate) {
-    setInputTensorTypes(*retval, fmap<IValue>(inputs), propagate);
+    setInputTensorTypes(*retval, fmap<IValue>(inputs), TypeKind::DimensionedTensorType);
     PropagateInputShapes(retval);
   }
-  setInputTensorTypes(*retval, fmap<IValue>(inputs), false);
+  setInputTensorTypes(*retval, fmap<IValue>(inputs), TypeKind::CompleteTensorType);
 
   return retval;
 }
