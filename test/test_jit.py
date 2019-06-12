@@ -12983,6 +12983,28 @@ a")
                 .check_count(s2, 1, exactly=True) \
                 .check_count("BINGET", 2, exactly=True).run(out.getvalue())
 
+    def test_sys_stdout_override(self):
+        @torch.jit.script
+        def foo():
+            print('foo')
+
+        class Redirect(object):
+            def __init__(self):
+                self.s = ''
+
+            def write(self, s):
+                self.s += s
+
+        old_stdout = sys.stdout
+        redirect = Redirect()
+        try:
+            sys.stdout = redirect
+            foo()
+        finally:
+            sys.stdout = old_stdout
+
+        FileCheck().check('foo').run(redirect.s)
+
     def test_optional_tuple(self):
         def fn(x=None):
             # type: (Optional[Tuple[int, int]]) -> Tuple[int, int]
