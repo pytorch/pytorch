@@ -22,28 +22,6 @@ bool& getFirstClassMode() {
   return experimental_run_as_first_class;
 }
 
-struct RecursiveMethodCallError : public std::exception {};
-void placeholderCreator(Function&) {
-  throw RecursiveMethodCallError();
-}
-
-void Function::ensure_defined() {
-  try {
-    if (function_creator_) {
-      auto creator = function_creator_;
-      function_creator_ = placeholderCreator;
-      creator(*this);
-      function_creator_ = nullptr;
-    }
-  } catch (RecursiveMethodCallError&) {
-    throw ErrorReport() // TODO: once lower_first_class methods is removed
-                        // re-establish callsite info for debugging
-        << " method '" << name() << "' is called recursively. "
-        << "Recursive calls are not supported";
-  }
-  check_single_output();
-}
-
 void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
   to_impl(device, dtype, non_blocking);
 }
