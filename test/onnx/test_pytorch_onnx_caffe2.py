@@ -1255,7 +1255,7 @@ class TestCaffe2Backend(unittest.TestCase):
             @torch.jit.script_method
             def forward(self, x):
                 return torch.full((4, 5), x, dtype=torch.long)
-        
+
         x = torch.tensor(12)
         self.run_model_test(FullClass(), train=False, input=(x,), batch_size=BATCH_SIZE,
                             use_gpu=False, example_outputs=FullClass()(x))
