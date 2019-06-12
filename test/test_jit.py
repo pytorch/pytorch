@@ -43,7 +43,6 @@ from functools import wraps
 from itertools import product, chain
 from textwrap import dedent
 from typing import List, Dict, Optional, Tuple
-import typing_extensions
 import copy
 import inspect
 import math
@@ -13145,7 +13144,8 @@ class TestRecursiveScript(JitTestCase):
 
     def test_constants_with_final(self):
         class M(torch.nn.Module):
-            x : torch.jit.Final[int]
+            # TODO: Use this (see below)
+            # x : torch.jit.Final[int]
 
             def __init__(self):
                 super(M, self).__init__()
@@ -13153,6 +13153,14 @@ class TestRecursiveScript(JitTestCase):
 
             def forward(self, t):
                 return t + self.x
+
+        m = M()
+
+        # TODO: Fix this test so that we can actually define the class like
+        #   class M(torch.nn.Module):
+        #       x : torch.jit.Final[int]
+        m.__annotations__ = {'x': torch.jit.Final[int]}
+
 
         self.checkModule(M(), (torch.randn(2, 2),))
 
