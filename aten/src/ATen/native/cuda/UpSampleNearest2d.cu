@@ -345,7 +345,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
   // efficient launch configs
   if (input_width >= output_width) {
     unsigned int n = grad_input.numel() / nbatch;
-    dim3 bdim{std::min<int>(
+    dim3 bdim{std::min<unsigned int>(
         at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
         MAX_THREADS)};
     dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};

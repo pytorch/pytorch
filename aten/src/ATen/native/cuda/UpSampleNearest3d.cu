@@ -107,8 +107,6 @@ __global__ void upsample_nearest3d_backward_out_frame(
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
-    size_t src_idx = b * dim_c * src_c_stride + c * src_c_stride +
-        src_z * src_dim_h * src_dim_w + src_y * src_dim_w + src_x;
     for (int z = src_z; z < src_z_up; z++) {
       for (int y = src_y; y < src_y_up; y++) {
         for (int x = src_x; x < src_x_up; x++) {
@@ -170,7 +168,7 @@ static void upsample_nearest3d_out_cuda_template(
   output.zero_();
 
   unsigned int n = output.numel() / nbatch;
-  dim3 bdim{std::min<int>(
+  dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -246,7 +244,7 @@ static void upsample_nearest3d_backward_out_cuda_template(
   grad_input.zero_();
 
   unsigned int n = grad_input.numel() / nbatch;
-  dim3 bdim{std::min<int>(
+  dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
