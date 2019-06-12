@@ -856,6 +856,9 @@ struct PythonPrintPass {
         }
         printValueList(stmt, node->inputs(), "(", ")");
       } break;
+      case prim::Uninitialized: {
+        stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
+      } break;
       case prim::Constant: {
         if (node->kind() == prim::Constant && !node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
@@ -1028,7 +1031,7 @@ struct PythonPrintPass {
   }
 
  public:
-  void printFunction(const script::Function& func) {
+  void printFunction(const Function& func) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
@@ -1119,7 +1122,7 @@ struct PythonPrintPass {
 
 void PythonPrint(
     std::ostream& out,
-    const script::Function& func,
+    const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
     std::vector<ClassTypePtr>& class_table,
@@ -1162,6 +1165,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
       prim::Constant,
+      prim::Uninitialized,
       prim::fork,
       prim::ListConstruct,
       prim::DictConstruct,

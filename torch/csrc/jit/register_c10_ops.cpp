@@ -8,9 +8,6 @@ namespace jit {
 namespace {
 
 at::Tensor unwrap_tensor(at::Tensor&& tensor) {
-  if (tensor.requires_grad()) {
-    throw std::runtime_error("Autograd not yet supported for c10 ops.");
-  }
   if (tensor.is_variable()) {
     return torch::autograd::Variable(std::move(tensor)).tensor_data();
   } else {

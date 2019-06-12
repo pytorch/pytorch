@@ -395,7 +395,7 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
-  std::vector<std::shared_ptr<script::Function>> function_table_;
+  std::vector<std::shared_ptr<Function>> function_table_;
   int register_size_ = 0;
   size_t n_outputs;
   size_t n_inputs;
@@ -563,7 +563,7 @@ struct CodeImpl {
   }
 
   void emitCall(
-      std::shared_ptr<script::Function> func,
+      std::shared_ptr<Function> func,
       at::ArrayRef<Value*> inputs) {
     emitLoadInputs(inputs);
     insertInstruction(CALL, function_table_.size());
@@ -696,7 +696,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     Instruction* instructions;
     IValue* constants;
     Operation* operators;
-    std::shared_ptr<script::Function>* functions;
+    std::shared_ptr<Function>* functions;
     ActiveFrame(const Frame& frame)
         : pc(frame.pc),
           instructions(frame.function->instructions_.data()),

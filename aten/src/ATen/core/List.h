@@ -463,4 +463,8 @@ ListPtr<T> toList(std::vector<T> list) {
 
 }
 
+namespace torch {
+  template<class T> using ListPtr = c10::ListPtr<T>;
+}
+
 #include <ATen/core/List_inl.h>

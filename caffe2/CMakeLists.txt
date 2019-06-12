@@ -383,6 +383,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/profiling_graph_executor_impl.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/bailout_graph.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/constant_pooling.cpp
@@ -391,6 +392,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/insert_guards.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inliner.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/lift_closures.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/inline_forked_closures.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
@@ -423,6 +426,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
@@ -442,6 +446,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 

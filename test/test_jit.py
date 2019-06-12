@@ -839,21 +839,21 @@ graph(%x : Tensor,
         m(x1, y1)
 
         # Check what we collected
-        self.assertTrue('x' in value_stats and 'y' in value_stats)
-        self.assertTrue('p' in value_stats and 'z' in value_stats)
+        self.assertTrue('x.1' in value_stats and 'y.1' in value_stats)
+        self.assertTrue('p.1' in value_stats and 'z.1' in value_stats)
         self.assertEqual(len(value_stats), 5)
-        self.assertEqual(len(value_stats['p']), 1)
-        self.assertEqual(len(value_stats['z']), 1)
-        self.assertEqual(value_stats['p'][0], x1 + y1)
-        self.assertEqual(value_stats['z'][0], x1 - y1)
+        self.assertEqual(len(value_stats['p.1']), 1)
+        self.assertEqual(len(value_stats['z.1']), 1)
+        self.assertEqual(value_stats['p.1'][0], x1 + y1)
+        self.assertEqual(value_stats['z.1'][0], x1 - y1)
 
         # Run one more time and check the updated statistics
         m(x2, y2)
-        self.assertTrue('x' in value_stats and 'y' in value_stats)
-        self.assertEqual(len(value_stats['p']), 2)
-        self.assertEqual(len(value_stats['z']), 2)
-        self.assertEqual(value_stats['p'][1], x2 + y2)
-        self.assertEqual(value_stats['z'][1], x2 - y2)
+        self.assertTrue('x.1' in value_stats and 'y.1' in value_stats)
+        self.assertEqual(len(value_stats['p.1']), 2)
+        self.assertEqual(len(value_stats['z.1']), 2)
+        self.assertEqual(value_stats['p.1'][1], x2 + y2)
+        self.assertEqual(value_stats['z.1'][1], x2 - y2)
 
     def test_insert_quantdequant_consecutive_qnodes_script(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -3229,6 +3229,35 @@ def foo(x):
         self.checkScript(annotate_none, ())
         self.checkScript(annotate_none_no_optional, ())
 
+    @unittest.skipIf(PY2, "Python 3 required")
+    def test_type_annotate_py3(self):
+        code = dedent("""
+        import torch
+        def fn():
+            a : List[int] = []
+            b : torch.Tensor = torch.ones(2, 2)
+            for _ in range(10):
+                a.append(4)
+            return a, b
+        """)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            script_path = os.path.join(tmp_dir, 'script.py')
+            with open(script_path, 'w') as f:
+                f.write(code)
+            fn = get_fn('test_type_annotate_py3', script_path)
+
+            self.checkScript(fn, ())
+
+        code = dedent("""
+        def wrong_type():
+            wrong : List[int] = [0.5]
+            return wrong
+        """)
+
+        with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
+            cu = torch.jit.CompilationUnit(code)
+
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
 
@@ -5006,6 +5035,19 @@ a")
 
         test_resize_as()
 
+    def test_uninitialized(self):
+        graph_str = """graph():
+          %1 : int = prim::Uninitialized()
+          %2 : int = prim::Constant[value=1]()
+          %3 : int = aten::add(%1, %2)
+          return (%3)
+        """
+        g = parse_ir(graph_str)
+        m = self.createFunctionFromGraph(g)
+        self.getExportImportCopy(m)
+        with self.assertRaisesRegex(RuntimeError, "isInt"):
+            m()
+
     def test_requires_grad_loop(self):
         @torch.jit.script
         def test(x, y, z):
@@ -5736,6 +5778,50 @@ a")
 
         inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
         self.checkScript(func, inputs, optimize=True)
+
+    def test_divmod(self):
+        def func_int(a, b):
+            # type: (int, int) -> Tuple[int, int]
+            return divmod(a, b)
+
+        def func_float(a, b):
+            # type: (float, float) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def func_int_float(a, b):
+            # type: (int, float) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def func_float_int(a, b):
+            # type: (float, int) -> Tuple[float, float]
+            return divmod(a, b)
+
+        def divmod_test_iterator(func, num, den):
+            for i in num:
+                for j in den:
+                    self.checkScript(func, (i, j))
+
+        num_int = [1024, -1024]
+        den_int = [10, -10]
+        num_float = [5.3, -5.3]
+        den_float = [2.0, -2.0]
+        divmod_test_iterator(func_int, num_int, den_int)
+        divmod_test_iterator(func_float, num_float, den_float)
+        divmod_test_iterator(func_int_float, num_int, den_float)
+        divmod_test_iterator(func_float_int, num_float, den_int)
+
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: integer division or modulo by zero"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int)))
+            cu.func_int(1024, 0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float)))
+            cu.func_float(5.3, 0.0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_int_float)))
+            cu.func_int_float(1024, 0.0)
+        with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError: float divmod()"):
+            cu = torch.jit.CompilationUnit(dedent(inspect.getsource(func_float_int)))
+            cu.func_float_int(5.3, 0)
 
     def test_math_ops(self):
         def checkMathWrap(func_name, num_args=1, is_float=True, **args):
@@ -10743,6 +10829,13 @@ a")
                 a = 8
                 return a[0]
 
+    def test_unsupported_builtin_error(self):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "calling a python builtin_function_or_method which is currently not supported"):
+            @torch.jit.script
+            def test_unsupported(a):
+                return math.hypot(a, 2.0)
+
     def test_annotated_script_fn(self):
         @torch.jit.script
         def foo(x, y, z):
@@ -14317,8 +14410,8 @@ graph(%0 : Double(5, 5)):
         def func(x):
             return torch.ops.aten.relu(x)
         self.assertExpectedInline(canonical(func.graph), '''\
-graph(%x : Tensor):
-  %1 : Tensor = aten::relu(%x)
+graph(%x.1 : Tensor):
+  %1 : Tensor = aten::relu(%x.1)
   return (%1)
 ''')
 
@@ -16049,6 +16142,17 @@ class TestClassType(JitTestCase):
                 other = LSTMStateStack(self.num_layers, self.hidden_size)
                 other.stack = list(self.stack)
                 return other
+
+    def test_optional_type_promotion(self):
+        # should not throw
+        @torch.jit.script  # noqa: B903
+        class Tree(object):
+            def __init__(self):
+                self.parent = torch.jit.annotate(Optional[Tree], None)
+
+            def add_child(self, child):
+                # type: (Tree) -> None
+                child.parent = torch.jit.annotate(Optional[Tree], self)
 
 
 class TestLogging(JitTestCase):
