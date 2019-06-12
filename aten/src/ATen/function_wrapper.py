@@ -1076,6 +1076,9 @@ def create_generic(top_env, declarations):
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
+        # For method-only entries, the first argument should be self
+        if is_method and not is_namespace_function:
+            assert formals[0]['name'] == 'self'
         is_factory_method = find_formal('TensorOptions', formals) and \
             not dispatch_options and 'method' not in option['variants']
 

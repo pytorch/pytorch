@@ -5282,8 +5282,8 @@ Args:
         1 and not referenced from :math:`A`. Default: ``False``.
 
 Returns:
-    A namedtuple :math:`(solution, cloned_coefficient)` where :math:`cloned_coefficient`
-    is a clone of :math:`A` and :math:`solution` is the solution :math:`X` to :math:`AX = b`
+    A namedtuple `(solution, cloned_coefficient)` where `cloned_coefficient`
+    is a clone of :math:`A` and `solution` is the solution :math:`X` to :math:`AX = b`
     (or whatever variant of the system of equations, depending on the keyword arguments.)
 
 Examples::
