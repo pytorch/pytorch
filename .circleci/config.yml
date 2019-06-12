@@ -2365,67 +2365,67 @@ workflows:
       - binary_macos_wheel_2.7_cpu_build:
           requires:
             - setup
-      #- binary_macos_wheel_3.5_cpu_build:
-      #    requires:
-      #      - setup
-      #- binary_macos_wheel_3.6_cpu_build:
-      #    requires:
-      #      - setup
-      #- binary_macos_wheel_3.7_cpu_build:
-      #    requires:
-      #      - setup
+      - binary_macos_wheel_3.5_cpu_build:
+          requires:
+            - setup
+      - binary_macos_wheel_3.6_cpu_build:
+          requires:
+            - setup
+      - binary_macos_wheel_3.7_cpu_build:
+          requires:
+            - setup
       - binary_macos_conda_2.7_cpu_build:
           requires:
             - setup
-      #- binary_macos_conda_3.6_cpu_build:
-      #    requires:
-      #      - setup
-      #- binary_macos_conda_3.7_cpu_build:
-      #    requires:
-      #      - setup
-      #- binary_macos_libtorch_2.7_cpu_build:
-      #    requires:
-      #      - setup
-      #- binary_macos_wheel_2.7_cpu_upload:
-      #    context: org-member
-      #    requires:
-      #      - setup
-      #      - binary_macos_wheel_2.7_cpu_build
-      #- binary_macos_wheel_3.5_cpu_upload:
-      #    context: org-member
-      #    requires:
-      #      - setup
-      #      - binary_macos_wheel_3.5_cpu_build
-      #- binary_macos_wheel_3.6_cpu_upload:
-      #    context: org-member
-      #    requires:
-      #      - setup
-      #      - binary_macos_wheel_3.6_cpu_build
-      #- binary_macos_wheel_3.7_cpu_upload:
-      #    context: org-member
-      #    requires:
-      #      - setup
-      #      - binary_macos_wheel_3.7_cpu_build
-      #- binary_macos_conda_2.7_cpu_upload:
-      #    context: org-member
-      #    requires:
-      #      - setup
-      #      - binary_macos_conda_2.7_cpu_build
-      #- binary_macos_conda_3.6_cpu_upload:
-      #    context: org-member
-      #    requires:
-      #      - setup
-      #      - binary_macos_conda_3.6_cpu_build
-      #- binary_macos_conda_3.7_cpu_upload:
-      #    context: org-member
-      #    requires:
-      #      - setup
-      #      - binary_macos_conda_3.7_cpu_build
-      #- binary_macos_libtorch_2.7_cpu_upload:
-      #    context: org-member
-      #    requires:
-      #      - setup
-      #      - binary_macos_libtorch_2.7_cpu_build
+      - binary_macos_conda_3.6_cpu_build:
+          requires:
+            - setup
+      - binary_macos_conda_3.7_cpu_build:
+          requires:
+            - setup
+      - binary_macos_libtorch_2.7_cpu_build:
+          requires:
+            - setup
+      - binary_macos_wheel_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_macos_wheel_2.7_cpu_build
+      - binary_macos_wheel_3.5_cpu_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_macos_wheel_3.5_cpu_build
+      - binary_macos_wheel_3.6_cpu_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_macos_wheel_3.6_cpu_build
+      - binary_macos_wheel_3.7_cpu_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_macos_wheel_3.7_cpu_build
+      - binary_macos_conda_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_macos_conda_2.7_cpu_build
+      - binary_macos_conda_3.6_cpu_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_macos_conda_3.6_cpu_build
+      - binary_macos_conda_3.7_cpu_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_macos_conda_3.7_cpu_build
+      - binary_macos_libtorch_2.7_cpu_upload:
+          context: org-member
+          requires:
+            - setup
+            - binary_macos_libtorch_2.7_cpu_build
 
 ##############################################################################
 # Daily smoke test trigger
