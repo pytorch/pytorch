@@ -1,7 +1,5 @@
 #include <ATen/core/context_base.h>
 
-#include <c10/util/Logging.h>
-
 namespace at {
 
 C10_DEFINE_TYPED_REGISTRY(

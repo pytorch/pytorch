@@ -1,15 +1,15 @@
-#include <THC/THCGeneral.h>
-#include <THC/THCTensor.hpp>
-#include <THC/THCTensorCopy.h>
+#include "THCGeneral.h"
+#include "THCTensor.hpp"
+#include "THCTensorCopy.h"
 
 #include <new>
 
-#include <THC/generic/THCTensor.cpp>
-#include <THC/THCGenerateAllTypes.h>
+#include "generic/THCTensor.cpp"
+#include "THCGenerateAllTypes.h"
 
-#include <THC/THCTensorInfo.cuh>
+#include "THCTensorInfo.cuh"
 
-#include <ATen/native/cuda/Resize.cuh>
+#include "ATen/native/cuda/Resize.cuh"
 
 int THCTensor_nDimension(THCState *state, const THCTensor *self) {
   return THTensor_nDimension(self);
@@ -62,7 +62,7 @@ THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta) {
     case at::ScalarType::Double:
       return THCudaDoubleTensor_new(state);
     default:
-      AT_ERROR("unexpected ScalarType: ", toString(scalar_type));
+      AT_ERROR("unexpected ScalarType: ", at::toString(scalar_type));
   }
 }
 

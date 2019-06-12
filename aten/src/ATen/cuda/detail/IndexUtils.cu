@@ -1,5 +1,4 @@
-#include <ATen/cuda/detail/IndexUtils.cuh>
-#include <vector>
+#include "IndexUtils.cuh"
 
 namespace at {
 namespace cuda {
@@ -36,7 +35,7 @@ within the next one.
 */
 bool maybeOverlappingIndices(const Tensor& t) {
   /* Extract size/stride arrays; only consider size >1 dims. */
-  std::vector<SizeAndStride> info(t.dim());
+  SizeAndStride *info = (SizeAndStride *)alloca(sizeof(SizeAndStride) * t.dim());
   int dims = t.dim();
   int nonSize1Dims = 0;
   for (int i = 0; i < dims; ++i) {
@@ -59,7 +58,7 @@ bool maybeOverlappingIndices(const Tensor& t) {
   }
 
   /* Ascending order (innermost dimension in sorted view is at [0]) */
-  qsort(info.data(), nonSize1Dims, sizeof(SizeAndStride), compareSizeAndStride);
+  qsort(info, nonSize1Dims, sizeof(SizeAndStride), compareSizeAndStride);
 
   for (int i = 0; i < (nonSize1Dims - 1); ++i) {
     if (((info[i].size - 1) * info[i].stride) >= info[i + 1].stride) {

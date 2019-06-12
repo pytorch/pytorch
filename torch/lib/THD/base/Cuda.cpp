@@ -1,4 +1,4 @@
-#include <THD/base/Cuda.hpp>
+#include "Cuda.hpp"
 #include <unordered_map>
 
 #ifdef USE_CUDA

@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/script/builtin_functions.h>
-#include <torch/csrc/api/include/torch/jit.h>
-#include <torch/csrc/jit/code_template.h>
+#include "torch/csrc/jit/script/builtin_functions.h"
+#include "torch/csrc/api/include/torch/jit.h"
+#include "torch/csrc/jit/code_template.h"
 
 namespace torch { namespace jit { namespace script {
 
@@ -27,6 +27,16 @@ def sub(a : ${Scalar}, b : Tensor) -> Tensor:
 def div(a : ${Scalar}, b : Tensor) -> Tensor:
   return torch.reciprocal(b) * a
 )SCRIPT");
+
+auto python_builtins_source = R"SCRIPT(
+def warn(string: str):
+  print(string)
+)SCRIPT";
+
+auto python_builtins_source_overloads = R"SCRIPT(
+def warn(string: str, stacklevel: int):
+  print(string)
+)SCRIPT";
 
 auto _ntuple_ops = CodeTemplate(
 R"SCRIPT(
@@ -61,7 +71,7 @@ private:
   void loadSource(const std::string& source) {
     auto module = std::make_shared<script::Module>();
     defineMethodsInModule(
-        module, source, script::nativeResolver, /*self=*/nullptr);
+        *module, source, script::nativeResolver, /*self=*/nullptr);
     modules.push_back(module);
     for (auto& method : module->get_methods()) {
       builtins_by_name[Symbol::fromQualString("aten::" + method.key())].push_back(
@@ -74,6 +84,8 @@ private:
       env.s("Scalar", scalar);
       loadSource(scalar_operators_source.format(env));
     }
+    loadSource(python_builtins_source);
+    loadSource(python_builtins_source_overloads);
 
     using str_pair = std::pair<std::string, std::string>;
     const std::vector<str_pair> name_len = {

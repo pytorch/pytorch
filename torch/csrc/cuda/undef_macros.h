@@ -16,6 +16,7 @@
 #undef THPTensorType
 
 #undef THPStorage_
+#undef THPStorage
 #undef THPStorageBaseStr
 #undef THPStorageStr
 #undef THPStorageClass

@@ -41,6 +41,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    cpp_extension
    data
    dlpack
+   ffi
    hub
    model_zoo
    onnx

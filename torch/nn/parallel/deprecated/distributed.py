@@ -194,6 +194,7 @@ class DistributedDataParallel(Module):
         self.reduced = [False] * len(self.bucket_sizes)
 
         self._register_grad_hooks()
+
         self.dispatch_lock = threading.Lock()
         self._start_reduction_threads()
 
@@ -202,8 +203,7 @@ class DistributedDataParallel(Module):
         if dist._backend != dist.dist_backend.NCCL:
             del attrs['_grad_accs'], attrs['_reduction_queues'], \
                 attrs['_reduction_streams'], attrs['_reduction_threads'], \
-                attrs['_nccl_streams'], attrs['_default_streams'], \
-                attrs['dispatch_lock']
+                attrs['_nccl_streams'], attrs['_default_streams']
         return attrs
 
     def __setstate__(self, state):
@@ -212,7 +212,6 @@ class DistributedDataParallel(Module):
             self._register_nccl_grad_hook()
         else:
             self._register_grad_hooks()
-            self.dispatch_lock = threading.Lock()
             self._start_reduction_threads()
 
     def forward(self, *inputs, **kwargs):

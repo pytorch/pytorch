@@ -1,4 +1,4 @@
-#include <THC/THCTensorSort.cuh>
+#include "THCTensorSort.cuh"
 
 void THCudaLongTensor_fillSliceWithIndex(THCState* state,
                                          THCudaLongTensor* t,

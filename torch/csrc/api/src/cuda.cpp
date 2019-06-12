@@ -7,7 +7,7 @@
 namespace torch {
 namespace cuda {
 size_t device_count() {
-  return at::detail::getCUDAHooks().getNumGPUs();
+  return at::globalContext().getNumGPUs();
 }
 
 bool is_available() {
@@ -18,7 +18,7 @@ bool is_available() {
 }
 
 bool cudnn_is_available() {
-  return is_available() && at::detail::getCUDAHooks().hasCuDNN();
+  return is_available() && at::globalContext().hasCuDNN();
 }
 } // namespace cuda
 } // namespace torch

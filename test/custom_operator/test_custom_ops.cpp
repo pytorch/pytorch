@@ -1,5 +1,4 @@
 #include <torch/script.h>
-#include <torch/cuda.h>
 
 #include "op.h"
 
@@ -81,7 +80,7 @@ void test_argument_checking_for_serialized_modules(
   } catch (const c10::Error& error) {
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("Expected value of type Tensor for argument 'input' in "
+            .find("Expected value of type Dynamic for argument 'input' in "
                   "position 0, but instead got value of type int") == 0);
   }
 
@@ -148,7 +147,7 @@ int main(int argc, const char* argv[]) {
   test_argument_checking_for_serialized_modules(path_to_exported_script_module);
   test_move_to_dtype(path_to_exported_script_module);
 
-  if (torch::cuda::device_count() > 0) {
+  if (torch::globalContext().getNumGPUs() > 0) {
     test_move_to_device(path_to_exported_script_module);
   }
 

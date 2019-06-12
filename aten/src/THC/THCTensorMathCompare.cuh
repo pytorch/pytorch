@@ -1,11 +1,11 @@
 #ifndef THC_TENSORMATH_COMPARE_CUH
 #define THC_TENSORMATH_COMPARE_CUH
 
-#include <THC/THCTensorMath.h>
-#include <THC/THCGeneral.h>
-#include <THC/THCTensorCopy.h>
-#include <THC/THCApply.cuh>
-#include <THC/THCNumerics.cuh>
+#include "THCTensorMath.h"
+#include "THCGeneral.h"
+#include "THCTensorCopy.h"
+#include "THCApply.cuh"
+#include "THCNumerics.cuh"
 
 template <typename T, typename TOut>
 struct TensorLTValueOp {

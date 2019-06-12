@@ -1,4 +1,4 @@
-#include <THC/THCSleep.h>
+#include "THCSleep.h"
 
 
 __global__ void spin_kernel(int64_t cycles)

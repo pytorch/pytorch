@@ -1,8 +1,8 @@
-#include <torch/csrc/autograd/functions/utils.h>
+#include "torch/csrc/autograd/functions/utils.h"
 
-#include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/variable.h>
+#include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/variable.h"
 
 #include <sstream>
 #include <vector>
@@ -10,7 +10,7 @@
 namespace torch { namespace autograd {
 
 variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
-                           const function_constructor& ctr) {
+                           function_constructor ctr) {
   variable_list result;
   result.reserve(outputs.size());
   if (!any_variable_requires_grad(inputs)) {

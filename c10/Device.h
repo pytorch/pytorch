@@ -27,21 +27,28 @@ using DeviceIndex = int16_t;
 /// 1. A negative index represents the current device, a non-negative index
 /// represents a specific, concrete device,
 /// 2. When the device type is CPU, the device index must be zero.
-struct C10_API Device final {
+struct C10_API Device {
   using Type = DeviceType;
 
   /// Constructs a new `Device` from a `DeviceType` and an optional device
   /// index.
   /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
       : type_(type), index_(index) {
-    validate();
+    AT_CHECK(
+        index == -1 || index >= 0,
+        "Device index must be -1 or non-negative, got ",
+        index);
+    AT_CHECK(
+        !is_cpu() || index <= 0,
+        "CPU device index must be -1 or zero, got ",
+        index);
   }
 
   /// Constructs a `Device` from a string description, for convenience.
   /// The string supplied must follow the following schema:
-  /// `(cpu|cuda)[:<device-index>]`
-  /// where `cpu` or `cuda` specifies the device type, and
-  /// `:<device-index>` optionally specifies a device index.
+  /// `(cpu|cuda):[<device-index>]`
+  /// where `cpu:` or `cuda:` specifies the device type, and
+  /// `<device-index>` optionally specifies a device index.
   /* implicit */ Device(const std::string& device_string);
 
   /// Returns true if the type and index of this `Device` matches that of
@@ -89,7 +96,6 @@ struct C10_API Device final {
  private:
   DeviceType type_;
   DeviceIndex index_ = -1;
-  void validate();
 };
 
 C10_API std::ostream& operator<<(
@@ -101,24 +107,18 @@ C10_API std::ostream& operator<<(
 namespace std {
 template <>
 struct hash<c10::Device> {
-  size_t operator()(c10::Device d) const noexcept {
-    // Are you here because this static assert failed?  Make sure you ensure
-    // that the bitmasking code below is updated accordingly!
-    static_assert(sizeof(c10::DeviceType) == 2, "DeviceType is not 16-bit");
-    static_assert(sizeof(c10::DeviceIndex) == 2, "DeviceIndex is not 16-bit");
-    // Note [Hazard when concatenating signed integers]
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    // We must first convert to a same-sized unsigned type, before promoting to
-    // the result type, to prevent sign extension when any of the values is -1.
-    // If sign extension occurs, you'll clobber all of the values in the MSB
-    // half of the resulting integer.
-    //
-    // Technically, by C/C++ integer promotion rules, we only need one of the
-    // uint32_t casts to the result type, but we put in both for explicitness's sake.
-    uint32_t bits =
-        static_cast<uint32_t>(static_cast<uint16_t>(d.type())) << 16
-      | static_cast<uint32_t>(static_cast<uint16_t>(d.index()));
-    return std::hash<uint32_t>{}(bits);
+  size_t operator()(c10::Device device) const noexcept {
+    size_t hash_val = static_cast<size_t>(device.index() + 1);
+    if (device.is_cuda()) {
+      hash_val += 2;
+    }
+    return hash_val;
   }
 };
 } // namespace std
+
+// TODO: Remove when we add global namespace include
+namespace at {
+using c10::Device;
+using c10::DeviceIndex;
+}

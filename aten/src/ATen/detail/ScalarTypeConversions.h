@@ -2,8 +2,8 @@
 
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
-#include <c10/core/ScalarType.h>
-#include <c10/Half.h>
+#include <ATen/ScalarType.h>
+#include <ATen/core/Half.h>
 
 namespace at { namespace detail {
 

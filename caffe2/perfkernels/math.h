@@ -1,6 +1,10 @@
 #pragma once
 
-#include <cstdint>
+#ifdef CAFFE2_USE_MKL
+#include <mkl.h>
+#endif // CAFFE2_USE_MKL
+
+#include <random>
 
 namespace caffe2 {
 
@@ -17,19 +21,27 @@ namespace math {
 // |    1B    |  1B  |  4B |  4B | ...output_data....|
 // In output_data: the b-th bucket of the i-th byte stores
 // the i-th data of the b-th segment of input row
-
+#ifdef CAFFE2_USE_MKL
+#define FUSED_ROWWISE_RANDOM_QUANTIZATION_USE_MKL
+#endif
 void quantize_and_compress(
     const float* input_data,
-    std::uint8_t* output_data,
-    std::size_t input_size,
-    std::size_t bitwidth,
+    uint8_t* output_data,
+    size_t input_size,
+    size_t bitwidth,
     bool random,
-    const float* random_buffer);
-
+#ifdef FUSED_ROWWISE_RANDOM_QUANTIZATION_USE_MKL
+    VSLStreamStatePtr& vslStream,
+    std::vector<float>& random_buffer
+#else
+    std::unique_ptr<std::uniform_real_distribution<float>>& dis,
+    std::minstd_rand& gen
+#endif
+);
 void decompress_and_dequantize(
-    const std::uint8_t* input_data,
+    const uint8_t* input_data,
     float* output_data,
-    std::size_t input_size);
+    size_t input_size);
 
 } // namespace math
 } // namespace caffe2

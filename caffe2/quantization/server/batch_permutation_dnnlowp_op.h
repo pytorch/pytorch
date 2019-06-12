@@ -1,4 +1,5 @@
-#pragma once
+#ifndef DEEPLEARNING_QUANTIZATION_CAFFE2_BATCH_PERMUTATION_DNNLOWP_OP_H_
+#define DEEPLEARNING_QUANTIZATION_CAFFE2_BATCH_PERMUTATION_DNNLOWP_OP_H_
 
 #include "caffe2/fb/operators/batch_permutation_op.h"
 #include "caffe2/quantization/server/dnnlowp_op.h"
@@ -25,3 +26,5 @@ class BatchPermutationDNNLowPOp final
 };
 
 } // namespace caffe2
+
+#endif // DEEPLEARNING_QUANTIZATION_CAFFE2_BATCH_PERMUTATION_DNNLOWP_OP_H_

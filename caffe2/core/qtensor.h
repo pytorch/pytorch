@@ -9,7 +9,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
-#include <c10/util/typeid.h>
+#include "caffe2/core/typeid.h"
 
 namespace caffe2 {
 
@@ -46,7 +46,6 @@ class C10_EXPORT QTensor {
    * many low precision integers as a sum of popcnt(A & B) * 1 << bit.
    * Explained here: https://arxiv.org/abs/1606.06160
    */
-  // TODO: changing at::ArrayRef<int> to at::ArrayRef<int64_t>?
   explicit QTensor(
       at::ArrayRef<int> dims,
       const unsigned char precision,

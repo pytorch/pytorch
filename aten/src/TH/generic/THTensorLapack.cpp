@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "TH/generic/THTensorLapack.cpp"
+#define TH_GENERIC_FILE "generic/THTensorLapack.cpp"
 #else
 
 /*
@@ -80,17 +80,12 @@ static THTensor *THTensor_(cloneColumnMajorNrows)(THTensor *self, THTensor *src,
   THTensor_(resize2d)(result, src->size(1), nrows);
   THTensor_(checkTransposed)(result);
 
-  if (src->size(0) == nrows) {
-    at::Tensor result_wrap = THTensor_wrap(result);
-    at::Tensor src_wrap = THTensor_wrap(src);
-    at::_copy_same_type_(result_wrap, src_wrap);
-  }
+  if (src->size(0) == nrows)
+    THTensor_(copy)(result, src);
   else
   {
     view = THTensor_(newNarrow)(result, 0, 0, src->size(0));
-    at::Tensor view_wrap = THTensor_wrap(view);
-    at::Tensor src_wrap = THTensor_wrap(src);
-    at::_copy_same_type_(view_wrap, src_wrap);
+    THTensor_(copy)(view, src);
     c10::raw::intrusive_ptr::decref(view);
   }
   return result;
@@ -534,9 +529,7 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
       THTensor_(narrow)(rvf_,NULL,1,0,k);
 
     THTensor_(resizeAs)(rv_, rvf_);
-    at::Tensor rv__wrap = THTensor_wrap(rv_);
-    at::Tensor rvf__wrap =  THTensor_wrap(rvf_);
-    at::_copy_same_type_(rv__wrap, rvf__wrap);
+    THTensor_(copy)(rv_, rvf_);
     c10::raw::intrusive_ptr::decref(rvf_);
   } else {
     THTensor_(zero)(ru_);
@@ -1014,9 +1007,7 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
 
   if (ra_ != a) {
     THTensor_(resizeAs)(ra_, a);
-    at::Tensor ra__wrap = THTensor_wrap(ra_);
-    at::Tensor a_wrap = THTensor_wrap(a);
-    at::_copy_same_type_(ra__wrap, a_wrap);
+    THTensor_(copy)(ra_, a);
   }
 
   int m = a->size(1);
@@ -1097,9 +1088,7 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
 
   if (rb_ != b) {
     THTensor_(resizeAs)(rb_, b);
-    at::Tensor rb__wrap = THTensor_wrap(rb_);
-    at::Tensor b_wrap = THTensor_wrap(b);
-    at::_copy_same_type_(rb__wrap, b_wrap);
+    THTensor_(copy)(rb_, b);
   }
 
   int64_t num_batches = atf->size(0);

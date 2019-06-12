@@ -27,6 +27,7 @@ bool UniqueOp<CPUContext>::DoRunWithType() {
   // use dim32 to enforce that it's fine to have remapping of type int
   int N = inputTensor.dim32(0);
   CAFFE_ENFORCE_EQ(inputTensor.dim(), 1, "Input should be a vector");
+  auto* uniqueTensor = Output(UNIQUE);
 
   int* remapping = nullptr;
   if (REMAPPING < OutputSize()) {
@@ -47,7 +48,7 @@ bool UniqueOp<CPUContext>::DoRunWithType() {
   for (int i = 1; i < N; ++i) {
     K -= input[order_[i]] == input[order_[i - 1]];
   }
-  auto* uniqueTensor = Output(UNIQUE, {K}, at::dtype<T>());
+  uniqueTensor->Resize(K);
   T* unique = uniqueTensor->template mutable_data<T>();
   K = 0;
   T prev = -1;

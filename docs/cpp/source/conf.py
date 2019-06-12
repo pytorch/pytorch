@@ -23,7 +23,7 @@ import os
 import sys
 import textwrap
 
-import pytorch_sphinx_theme
+import sphinx_rtd_theme
 
 # -- General configuration ------------------------------------------------
 
@@ -160,7 +160,7 @@ todo_include_todos = True
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'pytorch_sphinx_theme'
+html_theme = 'sphinx_rtd_theme'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -168,7 +168,6 @@ html_theme = 'pytorch_sphinx_theme'
 #
 html_theme_options = {
     'canonical_url': 'https://pytorch.org/docs/stable/',
-    'pytorch_project': 'docs',
     'collapse_navigation': False,
     'display_version': True,
     'logo_only': True,
@@ -191,7 +190,10 @@ def setup(app):
     # NOTE: in Sphinx 1.8+ `html_css_files` is an official configuration value
     # and can be moved outside of this function (and the setup(app) function
     # can be deleted).
-    html_css_files = []
+    html_css_files = [
+        'https://fonts.googleapis.com/css?family=Lato',
+        'css/pytorch_theme.css'  # relative to paths in `html_static_path`
+    ]
 
     # In Sphinx 1.8 it was renamed to `add_css_file`, 1.7 and prior it is
     # `add_stylesheet` (deprecated in 1.8).
@@ -202,7 +204,7 @@ def setup(app):
 # -- Options for HTMLHelp output ------------------------------------------
 
 # Output file base name for HTML help builder.
-# htmlhelp_basename = 'PyTorchdoc'
+htmlhelp_basename = 'PyTorchdoc'
 
 
 # -- Options for LaTeX output ---------------------------------------------

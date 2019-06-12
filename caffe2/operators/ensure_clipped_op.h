@@ -33,8 +33,8 @@ class EnsureClippedOp final : public Operator<Context> {
           this, Input(INDICES));
     } else {
       auto& X = Input(PARAM);
-
-      auto* Y = Output(OUTPUT_PARAM, X.sizes(), at::dtype<float>());
+      auto* Y = Output(OUTPUT_PARAM);
+      Y->ResizeLike(X);
       EigenVectorMap<float>(Y->template mutable_data<float>(), Y->numel()) =
           ConstEigenVectorMap<float>(X.template data<float>(), X.numel())
               .cwiseMax(min_)

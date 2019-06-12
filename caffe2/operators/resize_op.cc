@@ -3,11 +3,6 @@
 #include "caffe2/utils/cpu_neon.h"
 #include "caffe2/utils/math.h"
 
-#ifdef CAFFE2_USE_MKLDNN
-#include "caffe2/ideep/operators/operator_fallback_ideep.h"
-#include "caffe2/ideep/utils/ideep_operator.h"
-#endif
-
 namespace caffe2 {
 
 void resizeNearest2x(
@@ -61,6 +56,7 @@ void resizeNearest2x(
 template <>
 bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
+  auto* Y = Output(0);
 
   const int batch_size = X.dim32(0),
             num_channels = X.dim32(1),
@@ -77,10 +73,7 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
 
   int output_width = input_width * width_scale_;
   int output_height = input_height * height_scale_;
-  auto* Y = Output(
-      0,
-      {batch_size, num_channels, output_height, output_width},
-      at::dtype<float>());
+  Y->Resize(batch_size, num_channels, output_height, output_width);
 
   const float* Xdata = X.data<float>();
   float* Ydata = Y->template mutable_data<float>();
@@ -113,6 +106,7 @@ template <>
 bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& dY = Input(0);
   const auto& X = Input(1);
+  auto* dX = Output(0);
 
   const auto inputDims = dY.sizes();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
@@ -130,10 +124,7 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
     height_scale_ = scales_data[0];
     width_scale_ = scales_data[1];
   }
-  auto* dX = Output(
-      0,
-      {batch_size, num_channels, output_height, output_width},
-      at::dtype<float>());
+  dX->Resize(batch_size, num_channels, output_height, output_width);
   math::Set<float, CPUContext>(
       dX->numel(), 0.0f, dX->template mutable_data<float>(), &context_);
 
@@ -163,12 +154,6 @@ REGISTER_CPU_OPERATOR(ResizeNearest, ResizeNearestOp<float, CPUContext>);
 REGISTER_CPU_GRADIENT_OPERATOR(
     ResizeNearestGradient,
     ResizeNearestGradientOp<float, CPUContext>);
-
-#ifdef CAFFE2_USE_MKLDNN
-REGISTER_IDEEP_OPERATOR(
-    ResizeNearest,
-    IDEEPFallbackOp<ResizeNearestOp<float, CPUContext>>);
-#endif
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(ResizeNearest)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/miopen/miopen-wrapper.h>
+#include "miopen-wrapper.h"
 #include <ATen/Tensor.h>
 
 namespace at { namespace native {

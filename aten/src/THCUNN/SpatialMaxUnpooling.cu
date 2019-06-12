@@ -1,6 +1,6 @@
-#include <THCUNN/THCUNN.h>
-#include <THC/THCTensor.hpp>
-#include <THCUNN/common.h>
+#include "THCUNN.h"
+#include "THCTensor.hpp"
+#include "common.h"
 
 template <typename Dtype>
 __global__ void MaxUnpoolForward(const int nthreads, const Dtype* bottom_data, const int64_t* bottom_mask,
@@ -28,5 +28,5 @@ __global__ void MaxUnpoolBackward(const int nthreads, const Dtype* top_diff, con
   }
 }
 
-#include <THCUNN/generic/SpatialMaxUnpooling.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/SpatialMaxUnpooling.cu"
+#include "THCGenerateFloatTypes.h"

@@ -74,7 +74,7 @@ const std::string& Module::name() const noexcept {
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone(const optional<Device>& device) const {
+std::shared_ptr<Module> Module::clone(optional<Device> device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
@@ -83,7 +83,7 @@ std::shared_ptr<Module> Module::clone(const optional<Device>& device) const {
       "> instead of torch::nn::Module to inherit the ability to clone.");
 }
 
-void Module::apply(const ModuleApplyFunction& function) {
+void Module::apply(ModuleApplyFunction function) {
   function(*this);
   apply_to_submodules(
       [&function](const std::string&, const std::shared_ptr<Module>& module) {
@@ -91,7 +91,7 @@ void Module::apply(const ModuleApplyFunction& function) {
       });
 }
 
-void Module::apply(const ConstModuleApplyFunction& function) const {
+void Module::apply(ConstModuleApplyFunction function) const {
   function(*this);
   apply_to_submodules(
       [&function](const std::string&, const std::shared_ptr<Module>& module) {
@@ -99,31 +99,29 @@ void Module::apply(const ConstModuleApplyFunction& function) const {
       });
 }
 
-void Module::apply(
-    const NamedModuleApplyFunction& function,
-    const std::string& name_prefix) {
+void Module::apply(NamedModuleApplyFunction function, std::string name_prefix) {
   function(/*name=*/name_prefix, *this);
   apply_to_submodules(
       [&function](
           const std::string& name, const std::shared_ptr<Module>& module) {
         function(name, *module);
       },
-      name_prefix);
+      std::move(name_prefix));
 }
 
 void Module::apply(
-    const ConstNamedModuleApplyFunction& function,
-    const std::string& name_prefix) const {
+    ConstNamedModuleApplyFunction function,
+    std::string name_prefix) const {
   function(/*name=*/name_prefix, *this);
   apply_to_submodules(
       [&function](
           const std::string& name, const std::shared_ptr<Module>& module) {
         function(name, *module);
       },
-      name_prefix);
+      std::move(name_prefix));
 }
 
-void Module::apply(const ModulePointerApplyFunction& function) const {
+void Module::apply(ModulePointerApplyFunction function) const {
   function(shared_from_this_checked());
   apply_to_submodules(
       [&function](const std::string&, const std::shared_ptr<Module>& module) {
@@ -132,11 +130,11 @@ void Module::apply(const ModulePointerApplyFunction& function) const {
 }
 
 void Module::apply(
-    const NamedModulePointerApplyFunction& function,
-    const std::string& name_prefix) const {
+    NamedModulePointerApplyFunction function,
+    std::string name_prefix) const {
   function(
       /*name=*/name_prefix, shared_from_this_checked());
-  apply_to_submodules(function, name_prefix);
+  apply_to_submodules(function, std::move(name_prefix));
 }
 
 std::vector<Tensor> Module::parameters(bool recurse) const {
@@ -199,7 +197,7 @@ std::vector<std::shared_ptr<Module>> Module::modules(bool include_self) const {
 }
 
 OrderedDict<std::string, std::shared_ptr<Module>> Module::named_modules(
-    const std::string& name_prefix,
+    std::string name_prefix,
     bool include_self) const {
   OrderedDict<std::string, std::shared_ptr<Module>> result;
   if (include_self) {
@@ -208,14 +206,14 @@ OrderedDict<std::string, std::shared_ptr<Module>> Module::named_modules(
             const std::string& key, const std::shared_ptr<Module>& module) {
           result.insert(key, module);
         },
-        name_prefix);
+        std::move(name_prefix));
   } else {
     apply_to_submodules(
         [&result](
             const std::string& key, const std::shared_ptr<Module>& module) {
           result.insert(key, module);
         },
-        name_prefix);
+        std::move(name_prefix));
   }
   return result;
 }
@@ -229,15 +227,18 @@ OrderedDict<std::string, std::shared_ptr<Module>> Module::named_children()
   return children_;
 }
 
-void Module::train(bool on) {
+void Module::train() {
   for (auto& child : children_) {
-    child.value()->train(on);
+    child.value()->train();
   }
-  is_training_ = on;
+  is_training_ = true;
 }
 
 void Module::eval() {
-  train(/*on=*/false);
+  for (auto& child : children_) {
+    child.value()->eval();
+  }
+  is_training_ = false;
 }
 
 void Module::to(torch::Device device, torch::Dtype dtype, bool non_blocking) {
@@ -291,9 +292,14 @@ void Module::load(serialize::InputArchive& archive) {
     archive.read(buffer.key(), buffer.value(), /*is_buffer=*/true);
   }
   for (const auto& child : children_) {
-    serialize::InputArchive child_archive;
-    archive.read(child.key(), child_archive);
-    child.value()->load(child_archive);
+    // Modules that have no state at all (parameters or buffers) are currently
+    // not stored in Protobuf at all, so we can just skip them.
+    if (!child.value()->parameters_.is_empty() ||
+        !child.value()->buffers_.is_empty()) {
+      serialize::InputArchive child_archive;
+      archive.read(child.key(), child_archive);
+      child.value()->load(child_archive);
+    }
   }
 }
 
@@ -321,15 +327,15 @@ Tensor& Module::register_buffer(std::string name, Tensor tensor) {
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
-void Module::clone_(Module& other, const optional<Device>& device) {}
+void Module::clone_(Module& other, optional<Device> device) {}
 
 void Module::apply_to_submodules(
     const NamedModulePointerApplyFunction& function,
-    const std::string& name_prefix) const {
+    std::string name_name_prefix) const {
   for (const auto& child : children_) {
-    auto qualified_name = join_name(name_prefix, child.key());
+    auto qualified_name = join_name(name_name_prefix, child.key());
     function(qualified_name, child.value());
-    child.value()->apply_to_submodules(function, qualified_name);
+    child.value()->apply_to_submodules(function, std::move(qualified_name));
   }
 }
 
@@ -349,22 +355,6 @@ std::shared_ptr<Module> Module::shared_from_this_checked() const {
         "to modules() or named_modules()");
   }
   return std::const_pointer_cast<Module>(ptr);
-}
-
-serialize::OutputArchive& operator<<(
-    serialize::OutputArchive& archive,
-    const std::shared_ptr<nn::Module>& module) {
-  AT_CHECK(module != nullptr, "Cannot serialize empty module");
-  module->save(archive);
-  return archive;
-}
-
-serialize::InputArchive& operator>>(
-    serialize::InputArchive& archive,
-    const std::shared_ptr<nn::Module>& module) {
-  AT_CHECK(module != nullptr, "Cannot deserialize empty module");
-  module->load(archive);
-  return archive;
 }
 } // namespace nn
 } // namespace torch

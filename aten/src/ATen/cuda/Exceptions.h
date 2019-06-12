@@ -1,9 +1,7 @@
 #pragma once
 
-#include <c10/util/Exception.h>
-#include <c10/cuda/CUDAException.h>
+#include "c10/util/Exception.h"
 
-// See Note [CHECK macro]
 #define AT_CUDNN_CHECK(EXPR)                                                     \
   do {                                                                           \
     cudnnStatus_t status = EXPR;                                                 \
@@ -19,4 +17,10 @@
     }                                                                            \
   } while (0)
 
-#define AT_CUDA_CHECK(EXPR) C10_CUDA_CHECK(EXPR)
+#define AT_CUDA_CHECK(EXPR)                                \
+  do {                                                     \
+    cudaError_t __err = EXPR;                              \
+    if (__err != cudaSuccess) {                            \
+      AT_ERROR("CUDA error: ", cudaGetErrorString(__err)); \
+    }                                                      \
+  } while (0)

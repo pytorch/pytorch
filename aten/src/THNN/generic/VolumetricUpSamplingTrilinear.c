@@ -2,10 +2,10 @@
 // Originally developed by George Papandreou
 
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "THNN/generic/VolumetricUpSamplingTrilinear.c"
+#define TH_GENERIC_FILE "generic/VolumetricUpSamplingTrilinear.c"
 #else
 
-#include <THNN/generic/upsampling.h>
+#include "linear_upsampling.h"
 
 static inline void THNN_(VolumetricUpSamplingTrilinear_shapeCheck)
      (THTensor *input, THTensor *gradOutput,

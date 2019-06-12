@@ -23,6 +23,8 @@ template <typename T, class Context>
 bool FlexibleTopKOp<T, Context>::RunOnDevice() {
   auto& input = Input(0);
   auto& k = Input(1);
+  auto* values = Output(0);
+  auto* indices = Output(1);
 
   const T* input_data = input.template data<T>();
   const int64_t* k_data = k.template data<int64_t>();
@@ -53,8 +55,8 @@ bool FlexibleTopKOp<T, Context>::RunOnDevice() {
         k_data[i]);
     output_size += k_data[i];
   }
-  auto* values = Output(0, {output_size}, at::dtype<T>());
-  auto* indices = Output(1, {output_size}, at::dtype<int64_t>());
+  values->Resize(output_size);
+  indices->Resize(output_size);
   T* values_data = values->template mutable_data<T>();
   int64_t* indices_data = indices->template mutable_data<int64_t>();
 
@@ -97,6 +99,7 @@ bool FlexibleTopKGradientOp<T, Context>::RunOnDevice() {
   auto& k = Input(1);
   auto& values = Input(2);
   auto& indices = Input(3);
+  auto* output = Output(0);
 
   const int64_t* k_data = k.template data<int64_t>();
   const T* values_data = values.template data<T>();
@@ -105,7 +108,7 @@ bool FlexibleTopKGradientOp<T, Context>::RunOnDevice() {
   // Resize output tensors to be as orignial_input size and initialized with 0
   CAFFE_ENFORCE_GT(original_input.dim(), 0);
   vector<int64_t> original_dims = original_input.sizes().vec();
-  auto* output = Output(0, original_dims, at::dtype<T>());
+  output->Resize(original_dims);
   T* output_data = output->template mutable_data<T>();
   math::Set<T, Context>(
       output->numel(), static_cast<T>(0), output_data, &context_);

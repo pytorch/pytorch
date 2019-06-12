@@ -32,17 +32,18 @@ class AffineChannelOp final : public Operator<Context> {
     const auto& X = Input(0);
     const auto& scale = Input(1);
     const auto& bias = Input(2);
-
+    auto* Y = Output(0);
     if (is_learnable_) {
-      CAFFE_ENFORCE(
-          !IsInputOutputAlias(0, 0),
+      CAFFE_ENFORCE_NE(
+          Y,
+          &X,
           "In-place affine_channel_op is not supported when "
           "is_learnable = true.");
     }
     const int N = X.dim32(0);
     const int C = X.dim32(1);
     const int HxW = X.numel() / (N * C);
-    auto* Y = Output(0, X.sizes(), at::dtype<T>());
+    Y->ResizeLike(X);
     math::AffineChannel<T, Context, StorageOrder::NCHW>(
         N,
         C,
@@ -59,10 +60,11 @@ class AffineChannelOp final : public Operator<Context> {
     const auto& X = Input(0);
     const auto& scale = Input(1);
     const auto& bias = Input(2);
-
+    auto* Y = Output(0);
     if (is_learnable_) {
-      CAFFE_ENFORCE(
-          !IsInputOutputAlias(0, 0),
+      CAFFE_ENFORCE_NE(
+          Y,
+          &X,
           "In-place affine_channel_op is not supported when "
           "is_learnable = true.");
     }
@@ -70,8 +72,7 @@ class AffineChannelOp final : public Operator<Context> {
     const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
     const int HxW = X.numel() / (N * C);
-    auto* Y =
-        Output(0, X.sizes(), at::dtype<T>());
+    Y->ResizeLike(X);
     math::AffineChannel<T, Context, StorageOrder::NHWC>(
         N,
         C,

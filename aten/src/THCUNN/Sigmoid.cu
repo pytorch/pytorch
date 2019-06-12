@@ -1,6 +1,6 @@
-#include <THCUNN/THCUNN.h>
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include "THCUNN.h"
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -19,5 +19,5 @@ struct sigmoid_updateGradInput_functor<half> {
   }
 };
 
-#include <THCUNN/generic/Sigmoid.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/Sigmoid.cu"
+#include "THCGenerateFloatTypes.h"

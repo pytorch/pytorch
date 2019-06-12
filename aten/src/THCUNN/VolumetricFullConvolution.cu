@@ -1,7 +1,7 @@
-#include <THCUNN/THCUNN.h>
-#include <THCUNN/common.h>
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include "THCUNN.h"
+#include "common.h"
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 
-#include <THCUNN/generic/VolumetricFullConvolution.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/VolumetricFullConvolution.cu"
+#include "THCGenerateFloatTypes.h"

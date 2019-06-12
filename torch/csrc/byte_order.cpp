@@ -1,6 +1,6 @@
-#include <torch/csrc/byte_order.h>
+#include "byte_order.h"
 
-#include <cstring>
+#include <string.h>
 
 #if defined(_MSC_VER)
 #include <stdlib.h>
@@ -125,7 +125,6 @@ void THP_decodeInt64Buffer(int64_t* dst, const uint8_t* src, THPByteOrder order,
 void THP_decodeHalfBuffer(THHalf* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
   for (size_t i = 0; i < len; i++) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union { uint16_t x; THHalf f; };
     x = (order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
     dst[i] = f;
@@ -136,7 +135,6 @@ void THP_decodeHalfBuffer(THHalf* dst, const uint8_t* src, THPByteOrder order, s
 void THP_decodeFloatBuffer(float* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
   for (size_t i = 0; i < len; i++) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union { uint32_t x; float f; };
     x = (order == THP_BIG_ENDIAN ? decodeUInt32BE(src) : decodeUInt32LE(src));
     dst[i] = f;
@@ -147,7 +145,6 @@ void THP_decodeFloatBuffer(float* dst, const uint8_t* src, THPByteOrder order, s
 void THP_decodeDoubleBuffer(double* dst, const uint8_t* src, THPByteOrder order, size_t len)
 {
   for (size_t i = 0; i < len; i++) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union { uint64_t x; double d; };
     x = (order == THP_BIG_ENDIAN ? decodeUInt64BE(src) : decodeUInt64LE(src));
     dst[i] = d;

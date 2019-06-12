@@ -4,11 +4,10 @@
 #include <stdexcept>
 #include <string>
 
-#include <torch/csrc/THP_export.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/utils/auto_gil.h>
-#include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include "THP_export.h"
+#include "c10/util/Exception.h"
+#include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/object_ptr.h"
 
 #define HANDLE_TH_ERRORS                                                       \
   try {
@@ -50,15 +49,15 @@ struct python_error : public std::exception {
   }
 
   python_error(python_error&& other) {
-    type = other.type;
-    value = other.value;
-    traceback = other.traceback;
+    type = std::move(other.type);
+    value = std::move(other.value);
+    traceback = std::move(other.traceback);
     other.type = nullptr;
     other.value = nullptr;
     other.traceback = nullptr;
   }
 
-  ~python_error() override {
+  ~python_error() {
     if (type || value || traceback) {
       AutoGIL gil;
       Py_XDECREF(type);
@@ -106,7 +105,7 @@ THP_CLASS std::string processErrorMsg(std::string str);
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {
   virtual PyObject* python_type() = 0;
-  const char* what() const noexcept override {
+  virtual const char* what() const noexcept override {
     return msg.c_str();
   }
   std::string msg;
@@ -115,15 +114,15 @@ struct PyTorchError : public std::exception {
 // Translates to Python IndexError
 struct IndexError : public PyTorchError {
   IndexError(const char *format, ...);
-  PyObject* python_type() override {
+  virtual PyObject* python_type() override {
     return PyExc_IndexError;
   }
 };
 
 // Translates to Python TypeError
 struct TypeError : public PyTorchError {
-  TORCH_API TypeError(const char *format, ...);
-  PyObject* python_type() override {
+  TypeError(const char *format, ...);
+  virtual PyObject* python_type() override {
     return PyExc_TypeError;
   }
 };
@@ -131,7 +130,7 @@ struct TypeError : public PyTorchError {
 // Translates to Python ValueError
 struct ValueError : public PyTorchError {
   ValueError(const char *format, ...);
-  PyObject* python_type() override {
+  virtual PyObject* python_type() override {
     return PyExc_ValueError;
   }
 };

@@ -1,21 +1,23 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
 
-import caffe2.python.hypothesis_test_util as hu
-import hypothesis.strategies as st
 import numpy as np
-from caffe2.python import core, dyndep, workspace
+import caffe2.python.hypothesis_test_util as hu
+from caffe2.python import core, dyndep
 from hypothesis import given
-
+import hypothesis.strategies as st
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
-workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPQuantizeOpTest(hu.HypothesisTestCase):
-    @given(size=st.integers(1024, 2048), **hu.gcs_cpu_only)
+    @given(size=st.integers(1024, 2048),
+           **hu.gcs_cpu_only)
     def test_dnnlowp_quantize(self, size, gc, dc):
-        min_ = -10.0
-        max_ = 20.0
+        min_ = -10.
+        max_ = 20.
         X = (np.random.rand(size) * (max_ - min_) + min_).astype(np.float32)
 
         op_type_list = ["Quantize", "Int8Quantize"]
@@ -25,7 +27,11 @@ class DNNLowPQuantizeOpTest(hu.HypothesisTestCase):
             net = core.Net("test_net")
 
             quantize = core.CreateOperator(
-                op_type, ["X"], ["X_q"], engine=engine, device_option=gc
+                op_type,
+                ["X"],
+                ["X_q"],
+                engine=engine,
+                device_option=gc,
             )
             net.Proto().op.extend([quantize])
 

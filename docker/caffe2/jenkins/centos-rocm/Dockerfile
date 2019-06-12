@@ -1,10 +1,6 @@
 ARG CENTOS_VERSION
 FROM centos:${CENTOS_VERSION}
 
-# Include BUILD_ENVIRONMENT environment variable in image
-ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
-
 # Install required packages to build Caffe2
 ARG EC2
 ADD ./install_base.sh install_base.sh
@@ -26,6 +22,7 @@ ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
 ENV PATH /opt/rocm/opencl/bin:$PATH
+ENV MIOPEN_DISABLE_CACHE 1
 ENV HIP_PLATFORM hcc
 ENV LC_ALL en_US.utf8
 ENV LANG en_US.utf8
@@ -53,3 +50,7 @@ ARG JENKINS_GID
 ADD ./add_jenkins_user.sh add_jenkins_user.sh
 RUN if [ -n "${JENKINS}" ]; then bash ./add_jenkins_user.sh; fi
 RUN rm add_jenkins_user.sh
+
+# Include BUILD_ENVIRONMENT environment variable in image
+ARG BUILD_ENVIRONMENT
+ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}

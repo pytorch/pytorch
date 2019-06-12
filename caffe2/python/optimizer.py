@@ -81,7 +81,7 @@ class Optimizer(object):
         if current_scope is None:
             return self.get_cpu_blob_name(base_str)
 
-        if core.IsGPUDeviceType(current_scope.device_type):
+        if current_scope.device_type == caffe2_pb2.CUDA:
             return self.get_gpu_blob_name(
                 base_str, current_scope.device_id, current_scope.node_name
             )
@@ -127,7 +127,7 @@ class Optimizer(object):
         if self._local_lr_multiplier is not None:
             current_scope = scope.CurrentDeviceScope()
             if (current_scope is not None
-                    and core.IsGPUDeviceType(current_scope.device_type)
+                    and current_scope.device_type == caffe2_pb2.CUDA
                     and not self._local_lr_multiplier_on_gpu):
                 local_lr_multiplier = net.CopyFromCPUInput(
                     self._local_lr_multiplier,
@@ -258,7 +258,7 @@ class SgdOptimizer(Optimizer):
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and core.IsGPUDeviceType(current_scope.device_type)),
+                    and current_scope.device_type == caffe2_pb2.CUDA),
             )
 
         # We need negative sign for LR when used directly with WeightedSum
@@ -549,7 +549,7 @@ class AdagradOptimizer(Optimizer):
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and core.IsGPUDeviceType(current_scope.device_type)),
+                    and current_scope.device_type == caffe2_pb2.CUDA),
             )
 
         lr, _ = self.build_lr(
@@ -560,7 +560,7 @@ class AdagradOptimizer(Optimizer):
         )
 
         if self.rowWise:
-            logger.info("Using engine {} for rowWise Adagrad".format(self.engine))
+            assert self.engine == "SIMD", "Got {}".format(self.engine)
 
             shapes, types = workspace.InferShapesAndTypes([param_init_net])
             if str(param) not in shapes:
@@ -586,8 +586,6 @@ class AdagradOptimizer(Optimizer):
                     value=0.0
                 )
         else:
-            logger.info("Using engine {} for regular Adagrad".format(self.engine))
-
             if self.engine in FP16_ENGINES:
                 shapes, types = workspace.InferShapesAndTypes([param_init_net])
                 assert str(param) in shapes, shapes
@@ -688,7 +686,7 @@ class WngradOptimizer(Optimizer):
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and core.IsGPUDeviceType(current_scope.device_type)),
+                    and current_scope.device_type == caffe2_pb2.CUDA),
             )
 
         lr, _ = self.build_lr(

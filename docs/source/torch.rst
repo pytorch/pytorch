@@ -269,7 +269,6 @@ Other Operations
 .. autofunction:: histc
 .. autofunction:: meshgrid
 .. autofunction:: renorm
-.. autofunction:: roll
 .. autofunction:: tensordot
 .. autofunction:: trace
 .. autofunction:: tril

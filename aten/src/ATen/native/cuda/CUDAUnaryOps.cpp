@@ -1,9 +1,17 @@
-#include <ATen/ATen.h>
+#include "ATen/ATen.h"
 
 namespace at { namespace native {
 
 Tensor& _clamp__cuda(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  return _clamp_out_cuda(self, self, min, max);
+  if (min && max) {
+    return _th_clamp_out(self, self, *min, *max);
+  } else if (max) {
+    return _th_clamp_max_out(self, self, *max);
+  } else if (min) {
+    return _th_clamp_min_out(self, self, *min);
+  } else {
+    return self;
+  }
 }
 
 Tensor& _clamp_out_cuda(
@@ -17,8 +25,6 @@ Tensor& _clamp_out_cuda(
     _th_clamp_max_out(result, self, *max);
   } else if (min) {
     _th_clamp_min_out(result, self, *min);
-  } else {
-    AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
   return result;
 }

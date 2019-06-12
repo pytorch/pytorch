@@ -120,13 +120,7 @@ class IfstreamInputStream : public ::google::protobuf::io::CopyingInputStream {
 }  // namespace
 
 C10_EXPORT string ProtoDebugString(const MessageLite& proto) {
-  string serialized = proto.SerializeAsString();
-  for (char& c : serialized) {
-    if (c < 0x20 || c >= 0x7f) {
-      c = '?';
-    }
-  }
-  return serialized;
+  return proto.SerializeAsString();
 }
 
 C10_EXPORT bool ParseProtoFromLargeString(

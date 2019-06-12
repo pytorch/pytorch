@@ -54,8 +54,8 @@ template <>
 bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const auto& dY = Input(0);
   const auto& scale = is_learnable_ ? Input(2) : Input(1);
-
-  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
+  auto* dX = Output(0);
+  dX->ResizeLike(dY);
   const int N = dY.dim32(0);
   const int C = dY.dim32(1);
   const int HxW = dY.numel() / (N * C);
@@ -75,9 +75,10 @@ bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   if (is_learnable_) {
     const auto& X = Input(1);
     const float* X_data = X.data<float>();
-
-    auto* dscale = Output(1, scale.sizes(), at::dtype<float>());
-    auto* dbias = Output(2, scale.sizes(), at::dtype<float>());
+    auto* dscale = Output(1);
+    auto* dbias = Output(2);
+    dscale->ResizeLike(scale);
+    dbias->ResizeLike(scale);
     AffineChannelScaleBiasBackwardNCHW<float>(
         N,
         C,
@@ -94,8 +95,8 @@ template <>
 bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const auto& dY = Input(0);
   const auto& scale = is_learnable_ ? Input(2) : Input(1);
-
-  auto* dX = Output(0, dY.sizes(), at::dtype<float>());
+  auto* dX = Output(0);
+  dX->ResizeLike(dY);
   const int ndim = dY.dim();
   const int C = dY.dim32(ndim - 1);
   const int rows = dY.numel() / C;
@@ -114,9 +115,10 @@ bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     const float* X_data = X.data<float>();
     const int N = X.dim32(0);
     const int HxW = rows / N;
-
-    auto* dscale = Output(1, scale.sizes(), at::dtype<float>());
-    auto* dbias = Output(2, scale.sizes(), at::dtype<float>());
+    auto* dscale = Output(1);
+    auto* dbias = Output(2);
+    dscale->ResizeLike(scale);
+    dbias->ResizeLike(scale);
     AffineChannelScaleBiasBackwardNHWC<float>(
         N,
         C,

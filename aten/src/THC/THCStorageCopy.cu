@@ -1,10 +1,10 @@
-#include <THC/THCStorageCopy.h>
-#include <THC/THCGeneral.h>
+#include "THCStorageCopy.h"
+#include "THCGeneral.h"
 
-#include <TH/THHalf.h>
-#include <THC/THCTensorCopy.h>
-#include <THC/THCTensor.hpp>
-#include <THC/THCStorage.hpp>
+#include "TH/THHalf.h"
+#include "THCTensorCopy.h"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 
-#include <THC/generic/THCStorageCopy.cu>
-#include <THC/THCGenerateAllTypes.h>
+#include "generic/THCStorageCopy.cu"
+#include "THCGenerateAllTypes.h"

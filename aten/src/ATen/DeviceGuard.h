@@ -2,7 +2,7 @@
 
 #include <c10/DeviceGuard.h>
 #include <ATen/core/Tensor.h>
-#include <c10/core/ScalarType.h> // TensorList whyyyyy
+#include <ATen/core/ScalarType.h> // TensorList whyyyyy
 
 namespace at {
 

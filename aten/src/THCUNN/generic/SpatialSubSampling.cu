@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THCUNN/generic/SpatialSubSampling.cu"
+#define THC_GENERIC_FILE "generic/SpatialSubSampling.cu"
 #else
 
-#include <THCUNN/common.h>
+#include "../common.h"
 
 static inline void THNN_(SpatialSubSampling_shapeCheck)(
                          THCState *state,

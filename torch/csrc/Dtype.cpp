@@ -1,22 +1,22 @@
-#include <torch/csrc/Dtype.h>
+#include "Dtype.h"
 
 #include <cstring>
 #include <structmember.h>
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/tensor_dtypes.h>
-#include <torch/csrc/utils/tensor_types.h>
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/object_ptr.h"
+#include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/utils/tensor_dtypes.h"
+#include "torch/csrc/utils/tensor_types.h"
 
 PyObject * THPDtype_New(at::ScalarType scalar_type, const std::string& name)
 {
-  AT_ASSERT(name.length() < DTYPE_NAME_LEN);
   auto type = (PyTypeObject*)&THPDtypeType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPDtype*>(self.get());
   self_->scalar_type = scalar_type;
-  std::strncpy(self_->name, name.c_str(), DTYPE_NAME_LEN);
+  std::strncpy (self_->name, name.c_str(), DTYPE_NAME_LEN);
+  self_->name[DTYPE_NAME_LEN] = '\0';
   return self.release();
 }
 
@@ -60,40 +60,40 @@ PyTypeObject THPDtypeType = {
   "torch.dtype",                         /* tp_name */
   sizeof(THPDtype),                      /* tp_basicsize */
   0,                                     /* tp_itemsize */
-  nullptr,                                     /* tp_dealloc */
-  nullptr,                                     /* tp_print */
-  nullptr,                                     /* tp_getattr */
-  nullptr,                                     /* tp_setattr */
-  nullptr,                                     /* tp_reserved */
+  0,                                     /* tp_dealloc */
+  0,                                     /* tp_print */
+  0,                                     /* tp_getattr */
+  0,                                     /* tp_setattr */
+  0,                                     /* tp_reserved */
   (reprfunc)THPDtype_repr,               /* tp_repr */
-  nullptr,                                     /* tp_as_number */
-  nullptr,                                     /* tp_as_sequence */
-  nullptr,                                     /* tp_as_mapping */
-  nullptr,                                     /* tp_hash  */
-  nullptr,                                     /* tp_call */
-  nullptr,                                     /* tp_str */
-  nullptr,                                     /* tp_getattro */
-  nullptr,                                     /* tp_setattro */
-  nullptr,                                     /* tp_as_buffer */
+  0,                                     /* tp_as_number */
+  0,                                     /* tp_as_sequence */
+  0,                                     /* tp_as_mapping */
+  0,                                     /* tp_hash  */
+  0,                                     /* tp_call */
+  0,                                     /* tp_str */
+  0,                                     /* tp_getattro */
+  0,                                     /* tp_setattro */
+  0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT,                    /* tp_flags */
   nullptr,                               /* tp_doc */
-  nullptr,                                     /* tp_traverse */
-  nullptr,                                     /* tp_clear */
-  nullptr,                                     /* tp_richcompare */
+  0,                                     /* tp_traverse */
+  0,                                     /* tp_clear */
+  0,                                     /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
-  nullptr,                                     /* tp_iter */
-  nullptr,                                     /* tp_iternext */
+  0,                                     /* tp_iter */
+  0,                                     /* tp_iternext */
   THPDtype_methods,                      /* tp_methods */
-  nullptr,                                     /* tp_members */
+  0,                                     /* tp_members */
   THPDtype_properties,                   /* tp_getset */
-  nullptr,                                     /* tp_base */
-  nullptr,                                     /* tp_dict */
-  nullptr,                                     /* tp_descr_get */
-  nullptr,                                     /* tp_descr_set */
+  0,                                     /* tp_base */
+  0,                                     /* tp_dict */
+  0,                                     /* tp_descr_get */
+  0,                                     /* tp_descr_set */
   0,                                     /* tp_dictoffset */
-  nullptr,                                     /* tp_init */
-  nullptr,                                     /* tp_alloc */
-  nullptr,                                     /* tp_new */
+  0,                                     /* tp_init */
+  0,                                     /* tp_alloc */
+  0,                                     /* tp_new */
 };
 
 void THPDtype_init(PyObject *module)

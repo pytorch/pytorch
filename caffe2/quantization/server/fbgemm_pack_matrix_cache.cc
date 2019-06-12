@@ -34,7 +34,8 @@ shared_ptr<fbgemm::PackBMatrix<int8_t, ACC_T>> GetOrCreateFbgemmPackBMatrix(
       quantized_data,
       ld,
       nullptr, // pmat
-      1); // groups
+      1, // groups
+      zero_point);
 
   std::tuple<int, int, const void*> key(m, n, orig_data);
   auto itr = cache.find(key);

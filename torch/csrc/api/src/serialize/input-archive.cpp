@@ -33,11 +33,7 @@ void InputArchive::read(
   // clang-format on
   if (tensor.defined()) {
     torch::NoGradGuard guard;
-    if (tensor.device() != read_tensor->slot()->device()) {
-      tensor.set_data(autograd::Variable(*read_tensor->slot()).data());
-    } else {
-      tensor.set_(*read_tensor->slot());
-    }
+    tensor.set_(*read_tensor->slot());
   } else {
     tensor = std::move(*read_tensor->slot());
   }
@@ -52,14 +48,12 @@ void InputArchive::read(const std::string& key, InputArchive& archive) {
   }
 }
 
-void InputArchive::load_from(const std::string& filename,
-    c10::optional<torch::Device> device /*= c10::nullopt*/) {
-  module_ = torch::jit::load(filename, std::move(device));
+void InputArchive::load_from(const std::string& filename) {
+  module_ = torch::jit::load(filename);
 }
 
-void InputArchive::load_from(std::istream& stream,
-    c10::optional<torch::Device> device /*= c10::nullopt*/) {
-  module_ = torch::jit::load(stream, std::move(device));
+void InputArchive::load_from(std::istream& stream) {
+  module_ = torch::jit::load(stream);
 }
 } // namespace serialize
 } // namespace torch

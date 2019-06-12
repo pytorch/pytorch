@@ -1,8 +1,8 @@
 #ifndef THC_SCAN_UTILS_INC
 #define THC_SCAN_UTILS_INC
 
-#include <THC/THCAsmUtils.cuh>
-#include <THC/THCDeviceUtils.cuh>
+#include "THCAsmUtils.cuh"
+#include "THCDeviceUtils.cuh"
 
 #if defined(__HIP_PLATFORM_HCC__)
 #define SCAN_UTILS_WARP_SIZE 64

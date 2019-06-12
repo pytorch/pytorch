@@ -1,6 +1,6 @@
 #pragma once
 
-#include <THC/THCTensorCopy.h>
+#include "THCTensorCopy.h"
 
 template <typename ScalarTypeDst, typename ScalarTypeSrc>
 void THC_copyTensor(THCState* state, THCTensor* dst, THCTensor* src);

@@ -59,6 +59,7 @@ class CAFFE2_API StoreHandler {
  */
 struct CAFFE2_API StoreHandlerNotAvailableException
     : public std::runtime_error {
+  StoreHandlerNotAvailableException() = default;
   explicit StoreHandlerNotAvailableException(const std::string& msg)
       : std::runtime_error(msg) {}
 };
@@ -71,6 +72,7 @@ struct CAFFE2_API StoreHandlerNotAvailableException
  * Timeout accessing the store.
  */
 struct CAFFE2_API StoreHandlerTimeoutException : public std::runtime_error {
+  StoreHandlerTimeoutException() = default;
   explicit StoreHandlerTimeoutException(const std::string& msg)
       : std::runtime_error(msg) {}
 };

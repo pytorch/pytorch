@@ -430,16 +430,12 @@ class C10_API TypeMeta {
     // variable template. '-Wpragmas' and '-Wunknown-warning-option' has to be
     // disabled for compilers that don't know '-Wundefined-var-template' and
     // would error at our attempt to disable it.
-#ifndef _MSC_VER  
-#  pragma GCC diagnostic push  
-#  pragma GCC diagnostic ignored "-Wpragmas"  
-#  pragma GCC diagnostic ignored "-Wunknown-warning-option"  
-#  pragma GCC diagnostic ignored "-Wundefined-var-template"  
-#endif
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wundefined-var-template"
     return TypeMeta(_typeMetaDataInstance<T>());
-#ifndef _MSC_VER  
-#  pragma GCC diagnostic pop  
-#endif
+#pragma GCC diagnostic pop
   }
 
  private:

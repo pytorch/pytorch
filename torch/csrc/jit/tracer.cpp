@@ -1,11 +1,12 @@
-#include <torch/csrc/jit/tracer.h>
+#include "torch/csrc/jit/tracer.h"
 
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/engine.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/remove_expands.h>
+#include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/engine.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/remove_expands.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
 #include <string>
 #include <sstream>
@@ -37,33 +38,6 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
 
-void setValueTrace(const IValue &v, Value *value) {
-  if (v.isTensor()) {
-    auto var = v.toTensor();
-    JIT_ASSERT(var.defined());
-    getTracingState()->value_map[var] = value;
-  } else if (v.isTensorList()) {
-    auto& outputs = v.toTensorList()->elements();
-    auto graph = getTracingState()->graph;
-    Node * unpack_node = graph->appendNode(graph->create(prim::ListUnpack, {value}, outputs.size()));
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      setValueTrace(outputs[i], unpack_node->outputs()[i]);
-    }
-  } else if (v.isTuple()) {
-    auto& outputs = v.toTuple()->elements();
-    auto graph = getTracingState()->graph;
-    Node * unpack_node = graph->appendNode(graph->create(prim::TupleUnpack, {value}, outputs.size()));
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      setValueTrace(outputs[i], unpack_node->outputs()[i]);
-    }
-  } else {
-    std::ostringstream os;
-    os << "Tracer cannot set value trace for type " << v.tagKind() << ". "
-       << "Supported types are tensor, tensor list, and tuple of tensors.";
-    throw std::runtime_error(os.str());
-  }
-}
-
 void addInputs(Node *n, const char * name, int64_t value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
@@ -80,11 +54,7 @@ void addInputs(Node *n, const char * name, const c10::optional<at::Scalar>& valu
   if(value) {
     detail::genericAddInput(n, *value);
   } else {
-    Graph * g = n->owningGraph();
-    Value* none =
-        g->insertNode(g->createNone(NumberType::get()))
-            ->output();
-    n->addInput(none);
+    detail::genericAddInput(n, IValue());
   }
 }
 void addInputs(Node *n, const char * name, const std::string& value) { detail::genericAddInput(n, value); }
@@ -99,7 +69,10 @@ void addInputs(Node *n, const char * name, at::Generator * value)            {
   n->addInput(undef_gen);
 }
 void addInputs(Node *n, const char * name, at::Device value) {
-  detail::genericAddInput(n, value);
+  std::vector<int64_t> device = {
+      static_cast<int64_t>(value.type()),
+      static_cast<int64_t>(value.index())};
+  detail::genericAddInput(n, std::move(device));
 }
 void addInputs(Node *n, const char * name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
@@ -213,24 +186,22 @@ void ArgumentStash::stashIntListElem(const std::string& arg_name, size_t size, s
 
   Value* ten = getValueTrace(var);
   auto& g = *ten->owningGraph();
-  WithInsertPoint guard(ten->node()->next());
-  auto prim = g.insert(prim::Int, {ten});
+  auto prim = g.createTensorToNum(jit::IntType::get(), ten)
+                   ->insertAfter(ten->node())
+                   ->output();
   list_trace[idx] = prim;
 }
 
-void ArgumentStash::stashValue(const std::string& arg_name, size_t idx, const Variable& var, const TypePtr& type) {
+void ArgumentStash::stashValue(const std::string& arg_name, size_t idx, const Variable& var, TypePtr type) {
   if (!isTracing()) return;
 
   Value* ten = getValueTrace(var);
-  WithInsertPoint guard(ten->node()->next());
-  auto& g = *ten->owningGraph();
-
-  if (type == IntType::get()) {
-    ten = g.insert(prim::Int, { ten });
-  } else if (type == FloatType::get()) {
-    ten = g.insert(prim::Float, { ten });
+  if (type) {
+    auto& g = *ten->owningGraph();
+    ten = g.createTensorToNum(type, ten)
+                     ->insertAfter(ten->node())
+                     ->output();
   }
-
   stash.values.emplace(arg_name, ten);
 }
 

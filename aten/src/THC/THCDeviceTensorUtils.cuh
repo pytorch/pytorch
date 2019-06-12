@@ -1,8 +1,8 @@
 #ifndef THC_DEVICE_TENSOR_UTILS_INC
 #define THC_DEVICE_TENSOR_UTILS_INC
 
-#include <THC/THCDeviceTensor.cuh>
-#include <THC/THCTensor.hpp>
+#include "THCDeviceTensor.cuh"
+#include "THCTensor.hpp"
 #include <limits>
 
 /// Constructs a DeviceTensor initialized from a THCudaTensor by
@@ -75,6 +75,6 @@ toDeviceTensor(THCState* state, THCTensor* t) {
     t->data<T>(), sizes, strides);
 }
 
-#include <THC/THCDeviceTensorUtils-inl.cuh>
+#include "THCDeviceTensorUtils-inl.cuh"
 
 #endif // THC_DEVICE_TENSOR_UTILS_INC

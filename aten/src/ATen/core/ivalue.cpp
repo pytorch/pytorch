@@ -38,22 +38,15 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toTensor();
     case IValue::Tag::Double: {
       double d = v.toDouble();
-      int c = std::fpclassify(d);
-      if (c == FP_NORMAL || c == FP_ZERO) {
-        int64_t i = int64_t(d);
-        if (double(i) == d) {
-          return out << i << ".";
-        }
+      int64_t i = int64_t(d);
+      if (std::isnormal(d) && double(i) == d) {
+        return out << i << ".";
       }
-      auto orig_prec = out.precision();
-      return out
-        << std::setprecision(std::numeric_limits<double>::max_digits10)
-        << v.toDouble()
-        << std::setprecision(orig_prec);
+      return out << v.toDouble();
     } case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::Bool:
-      return out << (v.toBool() ? "True" : "False");
+      return out << v.toBool();
     case IValue::Tag::Tuple:
       return printList(out, v.toTuple(), "(", ")");
     case IValue::Tag::IntList:
@@ -72,16 +65,10 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:
       return out << "Future";
-    case IValue::Tag::Device:
-      return out << v.toDevice();
   }
   AT_ERROR("Tag not found\n");
 }
 
 #undef TORCH_FORALL_TAGS
-
-void IValue::dump() const {
-  std::cout << *this << "\n";
-}
 
 } // namespace c10

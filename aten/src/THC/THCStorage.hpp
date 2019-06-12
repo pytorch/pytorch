@@ -3,17 +3,17 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include <THC/THCStorage.h>
+#include "THCStorage.h"
 // Should work with THStorageClass
 #include <TH/THStorageFunctions.hpp>
 
-#include <c10/core/ScalarType.h>
+#include "ATen/ScalarType.h"
 
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 
-namespace c10 {
+namespace at {
 
 #if defined(__CUDACC__) || defined(__HIP_PLATFORM_HCC__)
 template <>

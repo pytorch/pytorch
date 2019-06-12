@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vector>
-#include <c10/util/ArrayRef.h>
+#include <ATen/core/ArrayRef.h>
 
 namespace c10 {
 

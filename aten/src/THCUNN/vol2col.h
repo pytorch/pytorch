@@ -1,8 +1,8 @@
 #ifndef THCUNN_VOL2COL_H
 #define THCUNN_VOL2COL_H
 
-#include <THCUNN/common.h>
-#include <THC/THCNumerics.cuh>
+#include "common.h"
+#include "THCNumerics.cuh"
 
 // Kernel for fast unfold+copy on volumes
 template <typename Dtype>

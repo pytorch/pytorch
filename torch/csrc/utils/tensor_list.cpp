@@ -1,8 +1,8 @@
-#include <torch/csrc/utils/tensor_list.h>
+#include "tensor_list.h"
 
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/utils/auto_gil.h>
-#include <torch/csrc/utils/python_scalars.h>
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/python_scalars.h"
 
 using namespace at;
 

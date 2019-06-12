@@ -1,8 +1,8 @@
-#include <THCUNN/THCUNN.h>
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include "THCUNN.h"
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
-#include <THCUNN/common.h>
+#include "common.h"
 
 template <typename Dtype, typename Acctype>
 struct gatedLinearCSigMul_functor
@@ -33,5 +33,5 @@ struct gatedLinearDerivative
    }
 };
 
-#include <THCUNN/generic/GatedLinearUnit.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/GatedLinearUnit.cu"
+#include "THCGenerateFloatTypes.h"

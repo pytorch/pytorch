@@ -1,6 +1,6 @@
-#include <ATen/cudnn/Handle.h>
+#include "Handle.h"
 
-#include <ATen/cuda/Exceptions.h>
+#include "ATen/cuda/Exceptions.h"
 
 #include <unordered_map>
 #include <mutex>

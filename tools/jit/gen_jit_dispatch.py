@@ -78,12 +78,12 @@ def jit_type_of(arg):
 # map from aten 'simple_type' to the function that will turn a tensor into
 # that type
 FROM_IVALUE = {
-    'Device': '{}.toDevice()',
+    'Device': '{}.to<at::Device>()',
     'IntList': '{}.toIntList()->elements()',
-    'Layout': '{}.toLayout()',
+    'Layout': '{}.to<at::Layout>()',
     'Scalar': '{}.toScalar()',
     'Scalar?': '{}.toOptional<Scalar>()',
-    'ScalarType': '{}.toScalarType()',
+    'ScalarType': '{}.to<at::ScalarType>()',
     'Tensor': '{}.toTensor()',
     'TensorList': '{}.toTensorList()->elements()',
     'bool': '{}.toBool()',
@@ -211,6 +211,7 @@ def argument_order(decl):
 
 def gen_jit_dispatch(declarations, out, template_path):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
+    ATEN_INTERNED_STRINGS_H = CodeTemplate.from_file(template_path + '/aten_interned_strings.h')
 
     ops = []
 
@@ -332,7 +333,7 @@ def gen_jit_dispatch(declarations, out, template_path):
             {'name': 'layout', 'simple_type': 'Layout', 'default': 'strided', 'kwarg_only': True},
             # device is specified as an IntList of { at::Device::Type, device_id }
             {'name': 'device', 'simple_type': 'Device', 'kwarg_only': True,
-                'default': '\\"cpu\\"'},
+                'default': '[cpu, -1]'},
         ]
 
     for decl in jit_decls:
@@ -366,6 +367,23 @@ def gen_jit_dispatch(declarations, out, template_path):
         }
         write(out, 'register_aten_ops_%d.cpp' % i, REGISTER_ATEN_OPS_CPP, env)
 
+    # NB: Operate on aten_decls, not jit_decls, because VariableType is
+    # a client for these symbols as well
+    # NB: This means we DON'T generate interned strings for inplace ops.
+    # Change this when you do!
+    # NB: Keep this code synchronized with the code in
+    # tool/autograd/gen_variable_type.py
+    # NB: Some operations have inplace versions, but NOT non-inplace
+    # versions! Thus uninplace_api_name() is mandatory (if you remove
+    # it, you will get missing symbols.)
+    names = set(uninplace_api_name(decl['api_name']) for decl in aten_decls)
+    # NB: This grabs non keyword arguments too, but it's harmless
+    attrs = set(arg['name'] for decl in aten_decls for arg in decl['arguments'])
+    strings_env = {
+        'aten_symbols': ["_(aten, {}) \\".format(n) for n in sorted(names)],
+        'attr_symbols': ["_(attr, {}) \\".format(n) for n in sorted(attrs)]
+    }
+    write(out, 'aten_interned_strings.h', ATEN_INTERNED_STRINGS_H, strings_env)
 
 default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}
 

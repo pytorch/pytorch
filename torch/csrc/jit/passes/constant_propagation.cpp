@@ -1,13 +1,12 @@
-#include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/interpreter.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/ivalue.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/utils/functional.h>
+#include "torch/csrc/jit/passes/constant_propagation.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/interpreter.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/ivalue.h"
+#include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/utils/functional.h"
 
 namespace torch { namespace jit {
 
@@ -18,13 +17,10 @@ std::unordered_set<Symbol> skip_list = {
   prim::Loop, //TODO: handle Loop
   prim::Print,
   prim::RaiseException,
-  aten::warn,
   prim::PythonOp, //may have side effects
   prim::Constant,
   prim::Undefined,
   prim::NoneGenerator,
-  prim::None, // it is already a constant and propagating it will lose
-              // important type information about which Optional type it is
   // TODO (zach): we should consider skipping tensor factories in the cases
   // where the constant tensor would be large but cheap to create.
  };
@@ -117,20 +113,19 @@ bool removeExtraNodeOutputs(Node *n) {
   return initial_outputs != true_block->outputs().size();
 }
 
-void ConstantPropagation(Block* block, const AliasDb& aliasDb, bool recurse);
+} // anonymous namespace
 
-void ConstantPropagation(Node* n, const AliasDb& aliasDb, bool recurse) {
+void ConstantPropagation(Node* n, bool recurse) {
   bool constant_inputs =
       std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
         return v->node()->kind() == prim::Constant;
       });
-  bool supported_node = !n->kind().is_onnx() &&
-      skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
-      !aliasDb.hasWriters(n) && !aliasDb.hasWildcard(n);
+  bool supported_node = !n->kind().is_onnx() && skip_list.count(n->kind()) == 0
+    && !n->isNondeterministic();
   auto run_blocks = [&]() {
     if (recurse) {
       for (Block * block : n->blocks()) {
-        ConstantPropagation(block, aliasDb, recurse);
+        ConstantPropagation(block, recurse);
       }
     }
   };
@@ -152,19 +147,16 @@ void ConstantPropagation(Node* n, const AliasDb& aliasDb, bool recurse) {
   run_blocks();
 }
 
-void ConstantPropagation(Block* block, const AliasDb& aliasDb, bool recurse) {
+void ConstantPropagation(Block* block, bool recurse) {
   for(auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node *n = *it;
     it++; //advance iterator bc the current node may be destroyed
-    ConstantPropagation(n, aliasDb, recurse);
+    ConstantPropagation(n, recurse);
   }
 }
-} // anonymous namespace
-
 
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {
-  const auto aliasDb = AliasAnalysis(graph);
-  ConstantPropagation(graph->block(), aliasDb, true);
+  ConstantPropagation(graph->block(), true);
   EliminateDeadCode(graph);
 }
 

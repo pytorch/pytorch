@@ -1,15 +1,15 @@
-#include <THCUNN/THCUNN.h>
-#include <THC/THCTensor.hpp>
-#include <THCUNN/common.h>
-#include <THC/THCDeviceTensor.cuh>
-#include <THC/THCDeviceTensorUtils.cuh>
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCReduceApplyUtils.cuh>
+#include "THCUNN.h"
+#include "THCTensor.hpp"
+#include "common.h"
+#include "THCDeviceTensor.cuh"
+#include "THCDeviceTensorUtils.cuh"
+#include "THCDeviceUtils.cuh"
+#include "THCReduceApplyUtils.cuh"
 #include <THC/THCApply.cuh>
 
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
-#include <THC/THCAtomics.cuh>
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
+#include "THCAtomics.cuh"
 
 template<typename Dtype>
 __global__ void SpatialReflectionPadding_updateOutput(
@@ -83,5 +83,5 @@ __global__ void SpatialReflectionPadding_updateGradInput(
   atomicAdd(&gradInput[batch][plane][inputPointY][inputPointX], valueToCopy);
 }
 
-#include <THCUNN/generic/SpatialReflectionPadding.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/SpatialReflectionPadding.cu"
+#include "THCGenerateFloatTypes.h"

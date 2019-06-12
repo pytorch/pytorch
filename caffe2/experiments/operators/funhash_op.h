@@ -75,7 +75,8 @@ class FunHashOp : public Operator<Context> {
       ++n_segments;
     }
 
-    auto* output = Output(0, {n_segments, num_outputs_}, at::dtype<T>());
+    auto* output = Output(0);
+    output->Resize(n_segments, num_outputs_);
 
     T* output_data = output->template mutable_data<T>();
 

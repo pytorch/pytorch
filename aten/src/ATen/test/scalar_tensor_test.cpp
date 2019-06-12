@@ -1,6 +1,7 @@
-#include <gtest/gtest.h>
+#include "gtest/gtest.h"
 
-#include <ATen/ATen.h>
+#include "ATen/ATen.h"
+#include "test_seed.h"
 #include <algorithm>
 #include <iostream>
 #include <numeric>
@@ -187,7 +188,8 @@ void test(Type &T) {
         // with storage
         auto lhs = ones(*lhs_it, T);
         auto rhs = ones(*rhs_it, T);
-        lhs.set_(rhs.storage());
+        auto storage = T.storage(rhs.numel(), false);
+        lhs.set_(storage);
         // should not be dim 0 because an empty storage is dim 1; all other
         // storages aren't scalars
         ASSERT_NE(lhs.dim(), 0);
@@ -196,7 +198,8 @@ void test(Type &T) {
         // with storage, offset, sizes, strides
         auto lhs = ones(*lhs_it, T);
         auto rhs = ones(*rhs_it, T);
-        lhs.set_(rhs.storage(), rhs.storage_offset(), rhs.sizes(), rhs.strides());
+        auto storage = T.storage(rhs.numel(), false);
+        lhs.set_(storage, rhs.storage_offset(), rhs.sizes(), rhs.strides());
         require_equal_size_dim(lhs, rhs);
       }
     }
@@ -266,12 +269,12 @@ void test(Type &T) {
 }
 
 TEST(TestScalarTensor, TestScalarTensorCPU) {
-  manual_seed(123);
+  manual_seed(123, at::kCPU);
   test(CPU(kFloat));
 }
 
 TEST(TestScalarTensor, TestScalarTensorCUDA) {
-  manual_seed(123);
+  manual_seed(123, at::kCUDA);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat));

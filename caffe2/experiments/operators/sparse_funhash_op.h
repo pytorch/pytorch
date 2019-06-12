@@ -74,7 +74,8 @@ class SparseFunHashOp : public Operator<Context> {
       ++n_segments;
     }
 
-    auto* output = Output(0, {n_segments, num_outputs_}, at::dtype<T>());
+    auto* output = Output(0);
+    output->Resize(n_segments, num_outputs_);
 
     T* output_data = output->template mutable_data<T>();
 
@@ -175,11 +176,12 @@ class SparseFunHashGradientOp : public Operator<Context> {
     int64_t num_nz_ent = seg.size(0);
 
     int64_t grad_weight_size = num_nz_ent * num_outputs_ * num_alpha;
-
-    auto* grad_weight_val = Output(0, {grad_weight_size}, at::dtype<T>());
+    auto* grad_weight_val = Output(0);
+    grad_weight_val->Resize(grad_weight_size);
     T* grad_weight_val_data = grad_weight_val->template mutable_data<T>();
 
-    auto* grad_weight_ind = Output(1, {grad_weight_size}, at::dtype<int64_t>());
+    auto* grad_weight_ind = Output(1);
+    grad_weight_ind->Resize(grad_weight_size);
     auto* grad_weight_ind_data =
         grad_weight_ind->template mutable_data<int64_t>();
 

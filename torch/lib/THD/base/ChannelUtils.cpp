@@ -1,4 +1,4 @@
-#include <THD/base/ChannelUtils.hpp>
+#include "ChannelUtils.hpp"
 
 #include <arpa/inet.h>
 #include <fcntl.h>

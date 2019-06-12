@@ -1,12 +1,8 @@
 #ifndef THC_CACHING_HOST_ALLOCATOR_INC
 #define THC_CACHING_HOST_ALLOCATOR_INC
 
-#include <THC/THCGeneral.h>
-
-
-#ifdef __cplusplus
-#include <c10/cuda/CUDAStream.h>
-#endif
+#include "THCGeneral.h"
+#include "THCStream.h"
 
 //
 // A caching allocator for CUDA host allocations (pinned memory).
@@ -17,8 +13,8 @@
 //
 // To ensure correct behavior, THCCachingHostAllocator_recordEvent must be
 // called anytime a pointer from this allocator is used in a cudaMemcpyAsync
-// call between host and device. We implement this for storages and tensors in
-// copy_from_cpu_async_ and copy_to_cpu_async_.
+// call between host and device. The THC library implements this for storages
+// and tensors in THCTensor_(copyAsyncCPU) and THCTensor_(copyAsyncCuda).
 //
 // Note that this allocator does not split larger allocations into smaller
 // blocks, unlike the caching device allocator.
@@ -27,9 +23,7 @@ THC_API THAllocator* getTHCCachingHostAllocator(void);
 
 // Records an event in the specified stream. The allocation 'ptr' will not be
 // re-used until the event has occurred.
-#ifdef __cplusplus
-THC_API cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, at::cuda::CUDAStream stream);
-#endif
+THC_API cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, THCStream *stream);
 
 // Releases cached pinned memory allocations via cudaHostFree
 THC_API void THCCachingHostAllocator_emptyCache(void);

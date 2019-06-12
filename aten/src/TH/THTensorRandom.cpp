@@ -1,5 +1,5 @@
-#include <TH/THTensor.hpp>
-#include <TH/THVector.h>
+#include "THTensor.hpp"
+#include "THVector.h"
 
-#include <TH/generic/THTensorRandom.cpp>
-#include <TH/THGenerateAllTypes.h>
+#include "generic/THTensorRandom.cpp"
+#include "THGenerateAllTypes.h"

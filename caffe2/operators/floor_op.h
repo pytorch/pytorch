@@ -16,8 +16,8 @@ class FloorOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& X = Input(0);
-
-    auto* Y = Output(0, X.sizes(), at::dtype<float>());
+    auto* Y = Output(0);
+    Y->ResizeLike(X);
 
     const float* Xdata = X.template data<float>();
     float* Ydata = Y->template mutable_data<float>();

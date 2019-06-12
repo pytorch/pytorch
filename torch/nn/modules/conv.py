@@ -6,13 +6,9 @@ from .. import functional as F
 from .. import init
 from .module import Module
 from .utils import _single, _pair, _triple
-from ..._jit_internal import weak_module, weak_script_method, List
 
 
-@weak_module
 class _ConvNd(Module):
-
-    __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias']
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding, groups, bias):
@@ -66,7 +62,6 @@ class _ConvNd(Module):
         return s.format(**self.__dict__)
 
 
-@weak_module
 class Conv1d(_ConvNd):
     r"""Applies a 1D convolution over an input signal composed of several input
     planes.
@@ -181,13 +176,11 @@ class Conv1d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias)
 
-    @weak_script_method
     def forward(self, input):
         return F.conv1d(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
 
-@weak_module
 class Conv2d(_ConvNd):
     r"""Applies a 2D convolution over an input signal composed of several input
     planes.
@@ -304,6 +297,7 @@ class Conv2d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
+
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True):
         kernel_size = _pair(kernel_size)
@@ -314,13 +308,11 @@ class Conv2d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _pair(0), groups, bias)
 
-    @weak_script_method
     def forward(self, input):
         return F.conv2d(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
 
-@weak_module
 class Conv3d(_ConvNd):
     r"""Applies a 3D convolution over an input signal composed of several input
     planes.
@@ -432,6 +424,7 @@ class Conv3d(_ConvNd):
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
     """
+
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True):
         kernel_size = _triple(kernel_size)
@@ -442,21 +435,15 @@ class Conv3d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias)
 
-    @weak_script_method
     def forward(self, input):
         return F.conv3d(input, self.weight, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
 
-@weak_module
 class _ConvTransposeMixin(object):
-    __constants__ = ['stride', 'padding', 'kernel_size', 'dim_size',
-                     'output_padding', 'groups', 'dilation', 'transposed', 'bias']
 
-    @weak_script_method
     def forward(self, input, output_size=None):
-        # type(Tensor, Optional[List[int]]) -> Tensor
-        output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
+        output_padding = self._output_padding(input, output_size)
         func = self._backend.ConvNd(
             self.stride, self.padding, self.dilation, self.transposed,
             output_padding, self.groups)
@@ -465,48 +452,35 @@ class _ConvTransposeMixin(object):
         else:
             return func(input, self.weight, self.bias)
 
-    @weak_script_method
-    def _output_padding(self, input, output_size, stride, padding, kernel_size):
-        # type: (Tensor, Optional[List[int]], List[int], List[int], List[int]) -> List[int]
+    def _output_padding(self, input, output_size):
         if output_size is None:
-            ret = _single(self.output_padding)  # converting to list if was not already
-        else:
-            output_size = torch.jit._unwrap_optional(output_size)
-            k = input.dim() - 2
-            if len(output_size) == k + 2:
-                output_size = output_size[2:]
-            if len(output_size) != k:
-                raise ValueError(
-                    "output_size must have {} or {} elements (got {})"
-                    .format(k, k + 2, len(output_size)))
+            return self.output_padding
 
-            min_sizes = torch.jit.annotate(List[int], [])
-            max_sizes = torch.jit.annotate(List[int], [])
-            for d in range(k):
-                dim_size = ((input.size(d + 2) - 1) * stride[d] -
-                            2 * padding[d] + kernel_size[d])
-                min_sizes.append(dim_size)
-                max_sizes.append(min_sizes[d] + stride[d] - 1)
+        output_size = list(output_size)
+        k = input.dim() - 2
+        if len(output_size) == k + 2:
+            output_size = output_size[2:]
+        if len(output_size) != k:
+            raise ValueError(
+                "output_size must have {} or {} elements (got {})"
+                .format(k, k + 2, len(output_size)))
 
-            for i in range(len(output_size)):
-                size = output_size[i]
-                min_size = min_sizes[i]
-                max_size = max_sizes[i]
-                if size < min_size or size > max_size:
-                    raise ValueError((
-                        "requested an output size of {}, but valid sizes range "
-                        "from {} to {} (for an input of {})").format(
-                            output_size, min_sizes, max_sizes, input.size()[2:]))
+        def dim_size(d):
+            return ((input.size(d + 2) - 1) * self.stride[d] -
+                    2 * self.padding[d] + self.kernel_size[d])
 
-            res = torch.jit.annotate(List[int], [])
-            for d in range(k):
-                res.append(output_size[d] - min_sizes[d])
+        min_sizes = [dim_size(d) for d in range(k)]
+        max_sizes = [min_sizes[d] + self.stride[d] - 1 for d in range(k)]
+        for size, min_size, max_size in zip(output_size, min_sizes, max_sizes):
+            if size < min_size or size > max_size:
+                raise ValueError((
+                    "requested an output size of {}, but valid sizes range "
+                    "from {} to {} (for an input of {})").format(
+                        output_size, min_sizes, max_sizes, input.size()[2:]))
 
-            ret = res
-        return ret
+        return tuple([output_size[d] - min_sizes[d] for d in range(k)])
 
 
-@weak_module
 class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     r"""Applies a 1D transposed convolution operator over an input image
     composed of several input planes.
@@ -579,8 +553,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         - Output: :math:`(N, C_{out}, L_{out})` where
 
           .. math::
-              L_{out} = (L_{in} - 1) \times \text{stride} - 2 \times \text{padding} + \text{dilation}
-                        \times (\text{kernel\_size} - 1) + \text{output\_padding} + 1
+              L_{out} = (L_{in} - 1) \times \text{stride} - 2 \times \text{padding}
+                    + \text{kernel\_size} + \text{output\_padding}
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -605,16 +579,13 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias)
 
-    @weak_script_method
     def forward(self, input, output_size=None):
-        # type: (Tensor, Optional[List[int]]) -> Tensor
-        output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
+        output_padding = self._output_padding(input, output_size)
         return F.conv_transpose1d(
             input, self.weight, self.bias, self.stride, self.padding,
             output_padding, self.groups, self.dilation)
 
 
-@weak_module
 class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     r"""Applies a 2D transposed convolution operator over an input image
     composed of several input planes.
@@ -694,11 +665,11 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
 
         .. math::
-              H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{dilation}[0]
-                        \times (\text{kernel\_size}[0] - 1) + \text{output\_padding}[0] + 1
+              H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0]
+                    + \text{kernel\_size}[0] + \text{output\_padding}[0]
         .. math::
-              W_{out} = (W_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1] + \text{dilation}[1]
-                        \times (\text{kernel\_size}[1] - 1) + \text{output\_padding}[1] + 1
+              W_{out} = (W_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1]
+                    + \text{kernel\_size}[1] + \text{output\_padding}[1]
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -748,16 +719,13 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias)
 
-    @weak_script_method
     def forward(self, input, output_size=None):
-        # type: (Tensor, Optional[List[int]]) -> Tensor
-        output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
+        output_padding = self._output_padding(input, output_size)
         return F.conv_transpose2d(
             input, self.weight, self.bias, self.stride, self.padding,
             output_padding, self.groups, self.dilation)
 
 
-@weak_module
 class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     r"""Applies a 3D transposed convolution operator over an input image composed of several input
     planes.
@@ -839,15 +807,14 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` where
 
         .. math::
-              D_{out} = (D_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{dilation}[0]
-                        \times (\text{kernel\_size}[0] - 1) + \text{output\_padding}[0] + 1
+              D_{out} = (D_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0]
+                    + \text{kernel\_size}[0] + \text{output\_padding}[0]
         .. math::
-              H_{out} = (H_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1] + \text{dilation}[1]
-                        \times (\text{kernel\_size}[1] - 1) + \text{output\_padding}[1] + 1
+              H_{out} = (H_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1]
+                    + \text{kernel\_size}[1] + \text{output\_padding}[1]
         .. math::
-              W_{out} = (W_{in} - 1) \times \text{stride}[2] - 2 \times \text{padding}[2] + \text{dilation}[2]
-                        \times (\text{kernel\_size}[2] - 1) + \text{output\_padding}[2] + 1
-
+              W_{out} = (W_{in} - 1) \times \text{stride}[2] - 2 \times \text{padding}[2]
+                    + \text{kernel\_size}[2] + \text{output\_padding}[2]
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -887,10 +854,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias)
 
-    @weak_script_method
     def forward(self, input, output_size=None):
-        # type: (Tensor, Optional[List[int]]) -> Tensor
-        output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
+        output_padding = self._output_padding(input, output_size)
         return F.conv_transpose3d(
             input, self.weight, self.bias, self.stride, self.padding,
             output_padding, self.groups, self.dilation)

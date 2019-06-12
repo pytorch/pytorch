@@ -13,7 +13,8 @@ namespace torch {
 namespace nn {
 BatchNormOptions::BatchNormOptions(int64_t features) : features_(features) {}
 
-BatchNormImpl::BatchNormImpl(BatchNormOptions options) : options(options) {
+BatchNormImpl::BatchNormImpl(BatchNormOptions options)
+    : options(std::move(options)) {
   reset();
 }
 
@@ -32,7 +33,7 @@ void BatchNormImpl::reset() {
   }
 }
 
-Tensor BatchNormImpl::forward(const Tensor& input) {
+Tensor BatchNormImpl::forward(Tensor input) {
   AT_CHECK(
       options.stateful_,
       "Calling BatchNorm::forward is only permitted when "
@@ -41,10 +42,7 @@ Tensor BatchNormImpl::forward(const Tensor& input) {
   return pure_forward(input, running_mean, running_variance);
 }
 
-Tensor BatchNormImpl::pure_forward(
-    const Tensor& input,
-    const Tensor& mean,
-    const Tensor& variance) {
+Tensor BatchNormImpl::pure_forward(Tensor input, Tensor mean, Tensor variance) {
   if (is_training()) {
     const auto num_channels = input.dim() > 1 ? input.size(1) : 1;
     AT_CHECK(

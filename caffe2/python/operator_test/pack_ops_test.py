@@ -209,7 +209,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
         exponentiated = workspace.FetchBlob('r')
         assert(exponentiated[0, -1, 0] == 0.0)
 
-    @given(**hu.gcs)
+    @given(**hu.gcs_cpu_only)
     def test_presence_mask(self, gc, dc):
         lengths = np.array([1, 2, 3], dtype=np.int32)
         data = np.array(

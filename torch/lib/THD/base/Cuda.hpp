@@ -2,7 +2,7 @@
 
 #ifdef USE_CUDA
 #include <THC/THC.h>
-#include <THD/base/Cuda.h>
+#include "Cuda.h"
 
 extern THCState** _THDCudaState;
 

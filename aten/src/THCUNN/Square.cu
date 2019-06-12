@@ -1,6 +1,6 @@
-#include <THCUNN/THCUNN.h>
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include "THCUNN.h"
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -21,5 +21,5 @@ struct squareupdateGradInput_functor
   }
 };
 
-#include <THCUNN/generic/Square.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/Square.cu"
+#include "THCGenerateFloatTypes.h"

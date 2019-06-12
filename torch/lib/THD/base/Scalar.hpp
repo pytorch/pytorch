@@ -2,7 +2,7 @@
 
 #include <cstddef>
 
-#include <THD/base/RPCType.hpp>
+#include "RPCType.hpp"
 
 namespace thd {
 

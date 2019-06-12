@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <ATen/native/DispatchStub.h>
 
 namespace at { struct TensorIterator; }

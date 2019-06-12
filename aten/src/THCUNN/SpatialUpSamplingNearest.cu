@@ -1,15 +1,15 @@
-#include <THCUNN/THCUNN.h>
-#include <THCUNN/common.h>
-#include <THC/THCTensor.hpp>
+#include "THCUNN.h"
+#include "common.h"
+#include "THCTensor.hpp"
 
-#include <THCUNN/upsampling.h>
-#include <THC/THCDeviceTensor.cuh>
-#include <THC/THCDeviceTensorUtils.cuh>
-#include <THC/THCDeviceUtils.cuh>
+#include "linear_upsampling.h"
+#include "THCDeviceTensor.cuh"
+#include "THCDeviceTensorUtils.cuh"
+#include "THCDeviceUtils.cuh"
 
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
-#include <THC/THCAtomics.cuh>
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
+#include "THCAtomics.cuh"
 
 template<typename Dtype, typename Acctype>
 __global__ void nearest_neighbor_4d_kernel(
@@ -98,5 +98,5 @@ __global__ void nearest_neighbor_4d_kernel_backward(
 }
 
 
-#include <THCUNN/generic/SpatialUpSamplingNearest.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/SpatialUpSamplingNearest.cu"
+#include "THCGenerateFloatTypes.h"

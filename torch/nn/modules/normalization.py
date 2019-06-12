@@ -5,10 +5,8 @@ from .module import Module
 from .batchnorm import _BatchNorm
 from .. import functional as F
 from .. import init
-from ..._jit_internal import weak_module, weak_script_method
 
 
-@weak_module
 class LocalResponseNorm(Module):
     r"""Applies local response normalization over an input signal composed
     of several input planes, where channels occupy the second dimension.
@@ -37,16 +35,14 @@ class LocalResponseNorm(Module):
         >>> output_4d = lrn(signal_4d)
 
     """
-    __constants__ = ['size', 'alpha', 'beta', 'k']
 
-    def __init__(self, size, alpha=1e-4, beta=0.75, k=1.):
+    def __init__(self, size, alpha=1e-4, beta=0.75, k=1):
         super(LocalResponseNorm, self).__init__()
         self.size = size
         self.alpha = alpha
         self.beta = beta
         self.k = k
 
-    @weak_script_method
     def forward(self, input):
         return F.local_response_norm(input, self.size, self.alpha, self.beta,
                                      self.k)
@@ -72,7 +68,6 @@ class CrossMapLRN2d(Module):
         return '{size}, alpha={alpha}, beta={beta}, k={k}'.format(**self.__dict__)
 
 
-@weak_module
 class LayerNorm(Module):
     r"""Applies Layer Normalization over a mini-batch of inputs as described in
     the paper `Layer Normalization`_ .
@@ -130,8 +125,6 @@ class LayerNorm(Module):
 
     .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
     """
-    __constants__ = ['normalized_shape', 'weight', 'bias', 'eps']
-
     def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
         super(LayerNorm, self).__init__()
         if isinstance(normalized_shape, numbers.Integral):
@@ -152,7 +145,6 @@ class LayerNorm(Module):
             init.ones_(self.weight)
             init.zeros_(self.bias)
 
-    @weak_script_method
     def forward(self, input):
         return F.layer_norm(
             input, self.normalized_shape, self.weight, self.bias, self.eps)
@@ -162,7 +154,6 @@ class LayerNorm(Module):
             'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
 
 
-@weak_module
 class GroupNorm(Module):
     r"""Applies Group Normalization over a mini-batch of inputs as described in
     the paper `Group Normalization`_ .
@@ -205,9 +196,6 @@ class GroupNorm(Module):
 
     .. _`Group Normalization`: https://arxiv.org/abs/1803.08494
     """
-    __constants__ = ['num_groups', 'num_channels', 'eps', 'affine', 'weight',
-                     'bias']
-
     def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
         super(GroupNorm, self).__init__()
         self.num_groups = num_groups
@@ -227,7 +215,6 @@ class GroupNorm(Module):
             init.ones_(self.weight)
             init.zeros_(self.bias)
 
-    @weak_script_method
     def forward(self, input):
         return F.group_norm(
             input, self.num_groups, self.weight, self.bias, self.eps)

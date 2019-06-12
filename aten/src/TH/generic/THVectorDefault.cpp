@@ -1,8 +1,8 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "TH/generic/THVectorDefault.cpp"
+#define TH_GENERIC_FILE "generic/THVectorDefault.cpp"
 #else
 
-#include <TH/THRandom.h>
+#include "../THRandom.h"
 
 void THVector_(copy_DEFAULT)(scalar_t *x, const scalar_t *y, const ptrdiff_t n) {
   ptrdiff_t i = 0;

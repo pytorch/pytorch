@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import unittest
 
-from hypothesis import given, assume
+from hypothesis import given
 import numpy as np
 
 from caffe2.proto import caffe2_pb2
@@ -410,11 +410,9 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
         dc_cpu_only = [d for d in dc if d.device_type != caffe2_pb2.CUDA]
         self.assertDeviceChecks(dc_cpu_only, op, [X, Y], [0])
 
-    @unittest.skipIf(not workspace.has_gpu_support and not workspace.has_hip_support, "No gpu support")
-    @given(**hu.gcs)
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
+    @given(**hu.gcs_gpu_only)
     def test_sum_reduce_fp16(self, gc, dc):
-        assume(core.IsGPUDeviceType(gc.device_type))
-
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
         X = np.random.rand(2, 3, 4, 5).astype(np.float16)
         Y = np.random.rand(4, 5).astype(np.float16)

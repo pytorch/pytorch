@@ -1,5 +1,5 @@
-#include <THC/THCTensorMathPointwise.cuh>
-#include <THC/THCTensor.hpp>
-
-#include <THC/generic/THCTensorMathPointwise.cu>
-#include <THC/THCGenerateLongType.h>
+#include "../THCTensorMathPointwise.cuh"
+#include "THCTensor.hpp"
+#include "THCStream.h"
+#include "../generic/THCTensorMathPointwise.cu"
+#include "../THCGenerateLongType.h"

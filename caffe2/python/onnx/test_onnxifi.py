@@ -53,8 +53,6 @@ class OnnxifiTest(TestCase):
             ["X"],
             ["Y"],
             onnx_model=model_def.SerializeToString(),
-            input_names=["X"],
-            output_names=["Y"],
             output_shape_hint_0=[ONNXIFI_DATATYPE_FLOAT32, batch_size, 1, 3, 2])
         workspace.FeedBlob("X", X)
         workspace.RunOperatorOnce(op)
@@ -90,21 +88,17 @@ class OnnxifiTest(TestCase):
             outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT,
                 [1, 1, 3, 3])])
         model_def = make_model(graph_def, producer_name='conv-test')
-        # We intentional rewrite the input/output name so test that the
-        # input/output binding of c2 op is positional
         op = core.CreateOperator(
             "Onnxifi",
-            ["X0"],
-            ["Y0"],
+            ["X"],
+            ["Y"],
             onnx_model=model_def.SerializeToString(),
-            initializers=["W", "W0"],
-            input_names=["X"],
-            output_names=["Y"],
+            initializers=["W", "W"],
             output_shape_hint_0=[ONNXIFI_DATATYPE_FLOAT32, 1, 1, 3, 3])
-        workspace.FeedBlob("X0", X)
-        workspace.FeedBlob("W0", W)
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("W", W)
         workspace.RunOperatorOnce(op)
-        Y = workspace.FetchBlob("Y0")
+        Y = workspace.FetchBlob("Y")
         np.testing.assert_almost_equal(Y, Y_without_padding)
 
 

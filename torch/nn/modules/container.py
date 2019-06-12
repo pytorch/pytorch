@@ -137,7 +137,7 @@ class ModuleList(Module):
             return self._modules[self._get_abs_string_index(idx)]
 
     def __setitem__(self, idx, module):
-        idx = self._get_abs_string_index(idx)
+        idx = operator.index(idx)
         return setattr(self, str(idx), module)
 
     def __delitem__(self, idx):
@@ -343,24 +343,19 @@ class ParameterList(Module):
         if parameters is not None:
             self += parameters
 
-    def _get_abs_string_index(self, idx):
-        """Get the absolute index for the list of modules"""
-        idx = operator.index(idx)
-        if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
-        if idx < 0:
-            idx += len(self)
-        return str(idx)
-
     def __getitem__(self, idx):
         if isinstance(idx, slice):
             return self.__class__(list(self._parameters.values())[idx])
         else:
-            idx = self._get_abs_string_index(idx)
+            idx = operator.index(idx)
+            if not (-len(self) <= idx < len(self)):
+                raise IndexError('index {} is out of range'.format(idx))
+            if idx < 0:
+                idx += len(self)
             return self._parameters[str(idx)]
 
     def __setitem__(self, idx, param):
-        idx = self._get_abs_string_index(idx)
+        idx = operator.index(idx)
         return self.register_parameter(str(idx), param)
 
     def __len__(self):

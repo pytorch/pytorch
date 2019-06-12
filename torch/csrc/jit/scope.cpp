@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/ir.h>
+#include "ir.h"
 
 
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/assertions.h>
+#include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <iostream>
 #include <unordered_map>

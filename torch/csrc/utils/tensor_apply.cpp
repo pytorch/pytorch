@@ -1,11 +1,11 @@
-#include <torch/csrc/utils/tensor_apply.h>
+#include "tensor_apply.h"
 
 #include <ATen/TensorUtils.h>
 #include <ATen/ExpandUtils.h>
 
-#include <torch/csrc/Exceptions.h>
-#include <torch/csrc/utils/python_numbers.h>
-#include <torch/csrc/utils/python_scalars.h>
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/python_scalars.h"
 
 using namespace at;
 

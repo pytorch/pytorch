@@ -4,7 +4,7 @@
 #include <vector>
 #include <functional>
 
-#include <torch/csrc/jit/script/lexer.h>
+#include "torch/csrc/jit/script/lexer.h"
 
 namespace torch {
 namespace jit {
@@ -52,8 +52,7 @@ struct Tree : std::enable_shared_from_this<Tree> {
   const TreeRef& tree(size_t i) const {
     return trees().at(i);
   }
-  virtual TreeRef map(const std::function<TreeRef(TreeRef)>& fn) {
-    (void)fn;
+  virtual TreeRef map(std::function<TreeRef(TreeRef)> fn) {
     return shared_from_this();
   }
   template <typename... Args>
@@ -111,7 +110,7 @@ struct String : public Tree {
 };
 
 static SourceRange mergeRanges(SourceRange c, const TreeList& others) {
-  for (const auto& t : others) {
+  for (auto t : others) {
     if (t->isAtom())
       continue;
     size_t s = std::min(c.start(), t->range().start());
@@ -137,7 +136,7 @@ struct Compound : public Tree {
   bool isAtom() const override {
     return false;
   }
-  TreeRef map(const std::function<TreeRef(TreeRef)>& fn) override {
+  TreeRef map(std::function<TreeRef(TreeRef)> fn) override {
     TreeList trees_;
     for (auto& t : trees()) {
       trees_.push_back(fn(t));
@@ -171,7 +170,7 @@ struct pretty_tree {
         break;
       default:
         out << "(" << kindToString(t->kind());
-        for (const auto& e : t->trees()) {
+        for (auto e : t->trees()) {
           out << " " << get_flat(e);
         }
         out << ")";
@@ -188,7 +187,7 @@ struct pretty_tree {
     }
     std::string k = kindToString(t->kind());
     out << "(" << k;
-    for (const auto& e : t->trees()) {
+    for (auto e : t->trees()) {
       out << "\n" << std::string(indent + 2, ' ');
       print(out, e, indent + 2);
     }
@@ -201,7 +200,7 @@ static inline std::ostream& operator<<(std::ostream& out, pretty_tree t_) {
   return out << std::endl;
 }
 
-static inline std::ostream& operator<<(std::ostream& out, const TreeRef& t) {
+static inline std::ostream& operator<<(std::ostream& out, TreeRef t) {
   return out << pretty_tree(t);
 }
 

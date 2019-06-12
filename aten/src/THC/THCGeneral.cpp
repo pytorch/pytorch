@@ -1,13 +1,13 @@
-#include <THC/THCGeneral.h>
-#include <TH/TH.h>
-#include <THC/THCAllocator.h>
-#include <THC/THCCachingHostAllocator.h>
-#include <THC/THCTensorRandom.h>
-#include <THC/THCGeneral.hpp>
+#include "THCGeneral.h"
+#include "TH.h"
+#include "THCAllocator.h"
+#include "THCCachingHostAllocator.h"
+#include "THCTensorRandom.h"
+#include "THCGeneral.hpp"
 
-#include <c10/cuda/CUDAStream.h>
+#include "ATen/cuda/CUDAStream.h"
 
-#include <THC/THCCachingAllocator.h>
+#include "THCCachingAllocator.h"
 #include <stdlib.h>
 #include <stdint.h>
 
@@ -222,14 +222,30 @@ THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   return &(state->resourcesPerDevice[device]);
 }
 
-// TODO: delete me
-cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
-  return at::cuda::getCurrentCUDAStream(device).stream();
+THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
+  return at::cuda::detail::CUDAStream_getCurrentStream(device);
 }
 
-// TODO: delete me
+void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
+  at::cuda::detail::CUDAStream_setStream(stream);
+}
+
+THC_API void THCState_setStream(THCState *state, THCStream* stream) {
+  at::cuda::detail::CUDAStream_setStream(stream);
+}
+
+cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
+  return at::cuda::detail::CUDAStream_stream(
+    at::cuda::detail::CUDAStream_getCurrentStream(device));
+}
+
 cudaStream_t THCState_getCurrentStream(THCState *state) {
-  return at::cuda::getCurrentCUDAStream().stream();
+  return at::cuda::detail::CUDAStream_stream(
+    at::cuda::detail::CUDAStream_getCurrentStream());
+}
+
+THCStream* THCState_getStream(THCState *state) {
+  return at::cuda::detail::CUDAStream_getCurrentStream();
 }
 
 cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
@@ -420,7 +436,8 @@ at::DataPtr THCudaHostAlloc(THCState *state, size_t size)
 
 void THCudaHostRecord(THCState *state, void *ptr) {
   if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
-    THCCachingHostAllocator_recordEvent(ptr, at::cuda::getCurrentCUDAStream());
+    THCStream* stream = THCState_getStream(state);
+    THCCachingHostAllocator_recordEvent(ptr, stream);
   }
 }
 
@@ -455,5 +472,5 @@ cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalB
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE
 
-#include <THC/THCStorage.cpp>
-#include <THC/THCAllocator.cpp>
+#include "THCStorage.cpp"
+#include "THCAllocator.cpp"

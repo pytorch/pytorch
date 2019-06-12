@@ -1,6 +1,6 @@
 #pragma once
 
-#include <THD/base/ChannelUtils.hpp>
+#include "../ChannelUtils.hpp"
 
 #include <string>
 #include <vector>

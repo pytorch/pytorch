@@ -1,12 +1,14 @@
-#include <THCUNN/THCUNN.h>
-#include <THC/THCTensor.hpp>
-#include <THCUNN/common.h>
-#include <THC/THCDeviceTensor.cuh>
-#include <THC/THCDeviceTensorUtils.cuh>
-#include <THC/THCDeviceUtils.cuh>
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
-#include <THC/THCAtomics.cuh>
+#include "THCUNN.h"
+#include "THCTensor.hpp"
+#include "common.h"
+#include "THCDeviceTensor.cuh"
+#include "THCDeviceTensorUtils.cuh"
+#include "THCDeviceUtils.cuh"
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
+#include "THCAtomics.cuh"
+
+#include <cfloat>
 
 template <typename Dtype>
 __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
@@ -29,9 +31,9 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
     int tStart = oFrame  * dT - padT;
     int hStart = oRow    * dH - padH;
     int wStart = oColumn * dW - padW;
-    int tEnd = min(tStart + (kT - 1) * dilationT + 1, inputT);
-    int hEnd = min(hStart + (kH - 1) * dilationH + 1, inputH);
-    int wEnd = min(wStart + (kW - 1) * dilationW + 1, inputW);
+    int tEnd = fminf(tStart + (kT - 1) * dilationT + 1, inputT);
+    int hEnd = fminf(hStart + (kH - 1) * dilationH + 1, inputH);
+    int wEnd = fminf(wStart + (kW - 1) * dilationW + 1, inputW);
 
     while(tStart < 0)
       tStart += dilationT;
@@ -90,9 +92,9 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
     int tStart = oFrame  * dT - padT;
     int hStart = oRow    * dH - padH;
     int wStart = oColumn * dW - padW;
-    int tEnd = min(tStart + (kT - 1) * dilationT + 1, inputT);
-    int hEnd = min(hStart + (kH - 1) * dilationH + 1, inputH);
-    int wEnd = min(wStart + (KERNEL_WIDTH - 1) * dilationW + 1, inputW);
+    int tEnd = fminf(tStart + (kT - 1) * dilationT + 1, inputT);
+    int hEnd = fminf(hStart + (kH - 1) * dilationH + 1, inputH);
+    int wEnd = fminf(wStart + (KERNEL_WIDTH - 1) * dilationW + 1, inputW);
 
     while(tStart < 0)
       tStart += dilationT;
@@ -155,5 +157,5 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateGradInput(
   }
 }
 
-#include <THCUNN/generic/VolumetricDilatedMaxPooling.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/VolumetricDilatedMaxPooling.cu"
+#include "THCGenerateFloatTypes.h"

@@ -4,9 +4,8 @@
 #include <unordered_set>
 
 #include <NvInfer.h>
+#include <google/protobuf/text_format.h>
 #include <onnx2trt.hpp>
-
-#include "onnx/proto_utils.h"
 
 #include "caffe2/contrib/tensorrt/trt_utils.h"
 #include "caffe2/core/context_gpu.h"
@@ -43,7 +42,9 @@ std::unordered_map<std::string, TensorShape> InferShapes(
 
 void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model, const std::string& fname) {
   std::ofstream ff(fname);
-  ff << ::ONNX_NAMESPACE::ProtoDebugString(model) << std::endl;
+  std::string body;
+  ::google::protobuf::TextFormat::PrintToString(model.graph(), &body);
+  ff << body << std::endl;
   ff.close();
 }
 
@@ -99,7 +100,7 @@ void BlobToTensorProto(
     CPUTensorToTensorProto(cpu_tensor, t);
   } else if (BlobIsTensorType(*blob, CUDA)) {
     const auto& cuda_tensor = blob->template Get<TensorCUDA>();
-    const auto cpu_tensor = TensorCPU(cuda_tensor, CPU);
+    const auto cpu_tensor = TensorCPU(cuda_tensor, context);
     context->FinishDeviceComputation();
     CPUTensorToTensorProto(cpu_tensor, t);
   } else {
@@ -140,7 +141,7 @@ void FillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
   model->set_producer_name("caffe2");
   auto* opset_id = model->add_opset_import();
   opset_id->set_domain("");
-  opset_id->set_version(7);
+  opset_id->set_version(3);
 }
 } // namespace
 
@@ -298,25 +299,17 @@ NetDef TensorRTTransformer::SubnetToTrtOp(
       ::ONNX_NAMESPACE::TensorProto tf;
       tf.set_name(t.name());
       tf.mutable_dims()->CopyFrom(t.dims());
-
-      if (t.data_type() == ::ONNX_NAMESPACE::TensorProto::FLOAT) {
-        tf.set_data_type(::ONNX_NAMESPACE::TensorProto::FLOAT);
-        std::vector<int64_t> v;
-        v.resize(t.raw_data().size() / sizeof(int64_t));
-        memcpy(v.data(), t.raw_data().data(), t.raw_data().size());
-        std::vector<float> vf;
-        for (auto i : v) {
-          vf.push_back(static_cast<float>(i));
-        }
-        tf.mutable_raw_data()->assign(
-            reinterpret_cast<const char *>(vf.data()), sizeof(float) * vf.size());
-      } else if (t.data_type() == ::ONNX_NAMESPACE::TensorProto::INT64) {
-        tf.set_data_type(::ONNX_NAMESPACE::TensorProto::INT64);
-        tf.mutable_raw_data()->assign(t.raw_data().data(), t.raw_data().size());
-      } else {
-        CAFFE_THROW("Unsupported tensor data type for conversion: ",
-            t.data_type());
+      tf.set_data_type(::ONNX_NAMESPACE::TensorProto::FLOAT);
+      std::vector<int64_t> v;
+      v.resize(t.raw_data().size() / sizeof(int64_t));
+      memcpy(v.data(), t.raw_data().data(), t.raw_data().size());
+      std::vector<float> vf;
+      for (auto i : v) {
+        vf.push_back(static_cast<float>(i));
       }
+      tf.mutable_raw_data()->assign(
+          reinterpret_cast<const char*>(vf.data()), sizeof(float) * vf.size());
+
       onnx_model.mutable_graph()->add_initializer()->CopyFrom(tf);
     }
   }
@@ -481,7 +474,7 @@ void TensorRTTransformer::Transform(
   auto shape_hints = InferShapes(&mapped_ws, pred_net, &shape_hints_ordered);
 
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
-  onnx::OnnxExporter exporter(nullptr);
+  onnx::OnnxExporter exporter(nullptr, true);
   tensorrt::TrtLogger logger;
   auto trt_builder = tensorrt::TrtObject(nvinfer1::createInferBuilder(logger));
   auto trt_network = tensorrt::TrtObject(trt_builder->createNetwork());
@@ -512,7 +505,7 @@ void TensorRTTransformer::Transform(
   // but it should be OK as the cost is really small. We also need to keep the
   // same exporter throughout the process to avoid duplicated dummy name
   // generation
-  onnx::OnnxExporter exporter2(nullptr);
+  onnx::OnnxExporter exporter2(nullptr, true);
   auto trt_converter = [this, &mapped_ws, &shape_hints, &exporter2](
                            const caffe2::NetDef& net) mutable {
     return SubnetToTrtOp(net, &mapped_ws, &exporter2, &shape_hints);

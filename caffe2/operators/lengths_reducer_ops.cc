@@ -99,15 +99,10 @@ using SparseLengthsWeightedSumDef = AbstractSparseLengthsDef<
 OPERATOR_SCHEMA(SparseLengthsWeightedSum)
     .NumInputs(SparseLengthsWeightedSumDef::ForwardOp::kNumInputs)
     .NumOutputs(1)
-    .WeightedValueKeyLengthInputFillers(
-        SparseLengthsWeightedSumOp::DATA,
-        SparseLengthsWeightedSumOp::INDICES,
-        SparseLengthsWeightedSumOp::LENGTHS,
-        SparseLengthsWeightedSumOp::WEIGHT)
+    .DisallowInputFillers() // TODO: enable input fillers
     .SetDoc(FormatDoc<SparseLengthsWeightedSumDef>())
     .Output(0, "OUTPUT", "Aggregated tensor")
-    .FillUsing(SparseLengthsWeightedSumDef::PopulateSchema)
-    .InheritOnnxSchema();
+    .FillUsing(SparseLengthsWeightedSumDef::PopulateSchema);
 REGISTER_CPU_OPERATOR(
     SparseLengthsWeightedSumGradient,
     SparseLengthsWeightedSumDef::BackwardOp);

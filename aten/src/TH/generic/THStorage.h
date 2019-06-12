@@ -1,10 +1,10 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "TH/generic/THStorage.h"
+#define TH_GENERIC_FILE "generic/THStorage.h"
 #else
 
 #ifdef __cplusplus
 #include <ATen/Allocator.h>
-#include <c10/core/StorageImpl.h>
+#include <ATen/StorageImpl.h>
 #endif
 
 /* on pourrait avoir un liste chainee

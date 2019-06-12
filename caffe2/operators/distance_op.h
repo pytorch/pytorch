@@ -31,7 +31,8 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
     auto& X = Input(0);
     auto& Y = Input(1);
     auto& dDistance = Input(2);
-
+    auto* dX = Output(0);
+    auto* dY = Output(1);
     int N = X.dim() > 0 ? X.dim32(0) : 1;
     int D = N > 0 ? X.numel() / N : 0;
     CAFFE_ENFORCE(X.dim() == Y.dim());
@@ -40,8 +41,8 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
     }
     CAFFE_ENFORCE(dDistance.dim() == 1);
     CAFFE_ENFORCE(dDistance.dim32(0) == N);
-    auto* dX = Output(0, X.sizes(), at::dtype<T>());
-    auto* dY = Output(1, Y.sizes(), at::dtype<T>());
+    dX->ResizeLike(X);
+    dY->ResizeLike(Y);
     math::Sub<T, Context>(
         X.numel(),
         X.template data<T>(),
@@ -189,7 +190,8 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
     auto& X = Input(X_IN);
     auto& Y = Input(Y_IN);
     auto& dDot = Input(DER_DOT_IN);
-
+    auto* dX = Output(DER_X_OUT);
+    auto* dY = Output(DER_Y_OUT);
     int N, D, DX, DY, restD;
     if (X.numel() > 0) {
       N = X.dim() > 0 ? X.dim32(0) : 1;
@@ -207,8 +209,8 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(X.dim32(0), Y.dim32(0));
     CAFFE_ENFORCE_EQ(dDot.dim(), 1);
     CAFFE_ENFORCE_EQ(dDot.dim32(0), N);
-    auto* dX = Output(DER_X_OUT, X.sizes(), at::dtype<T>());
-    auto* dY = Output(DER_Y_OUT, Y.sizes(), at::dtype<T>());
+    dX->ResizeLike(X);
+    dY->ResizeLike(Y);
 
     const auto* X_data = X.template data<T>();
     const auto* Y_data = Y.template data<T>();

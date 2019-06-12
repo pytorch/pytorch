@@ -1,5 +1,5 @@
 #include <ATen/native/cuda/Reduce.cuh>
-#include <c10/util/ArrayRef.h>
+#include <ATen/core/ArrayRef.h>
 
 #include <iostream>
 

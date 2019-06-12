@@ -123,9 +123,9 @@ bool SliceImplGpu(
   }
   if (dim == -1) {
     if (!backward) {
-      output->CopyFrom(data, true /*async*/);
+      output->CopyFrom(data, context);
     } else {
-      gdata->CopyFrom(*go, true /*async*/);
+      gdata->CopyFrom(*go, context);
     }
     return true;
   }

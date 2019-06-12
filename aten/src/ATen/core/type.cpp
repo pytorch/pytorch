@@ -6,7 +6,7 @@ namespace c10 {
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if(auto value = t.cast<CompleteTensorType>()) {
-    out << toString(value->scalarType()) << "(";
+    out << at::toString(value->scalarType()) << "(";
     auto& sizes = value->sizes();
     auto& strides = value->strides();
     AT_ASSERT(sizes.size() == strides.size());
@@ -24,7 +24,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     }
     out << ")";
   } else if (auto value = t.cast<TensorType>()) {
-    out << toString(value->scalarType()) << "(";
+    out << at::toString(value->scalarType()) << "(";
     for (int i = 0; i < value->dim(); ++i) {
       if (i > 0) {
         out << ", ";
@@ -32,25 +32,39 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "*";
     }
     out << ")";
+  } else if(t.kind() == TypeKind::DynamicType) {
+    out << "Dynamic";
+  } else if(t.kind() == TypeKind::UndefinedTensorType) {
+    out << "Undefined";
+  } else if(t.kind() == TypeKind::TupleType) {
+    out << "Tuple";
+  } else if(t.kind() == TypeKind::NumberType) {
+    out << "Number";
+  } else if(t.kind() == TypeKind::FloatType) {
+    out << "float";
+  } else if(t.kind() == TypeKind::IntType) {
+    out << "int";
+  } else if(t.kind() == TypeKind::BoolType) {
+    out << "bool";
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
   } else if (t.kind() == TypeKind::OptionalType) {
     auto prim = t.cast<OptionalType>()->getElementType();
     out << *prim << "?";
+  } else if(t.kind() == TypeKind::NoneType) {
+    out << "None";
+  } else if(t.kind() == TypeKind::StringType) {
+    out << "string";
+  } else if(t.kind() == TypeKind::GeneratorType) {
+    out << "Generator";
+  } else if(t.kind() == TypeKind::VarType) {
+    out << t.expect<VarType>()->name();
   } else if(t.kind() == TypeKind::FutureType) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
-  } else if(auto tup = t.cast<TupleType>()) {
-    out << "(";
-    for(size_t i = 0; i < tup->elements().size(); ++i) {
-      if(i > 0)
-        out << ", ";
-      out << *(tup->elements()[i]);
-    }
-    out << ")";
   } else {
-    out << t.str();
+    AT_ERROR("unknown type kind");
   }
   return out;
 }
@@ -89,10 +103,6 @@ GeneratorTypePtr GeneratorType::get() {
 }
 StringTypePtr StringType::get() {
   static auto value = StringType::create();
-  return value;
-}
-DeviceObjTypePtr DeviceObjType::get() {
-  static auto value = DeviceObjType::create();
   return value;
 }
 OptionalTypePtr OptionalType::ofTensor() {
@@ -137,8 +147,6 @@ TypePtr inferTypeFrom(const IValue& value) {
     return ListType::ofFloats();
   } else if (value.isTuple()) {
     return TupleType::create(fmap(value.toTuple()->elements(), inferTypeFrom));
-  } else if (value.isDevice()) {
-    return DeviceObjType::get();
   }
   AT_ASSERTM(false, "Unhandled IValue kind in inferTypeFrom");
 }
@@ -193,105 +201,67 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   return c10::nullopt;
 }
 
-MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
-  MatchTypeReturn ret;
-  if(!formal->hasFreeVariables()) {
-    ret.type = formal;
-    return ret;
-  }
-
+TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
+  if(!formal->hasFreeVariables())
+    return formal;
   if(auto vt = formal->cast<VarType>()) {
     auto it = type_env.find(vt->name());
     if(it == type_env.end()) {
       type_env[vt->name()] = actual;
-      ret.type = actual;
-      return ret;
+      return actual;
     } else if(auto unified = unifyTypes(it->second, actual)) {
       type_env[vt->name()] = *unified;
-      ret.type = *unified;
-      return ret;
+      return *unified;
     }
     std::stringstream ss;
     ss << "type variable '" << vt->name() <<"' previously matched to type " <<
       it->second->str() << " is matched to type " << actual->str();
-    ret.errMsg = ss.str();
-    return ret;
+    throw TypeMatchError(ss.str());
   } else if(auto lt_formal = formal->cast<ListType>()) {
     if(auto lt_actual = actual->cast<ListType>()) {
-      const auto innerType = matchTypeVariables(
-          lt_formal->getElementType(),
-          lt_actual->getElementType(),
-          type_env);
-      if (!innerType.type) {
-        // propagate the errMsg onward
-        return innerType;
-      }
-      ret.type = ListType::create(*innerType.type);
-      return ret;
+      return ListType::create(matchTypeVariables(lt_formal->getElementType(), lt_actual->getElementType(), type_env));
     } else {
       std::stringstream ss;
       ss << "cannot match a list to " << actual->str();
-      ret.errMsg = ss.str();
-      return ret;
+      throw TypeMatchError(ss.str());
     }
   } else if(auto tp_formal = formal->cast<TupleType>()) {
     if(auto tp_actual = actual->cast<TupleType>()) {
       if(tp_formal->elements().size() != tp_actual->elements().size()) {
-        ret.errMsg = "cannot match tuples of mismatched size";
-        return ret;
+        std::stringstream ss;
+        throw TypeMatchError("cannot match tuples of mismatched size");
       }
       std::vector<TypePtr> elements;
       for(size_t i = 0; i < tp_formal->elements().size(); ++i) {
-        const auto result = matchTypeVariables(
+        TypePtr result = matchTypeVariables(
             tp_formal->elements()[i],
             tp_actual->elements()[i],
             type_env);
-        if (!result.type) {
-          return result;
-        }
-        elements.push_back(*result.type);
+        elements.push_back(result);
       }
-      ret.type = TupleType::create(std::move(elements));
-      return ret;
+      return TupleType::create(std::move(elements));
     } else {
       std::stringstream ss;
       ss << "cannot match a tuple to " << actual->str();
-      ret.errMsg = ss.str();
-      return ret;
+      throw TypeMatchError(ss.str());
     }
   } else if (auto lt_formal = formal->cast<FutureType>()) {
     if (auto lt_actual = actual->cast<FutureType>()) {
-      const auto innerType = matchTypeVariables(
-          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
-      if (!innerType.type) {
-        return innerType;
-      }
-      ret.type = FutureType::create(*innerType.type);
-      return ret;
+      return FutureType::create(matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env));
     } else {
       std::stringstream ss;
       ss << "cannot match a future to " << actual->str();
-      ret.errMsg = ss.str();
-      return ret;
+      throw TypeMatchError(ss.str());
     }
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
     if (auto opt_actual = actual->cast<OptionalType>()) {
-      const auto optionedType = matchTypeVariables(
-          opt_formal->getElementType(), opt_actual->getElementType(), type_env);
-      if (!optionedType.type) {
-        return optionedType;
-      }
-      ret.type = OptionalType::create(*optionedType.type);
-      return ret;
-    } else if (!actual->isSubtypeOf(NoneType::get())) {
-      // If the actual type is a non-optional, allow matching to the formal if
-      // its element type matches the actual.
-      // Don't match None because it is already an optional (but one of
-      // unknown type).
-      return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
+      return OptionalType::create(matchTypeVariables(
+          opt_formal->getElementType(), opt_actual->getElementType(), type_env));
     } else {
-      ret.errMsg = "cannot match an Optional[T] to None, because there is no way to determine T from None.";
-      return ret;
+      // If the actual type is a non-optional, allow matching to the formal if
+      // its element type matches the actual
+      return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     }
   }
 
@@ -313,23 +283,6 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::strin
     });
     return type->withContained(std::move(new_contained));
   }
-}
-
-
-const char * typeKindToString(TypeKind kind) {
-#define CASE_TYPE(T) case TypeKind::T: return #T;
-  switch(kind) {
-    C10_FORALL_TYPES(CASE_TYPE)
-  }
-#undef CASE_TYPE
-  return "";
-}
-
-bool Type::isSubtypeOf(const TypePtr rhs) const {
-  if(auto rhs_ = rhs->cast<OptionalType>()) {
-    return this->isSubtypeOf(rhs_->getElementType());
-  }
-  return *this == *rhs;
 }
 
 } // namespace c10

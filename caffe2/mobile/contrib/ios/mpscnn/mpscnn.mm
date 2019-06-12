@@ -2302,8 +2302,8 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
       int csz = im_i_boxes.rows();
       int cur_start_idx = out_rois->dim(0);
 
-      out_rois->Extend(csz, 50);
-      out_rois_probs->Extend(csz, 50);
+      out_rois->Extend(csz, 50, &context_);
+      out_rois_probs->Extend(csz, 50, &context_);
 
       // write rois
       Eigen::Map<ERArrXXf> cur_rois(

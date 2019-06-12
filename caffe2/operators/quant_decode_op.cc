@@ -1,7 +1,7 @@
 #include "quant_decode_op.h"
 #include <stdint.h>
 #include "caffe2/core/tensor.h"
-#include <c10/util/typeid.h>
+#include "caffe2/core/typeid.h"
 
 namespace caffe2 {
 

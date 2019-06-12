@@ -1,4 +1,4 @@
-#include <c10d/test/StoreTestCommon.hpp>
+#include "StoreTestCommon.hpp"
 
 #include <unistd.h>
 

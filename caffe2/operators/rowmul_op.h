@@ -19,8 +19,9 @@ class RowMulOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& mat = Input(0);
     auto& w = Input(1);
+    auto* output = Output(0);
 
-    auto* output = Output(0, mat.sizes(), at::dtype<T>());
+    output->ResizeLike(mat);
     T* output_data = output->template mutable_data<T>();
     const T* mat_data = mat.template data<T>();
     const T* w_data = w.template data<T>();
@@ -52,11 +53,12 @@ class ReduceTailSumOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& mat = Input(0);
+    auto* output = Output(0);
 
     int N = mat.dim32(0);
     int block_size = mat.size_from_dim(1);
 
-    auto* output = Output(0, {N}, at::dtype<T>());
+    output->Resize(N);
     T* output_data = output->template mutable_data<T>();
     const T* mat_data = mat.template data<T>();
 

@@ -2,8 +2,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 
-// TODO: Remove the condition on AT_ROCM_ENABLED entirely,
-// don't build this file as part of CPU build.
 #include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_ROCM_ENABLED()

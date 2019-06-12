@@ -55,7 +55,7 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnDropoutDescriptor_t dropout_desc_;
 
-  at::IntList cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   float ratio_;
   bool is_test_;
@@ -113,7 +113,7 @@ class CuDNNDropoutGradientOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnDropoutDescriptor_t dropout_desc_;
 
-  at::IntList cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   Blob* scratch_blob_;
 
@@ -146,11 +146,12 @@ bool CuDNNDropoutOp::DoRunWithType() {
     }
     return true;
   } else {
+    auto* mask = Output(1);
     // Reshape tensor descriptors if necessary
-    if (X.sizes() != cudnn_input_dims_) {
+    if (X.sizes() != cudnn_input_dims_ && !is_test_) {
       CAFFE_ENFORCE(scratch_blob_);
       Tensor* states = BlobGetMutableTensor(scratch_blob_, CUDA);
-      cudnn_input_dims_ = X.sizes();
+      cudnn_input_dims_ = X.sizes().vec();
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           data_desc_,
           GetCudnnTensorFormat(StorageOrder::NCHW),
@@ -164,6 +165,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
       CUDNN_ENFORCE(cudnnDropoutGetReserveSpaceSize(
           data_desc_, &reserve_space_size_in_bytes_));
 
+      mask->Resize(reserve_space_size_in_bytes_);
       states->Resize(states_size_in_bytes_);
 
       if (!states_initialized_) {
@@ -185,10 +187,6 @@ bool CuDNNDropoutOp::DoRunWithType() {
         states_initialized_ = true;
       }
     }
-    auto* mask = Output(
-        1,
-        {static_cast<int64_t>(reserve_space_size_in_bytes_)},
-        at::dtype<uint8_t>());
     CUDNN_ENFORCE(cudnnDropoutForward(
         cudnn_wrapper_.inline_cudnn_handle(),
         dropout_desc_,
@@ -246,7 +244,7 @@ bool CuDNNDropoutGradientOp::DoRunWithType() {
   }
 
   if (dY.sizes() != cudnn_input_dims_) {
-    cudnn_input_dims_ = dY.sizes();
+    cudnn_input_dims_ = dY.sizes().vec();
     CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
         data_desc_,
         GetCudnnTensorFormat(StorageOrder::NCHW),

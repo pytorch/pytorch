@@ -23,7 +23,7 @@ namespace c10 {
  * for you, given the underlying type supports it.
  */
 template <class ConcreteType, class UnderlyingType>
-class IdWrapper {
+class CAFFE2_API IdWrapper {
  public:
   using underlying_type = UnderlyingType;
   using concrete_type = ConcreteType;

@@ -59,14 +59,11 @@ class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
   /// The module must be constructed with `stateful = true` when calling this
   /// method, as the module will otherwise not store running statistics. If you
   /// want to supply the mean and variance yourself, use `pure_forward`.
-  Tensor forward(const Tensor& input);
+  Tensor forward(Tensor input);
 
   /// Applies batch normalization on the `input` using the given `mean` and
   /// `variance` statistics.
-  Tensor pure_forward(
-      const Tensor& input,
-      const Tensor& mean,
-      const Tensor& variance);
+  Tensor pure_forward(Tensor input, Tensor mean, Tensor variance);
 
   /// The options with which this module was constructed.
   BatchNormOptions options;

@@ -20,9 +20,10 @@ class MeanOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& input0 = Input(0);
+    auto* output = Output(0);
 
-    auto* output = Output(0, input0.sizes(), at::dtype<T>());
-    output->CopyFrom(input0, true /*async*/);
+    output->ResizeLike(input0);
+    output->CopyFrom(input0, &context_);
 
     if (InputSize() == 1) {
       return true;
@@ -92,8 +93,8 @@ class MeanGradientOp : public Operator<Context> {
     float scale = 1.0f / num_inputs;
 
     // dX0 = scale * dY
-
-    auto* dX0 = Output(0, dY.sizes(), at::dtype<T>());
+    auto* dX0 = Output(0);
+    dX0->ResizeLike(dY);
     math::Scale(
         size, scale, dY_data, dX0->template mutable_data<T>(), &context_);
 
@@ -101,7 +102,7 @@ class MeanGradientOp : public Operator<Context> {
     for (int i = 1; i < num_inputs; i++) {
       auto* cur_dX = Output(i);
       cur_dX->ResizeLike(dY);
-      cur_dX->CopyFrom(*dX0, true /*async*/);
+      cur_dX->CopyFrom(*dX0, &context_);
     }
 
     return true;

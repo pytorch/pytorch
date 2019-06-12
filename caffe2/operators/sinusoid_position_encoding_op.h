@@ -34,12 +34,13 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
   template <typename Index>
   bool DoRunWithType() {
     auto& positions = Input(0);
+    auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(positions.dim(), 2, "POSITIONS should be a 2-D tensor");
 
     auto shape = positions.sizes().vec();
     shape.push_back(embedding_size_);
-    auto* output = Output(0, shape, at::dtype<float>());
+    output->Resize(shape);
 
     int M = shape[0];
     int K = shape[1];

@@ -106,7 +106,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
     const auto& jw = Input(3);
     // Notice that we do not need to transpose b
     const auto& b = Input(4);
-    // transposed Y
+    auto* Yt = Output(0); // transposed Y
     // here we assume X is k-by-m
     CAFFE_ENFORCE_EQ(Xt.dim(), 2);
     CAFFE_ENFORCE_EQ(b.dim(), 1);
@@ -117,7 +117,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
     // number of outputs.
     int N = iw.dim32(0)-1;
     CAFFE_ENFORCE_EQ(N, b.dim32(0));
-    auto* Yt = Output(0, shape(N, M), at::dtype<T>());
+    Yt->Resize(shape(N, M));
 
     // Y' = W * X';
     Sparse_mm<T, Context>(

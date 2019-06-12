@@ -1,7 +1,6 @@
 #pragma once
 
-#include <c10/core/Backend.h>
-#include <c10/core/ScalarType.h>
+#include <ATen/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <type_traits>
 
@@ -31,9 +30,6 @@
 //
 // To call:
 //   stub(kCPU, tensor);
-//
-// TODO: CPU instruction set selection should be folded into whatever
-// the main dispatch mechanism is.
 
 // ignore warnings about DispatchStub::DEFAULT, AVX, AVX2 defined elsewhere
 #if defined(__clang__)
@@ -69,9 +65,6 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
     } else if (device_type == DeviceType::CUDA) {
       AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
       return (*cuda_dispatch_ptr)(std::forward<ArgTypes>(args)...);
-    } else if (device_type == DeviceType::HIP) {
-      AT_ASSERTM(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
-      return (*hip_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else {
       AT_ERROR("DispatchStub: unsupported device type", device_type);
     }
@@ -98,7 +91,6 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
 
   FnPtr cpu_dispatch_ptr = nullptr;
   FnPtr cuda_dispatch_ptr = nullptr;
-  FnPtr hip_dispatch_ptr = nullptr;
   static FnPtr DEFAULT;
 #ifdef HAVE_AVX_CPU_DEFINITION
   static FnPtr AVX;
@@ -110,16 +102,8 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
 
 namespace {
 template <typename FnPtr, typename T>
-struct RegisterCUDADispatch {
-  RegisterCUDADispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
-    stub.cuda_dispatch_ptr = value;
-  }
-};
-
-template <typename FnPtr, typename T>
-struct RegisterHIPDispatch {
-  RegisterHIPDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
-    // TODO: make this point at hip_dispatch_ptr
+struct RegisterDispatch {
+  RegisterDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
     stub.cuda_dispatch_ptr = value;
   }
 };
@@ -157,20 +141,10 @@ struct RegisterHIPDispatch {
   REGISTER_AVX2_DISPATCH(name, static_cast<fn_type>(nullptr))
 
 #define REGISTER_CUDA_DISPATCH(name, fn) \
-  static RegisterCUDADispatch<decltype(fn), struct name> name ## __register(name, fn);
+  static RegisterDispatch<decltype(fn), struct name> name ## __register(name, fn);
 
-#define REGISTER_HIP_DISPATCH(name, fn) \
-  static RegisterHIPDispatch<decltype(fn), struct name> name ## __register(name, fn);
-
-// NB: This macro must be used in an actual 'cu' file; if you try using
-// it from a 'cpp' file it will not work!
 #if defined(__CUDACC__)
 #define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
-#elif defined(__HIPCC__)
-// TODO: cut this over to HIP dispatch once we stop pretending that CUDA
-// is HIP in the PyTorch HIPify build.
-#define REGISTER_DISPATCH(name, fn) REGISTER_CUDA_DISPATCH(name, fn)
-// #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
 #endif

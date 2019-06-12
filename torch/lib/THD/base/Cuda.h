@@ -1,7 +1,7 @@
 #pragma once
 
 #ifdef USE_CUDA
-#include <THD/THD.h>
+#include "../THD.h"
 
 #include <THC/THC.h>
 

@@ -1,11 +1,11 @@
-#include <THCUNN/THCUNN.h>
-#include <THCUNN/common.h>
-#include <THCUNN/im2col.h>
+#include "THCUNN.h"
+#include "common.h"
+#include "im2col.h"
 
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
-#include <THC/THCTensor.hpp>
-#include <THC/THCStorage.hpp>
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 
-#include <THCUNN/generic/Im2Col.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/Im2Col.cu"
+#include "THCGenerateFloatTypes.h"

@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/python_arg_flatten.h>
+#include "python_arg_flatten.h"
 
-#include <torch/csrc/autograd/grad_mode.h>
+#include "torch/csrc/autograd/grad_mode.h"
 
 namespace torch { namespace jit { namespace python {
 

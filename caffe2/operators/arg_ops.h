@@ -30,7 +30,7 @@ class ArgOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& X = Input(0);
-
+    auto* Y = Output(0);
     const int ndim = X.dim();
     if (axis_ == -1) {
       axis_ = ndim - 1;
@@ -38,7 +38,7 @@ class ArgOp final : public Operator<Context> {
     CAFFE_ENFORCE_GE(axis_, 0);
     CAFFE_ENFORCE_LT(axis_, ndim);
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
-    std::vector<int64_t> Y_dims;
+    std::vector<int> Y_dims;
     Y_dims.reserve(ndim);
     int prev_size = 1;
     int next_size = 1;
@@ -53,7 +53,7 @@ class ArgOp final : public Operator<Context> {
       Y_dims.push_back(X_dims[i]);
       next_size *= X_dims[i];
     }
-    auto* Y = Output(0, Y_dims, at::dtype<int64_t>());
+    Y->Resize(Y_dims);
     const int n = X_dims[axis_];
     return reducer_(
         prev_size,

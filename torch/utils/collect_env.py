@@ -66,9 +66,9 @@ def run_and_parse_first_match(run_lambda, command, regex):
 
 def get_conda_packages(run_lambda):
     if get_platform() == 'win32':
-        grep_cmd = r'findstr /R "torch soumith mkl magma"'
+        grep_cmd = r'findstr /R "torch soumith"'
     else:
-        grep_cmd = r'grep "torch\|soumith\|mkl\|magma"'
+        grep_cmd = r'grep "torch\|soumith"'
     out = run_and_read_all(run_lambda, 'conda list | ' + grep_cmd)
     if out is None:
         return out

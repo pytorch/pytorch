@@ -980,10 +980,12 @@ class _DistTestBase(object):
             input = input[torch.randperm(batch_size)]
 
         # Test that saving and loading work
-        with tempfile.TemporaryFile() as tmp_file:
-            torch.save(model_DDP, tmp_file)
-            tmp_file.seek(0)
-            saved_model_DDP = torch.load(tmp_file)
+        # gloo serialization doesn't work, see #12261
+        if BACKEND != "gloo":
+            with tempfile.TemporaryFile() as tmp_file:
+                torch.save(model_DDP, tmp_file)
+                tmp_file.seek(0)
+                saved_model_DDP = torch.load(tmp_file)
 
     @unittest.skipIf(
         BACKEND != "nccl" and BACKEND != "gloo",

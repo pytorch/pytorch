@@ -1,14 +1,13 @@
 #pragma once
 
-#include <torch/csrc/jit/function_schema.h>
-#include <torch/csrc/jit/ivalue.h>
-#include <torch/csrc/jit/stack.h>
-#include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/type.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/auto_gil.h>
-#include <torch/csrc/Device.h>
+#include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/ivalue.h"
+#include "torch/csrc/jit/stack.h"
+#include "torch/csrc/jit/script/module.h"
+#include "torch/csrc/jit/type.h"
+#include "torch/csrc/jit/operator.h"
+#include "torch/csrc/utils/pybind.h"
+#include "torch/csrc/utils/auto_gil.h"
 
 #include <c10/util/Exception.h>
 
@@ -148,10 +147,6 @@ inline IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_
       }
       case TypeKind::StringType:
         return ConstantString::create(py::cast<std::string>(obj));
-      case TypeKind::DeviceObjType: {
-        auto device = reinterpret_cast<THPDevice*>(obj.ptr());
-        return device->device;
-      }
       case TypeKind::ListType: {
         const auto& elem_type = type->expect<ListType>()->getElementType();
         switch(elem_type->kind()) {
@@ -287,8 +282,6 @@ inline py::object toPyObject(IValue&& ivalue) {
       t[i] = toPyObject(IValue{elements[i]});
     }
     return t;
-  } else if (ivalue.isDevice()) {
-    return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
   } else {
     AT_ERROR("Missing cases in 'toPyObject'! File a bug report.");
   }
@@ -321,8 +314,8 @@ private:
 
 inline Stack createStackForSchema(
     const FunctionSchema& schema,
-    const tuple_slice& args,
-    const py::kwargs& kwargs = py::kwargs()) {
+    tuple_slice args,
+    py::kwargs kwargs = py::kwargs()) {
   if(args.size() + kwargs.size() > schema.arguments().size()) {
     throw std::runtime_error(c10::str(
         schema.name(), "() expected at most ", schema.arguments().size(),

@@ -43,7 +43,7 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
     const auto& U = Input(1);
     const auto& V = Input(2);
     const auto& b = Input(3);
-
+    auto* Y = Output(0);
     //auto* buffer_ptr = Output(1);
     // Size M * middle;
     //auto& multi_buffer_ = *buffer_ptr;
@@ -64,17 +64,15 @@ class FullyConnectedOpDecomp final : public Operator<Context> {
     int middle = U.dim32(0);
     CAFFE_ENFORCE_EQ(K, V.dim32(0));
     CAFFE_ENFORCE_EQ(N, b.dim32(0));
-    std::vector<int64_t> dims;
     if (X.dim() > 1) {
-      dims = {M, N};
+      Y->Resize(M, N);
       multi_buffer_.Resize(M, middle);
     } else {
-      dims = {N};
+      Y->Resize(N);
       multi_buffer_.Resize(middle);
     }
-    auto* Y = Output(0, dims, at::dtype<T>());
-    // The col buffer is stored in CHW order as well - kernel_dim, and the
-    // height and width.
+  // The col buffer is stored in CHW order as well - kernel_dim, and the height
+  // and width.
     //  multi_buffer_.Resize(M, middle);
     T* multi_buffer_data = multi_buffer_.template mutable_data<T>();
     //  X * V * tans(U)
@@ -140,10 +138,10 @@ class FullyConnectedDecompGradientOp : public Operator<Context> {
     }
     auto* dU = Output(0);
     auto* dV = Output(1);
-
+    auto* db = Output(2);
     dU->ResizeLike(U);
     dV->ResizeLike(V);
-    auto* db = Output(2, {N}, at::dtype<T>());
+    db->Resize(N);
 
     // Compute dU
     // first compute X * V

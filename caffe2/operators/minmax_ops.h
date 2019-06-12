@@ -21,7 +21,7 @@ class MaxMinOpBase : public Operator<Context> {
     auto* output = Output(0);
 
     output->ResizeLike(input0);
-    output->CopyFrom(input0, /* async */ true);
+    output->CopyFrom(input0, &context_);
 
     if (InputSize() == 1) {
       return true;

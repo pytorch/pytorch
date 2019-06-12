@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THC/generic/THCTensorMathReduce.cu"
+#define THC_GENERIC_FILE "generic/THCTensorMathReduce.cu"
 #else
 
 void THCTensor_(sum)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {
@@ -66,7 +66,6 @@ void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar
   if (numel > 0) {
     ptrdiff_t size = numel / THTensor_sizeLegacyNoScalars(data, 0);
     dim3 grid( THTensor_sizeLegacyNoScalars(data, 0));
-    // NOTE: only with this specific number of threads can this work on GPUs with a warp size != 32 (such as AMD). Do not alter w/o changing buffer size in kernel.
     dim3 threads(32);
 
     THCTensor_kernel_renorm<scalar_t, accreal>
@@ -89,13 +88,11 @@ void THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dime
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
-  WelfordData<accreal, scalar_t> init;
-  init.reset();
   if (!THC_reduceDim<scalar_t>(state, self_, src,
                            ModifyWelford<WelfordData<accreal, scalar_t>>{},
                            ReduceWelford<accreal, scalar_t>{},
                            VarianceWelford<accreal, scalar_t>{biased, true},
-                           init,
+                           WelfordData<accreal, scalar_t>{},
                            dimension,
                            keepdim)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
@@ -108,13 +105,11 @@ void THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dime
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
 
-  WelfordData<accreal, scalar_t> init;
-  init.reset();
   if (!THC_reduceDim<scalar_t>(state, self_, src,
                            ModifyWelford<WelfordData<accreal, scalar_t>>{},
                            ReduceWelford<accreal, scalar_t>{},
                            VarianceWelford<accreal, scalar_t>{biased, false},
-                           init,
+                           WelfordData<accreal, scalar_t>{},
                            dimension,
                            keepdim)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);

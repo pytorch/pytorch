@@ -20,7 +20,7 @@
 #if defined(__SSE4_2__) && defined(__clang__)
 #define INT8_NEON_SIMD
 
-#include "NEON_2_SSE.h"
+#include "neon2sse.h"
 // Add GEMMLOWP SIMD type wrappers for the NEON2SSE SIMD types.
 
 namespace gemmlowp {

@@ -64,8 +64,8 @@ class BisectPercentileOp final : public Operator<Context> {
     const float* raw_data = raw.template data<float>();
 
     // Output
-
-    auto* pct = Output(PCT, raw.sizes(), at::dtype<float>());
+    auto* pct = Output(PCT);
+    pct->ResizeLike(raw);
     float* pct_output = pct->template mutable_data<float>();
 
     // Compute percentile for each raw feature value

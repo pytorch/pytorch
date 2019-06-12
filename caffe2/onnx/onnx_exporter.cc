@@ -287,13 +287,13 @@ void OnnxExporter::CopyCaffe2ArgToOnnxAttr(
     AttributeProto* attr,
     const std::string& op_type,
     const caffe2::Argument& arg) {
-  std::string name =
-      caffe2::get_default(get_renamed_attrs(), arg.name(), arg.name());
+  std::string name;
   const auto& per_op_renamed_attr_lut = get_per_op_renamed_attrs();
   const auto it = per_op_renamed_attr_lut.find(op_type);
   if (it != per_op_renamed_attr_lut.end()) {
-    // Per-op attribute renames override the global attribute renames
-    name = caffe2::get_default(it->second, arg.name(), name);
+    name = caffe2::get_default(it->second, arg.name(), arg.name());
+  } else {
+    name = caffe2::get_default(get_renamed_attrs(), arg.name(), arg.name());
   }
   attr->set_name(name);
 
@@ -1046,3 +1046,4 @@ void OnnxExporter::InitOpToTensorProto(
 
 } // namespace onnx
 } // namespace caffe2
+

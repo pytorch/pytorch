@@ -1,4 +1,4 @@
-#include <ATen/native/DispatchStub.h>
+#include "DispatchStub.h"
 
 #include <c10/util/Exception.h>
 

@@ -14,7 +14,7 @@ from six import binary_type, string_types, text_type
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
 from caffe2.python.control_ops_grad import \
-    gen_do_gradient, gen_if_gradient, gen_while_gradient, disambiguate_grad_if_op_output
+    gen_do_gradient, gen_if_gradient, gen_while_gradient
 
 import caffe2.python._import_c_extension as C
 
@@ -80,10 +80,6 @@ def IsOperator(op_type):
 
 def IsOperatorWithEngine(op_type, engine):
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
-
-
-def IsGPUDeviceType(device_type):
-    return device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP}
 
 
 def DeviceOption(
@@ -725,12 +721,8 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                 break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
-        new_grad_output = (
+        grad_op.output[idx] = (
             '_' + grad_op.output[idx] + '_autosplit_{}'.format(cnt))
-        if grad_op.type == "If":
-            disambiguate_grad_if_op_output(grad_op, idx, new_grad_output)
-        else:
-            grad_op.output[idx] = new_grad_output
         return grad_op.output[idx], cnt + 1
 
     def _CheckSumOpsConflict(self, out_base_name, g):
@@ -2118,7 +2110,7 @@ class Net(object):
     def RunAllOnGPU(self, gpu_id=0, use_cudnn=False):
         """A convenient function to run everything on the GPU."""
         device_option = caffe2_pb2.DeviceOption()
-        device_option.device_type = workspace.GpuDeviceType
+        device_option.device_type = caffe2_pb2.CUDA
         device_option.device_id = gpu_id
         self._net.device_option.CopyFrom(device_option)
         if use_cudnn:
@@ -2288,13 +2280,12 @@ def remap_input(op, blob_name_remapping):
 
 def copy_func_between_devices(src, dst):
     CPU = caffe2_pb2.CPU
-    is_src_gpu = IsGPUDeviceType(src.device_type)
-    is_dst_gpu = IsGPUDeviceType(dst.device_type)
+    CUDA = caffe2_pb2.CUDA
 
     if src.device_type == CPU and dst.device_type == CPU:
         return None
 
-    if is_src_gpu and is_dst_gpu:
+    if src.device_type == CUDA and dst.device_type == CUDA:
         if src.device_id == dst.device_id:
             return None
         else:
@@ -2303,13 +2294,13 @@ def copy_func_between_devices(src, dst):
                     return net.Copy(*args, **kw)
             return fun
 
-    if is_src_gpu and dst.device_type == CPU:
+    if src.device_type == CUDA and dst.device_type == CPU:
         def fun(net, *args, **kw):
             with DeviceScope(src):
                 return net.CopyGPUToCPU(*args, **kw)
         return fun
 
-    if src.device_type == CPU and is_dst_gpu:
+    if src.device_type == CPU and dst.device_type == CUDA:
         def fun(net, *args, **kw):
             with DeviceScope(dst):
                 return net.CopyCPUToGPU(*args, **kw)
@@ -2434,10 +2425,11 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
 
                     def _gen_new_name(blob, device_option):
                         CPU = caffe2_pb2.CPU
+                        CUDA = caffe2_pb2.CUDA
                         if device_option.device_type == CPU:
                             suffix = '_cpu'
-                        elif IsGPUDeviceType(device_option.device_type):
-                            suffix = '_gpu_' + str(device_option.device_id)
+                        elif device_option.device_type == CUDA:
+                            suffix = '_cuda_' + str(device_option.device_id)
                         else:
                             raise RuntimeError(
                                 "Unknown device type: {}".

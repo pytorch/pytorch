@@ -1,6 +1,7 @@
-#include <gtest/gtest.h>
+#include "gtest/gtest.h"
 
-#include <ATen/ATen.h>
+#include "ATen/ATen.h"
+#include "test_seed.h"
 
 using namespace at;
 void TestSimpleCase(Type& T) {
@@ -34,7 +35,7 @@ void TestScalarVs1Dim1Size(Type& T) {
 }
 
 TEST(TestWrapdim, TestWrapdim) {
-  manual_seed(123);
+  manual_seed(123, at::kCPU);
   Type& T = CPU(kFloat);
 
   TestSimpleCase(T);

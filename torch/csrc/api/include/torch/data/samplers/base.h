@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstddef>
 #include <vector>
@@ -27,9 +27,7 @@ class Sampler {
 
   /// Resets the `Sampler`'s internal state.
   /// Typically called before a new epoch.
-
-  /// Optionally, accepts a new size when reseting the sampler.
-  TORCH_API virtual void reset(optional<size_t> new_size) = 0;
+  TORCH_API virtual void reset() = 0;
 
   /// Returns the next index if possible, or an empty optional if the
   /// sampler is exhausted for this epoch.

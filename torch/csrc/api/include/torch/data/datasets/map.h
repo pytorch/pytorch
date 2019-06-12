@@ -3,7 +3,7 @@
 #include <torch/data/datasets/base.h>
 #include <torch/types.h>
 
-#include <c10/util/ArrayRef.h>
+#include <ATen/core/ArrayRef.h>
 
 #include <cstddef>
 #include <utility>

@@ -1,9 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THCUNN/generic/SpatialDilatedMaxPooling.cu"
+#define THC_GENERIC_FILE "generic/SpatialDilatedMaxPooling.cu"
 #else
 
-#include <THCUNN/common.h>
-#include <THCUNN/generic/pooling_shape.h>
+#include "../common.h"
 
 static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
                          THCState *state,
@@ -42,10 +41,27 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
   int64_t nInputPlane = input->size(dimh-1);
   int64_t nInputRows = input->size(dimh);
   int64_t nInputCols = input->size(dimw);
+  int64_t nOutputRows, nOutputCols;
   int64_t nOutputPlane = nInputPlane;
 
-  int64_t nOutputRows = pooling_output_shape<int64_t>(nInputRows, kH, padH, dH, dilationH, ceil_mode);
-  int64_t nOutputCols = pooling_output_shape<int64_t>(nInputCols, kW, padW, dW, dilationW, ceil_mode);
+  if(ceil_mode) {
+    nOutputCols = ceil(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+    nOutputRows = ceil(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
+  }
+  else {
+    nOutputCols = floor(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+    nOutputRows = floor(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
+  }
+
+  if (padW || padH)
+  {
+    // ensure that the last pooling starts inside the image
+    // needed to avoid problems in ceil mode
+    if ((nOutputRows - 1)*dH >= nInputRows + padH)
+      --nOutputRows;
+    if ((nOutputCols  - 1)*dW >= nInputCols  + padW)
+      --nOutputCols;
+  }
 
   if (nOutputCols < 1 || nOutputRows < 1)
     THError("Given input size: (%dx%dx%d). "
@@ -99,8 +115,24 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
     batchSize = input->size(0);
   }
 
-  nOutputCols = pooling_output_shape<int64_t>(nInputCols, kW, padW, dW, dilationW, ceil_mode);
-  nOutputRows = pooling_output_shape<int64_t>(nInputRows, kH, padH, dH, dilationH, ceil_mode);
+  if(ceil_mode) {
+    nOutputCols = ceil(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+    nOutputRows = ceil(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
+  }
+  else {
+    nOutputCols = floor(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+    nOutputRows = floor(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
+  }
+
+  if (padW || padH)
+  {
+    // ensure that the last pooling starts inside the image
+    // needed to avoid problems in ceil mode
+    if ((nOutputRows - 1)*dH >= nInputRows + padH)
+      --nOutputRows;
+    if ((nOutputCols  - 1)*dW >= nInputCols  + padW)
+      --nOutputCols;
+  }
 
   input = THCTensor_(newContiguous)(state, input);
   scalar_t* input_data = THCTensor_(data)(state, input);
@@ -162,8 +194,24 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
     batchSize = input->size(0);
   }
 
-  nOutputCols = pooling_output_shape<int64_t>(nInputCols, kW, padW, dW, dilationW, ceil_mode);
-  nOutputRows = pooling_output_shape<int64_t>(nInputRows, kH, padH, dH, dilationH, ceil_mode);
+  if(ceil_mode) {
+     nOutputCols = ceil(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+     nOutputRows = ceil(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
+  }
+  else {
+    nOutputCols = floor(float(nInputCols - (dilationW * (kW - 1) + 1) + 2*padW) / float(dW)) + 1;
+    nOutputRows = floor(float(nInputRows - (dilationH * (kH - 1) + 1) + 2*padH) / float(dH)) + 1;
+  }
+
+  if (padW || padH)
+  {
+    // ensure that the last pooling starts inside the image
+    // needed to avoid problems in ceil mode
+    if ((nOutputRows - 1)*dH >= nInputRows + padH)
+      --nOutputRows;
+    if ((nOutputCols  - 1)*dW >= nInputCols  + padW)
+      --nOutputCols;
+  }
 
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);

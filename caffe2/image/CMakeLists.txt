@@ -12,16 +12,13 @@ if(USE_OPENCV AND OpenCV_FOUND)
   exclude(Caffe2_GPU_SRCS "${Caffe2_GPU_SRCS}" ${tmp})
 
   # ---[ HIP files
-  # ------[ general HIP
-  file(GLOB tmp hip/*.cc)
-  set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
-  # ------[ HIP sources
-  file(GLOB tmp hip/*.hip)
+  # ------[ general hip
+  file(GLOB_RECURSE tmp *_hip.cc)
   set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS} ${tmp})
   # exclude test files
-  file(GLOB tmp hip/*_test.cc)
+  file(GLOB_RECURSE tmp *_test.cc)
   exclude(Caffe2_HIP_SRCS "${Caffe2_HIP_SRCS}" ${tmp})
-
+  
   # ---[ CPU files.
   file(GLOB tmp *.cc)
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
@@ -36,9 +33,9 @@ if(USE_OPENCV AND OpenCV_FOUND)
   set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS} ${tmp})
 
   # ---[ HIP test files
-  file(GLOB tmp hip/*_test.cc)
+  file(GLOB_RECURSE tmp *_hip_test.cc)
   set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS} ${tmp})
-
+  
   # ---[ CPU test files
   file(GLOB tmp *_test.cc)
   set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS} ${tmp})

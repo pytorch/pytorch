@@ -52,9 +52,10 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     const int64_t M = lengthsInput.size(0);
     const int64_t indices_size = indicesInput.numel();
 
+    auto* output = Output(0);
     auto shape = dataInput.sizes().vec();
     shape[0] = M;
-    auto* output = Output(0, shape, at::dtype<T>());
+    output->Resize(shape);
     T* out_data = output->template mutable_data<T>();
 
     const InputType* in_data = dataInput.template data<InputType>();

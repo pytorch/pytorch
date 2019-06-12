@@ -1,9 +1,15 @@
 #pragma once
 
-#include <chrono>
 #include <cstdint>
 
 namespace c10d {
+
+enum class CollectiveType : std::uint8_t {
+  BROADCAST,
+  ALLREDUCE,
+  BARRIER,
+  UNUSED,
+};
 
 enum class ReduceOp : std::uint8_t {
   SUM = 0,
@@ -13,42 +19,27 @@ enum class ReduceOp : std::uint8_t {
   UNUSED,
 };
 
-constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);
-
 struct BroadcastOptions {
   int rootRank = 0;
   int rootTensor = 0;
-  std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
 struct AllreduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
-  std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
 struct ReduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   int rootRank = 0;
   int rootTensor = 0;
-  std::chrono::milliseconds timeout = kUnsetTimeout;
-};
-
-struct AllgatherOptions {
-  std::chrono::milliseconds timeout = kUnsetTimeout;
-};
-
-struct GatherOptions {
-  int rootRank = 0;
-  std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
 struct ScatterOptions {
   int rootRank = 0;
-  std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
-struct BarrierOptions {
-  std::chrono::milliseconds timeout = kUnsetTimeout;
+struct GatherOptions {
+  int rootRank = 0;
 };
 
 } // namespace c10d

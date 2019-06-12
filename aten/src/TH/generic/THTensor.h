@@ -1,11 +1,11 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "TH/generic/THTensor.h"
+#define TH_GENERIC_FILE "generic/THTensor.h"
 #else
 
 /* a la lua? dim, storageoffset, ...  et les methodes ? */
 
 #ifdef __cplusplus
-#include <c10/core/TensorImpl.h>
+#include <ATen/core/TensorImpl.h>
 #endif
 
 #ifdef __cplusplus

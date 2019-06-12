@@ -1,5 +1,5 @@
-#include <THD/process_group/General.hpp>
-#include <THD/base/Exceptions.hpp>
+#include "General.hpp"
+#include "../base/Exceptions.hpp"
 
 namespace thd {
 std::unique_ptr<DataChannel> dataChannel;

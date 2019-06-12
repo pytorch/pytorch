@@ -1,4 +1,4 @@
-#include <THD/base/init_methods/InitMethodUtils.hpp>
+#include "InitMethodUtils.hpp"
 
 #include <ifaddrs.h>
 #include <net/if.h>

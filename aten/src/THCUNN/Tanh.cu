@@ -1,6 +1,6 @@
-#include <THCUNN/THCUNN.h>
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include "THCUNN.h"
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -23,5 +23,5 @@ struct tanh_updateGradInput_functor<half>
   }
 };
 
-#include <THCUNN/generic/Tanh.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/Tanh.cu"
+#include "THCGenerateFloatTypes.h"

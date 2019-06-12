@@ -98,8 +98,8 @@ template <>
 bool PReluOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
   const auto& W = Input(1);
-
-  auto* Y = Output(0, X.sizes(), at::dtype<float>());
+  auto* Y = Output(0);
+  Y->ResizeLike(X);
   const auto* Xdata = X.template data<float>();
   const auto* Wdata = W.template data<float>();
   auto* Ydata = Y->template mutable_data<float>();
@@ -174,10 +174,12 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
   auto& W = Input(3);
 
   CAFFE_ENFORCE(&Y != &X, "Cannot backpropagate through an in-place PReLU");
+  auto* dX = Output(0);
+  auto* dW = Output(1);
 
   DCHECK_EQ(dY.numel(), Y.numel());
-  auto* dX = Output(0, Y.sizes(), at::dtype<float>());
-  auto* dW = Output(1, W.sizes(), at::dtype<float>());
+  dX->ResizeLike(Y);
+  dW->ResizeLike(W);
 
   const auto C = order_ == StorageOrder::NCHW ? X.size(1) : X.size(X.dim() - 1);
   const auto C_shared = (W.numel() == 1);

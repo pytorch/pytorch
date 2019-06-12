@@ -1,6 +1,6 @@
-#include <THD/process_group/Collectives.hpp>
-#include <THD/base/ChannelUtils.hpp>
-#include <THD/process_group/General.hpp>
+#include "Collectives.hpp"
+#include "../base/ChannelUtils.hpp"
+#include "General.hpp"
 
 #include <vector>
 

@@ -1,6 +1,8 @@
+#include "caffe2/core/types.h"
 #include "caffe2/perfkernels/cvtsh_ss_bugfix.h"
+#include "caffe2/perfkernels/typed_axpy.h"
+#include "caffe2/utils/math.h"
 
-#include <ATen/core/Half.h>
 #include <emmintrin.h>
 #include <immintrin.h>
 

@@ -35,7 +35,8 @@ class KeySplitOp : public Operator<Context> {
       counts[k]++;
     }
     for (int k = 0; k < categorical_limit_; k++) {
-      auto* eid = Output(k, {counts[k]}, at::dtype<int>());
+      auto* eid = Output(k);
+      eid->Resize(counts[k]);
       eids[k] = eid->template mutable_data<int>();
       counts[k] = 0;
     }

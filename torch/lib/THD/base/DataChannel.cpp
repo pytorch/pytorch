@@ -1,14 +1,14 @@
-#include <THD/base/DataChannel.hpp>
+#include "DataChannel.hpp"
 #ifdef WITH_GLOO
-#include <THD/base/data_channels/DataChannelGloo.hpp>
+#include "data_channels/DataChannelGloo.hpp"
 #endif // WITH_GLOO
 #ifdef WITH_MPI
-#include <THD/base/data_channels/DataChannelMPI.hpp>
+#include "data_channels/DataChannelMPI.hpp"
 #endif // WITH_MPI
 #if defined(USE_CUDA) && defined(USE_DISTRIBUTED_NCCL)
-#include <THD/base/data_channels/DataChannelNccl.hpp>
+#include "data_channels/DataChannelNccl.hpp"
 #endif // USE_DISTRIBUTED_NCCL
-#include <THD/base/data_channels/DataChannelTCP.hpp>
+#include "data_channels/DataChannelTCP.hpp"
 
 #include <algorithm>
 #include <stdexcept>

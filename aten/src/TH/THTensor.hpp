@@ -3,8 +3,8 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include <TH/THTensor.h>
-#include <TH/THStorageFunctions.hpp>
+#include "THTensor.h"
+#include "THStorageFunctions.hpp"
 
 #include <atomic>
 #include <ATen/ATen.h>
@@ -89,8 +89,8 @@ inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
   return self->dim() == 0 ? 1 : self->size(dim);
 }
 
-#include <TH/generic/THTensorFastGetSet.hpp>
-#include <TH/THGenerateAllTypes.h>
+#include "generic/THTensorFastGetSet.hpp"
+#include "THGenerateAllTypes.h"
 
 inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(const THTensor *self) {
   if (self->dim() == 0) {
@@ -122,8 +122,8 @@ TH_CPP_API c10::optional<std::vector<int64_t>> THTensor_compute_stride(
     at::IntList oldstride,
     at::IntList newshape);
 
-#include <TH/generic/THTensor.hpp>
-#include <TH/THGenerateAllTypes.h>
+#include "generic/THTensor.hpp"
+#include "THGenerateAllTypes.h"
 
-#include <TH/generic/THTensor.hpp>
-#include <TH/THGenerateHalfType.h>
+#include "generic/THTensor.hpp"
+#include "THGenerateHalfType.h"

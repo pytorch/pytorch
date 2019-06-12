@@ -1,6 +1,6 @@
-#include <THCUNN/THCUNN.h>
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include "THCUNN.h"
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -40,5 +40,5 @@ struct SoftShrinkUpdateGradInput
   }
 };
 
-#include <THCUNN/generic/SoftShrink.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/SoftShrink.cu"
+#include "THCGenerateFloatTypes.h"

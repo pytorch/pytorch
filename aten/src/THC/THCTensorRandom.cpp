@@ -1,5 +1,5 @@
-#include <THC/THCTensorRandom.h>
-#include <THC/THCGenerator.hpp>
+#include "THCTensorRandom.h"
+#include "THCGenerator.hpp"
 
 #include <random>
 #include <curand.h>
@@ -87,7 +87,7 @@ THCGenerator* THCRandom_getGenerator(THCState* state)
   return gen;
 }
 
-curandStateMtgp32* THCRandom_generatorStates(THCState* state)
+struct curandStateMtgp32* THCRandom_generatorStates(struct THCState* state)
 {
   THCGenerator* gen = THCRandom_getGenerator(state);
   return gen->state.gen_states;

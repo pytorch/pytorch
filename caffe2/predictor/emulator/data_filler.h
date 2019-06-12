@@ -93,9 +93,7 @@ class DataRandomFiller : public Filler {
 
   void fill_parameter(Workspace* ws) const override;
 
- protected:
-  DataRandomFiller() {}
-
+ private:
   TensorFiller get_tensor_filler(
       const OperatorDef& op_def,
       int input_index,
@@ -118,22 +116,6 @@ class DataRandomFiller : public Filler {
   using filler_type_pair_t = std::pair<TensorFiller, std::string>;
   std::unordered_map<std::string, filler_type_pair_t> parameters_;
   std::unordered_map<std::string, filler_type_pair_t> inputs_;
-};
-
-// A DataRandomFiller that is more convenient to use in unit tests.
-// Callers just need to supply input dimensions and types for non-intermediate
-// blobs.
-// It also treats parameters the same way as non-intermediate inputs (no
-// handling of parameters separately).
-class TestDataRandomFiller : public DataRandomFiller {
- public:
-  TestDataRandomFiller(
-      const NetDef& net,
-      const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
-      const std::vector<std::vector<std::string>>& inputTypes);
-
-  // Fill input directly to the workspace.
-  void fillInputToWorkspace(Workspace* workspace) const;
 };
 
 } // namespace emulator

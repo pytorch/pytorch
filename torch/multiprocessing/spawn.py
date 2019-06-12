@@ -5,16 +5,8 @@ import multiprocessing.connection
 import signal
 import sys
 
-from . import _prctl_pr_set_pdeathsig
-
 
 def _wrap(fn, i, args, error_queue):
-    # prctl(2) is a Linux specific system call.
-    # On other systems the following function call has no effect.
-    # This is set to ensure that non-daemonic child processes can
-    # terminate if their parent terminates before they do.
-    _prctl_pr_set_pdeathsig(signal.SIGINT)
-
     try:
         fn(i, *args)
     except KeyboardInterrupt:
@@ -26,29 +18,14 @@ def _wrap(fn, i, args, error_queue):
         sys.exit(1)
 
 
-def _python_version_check():
-    if sys.version_info < (3, 4):
-        raise RuntimeError("Requires python 3.4 or higher to use "
-                           "torch.multiprocessing.spawn and "
-                           "torch.multiprocessing.SpawnContext helper "
-                           "to launch multiple processes. If you are using "
-                           "this for distributed training and have a lower "
-                           "version of python, please use "
-                           "torch.distributed.launch instead.")
-
-
 class SpawnContext:
     def __init__(self, processes, error_queues):
-        _python_version_check()
         self.error_queues = error_queues
         self.processes = processes
         self.sentinels = {
             process.sentinel: index
             for index, process in enumerate(processes)
         }
-
-    def pids(self):
-        return [int(process.pid) for process in self.processes]
 
     def join(self, timeout=None):
         r"""
@@ -114,7 +91,7 @@ class SpawnContext:
         raise Exception(msg)
 
 
-def spawn(fn, args=(), nprocs=1, join=True, daemon=False):
+def spawn(fn, args=(), nprocs=1, join=True):
     r"""Spawns ``nprocs`` processes that run ``fn`` with ``args``.
 
     If one of the processes exits with a non-zero exit status, the
@@ -136,15 +113,12 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False):
         args (tuple): Arguments passed to ``fn``.
         nprocs (int): Number of processes to spawn.
         join (bool): Perform a blocking join on all processes.
-        daemon (bool): The spawned processes' daemon flag. If set to True,
-                       daemonic processes will be created.
 
     Returns:
         None if ``join`` is ``True``,
         :class:`~SpawnContext` if ``join`` is ``False``
 
     """
-    _python_version_check()
     mp = multiprocessing.get_context('spawn')
     error_queues = []
     processes = []
@@ -153,7 +127,7 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False):
         process = mp.Process(
             target=_wrap,
             args=(fn, i, args, error_queue),
-            daemon=daemon,
+            daemon=True,
         )
         process.start()
         error_queues.append(error_queue)

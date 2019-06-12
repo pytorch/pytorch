@@ -1,28 +1,28 @@
 #pragma once
 
-#include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/assertions.h>
-#include <torch/csrc/jit/generic_if.h>
-#include <torch/csrc/jit/graph_node_list.h>
-#include <torch/csrc/jit/interned_strings.h>
-#include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/scope.h>
-#include <torch/csrc/jit/source_location.h>
-#include <torch/csrc/jit/source_range.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/function_schema.h>
-#include <torch/csrc/jit/ivalue.h>
-#include <torch/csrc/jit/type.h>
-#include <torch/csrc/jit/named_value.h>
+#include "torch/csrc/jit/attributes.h"
+#include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/generic_if.h"
+#include "torch/csrc/jit/graph_node_list.h"
+#include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/resource_guard.h"
+#include "torch/csrc/jit/scope.h"
+#include "torch/csrc/jit/source_location.h"
+#include "torch/csrc/jit/source_range.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/ivalue.h"
+#include "torch/csrc/jit/type.h"
+#include "torch/csrc/jit/named_value.h"
 
-#include <torch/csrc/utils/disallow_copy.h>
-#include <torch/csrc/utils/functional.h>
-#include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/utils/python_stub.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/utils/object_ptr.h"
+#include "torch/csrc/utils/python_stub.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
-#include <c10/util/ArrayRef.h>
+#include "ATen/core/ArrayRef.h"
 
 #include <algorithm>
 #include <atomic>
@@ -74,8 +74,6 @@ struct Use {
     return user == b.user && offset == b.offset;
   }
 };
-
-class AliasDb;
 
 // Note [User node does not uniquely identify use]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -138,7 +136,10 @@ public:
   bool isTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
   }
-  TORCH_API bool mustBeNone() const;
+  bool isNone() const {
+    return type()->kind() == TypeKind::NoneType;
+
+  }
   size_t unique() const {
     return unique_;
   }
@@ -169,10 +170,6 @@ public:
   // TODO: make this more const correct
   const use_list & uses() const {
     return uses_;
-  }
-
-  bool hasUses() const {
-    return !uses().empty();
   }
 
   TORCH_API void replaceFirstUseWith(Value * newValue);
@@ -264,7 +261,7 @@ public:
     return scope_;
   }
   void setScope(ScopePtr scope) {
-    scope_ = std::move(scope);
+    scope_ = scope;
   }
   std::string scopeName() const {
     if (!scope_) {
@@ -482,11 +479,7 @@ public:
   //
   // Returns `false` if it's impossible to move `this` after `n` without
   // violating dependencies, otherwise executes the move and returns `true`
-  TORCH_API bool moveAfterTopologicallyValid(Node* n, const AliasDb& aliasDb);
-
-  // Like moveAfterTopologicallyValid, but only returns if the move is
-  // possible, without actually performing it.
-  TORCH_API bool couldMoveAfterTopologically(Node* n, const AliasDb& aliasdb);
+  TORCH_API bool moveAfterTopologicallyValid(Node* n);
 
   // Move a node 'n' (already in the graph) before 'this' in the topological
   // order.
@@ -510,11 +503,7 @@ public:
   //
   // Returns `false` if it's impossible to move `this` after `n` without
   // violating dependencies, otherwise executes the move and returns `true`
-  TORCH_API bool moveBeforeTopologicallyValid(Node* n, const AliasDb& aliasDb);
-
-  // Like moveBeforeTopologicallyValid, but only returns if the move is
-  // possible, without actually performing it.
-  TORCH_API bool couldMoveBeforeTopologically(Node* n, const AliasDb& aliasDb);
+  TORCH_API bool moveBeforeTopologicallyValid(Node* n);
 
   // Remove the input at 'i' from this node.
   //
@@ -595,9 +584,8 @@ public:
 
  private:
   enum class MoveSide { BEFORE, AFTER };
-  bool tryMove(Node* movePoint, MoveSide moveSide, const AliasDb& aliasDb, bool dryRun);
+  bool tryMove(Node* movePoint, MoveSide moveSide);
   void move(Node* movePoint, MoveSide moveSide);
-  bool isBeforeOrAfter(const Node* n, MoveSide moveSide) const;
 
   std::pair<Value*, const Argument&> findInput(Symbol name);
   void findSchema() const;
@@ -676,12 +664,12 @@ struct Block {
   }
   Value * addInput(std::string name="") {
     Value * v = input_->addOutput();
-    v->setUniqueName(std::move(name));
+    v->setUniqueName(name);
     return v;
   }
   Value* insertInput(size_t i, std::string name = "") {
     Value* v = input_->insertOutput(i);
-    v->setUniqueName(std::move(name));
+    v->setUniqueName(name);
     return v;
   }
   void eraseInput(size_t i) {
@@ -807,12 +795,6 @@ public:
     const auto & block = *block_;
     return block.nodes();
   }
-  Node * param_node() {
-    return block_->param_node();
-  }
-  const Node * param_node() const {
-    return block_->param_node();
-  }
   Node * return_node() {
     return block_->return_node();
   }
@@ -829,7 +811,7 @@ public:
     return current_scope_;
   }
   void set_current_scope(ScopePtr scope) {
-    current_scope_ = std::move(scope);
+    current_scope_ = scope;
   }
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
@@ -854,12 +836,9 @@ public:
   TORCH_API Node * create(NodeKind kind, size_t num_outputs=1);
   TORCH_API Node * create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs=1);
 
-
-  TORCH_API Node* createNone(TypePtr typ); // value of None with type Optional[typ]
   TORCH_API Node* createUndefined();
   TORCH_API Node* createNoneGenerator();
   TORCH_API Node* createFusionGroup();
-  TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
   TORCH_API Node* createTupleUnpack(Value * v);
   TORCH_API Node* createTupleIndex(Value * tup, int64_t index);
@@ -867,7 +846,13 @@ public:
   TORCH_API Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values);
   TORCH_API Node* createListUnpack(Value *v, size_t size);
   TORCH_API Node* createNumToTensor(Value* value);
+  TORCH_API Node* createBoolToTensor(Value* value);
+  TORCH_API Node* createTensorToNum(const TypePtr& type, Value* value);
   TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
+  TORCH_API Node* createTensorToBool(Value* value);
+  TORCH_API Node* createIntToFloat(Value* value);
+  TORCH_API Node* createFloatToInt(Value* value);
+  TORCH_API Node* createStringToFloat(Value* value);
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -876,7 +861,7 @@ public:
   // use node_map to translate inputs of n to inputs of the cloned node
   // if copy_blocks is false, it will not recursively clone the nested blocks
   // this node contains.
-  TORCH_API Node * createClone(Node * n, const std::function<Value*(Value*)>& value_map, bool copy_blocks=true);
+  TORCH_API Node * createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks=true);
 
   TORCH_API Value* insertConstant(
       IValue val,
@@ -889,11 +874,11 @@ public:
   // argument matching rules, and checks that the op matches a known schema
   // if this node successfully completes, it guarentees the node is a correctly-formed invocation
   // of opname
-  TORCH_API Value* insert(
+  Value* insert(
       Symbol opname,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs = {},
-      const c10::optional<SourceRange>& range = {});
+      c10::optional<SourceRange> range = {});
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);
@@ -976,7 +961,7 @@ struct WithCurrentScope : public ResourceGuard {
     g.set_current_scope(prev_scope);
   })
   , prev_scope(g.current_scope()) {
-    g.set_current_scope(std::move(scope));
+    g.set_current_scope(scope);
   }
 private:
   ScopePtr prev_scope;
@@ -990,9 +975,9 @@ inline Value::Value(Node * node_, size_t offset_)
   node_->graph_->all_values.emplace(this);
 }
 
-inline Value* Value::setType(TypePtr type) {
+inline Value* Value::setType(const TypePtr type) {
   JIT_ASSERT(type);
-  type_ = std::move(type);
+  type_ = type;
   for (Use & use : uses_) {
     use.user->schema_ = nullptr;
   }

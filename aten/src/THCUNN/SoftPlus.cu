@@ -1,6 +1,6 @@
-#include <THCUNN/THCUNN.h>
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include "THCUNN.h"
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 
 template <typename T>
@@ -39,5 +39,5 @@ struct softPlusupdateGradInput_functor
   }
 };
 
-#include <THCUNN/generic/SoftPlus.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/SoftPlus.cu"
+#include "THCGenerateFloatTypes.h"

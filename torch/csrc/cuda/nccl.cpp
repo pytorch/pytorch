@@ -1,13 +1,14 @@
-#include <torch/csrc/cuda/nccl.h>
-#include <torch/csrc/cuda/device_set.h>
-#include <torch/csrc/utils/functional.h>
-#include <torch/csrc/utils/hash.h>
+#include "nccl.h"
+#include "torch/csrc/cuda/device_set.h"
+#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/utils/hash.h"
 
 #include <ATen/ATen.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 
 #include <THC/THC.h>
+#include <THC/THCStream.h>
 
 #include <limits>
 #include <sstream>

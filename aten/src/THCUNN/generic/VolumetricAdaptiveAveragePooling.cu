@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "THCUNN/generic/VolumetricAdaptiveAveragePooling.cu"
+#define THC_GENERIC_FILE "generic/VolumetricAdaptiveAveragePooling.cu"
 #else
 
-#include <THCUNN/common.h>
+#include "../common.h"
 
 // 5d tensor B x D x T x H x W
 

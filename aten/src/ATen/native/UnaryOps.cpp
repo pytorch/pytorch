@@ -4,16 +4,15 @@
 #include <math.h>
 #endif
 
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
-#include <ATen/WrapDimUtils.h>
+#include "ATen/ATen.h"
+#include "ATen/Dispatch.h"
+#include "ATen/ExpandUtils.h"
+#include "ATen/NativeFunctions.h"
+#include "ATen/WrapDimUtils.h"
 
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Parallel.h>
-#include <ATen/native/cpu/UnaryOpsKernel.h>
+#include "ATen/CPUApplyUtils.h"
+#include "ATen/Parallel.h"
+#include "ATen/native/cpu/UnaryOpsKernel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -47,7 +46,15 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  return _clamp_out_cpu(self, self, min, max);
+  if (min && max) {
+    return _th_clamp_out(self, self, *min, *max);
+  } else if (max) {
+    return _th_clamp_max_out(self, self, *max);
+  } else if (min) {
+    return _th_clamp_min_out(self, self, *min);
+  } else {
+    return self;
+  }
 }
 
 Tensor& _clamp_out_cpu(
@@ -56,39 +63,37 @@ Tensor& _clamp_out_cpu(
     optional<Scalar> min,
     optional<Scalar> max) {
   if (min && max) {
-    legacy::th::_th_clamp_out(result, self, *min, *max);
+    _th_clamp_out(result, self, *min, *max);
   } else if (max) {
-    legacy::th::_th_clamp_max_out(result, self, *max);
+    _th_clamp_max_out(result, self, *max);
   } else if (min) {
-    legacy::th::_th_clamp_min_out(result, self, *min);
-  } else {
-    AT_ERROR("At least one of 'min' or 'max' must not be None");
+    _th_clamp_min_out(result, self, *min);
   }
   return result;
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
-  return legacy::th::_th_clamp_max_out(self, self, max);
+  return _th_clamp_max_out(self, self, max);
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  return legacy::th::_th_clamp_max_out(result, self, max);
+  return _th_clamp_max_out(result, self, max);
 }
 
 Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
-  return legacy::th::_th_clamp_min_out(self, self, min);
+  return _th_clamp_min_out(self, self, min);
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  return legacy::th::_th_clamp_min_out(result, self, min);
+  return _th_clamp_min_out(result, self, min);
 }
 
 Tensor& fill_(Tensor& self, Scalar value) {
-  return at::legacy::th::_th_fill_(self, value);
+  return at::_th_fill_(self, value);
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
-  return at::legacy::th::_th_fill_(self, value);
+  return at::_th_fill_(self, value);
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
@@ -146,7 +151,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     result.resize_(self.sizes());                               \
-    return at::legacy::th::_th_##op##_out(result, self);                    \
+    return at::_th_##op##_out(result, self);                    \
   }
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple

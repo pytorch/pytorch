@@ -29,7 +29,7 @@ RNNOptionsBase::RNNOptionsBase(int64_t input_size, int64_t hidden_size)
 
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(
-    const RNNOptionsBase& options_,
+    RNNOptionsBase options_,
     optional<CuDNNMode> cudnn_mode,
     int64_t number_of_gates)
     : options(options_),
@@ -121,7 +121,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
 template <typename Derived>
 RNNOutput RNNImplBase<Derived>::generic_forward(
     std::function<RNNFunctionSignature> function,
-    const Tensor& input,
+    Tensor input,
     Tensor state) {
   if (!state.defined()) {
     // #layers, batch size, state size
@@ -131,7 +131,7 @@ RNNOutput RNNImplBase<Derived>::generic_forward(
   }
   Tensor output, new_state;
   std::tie(output, new_state) = function(
-      input,
+      std::move(input),
       std::move(state),
       flat_weights_,
       options.with_bias_,
@@ -192,7 +192,7 @@ RNNOptions& RNNOptions::relu() {
   return activation(RNNActivation::ReLU);
 }
 
-RNNImpl::RNNImpl(const RNNOptions& options)
+RNNImpl::RNNImpl(RNNOptions options)
     : detail::RNNImplBase<RNNImpl>(
           detail::RNNOptionsBase(options.input_size_, options.hidden_size_)
               .layers(options.layers_)
@@ -203,18 +203,14 @@ RNNImpl::RNNImpl(const RNNOptions& options)
           static_cast<CuDNNMode>(options.activation_)),
       options(options) {}
 
-RNNOutput RNNImpl::forward(const Tensor& input, Tensor state) {
+RNNOutput RNNImpl::forward(Tensor input, Tensor state) {
   switch (options.activation_) {
     case RNNActivation::ReLU:
       return generic_forward(
-          static_cast<RNNFunctionSignature*>(&torch::rnn_relu),
-          input,
-          std::move(state));
+          static_cast<RNNFunctionSignature*>(&torch::rnn_relu), input, state);
     case RNNActivation::Tanh:
       return generic_forward(
-          static_cast<RNNFunctionSignature*>(&torch::rnn_tanh),
-          input,
-          std::move(state));
+          static_cast<RNNFunctionSignature*>(&torch::rnn_tanh), input, state);
     default:
       AT_ERROR("Unhandled RNN activation function!");
   }
@@ -222,13 +218,13 @@ RNNOutput RNNImpl::forward(const Tensor& input, Tensor state) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-LSTMImpl::LSTMImpl(const LSTMOptions& options)
+LSTMImpl::LSTMImpl(LSTMOptions options)
     : detail::RNNImplBase<LSTMImpl>(
           options,
           CuDNNMode::LSTM,
           /*number_of_gates=*/4) {}
 
-RNNOutput LSTMImpl::forward(const Tensor& input, Tensor state) {
+RNNOutput LSTMImpl::forward(Tensor input, Tensor state) {
   // It would be trickier to adapt the `generic_forward` for the LSTM because
   // its output has a different dimensionality (3-tuple vs. 2-tuple), while we
   // always return one state variable (stacking the hidden/cell state into one),
@@ -258,15 +254,15 @@ RNNOutput LSTMImpl::forward(const Tensor& input, Tensor state) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-GRUImpl::GRUImpl(const GRUOptions& options)
+GRUImpl::GRUImpl(GRUOptions options)
     : detail::RNNImplBase<GRUImpl>(
           options,
           CuDNNMode::GRU,
           /*number_of_gates=*/3) {}
 
-RNNOutput GRUImpl::forward(const Tensor& input, Tensor state) {
+RNNOutput GRUImpl::forward(Tensor input, Tensor state) {
   return generic_forward(
-      static_cast<RNNFunctionSignature*>(&torch::gru), input, std::move(state));
+      static_cast<RNNFunctionSignature*>(&torch::gru), input, state);
 }
 } // namespace nn
 } // namespace torch

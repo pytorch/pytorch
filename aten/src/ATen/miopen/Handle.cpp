@@ -1,6 +1,6 @@
-#include <ATen/miopen/Handle.h>
+#include "ATen/miopen/Handle.h"
 
-#include <ATen/miopen/Exceptions.h>
+#include "Exceptions.h"
 
 #include <unordered_map>
 #include <mutex>

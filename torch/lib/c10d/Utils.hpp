@@ -215,7 +215,7 @@ inline at::Tensor flattenDenseTensors(at::TensorList tensors) {
   if (tensors.size() == 1) {
     return flatten(tensors[0]);
   }
-  return at::cat(::c10d::fmap(tensors, flatten));
+  return at::cat(fmap(tensors, flatten));
 }
 
 inline at::Tensor newLikeFlat(
@@ -291,11 +291,9 @@ using SizeType = uint64_t;
 
 #define SYSCHECK(expr)                                        \
   {                                                           \
-    do {                                                      \
-      errno = 0;                                              \
-      auto ___output = (expr);                                \
-      (void)___output;                                        \
-    } while (errno == EINTR);                                 \
+    errno = 0;                                                \
+    auto ___output = (expr);                                  \
+    (void)___output;                                          \
     if (errno != 0)                                           \
       throw std::system_error(errno, std::system_category()); \
   }

@@ -2,10 +2,13 @@
 #include "c10/util/StringUtil.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/net_async_scheduling.h"
+#include "caffe2/core/net_dag.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
 
 #include <google/protobuf/text_format.h>
+
+C10_DECLARE_bool(caffe2_disable_chaining);
 
 namespace caffe2 {
 
@@ -148,6 +151,10 @@ void checkChainingAndRun(
       TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
+    auto old = FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
+    FLAGS_caffe2_disable_chaining = false;
+
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
     CHECK_NOTNULL(dag);
@@ -171,6 +178,10 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   }
 
   {
+    auto old = FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
+    FLAGS_caffe2_disable_chaining = false;
+
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
     CHECK_NOTNULL(dag);
@@ -562,6 +573,10 @@ TEST(NetTest, DISABLED_FailingOperator) {
 
   {
     net_def.set_num_workers(4);
+    auto old = FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
+    FLAGS_caffe2_disable_chaining = false;
+
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     for (int i = 0; i < 10; i++) {
       counter.exchange(0);

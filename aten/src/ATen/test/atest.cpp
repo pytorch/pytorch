@@ -1,6 +1,7 @@
-#include <gtest/gtest.h>
+#include "gtest/gtest.h"
 
-#include <ATen/ATen.h>
+#include "ATen/ATen.h"
+#include "test_seed.h"
 
 #include<iostream>
 using namespace std;
@@ -22,7 +23,8 @@ void trace() {
 
 // TEST_CASE( "atest", "[]" ) {
 TEST(atest, atest) {
-  manual_seed(123);
+  manual_seed(123, at::kCPU);
+  manual_seed(123, at::kCUDA);
 
   auto foo = rand({12, 6});
 

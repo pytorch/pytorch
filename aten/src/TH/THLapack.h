@@ -21,7 +21,7 @@ if (info < 0) {                                                     \
   THError(fmt, func, info, ##__VA_ARGS__);                          \
 }
 
-#include <TH/generic/THLapack.h>
-#include <TH/THGenerateAllTypes.h>
+#include "generic/THLapack.h"
+#include "THGenerateAllTypes.h"
 
 #endif

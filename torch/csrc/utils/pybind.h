@@ -1,18 +1,17 @@
 #pragma once
 
-#include <torch/csrc/python_headers.h>
+#include "torch/csrc/python_headers.h"
 
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/python_tuples.h>
-#include <torch/csrc/utils/python_numbers.h>
+#include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/utils/python_tuples.h"
+#include "torch/csrc/utils/python_numbers.h"
 
 #include <stdexcept>
-#include <utility>
 
 namespace py = pybind11;
 
@@ -34,7 +33,7 @@ struct type_caster<at::Tensor> {
   }
 
   static handle
-  cast(const at::Tensor& src, return_value_policy /* policy */, handle /* parent */) {
+  cast(at::Tensor src, return_value_policy /* policy */, handle /* parent */) {
     if (!src.is_variable()) {
       throw std::runtime_error(
           "Expected tensor's dynamic type to be Variable, not Tensor");
@@ -56,7 +55,7 @@ public:
     }
   }
   static handle cast(torch::autograd::Variable src, return_value_policy /* policy */, handle /* parent */) {
-    return handle(THPVariable_Wrap(std::move(src)));
+    return handle(THPVariable_Wrap(src));
   }
 };
 
@@ -93,7 +92,6 @@ private:
   std::vector<int64_t> v_value;
 };
 
-// Pybind11 bindings for our optional type.
 // http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
 template <typename T>
 struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};

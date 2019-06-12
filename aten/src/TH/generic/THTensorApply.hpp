@@ -13,13 +13,10 @@
 
 #ifdef _OPENMP
 
-#ifdef _WIN32  
-// MSVC doesing support loop pragmas, but does support others. Create a new macro to account for those differences.  
-#define PRAGMA_LOOP(P)    // Noop  
-#define PRAGMA(P)         __pragma(P)
+#ifndef _WIN32
+#define PRAGMA(P) _Pragma(#P)
 #else
-#define PRAGMA_LOOP(P)    _Pragma(#P)  
-#define PRAGMA(P)         _Pragma(#P)
+#define PRAGMA(P) __pragma(P)
 #endif
 
 #define TH_TENSOR_APPLY_CONTIG(TYPE, TENSOR, CODE) \

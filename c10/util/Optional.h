@@ -150,13 +150,6 @@ inline constexpr typename std::remove_reference<T>::type&& constexpr_move(
 
 namespace detail_ {
 
-// VS 2015 doesn't handle constexpr well, so we need to skip these stuff.
-#if (defined _MSC_VER) && (_MSC_VER <= 1900)
-template <typename T>
-T* static_addressof(T& ref) {
-  return std::addressof(ref);
-}
-#else
 // static_addressof: a constexpr version of addressof
 template <typename T>
 struct has_overloaded_addressof {
@@ -182,7 +175,6 @@ template <typename T, TR2_OPTIONAL_REQUIRES(has_overloaded_addressof<T>)>
 T* static_addressof(T& ref) {
   return std::addressof(ref);
 }
-#endif
 
 // the call to convert<A>(b) has return type A and converts b to type A iff b
 // decltype(b) is implicitly convertible to A
@@ -1086,6 +1078,13 @@ struct hash<c10::optional<T&>> {
   }
 };
 } // namespace std
+
+// Plan on record is to land 'using namespace c10' to bridge c10 into at:: and
+// caffe2:: namespaces. Until that lands, proceeding one name at a time.
+namespace at {
+template <class T>
+using optional = c10::optional<T>;
+}
 
 #undef TR2_OPTIONAL_REQUIRES
 #undef TR2_OPTIONAL_ASSERTED_EXPRESSION

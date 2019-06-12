@@ -100,7 +100,7 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
           destData);
 
       if (OutputSize() == 2) {
-        Output(1)->CopyFrom(indices_, /* async */ true);
+        Output(1)->CopyFrom(indices_, &context_);
       }
     }
 

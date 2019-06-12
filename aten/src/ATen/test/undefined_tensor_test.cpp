@@ -1,13 +1,14 @@
-#include <gtest/gtest.h>
+#include "gtest/gtest.h"
 
-#include <ATen/ATen.h>
-#include <c10/core/UndefinedTensorImpl.h>
+#include "ATen/ATen.h"
+#include "ATen/core/UndefinedTensorImpl.h"
 #include <string>
+#include "test_seed.h"
 
 using namespace at;
 
 TEST(TestUndefined, UndefinedTest) {
-  manual_seed(123);
+  manual_seed(123, at::kCPU);
 
   // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.
   Tensor und;

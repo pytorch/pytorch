@@ -20,10 +20,7 @@ BatchSize::operator size_t() const noexcept {
 
 StreamSampler::StreamSampler(size_t epoch_size) : epoch_size_(epoch_size) {}
 
-void StreamSampler::reset(optional<size_t> new_size) {
-  if (new_size.has_value()) {
-    epoch_size_ = *new_size;
-  }
+void StreamSampler::reset() {
   examples_retrieved_so_far_ = 0;
 }
 

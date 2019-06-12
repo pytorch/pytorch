@@ -1,7 +1,7 @@
 #pragma once
-#include <ATen/Tensor.h>
-#include <torch/csrc/jit/pybind.h>
-#include <ATen/ATen.h>
+#include "ATen/Tensor.h"
+#include "torch/csrc/jit/pybind.h"
+#include "ATen/ATen.h"
 #include <iostream>
 #include <vector>
 
@@ -10,8 +10,9 @@ struct BatchTensor {
 public:
   BatchTensor(at::Tensor data, at::Tensor mask, at::Tensor dims);
   // expand a tensor to a batchtensor given batch_size
-  BatchTensor(const at::Tensor& data, int64_t batch_size);
-  BatchTensor(const std::vector<at::Tensor>& datalist, at::Tensor dims);
+  BatchTensor(at::Tensor data, int64_t batch_size);
+  BatchTensor(const std::vector<at::Tensor> datalist, at::Tensor dims);
+  ~BatchTensor(){};
   const char * toString() const {
     return "BatchTensor";
   }

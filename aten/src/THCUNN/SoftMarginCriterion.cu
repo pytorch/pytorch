@@ -1,8 +1,8 @@
-#include <THCUNN/THCUNN.h>
-#include <THCUNN/common.h>
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
-#include <THC/THCApply.cuh>
+#include "THCUNN.h"
+#include "common.h"
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
+#include "THCApply.cuh"
 
 #include <thrust/fill.h>
 #include <thrust/functional.h>
@@ -61,5 +61,5 @@ struct softmargin_updateGradInput_no_reduce_functor
   }
 };
 
-#include <THCUNN/generic/SoftMarginCriterion.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/SoftMarginCriterion.cu"
+#include "THCGenerateFloatTypes.h"

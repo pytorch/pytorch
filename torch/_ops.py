@@ -4,8 +4,6 @@ import contextlib
 import ctypes
 import sys
 import types
-import os.path
-
 import torch.jit
 
 # Query `hasattr` only once.
@@ -94,7 +92,6 @@ class _Ops(types.ModuleType):
         Arguments:
             path (str): A path to a shared library to load.
         """
-        path = os.path.realpath(path)
         with dl_open_guard():
             # Import the shared library into the process, thus running its
             # static (global) initialization code in order to register custom

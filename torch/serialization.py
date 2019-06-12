@@ -64,34 +64,25 @@ def _cpu_deserialize(obj, location):
         return obj
 
 
-def validate_cuda_device(location):
-    if isinstance(location, torch.device):
-        location = str(location)
-    if not isinstance(location, _string_classes):
-        raise ValueError("location should be a string or torch.device")
-    if location[5:] == '':
-        device = 0
-    else:
-        device = max(int(location[5:]), 0)
-
-    if not torch.cuda.is_available():
-        raise RuntimeError('Attempting to deserialize object on a CUDA '
-                           'device but torch.cuda.is_available() is False. '
-                           'If you are running on a CPU-only machine, '
-                           'please use torch.load with map_location=\'cpu\' '
-                           'to map your storages to the CPU.')
-    if device >= torch.cuda.device_count():
-        raise RuntimeError('Attempting to deserialize object on CUDA device '
-                           '{} but torch.cuda.device_count() is {}. Please use '
-                           'torch.load with map_location to map your storages '
-                           'to an existing device.'.format(
-                               device, torch.cuda.device_count()))
-    return device
-
-
 def _cuda_deserialize(obj, location):
     if location.startswith('cuda'):
-        device = validate_cuda_device(location)
+        if location[5:] == '':
+            device = 0
+        else:
+            device = max(int(location[5:]), 0)
+
+        if not torch.cuda.is_available():
+            raise RuntimeError('Attempting to deserialize object on a CUDA '
+                               'device but torch.cuda.is_available() is False. '
+                               'If you are running on a CPU-only machine, '
+                               'please use torch.load with map_location=\'cpu\' '
+                               'to map your storages to the CPU.')
+        if device >= torch.cuda.device_count():
+            raise RuntimeError('Attempting to deserialize object on CUDA device '
+                               '{} but torch.cuda.device_count() is {}. Please use '
+                               'torch.load with map_location to map your storages '
+                               'to an existing device.'.format(
+                                   device, torch.cuda.device_count()))
         return obj.cuda(device)
 
 
@@ -297,7 +288,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
         serialized_storages[key]._write_file(f, _should_read_directly(f))
 
 
-def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
+def load(f, map_location=None, pickle_module=pickle):
     """Loads an object saved with :func:`torch.save` from a file.
 
     :meth:`torch.load` uses Python's unpickling facilities but treats storages,
@@ -336,23 +327,11 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
             locations
         pickle_module: module used for unpickling metadata and objects (has to
             match the pickle_module used to serialize file)
-        pickle_load_args: optional keyword arguments passed over to
-            ``pickle_module.load`` and ``pickle_module.Unpickler``, e.g.,
-            ``encoding=...``.
 
     .. note::
         When you call :meth:`torch.load()` on a file which contains GPU tensors, those tensors
         will be loaded to GPU by default. You can call `torch.load(.., map_location='cpu')`
         and then :meth:`load_state_dict` to avoid GPU RAM surge when loading a model checkpoint.
-
-    .. note::
-        In Python 3, when loading files saved by Python 2, you may encounter
-        ``UnicodeDecodeError: 'ascii' codec can't decode byte 0x...``. This is
-        caused by the difference of handling in byte strings in Python2 and
-        Python 3. You may use extra ``encoding`` keyword argument to specify how
-        these objects should be loaded, e.g., ``encoding='latin1'`` decodes them
-        to strings using ``latin1`` encoding, and ``encoding='bytes'`` keeps them
-        as byte arrays which can be decoded later with ``byte_array.decode(...)``.
 
     Example:
         >>> torch.load('tensors.pt')
@@ -376,13 +355,13 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         new_fd = True
         f = open(f, 'rb')
     try:
-        return _load(f, map_location, pickle_module, **pickle_load_args)
+        return _load(f, map_location, pickle_module)
     finally:
         if new_fd:
             f.close()
 
 
-def _load(f, map_location, pickle_module, **pickle_load_args):
+def _load(f, map_location, pickle_module):
     deserialized_objects = {}
 
     if map_location is None:
@@ -461,24 +440,24 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
 
             tar.extract('storages', path=tmpdir)
             with open(os.path.join(tmpdir, 'storages'), 'rb', 0) as f:
-                num_storages = pickle_module.load(f, **pickle_load_args)
+                num_storages = pickle_module.load(f)
                 for i in range(num_storages):
-                    args = pickle_module.load(f, **pickle_load_args)
+                    args = pickle_module.load(f)
                     key, location, storage_type = args
                     obj = storage_type._new_with_file(f)
                     obj = restore_location(obj, location)
                     deserialized_objects[key] = obj
 
-                storage_views = pickle_module.load(f, **pickle_load_args)
+                storage_views = pickle_module.load(f)
                 for target_cdata, root_cdata, offset, size in storage_views:
                     root = deserialized_objects[root_cdata]
                     deserialized_objects[target_cdata] = root[offset:offset + size]
 
             tar.extract('tensors', path=tmpdir)
             with open(os.path.join(tmpdir, 'tensors'), 'rb', 0) as f:
-                num_tensors = pickle_module.load(f, **pickle_load_args)
+                num_tensors = pickle_module.load(f)
                 for _ in range(num_tensors):
-                    args = pickle_module.load(f, **pickle_load_args)
+                    args = pickle_module.load(f)
                     key, storage_id, original_tensor_type = args
                     storage = deserialized_objects[storage_id]
                     tensor_type = storage_to_tensor_type(storage)
@@ -492,27 +471,16 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
                     deserialized_objects[key] = tensor
 
             pickle_file = tar.extractfile('pickle')
-            unpickler = pickle_module.Unpickler(pickle_file, **pickle_load_args)
+            unpickler = pickle_module.Unpickler(pickle_file)
             unpickler.persistent_load = persistent_load
             result = unpickler.load()
             return result
 
     deserialized_objects = {}
 
-    def maybe_decode_ascii(bytes_str):
-        # When using encoding='bytes' in Py3, some **internal** keys stored as
-        # strings in Py2 are loaded as bytes. This function decodes them with
-        # ascii encoding, one that Py3 uses by default.
-        #
-        # NOTE: This should only be used on internal keys (e.g., `typename` and
-        #       `location` in `persistent_load` below!
-        if isinstance(bytes_str, bytes):
-            return bytes_str.decode('ascii')
-        return bytes_str
-
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
-        typename = maybe_decode_ascii(saved_id[0])
+        typename = saved_id[0]
         data = saved_id[1:]
 
         if typename == 'module':
@@ -522,7 +490,6 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             return data[0]
         elif typename == 'storage':
             data_type, root_key, location, size, view_metadata = data
-            location = maybe_decode_ascii(location)
             if root_key not in deserialized_objects:
                 deserialized_objects[root_key] = restore_location(
                     data_type(size), location)
@@ -549,19 +516,19 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
-    magic_number = pickle_module.load(f, **pickle_load_args)
+    magic_number = pickle_module.load(f)
     if magic_number != MAGIC_NUMBER:
         raise RuntimeError("Invalid magic number; corrupt file?")
-    protocol_version = pickle_module.load(f, **pickle_load_args)
+    protocol_version = pickle_module.load(f)
     if protocol_version != PROTOCOL_VERSION:
         raise RuntimeError("Invalid protocol version: %s" % protocol_version)
 
-    _sys_info = pickle_module.load(f, **pickle_load_args)
-    unpickler = pickle_module.Unpickler(f, **pickle_load_args)
+    _sys_info = pickle_module.load(f)
+    unpickler = pickle_module.Unpickler(f)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
 
-    deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
+    deserialized_storage_keys = pickle_module.load(f)
 
     offset = f.tell() if f_should_read_directly else None
     for key in deserialized_storage_keys:

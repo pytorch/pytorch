@@ -5,10 +5,8 @@ from torch.nn.parameter import Parameter
 from .. import functional as F
 from .. import init
 from .module import Module
-from ..._jit_internal import weak_module, weak_script_method
 
 
-@weak_module
 class Linear(Module):
     r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
 
@@ -42,7 +40,6 @@ class Linear(Module):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    __constants__ = ['bias']
 
     def __init__(self, in_features, out_features, bias=True):
         super(Linear, self).__init__()
@@ -62,7 +59,6 @@ class Linear(Module):
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(self.bias, -bound, bound)
 
-    @weak_script_method
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
 
@@ -72,7 +68,6 @@ class Linear(Module):
         )
 
 
-@weak_module
 class Bilinear(Module):
     r"""Applies a bilinear transformation to the incoming data:
     :math:`y = x_1 A x_2 + b`
@@ -110,7 +105,6 @@ class Bilinear(Module):
         >>> print(output.size())
         torch.Size([128, 40])
     """
-    __constants__ = ['in1_features', 'in2_features', 'out_features', 'bias']
 
     def __init__(self, in1_features, in2_features, out_features, bias=True):
         super(Bilinear, self).__init__()
@@ -131,7 +125,6 @@ class Bilinear(Module):
         if self.bias is not None:
             init.uniform_(self.bias, -bound, bound)
 
-    @weak_script_method
     def forward(self, input1, input2):
         return F.bilinear(input1, input2, self.weight, self.bias)
 

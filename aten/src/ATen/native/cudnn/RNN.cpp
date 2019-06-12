@@ -1120,7 +1120,7 @@ struct DropoutState {
     // could then define it before we get to unlock().
     mutex.lock();
     if (event) {
-      event->block(cuda::getCurrentCUDAStream());
+      cuda::getCurrentCUDAStream().synchronize_with(*event);
     }
   }
 

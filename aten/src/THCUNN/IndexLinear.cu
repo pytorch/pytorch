@@ -1,9 +1,9 @@
-#include <THCUNN/THCUNN.h>
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCTensor.hpp>
-#include <THC/THCStorage.hpp>
+#include "THCUNN.h"
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
+#include "THCAtomics.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 
 #define divup(a, b) ((a) + (b) - 1) / (b)
 const int THREADS_PER_BLOCK = 256;
@@ -465,7 +465,7 @@ void THNN_CudaHalfIndexLinear_updateParameters(
     THError("THCudaHalfTensor not supported with IndexLinear");
 }
 
-#include <THCUNN/generic/IndexLinear.cu>
-#include <THC/THCGenerateFloatType.h>
-#include <THCUNN/generic/IndexLinear.cu>
-#include <THC/THCGenerateDoubleType.h>
+#include "generic/IndexLinear.cu"
+#include "THCGenerateFloatType.h"
+#include "generic/IndexLinear.cu"
+#include "THCGenerateDoubleType.h"

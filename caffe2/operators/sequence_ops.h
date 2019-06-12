@@ -120,9 +120,9 @@ class RemovePaddingOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (startPaddingWidth_ == 0 && endPaddingWidth_ == 0) {
-      Output(0)->CopyFrom(Input(0), true /*async*/);
+      Output(0)->CopyFrom(Input(0), &context_);
       if (OutputSize() == 2) {
-        Output(1)->CopyFrom(Input(1), true /*async*/);
+        Output(1)->CopyFrom(Input(1), &context_);
       }
       return true;
     }
@@ -160,9 +160,9 @@ class AddPaddingOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (startPaddingWidth_ == 0 && endPaddingWidth_ == 0) {
-      Output(0)->CopyFrom(Input(0), true /*async*/);
+      Output(0)->CopyFrom(Input(0), &context_);
       if (OutputSize() == 2) {
-        Output(1)->CopyFrom(Input(1), true /*async*/);
+        Output(1)->CopyFrom(Input(1), &context_);
       }
       return true;
     }
@@ -205,10 +205,12 @@ class AddPaddingOp final : public Operator<Context> {
       padding_end_ptr = padding_start_ptr;
     }
 
-    auto out_dims = in.sizes().vec();
-    out_dims[0] += (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
-    auto* out = Output(0, std::move(out_dims), at::dtype<T>());
-
+    auto* out = Output(0);
+    {
+      auto out_dims = in.sizes().vec();
+      out_dims[0] += (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
+      out->Resize(std::move(out_dims));
+    }
     const auto* in_ptr = in.template data<T>();
     auto* out_ptr = out->template mutable_data<T>();
 

@@ -14,7 +14,7 @@ EmbeddingOptions::EmbeddingOptions(int64_t count, int64_t dimension)
     : count_(count), dimension_(dimension) {}
 
 EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options)
-    : options(options) {
+    : options(std::move(options)) {
   reset();
 }
 
@@ -25,7 +25,7 @@ void EmbeddingImpl::reset() {
   weight.normal_(0, 1);
 }
 
-Tensor EmbeddingImpl::forward(const Tensor& input) {
+Tensor EmbeddingImpl::forward(Tensor input) {
   return torch::embedding(weight, /*indices=*/input);
 }
 } // namespace nn

@@ -1,4 +1,4 @@
 #pragma once
-#include <TH/THStorageFunctions.h>
+#include "THStorageFunctions.h"
 
 // Compatability header. Use THStorageFunctions.h instead if you need this.

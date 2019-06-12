@@ -1,10 +1,10 @@
-#include <THCUNN/THCUNN.h>
-#include <THCUNN/common.h>
-#include <THC/THCDeviceTensor.cuh>
-#include <THC/THCDeviceTensorUtils.cuh>
-#include <THC/THCDeviceUtils.cuh>
+#include "THCUNN.h"
+#include "common.h"
+#include "THCDeviceTensor.cuh"
+#include "THCDeviceTensorUtils.cuh"
+#include "THCDeviceUtils.cuh"
 
 #include <cfloat>
 
-#include <THCUNN/generic/VolumetricMaxPooling.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/VolumetricMaxPooling.cu"
+#include "THCGenerateFloatTypes.h"

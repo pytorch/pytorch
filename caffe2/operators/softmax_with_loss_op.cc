@@ -154,13 +154,14 @@ template <>
 bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Logits
   auto& T = Input(1); // Labels / targets
+  auto* P = Output(0); // Probabilities from softmax
+  auto* avg_loss = Output(1); // Average loss
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
   int N, D;
   N = X.size_to_dim(canonical_axis); // batch size
   D = X.size_from_dim(canonical_axis);
-  auto* P =
-      Output(0, X.sizes(), at::dtype<float>()); // Probabilities from softmax
+  P->ResizeLike(X);
 
   float* Pdata = P->template mutable_data<float>();
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
@@ -245,9 +246,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
-  auto* avg_loss =
-      Output(1, vector<int64_t>(), at::dtype<float>()); // Average loss
-
+  avg_loss->Resize(vector<int64_t>());
   float* avg_loss_data = avg_loss->template mutable_data<float>();
   if (weight_sum != 0.0) {
     avg_loss_data[0] = loss_sum * scale_ / weight_sum;
@@ -264,14 +263,14 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   // Input(2) is weights if given
   auto& P = Input(InputSize() - 2); // Probabilities from softmax
   auto& d_avg_loss = Input(InputSize() - 1); // Gradient w.r.t. avg loss
-
+  auto* dX = Output(0);
   const float* weights = (InputSize() > 4 ? Input(2).data<float>() : nullptr);
 
   const auto canonical_axis = X.canonical_axis_index(axis_);
   int N, D;
   N = X.size_to_dim(canonical_axis); // batch size
   D = X.size_from_dim(canonical_axis);
-  auto* dX = Output(0, X.sizes(), at::dtype<float>());
+  dX->ResizeLike(X);
 
   if (label_prob_mode_) {
     CAFFE_ENFORCE_GE(T.dim(), 2);

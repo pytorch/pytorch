@@ -23,11 +23,12 @@ template <typename T, class Context>
 bool PairWiseLossOp<T, Context>::RunOnDevice() {
   auto& X = Input(XVALUE);
   auto& label = Input(LABEL);
+  auto* Y = Output(YVALUE);
 
   int N = X.dim() > 0 ? X.dim32(0) : 0;
   if (N == 0) {
-    // Set correct data type for output
-    Output(YVALUE, {0}, at::dtype<T>());
+    Y->Resize(0);
+    Y->template mutable_data<T>();
     return true;
   }
 
@@ -48,7 +49,7 @@ bool PairWiseLossOp<T, Context>::RunOnDevice() {
   }
 
   // a total of len_size sessions
-  auto* Y = Output(YVALUE, {len_size}, at::dtype<T>());
+  Y->Resize(len_size);
   auto* Ydata = Y->template mutable_data<T>();
 
   int D = X.numel() / N;
@@ -88,13 +89,13 @@ bool PairWiseLossGradientOp<T, Context>::RunOnDevice() {
   auto& X = Input(XVALUE);
   auto& label = Input(LABEL);
   auto& dY = Input(DYVALUE);
-
+  auto* dX = Output(DXVALUE);
   int N = X.dim() > 0 ? X.dim32(0) : 0;
   CAFFE_ENFORCE_EQ(N, X.numel());
   CAFFE_ENFORCE(
       (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  auto* dX = Output(DXVALUE, X.sizes(), at::dtype<T>());
+  dX->ResizeLike(X);
   math::Set<T, CPUContext>(
       dX->numel(), 0.f, dX->template mutable_data<T>(), &context_);
 

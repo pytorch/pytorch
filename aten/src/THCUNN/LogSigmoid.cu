@@ -1,6 +1,6 @@
-#include <THCUNN/THCUNN.h>
-#include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include "THCUNN.h"
+#include "TH/THHalf.h"
+#include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 
 #if defined(_MSC_VER) || defined(__HIP_PLATFORM_HCC__)
@@ -72,5 +72,5 @@ struct logSigmoid_updateGradInput_functor<half> {
   }
 };
 
-#include <THCUNN/generic/LogSigmoid.cu>
-#include <THC/THCGenerateFloatTypes.h>
+#include "generic/LogSigmoid.cu"
+#include "THCGenerateFloatTypes.h"

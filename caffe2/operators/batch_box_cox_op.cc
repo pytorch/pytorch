@@ -79,7 +79,8 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
   auto N = data.size(0);
   auto D = data.size_from_dim(1);
 
-  auto* output = Output(0, Input(DATA).sizes(), at::dtype<T>());
+  auto* output = Output(0);
+  output->ResizeLike(Input(DATA));
   auto* output_ptr = output->template mutable_data<T>();
 
   if (data.numel() <= 0) {

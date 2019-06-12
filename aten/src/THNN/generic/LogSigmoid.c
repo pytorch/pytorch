@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "THNN/generic/LogSigmoid.c"
+#define TH_GENERIC_FILE "generic/LogSigmoid.c"
 #else
 
 void THNN_(LogSigmoid_updateOutput)(

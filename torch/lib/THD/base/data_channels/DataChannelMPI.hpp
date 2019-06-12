@@ -1,6 +1,6 @@
 #pragma once
 
-#include <THD/base/DataChannel.hpp>
+#include "../DataChannel.hpp"
 
 #include <mpi.h>
 #include <memory>

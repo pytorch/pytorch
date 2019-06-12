@@ -1,8 +1,6 @@
 #pragma once
 
-#include <condition_variable>
 #include <memory>
-#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -40,17 +38,11 @@ class ProcessGroup {
     virtual ~Work();
 
     // Checks if request has completed. Non-blocking operation.
-    virtual bool isCompleted();
+    virtual bool isCompleted() = 0;
 
     // Returns if the work completed successfully.
     // If false, the exception function can be called to get details.
-    virtual bool isSuccess() const;
-
-    // Returns exception if isSuccess() returned false.
-    virtual std::exception_ptr exception() const;
-
-    // Returns source rank if this objects represents a recv-from-any.
-    virtual int sourceRank() const;
+    virtual bool isSuccess() const = 0;
 
     // Ensures that operations on the output tensors that are invoked
     // after this function returns are correctly sequenced after the
@@ -66,27 +58,22 @@ class ProcessGroup {
     // completion through the `isCompleted` function, it has returned
     // true, and the `isSuccess` function also has returned true.
     //
-    virtual void synchronize();
+    virtual void synchronize() = 0;
 
     // Waits until request completes. Blocking operation.
-    // Throws if the work completed with an exception.
+    // Returns false if the work completed with an exception.
     //
     // Functionally equivalent to:
     //
     //   while (!isCompleted()) { /* nop */ }
     //   auto success = isSuccess();
-    //   if (!success) { std::rethrow_exception(exception()); }
+    //   if (success) { synchronize(); }
     //   return success;
     //
-    virtual void wait();
+    virtual bool wait() = 0;
 
-   protected:
-    void finish(std::exception_ptr exception = nullptr);
-
-    mutable std::mutex mutex_;
-    std::condition_variable cv_;
-    bool completed_ = false;
-    std::exception_ptr exception_;
+    // Returns exception if wait() returned false.
+    virtual const std::exception& exception() const = 0;
   };
 
   explicit ProcessGroup(int rank, int size);
@@ -100,11 +87,11 @@ class ProcessGroup {
     return size_;
   }
 
-  virtual std::shared_ptr<ProcessGroup::Work> broadcast(
+  virtual std::shared_ptr<Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> allreduce(
+  virtual std::shared_ptr<Work> allreduce(
       std::vector<at::Tensor>& data,
       const AllreduceOptions& opts = AllreduceOptions()) = 0;
 
@@ -114,8 +101,7 @@ class ProcessGroup {
 
   virtual std::shared_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const AllgatherOptions& opts = AllgatherOptions()) = 0;
+      std::vector<at::Tensor>& inputTensors) = 0;
 
   virtual std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
@@ -139,10 +125,10 @@ class ProcessGroup {
 
   virtual std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
+      int* srcRank,
       int tag) = 0;
 
-  virtual std::shared_ptr<ProcessGroup::Work> barrier(
-      const BarrierOptions& opts = BarrierOptions()) = 0;
+  virtual std::shared_ptr<ProcessGroup::Work> barrier() = 0;
 
   virtual std::unordered_map<int, int> getGroupRank() = 0;
 

@@ -13,7 +13,7 @@
 namespace torch {
 namespace detail {
 // Dump all the template metaprogramming in this file.
-#include <torch/csrc/api/include/torch/nn/pimpl-inl.h>
+#include "pimpl-inl.h"
 } // namespace detail
 
 namespace nn {
@@ -57,8 +57,12 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
       typename Head,
       typename... Tail,
       typename = typename std::enable_if<
-          !(torch::detail::is_module_holder_of<Head, ContainedType>::value &&
-            (sizeof...(Tail) == 0))>::type>
+      !(
+          torch::detail::is_module_holder_of<Head, ContainedType>::value
+          && (sizeof...(Tail) == 0)
+       )
+      >::type
+          >
   explicit ModuleHolder(Head&& head, Tail&&... tail)
       : impl_(new Contained(
             std::forward<Head>(head),
@@ -156,20 +160,22 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   }
 };
 
-/// Serializes a `ModuleHolder` into an `OutputArchive`.
+/// Serializes an `OptimizerBase` into an `OutputArchive`.
 template <typename ModuleType>
 serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
     const nn::ModuleHolder<ModuleType>& module) {
-  return archive << module.ptr();
+  module->save(archive);
+  return archive;
 }
 
-/// Deserializes a `ModuleHolder` from an `InputArchive`.
+/// Deserializes a `Tensor` from an `InputArchive`.
 template <typename ModuleType>
 serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
     nn::ModuleHolder<ModuleType>& module) {
-  return archive >> module.ptr();
+  module->load(archive);
+  return archive;
 }
 
 } // namespace nn

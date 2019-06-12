@@ -1,6 +1,7 @@
-#include <ATen/ATen.h>
-#include <ATen/Parallel.h>
-#include <ATen/test/test_assert.h>
+#include "ATen/ATen.h"
+#include "ATen/Parallel.h"
+#include "test_assert.h"
+#include "test_seed.h"
 #include <thread>
 
 
@@ -22,7 +23,7 @@ void test(int given_num_threads) {
 }
 
 int main() {
-  at::manual_seed(123);
+  manual_seed(123, at::kCPU);
 
   test(-1);
   std::thread t1(test, -1);

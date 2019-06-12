@@ -320,8 +320,7 @@ class TestMultiWorkspaces(unittest.TestCase):
         self.assertTrue("test" in workspaces)
 
 
-@unittest.skipIf(not workspace.has_gpu_support
-                and not workspace.has_hip_support, "No gpu support.")
+@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 class TestWorkspaceGPU(test_util.TestCase):
 
     def setUp(self):
@@ -343,12 +342,12 @@ class TestWorkspaceGPU(test_util.TestCase):
         self.assertEqual(fetched_again.shape, (1, 2, 3, 4))
         np.testing.assert_array_equal(fetched_again, 2.0)
 
-    def testGetGpuPeerAccessPattern(self):
-        pattern = workspace.GetGpuPeerAccessPattern()
+    def testGetCudaPeerAccessPattern(self):
+        pattern = workspace.GetCudaPeerAccessPattern()
         self.assertEqual(type(pattern), np.ndarray)
         self.assertEqual(pattern.ndim, 2)
         self.assertEqual(pattern.shape[0], pattern.shape[1])
-        self.assertEqual(pattern.shape[0], workspace.NumGpuDevices())
+        self.assertEqual(pattern.shape[0], workspace.NumCudaDevices())
 
 
 @unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
