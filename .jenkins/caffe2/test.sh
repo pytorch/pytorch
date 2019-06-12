@@ -121,5 +121,7 @@ pip install --user pytest-sugar
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install -q --user git+https://github.com/pytorch/vision.git
+  export LC_ALL=C.UTF-8
+  export LANG=C.UTF-8
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

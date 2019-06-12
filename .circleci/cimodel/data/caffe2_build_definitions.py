@@ -30,6 +30,7 @@ class Conf:
     def get_cudnn_insertion(self):
 
         omit = self.language == "onnx_py2" \
+            or self.language == "onnx_py3.6" \
             or self.compiler.name in ["android", "mkl", "clang"] \
             or str(self.distro) in ["ubuntu14.04", "macos10.13"]
 
@@ -58,6 +59,7 @@ class Conf:
 
         lang_substitutions = {
             "onnx_py2": "py2",
+            "onnx_py3.6": "py3.6",
             "cmake": "py2",
         }
 
@@ -71,6 +73,7 @@ class Conf:
 
         lang_substitutions = {
             "onnx_py2": "onnx-py2",
+            "onnx_py3.6": "onnx-py3.6",
         }
 
         lang = miniutils.override(self.language, lang_substitutions)
