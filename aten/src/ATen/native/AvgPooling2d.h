@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
 #include <tuple>
 
 #pragma once
@@ -64,6 +65,28 @@ namespace {
           "x", 
           outputWidth, 
           "). Output size is too small");
+  }
+
+  static inline void
+  avg_pool2d_shape_check(
+    const Tensor& input, const Tensor& gradOutput,
+    int kH, int kW, int dH, int dW, int padH, int padW, bool ceil_mode, 
+    int64_t nInputPlane,
+    int64_t inputHeight, int64_t inputWidth,
+    int64_t outputHeight, int64_t outputWidth)
+  {
+    avg_pool2d_shape_check(
+      input,
+      kH, kW, dH, dW, padH, padW, ceil_mode,
+      nInputPlane, inputHeight, inputWidth,
+      outputHeight, outputWidth);
+
+    const int64_t ndim = input.ndimension();
+    const int64_t nOutputPlane = nInputPlane;
+
+    check_dim_size(gradOutput, ndim, ndim-3, nOutputPlane);
+    check_dim_size(gradOutput, ndim, ndim-2, outputHeight);
+    check_dim_size(gradOutput, ndim, ndim-1, outputWidth);
   }
 } // namespace
 
