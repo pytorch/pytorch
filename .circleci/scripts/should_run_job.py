@@ -32,6 +32,7 @@ default_set = [
 
     # Binaries
     'manywheel 2.7mu cpu devtoolset3',
+    'libtorch 2.7m cpu devtoolset3',
 
     # Caffe2 Android
     'caffe2-py2-android-ubuntu16.04',
