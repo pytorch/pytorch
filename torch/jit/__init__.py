@@ -1,7 +1,7 @@
 import torch._C
 from torch.autograd import Variable, function
 from torch.serialization import validate_cuda_device
-from torch.nn import Module, ModuleList, Parameter, Sequential
+from torch.nn import Module, ModuleList, Sequential
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 import torch.backends.cudnn as cudnn
 import torch.jit.annotations
@@ -18,7 +18,6 @@ from collections import OrderedDict, namedtuple
 import textwrap
 import sys
 import warnings
-import weakref
 import types
 import contextlib
 import os
