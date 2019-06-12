@@ -1685,9 +1685,9 @@ int dictKeys(Stack& stack) {
 }
 
 template <typename Elem>
-c10::impl::GenericListPtr makeListForDictValues(
+c10::ListPtr<Elem> makeListForDictValues(
     const std::vector<std::pair<IValue, IValue>>& order) {
-  c10::impl::GenericListPtr values = c10::impl::make_generic_list();
+  c10::ListPtr<Elem> values = c10::make_list<Elem>();
   values.reserve(order.size());
   for (auto item : order) {
     values.push_back(item.second.to<Elem>());
