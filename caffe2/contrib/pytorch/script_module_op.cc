@@ -82,8 +82,8 @@ class ScriptModuleOp final : public Operator<Context> {
     // for that.
   }
 
-  static caffe2::Tensor castIValueToTensor(const IValue& v) {
-    return caffe2::Tensor(torch::autograd::Variable(v.toTensor()).tensor_data());
+  static caffe2::Tensor castIValueToTensor(IValue v) {
+    return caffe2::Tensor(torch::autograd::Variable(std::move(v).toTensor()).tensor_data());
   }
 
   bool RunOnDevice() override {
@@ -102,14 +102,14 @@ class ScriptModuleOp final : public Operator<Context> {
     // don't have default values, method::operator() is going to complain.
     IValue output = method(inputs);
     if (output.isTuple()) {
-      const std::vector<IValue>& elems = output.toTuple()->elements();
-      CAFFE_ENFORCE_EQ(elems.size(), OutputSize());
-      for (int i = 0; i < elems.size(); ++i) {
-        this->SetOutputTensor(i, castIValueToTensor(elems[i]));
+      auto elems = std::move(output).toTuple();
+      CAFFE_ENFORCE_EQ(elems.elements().size(), OutputSize());
+      for (int i = 0; i < elems.elements().size(); ++i) {
+        this->SetOutputTensor(i, castIValueToTensor(elems.elements()[i]));
       }
     } else if (output.isTensor()) {
       CAFFE_ENFORCE_EQ(1, OutputSize());
-      this->SetOutputTensor(0, castIValueToTensor(output));
+      this->SetOutputTensor(0, castIValueToTensor(std::move(output)));
     } else {
       CAFFE_THROW("Unexpected return type: ", output.tagKind());
     }
