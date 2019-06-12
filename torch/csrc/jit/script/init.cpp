@@ -181,14 +181,17 @@ static Self moduleSelf(
 static TypePtr getTensorType(
     const at::Tensor& t,
     const TypeKind type_kind) {
-  AT_ASSERT(type_kind == TypeKind::DimensionedTensorType || type_kind == TypeKind::CompleteTensorType);
   switch (type_kind) {
     case TypeKind::DimensionedTensorType:
       return DimensionedTensorType::create(t);
-    case TypeKind::CompleteTensorType:
+    case TypeKind::CompleteTensorType: {
       auto scalar_type = t.scalar_type();
       auto sizes = t.sizes();
       return CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+    }
+    default:
+      throw std::runtime_error(
+          "Attempted to call getTensorType for type kind other than DimensionedTensorType or CompleteTensorType.");
   }
 }
 
