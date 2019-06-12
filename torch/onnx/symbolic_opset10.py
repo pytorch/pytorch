@@ -6,7 +6,7 @@ import torch.onnx
 import torch.onnx.utils
 
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset
+from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
 
 
