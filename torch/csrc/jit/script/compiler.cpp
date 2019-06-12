@@ -3073,7 +3073,7 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
   // be inlined into forked closures
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
-  if (!script::getFirstClassMode()) {
+  if (script::getInlineEverythingMode()) {
     Inline(*to_clean);
   }
   // remove any uses of tuples that we inserted that are not needed

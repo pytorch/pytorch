@@ -101,67 +101,61 @@ void initJITBindings(PyObject* module) {
       m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
-      .def(
-          "_jit_debug_fuser_num_cached_kernel_specs",
-          torch::jit::fuser::debugNumCachedKernelSpecs)
+      .def("_jit_debug_fuser_num_cached_kernel_specs",
+           torch::jit::fuser::debugNumCachedKernelSpecs)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
-      .def(
-          "_jit_pass_onnx_constant_fold",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict) {
-            ConstantFoldONNX(graph->block(), paramsDict); // overload resolution
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
+      .def("_jit_pass_onnx_constant_fold",
+           [](std::shared_ptr<Graph> &graph,
+              std::map<std::string, at::Tensor> &paramsDict) {
+             ConstantFoldONNX(graph->block(),
+                              paramsDict); // overload resolution
+             return paramsDict;
+           },
+           pybind11::return_value_policy::move)
       .def("_jit_pass_fuse", FuseGraph)
-      .def(
-          "_jit_pass_dce",
-          [](std::shared_ptr<Graph>& g) {
-            return EliminateDeadCode(g->block()); // overload resolution
-          })
-      .def(
-          "_jit_pass_cse",
-          [](std::shared_ptr<Graph>& g) {
-            return EliminateCommonSubexpression(g); // overload resolution
-          })
-      .def(
-          "_jit_pass_propagate_qinfo",
-          [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
-      .def(
-          "_jit_pass_insert_observers",
-          [](std::shared_ptr<script::Module>& moduleObj,
-             const std::string& methodName,
-             py::function pyObserverFunction) {
-            // Create a new node that would be used in the insert observer pass:
-            // all observer nodes will be cloned from this one.
-            Graph g;
-            Node* new_node = g.createPythonOp(
-                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(moduleObj, methodName, new_node);
-            // We don't need this node anymore, don't forget to remove it.
-            new_node->destroy();
-          })
-      .def(
-          "_jit_pass_insert_observers",
-          [](std::shared_ptr<script::Function>& function_var,
-             py::function pyObserverFunction) {
-            // Overloaded jit pass for pure functions instead of modules.
-            // Create a new node that would be used in the insert observer pass:
-            // all observer nodes will be cloned from this one.
-            Graph g;
-            Node* new_node = g.createPythonOp(
-                THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
-            InsertObserverNodes(function_var, new_node);
-            // We don't need this node anymore, don't forget to remove it.
-            new_node->destroy();
-          })
+      .def("_jit_pass_dce",
+           [](std::shared_ptr<Graph> &g) {
+             return EliminateDeadCode(g->block()); // overload resolution
+           })
+      .def("_jit_pass_cse",
+           [](std::shared_ptr<Graph> &g) {
+             return EliminateCommonSubexpression(g); // overload resolution
+           })
+      .def("_jit_pass_propagate_qinfo",
+           [](std::shared_ptr<Graph> &g) { return PropagateQuantInfo(g); })
+      .def("_jit_pass_insert_observers",
+           [](std::shared_ptr<script::Module> &moduleObj,
+              const std::string &methodName, py::function pyObserverFunction) {
+             // Create a new node that would be used in the insert observer
+             // pass:
+             // all observer nodes will be cloned from this one.
+             Graph g;
+             Node *new_node = g.createPythonOp(
+                 THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
+             InsertObserverNodes(moduleObj, methodName, new_node);
+             // We don't need this node anymore, don't forget to remove it.
+             new_node->destroy();
+           })
+      .def("_jit_pass_insert_observers",
+           [](std::shared_ptr<script::Function> &function_var,
+              py::function pyObserverFunction) {
+             // Overloaded jit pass for pure functions instead of modules.
+             // Create a new node that would be used in the insert observer
+             // pass:
+             // all observer nodes will be cloned from this one.
+             Graph g;
+             Node *new_node = g.createPythonOp(
+                 THPObjectPtr(pyObserverFunction.release().ptr()), "dd", {});
+             InsertObserverNodes(function_var, new_node);
+             // We don't need this node anymore, don't forget to remove it.
+             new_node->destroy();
+           })
       .def(
           "_jit_pass_insert_quantdequant",
-          [](std::shared_ptr<script::Module>& moduleObj,
-             const std::string& methodName,
-             py::dict& pyQParamDict) {
+          [](std::shared_ptr<script::Module> &moduleObj,
+             const std::string &methodName, py::dict &pyQParamDict) {
             if (!pyQParamDict.size()) {
               return;
             }
@@ -173,9 +167,8 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quantdequant_for_weight_bias",
-          [](std::shared_ptr<script::Module>& moduleObj,
-             const std::string& method_name,
-             const std::string& param_name,
+          [](std::shared_ptr<script::Module> &moduleObj,
+             const std::string &method_name, const std::string &param_name,
              py::function pyGetQParamFunc) {
             // For different static params we pass different getQParamFunc via
             // same interface exposed by the quantizer.
@@ -203,143 +196,120 @@ void initJITBindings(PyObject* module) {
               TORCH_CHECK(false, "Invalid Param Name");
             }
           })
-      .def(
-          "_jit_pass_quantlint",
-          [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
-      .def(
-          "_jit_pass_pattern_based_rewrite",
-          [](std::shared_ptr<script::Module>& m) {
-            return PatternBasedRewrite(m);
-          })
-      .def(
-          "_jit_pass_custom_pattern_based_rewrite",
-          [](const std::string& pattern,
-             const std::string& fused_node_name,
-             std::shared_ptr<script::Module> m) {
-            SubgraphRewriter subgraph_rewriter;
-            subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
-            subgraph_rewriter.runOnModule(m);
-          })
-      .def(
-          "_jit_pass_custom_pattern_based_rewrite_graph",
-          [](const std::string& pattern,
-             const std::string& fused_node_name,
-             std::shared_ptr<Graph> g) {
-            SubgraphRewriter subgraph_rewriter;
-            subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
-            subgraph_rewriter.runOnGraph(g);
-          })
-      .def(
-          "_jit_pass_fold_quant_inputs",
-          [](std::shared_ptr<Graph>& g) {
-            return FoldQuantNodesIntoInputsOutputs(g);
-          })
-      .def(
-          "_jit_pass_remove_inplace_ops",
-          [](std::shared_ptr<Graph> g) { return RemoveInplaceOps(g); })
+      .def("_jit_pass_quantlint",
+           [](std::shared_ptr<Graph> &g) { return QuantLinting(g); })
+      .def("_jit_pass_pattern_based_rewrite",
+           [](std::shared_ptr<script::Module> &m) {
+             return PatternBasedRewrite(m);
+           })
+      .def("_jit_pass_custom_pattern_based_rewrite",
+           [](const std::string &pattern, const std::string &fused_node_name,
+              std::shared_ptr<script::Module> m) {
+             SubgraphRewriter subgraph_rewriter;
+             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
+             subgraph_rewriter.runOnModule(m);
+           })
+      .def("_jit_pass_custom_pattern_based_rewrite_graph",
+           [](const std::string &pattern, const std::string &fused_node_name,
+              std::shared_ptr<Graph> g) {
+             SubgraphRewriter subgraph_rewriter;
+             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
+             subgraph_rewriter.runOnGraph(g);
+           })
+      .def("_jit_pass_fold_quant_inputs",
+           [](std::shared_ptr<Graph> &g) {
+             return FoldQuantNodesIntoInputsOutputs(g);
+           })
+      .def("_jit_pass_remove_inplace_ops",
+           [](std::shared_ptr<Graph> g) { return RemoveInplaceOps(g); })
       .def("_jit_pass_constant_pooling", ConstantPooling)
-      .def(
-          "_jit_pass_peephole",
-          [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
-            return PeepholeOptimize(g, addmm_fusion_enabled);
-          },
-          py::arg("graph"),
-          py::arg("addmm_fusion_enabled") = false)
-      .def(
-          "_jit_pass_canonicalize",
-          [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
+      .def("_jit_pass_peephole",
+           [](const std::shared_ptr<Graph> &g, bool addmm_fusion_enabled) {
+             return PeepholeOptimize(g, addmm_fusion_enabled);
+           },
+           py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
+      .def("_jit_pass_canonicalize",
+           [](const std::shared_ptr<Graph> &g) { return Canonicalize(g); })
       .def("_jit_pass_lint", LintGraph)
-      .def(
-          "_jit_pass_complete_shape_analysis",
-          [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
-            ArgumentSpecCreator arg_spec_creator(*graph);
-            Stack stack;
-            stack.reserve(inputs.size()); // captures?
-            for (auto& obj : inputs) {
-              stack.push_back(toIValue(obj));
-            }
-            ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
-            arg_spec_creator.specializeTypes(*graph, spec);
-            // We only get DimensionedTensorType from the arg_spec_creator, but
-            // we want CompleteTensorType. The alternative would be to have a
-            // "complete type inference" function in ArguemntSpecCreator.
-            auto g_inputs = graph->inputs();
-            for (size_t i = 0; i < inputs.size(); ++i) {
-              if (stack[i].isTensor()) {
-                g_inputs[i]->setType(incompleteInferTypeFrom(stack[i]));
-              }
-            }
-            PropagateInputShapes(graph);
-          })
+      .def("_jit_pass_complete_shape_analysis",
+           [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
+             ArgumentSpecCreator arg_spec_creator(*graph);
+             Stack stack;
+             stack.reserve(inputs.size()); // captures?
+             for (auto &obj : inputs) {
+               stack.push_back(toIValue(obj));
+             }
+             ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
+             arg_spec_creator.specializeTypes(*graph, spec);
+             // We only get DimensionedTensorType from the arg_spec_creator, but
+             // we want CompleteTensorType. The alternative would be to have a
+             // "complete type inference" function in ArguemntSpecCreator.
+             auto g_inputs = graph->inputs();
+             for (size_t i = 0; i < inputs.size(); ++i) {
+               if (stack[i].isTensor()) {
+                 g_inputs[i]->setType(incompleteInferTypeFrom(stack[i]));
+               }
+             }
+             PropagateInputShapes(graph);
+           })
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
       .def("_jit_pass_loop_unrolling", UnrollLoops)
-      .def(
-          "_jit_pass_constant_propagation",
-          [](std::shared_ptr<Graph>& g) { return ConstantPropagation(g); })
+      .def("_jit_pass_constant_propagation",
+           [](std::shared_ptr<Graph> &g) { return ConstantPropagation(g); })
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
-      .def(
-          "_jit_pass_create_autodiff_subgraphs",
-          [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
-      .def(
-          "_jit_run_cpp_tests",
-          [](bool runCuda) {
-            // We have to release the GIL inside this method, because if we
-            // happen to initialize the autograd engine in these tests, the
-            // newly spawned worker threads will try to initialize their
-            // PyThreadState*, and they need the GIL for this.
-            AutoNoGIL _no_gil;
-            return runJITCPPTests(runCuda);
-          },
-          py::arg("run_cuda"))
-      .def(
-          "_jit_flatten",
-          [](py::handle& obj) {
-            auto res = python::flatten(obj);
-            return std::make_pair(res.vars, res.desc);
-          })
-      .def(
-          "_jit_unflatten",
-          [](autograd::variable_list vars, python::IODescriptor& desc) {
-            return py::reinterpret_steal<py::object>(
-                python::unflatten(vars, desc));
-          })
+      .def("_jit_pass_create_autodiff_subgraphs",
+           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
+      .def("_jit_run_cpp_tests",
+           [](bool runCuda) {
+             // We have to release the GIL inside this method, because if we
+             // happen to initialize the autograd engine in these tests, the
+             // newly spawned worker threads will try to initialize their
+             // PyThreadState*, and they need the GIL for this.
+             AutoNoGIL _no_gil;
+             return runJITCPPTests(runCuda);
+           },
+           py::arg("run_cuda"))
+      .def("_jit_flatten",
+           [](py::handle &obj) {
+             auto res = python::flatten(obj);
+             return std::make_pair(res.vars, res.desc);
+           })
+      .def("_jit_unflatten",
+           [](autograd::variable_list vars, python::IODescriptor &desc) {
+             return py::reinterpret_steal<py::object>(
+                 python::unflatten(vars, desc));
+           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
       .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
-      .def(
-          "_jit_differentiate",
-          [](Graph& g) {
-            // the python binding slightly differs in semantics
-            // it makes a copy of the input Graph, and works on that
-            // jit::differentiate mutates the input Graph
-            auto g_clone = g.copy();
-            return differentiate(g_clone);
-          })
-      .def(
-          "_jit_check_alias_annotation",
-          [](std::shared_ptr<Graph> g,
-             py::tuple args,
-             const std::string& unqualified_op_name) {
-            auto stack = toStack(args);
-            checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
-          })
-      .def(
-          "_jit_set_profiling_mode",
-          [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
-      .def(
-          "_jit_set_first_class_mode",
-          [](bool enabled) { script::getFirstClassMode() = enabled; })
-      .def(
-          "_jit_fuser_get_fused_kernel_code",
-          [](Graph& g, std::vector<at::Tensor> inps) {
-            return debugGetFusedKernelCode(g, inps);
-          });
+      .def("_jit_differentiate",
+           [](Graph &g) {
+             // the python binding slightly differs in semantics
+             // it makes a copy of the input Graph, and works on that
+             // jit::differentiate mutates the input Graph
+             auto g_clone = g.copy();
+             return differentiate(g_clone);
+           })
+      .def("_jit_check_alias_annotation",
+           [](std::shared_ptr<Graph> g, py::tuple args,
+              const std::string &unqualified_op_name) {
+             auto stack = toStack(args);
+             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
+           })
+      .def("_jit_set_profiling_mode",
+           [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
+      .def("_jit_set_inline_everything_mode",
+           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
+      .def("_jit_fuser_get_fused_kernel_code",
+           [](Graph &g, std::vector<at::Tensor> inps) {
+             return debugGetFusedKernelCode(g, inps);
+           });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")

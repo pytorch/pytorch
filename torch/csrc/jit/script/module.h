@@ -71,10 +71,6 @@ struct TORCH_API Method {
 
   IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs());
 
-  const std::vector<Slot>& initial_ivalues() const {
-    return initial_ivalues_;
-  }
-
   std::shared_ptr<Graph> graph() const {
     return function_->graph();
   }
@@ -83,13 +79,7 @@ struct TORCH_API Method {
     return function_->name();
   }
 
-  size_t num_inputs() const {
-    return function_->num_inputs() - initial_ivalues_.size();
-  }
-
-  const FunctionSchema& getSchema() const {
-    return schema_;
-  }
+  size_t num_inputs() const { return function_->num_inputs(); }
 
   GraphExecutor& get_executor() {
     return function_->get_executor();
@@ -113,11 +103,6 @@ struct TORCH_API Method {
   // This is the _lowered_ function and is different than the
   // first-class function in class_compilation_unit()
   std::shared_ptr<Function> function_;
-
-  // parameters and attributes loaded from the Module and appending
-  // before calling function_
-  std::vector<Slot> initial_ivalues_;
-  FunctionSchema schema_;
 };
 
 struct Module;
@@ -430,10 +415,7 @@ struct TORCH_API Module {
 
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
- private:
-  std::pair<std::shared_ptr<Function>, std::vector<Slot>>
-  lower_first_class_method(Function* fn);
-
+private:
   void to_impl(
       const c10::optional<at::Device>& device,
       const c10::optional<at::ScalarType>& dtype,
@@ -525,11 +507,6 @@ struct TORCH_API Module {
   // parameters, attributes, methods, and sub-modules
   // we store individual lists of each concept, and a single map to
   // unify the namespace and ensure fast lookup
-
-  // invariant: to ensure initial_ivalues of Methods stay valid,
-  // it is only legal to _add_ new modules and parameters.
-  // removing them will allow initial_ivalues to point to invalid parameters
-  // no such restriction exists for methods
   std::vector<std::shared_ptr<Module>> modules_;
   std::vector<Slot> parameters_;
   std::vector<Slot> attributes_;
@@ -554,7 +531,7 @@ struct TORCH_API Module {
   friend struct Method;
 };
 
-TORCH_API bool& getFirstClassMode();
+TORCH_API bool &getInlineEverythingMode();
 
 } // namespace script
 } // namespace jit

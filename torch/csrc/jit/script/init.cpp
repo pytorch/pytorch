@@ -493,7 +493,7 @@ void initJitScriptBindings(PyObject* module) {
             if (tracing) {
               tracer::getTracingState()->graph->push_scope(callee.name());
             }
-            py::object result = invokeScriptMethodFromPython(
+            py::object result = invokeScriptFunctionFromPython(
                 callee, tuple_slice(std::move(args), 1), std::move(kwargs));
             if (tracing) {
               tracer::getTracingState()->graph->pop_scope();
@@ -538,28 +538,19 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("name", &Function::name);
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
-      .def(
-          "__call__",
-          [](py::args args, py::kwargs kwargs) {
-            // see: [pybind11 varargs]
-            Method& method = py::cast<Method&>(args[0]);
-            return invokeScriptMethodFromPython(
-                method, tuple_slice(std::move(args), 1), std::move(kwargs));
-          })
+      .def("__call__",
+           [](py::args args, py::kwargs kwargs) {
+             // see: [pybind11 varargs]
+             Method &method = py::cast<Method &>(args[0]);
+             return invokeScriptMethodFromPython(
+                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
+           })
       .def_property_readonly("graph", &Method::graph)
-      .def(
-          "initial_ivalues",
-          [](Method& m) {
-            std::vector<at::Tensor> tensors;
-            for (auto& t : m.initial_ivalues()) {
-              tensors.push_back(t.value().toTensor());
-            }
-            return tensors;
-          })
+      .def_property_readonly("schema",
+                             [](Method &m) { return m.function().getSchema(); })
       .def("_lowered_graph", &Method::_lowered_graph)
-      .def_property_readonly("schema", &Method::getSchema)
       .def_property_readonly("name", &Method::name)
-      .def_property_readonly("code", [](Method& self) {
+      .def_property_readonly("code", [](Method &self) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
         std::vector<ClassTypePtr> classes;
