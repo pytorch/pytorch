@@ -2192,6 +2192,12 @@
 - func: nuclear_norm(Tensor self, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
+- func: nuclear_norm(Tensor self, int[2] dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: nuclear_norm(Tensor self, int[2] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+
 - func: clone(Tensor self) -> Tensor
   variants: function, method
   dispatch:
@@ -2624,12 +2630,12 @@
   dispatch:
     CPU: dequantize_linear_cpu
 
-- func: q_scale(Tensor self) -> Scalar
+- func: q_scale(Tensor self) -> float
   variants: function, method
   dispatch:
     QuantizedCPU: q_scale_quant
 
-- func: q_zero_point(Tensor self) -> Scalar
+- func: q_zero_point(Tensor self) -> int
   variants: function, method
   dispatch:
     QuantizedCPU: q_zero_point_quant

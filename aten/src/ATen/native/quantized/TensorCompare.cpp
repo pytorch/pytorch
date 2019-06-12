@@ -27,8 +27,8 @@ std::tuple<Tensor, Tensor> sort(const Tensor& self, int64_t dim, bool descending
     return std::forward_as_tuple(
       at::_per_tensor_affine_qtensor(
         sort_int,
-        self.q_scale().toDouble(),
-        self.q_zero_point().toLong()),
+        self.q_scale(),
+        self.q_zero_point()),
         sort_indicies);
   } else {
     return at::sort(self, dim, descending);

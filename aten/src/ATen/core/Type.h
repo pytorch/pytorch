@@ -74,7 +74,6 @@ struct CAFFE2_API Type {
   bool is_undefined() const noexcept { return is_undefined_; }
   virtual Allocator * allocator() const = 0;
   virtual Device getDeviceFromPtr(void * data) const = 0;
-  virtual std::unique_ptr<Generator> generator() const = 0;
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
@@ -392,8 +391,8 @@ struct CAFFE2_API Type {
   virtual Tensor to_sparse(const Tensor & self) const = 0;
   virtual Tensor to_mkldnn(const Tensor & self) const = 0;
   virtual Tensor dequantize(const Tensor & self) const = 0;
-  virtual Scalar q_scale(const Tensor & self) const = 0;
-  virtual Scalar q_zero_point(const Tensor & self) const = 0;
+  virtual double q_scale(const Tensor & self) const = 0;
+  virtual int64_t q_zero_point(const Tensor & self) const = 0;
   virtual Tensor int_repr(const Tensor & self) const = 0;
   virtual Tensor to(const Tensor & self, const TensorOptions & options, bool non_blocking, bool copy) const = 0;
   virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;

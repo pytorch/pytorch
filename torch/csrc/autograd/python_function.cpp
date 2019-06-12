@@ -676,7 +676,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   RECORD_FUNCTION(
     Py_TYPE(self)->tp_name,
     std::vector<c10::IValue>(),
-    Function::peek_at_next_sequence_nr());
+    autograd::Function::peek_at_next_sequence_nr());
 
   auto info_pair = unpack_input<true>(_inputs);
   auto& unpacked_input = info_pair.first;
@@ -709,7 +709,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   RECORD_FUNCTION(
     ((PyTypeObject*)cls)->tp_name,
     std::vector<c10::IValue>(),
-    Function::peek_at_next_sequence_nr());
+    autograd::Function::peek_at_next_sequence_nr());
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
   if (!backward_cls) return nullptr;
@@ -993,7 +993,7 @@ PyObject* getMember(PyObject* obj, void* _unused) {
   return Convert(self->*ptr);
 }
 
-template<typename M, M Function::*ptr, PyObject* (*Convert)(long)>
+template<typename M, M autograd::Function::*ptr, PyObject* (*Convert)(long)>
 PyObject* getImplMember(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   return Convert(self->cdata.*ptr);

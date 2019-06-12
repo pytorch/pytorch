@@ -20,8 +20,9 @@ from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from torch._six import inf, nan, string_classes, istuple
-from itertools import product, combinations, combinations_with_replacement
+from itertools import product, combinations, combinations_with_replacement, permutations
 from functools import reduce
+from random import randrange
 from torch import multiprocessing as mp
 from common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
@@ -977,6 +978,100 @@ class _TestTorchMixin(object):
     @skipIfNoLapack
     def test_norm(self):
         self._test_norm(self, device='cpu')
+
+    @staticmethod
+    def _test_nuclear_norm_axes(self, device='cpu'):
+        def check_single_nuclear_norm(x, axes):
+            if x.is_cuda and randrange(100) < 95:
+                return  # too many cpu <==> gpu copies
+
+            a = np.array(x.cpu(), copy=False)
+            expected = np.linalg.norm(a, "nuc", axis=axes)
+
+            ans = torch.norm(x, "nuc", dim=axes)
+            self.assertTrue(ans.is_contiguous())
+            self.assertEqual(ans.shape, expected.shape)
+            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03))
+
+            out = torch.zeros(expected.shape, dtype=x.dtype, device=x.device)
+            ans = torch.norm(x, "nuc", dim=axes, out=out)
+            self.assertIs(ans, out)
+            self.assertTrue(ans.is_contiguous())
+            self.assertEqual(ans.shape, expected.shape)
+            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03))
+
+        for n in range(1, 3):
+            for m in range(1, 3):
+                for axes in permutations([0, 1], 2):
+                    # 2d, inner dimensions C
+                    x = torch.randn(n, m, device=device)
+                    check_single_nuclear_norm(x, axes)
+
+                    # 2d, inner dimensions Fortran
+                    x = torch.randn(m, n, device=device).transpose(-1, -2)
+                    check_single_nuclear_norm(x, axes)
+
+                    # 2d, inner dimensions non-contiguous
+                    x = torch.randn(n, 2 * m, device=device)[:, ::2]
+                    check_single_nuclear_norm(x, axes)
+
+                    # 2d, all dimensions non-contiguous
+                    x = torch.randn(7 * n, 2 * m, device=device)[::7, ::2]
+                    check_single_nuclear_norm(x, axes)
+
+                for o in range(1, 3):
+                    for axes in permutations([0, 1, 2], 2):
+                        # 3d, inner dimensions C
+                        x = torch.randn(o, n, m, device=device)
+                        check_single_nuclear_norm(x, axes)
+
+                        # 3d, inner dimensions Fortran
+                        y = torch.randn(o, n, m, device=device).transpose(-1, -2)
+                        check_single_nuclear_norm(x, axes)
+
+                        # 3d, inner dimensions non-contiguous
+                        x = torch.randn(o, n, 2 * m, device=device)[:, :, ::2]
+                        check_single_nuclear_norm(x, axes)
+
+                        # 3d, all dimensions non-contiguous
+                        x = torch.randn(7 * o, 5 * n, 2 * m, device=device)[::7, ::5, ::2]
+                        check_single_nuclear_norm(x, axes)
+
+                    for r in range(1, 3):
+                        for axes in permutations([0, 1, 2, 3], 2):
+                            # 4d, inner dimensions C
+                            x = torch.randn(r, o, n, m, device=device)
+                            check_single_nuclear_norm(x, axes)
+
+                            # 4d, inner dimensions Fortran
+                            x = torch.randn(r, o, n, m, device=device).transpose(-1, -2)
+                            check_single_nuclear_norm(x, axes)
+
+                            # 4d, inner dimensions non-contiguous
+                            x = torch.randn(r, o, n, 2 * m, device=device)[:, :, :, ::2]
+                            check_single_nuclear_norm(x, axes)
+
+                            # 4d, all dimensions non-contiguous
+                            x = torch.randn(7 * r, 5 * o, 11 * n, 2 * m, device=device)[::7, ::5, ::11, ::2]
+                            check_single_nuclear_norm(x, axes)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_nuclear_norm_axes_small_brute_force(self):
+        self._test_nuclear_norm_axes(self)
+
+    @staticmethod
+    def _test_nuclear_norm_exceptions(self, device='cpu'):
+        for lst in [], [1], [1, 2]:
+            for axes in (), (0,), (0, 1):
+                x = torch.tensor(lst, dtype=torch.double, device=device)
+                self.assertRaises(RuntimeError, torch.norm, x, "nuc", axes)
+
+        x = torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.double, device=device)
+        self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
+        self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 2))
+
+    def test_nuclear_norm_exceptions(self):
+        self._test_nuclear_norm_exceptions(self)
 
     @staticmethod
     def _test_dist(self, device):
@@ -3852,6 +3947,41 @@ class _TestTorchMixin(object):
             with self.assertRaisesRegex(RuntimeError, "expected 1-D"):
                 a_t, p_t = torch._multinomial_alias_setup(probs)
                 torch._multinomial_alias_draw(p_t.view(2, 2), a_t.view(2, 2))
+
+        MAX_SAMPLES = 200000
+        for probs in [get_probs(4, True),
+                      cast(torch.tensor([0.8, 0.2])),
+                      cast(torch.tensor([0.7, 0.2, 0.1]))]:
+            # Check how different the alias distribution and the original distribution are
+            alias_dist = torch.zeros_like(probs)
+            alias_table, prob_table = torch._multinomial_alias_setup(probs)
+            alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, MAX_SAMPLES)
+            alias_dist = torch.unique(alias_samples, return_counts=True)[1].to(dtype=probs.dtype) / MAX_SAMPLES
+            self.assertTrue(torch.allclose(alias_dist, probs, rtol=0.02, atol=0.0),
+                            "Actual: {}\nExpected: {}".format(alias_dist, probs))
+
+        for probs in [cast(torch.tensor([0.2501, 0.25, 0.2499, 0.25])),
+                      cast(torch.tensor([0.8, 0.199, 0.001])),
+                      cast(torch.tensor([0.25001, 0.25, 0.24999, 0.25])),
+                      cast(torch.tensor([0.33, 0.34, 0.33])),
+                      cast(torch.tensor([0.8, 0.1999, 0.0001]))]:
+            # Check the difference between the original probabilities and the reconstructed
+            # probabilities from the alias and probability tables output by _multinomial_alias_setup
+            alias_table, prob_table = torch._multinomial_alias_setup(probs)
+            actual = torch.zeros_like(probs)
+            for i, vals in enumerate(zip(alias_table, prob_table)):
+                idx, p = vals
+                actual[i] += p
+                actual[idx] += 1. - p
+            actual = actual / len(probs)
+            self.assertEqual(actual, probs, 1e-6)
+
+        # Some special cases
+        test_cases = [cast(torch.tensor([1.0, 0.0, 0.0])), cast(torch.tensor([0.0, 1.0]))]
+        for probs in test_cases:
+            alias_table, prob_table = torch._multinomial_alias_setup(probs)
+            alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, MAX_SAMPLES)
+            self.assertEqual(alias_samples.unique(), probs.nonzero().squeeze(-1))
 
     def test_multinomial_alias(self):
         self._test_multinomial_alias(self, lambda t: t)
@@ -9445,6 +9575,37 @@ class _TestTorchMixin(object):
         self.assertEqual(r[50:].mean(), 1, 0.2)
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+    def test_generator_cpu(self):
+        # test default generators are equal
+        self.assertEqual(torch.default_generator, torch.default_generator)
+
+        # tests Generator API
+        # manual_seed, seed, initial_seed, get_state, set_state
+        g1 = torch.Generator()
+        g2 = torch.Generator()
+        g1.manual_seed(12345)
+        g2.manual_seed(12345)
+        self.assertEqual(g1.initial_seed(), g2.initial_seed())
+
+        g1.seed()
+        g2.seed()
+        self.assertNotEqual(g1.initial_seed(), g2.initial_seed())
+
+        g1 = torch.Generator()
+        g2_state = g2.get_state()
+        g2_randn = torch.randn(1, generator=g2)
+        g1.set_state(g2_state)
+        g1_randn = torch.randn(1, generator=g1)
+        self.assertEqual(g1_randn, g2_randn)
+
+        default_state = torch.default_generator.get_state()
+        q = torch.Tensor(100)
+        g1_normal = q.normal_()
+        g2 = torch.Generator()
+        g2.set_state(default_state)
+        g2_normal = q.normal_(generator=g2)
+        self.assertEqual(g1_normal, g2_normal)
 
     def test_sobolengine_unscrambled_lowdim(self):
         engine_1d = torch.quasirandom.SobolEngine(1)
