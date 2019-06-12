@@ -6,7 +6,6 @@ import torch
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
-from torch.__future__ import change_nn_module_params_inplace_cpu_cuda
 
 
 _IncompatibleKeys = namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])
@@ -199,13 +198,14 @@ class Module(object):
             # the existing tensor (and we in-place update the existing tensor
             # instead).
             if tensor.device != tensor_applied.device:
+                # yf225 TODO: fix comments here:
                 # If the new tensor is on a different device, then we take
-                # `change_nn_module_params_inplace_cpu_cuda` into account only if we are
-                # moving the model between CPU and CUDA. Otherwise, we always
-                # move the existing tensor.
+                # `torch.__future__.change_nn_module_params_inplace_cpu_cuda`
+                # into account only if we are moving the model between CPU and CUDA.
+                # Otherwise, we always move the existing tensor.
                 if (tensor.is_cuda and tensor_applied.device == torch.device('cpu')) or
                    (tensor.device == torch.device('cpu') and tensor_applied.is_cuda):
-                    return not change_nn_module_params_inplace_cpu_cuda
+                    return not torch.__future__.change_nn_module_params_inplace_cpu_cuda
                 else:
                     return True
             else:
