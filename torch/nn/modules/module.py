@@ -193,28 +193,26 @@ class Module(object):
         for module in self.children():
             module._apply(fn)
 
-        def compute_should_move_tensor(tensor, tensor_applied):  # yf225 TODO: rename this function! Don't mention "move" in the name
-            # If the new tensor is still on the same device, we don't move
-            # the existing tensor (and we in-place update the existing tensor
-            # instead).
+        def compute_should_change_tensor_inplace(tensor, tensor_applied):
             if tensor.device != tensor_applied.device:
-                # yf225 TODO: fix comments here:
                 # If the new tensor is on a different device, then we take
                 # `torch.__future__.change_nn_module_params_inplace_cpu_cuda`
                 # into account only if we are moving the model between CPU and CUDA.
-                # Otherwise, we always move the existing tensor.
+                # Otherwise, we always replace the existing tensor.
                 if (tensor.is_cuda and tensor_applied.device == torch.device('cpu')) or
                    (tensor.device == torch.device('cpu') and tensor_applied.is_cuda):
-                    return not torch.__future__.change_nn_module_params_inplace_cpu_cuda
+                    return torch.__future__.change_nn_module_params_inplace_cpu_cuda
                 else:
-                    return True
+                    return False
             else:
-                return False
+                # If the new tensor is on the same device, we always in-place
+                # update the existing tensor.
+                return True
 
         for key, param in self._parameters.items():
             if param is not None:
                 param_applied = fn(param.data)
-                if compute_should_move_tensor(param, param_applied):
+                if not compute_should_change_tensor_inplace(param, param_applied):
                     # Tensors stored in modules are graph leaves, and we don't want to
                     # create copy nodes, so we have to use `with torch.no_grad():`
                     with torch.no_grad():
@@ -229,7 +227,7 @@ class Module(object):
 
                 if param.grad is not None:
                     grad_applied = fn(param.grad.data)
-                    if compute_should_move_tensor(param.grad, grad_applied):
+                    if not compute_should_change_tensor_inplace(param.grad, grad_applied):
                         with torch.no_grad():
                             self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
                             # Bump up the version counter of the original parameter's gradient,
