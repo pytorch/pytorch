@@ -32,7 +32,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT"
   sudo mkdir -p /var/run/sshd
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-py3-clang5-asan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 

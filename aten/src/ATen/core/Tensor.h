@@ -165,6 +165,16 @@ class CAFFE2_API Tensor {
   IntArrayRef strides() const {
     return impl_->strides();
   }
+#ifdef NAMEDTENSOR_ENABLED
+  optional<DimnameList> names() const {
+    const auto* meta = get_named_tensor_meta();
+    if (meta == nullptr) {
+      return nullopt;
+    } else {
+      return meta->names();
+    }
+  }
+#endif
   int64_t ndimension() const {
     return dim();
   }
@@ -256,7 +266,8 @@ class CAFFE2_API Tensor {
   bool is_named() const;
 
   /// Returns a `Tensor`'s dimension names data structure
-  NamedTensorMeta* get_named_tensor_meta() const;
+  const NamedTensorMeta* get_named_tensor_meta() const;
+  NamedTensorMeta* get_named_tensor_meta();
 #endif
 
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
