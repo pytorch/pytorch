@@ -13142,6 +13142,7 @@ class TestRecursiveScript(JitTestCase):
 
         return sm
 
+    @skipIf(PY2, "Class annotations are a thing in > 3.5")
     def test_constants_with_final(self):
         class M(torch.nn.Module):
             # TODO: Use this (see below)
