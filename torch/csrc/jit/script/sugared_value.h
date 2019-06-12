@@ -381,6 +381,13 @@ struct TORCH_API AnnotateValue : public SugaredValue {
   }
 };
 
+struct TORCH_API UninitializedValue : public SugaredValue {
+  UninitializedValue() = default;
+  std::string kind() const override {
+    return "uninitialized";
+  }
+};
+
 // matched against for special handling of getattr expressions
 struct TORCH_API GetAttrValue : SugaredValue {
   GetAttrValue() = default;

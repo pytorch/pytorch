@@ -11,16 +11,24 @@ namespace at {
 // that c10::Symbol isn't actually a part of the c10 lib (where TensorImpl is).
 // In the long term, we should decouple c10::Symbol from aten and toss it into c10.
 struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
-  std::vector<Dimname> names;
-
   explicit NamedTensorMeta(int64_t num_names)
-    : names(std::vector<Dimname>(num_names, Dimname::wildcard())) {}
+    : names_(std::vector<Dimname>(num_names, Dimname::wildcard())) {}
 
-  explicit NamedTensorMeta(std::vector<Dimname> names)
-    : names(names) {}
+  explicit NamedTensorMeta(DimnameList names)
+    : names_(names.vec()) {}
 
   bool has_names() const;
+  DimnameList names() const { return names_; }
+
+  void set_names_(DimnameList new_names) {
+    TORCH_INTERNAL_ASSERT(new_names.size() == names_.size());
+    std::copy(new_names.begin(), new_names.end(), names_.begin());
+  }
+
+ private:
+  std::vector<Dimname> names_;
 };
 
+CAFFE2_API void internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
 }
 #endif

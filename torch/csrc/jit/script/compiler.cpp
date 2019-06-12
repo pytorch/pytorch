@@ -376,6 +376,7 @@ struct Environment {
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
+          {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"rangelist",
@@ -571,7 +572,7 @@ struct to_ir {
     cu.define({def}, {resolver}, nullptr);
     Stack stack;
     cu.get_function("defaults").run(stack);
-    return stack.at(0).toTuple()->elements();
+    return stack.at(0).toTupleRef().vec();
   }
 
   std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {
@@ -1236,21 +1237,20 @@ struct to_ir {
   }
 
   // *********************** Loop Operators ************************************
-  // Emits a loop operators conforming to the semantics specified at
+  // Emits a loop operator with the form:
+  // Loop(max_trip_count)
+  // block0(loop_counter) {
+  //   <body>
+  // }
+  // block1 {
+  //   <loop condition>
+  //   -> (condition)
+  // }
+  // For loops will have an empty loop condition block with condition set to
+  // true. In the convert to ssa pass, the loop condition will correctly
+  // inlined. and inputs and outputs added so that the loop conforms to the
+  // semantics specified at
   // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
-  // TODO: implement scan_outputs
-
-  // the format of the Loop instruction is:
-  // loop_carried_outputs* = Loop(max_trip_count, start_condition,
-  //                              loop_carried_inputs*)
-  //                    block0(loop_counter, loop_carried_block*) {
-  //                       <body>
-  //                       -> (continue_condition, loop_carried_block_outputs*)
-  //                    }
-  // all loop_carried_... lists are the same length and represent the value of
-  // loop-carried variables whose definitions are updated as the loop executes
-  // in a way that ensure single static assignment.
-
   void emitLoopCommon(
       SourceRange range,
       const List<Stmt>& body,
@@ -1266,18 +1266,22 @@ struct to_ir {
           integral_constants);
     }
 
-    Value* cond_val = (cond) ? emitCond(cond.value())
-                             : graph->insertConstant(true, nullptr, range);
-
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
-    WithInsertPoint guard(n);
-
-    n->addInput(max_trip_count_val);
-    n->addInput(cond_val);
     auto* body_block = n->addBlock();
+
+    {
+      Block* condition_block = n->addBlock();
+      pushFrame(condition_block);
+      WithInsertPoint insert(condition_block);
+      Value* out = cond ? emitCond(cond.value())
+                        : graph->insertConstant(true, nullptr, range);
+      condition_block->registerOutput(out);
+      popFrame();
+    }
+    n->addInput(max_trip_count_val);
+
     Value* trip_count =
         body_block->addInput()->setType(IntType::get()); // Iteration num
-
     {
       pushFrame(body_block);
       WithInsertPoint guard(body_block);
@@ -1289,12 +1293,6 @@ struct to_ir {
       }
 
       emitStatements(body);
-
-      Value* block_condition = (cond)
-          ? emitCond(cond.value())
-          : graph->insertConstant(true, nullptr, range);
-
-      body_block->registerOutput(block_condition);
 
       popFrame();
     }
@@ -2113,11 +2111,15 @@ struct to_ir {
     });
   }
 
-  void checkApplyExpr(Apply& apply, SourceRange& loc) {
-    if (apply.inputs().size() != 2) {
-      throw ErrorReport(loc) << Var(apply.callee()).name().name()
-                             << " expected exactly two arguments but found "
-                             << apply.inputs().size();
+  void checkApplyExpr(
+      Apply& apply,
+      SourceRange& loc,
+      size_t expected_inputs = 2) {
+    if (apply.inputs().size() != expected_inputs) {
+      throw ErrorReport(loc)
+          << Var(apply.callee()).name().name() << " expected exactly "
+          << expected_inputs << " arguments but found "
+          << apply.inputs().size();
     }
     if (apply.attributes().size() > 0) {
       throw ErrorReport(loc)
@@ -2173,6 +2175,14 @@ struct to_ir {
       }
       const std::string& name = StringLiteral(selector).text();
       return obj->attr(apply.range(), method, name);
+    } else if (
+        auto uninitialized_value =
+            dynamic_cast<UninitializedValue*>(sv.get())) {
+      checkApplyExpr(apply, loc, 1);
+      TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+      auto out = graph->insertNode(graph->createUninitialized(type))
+                     ->setSourceRange(loc);
+      return std::make_shared<SimpleValue>(out->output());
     } else if (auto isinstance = dynamic_cast<IsInstanceValue*>(sv.get())) {
       // NOTE: for `isinstance` builtin call in JIT, we only check the static
       // types on the inputs to evaluate, and insert the corresponding constant

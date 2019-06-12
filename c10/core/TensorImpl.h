@@ -145,7 +145,9 @@ struct C10_API NonVariableTypeMode {
 };
 
 #ifdef NAMEDTENSOR_ENABLED
-struct C10_API NamedTensorMetaInterface {};
+struct C10_API NamedTensorMetaInterface {
+  virtual ~NamedTensorMetaInterface();
+};
 #endif
 
 // NOTE [ Version Counter Sharing ]
@@ -863,7 +865,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Return the pointer to named tensor metadata.
    */
-  c10::NamedTensorMetaInterface* named_tensor_meta() const {
+  const c10::NamedTensorMetaInterface* named_tensor_meta() const {
+    return named_tensor_meta_.get();
+  }
+
+  c10::NamedTensorMetaInterface* named_tensor_meta() {
     return named_tensor_meta_.get();
   }
 #endif
