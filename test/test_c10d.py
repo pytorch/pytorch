@@ -2490,6 +2490,71 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss = criterion(output, target)
             loss.backward()
 
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_failure_recovery(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # need to create a separate file for the recovered FileStore, because
+        # the original one will be deleted when destructing the first FileStore.
+        recovery_filename = self.file.name + "_recovery"
+
+        if self.rank == 0:
+            # the file will be deleted by the recovered FileStore
+            open(recovery_filename, "w").close()
+
+        # not necessary to run barrier here, as DDP will synchronize
+
+        class TestModel(nn.Module):
+            def __init__(self):
+                super(TestModel, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = TestModel().float().to(device_id)
+        ddp = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+
+        for _ in range(6):
+            output = ddp(input)
+            loss = criterion(output, target)
+            loss.backward()
+
+        del ddp
+        del process_group
+        del store  # this will delete self.file
+
+        store = c10d.FileStore(recovery_filename, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        ddp = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+        for _ in range(6):
+            output = ddp(input)
+            loss = criterion(output, target)
+            loss.backward()
+
 
 class ReducerModule(nn.Module):
     def __init__(self):

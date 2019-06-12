@@ -8,81 +8,9 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
 
-namespace detail {
-// InputToIValue takes a value and converts it to an IValue to be put on a stack.
-template<class T>
-struct InputToIValue final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    return c10::IValue(std::forward<T_>(v));
-  }
-};
-template<class T>
-struct InputToIValue<c10::optional<T>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    if (v.has_value()) {
-      return c10::IValue(std::move(*v));
-    } else {
-      return c10::IValue();
-    }
-  }
-};
-template<class T>
-struct InputToIValue<c10::ArrayRef<T>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    return c10::IValue(v.vec());
-  }
-};
-template<class Key, class Value>
-struct InputToIValue<std::vector<std::unordered_map<Key, Value>>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    auto list = c10::ivalue::GenericList::create({});
-    list->elements().reserve(v.size());
-    for (std::unordered_map<Key, Value>& e : v) {
-      list->elements().push_back(InputToIValue<std::unordered_map<Key, Value>>::call(std::move(e)));
-    }
-    return list;
-  }
-};
-template<>
-struct InputToIValue<std::vector<std::string>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    auto list = c10::ivalue::GenericList::create({});
-    list->elements().reserve(v.size());
-    for (std::string& e : v) {
-      list->elements().push_back(InputToIValue<std::string>::call(std::move(e)));
-    }
-    return list;
-  }
-};
-template<class Key, class Value>
-struct InputToIValue<c10::DictPtr<Key, Value>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    return c10::IValue(c10::impl::toGenericDict(std::move(v)));
-  }
-};
-template<class Key, class Value>
-struct InputToIValue<std::unordered_map<Key, Value>> final {
-  template<class T_>
-  static c10::IValue call(T_&& v) {
-    c10::impl::GenericDictPtr dict = c10::impl::make_generic_dict();
-    dict.reserve(v.size());
-    for (auto& element : v) {
-      dict.insert(InputToIValue<Key>::call(element.first), InputToIValue<Value>::call(element.second));
-    }
-    return c10::IValue(std::move(dict));
-  }
-};
-}
-
 template<class... Inputs>
 inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
-  return {detail::InputToIValue<c10::guts::decay_t<Inputs>>::call(std::forward<Inputs>(inputs))...};
+  return {std::forward<Inputs>(inputs)...};
 }
 
 inline at::Tensor dummyTensor(c10::TensorTypeId dispatch_key) {
@@ -128,4 +56,20 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
   }
   ADD_FAILURE() << "Expected to throw exception containing \""
     << expectMessageContains << "\" but didn't throw";
+}
+
+template<class T>
+void expectListEquals(c10::ArrayRef<T> expected, c10::ListPtr<T> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual.get(i));
+  }
+}
+
+template<class T>
+void expectListEquals(c10::ArrayRef<T> expected, std::vector<T> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual[i]);
+  }
 }

@@ -95,7 +95,7 @@ struct CaptureList {
       //  This is to avoid any implicit mutation to TensorList happened
       //  between forward & backward.
       capture_types_.emplace_back(CAPTURE_LIST);
-      const std::vector<at::Tensor>& tensors = val.toTensorListRef();
+      c10::ArrayRef<at::Tensor> tensors = val.toTensorListRef();
       sizes_.push_back(tensors.size());
 
       for (const at::Tensor& tensor : tensors) {
@@ -124,13 +124,13 @@ struct CaptureList {
           ++var_capture_it;
         } break;
         case CAPTURE_LIST: {
-          std::vector<at::Tensor> lst;
+          c10::ListPtr<at::Tensor> lst = c10::make_list<at::Tensor>();
           auto size = *size_it++;
           for (size_t i = 0; i < size; i++) {
             lst.emplace_back(var_capture_it->unpack(saved_for));
             var_capture_it++;
           }
-          stack.emplace_back(TensorList::create(std::move(lst)));
+          stack.emplace_back(std::move(lst));
         } break;
         case CAPTURE_IVALUE: {
           stack.push_back(*ivalue_capture_it++);
@@ -176,7 +176,7 @@ struct UnpackInstructions {
         } break;
         case PUSH_LIST: {
           std::vector<at::Tensor> lst(input_it, input_it + *sizes_it++);
-          stack.emplace_back(TensorList::create(std::move(lst)));
+          stack.emplace_back(c10::impl::toList(std::move(lst)));
         } break;
       }
     }
@@ -224,7 +224,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     size_t output_index = 0;
     for (IValue& v : stack) {
       if (v.isTensorList()) {
-        for (at::Tensor tensor : v.toTensorListRef()) {
+        for (const at::Tensor& tensor : v.toTensorListRef()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
@@ -270,7 +270,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
 
   void addInputIValue(const IValue& v) {
     if (v.isTensorList()) {
-      const std::vector<at::Tensor>& tensors = v.toTensorListRef();
+      c10::ArrayRef<at::Tensor> tensors = v.toTensorListRef();
       input_instructions_.pushTensorList(tensors.size());
       for (const at::Tensor& tensor : tensors) {
         addInputVariable(tensor);
@@ -362,23 +362,22 @@ struct DifferentiableGraphOp {
  private:
   friend GraphExecutor* detail::getGradExecutor(Operation& op);
 
-  void detach(at::Tensor& t) const {
-    if (t.defined()) {
-      t = autograd::as_variable_ref(t).detach();
+  at::Tensor detach(at::Tensor t) const {
+    if (!t.defined()) {
+      return t;
     }
+    return autograd::as_variable_ref(t).detach();
   }
 
   void detach(IValue& v) const {
     if (v.isTensor()) {
-      auto t = std::move(v).toTensor();
-      detach(t);
-      v = IValue{t};
+      v = IValue(detach(std::move(v).toTensor()));
     } else if (v.isTensorList()) {
-      std::vector<at::Tensor> lst = v.toTensorListRef();
-      for (at::Tensor& t : lst) {
-        detach(t);
+      c10::ListPtr<at::Tensor> lst = std::move(v).toTensorList();
+      for (size_t i = 0; i < lst.size(); ++i) {
+        lst.set(i, detach(lst.extract(i)));
       }
-      v = TensorList::create(std::move(lst));
+      v = std::move(lst);
     }
   }
 

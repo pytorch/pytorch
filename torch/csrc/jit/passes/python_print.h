@@ -14,7 +14,7 @@ struct Module;
 
 TORCH_API void PythonPrint(
     std::ostream& out,
-    const script::Function& callee,
+    const Function& callee,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
     std::vector<ClassTypePtr>& class_table,
