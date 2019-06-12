@@ -103,9 +103,8 @@ MatchTypeReturn tryToInferContainerType(py::handle input);
 // The type cannot be inferred if:
 //   input is a None
 //   input is an empty container (list, dict, tuple)
-//   input is an empty container
-//   input is an dict with more than one type of key or value
-//   input is an list with more than one type of element
+//   input is an list with element types that cannot be unified
+//   input is an dict with key or value types that cannot be unified
 inline MatchTypeReturn tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
@@ -147,18 +146,7 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
 }
 
 inline MatchTypeReturn tryToInferContainerType(py::handle input) {
-  if (THPVariable_Check(input.ptr())) {
-    auto tensor = py::cast<at::Tensor>(input);
-    if (tensor.is_sparse()) {
-      return MatchTypeReturn("Sparse tensors not supported");
-    }
-    if (tensor.is_mkldnn()) {
-      // mkldnn tensor as opaque tensor doesn't have strides, so we can
-      // not create a CompleteTensorType
-      return MatchTypeReturn(DimensionedTensorType::create(tensor));
-    }
-    return MatchTypeReturn(CompleteTensorType::create(tensor));
-  } else if (six::isTuple(input)) {
+  if (six::isTuple(input)) {
     py::tuple tuple = py::cast<py::tuple>(input);
     std::vector<TypePtr> element_types;
     element_types.reserve(tuple.size());
@@ -237,7 +225,8 @@ inline MatchTypeReturn tryToInferContainerType(py::handle input) {
     return MatchTypeReturn(ListType::create(element_type));
   } else {
     return MatchTypeReturn(c10::str(
-        "Only tensors and (possibly nested) tuples of tensors or dicts are supported ",
+        "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
+        "are supported ",
         "as inputs or outputs of traced functions",
         ", but instead got value of type ",
         py::str(input.get_type().attr("__name__")),
@@ -255,7 +244,8 @@ inline IValue toIValue(
 inline TypedIValue toTraceableIValue(py::handle input) {
   auto match = tryToInferType(input);
   if (!match.type) {
-    throw std::runtime_error(match.errMsg);
+    AT_ERROR(
+        "Tracer cannot infer type of ", py::str(input), "\n:", match.errMsg);
   }
   auto type = *match.type;
 
@@ -266,11 +256,11 @@ inline TypedIValue toTraceableIValue(py::handle input) {
     return TypedIValue(toIValue(input, type), type);
   }
 
-  throw std::runtime_error(c10::str(
+  AT_ERROR(
       "Type '",
       type->python_str(),
       "' cannot be traced. Only Tensors and Lists, Dicts, and"
-      " Tuples of Tensors can be traced."));
+      " Tuples of Tensors can be traced.");
 }
 
 inline IValue toIValue(py::handle input) {
