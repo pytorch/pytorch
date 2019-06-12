@@ -3629,16 +3629,6 @@
 - func: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
   python_module: nn
 
-- func: sum_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: sum_pool2d_out
-
-- func: sum_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False) -> Tensor
-  python_module: nn
-  dispatch:
-    CPU: sum_pool2d
-
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
@@ -3729,43 +3719,38 @@
     CPU: adaptive_max_pool3d_backward_cpu
     CUDA: adaptive_max_pool3d_backward_cuda
 
-- func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
+- func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, Scalar divisor=0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: avg_pool2d_out
     CUDA: avg_pool2d_out
     MkldnnCPU: mkldnn_avg_pool2d_out
 
-- func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
+- func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, Scalar divisor=0) -> Tensor
   python_module: nn
   dispatch:
     CPU: avg_pool2d
     CUDA: avg_pool2d
     MkldnnCPU: mkldnn_avg_pool2d
 
-- func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, Scalar divisor, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
 
-- func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad) -> Tensor
+- func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, Scalar divisor) -> Tensor
   python_module: nn
 
-- func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
+- func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, Scalar divisor=0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
 
-- func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
+- func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, Scalar divisor=0) -> Tensor
   python_module: nn
 
-- func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, Scalar divisor, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
 
-- func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
+- func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, Scalar divisor) -> Tensor
   python_module: nn
 
-- func: sum_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: nn
-
-- func: sum_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False) -> Tensor
-  python_module: nn
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))

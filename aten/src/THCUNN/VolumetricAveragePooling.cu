@@ -15,7 +15,7 @@ __global__ void cuda_VolumetricAveragePooling_updateOutput(
   int kT, int kH, int kW,
   int dT, int dH, int dW,
   int padT, int padH, int padW,
-  bool count_include_pad, int offsetZ)
+  bool count_include_pad, int offsetZ, int divisor)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -41,10 +41,15 @@ __global__ void cuda_VolumetricAveragePooling_updateOutput(
     wend = min(wend, input.getSize(3));
 
     Acctype divide_factor;
-    if (count_include_pad)
-      divide_factor = static_cast<Acctype>(pool_size);
-    else
-      divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+    if (divisor) {
+      divide_factor = static_cast<Acctype>(divisor);
+    } else {
+      if (count_include_pad) {
+        divide_factor = static_cast<Acctype>(pool_size);
+      } else {
+        divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+      }
+    }
 
     int ti, hi, wi;
     for (ti = tstart; ti < tend; ++ti)
@@ -73,7 +78,7 @@ __global__ void cuda_VolumetricAveragePooling_updateOutput_fixedKW(
   int kT, int kH,
   int dT, int dH, int dW,
   int padT, int padH, int padW,
-  bool count_include_pad, int offsetZ)
+  bool count_include_pad, int offsetZ, int divisor)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -99,10 +104,15 @@ __global__ void cuda_VolumetricAveragePooling_updateOutput_fixedKW(
     wend = min(wend, input.getSize(3));
 
     Acctype divide_factor;
-    if (count_include_pad)
-      divide_factor = static_cast<Acctype>(pool_size);
-    else
-      divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+    if (divisor) {
+      divide_factor = static_cast<Acctype>(divisor);
+    } else {
+      if (count_include_pad) {
+        divide_factor = static_cast<Acctype>(pool_size);
+      } else {
+        divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+      }
+    }
 
     int ti, hi, wi;
     for (ti = tstart; ti < tend; ++ti)
@@ -124,7 +134,7 @@ __global__ void cuda_VolumetricAveragePooling_updateOutput_fixedKW(
 #define LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW: \
   cuda_VolumetricAveragePooling_updateOutput_fixedKW<KW, scalar_t, accreal> \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>( \
-      cudaInput, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW, count_include_pad, offsetZ); \
+      cudaInput, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW, count_include_pad, offsetZ, divisor); \
   break
 
 template <typename Dtype, typename Acctype>
@@ -178,7 +188,7 @@ __global__ void cuda_VolumetricAveragePooling_updateGradInput_atomicAdd(
   int kT, int kH, int kW,
   int dT, int dH, int dW,
   int padT, int padH, int padW,
-  bool count_include_pad, int offsetZ)
+  bool count_include_pad, int offsetZ, int divisor)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -203,10 +213,15 @@ __global__ void cuda_VolumetricAveragePooling_updateGradInput_atomicAdd(
     wend = min(wend, gradInput.getSize(3));
 
     Acctype divide_factor;
-    if (count_include_pad)
-      divide_factor = static_cast<Acctype>(pool_size);
-    else
-      divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+    if (divisor) {
+      divide_factor = static_cast<Acctype>(divisor);
+    } else {
+      if (count_include_pad) {
+        divide_factor = static_cast<Acctype>(pool_size);
+      } else {
+        divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+      }
+    }
 
     Dtype val = ScalarConvert<Acctype, Dtype>::to(
       ScalarConvert<Dtype, Acctype>::to(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);
@@ -230,7 +245,7 @@ __global__ void cuda_VolumetricAveragePooling_updateGradInput(
   int kT, int kH, int kW,
   int dT, int dH, int dW,
   int padT, int padH, int padW,
-  bool count_include_pad, int offsetZ)
+  bool count_include_pad, int offsetZ, int divisor)
 {
   int oCol   = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow   = blockIdx.y * blockDim.y + threadIdx.y;
@@ -255,10 +270,15 @@ __global__ void cuda_VolumetricAveragePooling_updateGradInput(
     wend = min(wend, gradInput.getSize(3));
 
     Acctype divide_factor;
-    if (count_include_pad)
-      divide_factor = static_cast<Acctype>(pool_size);
-    else
-      divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+    if (divisor) {
+      divide_factor = static_cast<Acctype>(divisor);
+    } else {
+      if (count_include_pad) {
+        divide_factor = static_cast<Acctype>(pool_size);
+      } else {
+        divide_factor = static_cast<Acctype>((tend - tstart) * (hend - hstart) * (wend - wstart));
+      }
+    }
 
     Dtype val = ScalarConvert<Acctype, Dtype>::to(
       ScalarConvert<Dtype, Acctype>::to(gradOutput[slice][oFrame][oRow][oCol]) / divide_factor);

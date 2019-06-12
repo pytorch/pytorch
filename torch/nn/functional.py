@@ -254,27 +254,8 @@ Examples::
 
 """)
 
-sum_pool2d = _add_docstr(torch._C._nn.sum_pool2d, r"""
-sum_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False) -> Tensor
-
-Applies 2D sum-pooling operation in :math:`kH \times kW` regions by step size
-:math:`sH \times sW` steps. The number of output features is equal to the number of
-input planes.
-
-Args:
-    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
-    kernel_size: size of the pooling region. Can be a single number or a
-      tuple `(kH, kW)`
-    stride: stride of the pooling operation. Can be a single number or a
-      tuple `(sH, sW)`. Default: :attr:`kernel_size`
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padH, padW)`. Default: 0
-    ceil_mode: when True, will use `ceil` instead of `floor` in the formula
-        to compute the output shape. Default: ``False``
-""")
-
 avg_pool2d = _add_docstr(torch._C._nn.avg_pool2d, r"""
-avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
+avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor=0) -> Tensor
 
 Applies 2D average-pooling operation in :math:`kH \times kW` regions by step size
 :math:`sH \times sW` steps. The number of output features is equal to the number of
@@ -294,10 +275,12 @@ Args:
         to compute the output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
         averaging calculation. Default: ``True``
+    divisor: when 0, will use attr:`kernel_size` to calculate averadge, otherwise
+        will use divisor. Default: 0
 """)
 
 avg_pool3d = _add_docstr(torch._C._nn.avg_pool3d, r"""
-avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
+avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor=0) -> Tensor
 
 Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions by step
 size :math:`sT \times sH \times sW` steps. The number of output features is equal to
@@ -317,29 +300,9 @@ Args:
         to compute the output shape
     count_include_pad: when True, will include the zero-padding in the
         averaging calculation
+    divisor: when 0, will use attr:`kernel_size` to calculate averadge, otherwise
+        will use divisor. Default: 0
 """)
-
-sum_pool3d = _add_docstr(torch._C._nn.sum_pool3d, r"""
-sum_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False) -> Tensor
-
-Applies 3D sum-pooling operation in :math:`kT \times kH \times kW` regions by step
-size :math:`sT \times sH \times sW` steps. The number of output features is equal to
-:math:`\lfloor\frac{\text{input planes}}{sT}\rfloor`.
-
-See :class:`~torch.nn.AvgPool3d` for details and output shape.
-
-Args:
-    input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iT \times iH , iW)`
-    kernel_size: size of the pooling region. Can be a single number or a
-      tuple `(kT, kH, kW)`
-    stride: stride of the pooling operation. Can be a single number or a
-      tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`, Default: 0
-    ceil_mode: when True, will use `ceil` instead of `floor` in the formula
-        to compute the output shape
-""")
-
 
 @weak_script
 def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,

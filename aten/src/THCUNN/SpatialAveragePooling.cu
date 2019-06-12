@@ -4,13 +4,13 @@
 #include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THCUNN/common.h>
 
-template <typename Dtype, typename Acctype, bool COUNT_INCLUDE_PAD>
+template <typename Dtype, typename Acctype, bool COUNT_INCLUDE_PAD, bool USE_DIVISOR>
 __global__ void AvePoolForward(const int nthreads,
     const Dtype* const bottom_data, const int num, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
-    Dtype* const top_data) {
+    Dtype* const top_data, const int divisor) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     const int pw = index % pooled_width;
     const int ph = (index / pooled_width) % pooled_height;
@@ -32,20 +32,27 @@ __global__ void AvePoolForward(const int nthreads,
         aveval += bottom_slice[h * width + w];
       }
     }
-    if(COUNT_INCLUDE_PAD)
-      top_data[index] = ScalarConvert<Acctype, Dtype>::to(aveval / pool_size);
-    else
-      top_data[index] = ScalarConvert<Acctype, Dtype>::to(aveval / ((hend - hstart) * (wend - wstart)));
+    int divide_factor;
+    if (USE_DIVISOR) {
+      divide_factor = divisor;
+    } else {
+      if(COUNT_INCLUDE_PAD) {
+        divide_factor = pool_size;
+      } else {
+        divide_factor = (hend - hstart) * (wend - wstart);
+      }
+    }
+    top_data[index] = ScalarConvert<Acctype, Dtype>::to(aveval / divide_factor);
   }
 }
 
-template <typename Dtype, typename Acctype, bool COUNT_INCLUDE_PAD>
+template <typename Dtype, typename Acctype, bool COUNT_INCLUDE_PAD, bool USE_DIVISOR>
 __global__ void AvePoolBackward(const int nthreads, const Dtype* const top_diff,
     const int num, const int channels, const int height,
     const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
-    Dtype* const bottom_diff) {
+    Dtype* const bottom_diff, int divisor) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     // find out the local index
     // find out the local offset
@@ -72,10 +79,17 @@ __global__ void AvePoolBackward(const int nthreads, const Dtype* const top_diff,
         wstart = max(wstart, 0);
         hend = min(hend, height);
         wend = min(wend, width);
-        if(COUNT_INCLUDE_PAD)
-          gradient += top_diff_slice[ph * pooled_width + pw] / pool_size;
-        else
-          gradient += top_diff_slice[ph * pooled_width + pw] / ((hend - hstart) * (wend - wstart));
+        int divide_factor;
+        if (USE_DIVISOR) {
+          divide_factor = divisor;
+        } else {
+          if(COUNT_INCLUDE_PAD) {
+            divide_factor = pool_size;
+          } else {
+            divide_factor = (hend - hstart) * (wend - wstart);
+          }
+        }
+        gradient += top_diff_slice[ph * pooled_width + pw] / divide_factor;
       }
     }
     bottom_diff[index] = ScalarConvert<Acctype, Dtype>::to(gradient);

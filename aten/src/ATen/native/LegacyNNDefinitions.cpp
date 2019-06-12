@@ -348,52 +348,36 @@ Tensor adaptive_avg_pool3d_backward(const Tensor & grad_output, const Tensor & s
   return at::legacy::th::_thnn_adaptive_avg_pool3d_backward(grad_output, self);
 }
 
-Tensor & avg_pool2d_out(Tensor & output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad) {
-  return at::legacy::th::_thnn_avg_pool2d_forward_out(output, self, kernel_size, stride, padding, ceil_mode, count_include_pad);
+Tensor & avg_pool2d_out(Tensor & output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad, Scalar divisor) {
+  return at::legacy::th::_thnn_avg_pool2d_forward_out(output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor);
 }
 
-Tensor avg_pool2d(const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad) {
-  return at::legacy::th::_thnn_avg_pool2d_forward(self, kernel_size, stride, padding, ceil_mode, count_include_pad);
+Tensor avg_pool2d(const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad, Scalar divisor) {
+  return at::legacy::th::_thnn_avg_pool2d_forward(self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor);
 }
 
-Tensor & sum_pool2d_out(Tensor & output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode) {
-  return at::legacy::th::_thnn_sum_pool2d_forward_out(output, self, kernel_size, stride, padding, ceil_mode);
+Tensor & avg_pool2d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad, Scalar divisor) {
+  return at::legacy::th::_thnn_avg_pool2d_backward_out(grad_input, grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor);
 }
 
-Tensor sum_pool2d(const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode) {
-  return at::legacy::th::_thnn_sum_pool2d_forward(self, kernel_size, stride, padding, ceil_mode);
+Tensor avg_pool2d_backward(const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad, Scalar divisor) {
+  return at::legacy::th::_thnn_avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor);
 }
 
-Tensor & avg_pool2d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad) {
-  return at::legacy::th::_thnn_avg_pool2d_backward_out(grad_input, grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad);
+Tensor & avg_pool3d_out(Tensor & output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad, Scalar divisor) {
+  return at::legacy::th::_thnn_avg_pool3d_forward_out(output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor);
 }
 
-Tensor avg_pool2d_backward(const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad) {
-  return at::legacy::th::_thnn_avg_pool2d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad);
+Tensor avg_pool3d(const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad, Scalar divisor) {
+  return at::legacy::th::_thnn_avg_pool3d_forward(self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor);
 }
 
-Tensor & avg_pool3d_out(Tensor & output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad) {
-  return at::legacy::th::_thnn_avg_pool3d_forward_out(output, self, kernel_size, stride, padding, ceil_mode, count_include_pad);
+Tensor & avg_pool3d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad, Scalar divisor) {
+  return at::legacy::th::_thnn_avg_pool3d_backward_out(grad_input, grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor);
 }
 
-Tensor avg_pool3d(const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad) {
-  return at::legacy::th::_thnn_avg_pool3d_forward(self, kernel_size, stride, padding, ceil_mode, count_include_pad);
-}
-
-Tensor & sum_pool3d_out(Tensor & output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode) {
-  return at::legacy::th::_thnn_sum_pool3d_forward_out(output, self, kernel_size, stride, padding, ceil_mode);
-}
-
-Tensor sum_pool3d(const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode) {
-  return at::legacy::th::_thnn_sum_pool3d_forward(self, kernel_size, stride, padding, ceil_mode);
-}
-
-Tensor & avg_pool3d_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad) {
-  return at::legacy::th::_thnn_avg_pool3d_backward_out(grad_input, grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad);
-}
-
-Tensor avg_pool3d_backward(const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad) {
-  return at::legacy::th::_thnn_avg_pool3d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad);
+Tensor avg_pool3d_backward(const Tensor & grad_output, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, bool ceil_mode, bool count_include_pad, Scalar divisor) {
+  return at::legacy::th::_thnn_avg_pool3d_backward(grad_output, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor);
 }
 
 std::tuple<Tensor &,Tensor &> max_pool2d_with_indices_out(Tensor & output, Tensor & indices, const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool ceil_mode) {

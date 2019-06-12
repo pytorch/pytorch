@@ -54,7 +54,7 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   }
 }
 
-void THNN_(SpatialSumAveragePooling_updateOutput)(
+void THNN_(SpatialAveragePooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
@@ -66,7 +66,7 @@ void THNN_(SpatialSumAveragePooling_updateOutput)(
           int padH,
           bool ceil_mode,
           bool count_include_pad,
-          bool avg)
+          int divisor)
 {
   scalar_t *output_data;
   scalar_t *input_data;
@@ -149,25 +149,18 @@ void THNN_(SpatialSumAveragePooling_updateOutput)(
               sum += ptr_input[ky*inputWidth + kx];
           }
           /* Update output */
-#if !defined(TH_REAL_IS_LONG)
-          if (avg) {
-            int divide_factor;
-            if(count_include_pad)
+          int divide_factor;
+          if (divisor) {
+            divide_factor = divisor;
+          } else {
+            if(count_include_pad) {
               divide_factor = pool_size;
-            else
+            } else {
               divide_factor = (hend - hstart) * (wend - wstart);
+            }
+          }
 
-            *ptr_output++ += sum/divide_factor;
-          } else {
-            *ptr_output++ += sum;
-          }
-#else
-          if (avg) {
-            THError("Avg is not supported for non-float tensors");
-          } else {
-            *ptr_output++ += sum;
-          }
-#endif
+          *ptr_output++ += sum/divide_factor;
         }
       }
     }
@@ -176,23 +169,6 @@ void THNN_(SpatialSumAveragePooling_updateOutput)(
 }
 
 #if !defined(TH_REAL_IS_LONG)
-
-void THNN_(SpatialAveragePooling_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int kW,
-          int kH,
-          int dW,
-          int dH,
-          int padW,
-          int padH,
-          bool ceil_mode,
-          bool count_include_pad)
-{
-  THNN_(SpatialSumAveragePooling_updateOutput)
-    (state, input, output, kW, kH, dW, dH, padW, padH, ceil_mode, count_include_pad, true);
-}
 
 void THNN_(SpatialAveragePooling_updateGradInput)(
           THNNState *state,
@@ -206,7 +182,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
           int padW,
           int padH,
           bool ceil_mode,
-          bool count_include_pad)
+          bool count_include_pad,
+          int divisor)
 {
   int dimw = 2;
   int dimh = 1;
@@ -288,10 +265,15 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
           scalar_t z = *ptr_gradOutput++;
 
           int divide_factor;
-          if(count_include_pad)
-            divide_factor = pool_size;
-          else
-            divide_factor = (hend - hstart) * (wend - wstart);
+          if (divisor) {
+            divide_factor = divisor;
+          } else {
+            if(count_include_pad) {
+              divide_factor = pool_size;
+            } else {
+              divide_factor = (hend - hstart) * (wend - wstart);
+            }
+          }
 
           int64_t kx, ky;
           for(ky = hstart ; ky < hend; ky++)
@@ -306,5 +288,6 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
 
   c10::raw::intrusive_ptr::decref(gradOutput);
 }
+
 #endif
 #endif

@@ -94,7 +94,8 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
            int dT, int dW, int dH,
            int padT, int padW, int padH,
            bool ceil_mode,
-           bool count_include_pad)
+           bool count_include_pad,
+           int divisor)
 {
   int batchSize;
   int inputSlices;
@@ -196,7 +197,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
             dT, dH, dW,
             padT, padH, padW,
             count_include_pad,
-            offsetZ);
+            offsetZ, divisor);
         break;
       }
     totalZ -= 65535;
@@ -217,7 +218,8 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
            int dT, int dW, int dH,
            int padT, int padW, int padH,
            bool ceil_mode,
-           bool count_include_pad)
+           bool count_include_pad,
+           int divisor)
 {
   THNN_(VolumetricAveragePooling_shapeCheck)
        (state, input, gradOutput, kT, kW, kH, dT, dW, dH,
@@ -315,14 +317,14 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
         cuda_VolumetricAveragePooling_updateGradInput_atomicAdd<scalar_t, accreal>
           <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
             cudaGradOutput, cudaGradInput, kT, kH, kW, dT, dH, dW,
-            padT, padH, padW, count_include_pad, offsetZ);
+            padT, padH, padW, count_include_pad, offsetZ, divisor);
       }
       else
       {
         cuda_VolumetricAveragePooling_updateGradInput<scalar_t, accreal>
           <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
             cudaGradOutput, cudaGradInput, kT, kH, kW, dT, dH, dW,
-            padT, padH, padW, count_include_pad, offsetZ);
+            padT, padH, padW, count_include_pad, offsetZ, divisor);
       }
       THCudaCheck(cudaGetLastError());
       totalZ -= 65535;
