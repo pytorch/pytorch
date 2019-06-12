@@ -247,13 +247,27 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   // Hook API
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  void add_post_hook(std::unique_ptr<FunctionPostHook>&& post_hook) {
+  uintptr_t add_post_hook(std::unique_ptr<FunctionPostHook>&& post_hook) {
     post_hooks_.push_back(std::move(post_hook));
+    // Use the raw pointer as the unique key to identify this hook. This key
+    // can then be used in del_post_hook(key) to remove this hook.
+    return reinterpret_cast<std::uintptr_t>(post_hooks_.back().get());
   }
 
   const std::vector<std::unique_ptr<FunctionPostHook>>& post_hooks() const
       noexcept {
     return post_hooks_;
+  }
+
+  // delete a post hook matching the key
+  bool del_post_hook(const uintptr_t& key) {
+    for (auto it = post_hooks_.begin(); it != post_hooks_.end();) {
+      if (key == reinterpret_cast<std::uintptr_t>(it->get())) {
+        post_hooks_.erase(it);
+        return true;
+      }
+    }
+    return false;
   }
 
   std::vector<std::unique_ptr<FunctionPostHook>>& post_hooks() noexcept {

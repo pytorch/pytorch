@@ -43,7 +43,6 @@
 #include <caffe2/operators/stop_gradient.h>
 #include <caffe2/operators/tanh_op.h>
 #include <caffe2/operators/tensor_protos_db_input.h>
-#include <caffe2/operators/transpose_op.h>
 #include <caffe2/operators/utility_ops.h>
 #include <caffe2/queue/queue_ops.h>
 #include <caffe2/sgd/iter_op.h>
@@ -80,7 +79,6 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<AveragedLoss<float, CPUContext>, SkipIndices<0>>);
 REGISTER_IDEEP_OPERATOR(Flatten, IDEEPFallbackOp<FlattenOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(ResizeLike, IDEEPFallbackOp<ResizeLikeOp<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(Transpose, IDEEPFallbackOp<TransposeOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Slice, IDEEPFallbackOp<SliceOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Clip, IDEEPFallbackOp<ClipOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
