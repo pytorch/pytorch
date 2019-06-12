@@ -104,7 +104,7 @@ def manual_seed_all(seed):
         seed (int): The desired seed.
     """
     seed = int(seed)
- 
+
     def cb():
         for i in range(device_count()):
             with device_ctx_manager(i):
