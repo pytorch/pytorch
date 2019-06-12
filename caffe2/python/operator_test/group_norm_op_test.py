@@ -10,6 +10,8 @@ from hypothesis import given
 import hypothesis.strategies as st
 import numpy as np
 
+import unittest
+
 
 class TestGroupNormOp(serial.SerializedTestCase):
     def group_norm_nchw_ref(self, X, gamma, beta, group, epsilon):
@@ -144,3 +146,7 @@ class TestGroupNormOp(serial.SerializedTestCase):
         inputs = [X, gamma, beta]
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -55,7 +55,7 @@ def force_unicode(s):
 
 def get_device_option(device):
     m = {DeviceType.CPU: caffe2_pb2.CPU,
-         DeviceType.CUDA: caffe2_pb2.CUDA}
+         DeviceType.CUDA: workspace.GpuDeviceType}
     return core.DeviceOption(m[device.type], device.device_id)
 
 
@@ -155,7 +155,6 @@ class Caffe2Backend(Backend):
     # In most cases, this should be empty - as the effort of ONNX is
     # to unify the operator definitions.
     _renamed_operators = {
-        'Caffe2ConvTranspose':   'ConvTranspose',
         'GlobalMaxPool':         'MaxPool',
         'GlobalAveragePool':     'AveragePool',
         'Pad':                   'PadImage',
@@ -172,6 +171,8 @@ class Caffe2Backend(Backend):
         'Unsqueeze':             'ExpandDims',
         'Loop':                  'ONNXWhile',
         'Tile':                  'NumpyTile',
+        'RandomNormal':          'GaussianFill',
+        'RandomUniform':         'UniformFill',
     }
 
     _global_renamed_attrs = {'kernel_shape': 'kernels'}
@@ -184,7 +185,9 @@ class Caffe2Backend(Backend):
         'ConvTranspose':        {'output_padding': 'adjs'},
         'Selu':                 {'gamma': 'scale'},
         'If':                   {'then_branch': 'then_net',
-                                 'else_branch': 'else_net'}
+                                 'else_branch': 'else_net'},
+        'RandomUniform':        {'low': 'min',
+                                 'high': 'max'}
     }
 
     # operators whose behavior is different beyond renaming
@@ -197,6 +200,7 @@ class Caffe2Backend(Backend):
         'Loop': '_create_loop',
         'If': '_create_if',
         'Upsample': '_create_upsample',
+        'RandomNormal': '_create_gaussian_fill'
     }
 
     # Dummy name generator
@@ -382,19 +386,6 @@ class Caffe2Backend(Backend):
         return outputs
 
     @classmethod
-    def _create_upsample(cls, init_model, pred_model, n, opset_version):
-        c2_op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
-        if opset_version >= 7:
-            if len(n.attrs['scales']) != 4:
-                raise ValueError("The scales argument should have size 4")
-            elif not (np.isclose(n.attrs['scales'][0], 1) and np.isclose(n.attrs['scales'][1], 1)):
-                raise ValueError("The first two elements in the scales argument must be 1")
-            c2_op.arg.extend([caffe2.python.utils.MakeArgument('height_scale', n.attrs['scales'][2])])
-            c2_op.arg.extend([caffe2.python.utils.MakeArgument('width_scale', n.attrs['scales'][3])])
-
-        return c2_op
-
-    @classmethod
     def _create_rnn_variant(cls, init_model, pred_model, n, opset_version):
         assert init_model is not None, "cannot convert RNNs without access to the full model"
         assert pred_model is not None, "cannot convert RNNs without access to the full model"
@@ -404,7 +395,7 @@ class Caffe2Backend(Backend):
         direction = force_unicode(attrs.pop('direction', 'forward'))
 
         if n.op_type == 'RNN':
-            activation = force_unicode(attrs.pop('activations', ('tanh',))[0])
+            activation = force_unicode(attrs.pop('activations', ('tanh',))[0].lower())
         elif n.op_type == 'GRU':
             linear_before_reset = attrs.pop('linear_before_reset', 0)
 
@@ -656,7 +647,10 @@ class Caffe2Backend(Backend):
             if value_info.name in initialized:
                 continue
             shape = list(d.dim_value for d in value_info.type.tensor_type.shape.dim)
-            ws.FeedBlob(value_info.name, np.ones(shape), device_option)
+            ws.FeedBlob(
+                value_info.name,
+                np.ones(shape, dtype=onnx.mapping.TENSOR_TYPE_TO_NP_TYPE[value_info.type.tensor_type.elem_type]),
+                device_option)
 
     @staticmethod
     def optimize_onnx(input, init=False, predict=False):
@@ -927,7 +921,7 @@ class Caffe2Backend(Backend):
         device = Device(device_str)
         if device.type == DeviceType.CPU:
             return True
-        elif device.type == DeviceType.CUDA:
+        elif core.IsGPUDeviceType(device.type):
             return workspace.has_gpu_support
         return False
 

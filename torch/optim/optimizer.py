@@ -5,7 +5,13 @@ import torch
 from copy import deepcopy
 from itertools import chain
 
-required = object()
+
+class _RequiredParameter(object):
+    """Singleton class representing a required parameter for an Optimizer."""
+    def __repr__(self):
+        return "<required parameter>"
+
+required = _RequiredParameter()
 
 
 class Optimizer(object):
@@ -24,6 +30,7 @@ class Optimizer(object):
     """
 
     def __init__(self, params, defaults):
+        torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
 
         if isinstance(params, torch.Tensor):
@@ -45,6 +52,7 @@ class Optimizer(object):
 
     def __getstate__(self):
         return {
+            'defaults': self.defaults,
             'state': self.state,
             'param_groups': self.param_groups,
         }

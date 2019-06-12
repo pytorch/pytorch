@@ -45,15 +45,20 @@ def find_cuda_version(cuda_home):
         # which are files containing cudart
         candidate_names = list(glob.glob(os.path.join(cuda_lib_path, '*cudart*')))
         candidate_names = [os.path.basename(c) for c in candidate_names]
+        # if we didn't find any cudart, ask nvcc
+        if len(candidate_names) == 0:
+            proc = Popen(['nvcc', '--version'], stdout=PIPE, stderr=PIPE)
+            out, err = proc.communicate()
+            candidate_names = [out.decode().rsplit('V')[-1]]
 
     # suppose version is MAJOR.MINOR.PATCH, all numbers
-    version_regex = re.compile('[0-9]+\.[0-9]+\.[0-9]+')
+    version_regex = re.compile(r'[0-9]+\.[0-9]+\.[0-9]+')
     candidates = [c.group() for c in map(version_regex.search, candidate_names) if c]
     if len(candidates) > 0:
         # normally only one will be retrieved, take the first result
         return candidates[0]
     # if no candidates were found, try MAJOR.MINOR
-    version_regex = re.compile('[0-9]+\.[0-9]+')
+    version_regex = re.compile(r'[0-9]+\.[0-9]+')
     candidates = [c.group() for c in map(version_regex.search, candidate_names) if c]
     if len(candidates) > 0:
         return candidates[0]

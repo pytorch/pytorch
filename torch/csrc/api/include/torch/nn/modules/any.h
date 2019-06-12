@@ -3,14 +3,13 @@
 #include <torch/detail/static.h>
 #include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/Device.h>
-#include <ATen/core/optional.h>
 
 #include <memory>
 #include <type_traits>
@@ -39,6 +38,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   struct GenericTrainer {
 ///     torch::nn::AnyModule module;
 ///
@@ -58,6 +58,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   // Linear takes a tensor as input, but we are passing an integer.
 ///   // This will compile, but throw a `torch::Error` exception at runtime.
@@ -80,6 +81,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   auto output = module.forward(torch::ones({2, 3}));
 ///
@@ -98,6 +100,7 @@ namespace nn {
 ///
 /// \rst
 /// .. code-block:: cpp
+///
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   std::shared_ptr<nn::Module> ptr = module.ptr();
 ///   torch::nn::Linear linear(module.get<torch::nn::Linear>());
@@ -135,7 +138,7 @@ class AnyModule {
 
   /// Creates a deep copy of an `AnyModule` if it contains a module, else an
   /// empty `AnyModule` if it is empty.
-  AnyModule clone(at::optional<Device> device = at::nullopt) const;
+  AnyModule clone(optional<Device> device = nullopt) const;
 
   /// Assigns a module to the `AnyModule` (to circumvent the explicit
   /// constructor).
@@ -203,7 +206,7 @@ class AnyModule {
   /// `forward()` method.
   template <
       typename ModuleType,
-      typename Class, // = std::remove_reference<ModuleType>::type
+      typename Class,
       typename ReturnType,
       typename... ArgumentTypes>
   std::unique_ptr<Placeholder> make_holder(
@@ -211,8 +214,12 @@ class AnyModule {
       ReturnType (Class::*)(ArgumentTypes...));
 
   /// Helper method invoked by const and non-const `get()`.
-  template <typename T>
-  T& get_() const;
+  template <typename ModuleType, typename ReturnType, typename... ArgumentTypes>
+  ModuleType& get_(ReturnType (ModuleType::*)(ArgumentTypes...)) const;
+
+  /// Helper method invoked by const and non-const `get()`.
+  template <typename ModuleType>
+  ModuleType& get_() const;
 
   /// The type erased module.
   std::unique_ptr<Placeholder> content_;
@@ -263,9 +270,9 @@ class AnyModule::Value {
     }
     AT_ERROR(
         "Attempted to cast Value to ",
-        at::demangle(typeid(T).name()),
+        c10::demangle(typeid(T).name()),
         ", but its actual type is ",
-        at::demangle(type_info().name()));
+        c10::demangle(type_info().name()));
   }
 
   /// Returns the `type_info` object of the contained value.
@@ -333,8 +340,7 @@ struct AnyModule::Placeholder : public AnyModule::Value::Placeholder {
   virtual std::unique_ptr<Placeholder> copy() const = 0;
 
   /// Returns a `Placeholder` with a deep copy of this `AnyModule`.
-  virtual std::unique_ptr<Placeholder> clone(
-      at::optional<Device> device) const = 0;
+  virtual std::unique_ptr<Placeholder> clone(optional<Device> device) const = 0;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModule::Holder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -354,9 +360,9 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
           "Expected argument #",
           index,
           " to be of type ",
-          at::demangle(typeid(T).name()),
+          c10::demangle(typeid(T).name()),
           ", but received value of type ",
-          at::demangle(value.type_info().name()));
+          c10::demangle(value.type_info().name()));
     }
     std::vector<Value>& arguments_;
   };
@@ -377,16 +383,16 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
   /// Calls `forward()` on the underlying module, casting each `Value` in the
   /// argument vector to a concrete value.
   Value forward(std::vector<Value>&& arguments) override {
-    AT_CHECK(
+    TORCH_CHECK(
         arguments.size() == sizeof...(ArgumentTypes),
-        at::demangle(type_info.name()),
+        c10::demangle(type_info.name()),
         "'s forward() method expects ",
         sizeof...(ArgumentTypes),
         " arguments, but received ",
         arguments.size());
     // FYI: During invocation of a module's `forward()` method, the values live
     // in the `arguments` vector inside this function.
-    return torch::unpack<ArgumentTypes...>(
+    return torch::unpack<Value, ArgumentTypes...>(
         InvokeForward{module}, CheckedGetter{arguments});
   }
 
@@ -398,8 +404,7 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
     return torch::make_unique<Holder>(*this);
   }
 
-  std::unique_ptr<Placeholder> clone(
-      at::optional<Device> device) const override {
+  std::unique_ptr<Placeholder> clone(optional<Device> device) const override {
     return torch::make_unique<Holder>(
         std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }
@@ -414,7 +419,20 @@ template <typename ModuleType>
 AnyModule::AnyModule(std::shared_ptr<ModuleType> module)
     : content_(make_holder(
           std::move(module),
-          &std::remove_reference<ModuleType>::type::forward)) {}
+          &std::remove_reference<ModuleType>::type::forward)) {
+  // `AnyModule` can only store an `nn::Module` subclass object that provides
+  // a `forward()` method that has a non-templatized return type.
+  // (e.g. `AnyModule` cannot store `nn::Sequential`, because `nn::Sequential`'s
+  // `forward()` method has a templatized return type.)
+  static_assert(
+      torch::detail::is_module<ModuleType>::value,
+      "Can only store object derived from nn::Module into AnyModule");
+  static_assert(
+      torch::detail::has_forward<ModuleType>::value,
+      "Can only store module with a forward() method that has a non-templatized"
+      "return type into AnyModule (e.g. we cannot store nn::Sequential"
+      "into AnyModule, because its forward() method's return type is templatized)");
+}
 
 template <typename ModuleType, typename>
 AnyModule::AnyModule(ModuleType&& module)
@@ -435,7 +453,7 @@ inline AnyModule& AnyModule::operator=(const AnyModule& other) {
   return *this;
 }
 
-inline AnyModule AnyModule::clone(at::optional<Device> device) const {
+inline AnyModule AnyModule::clone(optional<Device> device) const {
   AnyModule clone;
   clone.content_ = content_ ? content_->clone(device) : nullptr;
   return clone;
@@ -448,7 +466,7 @@ AnyModule& AnyModule::operator=(std::shared_ptr<ModuleType> module) {
 
 template <typename... ArgumentTypes>
 AnyModule::Value AnyModule::any_forward(ArgumentTypes&&... arguments) {
-  AT_CHECK(!is_empty(), "Cannot call forward() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call forward() on an empty AnyModule");
   std::vector<Value> values;
   values.reserve(sizeof...(ArgumentTypes));
   torch::apply(
@@ -465,13 +483,13 @@ ReturnType AnyModule::forward(ArgumentTypes&&... arguments) {
 
 template <typename T, typename>
 T& AnyModule::get() {
-  AT_CHECK(!is_empty(), "Cannot call get() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call get() on an empty AnyModule");
   return get_<T>();
 }
 
 template <typename T, typename>
 const T& AnyModule::get() const {
-  AT_CHECK(!is_empty(), "Cannot call get() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call get() on an empty AnyModule");
   return get_<T>();
 }
 
@@ -481,20 +499,20 @@ T AnyModule::get() const {
 }
 
 inline std::shared_ptr<Module> AnyModule::ptr() const {
-  AT_CHECK(!is_empty(), "Cannot call ptr() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call ptr() on an empty AnyModule");
   return content_->ptr();
 }
 
 template <typename T, typename>
 std::shared_ptr<T> AnyModule::ptr() const {
-  AT_CHECK(!is_empty(), "Cannot call ptr() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call ptr() on an empty AnyModule");
   // Call get() but discard the value, just to do the type checking.
   get_<T>();
   return std::dynamic_pointer_cast<T>(ptr());
 }
 
 inline const std::type_info& AnyModule::type_info() const {
-  AT_CHECK(!is_empty(), "Cannot call type_info() on an empty AnyModule");
+  TORCH_CHECK(!is_empty(), "Cannot call type_info() on an empty AnyModule");
   return content_->type_info;
 }
 
@@ -524,16 +542,27 @@ std::unique_ptr<AnyModule::Placeholder> AnyModule::make_holder(
       std::move(module));
 }
 
-template <typename T>
-T& AnyModule::get_() const {
-  if (typeid(T).hash_code() == type_info().hash_code()) {
-    return *static_cast<Holder<T>&>(*content_).module;
+template <typename ModuleType>
+ModuleType& AnyModule::get_() const {
+  using M = typename std::remove_reference<ModuleType>::type;
+  static_assert(
+      torch::detail::has_forward<M>::value,
+      "Can only call AnyModule::get<T> with a type T that has a forward method");
+  return get_(&M::forward);
+}
+
+template <typename ModuleType, typename ReturnType, typename... ArgumentTypes>
+ModuleType& AnyModule::get_(
+    ReturnType (ModuleType::*)(ArgumentTypes...)) const {
+  if (typeid(ModuleType).hash_code() == type_info().hash_code()) {
+    return *static_cast<Holder<ModuleType, ArgumentTypes...>&>(*content_)
+                .module;
   }
   AT_ERROR(
       "Attempted to cast module of type ",
-      at::demangle(type_info().name()),
+      c10::demangle(type_info().name()),
       " to type ",
-      at::demangle(typeid(T).name()));
+      c10::demangle(typeid(ModuleType).name()));
 }
 
 } // namespace nn

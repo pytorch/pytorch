@@ -1,6 +1,6 @@
 #include "observers/perf_observer.h"
 #include "observers/observer_config.h"
-#if !CAFFE2_MOBILE
+#ifndef C10_MOBILE
 #include "caffe2/core/flags.h"
 #include "observers/net_observer_reporter_print.h"
 #endif
@@ -10,7 +10,7 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
 
-#if !CAFFE2_MOBILE
+#ifndef C10_MOBILE
 C10_DEFINE_int64(
     aiBench_netInitSampleRate,
     0,
@@ -45,17 +45,17 @@ bool registerGlobalPerfNetObserverCreator(int* /*pargc*/, char*** /*pargv*/) {
     return caffe2::make_unique<PerfNetObserver>(subject);
   });
 
-#if !CAFFE2_MOBILE
+#if !defined(C10_MOBILE)
   // for aibench usage
   caffe2::ObserverConfig::setReporter(
       caffe2::make_unique<caffe2::NetObserverReporterPrint>());
 
   caffe2::ObserverConfig::initSampleRate(
-      c10::FLAGS_aiBench_netInitSampleRate,
-      c10::FLAGS_aiBench_netFollowupSampleRate,
-      c10::FLAGS_aiBench_netFollowupSampleCount,
-      c10::FLAGS_aiBench_operatorNetSampleRatio,
-      c10::FLAGS_aiBench_skipIters);
+      FLAGS_aiBench_netInitSampleRate,
+      FLAGS_aiBench_netFollowupSampleRate,
+      FLAGS_aiBench_netFollowupSampleCount,
+      FLAGS_aiBench_operatorNetSampleRatio,
+      FLAGS_aiBench_skipIters);
 #endif
 
   return true;
@@ -167,7 +167,7 @@ caffe2::string PerfNetObserver::getObserverName(const OperatorBase* op, int idx)
                                                 : "NO_OUTPUT")
                            : "NO_DEF");
   caffe2::string name =
-      "ID_" + caffe2::to_string(idx) + "_" + opType + "_" + displayName;
+      "ID_" + c10::to_string(idx) + "_" + opType + "_" + displayName;
   return name;
 }
 

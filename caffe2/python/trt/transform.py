@@ -35,7 +35,7 @@ def check_gpu_():
        raise Exception("TensorRT related functions require CUDA support")
 
 def convert_onnx_model_to_trt_op(onnx_model,
-        max_batch_size=50,
+        max_batch_size=64,
         max_workspace_size=2*1024*1024,
         verbosity=1,
         debug_builder=False):
@@ -77,7 +77,7 @@ def transform_caffe2_net(
         pred_net,
         input_shapes,
         populate_shapes = False,
-        max_batch_size=50,
+        max_batch_size=64,
         max_workspace_size=2*1024*1024,
         verbosity=1,
         debug_builder=False,

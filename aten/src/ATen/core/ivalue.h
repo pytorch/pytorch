@@ -1,81 +1,30 @@
 #pragma once
 
-#include <ATen/core/Scalar.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/core/TensorImpl.h>
-#include <ATen/core/UndefinedTensorImpl.h>
 #include <ATen/core/blob.h>
-#include <ATen/core/intrusive_ptr.h>
+#include <c10/util/intrusive_ptr.h>
+#include <ATen/core/Tensor.h>
 
-#include <type_traits>
-
-namespace torch { namespace jit {
-
-template <typename T>
-using Shared = c10::intrusive_ptr<T>;
-
-// string
-struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
- private:
-  const std::string str_;
- public:
-  ConstantString(std::string str)
-  : str_(std::move(str)) {}
-  static c10::intrusive_ptr<ConstantString> create(std::string str_);
-  const std::string & string() const {
-    return str_;
-  }
-  operator const std::string & () const {
-    return string();
-  }
-  CAFFE2_API friend std::ostream& operator<<(
-      std::ostream& out,
-      const ConstantString& v);
-};
-
-template <typename Elem>
-struct C10_EXPORT List : c10::intrusive_ptr_target {
- private:
-  std::vector<Elem> elements_;
-
- public:
-  typedef Elem ElemType;
-
-  List(std::vector<Elem> elements_) : elements_(std::move(elements_)) {}
-  static c10::intrusive_ptr<List<Elem>> create(std::vector<Elem> elements_) {
-    return c10::make_intrusive<List<Elem>>(std::move(elements_));
-  }
-  const std::vector<Elem>& elements() const {
-    return elements_;
-  }
-  operator const std::vector<Elem>&() const {
-    return elements();
-  }
-
-  std::vector<Elem>& elements() {
-    return elements_;
-  }
-  operator std::vector<Elem>&() {
-    return elements();
-  }
-};
-
-struct World {
-  int64_t world_id;
-};
-
+namespace torch {
+namespace jit {
+struct Function;
+} // namespace jit
+} // namespace torch
+namespace c10 {
+template<class Key, class Value> class DictPtr;
 struct IValue;
-struct C10_EXPORT Tuple : public List<IValue> {
-  using List<IValue>::List;
-  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
-    return c10::make_intrusive<Tuple>(std::move(elements_));
-  }
-};
+namespace ivalue {
+struct Tuple;
+template<class Elem> struct List;
 using IntList = List<int64_t>;
 using TensorList = List<at::Tensor>;
 using DoubleList = List<double>;
 using BoolList = List<bool>;
 using GenericList = List<IValue>;
+struct Future;
+struct ConstantString;
+struct GenericDict;
+struct Object;
+}
 
 // IValue is the generic tagged union used by the interpreter to hold
 // all value types.
@@ -98,7 +47,11 @@ using GenericList = List<IValue>;
   _(TensorList) \
   _(Blob) \
   _(GenericList) \
-  _(World) \
+  _(GenericDict) \
+  _(Future) \
+  _(Device) \
+  _(Uninitialized) \
+  _(Object)
 
 struct CAFFE2_API IValue final {
   IValue()
@@ -129,11 +82,38 @@ struct CAFFE2_API IValue final {
     IValue(rhs).swap(*this);
     return *this;
   }
+
+  void dump() const;
+
+  bool isAliasOf(const IValue& rhs) const {
+    if (this->tag != rhs.tag) {
+      // Trivially don't alias if the type is different
+      return false;
+    }
+
+    if (!this->is_intrusive_ptr) {
+      // Primitive types don't alias anything
+      return false;
+    }
+
+    AT_ASSERT(rhs.is_intrusive_ptr);
+
+    // Tensors should be compared based on internal storage
+    if (this->isTensor()) {
+      const auto thisTensor = this->toTensor();
+      const auto rhsTensor = rhs.toTensor();
+      return thisTensor.is_alias_of(rhsTensor);
+    }
+
+    // Other types can be compared by their ptr value
+    return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+  }
   void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
   }
+
   // Accessors for subtypes are arranged together below
   // While some of these accessors could be generated through templates,
   // we prefer to write them manually for clarity
@@ -149,13 +129,10 @@ struct CAFFE2_API IValue final {
     payload.as_intrusive_ptr = t.unsafeReleaseTensorImpl();
   }
   bool isTensor() const { return Tag::Tensor == tag; }
-  at::Tensor toTensor() && {
-    AT_ASSERT(isTensor());
-    return at::Tensor(moveToIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
-  }
-  at::Tensor toTensor() const & {
-    AT_ASSERT(isTensor());
-    return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
+  at::Tensor toTensor() &&;
+  at::Tensor toTensor() const &;
+  at::TensorImpl* unsafeToTensorImpl() const {
+    return static_cast<at::TensorImpl*>(payload.as_intrusive_ptr);
   }
 
   const IValue& toIValue() const {
@@ -165,36 +142,23 @@ struct CAFFE2_API IValue final {
     return *this;
   }
 
-  IValue(caffe2::Blob blob) : tag(Tag::Blob), is_intrusive_ptr(true) {
+  IValue(intrusive_ptr<caffe2::Blob> blob)
+  : tag(Tag::Blob), is_intrusive_ptr(true) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
-    // and
-    //      store it as a Tensor instead.
-    payload.as_intrusive_ptr =
-        c10::make_intrusive<caffe2::Blob>(std::move(blob)).release();
+    // and store it as a Tensor instead.
+    payload.as_intrusive_ptr = blob.release();
   }
   bool isBlob() const {
     return Tag::Blob == tag;
   }
-  caffe2::Blob& toBlob() & {
-    AT_ASSERT(isBlob());
-    return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
-  }
-  const caffe2::Blob& toBlob() const& {
-    AT_ASSERT(isBlob());
-    return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
-  }
+  c10::intrusive_ptr<caffe2::Blob> toBlob() &&;
+  c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
   // Tuple
-  IValue(c10::intrusive_ptr<Tuple> v);
+  IValue(c10::intrusive_ptr<ivalue::Tuple> v);
   bool isTuple() const { return Tag::Tuple == tag; }
-  c10::intrusive_ptr<Tuple> toTuple() && {
-    AT_ASSERT(isTuple());
-    return moveToIntrusivePtr<Tuple>();
-  }
-  c10::intrusive_ptr<Tuple> toTuple() const & {
-    AT_ASSERT(isTuple());
-    return toIntrusivePtr<Tuple>();
-  }
+  c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
+  c10::intrusive_ptr<ivalue::Tuple> toTuple() const &;
 
   // Double
   IValue(double d)
@@ -207,16 +171,11 @@ struct CAFFE2_API IValue final {
     return payload.as_double;
   }
 
-  // World
-  IValue(World w)
-  : tag(Tag::World), is_intrusive_ptr(false) {
-    payload.as_world = w;
-  }
-  bool isWorld() const { return Tag::World == tag; }
-  World toWorld() const {
-    AT_ASSERT(isWorld());
-    return payload.as_world;
-  }
+  // Future
+  IValue(c10::intrusive_ptr<ivalue::Future> v);
+  bool isFuture() const { return Tag::Future == tag; }
+  c10::intrusive_ptr<ivalue::Future> toFuture() &&;
+  c10::intrusive_ptr<ivalue::Future> toFuture() const &;
 
   // Int
   IValue(int64_t i)
@@ -247,98 +206,86 @@ struct CAFFE2_API IValue final {
   }
 
   // IntList
-  IValue(c10::intrusive_ptr<IntList> v);
+  IValue(c10::intrusive_ptr<ivalue::IntList> v);
   IValue(std::vector<int64_t> v);
   IValue(at::ArrayRef<int64_t> v)
   : IValue(v.vec()) {}
   bool isIntList() const { return Tag::IntList == tag; }
-  c10::intrusive_ptr<IntList> toIntList() && {
-    AT_ASSERT(isIntList());
-    return moveToIntrusivePtr<IntList>();
-  }
-  c10::intrusive_ptr<IntList> toIntList() const & {
-    AT_ASSERT(isIntList());
-    return toIntrusivePtr<IntList>();
-  }
+  c10::intrusive_ptr<ivalue::IntList> toIntList() &&;
+  c10::intrusive_ptr<ivalue::IntList> toIntList() const &;
 
   const std::vector<int64_t>& toIntListRef() const;
   const std::vector<double>& toDoubleListRef() const;
   const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
   const std::vector<IValue>& toGenericListRef() const;
+  const c10::DictPtr<IValue, IValue>& toGenericDictRef() const;
+  const std::string& toStringRef() const;
 
   // ConstantString
-  IValue(c10::intrusive_ptr<ConstantString> v);
+  IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
+  IValue(const char* v): IValue(std::string(v)) {}
   bool isString() const { return Tag::String == tag; }
-  c10::intrusive_ptr<ConstantString> toString() && {
-    AT_ASSERT(isString());
-    return moveToIntrusivePtr<ConstantString>();
-  }
-  c10::intrusive_ptr<ConstantString> toString() const & {
-    AT_ASSERT(isString());
-    return toIntrusivePtr<ConstantString>();
-  }
+  c10::intrusive_ptr<ivalue::ConstantString> toString() &&;
+  c10::intrusive_ptr<ivalue::ConstantString> toString() const &;
 
   // DoubleList
-  IValue(c10::intrusive_ptr<DoubleList> v);
+  IValue(c10::intrusive_ptr<ivalue::DoubleList> v);
   IValue(std::vector<double> v);
   bool isDoubleList() const { return Tag::DoubleList == tag; }
-  c10::intrusive_ptr<DoubleList> toDoubleList() && {
-    AT_ASSERT(isDoubleList());
-    return moveToIntrusivePtr<DoubleList>();
-  }
-  c10::intrusive_ptr<DoubleList> toDoubleList() const & {
-    AT_ASSERT(isDoubleList());
-    return toIntrusivePtr<DoubleList>();
-  }
+  c10::intrusive_ptr<ivalue::DoubleList> toDoubleList() &&;
+  c10::intrusive_ptr<ivalue::DoubleList> toDoubleList() const &;
 
   // BoolList
-  IValue(c10::intrusive_ptr<BoolList> v);
+  IValue(c10::intrusive_ptr<ivalue::BoolList> v);
   IValue(std::vector<bool> v);
   bool isBoolList() const { return Tag::BoolList == tag; }
-  c10::intrusive_ptr<BoolList> toBoolList() && {
-    AT_ASSERT(isBoolList());
-    return moveToIntrusivePtr<BoolList>();
-  }
-  c10::intrusive_ptr<BoolList> toBoolList() const & {
-    AT_ASSERT(isBoolList());
-    return toIntrusivePtr<BoolList>();
-  }
+  c10::intrusive_ptr<ivalue::BoolList> toBoolList() &&;
+  c10::intrusive_ptr<ivalue::BoolList> toBoolList() const &;
 
   //TensorList
-  IValue(c10::intrusive_ptr<TensorList> v);
+  IValue(c10::intrusive_ptr<ivalue::TensorList> v);
   IValue(std::vector<at::Tensor> v);
   bool isTensorList() const { return Tag::TensorList == tag; }
-  c10::intrusive_ptr<TensorList> toTensorList() && {
-    AT_ASSERT(isTensorList());
-    return moveToIntrusivePtr<TensorList>();
-  }
-  c10::intrusive_ptr<TensorList> toTensorList() const & {
-    AT_ASSERT(isTensorList());
-    return toIntrusivePtr<TensorList>();
-  }
+  c10::intrusive_ptr<ivalue::TensorList> toTensorList() &&;
+  c10::intrusive_ptr<ivalue::TensorList> toTensorList() const &;
 
   //GenericList
-  IValue(c10::intrusive_ptr<GenericList> v);
+  IValue(c10::intrusive_ptr<ivalue::GenericList> v);
   IValue(std::vector<IValue> v);
   bool isGenericList() const { return Tag::GenericList == tag; }
-  c10::intrusive_ptr<GenericList> toGenericList() && {
-    AT_ASSERT(isGenericList());
-    return moveToIntrusivePtr<GenericList>();
-  }
-  c10::intrusive_ptr<GenericList> toGenericList() const & {
-    AT_ASSERT(isGenericList());
-    return toIntrusivePtr<GenericList>();
-  }
+  c10::intrusive_ptr<ivalue::GenericList> toGenericList() &&;
+  c10::intrusive_ptr<ivalue::GenericList> toGenericList() const &;
+
+  // GenericDict
+  IValue(c10::intrusive_ptr<ivalue::GenericDict> v);
+  IValue(c10::DictPtr<IValue, IValue> v);
+  bool isGenericDict() const { return Tag::GenericDict == tag; }
+  c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() &&;
+  c10::intrusive_ptr<ivalue::GenericDict> toGenericDict() const &;
+
+  // ClassType
+  IValue(c10::intrusive_ptr<ivalue::Object> v);
+  bool isObject() const { return tag == Tag::Object; }
+  c10::intrusive_ptr<ivalue::Object> toObject() &&;
+  c10::intrusive_ptr<ivalue::Object> toObject() const & ;
 
   // None
-  bool isNone() {
+  bool isNone() const {
     return Tag::None == tag;
   }
   std::string toNone() const {
+    AT_ASSERT(isNone());
     return "None";
   }
+
+  static IValue uninitialized() {
+    auto i = IValue();
+    i.tag = Tag::Uninitialized;
+    return i;
+  }
+
   // Scalar, which gets encoded as either an Int or a Double
   IValue(at::Scalar s)
   : IValue() {
@@ -348,18 +295,44 @@ struct CAFFE2_API IValue final {
       *this = s.toLong();
     }
   }
-  bool isScalar() {
-    return isDouble() || isInt() || isBool();
+  bool isScalar() const {
+    return isDouble() || isInt();
   }
   at::Scalar toScalar() const {
     if(isDouble())
       return toDouble();
     else if(isInt())
       return toInt();
-    else if (isBool())
-      return int(toBool());
     throw std::runtime_error("IValue is not a Scalar");
   }
+
+  // Device
+  IValue(c10::Device d)
+  : tag(Tag::Device), is_intrusive_ptr(false) {
+    payload.as_device.type = d.type();
+    payload.as_device.index = d.index();
+  }
+  bool isDevice() const { return Tag::Device == tag; }
+  c10::Device toDevice() const {
+    AT_ASSERT(isDevice());
+    return c10::Device(payload.as_device.type, payload.as_device.index);
+  }
+
+  // ScalarType
+  at::ScalarType toScalarType() const {
+    return static_cast<at::ScalarType>(toInt());
+  }
+
+  // Layout
+  at::Layout toLayout() const {
+    return static_cast<at::Layout>(toInt());
+  }
+
+  // MemoryFormat
+  at::MemoryFormat toMemoryFormat() const {
+    return static_cast<at::MemoryFormat>(toInt());
+  }
+
 
   // for debugging
   std::string tagKind() const {
@@ -385,9 +358,20 @@ struct CAFFE2_API IValue final {
   template<typename T>
   T to() const &;
 
+  // ToOptional: convert a IValue to the Optional obj that accepts both T and None
+  template<typename T>
+  optional<T> toOptional();
+
+  // this is a shallow comparison of two IValues to test the object identity
+  bool isSameIdentity(const IValue& rhs) const;
+
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const IValue& v);
+
+  bool isPtrType() const {
+    return is_intrusive_ptr;
+  }
 
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
@@ -403,18 +387,10 @@ struct CAFFE2_API IValue final {
   };
 
   template<class T, class NullType = c10::detail::intrusive_target_default_null_type<T>>
-  c10::intrusive_ptr<T, NullType> moveToIntrusivePtr() {
-    auto t = c10::intrusive_ptr<T, NullType>::reclaim(static_cast<T*>(payload.as_intrusive_ptr));
-    clearToNone();
-    return t;
-  }
+  c10::intrusive_ptr<T, NullType> moveToIntrusivePtr();
   template<typename T, class NullType = c10::detail::intrusive_target_default_null_type<T>>
-  c10::intrusive_ptr<T, NullType> toIntrusivePtr() const {
-    auto r = c10::intrusive_ptr<T, NullType>::reclaim(static_cast<T*>(payload.as_intrusive_ptr));
-    auto p = r;
-    r.release();
-    return p;
-  }
+  c10::intrusive_ptr<T, NullType> toIntrusivePtr() const;
+
   void clearToNone() {
     payload.as_int = 0;
     tag = Tag::None;
@@ -425,141 +401,15 @@ struct CAFFE2_API IValue final {
     double as_double;
     bool as_bool;
     c10::intrusive_ptr_target* as_intrusive_ptr;
-    World as_world;
+    struct {
+      DeviceType type;
+      DeviceIndex index;
+    } as_device;
   } payload;
   Tag tag;
   bool is_intrusive_ptr;
 };
 
-#undef TORCH_FORALL_TAGS
-
-
-#define DEFINE_TO(type, method_name) \
-template<> \
-inline type IValue::to<type>() && { \
-  return std::move(*this).method_name(); \
-} \
-template<> \
-inline type IValue::to<type>() const & { \
-  return this->method_name(); \
-}
-DEFINE_TO(at::Tensor, toTensor)
-DEFINE_TO(c10::intrusive_ptr<Tuple>, toTuple)
-DEFINE_TO(double, toDouble)
-DEFINE_TO(int64_t, toInt)
-DEFINE_TO(bool, toBool)
-DEFINE_TO(c10::intrusive_ptr<DoubleList>, toDoubleList)
-DEFINE_TO(c10::intrusive_ptr<IntList>, toIntList)
-DEFINE_TO(c10::intrusive_ptr<TensorList>, toTensorList)
-DEFINE_TO(c10::intrusive_ptr<GenericList>, toGenericList)
-DEFINE_TO(c10::intrusive_ptr<ConstantString>, toString)
-DEFINE_TO(at::Scalar, toScalar)
-DEFINE_TO(std::vector<int64_t>, toIntListRef)
-DEFINE_TO(std::vector<double>, toDoubleListRef)
-DEFINE_TO(std::vector<bool>, toBoolListRef)
-DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
-DEFINE_TO(std::vector<IValue>, toGenericListRef)
-DEFINE_TO(World, toWorld)
-DEFINE_TO(IValue, toIValue)
-
-#undef DEFINE_TO
-
-#define DEFINE_TO_WITH_BODY(type, body) \
-template<> \
-inline type IValue::to<type>() && { \
-  body(std::move(*this)); \
-} \
-template<> \
-inline type IValue::to<type>() const & { \
-  body((*this)); \
 }
 
-#define SCALAR_TYPE_BODY(this) return static_cast<at::ScalarType>(this.toInt());
-#define LAYOUT_BODY(this) return static_cast<at::Layout>(this.toInt());
-#define DEVICE_BODY(this)                                           \
-  /* NB: const_list might be a move of the vector, so we need to */ \
-  /*     assign it to prevent its deallocation.                  */ \
-  auto&& const_list = this.toIntList();                             \
-  const auto& elems = const_list->elements();                       \
-  AT_ASSERT(elems.size() == 2);                                     \
-  return at::Device(static_cast<at::Device::Type>(elems[0]), elems[1]);
-
-DEFINE_TO_WITH_BODY(at::ScalarType, SCALAR_TYPE_BODY)
-DEFINE_TO_WITH_BODY(at::Layout, LAYOUT_BODY)
-DEFINE_TO_WITH_BODY(at::Device, DEVICE_BODY)
-
-#undef DEFINE_TO_WITH_BODY
-#undef SCALAR_TYPE_BODY
-#undef LAYOUT_BODY
-#undef DEVICE_BODY
-
-inline IValue::IValue(c10::intrusive_ptr<Tuple> v)
-: tag(Tag::Tuple), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
-}
-
-inline IValue::IValue(c10::intrusive_ptr<IntList> v)
-: tag(Tag::IntList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
-}
-inline IValue::IValue(std::vector<int64_t> v)
-: IValue(IntList::create(std::move(v))) {}
-
-inline IValue::IValue(c10::intrusive_ptr<ConstantString> v)
-: tag(Tag::String), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
-}
-inline IValue::IValue(std::string v)
-: IValue(ConstantString::create(std::move(v))) {}
-
-inline IValue::IValue(c10::intrusive_ptr<DoubleList> v)
-: tag(Tag::DoubleList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
-}
-inline IValue::IValue(std::vector<double> v)
-: IValue(DoubleList::create(std::move(v))) {}
-
-inline IValue::IValue(c10::intrusive_ptr<BoolList> v)
-: tag(Tag::BoolList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
-}
-inline IValue::IValue(std::vector<bool> v)
-: IValue(BoolList::create(std::move(v))) {}
-
-inline IValue::IValue(c10::intrusive_ptr<TensorList> v)
-: tag(Tag::TensorList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
-}
-inline IValue::IValue(std::vector<at::Tensor> v)
-: IValue(TensorList::create(std::move(v))) {}
-
-inline IValue::IValue(c10::intrusive_ptr<GenericList> v)
-: tag(Tag::GenericList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
-}
-inline IValue::IValue(std::vector<IValue> v)
-: IValue(GenericList::create(std::move(v))) {}
-
-
-inline const std::vector<int64_t>& IValue::toIntListRef() const {
-  return toIntList()->elements();
-}
-
-inline const std::vector<double>& IValue::toDoubleListRef() const {
-  return toDoubleList()->elements();
-}
-
-inline const std::vector<at::Tensor>& IValue::toTensorListRef() const {
-  return toTensorList()->elements();
-}
-
-inline const std::vector<bool>& IValue::toBoolListRef() const {
-  return toBoolList()->elements();
-}
-
-inline const std::vector<IValue>& IValue::toGenericListRef() const {
-  return toGenericList()->elements();
-}
-
-
-}}
+#include <ATen/core/ivalue_inl.h>

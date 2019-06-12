@@ -1,23 +1,13 @@
-def script(a1, b1):
-  t5 = aten::lt(a1, 10)
-  t6 = prim::TensorToBool(t5)
-  a = a1
-  b = b1
-  c = 0
-  t7 = t6
-  while t7:
-    a2 = aten::add(a, 1, 1)
-    b2 = aten::add(b, 1, 1)
-    t15 = aten::gt(a2, b2)
-    t16 = prim::TensorToBool(t15)
-    if t16:
-      c4 = 2
+def while_if_test(a: Tensor,
+    b: Tensor) -> Tensor:
+  a0, c, b0 = a, 0, b
+  _0 = bool(torch.lt(a, 10))
+  while _0:
+    a1 = torch.add(a0, 1, 1)
+    b1 = torch.add(b0, 1, 1)
+    if bool(torch.gt(a1, b1)):
+      c0 = 2
     else:
-      c4 = 3
-    t21 = aten::lt(a2, 10)
-    t7 = prim::TensorToBool(t21)
-    a = a2
-    b = b2
-    c = c4
-  t27 = aten::add(a, 1, 1)
-  return aten::add(t27, c, 1)
+      c0 = 3
+    _0, a0, c, b0 = bool(torch.lt(a1, 10)), a1, c0, b1
+  return torch.add(torch.add(a0, 1, 1), c, 1)

@@ -19,9 +19,11 @@ MKL and MAGMA. Here are the steps to build with them.
     7z x -aoa mkl_2018.2.185.7z -omkl
 
     REM Download MAGMA files
-    REM cuda90/cuda91 is also available in the following line.
-    set CUDA_PREFIX=cuda80 
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_%CUDA_PREFIX%_release_mkl_2018.2.185.7z -o magma.7z
+    REM cuda100/cuda101 is also available for `CUDA_PREFIX`. There are also 2.4.0 binaries for cuda80/cuda92.
+    REM The configuration could be `debug` or `release` for 2.5.0. Only `release` is available for 2.4.0.
+    set CUDA_PREFIX=cuda90
+    set CONFIG=release
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_2.5.0_%CUDA_PREFIX%_%CONFIG%.7z -o magma.7z
     7z x -aoa magma.7z -omagma
     
     REM Setting essential environment variables
@@ -113,9 +115,7 @@ This type of extension has better support compared with
 the previous one. However, it still needs some manual
 configuration. First, you should open the
 **x86_x64 Cross Tools Command Prompt for VS 2017**.
-And then, you can open the Git-Bash in it. It is
-usually located in ``C:\Program Files\Git\git-bash.exe``.
-Finally, you can start your compiling process.
+And then, you can start your compiling process.
 
 Installation
 ------------
@@ -213,8 +213,8 @@ Multiprocessing error without if-clause protection
 .. code-block:: py3tb
 
     RuntimeError:
-   	An attempt has been made to start a new process before the
-   	current process has finished its bootstrapping phase.
+           An attempt has been made to start a new process before the
+           current process has finished its bootstrapping phase.
 
        This probably means that you are not using fork to start your
        child processes and you have forgotten to use the proper idiom

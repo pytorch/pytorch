@@ -1,18 +1,18 @@
-#include "THCUNN.h"
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <THCUNN/THCUNN.h>
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <THC/THCApply.cuh>
 
 #if defined(_MSC_VER) || defined(__HIP_PLATFORM_HCC__)
 #define ZERO_MACRO zero<T>()
 template <typename T>
 inline __device__ typename std::enable_if<std::is_same<T, double>::value, T>::type zero() {
-	return 0.;
+        return 0.;
 }
 
 template <typename T>
 inline __device__ typename std::enable_if<!std::is_same<T, double>::value, T>::type zero() {
-	return 0.f;
+        return 0.f;
 }
 #else
 #define ZERO_MACRO 0.f
@@ -72,5 +72,5 @@ struct logSigmoid_updateGradInput_functor<half> {
   }
 };
 
-#include "generic/LogSigmoid.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/LogSigmoid.cu>
+#include <THC/THCGenerateFloatTypes.h>

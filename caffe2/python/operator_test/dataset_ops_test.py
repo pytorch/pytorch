@@ -270,7 +270,7 @@ class TestDatasetOps(TestCase):
 
         Contents as defined below could represent, for example, a log of
         search queries along with dense, sparse features and metadata.
-        The datset below has 3 top-level entries.
+        The dataset below has 3 top-level entries.
         """
         contents_raw = [
             # dense

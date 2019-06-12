@@ -1,15 +1,15 @@
 #pragma once
 
-#include "ATen/ATen.h"
-#include "TensorInfo.cuh"
+#include <ATen/ATen.h>
+#include <ATen/cuda/detail/TensorInfo.cuh>
 #include <limits>
 
 namespace at {
 namespace cuda {
 namespace detail {
 
-bool maybeOverlappingIndices(const at::Tensor& t);
-bool canUse32BitIndexMath(const at::Tensor &t, int64_t max_elem=std::numeric_limits<int64_t>::max());
+CAFFE2_API bool maybeOverlappingIndices(const at::Tensor& t);
+CAFFE2_API bool canUse32BitIndexMath(const at::Tensor &t, int64_t max_elem=std::numeric_limits<int32_t>::max());
 
 template <typename scalar, typename IndexType>
 TensorInfo<scalar, IndexType>

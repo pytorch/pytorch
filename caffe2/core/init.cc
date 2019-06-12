@@ -42,6 +42,7 @@ bool GlobalInitAlreadyRun() {
 }
 
 bool GlobalInit(int* pargc, char*** pargv) {
+  C10_LOG_API_USAGE_ONCE("caffe2.global_init");
   static std::recursive_mutex init_mutex;
   std::lock_guard<std::recursive_mutex> guard(init_mutex);
   internal::State& init_state = internal::GlobalInitState();
@@ -71,7 +72,7 @@ bool GlobalInit(int* pargc, char*** pargv) {
     success &= c10::ParseCommandLineFlags(pargc, pargv);
     success &= InitCaffeLogging(pargc, *pargv);
     // Print out the current build version. Using cerr as LOG(INFO) might be off
-    if (c10::FLAGS_caffe2_version) {
+    if (FLAGS_caffe2_version) {
       std::cerr << "Caffe2 build configuration: " << std::endl;
       for (const auto& it : GetBuildOptions()) {
         std::cerr << "  " << std::setw(25) << std::left << it.first << " : "

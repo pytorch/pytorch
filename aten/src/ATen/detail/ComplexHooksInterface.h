@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/core/Error.h>
-#include "c10/util/Registry.h"
+#include <c10/util/Exception.h>
+#include <c10/util/Registry.h>
 
 namespace at {
 

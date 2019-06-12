@@ -33,7 +33,7 @@ class CAFFE2_API WorkspaceStack {
       Workspace* parent_ws,
       const std::unordered_map<std::string, std::string>& blob_bindings) {
     checkStack();
-    if (c10::FLAGS_caffe2_workspace_stack_debug) {
+    if (FLAGS_caffe2_workspace_stack_debug) {
       if (parent_ws_) {
         CAFFE_ENFORCE_EQ(parent_ws_, parent_ws, "Parent workspace mismatch");
       } else {
@@ -75,7 +75,7 @@ class CAFFE2_API WorkspaceStack {
       Workspace* parent_ws,
       const std::unordered_map<std::string, std::string>& grad_blob_bindings) {
     checkStack();
-    if (c10::FLAGS_caffe2_workspace_stack_debug) {
+    if (FLAGS_caffe2_workspace_stack_debug) {
       if (parent_ws_) {
         CAFFE_ENFORCE_EQ(parent_ws_, parent_ws, "Parent workspace mismatch");
       } else {
@@ -154,8 +154,9 @@ class CAFFE2_API WorkspaceStack {
 template <class Context>
 class CreateScopeOp final : public Operator<Context> {
  public:
-  CreateScopeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit CreateScopeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
@@ -164,8 +165,9 @@ class CreateScopeOp final : public Operator<Context> {
 template <class Context>
 class HasScopeOp final : public Operator<Context> {
  public:
-  HasScopeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+  template <class... Args>
+  explicit HasScopeOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;

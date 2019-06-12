@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/nn/modules/any.h>
-#include <torch/torch.h>
+#include <torch/nn/modules/linear.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/support.h>
@@ -119,7 +119,11 @@ TEST_F(AnyModuleTest, GetWithCorrectTypeSucceeds) {
 }
 
 TEST_F(AnyModuleTest, GetWithIncorrectTypeThrows) {
-  struct N : torch::nn::Module {};
+  struct N : torch::nn::Module {
+    torch::Tensor forward(torch::Tensor input) {
+      return input;
+    }
+  };
   AnyModule any(M{5});
   ASSERT_THROWS_WITH(any.get<N>(), "Attempted to cast module");
 }
@@ -139,7 +143,11 @@ TEST_F(AnyModuleTest, PtrWithGoodDowncastSuccceeds) {
 }
 
 TEST_F(AnyModuleTest, PtrWithBadDowncastThrows) {
-  struct N : torch::nn::Module {};
+  struct N : torch::nn::Module {
+    torch::Tensor forward(torch::Tensor input) {
+      return input;
+    }
+  };
   AnyModule any(M{5});
   ASSERT_THROWS_WITH(any.ptr<N>(), "Attempted to cast module");
 }
@@ -232,8 +240,9 @@ TEST_F(AnyModuleTest, ConvertsVariableToTensorCorrectly) {
   // mismatch).
   AnyModule any(M{});
   ASSERT_TRUE(
-      any.forward(torch::autograd::Variable(torch::ones(5))).sum().item<float>() ==
-      5);
+      any.forward(torch::autograd::Variable(torch::ones(5)))
+          .sum()
+          .item<float>() == 5);
   // at::Tensors that are not variables work too.
   ASSERT_EQ(any.forward(at::ones(5)).sum().item<float>(), 5);
 }

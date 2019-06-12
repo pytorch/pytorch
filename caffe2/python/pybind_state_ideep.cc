@@ -55,14 +55,17 @@ public:
   FetchedBlob FetchTensor(const itensor &atensor, bool force_copy) {
 #ifdef USE_NUMPY
     FetchedBlob result;
-    CAFFE_ENFORCE(atensor.materialized(),
+    CAFFE_ENFORCE((atensor.ndims() != 0) &&
+                  (atensor.get_nelems() == 0 ||
+                   atensor.get_data_handle() != nullptr),
                   "Trying to fetch uninitialized tensor");
-    const int numpy_type = CaffeToNumpyType(type_transform(atensor));
+    // NOTE: Only support float so far.
+    const int numpy_type = NPY_FLOAT;
     CAFFE_ENFORCE(
         numpy_type != -1,
         "Unsupported ideep memory data type? This usually should not happen "
         "since ideep memory usually only do float and double.");
-    itensor::dims dims = atensor.get_dims();
+    itensor::dims dims = atensor.get_public_format_dims();
     std::vector<npy_intp> npy_dims(dims.begin(), dims.end());
 
     result.copied = force_copy || atensor.need_reorder();
@@ -83,7 +86,7 @@ public:
     }
 
     if (result.copied) {
-      atensor.reorder_to(outPtr);
+      atensor.to_public(outPtr);
     }
 
     return result;
@@ -141,7 +144,7 @@ public:
         if (tensor->get_dims() != adims || type != tensor->get_data_type()) {
           tensor->resize(adims, type);
         }
-        tensor->reorder_from(adims, type,
+        tensor->feed_from(adims, type,
                              static_cast<void *>(PyArray_DATA(array)));
     }
 #else
@@ -152,16 +155,17 @@ public:
   bool ZeroDim(PyArrayObject *array) {
 #ifdef USE_NUMPY
     int ndim = PyArray_NDIM(array);
-    npy_intp *npy_dims = PyArray_DIMS(array);
-    return ndim == 0 ||
-      std::find(npy_dims, npy_dims + ndim, 0) != npy_dims + ndim;
+    return ndim == 0;
 #else
     CAFFE_THROW("Caffe2 was compiled without NumPy support.");
 #endif
   }
 
-  void Feed(const DeviceOption &option, PyArrayObject *original_array,
-            Blob *blob) {
+  void Feed(
+      const DeviceOption& option,
+      PyArrayObject* original_array,
+      Blob* blob,
+      bool in_place) override {
 #ifdef USE_NUMPY
     try {
       PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
@@ -169,15 +173,25 @@ public:
 
       const auto npy_type = PyArray_TYPE(array);
       const TypeMeta &meta = NumpyTypeToCaffe(npy_type);
+
       // TODO: if necessary, use dispatcher.
-      if (meta.Match<float>() && !ZeroDim(original_array)) {
+      if ((in_place && blob->IsType<itensor>())
+          || (meta.Match<float>() && !ZeroDim(original_array))) {
         FeedTensor(option, original_array, blob->GetMutable<itensor>());
       } else {
         DeviceOption cpu_option(option);
         cpu_option.set_device_type(DeviceTypeProto::PROTO_CPU);
         TensorFeeder<CPUContext> cpu_tensor_feeder;
-        cpu_tensor_feeder.FeedTensor(
-            cpu_option, original_array, BlobGetMutableTensor(blob, CPU));
+        if (in_place) {
+          cpu_tensor_feeder.FeedTensor(
+              cpu_option,
+              original_array,
+              BlobGetMutableTensor(blob, OptionToDevice(cpu_option).type()),
+              true);
+        } else {
+          blob->Reset<Tensor>(new Tensor(
+                                  cpu_tensor_feeder.FeedTensor(cpu_option, original_array)));
+        }
       }
     } catch (ideep::error &e) {
       LOG(ERROR) << "IDEEP error: " << e.message;

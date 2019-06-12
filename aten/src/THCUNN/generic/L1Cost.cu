@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/L1Cost.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/L1Cost.cu"
 #else
 
 void THNN_(L1Cost_updateOutput)(

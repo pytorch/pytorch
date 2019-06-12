@@ -6,14 +6,18 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(RoIAlign)
 
 namespace caffe2 {
 
 template <typename T, class Context>
 class RoIAlignOp final : public Operator<Context> {
  public:
-  RoIAlignOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit RoIAlignOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         order_(StringToStorageOrder(
             this->template GetSingleArgument<string>("order", "NCHW"))),
         spatial_scale_(

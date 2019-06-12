@@ -9,7 +9,7 @@ import torch.optim
 
 
 HEADER = """
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <vector>
 

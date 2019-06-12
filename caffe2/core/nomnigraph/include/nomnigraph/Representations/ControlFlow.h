@@ -19,6 +19,9 @@ class BasicBlock {
  public:
   using NodeRef = typename Subgraph<T, U...>::NodeRef;
   BasicBlock() {}
+  BasicBlock(const BasicBlock&) = delete;
+  BasicBlock(BasicBlock&&) = default;
+  BasicBlock& operator=(const BasicBlock&) = delete;
   ~BasicBlock() {
     for (auto pair : callbacks_) {
       pair.first->deleteDestructorCallback(pair.second);
@@ -72,6 +75,11 @@ class BasicBlock {
         std::find(std::begin(instructions_), std::end(instructions_), instr1);
     auto it2 =
         std::find(std::begin(instructions_), std::end(instructions_), instr2);
+    auto pos1b = std::distance(instructions_.begin(), it1);
+    auto pos2b = std::distance(instructions_.begin(), it2);
+    if (pos1b <= pos2b) {
+      return;
+    }
     instructions_.erase(it1);
     instructions_.insert(it2, instr1);
   }

@@ -51,6 +51,7 @@ REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
+REGISTER_CPU_OPERATOR(Scatter, ScatterOp<CPUContext>);
 
 REGISTER_CPU_OPERATOR(LengthsToShape, LengthsToShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
@@ -71,8 +72,6 @@ OPERATOR_SCHEMA(WallClockTime)
     .NumOutputs(1)
     .SetDoc("Time since epoch in nanoseconds.")
     .Output(0, "time", "The time in nanoseconds.");
-
-REGISTER_CPU_OPERATOR(UnsafeCoalesce, UnsafeCoalesceOp<CPUContext>);
 
 OPERATOR_SCHEMA(Print)
     .NumInputs(1)
@@ -371,6 +370,38 @@ Currently only works on CPU because of access to INDICES.
         "Update slices, with shape len(INDICES) + shape(X_0)[1:]")
     .Output(0, "DATA", "Has to be exactly the same tensor as the input 0");
 
+OPERATOR_SCHEMA(Scatter)
+    .NumInputs(3)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .SetDoc(R"DOC(
+Update values of the tensor by overriding current value specified by indices.
+
+Writes all values from the tensor UPDATES into DATA at the indices specified in the INDICES tensor.
+For each value in DATA, its output index is specified by its index in UPDATES and by the corresponding value in INDICES for the specified axis.
+
+For a 3-D tensor, DATA is updated as:
+
+DATA[INDICES[i][j][k]][j][k] = UPDATES[i][j][k]  # if axis == 0
+DATA[i][INDICES[i][j][k]][k] = UPDATES[i][j][k]  # if axis == 1
+DATA[i][j][INDICES[i][j][k]] = UPDATES[i][j][k]  # if axis == 2
+
+Currently only works on CPU because of access to INDICES.
+)DOC")
+    .Input(0, "DATA", "Tensor to be updated.")
+    .Input(
+        1,
+        "INDICES",
+        "1-D list of indices on the first dimension"
+        "of X_0 that need to be updated")
+    .Input(
+        2,
+        "UPDATES",
+        "Update slices, with shape len(INDICES) + shape(X_0)[1:]")
+    .Output(0, "OUTPUT", "The updated output.")
+    .Arg(
+        "axis",
+        "*(type: int; default: 1)* Which dimension to scatter on.");
 
 OPERATOR_SCHEMA(HasElements)
     .NumInputs(1)
@@ -649,31 +680,6 @@ weights derived by lengths. i.e 1/pow(length, power)
 
 SHOULD_NOT_DO_GRADIENT(WallClockTime);
 
-OPERATOR_SCHEMA(UnsafeCoalesce)
-    .NumInputsOutputs([](int inputs, int outputs) {
-      return inputs + 1 == outputs;
-    })
-    .AllowInplace([](int input, int output) { return input == output; })
-    .SetDoc(R"DOC(
-Coalesce the N inputs into N outputs and a single coalesced output blob.
-
-This allows operations that operate over multiple small kernels (e.g.
-biases in a deep CNN) to be coalesced into a single larger operation,
-amortizing the kernel launch overhead, synchronization costs for
-distributed computation, etc.
-
-The operator:
-
-- computes the total size of the coalesced blob by summing the input sizes
-- allocates the coalesced output blob as the total size
-- copies the input vectors into the coalesced blob, at the correct offset.
-- aliases each Output(i) to- point into the coalesced blob, at the corresponding offset for Input(i).
-
-This is 'unsafe' as the output vectors are aliased, so use with
-caution.
-
-)DOC");
-
 OPERATOR_SCHEMA(EnsureDense)
     .NumInputs(1)
     .NumOutputs(1)
@@ -739,7 +745,6 @@ SHOULD_NOT_DO_GRADIENT(Print);
 SHOULD_NOT_DO_GRADIENT(HasElements);
 SHOULD_NOT_DO_GRADIENT(IsEmpty);
 SHOULD_NOT_DO_GRADIENT(LengthsToShape);
-SHOULD_NOT_DO_GRADIENT(UnsafeCoalesce);
 
 class GetAliasGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -767,6 +772,7 @@ REGISTER_GRADIENT(Sum, GetSumGradient);
 
 SHOULD_NOT_DO_GRADIENT(ScatterWeightedSum);
 SHOULD_NOT_DO_GRADIENT(ScatterAssign);
+SHOULD_NOT_DO_GRADIENT(Scatter);
 
 class GetWeightedSumGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -814,7 +820,7 @@ template <>
 bool NanCheckOp<CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  const int D = X.size();
+  const int D = X.numel();
   const float* data = X.data<float>();
   ConstEigenVectorMap<float> input_data(data, D);
 
@@ -830,7 +836,7 @@ bool NanCheckOp<CPUContext>::RunOnDevice() {
       tensorPrinter_.Print<float>(Input(j));
       std::cerr << "NaN idxs:" << std::endl;
       const float* x = Input(j).data<float>();
-      for (size_t i = 0; i < Input(j).size(); ++i) {
+      for (size_t i = 0; i < Input(j).numel(); ++i) {
         if (std::isnan(x[i]) || std::isinf(x[i])) {
           std::cerr << i << " ";
         }
@@ -841,7 +847,7 @@ bool NanCheckOp<CPUContext>::RunOnDevice() {
   }
 
   if (&X != Y) {
-    Y->CopyFrom(X, &context_);
+    Y->CopyFrom(X);
   }
   return true;
 }
@@ -860,6 +866,15 @@ OPERATOR_SCHEMA(NanCheck)
         "output",
         "Tensor to copy input into if no NaNs or inf."
         " Can be in-place");
+
+REGISTER_CPU_OPERATOR(IsNaN, IsNanOp<CPUContext>);
+
+OPERATOR_SCHEMA(IsNaN)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc("Returns a new tensor with boolean elements representing if each element is NaN or not.")
+    .Input(0, "tensor", "Tensor to check for nan")
+    .Output(0, "output", "Tensor containing a 1 at each location of NaN elements."); 
 
 OPERATOR_SCHEMA(Size)
     .NumInputs(1)
@@ -940,7 +955,7 @@ bool RangeOp<CPUContext>::DoRunOnDevice(
     const T& step,
     Tensor* output) {
   auto* output_data = output->template mutable_data<T>();
-  for (int i = 0; i < output->size(); ++i) {
+  for (int i = 0; i < output->numel(); ++i) {
     output_data[i] = i * step + start;
   }
   return true;

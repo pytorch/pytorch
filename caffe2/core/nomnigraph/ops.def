@@ -56,6 +56,9 @@ Clip
 - Max : float
 
 FC
+- Axis : int : 1
+- AxisW : int : 1
+
 GivenTensorFill
 Concat
 - Axis : int : -1
@@ -63,6 +66,7 @@ Concat
 Softmax
 ChannelShuffle
 Add
+- Broadcast : int : 0
 Reshape
 Flatten
 
@@ -74,4 +78,3 @@ NHWC2NCHW
 
 Declare
 Export
-

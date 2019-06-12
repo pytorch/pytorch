@@ -42,7 +42,7 @@ template <typename SkipOutputCopy>
 class GPUFallbackOpEx final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  GPUFallbackOpEx(const OperatorDef& def, Workspace* ws)
+  explicit GPUFallbackOpEx(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws) {
     CAFFE_ENFORCE_EQ(def.device_option().device_type(), PROTO_CUDA);
     OperatorDef base_def_(def);
@@ -62,12 +62,10 @@ class GPUFallbackOpEx final : public Operator<CUDAContext> {
   }
 
   bool RunOnDevice() override {
-    bool need_sync = false;
     for (int i = 0; i < InputSize(); ++i) {
       if (this->InputIsTensorType(i, CUDA)) {
-        BlobGetMutableTensor(local_input_blobs_[i], CPU)
-            ->CopyFrom(Input(i), &context_);
-        need_sync = true;
+        // use sync copy
+        BlobGetMutableTensor(local_input_blobs_[i], CPU)->CopyFrom(Input(i));
       } else {
         VLOG(1) << "Input " << i << " is not TensorCUDA. Skipping copy.";
         // Note(jiayq): This removes a const but conceptually
@@ -77,11 +75,6 @@ class GPUFallbackOpEx final : public Operator<CUDAContext> {
             const_cast<void*>(OperatorBase::Inputs()[i]->GetRaw()),
             OperatorBase::Inputs()[i]->meta());
       }
-    }
-
-    // Sync to make sure copies are done.
-    if (need_sync) {
-      context_.FinishDeviceComputation();
     }
 
     if (!base_op_->Run()) {

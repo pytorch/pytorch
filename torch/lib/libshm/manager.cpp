@@ -9,8 +9,10 @@
 #include <memory>
 #include <unordered_map>
 
-#include "err.h"
-#include "socket.h"
+#include <c10/util/tempfile.h>
+
+#include <libshm/err.h>
+#include <libshm/socket.h>
 
 const int SHUTDOWN_TIMEOUT = 2000; // 2s
 
@@ -83,17 +85,20 @@ int main(int argc, char *argv[]) {
   setsid();  // Daemonize the process
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
+  const auto tempfile =
+      c10::try_make_tempfile(/*name_prefix=*/"torch-shm-file-");
   try {
-    char tmpfile[L_tmpnam];
-    if (std::tmpnam(tmpfile) == NULL)
-      throw std::runtime_error("could not generate a random filename for manager socket");
+    if (!tempfile.has_value()) {
+      throw std::runtime_error(
+          "could not generate a random filename for manager socket");
+    }
     // TODO: better strategy for generating tmp names
     // TODO: retry on collisions - this can easily fail
-    srv_socket.reset(new ManagerServerSocket(std::string(tmpfile)));
+    srv_socket.reset(new ManagerServerSocket(tempfile->name));
     register_fd(srv_socket->socket_fd);
-    print_init_message(tmpfile);
-    DEBUG("opened socket %s", tmpfile);
-  } catch(...) {
+    print_init_message(tempfile->name.c_str());
+    DEBUG("opened socket %s", tempfile->name.c_str());
+  } catch (...) {
     print_init_message("ERROR");
     throw;
   }
@@ -105,7 +110,7 @@ int main(int argc, char *argv[]) {
     int nevents;
     if (client_sessions.size() == 0)
       timeout = SHUTDOWN_TIMEOUT;
-    SYSCHECK(nevents = poll(pollfds.data(), pollfds.size(), timeout));
+    SYSCHECK_ERR_RETURN_NEG1(nevents = poll(pollfds.data(), pollfds.size(), timeout));
     timeout = -1;
     if (nevents == 0 && client_sessions.size() == 0)
       break;

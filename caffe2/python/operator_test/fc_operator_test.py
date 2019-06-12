@@ -7,7 +7,6 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 from hypothesis import assume, given, settings, HealthCheck
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.test_util import IN_CIRCLECI_FLAKY_ENV
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
@@ -17,9 +16,9 @@ import unittest
 class TestFcOperator(serial.SerializedTestCase):
     def _run_test(self, n, m, k, transposed, multi_dim, dtype, engine, gc, dc):
         if dtype == np.float16:
-            # fp16 only supported with CUDA
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            # fp16 only supported with CUDA/HIP
+            assume(core.IsGPUDeviceType(gc.device_type))
+            dc = [d for d in dc if core.IsGPUDeviceType(d.device_type)]
 
         if engine == 'TENSORCORE':
             # TensorCore only makes sense with CUDA
@@ -55,18 +54,21 @@ class TestFcOperator(serial.SerializedTestCase):
             engine=engine,
         )
 
-        if dtype == np.float16 and gc.device_type == caffe2_pb2.CUDA:
+        if dtype == np.float16 and core.IsGPUDeviceType(gc.device_type):
             a = caffe2_pb2.Argument()
             a.i = 1
             a.name = "float16_compute"
             op.arg.extend([a])
 
         # Check against numpy reference
+        # ReferenceChecks is flaky on rocm with threshold of 1e-4 for fp16. Relaxing to 1e-3.
+        threshold = 1e-3 if (gc.device_type == caffe2_pb2.HIP and dtype == np.float16) else 1e-4
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
             inputs=[X, W, b],
             reference=fc_tranposed_op if transposed else fc_op,
+            threshold=threshold
         )
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X, W, b], [0])
@@ -78,7 +80,6 @@ class TestFcOperator(serial.SerializedTestCase):
             self.assertGradientChecks(gc, op, [X, W, b], i, [0],
                                       threshold=threshold, stepsize=stepsize)
 
-    @unittest.skipIf(IN_CIRCLECI_FLAKY_ENV, "FIXME: flaky test in CircleCI")
     @settings(max_examples=50, suppress_health_check=[HealthCheck.filter_too_much])
     @serial.given(n=st.integers(1, 5),
            m=st.integers(0, 5),

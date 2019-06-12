@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <functional>
 
 #include "test_util.h"
 
@@ -12,21 +13,9 @@ namespace matcher {
 
 using NodeType = std::string;
 using Criteria = std::string;
-
-// Node matches a criteria (string) if the data string is the same as the
-// criteria. Special case: "*" will match any thing.
-struct TestNodeMatch {
-  static bool isMatch(
-      const nom::Graph<NodeType>::NodeRef& node,
-      const Criteria& criteria) {
-    return criteria == "*" || criteria == node->data();
-  }
-};
-
 using TestGraph = Graph<NodeType>;
-using TestMatcher = SubgraphMatcher<TestGraph, Criteria, TestNodeMatch>;
-using TestMatchGraph = MatchGraph<Criteria>;
-using TestMatchNode = MatchNode<Criteria>;
+using TestMatchGraph = MatchGraph<TestGraph>;
+using TestMatchPredicate = MatchPredicate<TestGraph>;
 
 // Have just one TestMatchGraph in the tests to make it less verbose to create
 // the match graphs.
@@ -36,12 +25,25 @@ void reset() {
   graph = TestMatchGraph();
 }
 
+// Node matches a criteria (string) if the data string is the same as the
+// criteria. Special case: "*" will match any thing.
+TestMatchPredicate testMatchPredicate(const Criteria& criteria) {
+  return TestMatchPredicate([criteria](TestGraph::NodeRef node) {
+    return criteria == "*" || criteria == node->data();
+  });
+}
+
+Criteria any() {
+  return Criteria("*");
+}
+
 // Helper methods to make it less verbose to create match graphs.
 TestMatchGraph::NodeRef Tree(
     const Criteria& root,
     const std::vector<TestMatchGraph::NodeRef>& children = {},
     int count = 1) {
-  auto result = graph.createNode(std::move(TestMatchNode(root).count(count)));
+  auto result =
+      graph.createNode(std::move(testMatchPredicate(root).count(count)));
   for (auto& child : children) {
     graph.createEdge(result, child);
   }
@@ -50,11 +52,7 @@ TestMatchGraph::NodeRef Tree(
 
 TestMatchGraph::NodeRef NonTerminal(const Criteria& root, int count = 1) {
   return graph.createNode(
-      std::move(TestMatchNode(root).count(count).nonTerminal()));
-}
-
-Criteria any() {
-  return Criteria("*");
+      std::move(testMatchPredicate(root).count(count).nonTerminal()));
 }
 
 std::map<std::string, std::string> TestGraphNodePrinter(
@@ -181,32 +179,32 @@ struct DataFlowTestGraphCriteria {
 
   DataFlowTestGraphCriteria() {
     auto matchOpCInputs =
-        graph.createNode(std::move(TestMatchNode(Criteria("input"))
+        graph.createNode(std::move(testMatchPredicate(Criteria("input"))
                                        .starCount()
                                        .nonTerminal()
                                        .excludeFromSubgraph()));
-    auto matchOpC = graph.createNode(Criteria("opC"));
+    auto matchOpC = graph.createNode(testMatchPredicate("opC"));
     graph.createEdge(matchOpCInputs, matchOpC);
 
-    matchOpCOutput = graph.createNode(any());
+    matchOpCOutput = graph.createNode(testMatchPredicate(any()));
     graph.createEdge(matchOpC, matchOpCOutput);
 
-    auto matchOpB = graph.createNode(Criteria("opB"));
+    auto matchOpB = graph.createNode(testMatchPredicate("opB"));
     graph.createEdge(matchOpCOutput, matchOpB);
     graph.createEdge(matchOpCOutput, matchOpB);
 
-    auto matchOpBOutput = graph.createNode(any());
+    auto matchOpBOutput = graph.createNode(testMatchPredicate(any()));
     graph.createEdge(matchOpB, matchOpBOutput);
 
-    auto matchOpF = graph.createNode(Criteria("opF"));
+    auto matchOpF = graph.createNode(testMatchPredicate("opF"));
     graph.createEdge(matchOpBOutput, matchOpF);
 
-    auto matchOpFOutput = graph.createNode(any());
+    auto matchOpFOutput = graph.createNode(testMatchPredicate(any()));
     graph.createEdge(matchOpF, matchOpFOutput);
 
-    matchOpG = graph.createNode(Criteria("opG"));
-    auto matchDataI = graph.createNode(
-        std::move(TestMatchNode(any()).nonTerminal().excludeFromSubgraph()));
+    matchOpG = graph.createNode(testMatchPredicate("opG"));
+    auto matchDataI = graph.createNode(std::move(
+        testMatchPredicate(any()).nonTerminal().excludeFromSubgraph()));
     graph.createEdge(matchOpFOutput, matchOpG);
     graph.createEdge(matchDataI, matchOpG);
   }
@@ -220,7 +218,7 @@ bool isSubgraphMatch(
     TestGraph::NodeRef nodeRef,
     const TestMatchGraph::NodeRef& criteria,
     bool invertGraphTraversal = true) {
-  return TestMatcher::isSubgraphMatch(nodeRef, criteria, invertGraphTraversal)
+  return graph.isSubgraphMatch(nodeRef, criteria, invertGraphTraversal)
       .isMatch();
 }
 } // namespace matcher
@@ -231,15 +229,15 @@ using namespace nom::matcher;
 
 // Simple test cases for node matching criteria.
 TEST(SubgraphMatcher, IsNodeMatch) {
-  TestGraph graph;
-  auto n1 = graph.createNode("Hello");
-  auto n2 = graph.createNode("Le");
-  graph.createEdge(n1, n2);
+  TestGraph g;
+  auto n1 = g.createNode("Hello");
+  auto n2 = g.createNode("Le");
+  g.createEdge(n1, n2);
 
-  EXPECT_TRUE(TestMatcher::isNodeMatch(n1, "Hello"));
-  EXPECT_FALSE(TestMatcher::isNodeMatch(n1, "G"));
-  EXPECT_TRUE(TestMatcher::isNodeMatch(n2, "Le"));
-  EXPECT_FALSE(TestMatcher::isNodeMatch(n2, "le"));
+  EXPECT_TRUE(graph.isNodeMatch(n1, testMatchPredicate("Hello")));
+  EXPECT_FALSE(graph.isNodeMatch(n1, testMatchPredicate("G")));
+  EXPECT_TRUE(graph.isNodeMatch(n2, testMatchPredicate("Le")));
+  EXPECT_FALSE(graph.isNodeMatch(n2, testMatchPredicate("le")));
 }
 
 // Test subtree matching with a simple tree graph.
@@ -321,7 +319,8 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
   EXPECT_FALSE(isSubgraphMatch(n1, subtree, false));
 
   reset();
-  subtree = Tree(any(), {Tree(Criteria("2"), {}, TestMatchNode::kStarCount)});
+  subtree =
+      Tree(any(), {Tree(Criteria("2"), {}, TestMatchPredicate::kStarCount)});
   EXPECT_FALSE(isSubgraphMatch(n1, subtree, false));
 
   reset();
@@ -349,23 +348,23 @@ TEST(SubgraphMatcher, IsSubtreeMatchRepeated) {
     Tree(Criteria("2")),
     Tree(Criteria("3"), {}, 2),
     Tree(Criteria("4"), {}, 2),
-    Tree(Criteria("5"), {}, TestMatchNode::kStarCount)
+    Tree(Criteria("5"), {}, TestMatchPredicate::kStarCount)
   });
   EXPECT_TRUE(isSubgraphMatch(n1, subtree, false));
 
   reset();
   subtree = Tree(any(), {
     Tree(Criteria("2")),
-    Tree(Criteria("3"), {}, TestMatchNode::kStarCount),
+    Tree(Criteria("3"), {}, TestMatchPredicate::kStarCount),
     Tree(Criteria("4"), {}, 2),
-    Tree(Criteria("5"), {}, TestMatchNode::kStarCount)
+    Tree(Criteria("5"), {}, TestMatchPredicate::kStarCount)
   });
   EXPECT_TRUE(isSubgraphMatch(n1, subtree, false));
 
   reset();
   subtree = Tree(any(), {
     Tree(Criteria("2")),
-    Tree(Criteria("3"), {}, TestMatchNode::kStarCount),
+    Tree(Criteria("3"), {}, TestMatchPredicate::kStarCount),
   });
   // Fails because there are unmatched edges.
   EXPECT_FALSE(isSubgraphMatch(n1, subtree, false));
@@ -569,16 +568,16 @@ TEST(SubgraphMatcher, IsSubtreeMatchRealistic) {
 
 TEST(SubgraphMatcher, ReplaceGraphRealistic) {
   reset();
-  auto graph = DataFlowTestGraph();
+  auto testGraph = DataFlowTestGraph();
   auto subtree = DataFlowTestGraphCriteria();
 
-  TestMatcher::replaceSubgraph(
-      graph.graph,
+  graph.replaceSubgraph(
+      testGraph.graph,
       subtree.matchOpG,
       [subtree](
           TestGraph& g,
           TestGraph::NodeRef opG,
-          const TestMatcher::SubgraphMatchResultType& matchResult) {
+          const TestMatchGraph::SubgraphMatchResultType& matchResult) {
         auto fusedNode = g.createNode("opFused");
         auto opC = getInNode(
             matchResult.getMatchNodeMap()->at(subtree.matchOpCOutput), 0);
@@ -595,10 +594,10 @@ TEST(SubgraphMatcher, ReplaceGraphRealistic) {
   // - fused node
   // - output node
   // - dataC2 node
-  auto nodes = graph.graph.getMutableNodes();
+  auto nodes = testGraph.graph.getMutableNodes();
 
   // Test that the graph is transformed as expected.
-  EXPECT_EQ(nodes.size(), graph.numInputs + 4);
+  EXPECT_EQ(nodes.size(), testGraph.numInputs + 4);
   TestGraph::NodeRef opFused;
   TestGraph::NodeRef dataI;
   TestGraph::NodeRef dataOut;
@@ -614,9 +613,9 @@ TEST(SubgraphMatcher, ReplaceGraphRealistic) {
 
   EXPECT_EQ(getInNode(dataOut, 0), opFused);
 
-  EXPECT_EQ(opFused->getInEdges().size(), graph.numInputs + 1);
+  EXPECT_EQ(opFused->getInEdges().size(), testGraph.numInputs + 1);
   EXPECT_EQ(getInNode(opFused, 0), dataI);
-  for (int i = 1; i <= graph.numInputs; i++) {
+  for (int i = 1; i <= testGraph.numInputs; i++) {
     EXPECT_EQ(getInNode(opFused, i)->data(), "input");
   }
 

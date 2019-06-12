@@ -13,8 +13,9 @@ class SeluOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  SeluOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit SeluOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     alpha_ = this->template GetSingleArgument<T>(
         "alpha", 1.6732632423543772848170429916717f);
     lambda_ = this->template GetSingleArgument<T>(
@@ -35,8 +36,9 @@ template <typename T, class Context>
 class SeluGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  SeluGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+  template <class... Args>
+  explicit SeluGradientOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...) {
     alpha_ = this->template GetSingleArgument<T>(
         "alpha", 1.6732632423543772848170429916717f);
     lambda_ = this->template GetSingleArgument<T>(

@@ -1,0 +1,3 @@
+def print_weird_test(y: Tensor) -> None:
+  print("hi\016")
+  return None

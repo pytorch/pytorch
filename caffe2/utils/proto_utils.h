@@ -30,6 +30,9 @@ CAFFE2_API int DeviceId(const DeviceOption& option);
 // Returns if the two DeviceOptions are pointing to the same device.
 CAFFE2_API bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs);
 
+CAFFE2_API bool IsCPUDeviceType(int device_type);
+CAFFE2_API bool IsGPUDeviceType(int device_type);
+
 // Common interfaces that reads file contents into a string.
 CAFFE2_API bool ReadStringFromFile(const char* filename, string* str);
 CAFFE2_API bool WriteStringToFile(const string& str, const char* filename);
@@ -52,6 +55,7 @@ namespace TextFormat {
 inline bool ParseFromString(const string& spec, MessageLite* proto) {
   LOG(FATAL) << "If you are running lite version, you should not be "
              << "calling any text-format protobuffers.";
+  return false;
 }
 } // namespace TextFormat
 
@@ -326,6 +330,14 @@ bool inline operator==(const DeviceOption& dl, const DeviceOption& dr) {
   return IsSameDevice(dl, dr);
 }
 
+// Given a net, modify the external inputs/outputs if necessary so that
+// the following conditions are met
+// - No duplicate external inputs
+// - No duplicate external outputs
+// - Going through list of ops in order, all op inputs must be outputs
+// from other ops, or registered as external inputs.
+// - All external outputs must be outputs of some operators.
+CAFFE2_API void cleanupExternalInputsAndOutputs(NetDef* net);
 
 } // namespace caffe2
 

@@ -304,8 +304,8 @@ template <typename DType, typename Context>
 void DeformConvOpBase<DType, Context>::DeformableIm2col(
     const DType* data_im,
     const DType* data_offset,
-    at::IntList im_shape,
-    at::IntList col_shape,
+    at::IntArrayRef im_shape,
+    at::IntArrayRef col_shape,
     DType* data_col) {
   CHECK_LT(2, CAFFE_CUDA_NUM_THREADS);
   CAFFE_ENFORCE_EQ(pad_t(), pad_b());
@@ -394,8 +394,9 @@ __global__ void deformable_col2im_gpu_kernel(
     for (int dy = -2; dy <= 2; dy++) {
       for (int dx = -2; dx <= 2; dx++) {
         if (cur_h + dy >= 0 && cur_h + dy < height && cur_w + dx >= 0 &&
-            cur_w + dx < width && abs(cur_inv_h_data - (cur_h + dy)) < 1 &&
-            abs(cur_inv_w_data - (cur_w + dx)) < 1) {
+            cur_w + dx < width &&
+            c10::cuda::compat::abs(cur_inv_h_data - (cur_h + dy)) < 1 &&
+            c10::cuda::compat::abs(cur_inv_w_data - (cur_w + dx)) < 1) {
           int cur_bottom_grad_pos =
               (c * height + cur_h + dy) * width + cur_w + dx;
           DType weight = get_gradient_weight(
@@ -430,8 +431,8 @@ template <typename DType, typename Context>
 void DeformConvOpBase<DType, Context>::DeformableCol2im(
     const DType* data_col,
     const DType* data_offset,
-    at::IntList im_shape,
-    at::IntList col_shape,
+    at::IntArrayRef im_shape,
+    at::IntArrayRef col_shape,
     DType* grad_im) {
   CAFFE_ENFORCE_EQ(pad_t(), pad_b());
   CAFFE_ENFORCE_EQ(pad_l(), pad_r());
@@ -577,8 +578,8 @@ void DeformConvOpBase<DType, Context>::DeformableCol2imCoord(
     const DType* data_col,
     const DType* data_im,
     const DType* data_offset,
-    at::IntList im_shape,
-    at::IntList col_shape,
+    at::IntArrayRef im_shape,
+    at::IntArrayRef col_shape,
     DType* grad_offset) {
   CAFFE_ENFORCE_EQ(pad_t(), pad_b());
   CAFFE_ENFORCE_EQ(pad_l(), pad_r());

@@ -67,7 +67,7 @@ NetDef optimize_inference_net(
 
           // Safety check to prevent double-memongering nets.
           string shared_blob =
-              "__m" + caffe2::to_string(renaming.size()) + "_shared";
+              "__m" + c10::to_string(renaming.size()) + "_shared";
           if (all_blobs.find(shared_blob) != all_blobs.end()) {
             LOG(INFO) << "Net was already memongered!";
             return net;
@@ -211,7 +211,7 @@ class ComputeBlobRecyclingForDag {
         if (renamed.find(mapped_blob.second) == renamed.end()) {
           renamed.insert(
               {mapped_blob.second,
-               namescope + "__m" + caffe2::to_string(name_idx++) + "_shared"});
+               namescope + "__m" + c10::to_string(name_idx++) + "_shared"});
         }
       } else {
         renamed.insert({mapped_blob.second, mapped_blob.second});

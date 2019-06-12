@@ -1,8 +1,9 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialAveragePooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialAveragePooling.cu"
 #else
 
-#include "../common.h"
+#include <THCUNN/common.h>
+#include <THCUNN/generic/pooling_shape.h>
 
 static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   THCState *state,
@@ -35,27 +36,10 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   int64_t nInputPlane = input->size(dimh-1);
   int64_t nInputRows = input->size(dimh);
   int64_t nInputCols = input->size(dimw);
-  int64_t nOutputRows, nOutputCols;
   int64_t nOutputPlane = nInputPlane;
 
-  if(ceil_mode) {
-    nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
-    nOutputRows = ceil(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
-  }
-  else {
-    nOutputCols = floor(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
-    nOutputRows = floor(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
-  }
-
-  if (padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((nOutputRows - 1)*dH >= nInputRows + padH)
-      --nOutputRows;
-    if ((nOutputCols  - 1)*dW >= nInputCols  + padW)
-      --nOutputCols;
-  }
+  int64_t nOutputCols = pooling_output_shape<int64_t>(nInputCols, kW, padW, dW, 1, ceil_mode);
+  int64_t nOutputRows = pooling_output_shape<int64_t>(nInputRows, kH, padH, dH, 1, ceil_mode);
 
   if (nOutputCols < 1 || nOutputRows < 1)
     THError("Given input size: (%dx%dx%d). "
@@ -101,23 +85,8 @@ void THNN_(SpatialAveragePooling_updateOutput)(
     batchSize = input->size(0);
   }
 
-  if(ceil_mode) {
-    nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
-    nOutputRows = ceil(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
-  }
-  else {
-    nOutputCols = floor(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
-    nOutputRows = floor(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
-  }
-  if (padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((nOutputRows - 1)*dH >= nInputRows + padH)
-      --nOutputRows;
-    if ((nOutputCols  - 1)*dW >= nInputCols  + padW)
-      --nOutputCols;
-  }
+  nOutputCols = pooling_output_shape<int64_t>(nInputCols, kW, padW, dW, 1, ceil_mode);
+  nOutputRows = pooling_output_shape<int64_t>(nInputRows, kH, padH, dH, 1, ceil_mode);
 
   input = THCTensor_(newContiguous)(state, input);
   scalar_t* input_data = THCTensor_(data)(state, input);
@@ -187,23 +156,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   nInputCols = input->size(dimCol);
   nInputRows = input->size(dimRow);
 
-  if(ceil_mode) {
-    nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
-    nOutputRows = ceil(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
-  }
-  else {
-    nOutputCols = floor(float(nInputCols - kW + 2*padW) / float(dW)) + 1;
-    nOutputRows = floor(float(nInputRows - kH + 2*padH) / float(dH)) + 1;
-  }
-  if (padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((nOutputRows - 1)*dH >= nInputRows + padH)
-      --nOutputRows;
-    if ((nOutputCols  - 1)*dW >= nInputCols  + padW)
-      --nOutputCols;
-  }
+  nOutputCols = pooling_output_shape<int64_t>(nInputCols, kW, padW, dW, 1, ceil_mode);
+  nOutputRows = pooling_output_shape<int64_t>(nInputRows, kH, padH, dH, 1, ceil_mode);
 
   THCUNN_check_dim_size(state, gradOutput, input->dim(), dimRow, nOutputRows);
   THCUNN_check_dim_size(state, gradOutput, input->dim(), dimCol, nOutputCols);

@@ -1,6 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/VolumetricAveragePooling.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/VolumetricAveragePooling.cu"
 #else
+
+#include <THCUNN/generic/pooling_shape.h>
 
 static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
                          THCState *state,
@@ -71,33 +73,9 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
              "padT = %d, padW = %d, padH = %d, kT = %d, kW = %d, kH = %d",
              padT, padW, padH, kT, kW, kH);
 
-  int outputTime;
-  int outputHeight;
-  int outputWidth;
-
-  if (ceil_mode)
-  {
-    outputTime   = ceil(float(inputTime   - kT + 2*padT) / float(dT)) + 1;
-    outputHeight = ceil(float(inputHeight - kH + 2*padH) / float(dH)) + 1;
-    outputWidth  = ceil(float(inputWidth  - kW + 2*padW) / float(dW)) + 1;
-  }
-  else
-  {
-    outputTime   = floor(float(inputTime   - kT + 2*padT) / float(dT)) + 1;
-    outputHeight = floor(float(inputHeight - kH + 2*padH) / float(dH)) + 1;
-    outputWidth  = floor(float(inputWidth  - kW + 2*padW) / float(dW)) + 1;
-  }
-  if (padT || padW || padH)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((outputTime   - 1)*dT >= inputTime   + padT)
-      --outputTime;
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  int outputTime = pooling_output_shape<int>(inputTime, kT, padT, dT, 1, ceil_mode);
+  int outputHeight = pooling_output_shape<int>(inputHeight, kH, padH, dH, 1, ceil_mode);
+  int outputWidth = pooling_output_shape<int>(inputWidth, kW, padW, dW, 1, ceil_mode);
 
   if (gradOutput != NULL)
   {
@@ -159,33 +137,9 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     inputWidth  = THCTensor_(size)(state, input, 4);
   }
 
-  int outputTime;
-  int outputHeight;
-  int outputWidth;
-
-  if (ceil_mode)
-  {
-    outputTime   = ceil(float(inputTime   - kT + 2*padT) / float(dT)) + 1;
-    outputHeight = ceil(float(inputHeight - kH + 2*padH) / float(dH)) + 1;
-    outputWidth  = ceil(float(inputWidth  - kW + 2*padW) / float(dW)) + 1;
-  }
-  else
-  {
-    outputTime   = floor(float(inputTime   - kT + 2*padT) / float(dT)) + 1;
-    outputHeight = floor(float(inputHeight - kH + 2*padH) / float(dH)) + 1;
-    outputWidth  = floor(float(inputWidth  - kW + 2*padW) / float(dW)) + 1;
-  }
-  if (padT || padH || padW)
-  {
-    // ensure that the last pooling starts inside the image
-    // needed to avoid problems in ceil mode
-    if ((outputTime   - 1)*dT >= inputTime   + padT)
-      --outputTime;
-    if ((outputHeight - 1)*dH >= inputHeight + padH)
-      --outputHeight;
-    if ((outputWidth  - 1)*dW >= inputWidth  + padW)
-      --outputWidth;
-  }
+  int outputTime = pooling_output_shape<int>(inputTime, kT, padT, dT, 1, ceil_mode);
+  int outputHeight = pooling_output_shape<int>(inputHeight, kH, padH, dH, 1, ceil_mode);
+  int outputWidth = pooling_output_shape<int>(inputWidth, kW, padW, dW, 1, ceil_mode);
 
   if (!fiveDimensionalInput) /* 4D */
   {
@@ -203,7 +157,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   if (fiveDimensionalInput) {
     // Collapse batch and feature dimensions
     output = THCTensor_(newFoldBatchDim)(state, output);
-    
+
     THCTensor *old_input = input;
     input = THCTensor_(newFoldBatchDim)(state, input);
     THCTensor_(free)(state, old_input);

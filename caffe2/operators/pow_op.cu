@@ -13,8 +13,10 @@ namespace caffe2 {
 // CUDA math library in header file math.h
 #define CUDA_POW(x, y) (pow(x, y))
 
+// renaming to PowOpKernel as there exists PowKernel in caffe2/utils/math_gpu.cc
+// Kernels with same leads to conflict during hipification for ROCm platform.
 template <int b_is_scalar, typename T1, typename T2, typename R>
-__global__ void PowKernel(const T1* a, const T2* b, T2 e, R* out, int n) {
+__global__ void PowOpKernel(const T1* a, const T2* b, T2 e, R* out, int n) {
   CUDA_1D_KERNEL_LOOP(i, n) {
     out[i] = CUDA_POW(a[i], ((b == NULL) ? e : b[b_is_scalar ? 0 : i]));
   }
@@ -43,7 +45,7 @@ struct CudaPowFunctor {
   template <bool b_is_scalar, typename T1, typename T2, typename R>
   inline void
   Run(size_t n, const T1* a, const T2* b, T2 e, R* out, CUDAContext* context) {
-    PowKernel<b_is_scalar, T1, T2, R>
+    PowOpKernel<b_is_scalar, T1, T2, R>
         <<<CAFFE_GET_BLOCKS(n),
            CAFFE_CUDA_NUM_THREADS,
            0,

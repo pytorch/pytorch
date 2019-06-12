@@ -1,4 +1,4 @@
-import torch
+import torch  # noqa: F401
 
 
 def div_int_nofuture():

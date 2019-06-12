@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/SoftPlus.c"
+#define TH_GENERIC_FILE "THNN/generic/SoftPlus.c"
 #else
 
 void THNN_(SoftPlus_updateOutput)(

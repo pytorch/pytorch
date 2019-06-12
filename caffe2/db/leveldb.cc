@@ -18,7 +18,7 @@ class LevelDBCursor : public Cursor {
       : iter_(db->NewIterator(leveldb::ReadOptions())) {
     SeekToFirst();
   }
-  ~LevelDBCursor() {}
+  ~LevelDBCursor() override {}
   void Seek(const string& key) override { iter_->Seek(key); }
   bool SupportsSeek() override { return true; }
   void SeekToFirst() override { iter_->SeekToFirst(); }
@@ -37,7 +37,9 @@ class LevelDBTransaction : public Transaction {
     CAFFE_ENFORCE(db_);
     batch_.reset(new leveldb::WriteBatch());
   }
-  ~LevelDBTransaction() { Commit(); }
+  ~LevelDBTransaction() override {
+    Commit();
+  }
   void Put(const string& key, const string& value) override {
     batch_->Put(key, value);
   }
@@ -60,7 +62,7 @@ class LevelDB : public DB {
  public:
   LevelDB(const string& source, Mode mode) : DB(source, mode) {
     leveldb::Options options;
-    options.block_size = c10::FLAGS_caffe2_leveldb_block_size;
+    options.block_size = FLAGS_caffe2_leveldb_block_size;
     options.write_buffer_size = 268435456;
     options.max_open_files = 100;
     options.error_if_exists = mode == NEW;

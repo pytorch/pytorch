@@ -1,33 +1,24 @@
-#include "ATen/native/cpu/TensorCompareKernel.h"
+#include <ATen/native/cpu/TensorCompareKernel.h>
 
 #include <numeric>
 #include <iterator>
 #include <algorithm>
 
-#include "ATen/Dispatch.h"
-#include "ATen/Parallel.h"
-#include "ATen/optional.h"
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#include <ATen/NumericUtils.h>
+#include <c10/util/Optional.h>
 
 namespace at { namespace native { namespace {
 
-template <typename scalar_t>
-bool _isnan(scalar_t val) {
-  return false;
-}
-
-template <>
-bool _isnan(float val) {
-  return std::isnan(val);
-}
-
-template <>
-bool _isnan(double val) {
-  return std::isnan(val);
-}
-
 template <typename scalar_t, typename index_t>
 struct Reduction {
-  static void apply(Tensor& res, Tensor& res_indices, const Tensor& self, at::optional<int64_t> dim, bool greater) {
+  static void apply(
+      Tensor& res,
+      Tensor& res_indices,
+      const Tensor& self,
+      c10::optional<int64_t> dim,
+      bool greater) {
     auto out_ = res.data<scalar_t>();
     auto indices_ = res_indices.data<index_t>();
     auto data_ = self.data<scalar_t>();
@@ -60,7 +51,7 @@ struct Reduction {
           }
           out_[b] = result;
           indices_[b] = result_index;
-        }             
+        }
       });
     } else {
       parallel_for(0, batch * stride, 1, [=](int64_t begin, int64_t end) {
@@ -87,14 +78,22 @@ struct Reduction {
   }
 };
 
-static void max_kernel_impl(Tensor& max, Tensor& max_indices, const Tensor& self, at::optional<int64_t> dim) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "max", [&] {
+static void max_kernel_impl(
+    Tensor& max,
+    Tensor& max_indices,
+    const Tensor& self,
+    c10::optional<int64_t> dim) {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "max", [&] {
     Reduction<scalar_t, int64_t>::apply(max, max_indices, self, dim, true);
   });
 }
 
-static void min_kernel_impl(Tensor& min, Tensor& min_indices, const Tensor& self, at::optional<int64_t> dim) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "min", [&] {
+static void min_kernel_impl(
+    Tensor& min,
+    Tensor& min_indices,
+    const Tensor& self,
+    c10::optional<int64_t> dim) {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "min", [&] {
     Reduction<scalar_t, int64_t>::apply(min, min_indices, self, dim, false);
   });
 }

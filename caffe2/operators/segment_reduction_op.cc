@@ -10,8 +10,7 @@ OpSchema::Cost CostInferenceForSparseLengths(
   CAFFE_ENFORCE_GE(
       inputs.size(),
       min_num_of_inputs,
-      def.type() + " requires at least " +
-          caffe2::to_string(min_num_of_inputs));
+      def.type() + " requires at least " + c10::to_string(min_num_of_inputs));
 
   const TensorShape data = inputs[0];
   const TensorShape indices = inputs[1 + use_weight];
@@ -336,18 +335,18 @@ OUTPUT:
 template <typename Def>
 string FormatDoc() {
   string doc = Def::doc;
-  ReplaceAll(doc, "{op}", Def::OpDef::name);
-  ReplaceAll(doc, "{op_doc}", Def::OpDef::doc);
+  c10::ReplaceAll(doc, "{op}", Def::OpDef::name);
+  c10::ReplaceAll(doc, "{op_doc}", Def::OpDef::doc);
   if (strcmp(Def::OpDef::name, "Max") == 0) {
-    ReplaceAll(doc, "{extra}", kLengthsMaxExtra);
+    c10::ReplaceAll(doc, "{extra}", kLengthsMaxExtra);
   } else if (strcmp(Def::OpDef::name, "Mean") == 0) {
-    ReplaceAll(doc, "{extra}", kLengthsMeanExtra);
+    c10::ReplaceAll(doc, "{extra}", kLengthsMeanExtra);
   } else if (strcmp(Def::OpDef::name, "Sum") == 0) {
-    ReplaceAll(doc, "{extra}", kLengthsSumExtra);
+    c10::ReplaceAll(doc, "{extra}", kLengthsSumExtra);
   } else if (strcmp(Def::OpDef::name, "WeightedSum") == 0) {
-    ReplaceAll(doc, "{extra}", kLengthsWeightedSumExtra);
+    c10::ReplaceAll(doc, "{extra}", kLengthsWeightedSumExtra);
   } else {
-    ReplaceAll(doc, "{extra}", " ");
+    c10::ReplaceAll(doc, "{extra}", " ");
   }
   return doc;
 }
@@ -580,3 +579,36 @@ REGISTER_LENGTHS_OPS_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT(
     LengthsMaxWithMainInputAndForwardOutputGradient,
     AbstractLengthsDef<float, int, CPUContext, MaxReducerDef>);
 } // namespace caffe2
+
+// Macro doesn't like comma
+using LengthsSumCPUOp = caffe2::AbstractLengthsDef<
+    float,
+    int,
+    caffe2::CPUContext,
+    caffe2::SumReducerDef,
+    true>::ForwardOp;
+using LengthsMeanCPUOp = caffe2::AbstractLengthsDef<
+    float,
+    int,
+    caffe2::CPUContext,
+    caffe2::MeanReducerDef,
+    true>::ForwardOp;
+using LengthsMaxCPUOp = caffe2::AbstractLengthsDef<
+    float,
+    int,
+    caffe2::CPUContext,
+    caffe2::MaxReducerDef,
+    true>::ForwardOp;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    LengthsSum,
+    "_caffe2::LengthsSum(Tensor data, Tensor lengths) -> Tensor",
+    LengthsSumCPUOp);
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    LengthsMean,
+    "_caffe2::LengthsMean(Tensor data, Tensor lengths) -> Tensor",
+    LengthsMeanCPUOp);
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    LengthsMax,
+    "_caffe2::LengthsMax(Tensor data, Tensor lengths) -> Tensor",
+    LengthsMaxCPUOp);

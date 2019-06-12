@@ -1,1 +1,1 @@
-from .cwrap import cwrap
+from .cwrap import cwrap  # noqa: F401

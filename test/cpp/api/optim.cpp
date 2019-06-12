@@ -5,7 +5,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/optim.h>
-#include <torch/tensor.h>
+#include <torch/types.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/optim_baseline.h>
@@ -70,7 +70,7 @@ void assign_parameter(
     const Parameters& parameters,
     const char* name,
     torch::Tensor new_tensor) {
-  auto parameter = parameters.at(name);
+  auto parameter = parameters[name];
   parameter.set_requires_grad(false);
   parameter.flatten().copy_(new_tensor);
   parameter.set_requires_grad(true);
@@ -94,7 +94,7 @@ void check_exact_values(
   model->to(torch::kFloat64);
 
   // Use exact input values because matching random values is hard.
-  auto parameters = model->parameters();
+  auto parameters = model->named_parameters();
   assign_parameter(
       parameters,
       "0.weight",
@@ -105,7 +105,7 @@ void check_exact_values(
       parameters, "2.weight", torch::tensor({-0.0508, -0.3941, -0.2843}));
   assign_parameter(parameters, "2.bias", torch::tensor({-0.0711}));
 
-  auto optimizer = OptimizerClass(parameters, options);
+  auto optimizer = OptimizerClass(parameters.values(), options);
   torch::Tensor input =
       torch::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}).reshape({3, 2});
 
@@ -121,8 +121,8 @@ void check_exact_values(
       ASSERT_TRUE(
           expected_parameters.at(i / kSampleEvery).size() == parameters.size());
       for (size_t p = 0; p < parameters.size(); ++p) {
-        ASSERT_TRUE(parameters.at(p)->defined());
-        auto computed = parameters.at(p)->flatten();
+        ASSERT_TRUE(parameters[p]->defined());
+        auto computed = parameters[p]->flatten();
         auto expected = expected_parameters.at(i / kSampleEvery).at(p);
         if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/5e-4)) {
           std::cout << "Iteration " << i << ": " << computed
@@ -278,7 +278,7 @@ TEST(OptimTest, ZeroGrad) {
   SGD optimizer(model->parameters(), 0.1);
 
   for (const auto& parameter : model->parameters()) {
-    ASSERT_FALSE(parameter->grad().defined());
+    ASSERT_FALSE(parameter.grad().defined());
   }
 
   auto output = model->forward(torch::ones({5, 2}));
@@ -286,15 +286,15 @@ TEST(OptimTest, ZeroGrad) {
   loss.backward();
 
   for (const auto& parameter : model->parameters()) {
-    ASSERT_TRUE(parameter->grad().defined());
-    ASSERT_GT(parameter->grad().sum().item<float>(), 0);
+    ASSERT_TRUE(parameter.grad().defined());
+    ASSERT_GT(parameter.grad().sum().item<float>(), 0);
   }
 
   optimizer.zero_grad();
 
   for (const auto& parameter : model->parameters()) {
-    ASSERT_TRUE(parameter->grad().defined());
-    ASSERT_EQ(parameter->grad().sum().item<float>(), 0);
+    ASSERT_TRUE(parameter.grad().defined());
+    ASSERT_EQ(parameter.grad().sum().item<float>(), 0);
   }
 }
 

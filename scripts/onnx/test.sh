@@ -23,7 +23,7 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-pip install pytest scipy torchvision
+pip install pytest scipy hypothesis
 if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi
@@ -35,8 +35,17 @@ test_paths=(
     "$top_dir/test/onnx"
 )
 
+args=()
+args+=("-v")
 if [[ $PARALLEL == 1 ]]; then
-    pytest -n 3 "${test_paths[@]}"
-else
-    pytest "${test_paths[@]}"
+  args+=("-n")
+  args+=("3")
 fi
+
+# These exclusions are for tests that take a long time / a lot of GPU
+# memory to run; they should be passing (and you will test them if you
+# run them locally
+pytest "${args[@]}" \
+  -k \
+  'not (TestOperators and test_full_like) and not (TestOperators and test_zeros_like) and not (TestOperators and test_ones_like) and not (TestModels and test_vgg16) and not (TestModels and test_vgg16_bn) and not (TestModels and test_vgg19) and not (TestModels and test_vgg19_bn)' \
+  "${test_paths[@]}"

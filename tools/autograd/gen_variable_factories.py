@@ -12,7 +12,8 @@ FUNCTION_TEMPLATE = CodeTemplate("""\
 inline at::Tensor ${name}(${formals}) {
   ${pre_record_trace}
   at::Tensor tensor = at::${name}(${actuals});
-  auto result = autograd::make_variable(tensor, /*requires_grad=*/${requires_grad});
+  at::Tensor result =
+    autograd::make_variable_consuming(std::move(tensor), /*requires_grad=*/${requires_grad});
   ${post_record_trace}
   return result;
 }
@@ -34,7 +35,8 @@ def gen_variable_factories(out, declarations, template_path):
     function_definitions = []
     for decl in declarations:
         has_tensor_options = any(a["simple_type"] == "TensorOptions" for a in decl["arguments"])
-        if has_tensor_options or decl["name"].endswith("_like"):
+        is_namespace_fn = 'namespace' in decl['method_of']
+        if (has_tensor_options or decl["name"].endswith("_like")) and is_namespace_fn:
             function_definitions.append(process_function(decl, has_tensor_options))
     write(out,
           "variable_factories.h",

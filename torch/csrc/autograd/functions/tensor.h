@@ -1,28 +1,33 @@
 #pragma once
 
-#include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/TensorGeometry.h>
-#include <ATen/core/optional.h>
-#include "ATen/Type.h"
+#include <ATen/core/DeprecatedTypeProperties.h>
+#include <c10/util/Optional.h>
 
 #include <cstdint>
 #include <memory>
 
 namespace torch { namespace autograd {
 
-struct CopyBackwards : public Function {
+struct TORCH_API CopyBackwards : public Function {
   variable_list apply(variable_list&& grads) override;
 
-  at::Type *src_type;
-  int32_t src_device = -1;
+  at::DeprecatedTypeProperties *src_type = nullptr; // initialized for safety.
+  at::Device src_device = at::kCPU;
 };
 
 // Performs grad[idx] = fn(grad[idx]), but out-of-place. The slicing operation
 // grad[idx] is defined by the relative sizes, strides, and offset of base and
 // view.
-struct CopySlices : public Function {
+// When an in-place operation is done on a differentiable view, the base's
+// grad_fn is updated to become a `CopySlice` wrapping the backward of the
+// in-place operation.
+// See NOTE [ Autograd View Variables ].
+struct TORCH_API CopySlices : public Function {
   CopySlices(
       const Variable& base_var,
       at::TensorGeometry view_,

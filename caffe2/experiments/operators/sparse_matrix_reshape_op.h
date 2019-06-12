@@ -93,18 +93,17 @@ class SparseMatrixReshapeOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& old_col = Input(0);
-    CAFFE_ENFORCE(old_col.ndim() == 1, "Row index tensor must be 1-D.");
+    CAFFE_ENFORCE(old_col.dim() == 1, "Row index tensor must be 1-D.");
     auto& old_row = Input(1);
-    CAFFE_ENFORCE(old_row.ndim() == 1, "Column index tensor must be 1-D.");
+    CAFFE_ENFORCE(old_row.dim() == 1, "Column index tensor must be 1-D.");
 
-    const auto nnz = old_col.size();
+    const auto nnz = old_col.numel();
     CAFFE_ENFORCE(
-        old_row.size() == nnz,
+        old_row.numel() == nnz,
         "Column and row tensors must have the same size.");
-    auto* new_col = Output(0);
-    auto* new_row = Output(1);
-    new_col->Resize(nnz);
-    new_row->Resize(nnz);
+
+    auto* new_col = Output(0, {nnz}, at::dtype<int64_t>());
+    auto* new_row = Output(1, {nnz}, at::dtype<int>());
 
     const auto* old_col_data = old_col.template data<int64_t>();
     const auto* old_row_data = old_row.template data<int>();

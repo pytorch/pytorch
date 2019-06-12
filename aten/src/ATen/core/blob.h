@@ -6,8 +6,8 @@
 #include <typeinfo>
 #include <vector>
 
-#include <ATen/core/intrusive_ptr.h>
-#include <ATen/core/typeid.h>
+#include <c10/util/intrusive_ptr.h>
+#include <c10/util/typeid.h>
 #include <c10/macros/Macros.h>
 
 namespace caffe2 {
@@ -23,12 +23,10 @@ class Tensor;
  */
 class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
  public:
-  using DestroyCall = void(void*);
-
   /**
    * Initializes an empty Blob.
    */
-  Blob() noexcept : meta_(), pointer_(nullptr), destroy_(nullptr) {}
+  Blob() noexcept : meta_(), pointer_(nullptr), has_ownership_(false) {}
   ~Blob() {
     Reset();
   }
@@ -53,14 +51,14 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   /**
    * Returns the meta info of the blob.
    */
-  inline const TypeMeta& meta() const noexcept {
+  const TypeMeta& meta() const noexcept {
     return meta_;
   }
 
   /**
    * Returns a printable typename of the blob.
    */
-  inline const char* TypeName() const noexcept {
+  const char* TypeName() const noexcept {
     return meta_.name();
   }
 
@@ -132,12 +130,10 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
    */
   template <class T>
   T* Reset(T* allocated) {
-    if (pointer_ && destroy_) {
-      destroy_(pointer_);
-    }
+    free_();
     meta_ = TypeMeta::Make<T>();
     pointer_ = static_cast<void*>(allocated);
-    destroy_ = &Destroy<T>;
+    has_ownership_ = true;
     return allocated;
   }
 
@@ -159,26 +155,23 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
         TypeMeta::Make<typename std::remove_const<T>::type>()));
   }
 
+  // TODO Remove ShareExternal() and have Blob always own its content
   void* ShareExternal(void* allocated, const TypeMeta& meta) {
-    if (pointer_ && destroy_) {
-      destroy_(pointer_);
-    }
+    free_();
     meta_ = meta;
     pointer_ = static_cast<void*>(allocated);
-    destroy_ = nullptr;
+    has_ownership_ = false;
     return allocated;
   }
 
   /**
    * Resets the Blob to an empty one.
    */
-  inline void Reset() {
-    if (pointer_ && destroy_) {
-      destroy_(pointer_);
-    }
+  void Reset() {
+    free_();
     pointer_ = nullptr;
     meta_ = TypeMeta();
-    destroy_ = nullptr;
+    has_ownership_ = false;
   }
 
   /**
@@ -188,20 +181,20 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
     using std::swap;
     swap(meta_, rhs.meta_);
     swap(pointer_, rhs.pointer_);
-    swap(destroy_, rhs.destroy_);
+    swap(has_ownership_, rhs.has_ownership_);
   }
 
  private:
-  /**
-   * @brief A destroy call that is used to properly deconstruct objects.
-   */
-  template <class T>
-  static void Destroy(void* pointer) {
-    delete static_cast<T*>(pointer);
+  void free_() {
+    if (has_ownership_) {
+      AT_ASSERTM(pointer_ != nullptr, "Can't have ownership of nullptr");
+      (*meta_.deleteFn())(pointer_);
+    }
   }
+
   TypeMeta meta_;
   void* pointer_ = nullptr;
-  DestroyCall* destroy_ = nullptr;
+  bool has_ownership_ = false;
 
   C10_DISABLE_COPY_AND_ASSIGN(Blob);
 };

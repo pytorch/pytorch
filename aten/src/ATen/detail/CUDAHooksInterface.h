@@ -1,10 +1,10 @@
 #pragma once
 
-#include <ATen/Allocator.h>
+#include <c10/core/Allocator.h>
 #include <ATen/core/Generator.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
-#include "c10/util/Registry.h"
+#include <c10/util/Registry.h>
 
 #include <cstddef>
 #include <functional>
@@ -102,24 +102,28 @@ struct CAFFE2_API CUDAHooksInterface {
     AT_ERROR("Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }
 
+  virtual std::string showConfig() const {
+    AT_ERROR("Cannot query detailed CUDA version without ATen_cuda library. ", CUDA_HELP);
+  }
+
   virtual double batchnormMinEpsilonCuDNN() const {
     AT_ERROR(
         "Cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheMaxSize() const {
+  virtual int64_t cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
+  virtual void cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual int64_t cuFFTGetPlanCacheSize() const {
+  virtual int64_t cuFFTGetPlanCacheSize(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual void cuFFTClearPlanCache() const {
+  virtual void cuFFTClearPlanCache(int64_t device_index) const {
     AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
@@ -138,17 +142,5 @@ C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 
 namespace detail {
 CAFFE2_API const CUDAHooksInterface& getCUDAHooks();
-
-/// This class exists to let us access `cudaSetDevice`, `cudaGetDevice` and CUDA
-/// error handling functions, when CUDA is available. These functions will first
-/// default to no-ops. When the `ATen` GPU library is loaded, they will be set to
-/// the `cudaSetDevice`/`cudaGetDevice` functions. This allows us to access them
-/// with only a single pointer indirection, while virtual dispatch would require
-/// two (one for the virtual call, one for `cudaSetDevice`/`cudaGetDevice`).
-struct CAFFE2_API DynamicCUDAInterface {
-  static void (*set_device)(int32_t);
-  static void (*get_device)(int32_t*);
-  static void (*unchecked_set_device)(int32_t);
-};
 } // namespace detail
 } // namespace at

@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 void momentum_sgd_update(
     const int N,
@@ -55,7 +57,7 @@ class IDEEPMomentumSGDOp final : public IDEEPOperator {
 
     // TODO: Use itensor after 0-dim is supported. Now use CPU tensor.
     const auto& lr = OperatorBase::Input<TensorCPU>(LR, CPU);
-    CAFFE_ENFORCE(lr.size() == 1);
+    CAFFE_ENFORCE(lr.numel() == 1);
 
     momentum_sgd_update(
         Input(GRAD).get_nelems(),
@@ -97,7 +99,7 @@ class IDEEPMomentumSGDUpdateOp final : public IDEEPOperator {
 
     // TODO: Use itensor after 0-dim is supported. Now use CPU tensor.
     const auto& lr = OperatorBase::Input<TensorCPU>(LR, CPU);
-    CAFFE_ENFORCE(lr.size() == 1);
+    CAFFE_ENFORCE(lr.numel() == 1);
 
     momentum_sgd_update(
         Input(GRAD).get_nelems(),
@@ -122,4 +124,4 @@ class IDEEPMomentumSGDUpdateOp final : public IDEEPOperator {
 REGISTER_IDEEP_OPERATOR(MomentumSGD, IDEEPMomentumSGDOp);
 REGISTER_IDEEP_OPERATOR(MomentumSGDUpdate, IDEEPMomentumSGDUpdateOp);
 
-} // namespace caffe2
+} // namespace

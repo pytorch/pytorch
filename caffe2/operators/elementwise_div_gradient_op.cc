@@ -130,10 +130,9 @@ class BinaryElementwiseWithArgsGradientOp<
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
 
-  BinaryElementwiseWithArgsGradientOp(
-      const OperatorDef& operator_def,
-      Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws),
+  template <class... Args>
+  explicit BinaryElementwiseWithArgsGradientOp(Args&&... args)
+      : Operator<CPUContext>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(bool, "broadcast", legacy_broadcast_, false),
         OP_SINGLE_ARG(int, "axis", axis_, -1),
         OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
@@ -173,21 +172,21 @@ class BinaryElementwiseWithArgsGradientOp<
 
   template <typename T>
   bool DoRunWithType() {
-    auto* dA = Output(0);
-    auto* dB = Output(1);
     const T* dC_data = nullptr;
     const T* A_data = nullptr;
     const T* B_data = nullptr;
     const T* C_data = nullptr;
     std::vector<int> A_dims;
     std::vector<int> B_dims;
+    at::IntArrayRef dA_sizes;
+    at::IntArrayRef dB_sizes;
     if (InputSize() == 3) {
       const auto& B = Input(0);
       const auto& C = Input(1);
       const auto& dC = Input(2);
       if (legacy_broadcast_) {
-        if (B.size() == 1) {
-          A_dims = {static_cast<int>(C.size())};
+        if (B.numel() == 1) {
+          A_dims = {static_cast<int>(C.numel())};
           B_dims = {1};
         } else {
           size_t pre, n, post;
@@ -200,23 +199,23 @@ class BinaryElementwiseWithArgsGradientOp<
         }
       } else {
         std::copy(
-            C.dims().cbegin(), C.dims().cend(), std::back_inserter(A_dims));
+            C.sizes().cbegin(), C.sizes().cend(), std::back_inserter(A_dims));
         std::copy(
-            B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+            B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
       }
       B_data = B.template data<T>();
       C_data = C.template data<T>();
       dC_data = dC.template data<T>();
-      dA->ResizeLike(C);
-      dB->ResizeLike(B);
+      dA_sizes = C.sizes();
+      dB_sizes = B.sizes();
     } else {
       const auto& dC = Input(0);
       const auto& A = Input(1);
       const auto& B = Input(2);
       const auto& C = Input(3);
       if (legacy_broadcast_) {
-        if (B.size() == 1) {
-          A_dims = {static_cast<int>(A.size())};
+        if (B.numel() == 1) {
+          A_dims = {static_cast<int>(A.numel())};
           B_dims = {1};
         } else {
           size_t pre, n, post;
@@ -229,17 +228,19 @@ class BinaryElementwiseWithArgsGradientOp<
         }
       } else {
         std::copy(
-            A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
+            A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
         std::copy(
-            B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+            B.sizes().cbegin(), B.sizes().cend(), std::back_inserter(B_dims));
       }
       dC_data = dC.template data<T>();
       A_data = A.template data<T>();
       B_data = B.template data<T>();
       C_data = C.template data<T>();
-      dA->ResizeLike(A);
-      dB->ResizeLike(B);
+      dA_sizes = A.sizes();
+      dB_sizes = B.sizes();
     }
+    auto* dA = Output(0, dA_sizes, at::dtype<T>());
+    auto* dB = Output(1, dB_sizes, at::dtype<T>());
     auto* dA_data = dA->template mutable_data<T>();
     auto* dB_data = dB->template mutable_data<T>();
     return functor_.Backward(

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/ClassNLLCriterion.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/ClassNLLCriterion.cu"
 #else
 
 void THNN_(ClassNLLCriterion_updateOutput)(
@@ -17,7 +17,6 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
   int n_dims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
   int n_classes = THCTensor_(sizeLegacyNoScalars)(state, input, n_dims - 1);
-  ignore_index -= TH_INDEX_BASE;
 
   if (weights) {
     THCUNN_assertSameGPU(
@@ -88,7 +87,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         input_data,
         target_data,
         weights_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         n_classes,
         ignore_index
     );
@@ -101,7 +100,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         input_data,
         target_data,
         weights_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,
@@ -185,8 +184,6 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     return;
   }
 
-  ignore_index -= TH_INDEX_BASE;
-
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
   target = THCIndexTensor_(newContiguous)(state, target);
 
@@ -205,7 +202,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         weights_data,
         target_data,
         total_weight_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         n_classes,
         ignore_index
     );
@@ -217,7 +214,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         target_data,
         weights_data,
         total_weight_data,
-        reduction == Reduction::ElementwiseMean,
+        reduction == Reduction::Mean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,

@@ -10,26 +10,11 @@ import hypothesis.strategies as st
 import numpy as np
 import unittest
 
-if workspace.is_asan:
-    # Numba seems to be not compatible with ASAN (at least at Facebook)
-    # so if we are in asan mode, we disable Numba which further disables
-    # the numba python op test.
-    HAS_NUMBA = False
-else:
-    try:
-        import numba
-        HAS_NUMBA = True
-    except ImportError:
-        HAS_NUMBA = False
-
-
 class PythonOpTest(hu.HypothesisTestCase):
-    @unittest.skipIf(not HAS_NUMBA, "")
     @given(x=hu.tensor(),
            n=st.integers(min_value=1, max_value=20),
            w=st.integers(min_value=1, max_value=20))
-    def test_multithreaded_evaluation_numba_nogil(self, x, n, w):
-        @numba.jit(nopython=True, nogil=True)
+    def test_simple_python_op(self, x, n, w):
         def g(input_, output):
             output[...] = input_
 

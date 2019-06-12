@@ -1,17 +1,17 @@
 #pragma once
 
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/grad_mode.h"
-#include "torch/csrc/autograd/anomaly_mode.h"
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/autograd/saved_variable.h"
-#include "torch/csrc/autograd/input_metadata.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/python_stub.h"
-#include "torch/csrc/utils/variadic.h"
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/input_metadata.h>
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/python_stub.h>
+#include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -86,10 +86,9 @@ void deleteFunction(Function* function);
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct TORCH_API Function : std::enable_shared_from_this<Function> {
  public:
-  /// Construct a new `Function` with `num_inputs` inputs and the given
-  /// `next_edges`. sequence_nr is a (currently THE) hint to prioritization
-  /// in the backward() pass, with higher sequence numbers prioritized
-  /// before lower sequence numbers.
+  /// Construct a new `Function` with the given `next_edges`. `sequence_nr` is
+  /// a (currently THE) hint to prioritization in the backward() pass, with
+  /// higher sequence numbers prioritized before lower sequence numbers.
   explicit Function(
       uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
@@ -113,7 +112,9 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
-    profiler::RecordFunction rec(this);
+    RECORD_FUNCTION(
+        this, std::vector<c10::IValue>(inputs.begin(), inputs.end()));
+
     return apply(std::move(inputs));
   }
 
@@ -129,9 +130,9 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Adds the type and shape metadata for a new input. Returns the index of
   /// of the new input.
   uint32_t add_input_metadata(
-    const at::Type& type
-  , at::IntList shape
-  , const int64_t device) noexcept {
+    const at::DeprecatedTypeProperties& type
+  , at::IntArrayRef shape
+  , at::Device device) noexcept {
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back(type, shape, device);
     return input_nr;
@@ -213,7 +214,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
   bool should_compute_output(size_t output_edge_index) const {
-    AT_CHECK(output_edge_index < num_outputs(), "Index out of range");
+    TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
     return next_edges_[output_edge_index].is_valid();
   }
 
@@ -361,7 +362,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
 /// `input_nr` thus equal to `function->num_inputs()`. Additionally, it
 /// increments the `Function`'s number of inputs by one. Approximately
 /// equivalent to `variable.set_gradient_edge(function,
-/// function->add_input_metadata(variable.type(), variable.sizes()))`.
+/// function->add_input_metadata(variable.dispatch_type(), variable.sizes()))`.
 /// If you don't want the `Function`'s `num_inputs` to be incremented, use
 /// `set_gradient_edge` directly.
 inline void create_gradient_edge(

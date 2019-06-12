@@ -36,7 +36,11 @@ static PyObject * THPStorage_(isPinned)(THPStorage *self)
     cudaGetLastError();
     Py_RETURN_FALSE;
   }
-  return PyBool_FromLong(attr.memoryType == cudaMemoryTypeHost);
+  #if CUDA_VERSION >= 10000
+    return PyBool_FromLong(attr.type == cudaMemoryTypeHost);
+  #else
+    return PyBool_FromLong(attr.memoryType == cudaMemoryTypeHost);
+  #endif
 #else
   Py_RETURN_FALSE;
 #endif
@@ -92,7 +96,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   PyObject *obj = nullptr;
   const char* byte_order_str = nullptr;
   Py_ssize_t count = -1, offset = 0;
-  Py_buffer buffer;
+  Py_buffer buffer = {};
   static char *kwlist[] = {"buffer", "byte_order", "count", "offset", nullptr};
   const char* argtypes;
 #if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
@@ -156,6 +160,11 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 
 #if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
   memcpy(THWStorage_(data)(storage), src + offset, count);
+#elif defined(TH_REAL_IS_BOOL)
+  // Because of ASAN checks, that are failing in the THStorage.cpp whenever
+  // we are trying to get a value which is not 0 or 1, we have to manually
+  // convert original values to boolean ones.
+  THP_decodeBoolBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_SHORT)
   THP_decodeInt16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_INT)
@@ -252,7 +261,8 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
   }
 
   // file is backed by a fd
-  int fd = PyObject_AsFileDescriptor(file);
+  const int fd = PyObject_AsFileDescriptor(file);
+  const auto fd_original_pos = lseek(fd, 0, SEEK_CUR);
   if (offset != Py_None) {
     lseek(fd, THPUtils_unpackLong(offset), SEEK_SET);
   }
@@ -262,6 +272,17 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
   if (storage == nullptr)
     return nullptr;
   Py_INCREF(self);
+
+  // the file descriptor is returned to original position and
+  // the file handle at python call-site needs updating to the
+  // advanced postion
+  const auto fd_current_pos = lseek(fd, 0, SEEK_CUR);
+  lseek(fd, fd_original_pos, SEEK_SET);
+  const auto seek_return = PyObject_CallMethod(file, "seek", "li", (long)fd_current_pos, 0);
+  if (seek_return == nullptr) {
+      return nullptr;
+  }
+  Py_DECREF(seek_return);
 
   return (PyObject *) self;
   END_HANDLE_TH_ERRORS

@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/LogSigmoid.c"
+#define TH_GENERIC_FILE "THNN/generic/LogSigmoid.c"
 #else
 
 void THNN_(LogSigmoid_updateOutput)(
@@ -31,7 +31,7 @@ void THNN_(LogSigmoid_updateGradInput)(
 /* deriv of -max(0,-x) - log(e(0 - max(0,-x)) + e(-x - max(0,-x))) is
  * -max_deriv - (-max_deriv*e(0-max(0,-x)) + (-1 - max_deriv)*e(-x - max(0,-x)))/z
  * where z = e(0 - max(0,-x)) + e(-x - max(0,-x))
- * which simplifies to 
+ * which simplifies to
  *  -max_deriv - (z-1)/z if x is >= 0 or
  *  -max_deriv + (z-1)/z if x is < 0
  */

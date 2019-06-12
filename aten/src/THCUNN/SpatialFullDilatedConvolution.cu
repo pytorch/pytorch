@@ -1,9 +1,9 @@
-#include "THCUNN.h"
-#include "im2col.h"
-#include "THCTensor.hpp"
+#include <THCUNN/THCUNN.h>
+#include <THCUNN/im2col.h>
+#include <THC/THCTensor.hpp>
 
-#include "TH/THHalf.h"
-#include "THCHalfAutoNumerics.cuh"
+#include <TH/THHalf.h>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 
-#include "generic/SpatialFullDilatedConvolution.cu"
-#include "THCGenerateFloatTypes.h"
+#include <THCUNN/generic/SpatialFullDilatedConvolution.cu>
+#include <THC/THCGenerateFloatTypes.h>

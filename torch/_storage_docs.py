@@ -12,6 +12,7 @@ storage_classes = [
     'ShortStorageBase',
     'CharStorageBase',
     'ByteStorageBase',
+    'BoolStorageBase',
 ]
 
 

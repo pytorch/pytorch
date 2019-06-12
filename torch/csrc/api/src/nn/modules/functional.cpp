@@ -1,6 +1,6 @@
 #include <torch/nn/modules/functional.h>
 
-#include <torch/tensor.h>
+#include <torch/types.h>
 
 #include <functional>
 #include <utility>
@@ -12,12 +12,20 @@ FunctionalImpl::FunctionalImpl(Function function)
 
 void FunctionalImpl::reset() {}
 
+void FunctionalImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Functional()";
+}
+
 Tensor FunctionalImpl::forward(Tensor input) {
   return function_(std::move(input));
 }
 
 Tensor FunctionalImpl::operator()(Tensor input) {
   return forward(std::move(input));
+}
+
+bool FunctionalImpl::is_serializable() const {
+  return false;
 }
 } // namespace nn
 } // namespace torch

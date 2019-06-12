@@ -8,17 +8,18 @@ namespace caffe2 {
 template <typename T, class Context>
 class GluOp final : public Operator<Context> {
  public:
-  GluOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
+  template <class... Args>
+  explicit GluOp(Args&&... args)
+      : Operator<Context>(std::forward<Args>(args)...),
         dim_(this->template GetSingleArgument<int>("dim", -1)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() {
     auto& X = Input(0);
-    auto* Y = Output(0);
+
     vector<int64_t> Yshape;
-    Yshape.insert(Yshape.end(), X.dims().begin(), X.dims().end());
+    Yshape.insert(Yshape.end(), X.sizes().begin(), X.sizes().end());
     const int split_index = dim_ == -1 ? Yshape.size() - 1 : dim_;
     CAFFE_ENFORCE(
         Yshape[split_index] % 2 == 0,
@@ -29,7 +30,7 @@ class GluOp final : public Operator<Context> {
     const int M = X.size_to_dim(split_index);
     const int N = X.size_from_dim(split_index + 1);
     Yshape[split_index] = split_dim_size;
-    Y->Resize(Yshape);
+    auto* Y = Output(0, Yshape, at::dtype<T>());
     ComputeGlu(
         M,
         split_dim_size,

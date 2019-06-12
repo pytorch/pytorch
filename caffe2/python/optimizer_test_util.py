@@ -70,7 +70,7 @@ class OptimizerTestBase(object):
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     def testGPUDense(self, dtype=core.DataType.FLOAT):
-        device_opt = core.DeviceOption(caffe2_pb2.CUDA, 0)
+        device_opt = core.DeviceOption(workspace.GpuDeviceType, 0)
         with core.DeviceScope(device_opt):
             model, _perfect_model, data, label = self._createDense(dtype)
             if dtype == core.DataType.FLOAT16:

@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/SpatialConvolutionLocal.cu"
+#define THC_GENERIC_FILE "THCUNN/generic/SpatialConvolutionLocal.cu"
 #else
 
 static inline void THNN_(SpatialConvolutionLocal_shapeCheck)(
@@ -53,7 +53,7 @@ static THCTensor* THNN_(view_weight_local)(
                  THCTensor *_weight)
 {
   THCTensor *weight = THCTensor_(newContiguous)(state, _weight);
-  AT_CHECK(!weight->is_empty() && (weight->dim() == 3 || weight->dim() == 6), 4,
+  TORCH_CHECK(!weight->is_empty() && (weight->dim() == 3 || weight->dim() == 6), 4,
            "weight tensor should be (non-empty) 3D or 6D - got size: ", weight->sizes());
   if (weight->dim() == 6) {
     int64_t s1 = weight->size(0) * weight->size(1);

@@ -18,6 +18,9 @@ NAME_PARAM_REGEX = r'(\w+)\((.*)\)'
 def argument_to_declaration(param, func=None):
     arg = {}
     arg['type'], name = param.split(' ')
+    if (arg['type'].endswith('?')):
+        arg['is_nullable'] = True
+        arg['type'] = arg['type'].rstrip('?')
     if arg['type'] == 'Tensor':
         arg['type'] = 'THTensor*'
     elif arg['type'] == 'LongTensor':
@@ -27,9 +30,9 @@ def argument_to_declaration(param, func=None):
     elif arg['type'] == 'Generator*':
         arg['type'] = 'THGenerator*'
 
-    match = re.match(r'IntList\[(\d+)\]', arg['type'])
+    match = re.match(r'IntArrayRef\[(\d+)\]', arg['type'])
     if match:
-        arg['type'] = 'IntList'
+        arg['type'] = 'IntArrayRef'
         arg['size'] = int(match.group(1))
 
     if '=' in name:
@@ -147,8 +150,15 @@ def get_thnn_args(thnn_function, params, inplace):
         if name not in params_by_name:
             raise RuntimeError('missing arg "{}" in {}'.format(name, thnn_function.name))
         param = params_by_name[name]
-        if param['type'] == 'IntList' and 'size' in param:
+        if param['type'] == 'IntArrayRef' and 'size' in param:
             name = name + '_'
+        # NB: We calculate the dimension based on the name of
+        # the argument, not its positional order.  This means
+        # that we may reorder arguments to get them in
+        # the right place; e.g., if a THNN implementation
+        # has arguments in the order kernelW, kernelH, we
+        # will generate a caller that is kernel[1], kernel[0]
+        # to order them in the correct way.
         index = DIMENSION_OFFSET[suffix]
         if index < 0:
             index += param['size']
@@ -290,11 +300,16 @@ def backward_declaration(base, thnn_functions):
         # Add input_size as parameter to upsample backwards functions
         # Note that input_size is 4-dim for upsample_xxx2d
         size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
-        input_size_arg = {'type': 'IntList', 'name': 'input_size', 'size': size}
+        input_size_arg = {'type': 'IntArrayRef', 'name': 'input_size', 'size': size}
         for output_size_idx, arg in enumerate(arguments):
             if arg['name'] == 'output_size':
                 break
         arguments.insert(output_size_idx + 1, input_size_arg)
+
+    if 'im2col' in base['name']:
+        # Add input_size as parameter to im2col backwards function
+        input_size_arg = {'type': 'IntArrayRef', 'name': 'input_size', 'size': 2}
+        arguments.insert(2, input_size_arg)
 
     # outputs from the forward may be inputs to the backwards
     for arg in arguments:
@@ -404,7 +419,6 @@ def run(paths):
                     bwd_functions.append(header_functions[cname + suffix])
 
             base = base_declaration(func, fwd_function, backends)
-            declarations.append(base)
             declarations.append(forward_declaration(base, fwd_function))
             declarations.append(backward_declaration(base, bwd_functions))
 
