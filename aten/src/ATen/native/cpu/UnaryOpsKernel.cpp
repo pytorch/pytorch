@@ -126,7 +126,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    seed = generator->random64();
+    seed = generator->random();
   }
   int64_t n = self.numel();
   bool contig = self.is_contiguous();
