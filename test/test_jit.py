@@ -13229,6 +13229,30 @@ class TestRecursiveScript(JitTestCase):
 
         return sm
 
+    @unittest.skipIf(PY2, "Class annotations are a thing in > 3.5")
+    def test_constants_with_final(self):
+        class M(torch.nn.Module):
+            # TODO: Use this (see below)
+            # x : torch.jit.Final[int]
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.x = 2
+
+            def forward(self, t):
+                return t + self.x
+
+
+        # TODO: Fix this test so that we can actually define the class like
+        #   class M(torch.nn.Module):
+        #       x : torch.jit.Final[int]
+        M.__annotations__ = {'x': torch.jit.Final[int]}
+
+        m = M()
+
+        self.checkModule(M(), (torch.randn(2, 2),))
+
+
     def test_script_basic(self):
         def a_python_fn(a, b, c):
             return a + b + c
