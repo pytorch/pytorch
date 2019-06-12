@@ -1102,10 +1102,10 @@ if (BUILD_TEST)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if (INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
-      # Install PDB files for MSVC builds
-      if (MSVC AND BUILD_SHARED_LIBS)
-        install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
-      endif()
+        # Install PDB files for MSVC builds
+        if (MSVC AND BUILD_SHARED_LIBS)
+          install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+        endif()
     endif()
   endforeach()
 
