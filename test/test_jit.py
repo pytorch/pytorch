@@ -12938,7 +12938,7 @@ a")
             def __init__(self):
                 self.s = ''
 
-            def write(self, s : str):
+            def write(self, s):
                 self.s += s
 
         old_stdout = sys.stdout
