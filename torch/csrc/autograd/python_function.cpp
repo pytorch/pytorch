@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/utils/auto_gil.h>
+#include <torch/csrc/utils/swap_thread_states.h>
 #include <torch/csrc/Exceptions.h>
 
 #include <exception>
@@ -133,7 +134,13 @@ auto PyFunction::apply(variable_list&& inputs) -> variable_list {
 
   THPObjectPtr apply_fn(PyObject_GetAttrString(obj, "apply"));
   if (!apply_fn) throw python_error();
-  THPObjectPtr r(PyObject_CallObject(apply_fn, pyInputs.get()));
+
+  PyObject* callRes;
+  {
+    SwapPyThreadState swapThreadState;
+    callRes = PyObject_CallObject(apply_fn, pyInputs.get());
+  }
+  THPObjectPtr r(callRes);
   if (!r) throw python_error();
   ensure_tuple(r);
 
@@ -1079,8 +1086,12 @@ bool THPFunction_initModule(PyObject *module)
 
 struct Decref {
   void operator()(PyFunction* p) const {
-    AutoGIL gil;
-    Py_DECREF(p->obj);
+    if (swappedThreadState) {
+      Py_DECREF(p->obj);
+    } else {
+      AutoGIL gil;
+      Py_DECREF(p->obj);
+    }
   }
 };
 
