@@ -211,7 +211,10 @@ class Module(object):
 
         for key, param in self._parameters.items():
             if param is not None:
-                param_applied = fn(param.data)
+                with torch.no_grad():
+                    print("before: param._version: ", param._version)
+                    param_applied = fn(param)
+                    print("after: param._version: ", param._version)
                 if not compute_should_change_tensor_inplace(param, param_applied):
                     # Tensors stored in modules are graph leaves, and we don't want to
                     # create copy nodes, so we have to use `with torch.no_grad():`
