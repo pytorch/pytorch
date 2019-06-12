@@ -28,11 +28,11 @@ class _DatasetKind(object):
     Iterable = 1
 
     @staticmethod
-    def create_fetcher(kind, dataset, is_batched, collate_fn, drop_last):
+    def create_fetcher(kind, dataset, auto_collation, collate_fn, drop_last):
         if kind == _DatasetKind.Map:
-            return _utils.fetch._MapDatasetFetcher(dataset, is_batched, collate_fn, drop_last)
+            return _utils.fetch._MapDatasetFetcher(dataset, auto_collation, collate_fn, drop_last)
         else:
-            return _utils.fetch._IterableDatasetFetcher(dataset, is_batched, collate_fn, drop_last)
+            return _utils.fetch._IterableDatasetFetcher(dataset, auto_collation, collate_fn, drop_last)
 
 
 class _InfiniteConstantSampler(Sampler):
@@ -46,24 +46,15 @@ class _InfiniteConstantSampler(Sampler):
         while True:
             yield None
 
-    def __len__(self):
-        return NotImplemented
-
 
 class DataLoader(object):
     r"""
-    Data loader. Combines a dataset and a sampler, and provides
-    single- or multi-process iterators over the dataset.
+    Data loader. Combines a dataset and a sampler, and provides an iterable over
+    the given dataset.
 
-    The :class:`~torch.utils.data.DataLoader` applies one of the following
-    data loading strategies based on the constructor arguments:
-
-    * batched loading from a map-style dataset (default for map-style datasets)
-
-    * loading individual members of a map-style dataset
-
-    * loading from an iterable-style dataset
-
+    The :class:`~torch.utils.data.DataLoader` supports both map-style and
+    iterable-style datasets with single- or multi-process loading strategies,
+    and optional automatic batching (collation).
 
     See `Dataset Types`_ and `Data Loading Strategies`_ for more details.
 
@@ -99,19 +90,22 @@ class DataLoader(object):
             input, after seeding and before data loading. (default: ``None``)
 
 
-    .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
-                 unpicklable object, e.g., a lambda function.
+    .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
+                 cannot be an unpicklable object, e.g., a lambda function. See
+                 :ref:`_multiprocessing-best-practices` on more details related
+                 to multiprocessing in PyTorch.
 
-    .. note:: When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
-              ``len(dataloader)`` returns ``len(dataset)``. But this may not be
-              accurate because the actual iterator size also depends on :attr:`num_workers`
-              and :attr:`worker_init_fn`. If ``num_workers > 0``, each worker
+    .. note:: ``len(dataloader)`` is determined by length of the sampler used.
+              When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
+              an infinite sampler is used, whose ``__len__`` is not implemented.
+              With :class:`~torch.utils.data.IterableDataset` the actual
+              iterator size depends on :attr:`num_workers`.
+              If ``num_workers > 0`` (i.e., multi-process loading), each worker
               gets a copy of the same iterable dataset object and can return
               duplicate data, unless the dataset copies and/or the workers are
-              configured differently in :attr:`worker_init_fn`. See
+              configured differently (e.g., in ``__iter__``). See
               :class:`~torch.utils.data.IterableDataset` for more details and
               examples.
-
     """
 
     __initialized = False
@@ -149,51 +143,48 @@ class DataLoader(object):
             self.drop_last = False
 
         if isinstance(dataset, IterableDataset):
-            # check default args
-
-            # NOTE [ Custom Samplers and IterableDataset ]
+            self.dataset_kind = _DatasetKind.Iterable
+            # NOTE [ Custom Samplers and `IterableDataset` ]
             #
-            # `IterableDataset` supports custom `batche_sampler` (only in
-            # single-process data loading) but not custom `sampler` since the
-            # key is irrelevant (unless we support generator-style dataset
-            # one day...).
+            # `IterableDataset` does not supports custom `batch_sampler` or
+            # `sampler` since the key is irrelevant (unless we support
+            # generator-style dataset one day...).
             #
-            # Therefore, for `sampler`, we create a dummy sampler always.
-            # This is an infinite sampler even when the dataset may have
-            # an implemented finite `__len__` because in multi-process data
-            # loading naive settings will return duplicate data (which may be
-            # desired), and thus using a  sampler with length matching that of
-            # dataset will cause data lost (you may have duplicates of the first
-            # couple batches, but never see anything afterwards). Therefore,
-            # `Iterabledataset` always uses an infinite sampler,
-            # `_InfiniteConstantSampler`.
+            # For `sampler`, we always create a dummy sampler. This is an
+            # infinite sampler even when the dataset may have an implemented
+            # finite `__len__` because in multi-process data loading, naive
+            # settings will return duplicated data (which may be desired), and
+            # thus using a sampler with length matching that of dataset will
+            # cause data lost (you may have duplicates of the first couple
+            # batches, but never see anything afterwards). Therefore,
+            # `Iterabledataset` always uses an infinite sampler, an instance of
+            # `_InfiniteConstantSampler` defined above.
             #
             # A custom `batch_sampler` essentially only controls the batch size.
-            # However, it is kind of pointless in multi-process data loading as
-            # the assignment order of batch to worker is an implementation
-            # detail so users can not control how to batchify each worker's
-            # iterable. Thus, we disable this option. If we support in future
-            # custom samplers that specify the assignments to specific workers,
-            # we should re-enable this.
-            if shuffle:
-                raise RuntimeError(
+            # However, it is unclear how useful it would be since an iterable-style
+            # dataset can handle that within itself. Moreover, it is pointless
+            # in multi-process data loading as the assignment order of batches
+            # to workers is an implementation detail so users can not control
+            # how to batchify each worker's iterable. Thus, we disable this
+            # option. If this turns out to be useful in future, we can re-enable
+            # this, and support custom samplers that specify the assignments to
+            # specific workers.
+            if shuffle is not False:
+                raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
-                    "shuffle option, but got shuffle=True")
+                    "shuffle option, but got shuffle={}".format(shuffle))
             elif sampler is not None:
                 # See NOTE [ Custom Samplers and IterableDataset ]
-                raise RuntimeError(
+                raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
-                    "sampler option, but got sampler=True")
-            elif batch_sampler is not None and num_workers > 0:
+                    "sampler option, but got sampler={}".format(sampler))
+            elif batch_sampler is not None:
                 # See NOTE [ Custom Samplers and IterableDataset ]
-                raise RuntimeError(
-                    "DataLoader with IterableDataset: multiprocessing data "
-                    "loading with IterableDataset does not support custom "
-                    "batch_sampler")
-            self.dataset_kind = _DatasetKind.Iterable
-            if batch_sampler is None:
-                # See NOTE [ Custom Samplers and IterableDataset ]
-                sampler = _InfiniteConstantSampler()
+                raise ValueError(
+                    "DataLoader with IterableDataset: expected unspecified "
+                    "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
+            # See NOTE [ Custom Samplers and IterableDataset ]
+            sampler = _InfiniteConstantSampler()
         else:
             self.dataset_kind = _DatasetKind.Map
             if sampler is None:
@@ -231,17 +222,17 @@ class DataLoader(object):
             return _MultiProcessingDataLoaderIter(self)
 
     @property
-    def is_batched(self):
+    def _auto_collation(self):
         return self.batch_sampler is not None
 
     @property
     def _index_sampler(self):
         # The actual sampler used for generating indices for `_DatasetFetcher`
-        # to read data at each time. This would be `.batch_sampler` if in
-        # batched mode, and `.sampler` otherwise.
+        # (see _utils/fetch.py) to read data at each time. This would be
+        # `.batch_sampler` if in auto-collation mode, and `.sampler` otherwise.
         # We can't change `.sampler` and `.batch_sampler` attributes for BC
         # reasons.
-        if self.is_batched:
+        if self._auto_collation:
             return self.batch_sampler
         else:
             return self.sampler
@@ -254,7 +245,7 @@ class _BaseDataLoaderIter(object):
     def __init__(self, loader):
         self.dataset = loader.dataset
         self.dataset_kind = loader.dataset_kind
-        self.is_batched = loader.is_batched
+        self.auto_collation = loader._auto_collation
         self.drop_last = loader.drop_last
         self.index_sampler = loader._index_sampler
         self.num_workers = loader.num_workers
@@ -292,7 +283,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         assert self.num_workers == 0
 
         self.dataset_fetcher = _DatasetKind.create_fetcher(
-            self.dataset_kind, self.dataset, self.is_batched, self.collate_fn, self.drop_last)
+            self.dataset_kind, self.dataset, self.auto_collation, self.collate_fn, self.drop_last)
 
     def __next__(self):
         index = self._next_index()  # may raise StopIteration
@@ -562,9 +553,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
         self.index_queues = []
         self.workers = []
-        # A list of booleans representing whether each worker has exhausted
-        # its iterable dataset object. Always contain all Trues if not using
-        # an iterable dataset (i.e., if mode != Iterable).
+        # A list of booleans representing whether each worker still has word to
+        # do, i.e., not having exhausted its iterable dataset object. It always
+        # contains all `True`s if not using an iterable dataset
+        # (i.e., if kind != Iterable).
         self.worker_status = []
         for i in range(self.num_workers):
             index_queue = multiprocessing.Queue()
@@ -573,7 +565,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 target=_utils.worker._worker_loop,
                 args=(self.dataset_kind, self.dataset, index_queue,
                       self.worker_result_queue, self.done_event,
-                      self.is_batched, self.collate_fn, self.drop_last,
+                      self.auto_collation, self.collate_fn, self.drop_last,
                       self.base_seed + i, self.worker_init_fn, i, self.num_workers))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to
@@ -701,7 +693,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 data = self.task_info.pop(self.rcvd_idx)[1]
                 return self._process_data(data)
 
-            assert (not self.shutdown and self.tasks_outstanding > 0)
+            assert not self.shutdown and self.tasks_outstanding > 0
             idx, data = self._get_data()
             self.tasks_outstanding -= 1
 

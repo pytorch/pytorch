@@ -24,11 +24,11 @@ class Dataset(object):
     def __getitem__(self, index):
         raise NotImplementedError
 
-    def __len__(self):
-        raise NotImplementedError
-
     def __add__(self, other):
         return ConcatDataset([self, other])
+
+    # No `def __len__(self)` default?
+    # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
 
 class IterableDataset(Dataset):
@@ -140,13 +140,8 @@ class IterableDataset(Dataset):
     def __add__(self, other):
         return ChainDataset([self, other])
 
-    def __len__(self):
-        # Returning `NotImplemented` instead of raising `NotImplementedError`
-        # allows for properly triggering some fallback behavior. E.g., the
-        # built-in `list(X)` tries to call `len(X)` first, and executes a
-        # different code path if `NotImplemented` is returned, while raising
-        # `NotImplementedError` will propagate and and make the call fail.
-        return NotImplemented
+    # No `def __len__(self)` default?
+    # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
 
 class TensorDataset(Dataset):

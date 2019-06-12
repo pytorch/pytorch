@@ -12,13 +12,8 @@ from torch._six import container_abcs, string_classes, int_classes
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
 
-default_convert_err_msg_format = (
-    "default_convert: data must contain tensors, numpy arrays, numbers, "
-    "dicts or lists; found {}")
-
-
 def default_convert(data):
-    r"""Puts each data field into a tensor"""
+    r"""Converts each NumPy array data field into a tensor"""
 
     elem_type = type(data)
     if isinstance(data, torch.Tensor):
@@ -27,21 +22,17 @@ def default_convert(data):
             and elem_type.__name__ != 'string_':
         # array of string classes and object
         if elem_type.__name__ == 'ndarray' \
-                and np_str_obj_array_pattern.search(elem.dtype.str) is not None:
-            raise TypeError(default_convert_err_msg_format.format(elem.dtype))
+                and np_str_obj_array_pattern.search(data.dtype.str) is not None:
+            return data
         return torch.as_tensor(data)
-    elif isinstance(data, int_classes):
-        return torch.tensor(data, dtype=torch.long)
-    elif isinstance(data, float):
-        return torch.tensor(data, dtype=torch.double)
-    elif isinstance(data, string_classes):
-        return data
     elif isinstance(data, container_abcs.Mapping):
         return {key: default_convert(data[key]) for key in data}
-    elif isinstance(data, container_abcs.Sequence):
+    elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
+        return elem_type(default_convert(d) for d in data)
+    elif isinstance(data, container_abcs.Sequence) and not isinstance(data, string_classes):
         return [default_convert(d) for d in data]
-
-    raise TypeError("default_convert: found unexpected input type {}".format(elem_type))
+    else:
+        return data
 
 
 default_collate_err_msg_format = (

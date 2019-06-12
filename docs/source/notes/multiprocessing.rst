@@ -1,3 +1,5 @@
+.. _multiprocessing-best-practices:
+
 Multiprocessing best practices
 ==============================
 

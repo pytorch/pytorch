@@ -763,6 +763,22 @@ class TestDataLoader(TestCase):
                 p.terminate()
 
     def test_iterable_dataset(self):
+        # Test that unsupported options raises error
+        dataset = CountingIterableDataset(20)
+        with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified shuffle"):
+            DataLoader(dataset, shuffle=True)
+        with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified shuffle"):
+            DataLoader(dataset, shuffle=3)
+        with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified sampler"):
+            DataLoader(dataset, sampler=torch.utils.data.SequentialSampler(dataset))
+        with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified sampler"):
+            DataLoader(dataset, sampler=3)
+        with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified batch_sampler"):
+            DataLoader(dataset, batch_sampler=torch.utils.data.BatchSampler(
+                torch.utils.data.SequentialSampler(dataset), 3, False))
+        with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified batch_sampler"):
+            DataLoader(dataset, batch_sampler=3)
+
         # [non-batched] single process loading
         dataset = CountingIterableDataset(20)
         fetched = list(DataLoader(dataset))
