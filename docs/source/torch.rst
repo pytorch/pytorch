@@ -88,7 +88,7 @@ Random sampling
 .. autofunction:: get_rng_state
 .. autofunction:: set_rng_state
 .. autoattribute:: torch.default_generator
-   :annotation:  Returns a tuple containing the default CPU torch.Generator
+   :annotation:  Returns the default CPU torch.Generator
 .. autoattribute:: torch.default_cuda_generators
    :annotation: If cuda is available, returns a tuple of default CUDA torch.Generator-s.
                 The number of CUDA torch.Generator-s returned is equal to the number of
@@ -354,6 +354,7 @@ BLAS and LAPACK Operations
 .. autofunction:: solve
 .. autofunction:: svd
 .. autofunction:: symeig
+.. autofunction:: trapz
 .. autofunction:: triangular_solve
 .. autofunction:: trtrs
 
