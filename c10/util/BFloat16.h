@@ -5,21 +5,37 @@
 
 #include <c10/macros/Macros.h>
 #include <cmath>
+#include <cstring>
 
 namespace c10 {
 
 namespace detail {
+  inline bool isSmallEndian() {
+    int num = 1;
+    return *(char *)&num == 1;
+  }
+
   inline float f32_from_bits(uint16_t src) {
     float res = 0;
-    uint16_t* tmp = reinterpret_cast<uint16_t*>(&res);
-    tmp[0] = 0;
-    tmp[1] = src;
+    uint32_t tmp = src;
+    if (isSmallEndian()) {
+      tmp <<= 16;
+    } else {
+      tmp >>= 16;
+    }
+
+    memcpy(&res, &tmp, sizeof(tmp));
     return res;
   }
 
   inline uint16_t bits_from_f32(float src) {
-    uint16_t* res = reinterpret_cast<uint16_t*>(&src);
-    return res[1];
+    uint32_t res;
+    memcpy(&res, &src, sizeof(res));
+    if (isSmallEndian()) {
+        return res >>= 16;
+    } else {
+      return res <<= 16;
+    }
   }
 } // namespace detail
 
