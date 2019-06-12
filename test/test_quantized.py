@@ -480,38 +480,65 @@ class TestQuantizedLinear(unittest.TestCase):
 )
 class TestQuantizedConv(unittest.TestCase):
     """Tests the correctness of quantized convolution op."""
-    def test_qconv(self):
+    @given(
+        batch_size=st.integers(1, 3),
+        input_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
+        height=st.integers(10, 16),
+        width=st.integers(7, 14),
+        output_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
+        groups=st.integers(1, 1),
+        kernel_h=st.integers(1, 7),
+        kernel_w=st.integers(1, 7),
+        stride_h=st.integers(1, 2),
+        stride_w=st.integers(1, 2),
+        pad_h=st.integers(0, 2),
+        pad_w=st.integers(0, 2),
+        dilation=st.integers(1, 1),
+    )
+    def test_qconv(
+            self,
+            batch_size,
+            input_channels_per_group,
+            height,
+            width,
+            output_channels_per_group,
+            groups,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+            pad_h,
+            pad_w,
+            dilation
+    ):
 
         qconv = torch.ops.quantized.fbgemm_conv2d
         qconv_prepack = torch.ops.quantized.fbgemm_conv_prepack
 
-        # N
-        batch_size = 1
         # C
-        input_channels = 1
-        # H, W
-        height = width = 24
+        input_channels = input_channels_per_group * groups
         # K
-        output_channels = 1
+        output_channels = output_channels_per_group * groups
 
-        kernel_h = kernel_w = 3
-        stride_h = stride_w = 2
-        padding_h = padding_w = 1
-        dilation_h = dilation_w = 1
-        groups = 1
+        dilation_h = dilation_w = dilation
 
+        # For testing, we use small values for weights and for activations so that no overflow occurs
+        # in vpmaddubsw instruction. If the overflow occurs in qconv implementation and if there is no overflow
+        # in reference we can't exactly match the results with reference.
+        # Please see the comment in qconv implementation file (aten/src/ATen/native/quantized/cpu/qconv.cpp)
+        # for more details.
         W_value_min = -5
         W_value_max = 5
-        # We use small values to avoid overflow.
-        # (the operator expects them in the format (output_channels, input_channels/groups, kernel_h, kernel_w))
 
-        W_init = torch.randint(
-            W_value_min,
-            W_value_max,
-            (output_channels, int(input_channels / groups), kernel_h, kernel_w),
+        # the operator expects them in the format (output_channels, input_channels/groups, kernel_h, kernel_w)
+        W_init = torch.from_numpy(
+            np.random.randint(
+                W_value_min,
+                W_value_max,
+                (output_channels, int(input_channels / groups), kernel_h, kernel_w)),
         )
 
-        b_init = torch.randint(0, 10, (output_channels,))
+        b_init = torch.from_numpy(np.random.randint(0, 10, (output_channels,)))
 
         # Existing floating point conv operator
         conv_op = torch.nn.Conv2d(
@@ -519,7 +546,7 @@ class TestQuantizedConv(unittest.TestCase):
             output_channels,
             (kernel_h, kernel_w),
             (stride_h, stride_w),
-            (padding_h, padding_w),
+            (pad_h, pad_w),
             (dilation_h, dilation_w),
             groups,
         )
@@ -534,9 +561,8 @@ class TestQuantizedConv(unittest.TestCase):
 
         X_value_min = 0
         X_value_max = 4
-        X_init = torch.randint(
-            X_value_min, X_value_max, (batch_size, input_channels, height, width)
-        )
+        X_init = torch.from_numpy(np.random.randint(
+            X_value_min, X_value_max, (batch_size, input_channels, height, width)))
 
         # run on an input tensor
         result_ref = conv_op(X_init.to(dtype=torch.float))
@@ -571,7 +597,7 @@ class TestQuantizedConv(unittest.TestCase):
             W_prepack,
             b_q,
             [stride_h, stride_w],  # stride
-            [padding_h, padding_w],  # padding
+            [pad_h, pad_w],  # padding
             [dilation_h, dilation_w],  # dilation
             groups,  # groups
             Y_scale,
