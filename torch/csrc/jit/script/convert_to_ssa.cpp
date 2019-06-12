@@ -172,6 +172,13 @@ struct ControlFlowLoadStores {
   std::shared_ptr<TypeEnvironment> environment_stack = nullptr;
 };
 
+void moveBlockBeforeNode(Node* before_node, Block* block) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+    auto block_node = *it++;
+    block_node->moveBefore(before_node);
+  }
+}
+
 // The loop node is initially emitted as:
 // Loop(max_trip_count)
 //    block0(loop_counter) {
@@ -187,43 +194,28 @@ struct ControlFlowLoadStores {
 //      <body>
 //      -> (continue_condition)
 //    }
-
 void inlineLoopCondition(Node* n) {
   Block* body_block = n->blocks().at(0);
 
   auto pre_header = n->blocks().at(1);
   auto header_block = n->addBlock();
   header_block->cloneFrom(pre_header, [](Value* v) { return v; });
-  for (auto it = header_block->nodes().begin();
-       it != header_block->nodes().end();) {
-    auto block_node = *it++;
-    block_node->moveBefore(n);
-  }
+  moveBlockBeforeNode(n, header_block);
   n->addInput(header_block->outputs().at(0));
   n->eraseBlock(2);
 
-  for (auto it = pre_header->nodes().begin();
-       it != pre_header->nodes().end();) {
-    auto block_node = *it++;
-    block_node->moveBefore(body_block->return_node());
-  }
+  moveBlockBeforeNode(body_block->return_node(), pre_header);
   body_block->insertOutput(0, pre_header->outputs().at(0));
   n->eraseBlock(1);
 }
 
 void inlineLoopCondition(Block* block) {
   for (Node* n : block->nodes()) {
-    switch (n->kind()) {
-      case prim::If:
-      case prim::Function: {
-        for (auto b : n->blocks()) {
-          inlineLoopCondition(b);
-        }
-      } break;
-      case prim::Loop: {
-        inlineLoopCondition(n->blocks().at(0));
-        inlineLoopCondition(n);
-      } break;
+    for (Block* b : n->blocks()) {
+      inlineLoopCondition(b);
+    }
+    if (n->kind() == prim::Loop) {
+      inlineLoopCondition(n);
     }
   }
 }
