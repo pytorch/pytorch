@@ -6,19 +6,50 @@
 namespace torch {
 namespace jit {
 
+// LivenessAnalyzer computes "bailout" liveness which is equivalent to
+// "{LIVE_IN} or {GEN}" or "{LIVE_OUT} - {KILL}"
 struct LivenessAnalyzer {
   explicit LivenessAnalyzer(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {}
 
-  std::map<Node*, std::vector<Value*>> run() {
-    auto function_outputs = toSparseBitVector(graph_->block()->outputs());
-    processBlock(graph_->block(), function_outputs);
-    std::map<Node*, std::vector<Value*>> result;
+  std::unordered_map<Node*, std::vector<Value*>> run() {
+    processBlock(graph_->block(), SparseBitVector{});
+    std::unordered_map<Node*, std::vector<Value*>> result;
 
     for (const auto& e : liveness_sets_) {
       result.insert({e.first, toValueVector(e.second)});
     }
     return result;
+  }
+
+  void dump(const std::map<Node*, std::vector<Value*>>& liveness_sets) {
+    std::cout << "Liveness info:\n";
+    for (auto e : liveness_sets) {
+      if (e.first->outputs().size() > 0) {
+        std::cout << e.first->outputs()[0]->uniqueName();
+      }
+
+      std::cout << " " << e.first->kind().toQualString();
+      std::cout << " = ";
+      dump(e.second);
+      std::cout << std::endl;
+    }
+    std::cout << "graph :\n";
+    graph_->dump();
+  }
+
+  void dump(const std::vector<Value*>& set) {
+    bool first = true;
+    std::cout << "[";
+    for (auto el : set) {
+      if (first) {
+        first = false;
+      } else {
+        std::cout << ", ";
+      }
+      std::cout << el->uniqueName() << "(" << el->unique() << ")";
+    }
+    std::cout << "]";
   }
 
  private:
@@ -45,13 +76,14 @@ struct LivenessAnalyzer {
     liveness |= block_outputs;
 
     SparseBitVector defs;
-    for (auto it = b->nodes().rbegin(); it != b->nodes().rend(); it++) {
+    for (Node* it : b->nodes().reverse()) {
+      // kill outputs
+      liveness -= toSparseBitVector(it->outputs());
       if (it->kind() == prim::Loop) {
         auto loop_block = liveness;
         // loop's outputs aren't live inside the loop
         // loop's block outputs, OTOH, will be considered
         // as uses
-        loop_block -= toSparseBitVector(it->outputs());
         loop_block = processBlock(it->blocks()[0], loop_block);
         // loop block's inputs die outside loop's block
         loop_block -= toSparseBitVector(it->blocks()[0]->inputs());
@@ -62,10 +94,8 @@ struct LivenessAnalyzer {
         liveness |= true_liveness;
         liveness |= false_liveness;
       }
-
       liveness |= toSparseBitVector(it->inputs());
-      liveness -= toSparseBitVector(it->outputs());
-      liveness_sets_.insert({*it, liveness});
+      liveness_sets_.insert({it, liveness});
     }
     return liveness;
   }
@@ -75,7 +105,7 @@ struct LivenessAnalyzer {
   std::map<size_t, Value*> ids_to_values_;
 };
 
-std::map<Node*, std::vector<Value*>> BuildLivenessSets(
+std::unordered_map<Node*, std::vector<Value*>> BuildLivenessSets(
     std::shared_ptr<Graph> graph) {
   LivenessAnalyzer la(std::move(graph));
   return la.run();

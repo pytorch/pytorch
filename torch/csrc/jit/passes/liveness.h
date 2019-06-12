@@ -16,7 +16,9 @@ namespace jit {
 using ::c10::ProfiledTensorTypePtr;
 using SparseBitVector = ::c10::SparseBitVector<256>;
 
-TORCH_API std::map<Node*,std::vector<Value*>>  BuildLivenessSets(std::shared_ptr<Graph> graph);
-
+// BuildLivenessSets computes "bailout" liveness which is equivalent to
+// "{LIVE_IN} or {GEN}" or "{LIVE_OUT} - {KILL}"
+TORCH_API std::unordered_map<Node*, std::vector<Value*>> BuildLivenessSets(
+    std::shared_ptr<Graph> graph);
 } // namespace jit
 } // namespace torch

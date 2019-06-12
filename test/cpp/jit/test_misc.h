@@ -909,11 +909,11 @@ static void checkShape(
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
-std::vector<std::string> values_to_value_names(
+std::vector<std::size_t> values_to_value_ids(
     const std::vector<Value*>& values) {
-  std::vector<std::string> result;
+  std::vector<std::size_t> result;
   for (auto v : values) {
-    result.push_back(v->uniqueName());
+    result.push_back(v->unique());
   }
   return result;
 };
@@ -936,11 +936,9 @@ void testLivenessIf() {
       return c * a
   )JIT";
 
-  std::vector<std::string> expected_liveness_add_before_if{
-      "x", "y", "z", "3", "14", "20"};
-  std::vector<std::string> expected_liveness_if{
-      "x", "y", "z", "3", "14", "a", "20"};
-  std::vector<std::string> expected_first_node_liveness{"x", "y", "z"};
+  std::vector<std::size_t> expected_liveness_add_before_if{0, 1, 2, 3, 16, 28};
+  std::vector<std::size_t> expected_liveness_if{0, 1, 2, 3, 16, 17, 28};
+  std::vector<std::size_t> expected_first_node_liveness{0, 1, 2};
 
   auto cu = compile(basic_example);
   auto& fun = cu->get_function("test_if_liveness");
@@ -951,13 +949,13 @@ void testLivenessIf() {
   });
 
   auto first_node = *fun.graph()->nodes().begin();
-  auto actual_first_node_liveness = values_to_value_names(liveness[first_node]);
+  auto actual_first_node_liveness = values_to_value_ids(liveness[first_node]);
   ASSERT_EQ(actual_first_node_liveness, expected_first_node_liveness);
 
-  auto actual_if_liveness = values_to_value_names(liveness[*if_node]);
+  auto actual_if_liveness = values_to_value_ids(liveness[*if_node]);
   ASSERT_EQ(actual_if_liveness, expected_liveness_if);
   auto add = if_node->prev();
-  auto actual_add_before_if_liveness = values_to_value_names(liveness[add]);
+  auto actual_add_before_if_liveness = values_to_value_ids(liveness[add]);
   ASSERT_EQ(actual_add_before_if_liveness, expected_liveness_add_before_if);
 }
 
@@ -978,8 +976,8 @@ void testLivenessFor() {
       return (sum + sum2, c, x)
   )JIT";
 
-  std::vector<std::string> expected_for{"n", "x", "sum.1", "5", "9"};
-  std::vector<std::string> expected_first_node_liveness{"n", "x"};
+  std::vector<std::size_t> expected_for{0, 1, 2, 7, 15};
+  std::vector<std::size_t> expected_first_node_liveness{0, 1};
 
   auto cu = compile(basic_example);
   auto& fun = cu->get_function("test_for_liveness");
@@ -990,10 +988,10 @@ void testLivenessFor() {
   });
 
   auto first_node = *fun.graph()->nodes().begin();
-  auto actual_first_node_liveness = values_to_value_names(liveness[first_node]);
+  auto actual_first_node_liveness = values_to_value_ids(liveness[first_node]);
   ASSERT_EQ(actual_first_node_liveness, expected_first_node_liveness);
 
-  auto actual_loop_liveness = values_to_value_names(liveness[*loop_node]);
+  auto actual_loop_liveness = values_to_value_ids(liveness[*loop_node]);
   ASSERT_EQ(actual_loop_liveness, expected_for);
 }
 
