@@ -41,6 +41,10 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     const int C = X.dim32(1);
     auto sizes = ConvPoolOpBase<Context>::GetOutputSize(X, C);
     auto* Y = Output(0, sizes, at::dtype<T>());
+    if (N == 0) {
+      VLOG(2) << "Batch size is 0 in PoolOp";
+      return true;
+    }
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
     if (N == 0) {
@@ -74,6 +78,10 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     const int C = X.dim32(ndim - 1);
     auto sizes = ConvPoolOpBase<Context>::GetOutputSize(X, C);
     auto* Y = Output(0, sizes, at::dtype<T>());
+    if (N == 0) {
+      VLOG(2) << "Batch size is 0 in PoolOp";
+      return true;
+    }
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
     if (N == 0) {
@@ -120,6 +128,10 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const auto& dY = Input(2);
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
     const int N = X.dim32(0);
+    if (N == 0) {
+      VLOG(2) << "Batch size is 0 in PoolGradientOp";
+      return true;
+    }
     const int C = X.dim32(1);
     const std::vector<int> X_HW_dims = GetDims(X);
     const std::vector<int> Y_HW_dims = GetDims(Y);
@@ -159,6 +171,10 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
     const int ndim = X.dim();
     const int N = X.dim32(0);
+    if (N == 0) {
+      VLOG(2) << "Batch size is 0 in PoolGradientOp";
+      return true;
+    }
     const int C = X.dim32(ndim - 1);
     const std::vector<int> X_HW_dims = GetDims(X);
     const std::vector<int> Y_HW_dims = GetDims(Y);
