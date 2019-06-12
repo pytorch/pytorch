@@ -13155,13 +13155,13 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, t):
                 return t + self.x
 
-        m = M()
 
         # TODO: Fix this test so that we can actually define the class like
         #   class M(torch.nn.Module):
         #       x : torch.jit.Final[int]
-        m.__annotations__ = {'x': torch.jit.Final[int]}
+        M.__annotations__ = {'x': torch.jit.Final[int]}
 
+        m = M()
 
         self.checkModule(M(), (torch.randn(2, 2),))
 
