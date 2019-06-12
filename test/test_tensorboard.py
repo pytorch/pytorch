@@ -357,7 +357,6 @@ if TEST_TENSORBOARD:
             summary.video('dummy', np.random.rand(20, 7, 1, 8, 8))
 
         def test_audio(self):
-            print(summary.audio('dummy', tensor_N(shape=(42,))))
             self.assertTrue(compare_proto(summary.audio('dummy', tensor_N(shape=(42,))), self))
 
         def test_text(self):
@@ -372,11 +371,11 @@ if TEST_TENSORBOARD:
         def test_histogram_doane(self):
             self.assertTrue(compare_proto(summary.histogram('dummy', tensor_N(shape=(1024,)), bins='doane', max_bins=5), self))
 
-        # def test_custom_scalars(self):
-        #     layout = {'Taiwan': {'twse': ['Multiline', ['twse/0050', 'twse/2330']]},
-        #               'USA': {'dow': ['Margin', ['dow/aaa', 'dow/bbb', 'dow/ccc']],
-        #                       'nasdaq': ['Margin', ['nasdaq/aaa', 'nasdaq/bbb', 'nasdaq/ccc']]}}
-        #     self.assertTrue(compare_proto(summary.custom_scalars(layout), self))
+        def test_custom_scalars(self):
+            layout = {'Taiwan': {'twse': ['Multiline', ['twse/0050', 'twse/2330']]},
+                      'USA': {'dow': ['Margin', ['dow/aaa', 'dow/bbb', 'dow/ccc']],
+                              'nasdaq': ['Margin', ['nasdaq/aaa', 'nasdaq/bbb', 'nasdaq/ccc']]}}
+            self.assertTrue(compare_proto(summary.custom_scalars(layout), self))
 
     def remove_whitespace(string):
         return string.replace(' ', '').replace('\t', '').replace('\n', '')
@@ -420,7 +419,7 @@ if TEST_TENSORBOARD:
                     return self.l(x)
 
             with SummaryWriter(comment='LinearModel') as w:
-                w.add_graph(myLinear(), dummy_input, True)
+                w.add_graph(myLinear(), dummy_input)
 
         def test_mlp_graph(self):
             dummy_input = (torch.zeros(2, 1, 28, 28),)
@@ -448,7 +447,7 @@ if TEST_TENSORBOARD:
                     return h
 
             with SummaryWriter(comment='MLPModel') as w:
-                w.add_graph(myMLP(), dummy_input, True)
+                w.add_graph(myMLP(), dummy_input)
 
         def test_wrong_input_size(self):
             with self.assertRaises(RuntimeError) as e_info:

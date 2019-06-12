@@ -1,0 +1,14 @@
+value {
+  tag: "custom_scalars__config__"
+  tensor {
+    dtype: DT_STRING
+    tensor_shape {
+    }
+    string_val: "\022(\n\006Taiwan\022\036\n\004twse\022\026\n\ttwse/0050\n\ttwse/2330\022]\n\003USA\022$\n\003dow\032\035\n\033\n\007dow/aaa\022\007dow/bbb\032\007dow/ccc\0220\n\006nasdaq\032&\n$\n\nnasdaq/aaa\022\nnasdaq/bbb\032\nnasdaq/ccc"
+  }
+  metadata {
+    plugin_data {
+      plugin_name: "custom_scalars"
+    }
+  }
+}
