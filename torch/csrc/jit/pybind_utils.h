@@ -39,20 +39,15 @@ namespace jit {
 // locations in libtorch code rather than user code.
 
 using tracer::TypedStack;
-struct TypedIValue : public std::pair<IValue, MatchTypeReturn> {
+struct TypedIValue : public std::pair<IValue, TypePtr> {
   using pair::pair;
-
-  TypedIValue(IValue value, TypePtr type)
-      : std::pair<IValue, MatchTypeReturn>(value, MatchTypeReturn(type)) {}
 
   IValue& ivalue() {
     return this->first;
   }
-  TypePtr& type() {
-    return *this->second.type;
-  }
-  std::string error() {
-    return this->second.errMsg;
+
+  TypePtr type() {
+    return this->second;
   }
 };
 
@@ -117,6 +112,9 @@ inline MatchTypeReturn tryToInferType(py::handle input) {
       // not create a CompleteTensorType
       return MatchTypeReturn(DimensionedTensorType::create(tensor));
     }
+
+    // TODO: maybe unshape this type if this is used for script instead of
+    // tracing
     return MatchTypeReturn(CompleteTensorType::create(tensor));
   }
 
@@ -268,21 +266,21 @@ inline IValue toIValue(py::handle input) {
 }
 
 inline Stack toStack(const py::tuple& inputs) {
-  return toIValue(inputs).toTuple()->elements();
+  return toIValue(inputs).toTupleRef().vec();
 }
 
 inline TypedStack toTypedStack(const py::tuple& inputs) {
   auto info = toTraceableIValue(inputs);
   return TypedStack(
-      info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
+      info.ivalue().toTupleRef().vec(), info.type()->expect<TupleType>());
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  std::vector<IValue> elems;
+  c10::ListPtr<IValue> elems = c10::make_list<IValue>();
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
-  return List<IValue>::create(std::move(elems));
+  return IValue(std::move(elems));
 }
 
 inline IValue createGenericDict(
@@ -295,7 +293,7 @@ inline IValue createGenericDict(
     elems.insert(
         toIValue(key, key_type), toIValue(obj[key], value_type));
   }
-  return at::ivalue::GenericDict::create(std::move(elems));
+  return IValue(std::move(elems));
 }
 
 inline IValue toIValue(
@@ -340,7 +338,7 @@ inline IValue toIValue(
       for (size_t i = 0; i < tuple_size; ++i) {
         values.push_back(toIValue(tuple[i], elem_types[i]));
       }
-      return Tuple::create(std::move(values));
+      return c10::ivalue::TuplePtr::create(std::move(values));
     }
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
@@ -460,49 +458,47 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
-    return py::cast(ivalue.toDouble());
+    return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isInt()) {
-    return py::cast(ivalue.toInt());
+    return py::cast(std::move(ivalue).toInt());
   } else if (ivalue.isBool()) {
-    return py::cast(ivalue.toBool());
+    return py::cast(std::move(ivalue).toBool());
   } else if (ivalue.isString()) {
-    return py::cast(ivalue.toStringRef());
+    return py::cast(std::move(ivalue).toStringRef());
   } else if (ivalue.isIntList()) {
-    return py::cast(ivalue.toIntListRef());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toIntList()));
   } else if (ivalue.isDoubleList()) {
-    return py::cast(ivalue.toDoubleListRef());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toDoubleList()));
   } else if (ivalue.isBoolList()) {
-    return py::cast(ivalue.toBoolListRef());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toBoolList()));
   } else if (ivalue.isTensorList()) {
-    return py::cast(ivalue.toTensorListRef());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toTensorList()));
   } else if (ivalue.isGenericList()) {
-    auto list = ivalue.toGenericList();
-    const auto& elements = list->elements();
-    py::list t{elements.size()};
-    for (size_t i = 0; i < elements.size(); ++i) {
-      t[i] = toPyObject(IValue{elements[i]});
+    auto list = std::move(ivalue).toGenericList();
+    py::list t{list.size()};
+    for (size_t i = 0; i < list.size(); ++i) {
+      t[i] = toPyObject(IValue{list.get(i)});
     }
     return std::move(t);
   } else if (ivalue.isTuple()) {
-    auto tuple = ivalue.toTuple();
-    const auto& elements = tuple->elements();
+    auto tuple = std::move(ivalue).toTuple();
+    const auto& elements = tuple.elements();
     py::tuple t{elements.size()};
     for (size_t i = 0; i < elements.size(); ++i) {
-      t[i] = toPyObject(IValue{elements[i]});
+      t[i] = toPyObject(IValue{elements.get(i)});
     }
     return std::move(t);
   } else if (ivalue.isDevice()) {
-    return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
+    return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
   } else if (ivalue.isGenericDict()) {
-    auto dict = ivalue.toGenericDict();
-    const auto& elements = dict->elements();
+    auto dict = std::move(ivalue).toGenericDict();
     py::dict py_dict;
-    for (auto pair : elements) {
+    for (auto& pair : dict) {
       py_dict[toPyObject(IValue{pair.key()})] = toPyObject(IValue{pair.value()});
     }
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
-    const auto obj = ivalue.toObject();
+    const auto obj = std::move(ivalue).toObject();
     auto& pyCu = script::CompilationUnit::_get_python_cu();
     const auto classType = pyCu.get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);

@@ -18,6 +18,13 @@ DictPtr<Key, Value> make_dict();
 
 namespace impl {
 bool shallowEquals(const IValue& lhs, const IValue& rhs);
+
+using valid_dict_key_types = guts::typelist::typelist<
+  int64_t,
+  std::string,
+  double,
+  bool
+>;
 }
 
 namespace detail {
@@ -167,6 +174,8 @@ template<class Key, class Value> DictPtr<IValue, IValue> toGenericDict(DictPtr<K
 template<class Key, class Value>
 class DictPtr final {
 private:
+  static_assert((std::is_same<IValue, Key>::value && std::is_same<IValue, Value>::value) || guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "Invalid Key type for Dict. We only support int64_t, double, bool, and string.");
+
   // impl_ stores the underlying map as a ska::flat_hash_map.
   // We intentionally don't offer conversion from/to
   // ska::flat_hash_map, return references to it or something like that,
@@ -178,6 +187,7 @@ private:
   c10::intrusive_ptr<detail::DictImpl> impl_;
 
   explicit DictPtr(c10::intrusive_ptr<detail::DictImpl>&& impl);
+  friend struct IValue;
   template<class K, class V> friend DictPtr<K, V> impl::toTypedDict(DictPtr<IValue, IValue>);
   template<class K, class V> friend DictPtr<IValue, IValue> impl::toGenericDict(DictPtr<K, V>);
 

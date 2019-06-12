@@ -36,189 +36,142 @@ namespace detail {
     at::Scalar
   >;
 
-  // ivalue_to_arg_type<T>: Take an IValue that is an argument to a kernel and
-  // cast it to the type that should be passed to the kernel function.
-  // Examples: If the IValue contains a plain type like an int, return that.
-  //           If the IValue contains an IntList, return it as ArrayRef<int>.
-  template<class T, class Enable = void> struct ivalue_to_arg_type {
-    // This base case is hit whenever a type does not have a specialisation below.
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
+  template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported input type.");
   };
-  template<class T>
-  struct ivalue_to_arg_type<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    static T call(IValue&& v) {
-      return std::move(v).to<T>();
-    }
-  };
-  template<class T>
-  struct ivalue_to_arg_type<optional<T>> {
-    static optional<T> call(IValue&& v) {
-      if (v.isNone()) {
-        return nullopt;
-      }
-      return ivalue_to_arg_type<T>::call(std::move(v));
-    }
-  };
-  template<class Key, class Value>
-  struct ivalue_to_arg_type<DictPtr<Key, Value>> {
-    static DictPtr<Key, Value> call(IValue&& v) {
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported argument type: c10::DictPtr<Key, Value> and Key is not one of the supported primitive types.");
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported argument type: c10::DictPtr<Key, Value> and Value is not one of the supported primitive types.");
 
-      auto dict_ptr = std::move(v).toGenericDict();
-      return impl::toTypedDict<Key, Value>(std::move(dict_ptr->elements()));
-    }
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+    // everything is ok, this is a primitive type
   };
-  template<class T>
-  struct ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> final {
-    static std::vector<T> call(IValue&& v) {
-      return std::move(*std::move(v).to<intrusive_ptr<ivalue::List<T>>>()).elements();
-    }
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<c10::optional<T>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {};
+
+  template<class Key, class Value, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<DictPtr<Key, Value>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<Value, AllowDeprecatedTypes> {
+    static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported input type: DictPtr<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
   };
-  template<class T>
-  struct ivalue_to_arg_type<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> final {
-    static std::vector<T> call(IValue&& v) {
-      auto list = std::move(v).toGenericList();
-      std::vector<T> result;
-      result.reserve(list->elements().size());
-      for (auto&& elem : std::move(list)->elements()) {
-        result.push_back(ivalue_to_arg_type<T>::call(std::move(elem)));
-      }
-      return result;
-    }
+
+  template<class Key, class Value, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<std::unordered_map<Key, Value>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<Value, AllowDeprecatedTypes> {
+    static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::unordered_map<Key, Value>. Please use DictPtr<Key, Value> instead.");
+    static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported input type: std::unordered_map<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
   };
-  template<class Key, class Value>
-  struct ivalue_to_arg_type<std::unordered_map<Key, Value>> final {
-    static std::unordered_map<Key, Value> call(IValue&& v) {
-      auto dict = std::move(v).toGenericDict();
-      std::unordered_map<Key, Value> result;
-      result.reserve(dict->elements().size());
-      for (auto& element : dict->elements()) {
-        result.emplace(ivalue_to_arg_type<Key>::call(element.key()), ivalue_to_arg_type<Value>::call(element.value()));
-      }
-      return result;
-    }
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<ListPtr<T>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: ListPtr<Scalar>. Please use ListPtr<int64_t>, ListPtr<double> or Tensor instead.");
   };
-  // The following specialisations of ivalue_to_arg_type are technically not
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<std::vector<T>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: std::vector<Scalar>. Please use ListPtr<int64_t>, ListPtr<double> or Tensor instead.");
+    // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::vector<T>. Please use ListPtr<T> instead.");
+  };
+
+  // The following specialisations of assert_is_valid_input_type are technically not
   // necessary since we would hit the base case and show an error message
   // there if they didn't exist, but we can show a better error message
   // in some common error scenarios.
-  template<class T>
-  struct ivalue_to_arg_type<T, guts::enable_if_t<std::is_same<float, T>::value>> {
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<float, T>::value>> {
     // There is no reason to support float when we have double. Keep the API lean.
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type: float. Please use double instead.");
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported input type: float. Please use double instead.");
   };
-  template<class T>
-  struct ivalue_to_arg_type<T, guts::enable_if_t<std::is_same<const char*, T>::value>> {
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type: const char*. Please use std::string instead.");
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<const char*, T>::value>> {
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported input type: const char*. Please use std::string instead.");
   };
-  template<class T>
-  struct ivalue_to_arg_type<T, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral argument type. Please use int64_t instead.");
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported input type: vector<bool>. Please use List<bool> instead.");
   };
-
-  // legacy_ivalue_to_arg_type is like ivalue_to_arg_type but additionally
-  // allows a few deprecated types like std::vector.
-  template<class T, class Enable = void>
-  struct legacy_ivalue_to_arg_type final {
-    static auto call(IValue&& v) -> decltype(ivalue_to_arg_type<T>::call(std::move(v))) {
-      return ivalue_to_arg_type<T>::call(std::move(v));
-    }
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral input type. Please use int64_t instead.");
   };
 
-  // TODO Make nesting types work with new style API, e.g. Dicts of lists, lists of lists, and so on
+  template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_output_type {
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported output type.");
+  };
 
-  template<class T, class Enable = void>
-  struct return_type_to_ivalue {
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type.");
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+    // everything is ok, this is a primitive type
   };
-  template<class T>
-  struct return_type_to_ivalue<T, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    template<class T_>
-    static IValue call(T_&& v) {
-      return IValue(std::forward<T_>(v));
-    }
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<c10::optional<T>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
+
+  template<class Key, class Value, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<DictPtr<Key, Value>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<Value, AllowDeprecatedTypes> {
+    static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported output type: DictPtr<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
+    static_assert(!std::is_same<Value, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: DictPtr<Key, Scalar>. Please use DictPtr<Key, int64_t> or DictPtr<Key, double>.");
   };
-  template<class T>
-  struct return_type_to_ivalue<optional<T>> {
-    static IValue call(optional<T>&& v) {
-      if (!v.has_value()) {
-        return IValue();
-      }
-      return return_type_to_ivalue<T>::call(std::move(*v));
-    }
+
+  template<class Key, class Value, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<std::unordered_map<Key, Value>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<Value, AllowDeprecatedTypes> {
+    static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Value>. Please use DictPtr<Key, Value> instead.");
+    static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
+    static_assert(!std::is_same<Value, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Scalar>. Please use DictPtr<Key, int64_t> or DictPtr<Key, double>.");
   };
-  template<class T>
-  struct return_type_to_ivalue<std::vector<T>, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value && !std::is_same<std::string, T>::value>> {
-    static IValue call(std::vector<T>&& v) {
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, T>::value, "You tried to register a kernel with an unsupported return type: vector<T> and T is not one of the supported primitive types.");
-      static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
-      return IValue(std::move(v));
-    }
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<ListPtr<T>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: ListPtr<Scalar>. Please use ListPtr<int64_t>, ListPtr<double> or Tensor instead.");
   };
-  template<class T>
-  struct return_type_to_ivalue<std::vector<T>, guts::enable_if_t<!guts::typelist::contains<supported_primitive_arg_types, T>::value || std::is_same<std::string, T>::value>> {
-    static IValue call(std::vector<T>&& v) {
-      static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported return type: vector<Scalar>. Please use vector<int64_t>, vector<double> or Tensor instead.");
-      std::vector<IValue> result;
-      result.reserve(v.size());
-      for (auto& elem : v) {
-        result.push_back(return_type_to_ivalue<T>::call(std::move(elem)));
-      }
-      return result;
-    }
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<std::vector<T>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: std::vector<Scalar>. Please use ListPtr<int64_t>, ListPtr<double> or Tensor instead.");
+    // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::vector<T>. Please use ListPtr<T> instead.");
   };
-  template<class Key, class Value>
-  struct return_type_to_ivalue<c10::DictPtr<Key, Value>> {
-    static IValue call(c10::DictPtr<Key, Value>&& v) {
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Key>::value, "You tried to register a kernel with an unsupported return type: DictPtr<Key, Value> and Key is not one of the supported primitive types.");
-      static_assert(guts::typelist::contains<supported_primitive_arg_types, Value>::value, "You tried to register a kernel with an unsupported return type: DictPtr<Key, Value> and Value is not one of the supported primitive types.");
-      return IValue(impl::toGenericDict(std::move(v)));
-    }
-  };
-  template<class Key, class Value>
-  struct return_type_to_ivalue<std::unordered_map<Key, Value>> final {
-    static IValue call(std::unordered_map<Key, Value>&& v) {
-      c10::impl::GenericDictPtr dict = c10::impl::make_generic_dict();
-      dict.reserve(v.size());
-      for (auto& element : v) {
-        dict.insert(return_type_to_ivalue<Key>::call(Key{element.first}), return_type_to_ivalue<Value>::call(std::move(element.second)));
-      }
-      return dict;
-    }
-  };
-  // The following specialisations of return_type_to_ivalue are technically not
+
+  // The following specialisations of assert_is_valid_output_type are technically not
   // necessary since we would hit the base case and show an error message
   // there if they didn't exist, but we can show a better error message
   // in some common error scenarios.
-  template<class T>
-  struct return_type_to_ivalue<c10::ArrayRef<T>> {
-    static_assert(guts::false_t<c10::ArrayRef<T>>::value, "You tried to register a kernel with an unsupported return type: c10::ArrayRef<T>. Please use std::vector<T> instead.");
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<float, T>::value>> {
+    // There is no reason to support float when we have double. Keep the API lean.
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported output type: float. Please use double instead.");
   };
-  template<class T>
-  struct return_type_to_ivalue<T, guts::enable_if_t<std::is_same<float, T>::value>> {
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type: float. Please use double instead.");
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<const char*, T>::value>> {
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported output type: const char*. Please use std::string instead.");
   };
-  template<class T>
-  struct return_type_to_ivalue<T, guts::enable_if_t<std::is_same<const char*, T>::value>> {
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported return type: const char*. Please use std::string instead.");
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported output type: vector<bool>. Please use List<bool> instead.");
   };
-  template<class T>
-  struct return_type_to_ivalue<T, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral return argument type. Please use int64_t instead.");
-  };
-  // legacy_return_type_to_ivalue is like return_type_to_ivalue but additionally
-  // allows a few deprecated types like std::unordered_map.
-  template<class T, class Enable = void>
-  struct legacy_return_type_to_ivalue final {
-    template<class T_>
-    static IValue call(T_&& v) {
-      return return_type_to_ivalue<T>::call(std::forward<T_>(v));
-    }
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral output type. Please use int64_t instead.");
   };
 
-  template<bool AllowDeprecatedTypes, class T> using ivalue_to_arg = guts::conditional_t<AllowDeprecatedTypes, legacy_ivalue_to_arg_type<T>, ivalue_to_arg_type<T>>;
-  template<bool AllowDeprecatedTypes, class T> using return_to_ivalue = guts::conditional_t<AllowDeprecatedTypes, legacy_return_type_to_ivalue<guts::decay_t<T>>, return_type_to_ivalue<guts::decay_t<T>>>;
+
+  template<class T, bool AllowDeprecatedTypes>
+  T ivalue_to_arg(IValue&& v) {
+    assert_is_valid_input_type<T, AllowDeprecatedTypes>();
+    return std::move(v).to<T>();
+  }
+
+  template<class T, bool AllowDeprecatedTypes>
+  IValue return_to_ivalue(T&& v) {
+    assert_is_valid_output_type<T, AllowDeprecatedTypes>();
+    return IValue(std::move(v));
+  }
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
   typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack_(Functor* functor, Stack* stack, guts::index_sequence<ivalue_arg_indices...>) {
@@ -227,7 +180,7 @@ namespace detail {
     constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
 
     using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
-    return (*functor)(ivalue_to_arg<AllowDeprecatedTypes, guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>>::call(
+    return (*functor)(ivalue_to_arg<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>, AllowDeprecatedTypes>(
       std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
     )...);
   }
@@ -241,7 +194,7 @@ namespace detail {
   template<class OutputType, bool AllowDeprecatedTypes>
   struct push_outputs final {
     static void call(OutputType&& output, Stack* stack) {
-      torch::jit::push(*stack, return_to_ivalue<AllowDeprecatedTypes, OutputType>::call(std::move(output)));
+      torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>(std::move(output)));
     }
   };
   template<class... OutputTypes, bool AllowDeprecatedTypes>
@@ -253,7 +206,7 @@ namespace detail {
   private:
     template<size_t... indices>
     static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, guts::index_sequence<indices...>) {
-      torch::jit::push(*stack, return_to_ivalue<AllowDeprecatedTypes, OutputTypes>::call(std::move(std::get<indices>(output)))...);
+      torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>(std::move(std::get<indices>(output)))...);
     }
   };
 

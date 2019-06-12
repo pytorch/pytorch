@@ -526,6 +526,15 @@ Recurrent layers
 .. autoclass:: GRUCell
     :members:
 
+Transformer layers
+----------------------------------
+
+:hidden:`Transformer`
+~~~~~~~~~~~~~
+
+.. autoclass:: Transformer
+    :members:
+
 Linear layers
 ----------------------------------
 
