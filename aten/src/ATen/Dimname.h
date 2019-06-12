@@ -2,6 +2,7 @@
 #ifdef NAMEDTENSOR_ENABLED
 
 #include <ATen/core/interned_strings.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
 namespace at {
@@ -26,6 +27,8 @@ struct CAFFE2_API Dimname {
   NameType type_;
   // Will need more fields for other special name types.
 };
+
+using DimnameList = c10::ArrayRef<Dimname>;
 
 static Symbol kWildcard = Symbol::dimname("*");
 bool CAFFE2_API is_valid_identifier(const std::string& name);
