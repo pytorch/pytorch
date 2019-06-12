@@ -102,7 +102,13 @@ def _strong_Wolfe(obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_chang
         t = _cubic_interpolate(bracket[0], bracket_f[0], bracket_gtd[0],
                                bracket[1], bracket_f[1], bracket_gtd[1])
 
-        # test what we are making sufficient progress
+        # test that we are making sufficient progress:
+        # in case `t` is so close to boundary, we mark that we are making
+        # insufficient progress, and if
+        #   + we have made insufficient progress in the last step, or
+        #   + `t` is at one of the boundary,
+        # we will move `t` to a position which is `0.1 * len(bracket)`
+        # away from the nearest boundary point.
         eps = 0.1 * (max(bracket) - min(bracket))
         if min(max(bracket) - t, t - min(bracket)) < eps:
             # interpolation close to boundary
