@@ -45,8 +45,7 @@ struct TypedIValue : public std::pair<IValue, TypePtr> {
   IValue& ivalue() {
     return this->first;
   }
-
-  TypePtr type() {
+  TypePtr& type() {
     return this->second;
   }
 };
@@ -57,8 +56,7 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
         ConstantString::create(py::cast<std::string>(key)),
         StringType::create());
   } else if (py::isinstance<py::int_>(key)) {
-    return TypedIValue(
-        py::cast<int64_t>(key), IntType::create());
+    return TypedIValue(py::cast<int64_t>(key), IntType::create());
   } else if (py::isinstance<py::float_>(key)) {
     return TypedIValue(py::cast<double>(key), FloatType::create());
   } else {
@@ -240,6 +238,8 @@ inline IValue toIValue(
     c10::optional<int32_t> N = c10::nullopt);
 
 inline TypedIValue toTraceableIValue(py::handle input) {
+  try {
+
   auto match = tryToInferType(input);
   if (!match.type) {
     AT_ERROR(
@@ -258,7 +258,11 @@ inline TypedIValue toTraceableIValue(py::handle input) {
       "Type '",
       type->python_str(),
       "' cannot be traced. Only Tensors and Lists, Dicts, and"
-      " Tuples of Tensors can be traced.");
+      " Tuples of Tensors can be traced");
+  } catch(...) {
+    tracer::abandon();
+    throw;
+  }
 }
 
 inline IValue toIValue(py::handle input) {
@@ -317,21 +321,23 @@ inline IValue toIValue(
     case TypeKind::IntType:
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
-      if (obj != Py_None)
-        throw py::cast_error();
-
+      if (!obj.is_none()) {
+        throw py::cast_error(
+            c10::str("Cannot cast ", py::str(obj), " to None"));
+      }
       return {};
     case TypeKind::BoolType:
       return py::cast<bool>(obj);
     case TypeKind::TupleType: {
-      if (!PyTuple_Check(obj.ptr()))
-        throw py::cast_error(); // note: the py::cast does not throw cast_error
-                                // because it attempts to iterate a non-tuple
       py::tuple tuple = py::cast<py::tuple>(obj);
       size_t tuple_size = tuple.size();
       const auto& elem_types = type->cast<TupleType>()->elements();
       if (elem_types.size() != tuple_size) {
-        throw py::cast_error();
+        throw py::cast_error(c10::str(
+            "Object ",
+            py::str(obj),
+            " had a different number of elements than type ",
+            type->python_str()));
       }
       std::vector<IValue> values;
       values.reserve(tuple_size);
