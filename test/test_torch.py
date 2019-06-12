@@ -11778,24 +11778,51 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             "must be tagged to be identified as channels_last")
 
     def _test_memory_format_operators(self, device):
-        x = torch.randn((10, 3, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
-        y = abs(torch.randn((10, 3, 32, 32), device=device)) + 1
-        s = 3
+        def chunk_op(x, y):
+            x1, x2 = x.chunk(2, dim=1)
+            y1, y2 = x.chunk(2, dim=1)
+            y1 = y1.contiguous()
+            return y1 + x1
+
+        def unsqueeze_op(x, y):
+            return x[0].unsqueeze(0)
+
+        x = torch.randn((10, 4, 32, 32), device=device).contiguous(memory_format=torch.channels_last)
+        y = abs(torch.randn((10, 4, 32, 32), device=device)) + 1
         fns = [
-            lambda x, y, s: x.clone(),
-            lambda x, y, s: abs(x),
-            lambda x, y, s: x + s,
-            lambda x, y, s: x + y,
-            lambda x, y, s: y + x,
-            lambda x, y, s: x * y,
-            lambda x, y, s: y * x,
-            lambda x, y, s: x.sin(),
-            lambda x, y, s: x.sinh(),
-            lambda x, y, s: x.sqrt(),
-            lambda x, y, s: x.abs(),
+            lambda x, y: x.clone(),
+            lambda x, y: x + 3,
+            lambda x, y: 3 * x,
+            lambda x, y: x + y,
+            lambda x, y: y + x,
+            lambda x, y: x * y,
+            lambda x, y: y * x,
+            lambda x, y: x.sin(),
+            lambda x, y: x.sinh(),
+            lambda x, y: x.sqrt(),
+            lambda x, y: abs(x),
+            lambda x, y: x.abs(),
+            lambda x, y: x.acos(),
+            lambda x, y: x.add(y, alpha=3),
+            # lambda x, y: x.addcdiv(2, y, y),
+            # lambda x, y: x.addcmul(2, y, y),
+            lambda x, y: x.asin(),
+            lambda x, y: x.atan(),
+            # lambda x, y: x.atan2(y),
+            lambda x, y: x.ceil(),
+            # lambda x, y: x.clamp(-1, 1),
+            chunk_op,
+            # unsqueeze_op,
+
+
         ]
         for fn in fns:
-            result = fn(x, y, s)
+            result = fn(x, y)
+            # if (result.is_contiguous(memory_format=torch.channels_last) == False):
+            #     import os
+            #     input(os.getpid())
+            #     fn(x, y)
+
             self.assertTrue(
                 result.is_contiguous(memory_format=torch.channels_last),
                 "result of the '{}' is not in channels_last format".format(inspect.getsource(fn).strip()))
