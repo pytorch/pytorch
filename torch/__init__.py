@@ -309,6 +309,7 @@ import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.openmp
 import torch.__config__
+import torch.__future__
 
 _C._init_names(list(torch._storage_classes))
 
