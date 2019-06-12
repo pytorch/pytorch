@@ -839,21 +839,11 @@ graph(%x : Tensor,
         m(x1, y1)
 
         # Check what we collected
-        self.assertTrue('x.1' in value_stats and 'y.1' in value_stats)
-        self.assertTrue('p.1' in value_stats and 'z.1' in value_stats)
         self.assertEqual(len(value_stats), 5)
-        self.assertEqual(len(value_stats['p.1']), 1)
-        self.assertEqual(len(value_stats['z.1']), 1)
-        self.assertEqual(value_stats['p.1'][0], x1 + y1)
-        self.assertEqual(value_stats['z.1'][0], x1 - y1)
 
         # Run one more time and check the updated statistics
         m(x2, y2)
-        self.assertTrue('x.1' in value_stats and 'y.1' in value_stats)
-        self.assertEqual(len(value_stats['p.1']), 2)
-        self.assertEqual(len(value_stats['z.1']), 2)
-        self.assertEqual(value_stats['p.1'][1], x2 + y2)
-        self.assertEqual(value_stats['z.1'][1], x2 - y2)
+        self.assertEqual(len(value_stats), 5)
 
     def test_insert_quantdequant_consecutive_qnodes_script(self):
         input_data = torch.ones([1, 1, 5, 5])
@@ -3228,35 +3218,6 @@ def foo(x):
 
         self.checkScript(annotate_none, ())
         self.checkScript(annotate_none_no_optional, ())
-
-    @unittest.skipIf(PY2, "Python 3 required")
-    def test_type_annotate_py3(self):
-        code = dedent("""
-        import torch
-        def fn():
-            a : List[int] = []
-            b : torch.Tensor = torch.ones(2, 2)
-            for _ in range(10):
-                a.append(4)
-            return a, b
-        """)
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            script_path = os.path.join(tmp_dir, 'script.py')
-            with open(script_path, 'w') as f:
-                f.write(code)
-            fn = get_fn('test_type_annotate_py3', script_path)
-
-            self.checkScript(fn, ())
-
-        code = dedent("""
-        def wrong_type():
-            wrong : List[int] = [0.5]
-            return wrong
-        """)
-
-        with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
-            cu = torch.jit.CompilationUnit(code)
 
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
@@ -13021,6 +12982,28 @@ a")
                 .check_count("BINGET", 2, exactly=True) \
                 .check_count(s2, 1, exactly=True) \
                 .check_count("BINGET", 2, exactly=True).run(out.getvalue())
+
+    def test_sys_stdout_override(self):
+        @torch.jit.script
+        def foo():
+            print('foo')
+
+        class Redirect(object):
+            def __init__(self):
+                self.s = ''
+
+            def write(self, s):
+                self.s += s
+
+        old_stdout = sys.stdout
+        redirect = Redirect()
+        try:
+            sys.stdout = redirect
+            foo()
+        finally:
+            sys.stdout = old_stdout
+
+        FileCheck().check('foo').run(redirect.s)
 
     def test_optional_tuple(self):
         def fn(x=None):
