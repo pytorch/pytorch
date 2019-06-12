@@ -531,9 +531,6 @@ endif()
 add_library(caffe2 ${Caffe2_CPU_SRCS})
 
 
-option(TORCH_STATIC "Build libtorch.a rather than libtorch.so" OFF)
-
-
 # This is required for older versions of CMake, which don't allow
 # specifying add_library() without a list of source files
 set(DUMMY_EMPTY_FILE ${CMAKE_BINARY_DIR}/empty.cpp)
@@ -550,11 +547,7 @@ file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
 # Wrapper library for transition to merged libcaffe and libtorch.
 # Only necessary on Windows?
 # Contains "caffe2" and "caffe2_gpu".
-if (TORCH_STATIC)
-  add_library(torch STATIC ${DUMMY_EMPTY_FILE})
-else()
-  add_library(torch SHARED ${DUMMY_EMPTY_FILE})
-endif()
+add_library(torch ${DUMMY_EMPTY_FILE})
 
 
 target_link_libraries(torch caffe2)
@@ -966,7 +959,7 @@ install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
 
 install(TARGETS torch DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
-if (MSVC AND NOT TORCH_STATIC)
+if (MSVC)
   install(FILES $<TARGET_PDB_FILE:torch> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
 endif()
 
