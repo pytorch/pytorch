@@ -279,8 +279,8 @@ RegisterOperators reg({
           if (scalar_type != initial_scalar_type || dev != tensor.device()) { \
             tensor = tensor.to(dev, scalar_type);                             \
           }                                                                   \
-          push(stack, std::move(tensor));                                     \
           tensor.set_requires_grad(requires_grad);                            \
+          push(stack, std::move(tensor));                                     \
           return 0;                                                           \
         };                                                                    \
       }),
