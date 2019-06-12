@@ -436,7 +436,7 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGenerator* generator) {
 
   for(int64_t i = 0; i < n - 1; i++)
   {
-    int64_t z = generator->random64() % (n-i);
+    int64_t z = generator->random() % (n-i);
     scalar_t sav = r__data[i*r__stride_0];
     r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
     r__data[(z+i)*r__stride_0] = sav;
