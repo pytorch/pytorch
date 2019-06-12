@@ -255,7 +255,7 @@ void initJitScriptBindings(PyObject* module) {
   // Methods here are prefixed with _ since they should not be
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
-      .def(py::init<>())
+      .def(py::init<std::string>())
       .def(
           "save",
           [](std::shared_ptr<Module> m,
@@ -339,7 +339,7 @@ void initJitScriptBindings(PyObject* module) {
           "_set_attribute",
           [](Module& self, const std::string& name, py::object value) {
             auto attr = self.find_attribute(name);
-            AT_CHECK(attr != nullptr, "Could not find attribute '", name, "'");
+            TORCH_CHECK(attr != nullptr, "Could not find attribute '", name, "'");
             auto ivalue = toIValue(value, attr->type());
             attr->setValue(ivalue);
           })
@@ -355,7 +355,7 @@ void initJitScriptBindings(PyObject* module) {
             py::tuple result(modules.size());
             for (size_t i = 0; i < modules.size(); ++i) {
               auto& item = modules[i];
-              result[i] = std::make_pair(item->name(), item);
+              result[i] = std::make_pair(item->field_name(), item);
             }
             return result;
           })
@@ -538,19 +538,21 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("name", &Function::name);
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
-      .def("__call__",
-           [](py::args args, py::kwargs kwargs) {
-             // see: [pybind11 varargs]
-             Method &method = py::cast<Method &>(args[0]);
-             return invokeScriptMethodFromPython(
-                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
-           })
+      .def(
+          "__call__",
+          [](py::args args, py::kwargs kwargs) {
+            // see: [pybind11 varargs]
+            Method& method = py::cast<Method&>(args[0]);
+            return invokeScriptMethodFromPython(
+                method, tuple_slice(std::move(args), 1), std::move(kwargs));
+          })
       .def_property_readonly("graph", &Method::graph)
-      .def_property_readonly("schema",
-                             [](Method &m) { return m.function().getSchema(); })
       .def("_lowered_graph", &Method::_lowered_graph)
+      .def_property_readonly("schema", [](Method& m) {
+        return m.function().getSchema();
+      })
       .def_property_readonly("name", &Method::name)
-      .def_property_readonly("code", [](Method &self) {
+      .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
         std::vector<ClassTypePtr> classes;

@@ -1147,6 +1147,9 @@ class OrderedDictWrapper(object):
     def values(self):
         return [v for k, v in self.items()]
 
+    def __len__(self):
+        return len(self.values())
+
     def __delitem__(self, k):
         raise RuntimeError("cannot delete methods or parameters of a script module")
 
@@ -1443,7 +1446,7 @@ if _enabled:
                       return input
         """
         def __init__(self, optimize=True):
-            self.__dict__['_c'] = torch._C.ScriptModule()
+            self.__dict__['_c'] = torch._C.ScriptModule(type(self).__name__)
             Module.__init__(self)
             self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)

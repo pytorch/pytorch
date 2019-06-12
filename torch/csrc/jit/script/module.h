@@ -57,7 +57,7 @@ using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(Module* owner, const std::shared_ptr<Function>& function);
+  Method(Module* owner, std::shared_ptr<Function> function);
 
   // the module that contains this method.
   Module& owner() const {
@@ -109,12 +109,16 @@ struct Module;
 
 struct TORCH_API Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
-  Module()
-      : name_("__main__"),
+  Module(std::string class_name)
+      : field_name_("__main__"),
         module_value_(c10::ivalue::Object::create(
-            ClassType::createModuleType(std::make_shared<CompilationUnit>()),
+            ClassType::create(
+                QualifiedName(std::move(class_name)),
+                std::make_shared<CompilationUnit>(),
+                /*is_module=*/true),
             0)) {}
-
+  Module()
+  : Module("$Module") {}
   ~Module() {
     // ClassType own the compilation unit of their Functions, but each
     // Function has a self argument which owns the ClassType, created a
@@ -122,8 +126,8 @@ struct TORCH_API Module {
     // here we break the cycle.
     class_compilation_unit().drop_all_functions();
   }
-  const std::string& name() const {
-    return name_;
+  const std::string& field_name() const {
+    return field_name_;
   }
 
   // note this doesn't change the flags of existing methods just ones
@@ -184,7 +188,7 @@ struct TORCH_API Module {
   void register_module(
       const std::string& name,
       std::shared_ptr<Module> module) {
-    module->name_ = name;
+    module->field_name_ = name;
     appendSlot(name, module->module_value_->type(), module->module_value_);
     insert(name, modules_, EntityType::MODULE, std::move(module));
   }
@@ -513,7 +517,11 @@ private:
   std::vector<std::unique_ptr<Method>> methods_;
 
   std::unordered_map<std::string, Entry> dict_;
-  std::string name_;
+
+  // The name of the module as it appears as a submodule
+  // parent.myself = this_module
+  // 'myself' is the field name:
+  std::string field_name_;
 
   ModulePtr module_value_;
 

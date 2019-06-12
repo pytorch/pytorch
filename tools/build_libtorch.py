@@ -19,4 +19,4 @@ if __name__ == '__main__':
     options = parser.parse_args()
 
     build_caffe2(version=None, cmake_python_library=None, build_python=False,
-                 rerun_cmake=True, cmake_only=False, build_dir='build')
+                 rerun_cmake=True, cmake_only=False, build_dir='.')

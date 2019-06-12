@@ -27,7 +27,6 @@ struct Graph;
 struct Node;
 using Stack = std::vector<c10::IValue>;
 using c10::ivalue::Future;
-using c10::ivalue::Tuple;
 
 struct TORCH_API Code {
   Code() : pImpl(nullptr) {}
