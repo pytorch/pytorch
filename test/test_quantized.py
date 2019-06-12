@@ -482,11 +482,11 @@ class TestQuantizedConv(unittest.TestCase):
     """Tests the correctness of quantized convolution op."""
     @given(
         batch_size=st.integers(1, 3),
-        input_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
+        input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
         height=st.integers(10, 16),
         width=st.integers(7, 14),
-        output_channels_per_group=st.sampled_from([2, 3, 4, 5, 8, 16, 32]),
-        groups=st.integers(1, 1),
+        output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
+        groups=st.integers(1, 3),
         kernel_h=st.integers(1, 7),
         kernel_w=st.integers(1, 7),
         stride_h=st.integers(1, 2),
@@ -538,6 +538,7 @@ class TestQuantizedConv(unittest.TestCase):
                 (output_channels, int(input_channels / groups), kernel_h, kernel_w)),
         )
 
+
         b_init = torch.from_numpy(np.random.randint(0, 10, (output_channels,)))
 
         # Existing floating point conv operator
@@ -570,8 +571,8 @@ class TestQuantizedConv(unittest.TestCase):
         # reformat X_init and W_init in the required format by conv operator
         # NCHW -> NHWC
         X_NHWC = X_init.permute([0, 2, 3, 1]).contiguous()
-        # KCRS -> RSCK
-        W_RSCK = W_init.permute([2, 3, 1, 0]).contiguous()
+        # K(C/G)RS -> KRS(C/G)
+        W_KRSC = W_init.permute([0, 2, 3, 1]).contiguous()
 
         X_scale = 1.5
         # Currently only 0 as zero point is supported.
@@ -580,7 +581,7 @@ class TestQuantizedConv(unittest.TestCase):
 
         W_scale = 2.5
         W_zero_point = 0
-        W = W_scale * (W_RSCK - W_zero_point).to(dtype=torch.float)
+        W = W_scale * (W_KRSC - W_zero_point).to(dtype=torch.float)
 
         b = X_scale * W_scale * (b_init - 0).to(dtype=torch.float)
 
