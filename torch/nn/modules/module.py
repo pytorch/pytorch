@@ -6,6 +6,7 @@ import torch
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
+from torch.__future__ import change_nn_module_params_inplace_cpu_cuda
 
 
 _IncompatibleKeys = namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])
@@ -189,22 +190,22 @@ class Module(object):
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
-    def _apply(self, fn, change_params_inplace_cpu_cuda):
+    def _apply(self, fn):
         for module in self.children():
-            module._apply(fn, change_params_inplace_cpu_cuda)
+            module._apply(fn)
 
-        def compute_should_move_tensor(tensor, tensor_applied):
+        def compute_should_move_tensor(tensor, tensor_applied):  # yf225 TODO: rename this function! Don't mention "move" in the name
             # If the new tensor is still on the same device, we don't move
             # the existing tensor (and we in-place update the existing tensor
             # instead).
             if tensor.device != tensor_applied.device:
                 # If the new tensor is on a different device, then we take
-                # `change_params_inplace_cpu_cuda` into account only if we are
+                # `change_nn_module_params_inplace_cpu_cuda` into account only if we are
                 # moving the model between CPU and CUDA. Otherwise, we always
                 # move the existing tensor.
                 if (tensor.is_cuda and tensor_applied.device == torch.device('cpu')) or
                    (tensor.device == torch.device('cpu') and tensor_applied.is_cuda):
-                    return not change_params_inplace_cpu_cuda
+                    return not change_nn_module_params_inplace_cpu_cuda
                 else:
                     return True
             else:
@@ -285,7 +286,7 @@ class Module(object):
         fn(self)
         return self
 
-    def cuda(self, device=None, change_params_inplace_cpu_cuda=True):
+    def cuda(self, device=None):
         r"""Moves all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -295,103 +296,65 @@ class Module(object):
         Arguments:
             device (int, optional): if specified, all parameters will be
                 copied to that device
-            change_params_inplace_cpu_cuda (bool, optional): whether to change
-                the existing parameters in-place instead of assigning new tensors
-                to the parameters when moving the model from CPU to GPU.
 
         Returns:
             Module: self
         """
-        return self._apply(
-            lambda t: t.cuda(device),
-            change_params_inplace_cpu_cuda=change_params_inplace_cpu_cuda)
+        return self._apply(lambda t: t.cuda(device))
 
-    def cpu(self, change_params_inplace_cpu_cuda=True):
+    def cpu(self):
         r"""Moves all model parameters and buffers to the CPU.
 
-        Arguments:
-            change_params_inplace_cpu_cuda (bool, optional): whether to change
-                the existing parameters in-place instead of assigning new tensors
-                to the parameters when moving the model from GPU to CPU.
-
         Returns:
             Module: self
         """
-        return self._apply(
-            lambda t: t.cpu(),
-            change_params_inplace_cpu_cuda=change_params_inplace_cpu_cuda)
+        return self._apply(lambda t: t.cpu())
 
-    def type(self, dst_type, change_params_inplace_cpu_cuda=True):
+    def type(self, dst_type):
         r"""Casts all parameters and buffers to :attr:`dst_type`.
 
         Arguments:
             dst_type (type or string): the desired type
-            change_params_inplace_cpu_cuda (bool, optional): whether to change
-                the existing parameters in-place instead of assigning new tensors
-                to the parameters when moving the model between CPU and GPU.
 
         Returns:
             Module: self
         """
-        return self._apply(
-            lambda t: t.type(dst_type),
-            change_params_inplace_cpu_cuda=change_params_inplace_cpu_cuda)
+        return self._apply(lambda t: t.type(dst_type))
 
-    def float(self, change_params_inplace_cpu_cuda=True):
+    def float(self):
         r"""Casts all floating point parameters and buffers to float datatype.
 
-        Arguments:
-            change_params_inplace_cpu_cuda (bool, optional): whether to change
-                the existing parameters in-place instead of assigning new tensors
-                to the parameters when moving the model between CPU and GPU.
-
         Returns:
             Module: self
         """
-        return self._apply(
-            lambda t: t.float() if t.is_floating_point() else t,
-            change_params_inplace_cpu_cuda=change_params_inplace_cpu_cuda)
+        return self._apply(lambda t: t.float() if t.is_floating_point() else t)
 
-    def double(self, change_params_inplace_cpu_cuda=True):
+    def double(self):
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
 
-        Arguments:
-            change_params_inplace_cpu_cuda (bool, optional): whether to change
-                the existing parameters in-place instead of assigning new tensors
-                to the parameters when moving the model between CPU and GPU.
-
         Returns:
             Module: self
         """
-        return self._apply(
-            lambda t: t.double() if t.is_floating_point() else t,
-            change_params_inplace_cpu_cuda=change_params_inplace_cpu_cuda)
+        return self._apply(lambda t: t.double() if t.is_floating_point() else t)
 
-    def half(self, change_params_inplace_cpu_cuda=True):
+    def half(self):
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
 
-        Arguments:
-            change_params_inplace_cpu_cuda (bool, optional): whether to change
-                the existing parameters in-place instead of assigning new tensors
-                to the parameters when moving the model between CPU and GPU.
-
         Returns:
             Module: self
         """
-        return self._apply(
-            lambda t: t.half() if t.is_floating_point() else t,
-            change_params_inplace_cpu_cuda=change_params_inplace_cpu_cuda)
+        return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
 
         This can be called as
 
-        .. function:: to(device=None, dtype=None, non_blocking=False, change_params_inplace_cpu_cuda=True)
+        .. function:: to(device=None, dtype=None, non_blocking=False)
 
-        .. function:: to(dtype, non_blocking=False, change_params_inplace_cpu_cuda=True)
+        .. function:: to(dtype, non_blocking=False)
 
-        .. function:: to(tensor, non_blocking=False, change_params_inplace_cpu_cuda=True)
+        .. function:: to(tensor, non_blocking=False)
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
         floating point desired :attr:`dtype` s. In addition, this method will
@@ -414,9 +377,6 @@ class Module(object):
                 the floating point parameters and buffers in this module
             tensor (torch.Tensor): Tensor whose dtype and device are the desired
                 dtype and device for all parameters and buffers in this module
-            change_params_inplace_cpu_cuda (bool, optional): whether to change
-                the existing parameters in-place instead of assigning new tensors
-                to the parameters when moving the model between CPU and GPU.
 
         Returns:
             Module: self
@@ -451,7 +411,7 @@ class Module(object):
 
         """
 
-        device, dtype, non_blocking, change_params_inplace_cpu_cuda = torch._C._nn._parse_to(*args, **kwargs)
+        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:
             if not dtype.is_floating_point:
@@ -461,7 +421,7 @@ class Module(object):
         def convert(t):
             return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
-        return self._apply(convert, change_params_inplace_cpu_cuda=change_params_inplace_cpu_cuda)
+        return self._apply(convert)
 
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.
@@ -1094,10 +1054,8 @@ class Module(object):
                 p.grad.detach_()
                 p.grad.zero_()
 
-    def share_memory(self, change_params_inplace_cpu_cuda=True):
-        return self._apply(
-            lambda t: t.share_memory_(),
-            change_params_inplace_cpu_cuda=change_params_inplace_cpu_cuda)
+    def share_memory(self):
+        return self._apply(lambda t: t.share_memory_())
 
     def _get_name(self):
         return self.__class__.__name__
