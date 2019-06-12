@@ -329,22 +329,29 @@ struct ParserImpl {
     });
   }
 
-  // Parse expr's of the form [a:], [:b], [a:b], [:]
+  // Parse expr's of the form [a:], [:b], [a:b], [:] and all variations with "::"
   Expr parseSubscriptExp() {
-    TreeRef first, second;
+    TreeRef first, second, third;
     auto range = L.cur().range;
     if (L.cur().kind != ':') {
       first = parseExp();
     }
     if (L.nextIf(':')) {
-      if (L.cur().kind != ',' && L.cur().kind != ']') {
+      if (L.cur().kind != ',' && L.cur().kind != ']' && L.cur().kind != ':') {
         second = parseExp();
       }
+    if (L.nextIf(':')) {
+      if (L.cur().kind != ',' && L.cur().kind != ']') {
+        third = parseExp();
+      }
+    }
       auto maybe_first = first ? Maybe<Expr>::create(range, Expr(first))
                                : Maybe<Expr>::create(range);
       auto maybe_second = second ? Maybe<Expr>::create(range, Expr(second))
                                  : Maybe<Expr>::create(range);
-      return SliceExpr::create(range, maybe_first, maybe_second);
+      auto maybe_third = third ? Maybe<Expr>::create(range, Expr(third))
+                                : Maybe<Expr>::create(range);
+      return SliceExpr::create(range, maybe_first, maybe_second, maybe_third);
     } else {
       return Expr(first);
     }

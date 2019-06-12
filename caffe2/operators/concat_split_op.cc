@@ -47,7 +47,14 @@ vector<TensorShape> TensorInferenceForSplit(
   auto split = helper.GetRepeatedArgument<int>("split");
   // Equally split the input into outputs
   const int output_size = def.output_size();
-  if (split.empty()) {
+  if (def.input_size() == caffe2::SplitOp<CPUContext>::kSplitOpInputSize) {
+    if (!split.empty()) {
+      LOG(WARNING) << "If you set split with an input blob, do not pass in "
+                      "split in the argument.";
+    }
+    // We cannot infer output shape until we see the value of split input
+    return ret_invalid_shape();
+  } else if (split.empty()) {
     if (!input_channels % output_size) {
       LOG(WARNING) << "Input channels (" << input_channels
                    << ") should be divisible by number of outputs ("
@@ -268,15 +275,16 @@ vector<TensorShape> TensorInferenceForConcat(
     out_shape.insert(out_shape.begin() + canonical_axis, in.size());
   } else {
     for (int i = 1; i < in.size(); ++i) {
-      CAFFE_ENFORCE_EQ(
-          in[0].dims().size(),
-          in[i].dims().size(),
+      CAFFE_ENFORCE(
+          in[0].dims_size() == in[i].dims_size() ||
+              (canonical_axis == in[0].dims_size() - 1 &&
+               in[0].dims_size() == in[i].dims_size() + 1),
           "All inputs of Concat should have same dims except "
           "canonical_axis dim that is equal to ",
           canonical_axis,
           "Got different sizes for inputs 0 and ",
           i);
-      for (int j = 0; j < in[0].dims().size(); ++j) {
+      for (int j = 0; j < in[0].dims_size(); ++j) {
         if (j == canonical_axis) {
           continue;
         }

@@ -333,14 +333,14 @@ void InsertObserverNodes(
 }
 
 void InsertObserverNodes(
-    std::shared_ptr<script::Function>& function_var,
+    std::shared_ptr<Function>& function_var,
     Node* observer_node) {
   InsertObserverNodes(
       function_var->graph(), observer_node, function_var->num_inputs());
 }
 
 void InsertQuantDequantNodes(
-    std::shared_ptr<Graph>& graph,
+    const std::shared_ptr<Graph>& graph,
     const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
         qparam_dict) {
   std::stack<Block*> blocks_to_visit;
@@ -466,6 +466,15 @@ void InsertQuantDequantNodes(
       param_info.n->replaceInputWith(param_info.v, dq->output());
     }
   }
+}
+
+void InsertQuantDequantNodes(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
+        qparam_dict) {
+  const auto& method = moduleObj->get_method(method_name);
+  InsertQuantDequantNodes(method.graph(), qparam_dict);
 }
 
 void QuantLinting(std::shared_ptr<Graph>& graph) {

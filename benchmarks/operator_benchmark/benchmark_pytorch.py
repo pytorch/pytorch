@@ -63,12 +63,18 @@ class PyTorchOperatorTestCase(object):
         self.op_bench = op_bench
         self.framework = "PyTorch"
 
+    def run_jit_forward(self, num_runs):
+        """ This is a temp solution and will be removed later 
+            Run the forward op with JIT 
+        """
+        self.op_bench.jit_forward(num_runs)
+
     def run_forward(self, num_runs):
         """ TODO (mingzhe): when JIT is ready, switch this to JIT 
             Run the forward path of an op in many iterations
         """
         for _ in range(num_runs):
-            self.op_bench.forward()
+            self.output = self.op_bench.forward()
 
     def _output_mean(self):
         """ TODO (mingzhe): it is not necessary to sum up everything by myself, 
