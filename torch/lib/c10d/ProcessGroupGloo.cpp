@@ -107,11 +107,7 @@ void setInputs(O& opts, std::vector<at::Tensor>& tensors) {
 
 template <typename T, typename O>
 void setInput(O& opts, at::Tensor& tensor) {
-  // Tensor is contiguous, but might not start from the beginning of the storage.
-  // For example, it could come from chunk(..., dim=0)[1]. Hence, we need to use
-  // data_ptr() instead of tensor.storage().data()
-  // NB: not using tensor.data<T>() because tensor is not aware of gloo::TYPE
-  opts.setInput(static_cast<T*>(tensor.data_ptr()), tensor.numel());
+  opts.setInput(getDataPointer<T>(tensor), tensor.numel());
 }
 
 template <typename T, typename O>
@@ -121,7 +117,7 @@ void setOutputs(O& opts, std::vector<at::Tensor>& tensors) {
 
 template <typename T, typename O>
 void setOutput(O& opts, at::Tensor& tensor) {
-  opts.setOutput(static_cast<T*>(tensor.data_ptr()), tensor.numel());
+  opts.setOutput(getDataPointer<T>(tensor), tensor.numel());
 }
 
 #ifdef USE_CUDA
