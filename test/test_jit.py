@@ -12523,6 +12523,45 @@ a")
         # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
         self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
 
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_scriptmodule_transformer_cuda(self):
+
+        class MyModule(torch.jit.ScriptModule):
+            def __init__(self, transformer, sample_q, sample_kv):
+                super(MyModule, self).__init__()
+                transformer.eval()
+
+                self.mod = torch.jit.trace(transformer,
+                                           (sample_q, sample_kv))
+
+            @torch.jit.script_method
+            def forward(self, q, k):
+                return self.mod(q, k)
+
+        d_model = 8
+        nhead = 2
+        num_encoder_layers = 2
+        num_decoder_layers = 2
+        dim_feedforward = 16
+        bsz = 2
+        seq_length = 5
+        tgt_length = 3
+
+        src = torch.randn(seq_length, bsz, d_model)
+        tgt = torch.randn(tgt_length, bsz, d_model)
+        transformer = nn.Transformer(d_model, nhead, num_encoder_layers, 
+                                     num_decoder_layers, dim_feedforward, dropout=0.0)
+        model = MyModule(transformer, tgt, src)
+
+        src = torch.randn(seq_length, bsz, d_model)
+        tgt = torch.randn(tgt_length, bsz, d_model)
+        jit_out = model(tgt, src)
+        py_out = transformer(tgt, src)
+
+        # print(jit_out/py_out-1)
+        # print(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+        self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+
     def test_list_python_op(self):
         def python_list_op(lst):
             # type: (List[Tensor]) -> Tensor
