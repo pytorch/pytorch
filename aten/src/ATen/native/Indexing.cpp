@@ -263,6 +263,8 @@ Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, con
 }
 
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
   if (index.dim() >= 2) {
     AT_INDEX_ERROR("index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
   }
