@@ -22,11 +22,11 @@ using std::max;
 template <>
 bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
-  auto* Y = Output(0);
   int channels = X.dim32(1);
   int height = X.dim32(2);
   int width = X.dim32(3);
-  ConvPoolOpBase::SetOutputSize(X, Y, channels);
+  auto sizes = ConvPoolOpBase::GetOutputSize(X, channels);
+  auto* Y = Output(0, sizes, at::dtype<float>());
 
   const float* Xdata = X.data<float>();
   float* Ydata = Y->template mutable_data<float>();
@@ -160,11 +160,11 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 template <>
 bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   auto& X = Input(0);
-  auto* Y = Output(0);
   int height = X.dim32(1);
   int width = X.dim32(2);
   int channels = X.dim32(3);
-  ConvPoolOpBase::SetOutputSize(X, Y, channels);
+  auto sizes = ConvPoolOpBase::GetOutputSize(X, channels);
+  auto* Y = Output(0, sizes, at::dtype<float>());
   const float* Xdata = X.data<float>();
   float* Ydata = Y->template mutable_data<float>();
 
