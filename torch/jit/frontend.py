@@ -8,8 +8,8 @@ from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 
-# Borrowed from cPython implementation 
-# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411# 
+# Borrowed from cPython implementation
+# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
 
 _reserved_prefix = '__jit'
 _reserved_names = {'print'}
@@ -356,6 +356,15 @@ class StmtBuilder(Builder):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("pass"))
         return Pass(r)
 
+    @staticmethod
+    def build_Break(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("break"))
+        return Break(r)
+
+    @staticmethod
+    def build_Continue(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("continue"))
+        return Continue(r)
 
 class ExprBuilder(Builder):
     binop_map = {

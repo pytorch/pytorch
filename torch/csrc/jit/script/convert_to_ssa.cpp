@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/script/convert_to_ssa.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/passes/break_continue_transform.h>
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/mini_environment.h>
@@ -65,40 +67,90 @@ struct ControlFlowLoadStores {
     n->addInput(inp);
   }
 
+  static void insertUninitialized(
+      const std::string& name,
+      const TypePtr& type,
+      Block* b) {
+    WithInsertPoint insert(b);
+    auto g = b->owningGraph();
+    auto uninitialized = g->insertNode(g->createUninitialized(type))->output();
+    g->insertNode(g->createStore(name, uninitialized));
+  }
+
   void addIfLoadStores(Node* n) {
     auto true_block = n->blocks().at(0);
     auto false_block = n->blocks().at(1);
 
     auto true_vars = addControlFlowLoadStores(true_block);
     auto false_vars = addControlFlowLoadStores(false_block);
+
+    // BLOCK EXITS:
+    // In a graph like:
+    // for i in range(3):
+    //     if cond == 2:
+    //         if cond == 2:
+    //             m = 2
+    //             break
+    //         k = 1
+    //     else:
+    //         k = 2
+    //     m += k
+    // We transform the inner cond == 2 block to look like:
+    // if cond == 2:
+    //     m = 2
+    //     $did_break = True
+    // else:
+    //     $did_break = False
+    // if $did_break...
+    //    prim::VarEscape
+    // else:
+    //    k = 1
+    // For these new if nodes that guard ops after a continue/break may have
+    // occurred, the new variables that are defined need to escape scope.
+    // Otherwise, in the example above, we would error in the m += k call.
+
+    bool true_escape = block_exits.count(true_block) == 1;
+    bool false_escape = block_exits.count(false_block) == 1;
+
     std::set<std::string> mutated_variables;
 
     for (auto& v : true_vars->definedVariables()) {
-      if (false_vars->findInAnyFrame(v)) {
+      if (false_vars->findInAnyFrame(v) || false_escape) {
         mutated_variables.insert(v);
       }
     }
     for (auto& v : false_vars->definedVariables()) {
-      if (true_vars->findInAnyFrame(v)) {
+      if (true_vars->findInAnyFrame(v) || true_escape) {
         mutated_variables.insert(v);
       }
     }
 
-    // Following the same logic as emitIfElseBlocks in compiler.cpp,
-    // we emit a node output if the variable is defined in each block
-    // and the types of each block can be unified
-
     for (const auto& x : mutated_variables) {
       auto true_type = true_vars->findInAnyFrame(x);
       auto false_type = false_vars->findInAnyFrame(x);
-      auto unified = unifyTypes(true_type, false_type);
-      if (!unified) {
-        continue;
+      TypePtr out_type;
+      // if the type is nullptr, then the corresponding block was an exit block
+      if (true_type == nullptr) {
+        out_type = false_type;
+        true_type = false_type;
+        insertUninitialized(x, false_type, true_block);
+      } else if (false_type == nullptr) {
+        out_type = true_type;
+        false_type = true_type;
+        insertUninitialized(x, true_type, false_block);
+      } else {
+        // Following the same logic as emitIfElseBlocks in compiler.cpp,
+        // we emit a node output if the variable is defined in each block
+        // and the types of each block can be unified
+        auto unified = unifyTypes(true_type, false_type);
+        if (!unified) {
+          continue;
+        }
+        out_type = *unified;
       }
-
       addBlockOutput(true_block, true_type, x);
       addBlockOutput(false_block, false_type, x);
-      addNodeOutput(n, *unified, x);
+      addNodeOutput(n, out_type, x);
     }
   }
 
@@ -134,7 +186,8 @@ struct ControlFlowLoadStores {
 
   std::shared_ptr<TypeEnvironment> addControlFlowLoadStores(Block* block) {
     pushFrame(block);
-    for (Node* n : block->nodes()) {
+    for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+      Node* n = *it;
       switch (n->kind()) {
         case prim::If: {
           addIfLoadStores(n);
@@ -150,7 +203,14 @@ struct ControlFlowLoadStores {
         case prim::Store: {
           environment_stack->setVar(n->s(attr::name), n->input()->type());
         } break;
+        case prim::VarEscape: {
+          block_exits.insert(block);
+          it++;
+          n->destroy();
+          continue;
+        } break;
       }
+      it++;
     }
     return popFrame();
   }
@@ -169,56 +229,9 @@ struct ControlFlowLoadStores {
     addControlFlowLoadStores(graph->block());
   }
 
+  std::unordered_set<Block*> block_exits;
   std::shared_ptr<TypeEnvironment> environment_stack = nullptr;
 };
-
-void moveBlockBeforeNode(Node* before_node, Block* block) {
-  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
-    auto block_node = *it++;
-    block_node->moveBefore(before_node);
-  }
-}
-
-// The loop node is initially emitted as:
-// Loop(max_trip_count)
-//    block0(loop_counter) {
-//      <body>
-//    }
-//    block1 {
-//      <loop condition>
-//      -> (condition)
-//    }
-// Here, we inline the loop condition and convert the loop to the form:
-// Loop(max_trip_count, start_condition)
-//    block0(loop_counter, loop_carried_block*) {
-//      <body>
-//      -> (continue_condition)
-//    }
-void inlineLoopCondition(Node* n) {
-  Block* body_block = n->blocks().at(0);
-
-  auto pre_header = n->blocks().at(1);
-  auto header_block = n->addBlock();
-  header_block->cloneFrom(pre_header, [](Value* v) { return v; });
-  moveBlockBeforeNode(n, header_block);
-  n->addInput(header_block->outputs().at(0));
-  n->eraseBlock(2);
-
-  moveBlockBeforeNode(body_block->return_node(), pre_header);
-  body_block->insertOutput(0, pre_header->outputs().at(0));
-  n->eraseBlock(1);
-}
-
-void inlineLoopCondition(Block* block) {
-  for (Node* n : block->nodes()) {
-    for (Block* b : n->blocks()) {
-      inlineLoopCondition(b);
-    }
-    if (n->kind() == prim::Loop) {
-      inlineLoopCondition(n);
-    }
-  }
-}
 
 // Given a graph where outputs have been added to control flow nodes, and
 // loads and stores are represented in the graph, converts the graph to SSA
@@ -271,11 +284,11 @@ struct SSATransformer {
   std::shared_ptr<ValueEnvironment> environment_stack = nullptr;
 };
 
-// Converting to SSA works in multiple parts. First we inline the loop condition
-// before and into the body of loops, then we add outputs to control flow
-// nodes, then we stitch together Loads & Stores into SSA form.
+// Converting to SSA works in multiple parts. First we transform the graph
+// so that breaks and continues are removed, then we add loads and stores
+// to control flow nodes, then we stitch together Loads & Stores into SSA form.
 void ConvertToSSA(std::shared_ptr<Graph>& graph) {
-  inlineLoopCondition(graph->block());
+  TransformBreaks(graph);
   ControlFlowLoadStores ctrl;
   ctrl.run(graph);
   SSATransformer ssa;

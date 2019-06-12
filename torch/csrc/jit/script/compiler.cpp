@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/script/compiler.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
@@ -6,13 +7,15 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/script/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/script/convert_to_ssa.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/final_returns.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -769,6 +772,18 @@ struct to_ir {
         def.name().range(), def.name().name(), closure_value);
   }
 
+  void emitBreak(const Break& stmt) {
+    auto break_node =
+        graph->create(prim::BreakStmt, {}, 0)->setSourceRange(stmt.range());
+    graph->insertNode(break_node);
+  }
+
+  void emitContinue(const Continue& stmt) {
+    auto continue_node =
+        graph->create(prim::ContinueStmt, {}, 0)->setSourceRange(stmt.range());
+    graph->insertNode(continue_node);
+  }
+
   void emitReturn(const Return& stmt) {
     Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
@@ -851,6 +866,12 @@ struct to_ir {
           break;
         case TK_RETURN: {
           emitReturn(Return(stmt));
+        } break;
+        case TK_CONTINUE: {
+          emitContinue(Continue(stmt));
+        } break;
+        case TK_BREAK: {
+          emitBreak(Break(stmt));
         } break;
         case TK_PASS:
           // Emit nothing for pass
@@ -3076,6 +3097,11 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
   // so subsequent cleanups do not need reconvert it
   if (convert_ssa) {
     ConvertToSSA(to_clean);
+    // convert loops with an iter and body condition specified to
+    // python-recognize while loops. we do this so they can be exported,
+    // and run the pass early to avoid jitter. Like conversion to SSA,
+    // it only needs to run once.
+    CanonicalizeModifiedLoops(to_clean);
   }
   // NB ORDERING: SSA conversion has to occur before
   // lifting of closures and forks, this way closures are converted

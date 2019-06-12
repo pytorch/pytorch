@@ -405,6 +405,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/break_continue_transform.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp
@@ -434,6 +435,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/script/class_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/canonicalize_modified_loop.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/edit_distance.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/logging.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
