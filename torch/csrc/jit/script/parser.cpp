@@ -541,8 +541,7 @@ struct ParserImpl {
     auto r = L.cur().range;
     L.expect(TK_FOR);
     auto targets =
-        parseList(TK_NOTHING, ',', TK_NOTHING, &ParserImpl::parseExpWithoutIn);
-    L.expect(TK_IN);
+        parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseExpWithoutIn);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
     auto body = parseStatements();
     return For::create(r, targets, itrs, body);
