@@ -145,9 +145,6 @@
 #include <THNN/generic/SpatialAveragePooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/VolumetricAveragePooling.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/VolumetricConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
