@@ -2904,7 +2904,7 @@ class TestScript(JitTestCase):
             ("return [x x]", "expected ]"),
             ("return x, x,", True),
             ("return bar(x, x,)", True),
-            ("return bar()", "Argument x not provided"),
+            ("return bar()", "argument x not provided"),
             ("for a, b, in x, x,:\n        pass", "List of iterables"),
             ("a, b, = x, x,\n    return a + b", True)
         ]
@@ -3217,6 +3217,35 @@ def foo(x):
 
         self.checkScript(annotate_none, ())
         self.checkScript(annotate_none_no_optional, ())
+
+    @unittest.skipIf(PY2, "Python 3 required")
+    def test_type_annotate_py3(self):
+        code = dedent("""
+        import torch
+        def fn():
+            a : List[int] = []
+            b : torch.Tensor = torch.ones(2, 2)
+            for _ in range(10):
+                a.append(4)
+            return a, b
+        """)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            script_path = os.path.join(tmp_dir, 'script.py')
+            with open(script_path, 'w') as f:
+                f.write(code)
+            fn = get_fn('test_type_annotate_py3', script_path)
+
+            self.checkScript(fn, ())
+
+        code = dedent("""
+        def wrong_type():
+            wrong : List[int] = [0.5]
+            return wrong
+        """)
+
+        with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
+            cu = torch.jit.CompilationUnit(code)
 
     def test_robust_op_resolution(self):
         neg = torch.add  # misleading name to make sure we resolve by function
@@ -4508,7 +4537,7 @@ a")
         self.assertEqual(comp([1, 2, 3], [4, 5]), [3, 6, 9, 6, 7])
 
     def test_comprehensions_wrong_expr_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def comp(l):
                 # type: (List[int]) -> List[float]
@@ -5598,14 +5627,14 @@ a")
                 x = torch.jit._unwrap_optional(x)
             return x  # noqa: T484
 
-        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def or_error(x, y):
                 # type: (Optional[int], Optional[int]) -> None
                 if x is None or y is None:
                     print(x + y)  # noqa: T484
 
-        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def and_error(x, y):
                 # type: (Optional[int], Optional[int]) -> None
@@ -5614,7 +5643,7 @@ a")
                 else:
                     print(x + y)  # noqa: T484
 
-        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def named_var(x):
                 # type: (Optional[int]) -> None
@@ -5622,7 +5651,7 @@ a")
                 if x_none:
                     print(x + 1)  # noqa: T484
 
-        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def named_var_and(x, y):
                 # type: (Optional[int], Optional[int]) -> None
@@ -8550,7 +8579,7 @@ a")
                 f.write(code)
             fn = get_fn('test_type_annotation_py3', script_path)
 
-            with self.assertRaisesRegex(RuntimeError, r"Expected a value of type 'Tensor' for argument"
+            with self.assertRaisesRegex(RuntimeError, r"expected a value of type 'Tensor' for argument"
                                                       r" '0' but instead found type 'Tuple\[Tensor,"):
                 @torch.jit.script
                 def bad_fn(x):
@@ -8625,13 +8654,13 @@ a")
                 y = self.baz(x)
                 return x
 
-        with self.assertRaisesRegex(RuntimeError, "Expected at most 1 arguments but found 2"):
+        with self.assertRaisesRegex(RuntimeError, "expected at most 1 arguments but found 2"):
             ModuleTooMany()
-        with self.assertRaisesRegex(RuntimeError, "Argument 1 not provided"):
+        with self.assertRaisesRegex(RuntimeError, "argument 1 not provided"):
             ModuleTooFew()
         with self.assertRaisesRegex(RuntimeError, "need 3 values .* found only 2"):
             ModuleTooManyAssign()
-        with self.assertRaisesRegex(RuntimeError, "Argument 1 not provided."):
+        with self.assertRaisesRegex(RuntimeError, "argument 1 not provided."):
             ModuleDefault()
 
     def test_script_define_order(self):
@@ -9461,12 +9490,12 @@ a")
 
     def test_builtin_args_fails(self):
 
-        with self.assertRaisesRegex(RuntimeError, 'xpected at most'):
+        with self.assertRaisesRegex(RuntimeError, 'expected at most'):
             @torch.jit.script
             def f0(a):
                 torch.sum(a, a, a, a)
 
-        with self.assertRaisesRegex(RuntimeError, 'Argument self not provided'):
+        with self.assertRaisesRegex(RuntimeError, 'argument self not provided'):
             @torch.jit.script
             def f1(a):
                 torch.sum(foo=4)
@@ -9832,7 +9861,7 @@ a")
             ReassignSelfRHS()
 
     def test_unknown_builtin(self):
-        with self.assertRaisesRegex(RuntimeError, 'Unknown builtin op'):
+        with self.assertRaisesRegex(RuntimeError, 'unknown builtin op'):
             @torch.jit.script
             def unknown_builtin(x):
                 return x.splork(3)
@@ -9915,7 +9944,7 @@ a")
             ''')
 
     def test_invalid_call_arguments(self):
-        with self.assertRaisesRegex(RuntimeError, 'Arguments for call are not valid'):
+        with self.assertRaisesRegex(RuntimeError, 'arguments for call are not valid'):
             @torch.jit.script
             def invalid_call_arguments(x):
                 return torch.unsqueeze(3, 4, 5, 6, 7, 8)
@@ -9999,7 +10028,7 @@ a")
                 return io.BytesIO
 
     def test_wrong_method_call_inputs(self):
-        with self.assertRaisesRegex(RuntimeError, 'Argument y not provided'):
+        with self.assertRaisesRegex(RuntimeError, 'argument y not provided'):
             class SomeModule(torch.jit.ScriptModule):
 
                 @torch.jit.script_method
@@ -10032,7 +10061,7 @@ a")
             ''')
 
     def test_call_ge(self):
-        with self.assertRaisesRegex(RuntimeError, 'Expected at most 1 arguments but found 3'):
+        with self.assertRaisesRegex(RuntimeError, 'expected at most 1 arguments but found 3'):
             @_trace(torch.zeros(1, 2, 3))
             def foo(x):
                 return x
@@ -10805,7 +10834,7 @@ a")
                 return x, x  # noqa: T484
 
     def test_annotated_script_fn_arg_mismatch(self):
-        with self.assertRaisesRegex(RuntimeError, r"Arguments for call are not valid"):
+        with self.assertRaisesRegex(RuntimeError, r"arguments for call are not valid"):
             @torch.jit.script
             def tuple_arg(x):
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
@@ -11299,7 +11328,7 @@ a")
             foo(torch.ones([123]))  # wrong size
 
     def test_builtin_error_messsage(self):
-        with self.assertRaisesRegex(RuntimeError, "Arguments for call are not valid"):
+        with self.assertRaisesRegex(RuntimeError, "arguments for call are not valid"):
             @torch.jit.script
             def close_match(x):
                 return x.masked_fill(True)
@@ -13179,6 +13208,30 @@ class TestRecursiveScript(JitTestCase):
         self.assertExportImportModule(sm, args)
 
         return sm
+
+    @unittest.skipIf(PY2, "Class annotations are a thing in > 3.5")
+    def test_constants_with_final(self):
+        class M(torch.nn.Module):
+            # TODO: Use this (see below)
+            # x : torch.jit.Final[int]
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.x = 2
+
+            def forward(self, t):
+                return t + self.x
+
+
+        # TODO: Fix this test so that we can actually define the class like
+        #   class M(torch.nn.Module):
+        #       x : torch.jit.Final[int]
+        M.__annotations__ = {'x': torch.jit.Final[int]}
+
+        m = M()
+
+        self.checkModule(M(), (torch.randn(2, 2),))
+
 
     def test_script_basic(self):
         def a_python_fn(a, b, c):
@@ -15617,7 +15670,7 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_type_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected a value of type \'bool"):
+        with self.assertRaisesRegex(RuntimeError, "expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
             class FooTest(object):
                 def __init__(self, x):

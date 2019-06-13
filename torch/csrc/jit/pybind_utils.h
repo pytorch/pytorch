@@ -557,7 +557,7 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
 }
 
 inline py::object
-invokeScriptFunctionFromPython(script::Function &callee, tuple_slice args,
+invokeScriptFunctionFromPython(Function &callee, tuple_slice args,
                                py::kwargs kwargs,
                                c10::optional<IValue> self = c10::nullopt) {
   auto stack = createStackForSchema(callee.getSchema(), std::move(args),
