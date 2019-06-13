@@ -237,6 +237,24 @@ IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
   return stack.front();
 }
 
+
+static std::vector<at::Tensor> loadTensors(const std::vector<Slot>& slots) {
+  std::vector<at::Tensor> result;
+  result.reserve(slots.size());
+  for(const Slot& slot : slots) {
+    result.emplace_back(slot.value().toTensor());
+  }
+  return result;
+}
+std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_graph() {
+  if(getFirstClassMode()) {
+    auto result = lower_graph(owner().module_object(), *graph());
+    return std::make_pair(result.first, loadTensors(result.second));
+  } else {
+    return std::make_pair(graph(), loadTensors(initial_ivalues()));
+  }
+}
+
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
   class_compilation_unit().define(
       src,
@@ -332,11 +350,6 @@ void Module::train(bool on) {
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
-  // Classes live in the top-level compilation unit.
-  if (parent_) {
-    return parent_->create_class(name, std::move(stack));
-  }
-
   // Look up the class
   const auto classType =
       class_compilation_unit().get_class(c10::QualifiedName(name));
