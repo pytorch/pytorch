@@ -52,7 +52,7 @@ fi
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 export PYTORCH_BUILD_VERSION="1.1.0"
-export PYTORCH_BUILD_NUMBER=1
+export PYTORCH_BUILD_NUMBER=2
 
 cat >>"$envfile" <<EOL
 # =================== The following code will be executed inside Docker container ===================
