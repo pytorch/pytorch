@@ -527,6 +527,20 @@ TEST(ListTest_IValueBasedList, copyHasSeparateStorage) {
   EXPECT_EQ(0, list3.size());
 }
 
+TEST(ListTest_IValueBasedList, givenEqualLists_thenIsEqual) {
+  ListPtr<string> list1 = make_list<string>({"first", "second"});
+  ListPtr<string> list2 = make_list<string>({"first", "second"});
+
+  EXPECT_TRUE(list_is_equal(list1, list2));
+}
+
+TEST(ListTest_IValueBasedList, givenDifferentLists_thenIsNotEqual) {
+  ListPtr<string> list1 = make_list<string>({"first", "second"});
+  ListPtr<string> list2 = make_list<string>({"first", "not_second"});
+
+  EXPECT_FALSE(list_is_equal(list1, list2));
+}
+
 
 static_assert(std::is_same<int64_t, typename ListPtr<int64_t>::internal_value_type_test_only>::value, "If this fails, then it seems we changed ListPtr<int64_t> to store it as std::vector<IValue> instead of std::vector<int64_t>. We need to change ListTest_NonIValueBasedList test cases to use a different type that is still not based on IValue.");
 
@@ -1050,4 +1064,18 @@ TEST(ListTest_NonIValueBasedList, copyHasSeparateStorage) {
   EXPECT_EQ(1, list1.size());
   EXPECT_EQ(0, list2.size());
   EXPECT_EQ(0, list3.size());
+}
+
+TEST(ListTest_NonIValueBasedList, givenEqualLists_thenIsEqual) {
+  ListPtr<int64_t> list1 = make_list<int64_t>({1, 3});
+  ListPtr<int64_t> list2 = make_list<int64_t>({1, 3});
+
+  EXPECT_TRUE(list_is_equal(list1, list2));
+}
+
+TEST(ListTest_NonIValueBasedList, givenDifferentLists_thenIsNotEqual) {
+  ListPtr<int64_t> list1 = make_list<int64_t>({1, 3});
+  ListPtr<int64_t> list2 = make_list<int64_t>({1, 2});
+
+  EXPECT_FALSE(list_is_equal(list1, list2));
 }

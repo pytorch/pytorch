@@ -350,6 +350,7 @@ BLAS and LAPACK Operations
 .. autofunction:: solve
 .. autofunction:: svd
 .. autofunction:: symeig
+.. autofunction:: trapz
 .. autofunction:: triangular_solve
 .. autofunction:: trtrs
 

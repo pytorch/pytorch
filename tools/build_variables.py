@@ -91,6 +91,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/inline_forked_closures.cpp",
     "torch/csrc/jit/passes/inplace_check.cpp",
     "torch/csrc/jit/passes/insert_guards.cpp",
+    "torch/csrc/jit/passes/liveness.cpp",
     "torch/csrc/jit/passes/loop_unrolling.cpp",
     "torch/csrc/jit/passes/lower_grad_of.cpp",
     "torch/csrc/jit/passes/lower_tuples.cpp",
