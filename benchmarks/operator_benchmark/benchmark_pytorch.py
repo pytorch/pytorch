@@ -74,7 +74,7 @@ class PyTorchOperatorTestCase(object):
             Run the forward path of an op in many iterations
         """
         for _ in range(num_runs):
-            self.op_bench.forward()
+            self.output = self.op_bench.forward()
 
     def _output_mean(self):
         """ TODO (mingzhe): it is not necessary to sum up everything by myself, 
