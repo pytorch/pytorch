@@ -40,7 +40,7 @@ ListPtr<T> ListPtr<T>::copy() const {
 
 namespace detail {
   template<class T>
-  T list_element_to(const T& element) {
+  T list_element_to(T element) {
     return element;
   }
   template<class T>
