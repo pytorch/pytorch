@@ -490,9 +490,9 @@ def softmax(g, input, dim, dtype=None):
             dim = input.type().dim() + dim
         if input.type().dim() == dim + 1:
             softmax = g.op('Softmax', input, axis_i=dim)
-        if dtype and dtype.node().kind() != 'prim::Constant':
-            parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
-            softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+            if dtype and dtype.node().kind() != 'prim::Constant':
+                parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
+                softmax = g.op("Cast", softmax, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
             return softmax
     exp = g.op('Exp', input)
     sum = g.op('ReduceSum', exp, axes_i=[dim])
