@@ -4,7 +4,7 @@
 if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
   project(torch CXX C)
-  find_package(torch REQUIRED)
+  find_package(Caffe2 REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
@@ -128,7 +128,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
-    torch_library
+    caffe2_library
     shm)
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
@@ -175,6 +175,7 @@ if (USE_CUDA)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${LIBNVTOOLSEXT})
     endif()
 
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES caffe2_gpu_library)
 endif()
 
 if (USE_CUDNN)
@@ -210,7 +211,7 @@ if (USE_ROCM)
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
       ${GENERATED_THNN_CXX_CUDA}
       )
-
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES caffe2_hip_library)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS
       USE_ROCM
       __HIP_PLATFORM_HCC__

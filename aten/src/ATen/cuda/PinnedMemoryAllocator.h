@@ -4,6 +4,6 @@
 
 namespace at { namespace cuda {
 
-CAFFE2_API at::Allocator* getPinnedMemoryAllocator();
+at::Allocator* getPinnedMemoryAllocator();
 
 }} // namespace at::cuda

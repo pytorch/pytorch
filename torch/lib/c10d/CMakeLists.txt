@@ -58,7 +58,20 @@ set(C10D_SRCS
   Utils.cpp
   )
 
-set(C10D_LIBS torch)
+if(C10D_USE_CUDA)
+  set(C10D_LIBS
+    caffe2_gpu
+    )
+elseif(C10D_USE_ROCM)
+  set(C10D_LIBS
+    caffe2_hip
+    )
+else()
+  set(C10D_LIBS
+    caffe2
+    )
+endif()
+
 
 if(USE_C10D_NCCL)
   list(APPEND C10D_SRCS ProcessGroupNCCL.cpp)
@@ -87,7 +100,7 @@ target_compile_options(c10d PUBLIC
   )
 
 
-add_dependencies(c10d torch)
+add_dependencies(c10d caffe2)
 
 if (USE_GLOO)
   add_dependencies(c10d gloo)
