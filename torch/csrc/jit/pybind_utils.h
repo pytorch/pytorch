@@ -328,6 +328,8 @@ inline IValue toIValue(
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
+    case TypeKind::CapsuleType:
+      AT_ERROR("Capsule Values aren't supported");
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",

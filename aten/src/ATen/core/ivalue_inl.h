@@ -348,8 +348,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  public:
+  int id;
   Object(std::shared_ptr<ClassType> type, size_t numSlots) : type_(std::move(type)) {
     slots_.resize(numSlots);
+    id = rand()%1000;
   }
 
   static c10::intrusive_ptr<Object> create(

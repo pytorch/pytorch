@@ -21,6 +21,26 @@ using namespace std;
 namespace torch {
 namespace jit {
 
+
+template <class R, class...>
+struct types {
+  const static bool hasRet = true;
+  using type = types;
+};
+template <class... args>
+struct types<void, args...> {
+  const static bool hasRet = false;
+  using type = types;
+};
+template <class Sig>
+struct args;
+template <class R, class CurClass, class... Args>
+struct args<R (CurClass::*)(Args...)> : types<R, Args...> {};
+template <class Sig>
+using args_t = typename args<Sig>::type;
+template<class... Types>
+types<void, Types...> init() {}
+
 template <class CurClass>
 struct class_ {
   std::string className;
@@ -83,11 +103,16 @@ struct class_ {
     v->setType(getTypePtr<T>());
   }
   template <class... Types>
-  class_& init() {
+  class_& def(types<void, Types...>) {  // Used in combination with torch::jit::init<...>()
     pyClass->def(py::init<Types...>());
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::__init__";
     auto func = [](CurClass* cur, Types... args) { *cur = CurClass(args...); };
+  //  auto func = [](CurClass* cur, Types... args) {
+  //     auto res = new Capsule();
+  //     res->ptr = (void*)(new CurClass(args...));
+  //     return res;
+  //   };
     std::vector<Value*> inputs = addInputs(func, graph);
     static auto classRegistry =
         c10::RegisterOperators().op(qualFuncName, std::move(func));
@@ -105,24 +130,7 @@ struct class_ {
     return *this;
   }
 
-  template <class R, class...>
-  struct types {
-    const static bool hasRet = true;
-    using type = types;
-  };
-  template <class... args>
-  struct types<void, args...> {
-    const static bool hasRet = false;
-    using type = types;
-  };
-  template <class Sig>
-  struct args;
-  template <class R, class... Args>
-  struct args<R (CurClass::*)(Args...)> : types<R, Args...> {};
-  template <class Sig>
-  using args_t = typename args<Sig>::type;
   template <typename Func, typename R, typename... Types>
-
   class_& def_(string name, Func f, types<R, Types...> funcInfo) {
     pyClass->def(name.c_str(), f);
     auto qualFuncName = className + "::" + name;

@@ -60,8 +60,6 @@ template <typename T>
 struct getTypePtr_ final {
   static TypePtr call() {
     auto res = tmap.find<T>();
-    std::cout<<typeid(T).name()<<std::endl;
-    std::cout<<tmap.size()<<std::endl;
     if (res == tmap.end()) {
         throw c10::Error("Trying to convert a class that's not registered.", "");
     }

@@ -500,6 +500,7 @@ RegisterOperators reg(
            return [num_inputs](Stack& stack) {
              bool first = true;
              for (const IValue& i : last(stack, num_inputs)) {
+               std::cout<<"printing: "<<&i<<std::endl;
                if (!first)
                  std::cout << " ";
                first = false;
@@ -971,6 +972,7 @@ RegisterOperators reg(
            const size_t numAttrs = type->numAttributes();
            return [type, numAttrs](Stack& stack) {
              auto userObj = c10::ivalue::Object::create(type, numAttrs);
+             std::cout<<"create object object id: "<<userObj->id<<std::endl;
              push(stack, std::move(userObj));
              return 0;
            };
@@ -979,7 +981,8 @@ RegisterOperators reg(
          "prim::CreateCapsule() -> Capsule",
          [](Stack& stack) {
             auto userObj = Capsule();
-            auto res = IValue(c10::make_intrusive<Capsule>(std::move(userObj)));
+            auto capsulePtr = c10::make_intrusive<Capsule>(std::move(userObj));
+            auto res = IValue(capsulePtr);
             push(stack, std::move(res));
             return 0;
          }),
@@ -1002,7 +1005,9 @@ RegisterOperators reg(
        const auto slot = type->getAttributeSlot(field);
        return [slot](Stack& stack) {
          auto v = pop(stack);
-         auto userObj = pop(stack).toObject();
+         auto iv = pop(stack);
+         auto userObj = iv.toObject();
+         std::cout<<"object id set attr: "<<userObj->id<<std::endl;
          userObj->setSlot(slot, std::move(v));
          return 0;
        };
