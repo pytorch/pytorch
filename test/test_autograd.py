@@ -2564,6 +2564,7 @@ class TestAutograd(TestCase):
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
 
+    @skipIfRocm
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_profiler_emit_nvtx(self):
         # This test is not intended to ensure correctness of nvtx ranges.
