@@ -67,19 +67,13 @@ static void div_kernel_cuda(TensorIterator& iter) {
 
 template <typename scalar_t>
 void mul_kernel_impl(TensorIterator& iter) {
-  if (iter.dtype() == at::ScalarType::Bool) {
-    gpu_binary_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
-      return a && b;
-    });
-  } else {
-    gpu_binary_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return a * b;
-    });
-  }
+  gpu_binary_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+    return a * b;
+  });
 }
 
 static void mul_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, iter.dtype(), "mul_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "mul_cuda", [&]() {
     mul_kernel_impl<scalar_t>(iter);
   });
 }
