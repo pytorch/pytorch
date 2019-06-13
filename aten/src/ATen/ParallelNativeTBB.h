@@ -85,5 +85,4 @@ void intraop_invoke(const F0& f0, const F1& f1) {
   tbb::parallel_invoke(f0, f1);
 }
 
-
 } // namespace at
