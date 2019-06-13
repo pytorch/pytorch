@@ -9,7 +9,7 @@ pt_checkout="/var/lib/jenkins/workspace"
 
 echo "doc_push_script.sh: Invoked with $*"
 
-git clone https://github.com/pytorch/pytorch.github.io -b willfeng_test  # yf225 TODO: change all reference of `willfeng_test` to `site` in this file!
+git clone https://github.com/pytorch/pytorch.github.io -b site
 pushd pytorch.github.io
 
 set -ex
@@ -91,26 +91,21 @@ git config user.name "pytorchbot"
 git commit -m "auto-generating sphinx docs" || true
 git status
 
-export dry_run=false  # yf225 TODO: remove this when ready to merge
-
 if [ "$dry_run" = false ]; then
   echo "Pushing to pytorch.github.io:site"
-  echo "GITHUB_PYTORCHBOT_TOKEN: " $GITHUB_PYTORCHBOT_TOKEN  # yf225 TODO: remove this when ready to merge
   set +x
 /usr/bin/expect <<DONE
-  spawn git push origin willfeng_test
+  spawn git push origin site
   expect "Username*"
   send "pytorchbot\n"
   expect "Password*"
-  send "$env(GITHUB_PYTORCHBOT_TOKEN)\n"
+  send "$::env(GITHUB_PYTORCHBOT_TOKEN)\n"
   expect eof
 DONE
   set -x
 else
   echo "Skipping push due to dry_run"
 fi
-
-exit 1  # yf225 TODO: remove this when ready to merge
 
 popd
 # =================== The above code **should** be executed inside Docker container ===================
