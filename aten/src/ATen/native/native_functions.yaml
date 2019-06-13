@@ -2008,6 +2008,9 @@
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
 
+- func: has_same_tensorimpl_type_as(Tensor self, Tensor other) -> bool
+  variants: method
+
 - func: _unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
   variants: function
   dispatch:

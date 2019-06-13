@@ -193,48 +193,36 @@ class Module(object):
         for module in self.children():
             module._apply(fn)
 
-        def compute_should_change_tensor_inplace(tensor, tensor_applied):
-            if tensor.device != tensor_applied.device:
-                # If the new tensor is on a different device, then we take
-                # `torch.__future__.change_nn_module_params_inplace_cpu_cuda`
-                # into account only if we are moving the model between CPU and CUDA.
-                # Otherwise, we always replace the existing tensor.
-                if (tensor.is_cuda and tensor_applied.device == torch.device('cpu')) or \
-                   (tensor.device == torch.device('cpu') and tensor_applied.is_cuda):
-                    return torch.__future__.change_nn_module_params_inplace_cpu_cuda
-                else:
-                    return False
+        def compute_should_use_data(tensor, tensor_applied):
+            if tensor.has_same_tensorimpl_type_as(tensor_applied):
+                # If the new tensor has the same TensorImpl type as the existing tensor,
+                # then we take `torch.__future__.overwrite_module_params_on_conversion()`
+                # into account.
+                return not torch.__future__.overwrite_module_params_on_conversion()
             else:
-                # If the new tensor is on the same device, we always in-place
-                # update the existing tensor.
-                return True
+                # If the new tensor has a different TensorImpl type, we always overwrite
+                # the existing tensor.
+                return False
 
         for key, param in self._parameters.items():
             if param is not None:
-                param_applied = fn(param)
-                if not compute_should_change_tensor_inplace(param, param_applied):
-                    # Tensors stored in modules are graph leaves, and we don't want to
-                    # create copy nodes, so we have to use `with torch.no_grad():`
-                    with torch.no_grad():
-                        self._parameters[key] = Parameter(param_applied, param.requires_grad)
-                        # Bump up the version counter of the original parameter, to invalidate
-                        # any previous references of it in the autograd graph.
-                        param._bump_version()
-                else:
+                if compute_should_use_data(param, fn(param)):
                     # Tensors stored in modules are graph leaves, and we don't
                     # want to create copy nodes, so we have to unpack the data.
-                    param.data = param_applied
+                    param.data = fn(param.data)
+                else:
+                    # Tensors stored in modules are graph leaves, and we don't want to
+                    # create copy nodes, so we have to use `with torch.no_grad():`
+                    # yf225 TODO: can we not use `with torch.no_grad():` here?
+                    with torch.no_grad():
+                        self._parameters[key] = Parameter(param_applied, param.requires_grad)
 
                 if param.grad is not None:
-                    grad_applied = fn(param.grad)
-                    if not compute_should_change_tensor_inplace(param.grad, grad_applied):
+                    if compute_should_use_data(param.grad, fn(param.grad)):
+                        param.grad.data = grad_applied
+                    else:
                         with torch.no_grad():
                             self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
-                            # Bump up the version counter of the original parameter's gradient,
-                            # to invalidate any previous references of it in the autograd graph.
-                            param.grad._bump_version()
-                    else:
-                        param.grad.data = grad_applied
 
         for key, buf in self._buffers.items():
             if buf is not None:

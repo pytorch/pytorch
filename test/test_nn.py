@@ -1557,40 +1557,71 @@ class TestNN(NNTestCase):
             net.to(cpu, torch.tensor(3, dtype=torch.long), non_blocking=True)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_global_flag_change_nn_module_params_inplace_cpu_cuda(self):
-        torch.__future__.change_nn_module_params_inplace_cpu_cuda = False
+    def test_global_flag_overwrite_module_params_on_conversion(self):
+        torch.__future__.set_overwrite_module_params_on_conversion(False)
 
-        # Test that when `torch.__future__.change_nn_module_params_inplace_cpu_cuda`
-        # is set to False, `cpu_module.to("cuda")` doesn't preserve previous references
+        # yf225 TODO: add comment for this test! Saying that the current default behavior is just wrong
+        m = nn.Linear(2,3)
+        mw = m.weight[:]
+        m.to('cuda')
+        mw[0][0] = 5
+        with self.assertRaisesRegex(RuntimeError, "Expected object of backend CPU but got backend CUDA")
+            self.assertEqual(mw[0][0], mw._base[0][0])
+
+        torch.__future__.set_overwrite_module_params_on_conversion(True)
+
+        # yf225 TODO: add comment for this test! Saying that the future behavior (aka. not doing cpu-cuda inplace) is correct
+        m = nn.Linear(2,3)
+        mw = m.weight[:]
+        m.to('cuda')
+        mw[0][0] = 5   # We have a view on the old thing, and that needs to be consistent
+        self.assertEqual(mw[0][0], mw._base[0][0])
+
+        # Test that when `torch.__future__.overwrite_module_params_on_conversion()`
+        # is true, `cpu_module.to("cuda")` doesn't preserve previous references
         # to `cpu_module`'s parameters or gradients.
         m = nn.Linear(20, 10)
         m.weight.grad = torch.randn(10, 20)
         weight_ref = m.weight
         weight_grad_ref = m.weight.grad
-        m.to("cuda")
+        m.to('cuda')
         self.assertNotEqual(weight_ref.device, m.weight.device)
         self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
 
-        # Test that when `torch.__future__.change_nn_module_params_inplace_cpu_cuda`
-        # is set to False, `cpu_module.to("cuda")` invalidates `cpu_module`'s original
+        # Test that when `torch.__future__.overwrite_module_params_on_conversion()`
+        # is true, `cpu_module.to("cuda")` invalidates `cpu_module`'s original
         # parameters in any autograd graph they participate in.
         m = nn.Linear(20, 10)
         pvm = m.weight.mul(m.weight)
-        m.to("cuda")
+        m.to('cuda')
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pvm.backward(torch.randn(10, 20))
 
-        # Test that when `torch.__future__.change_nn_module_params_inplace_cpu_cuda`
-        # is set to False, `cpu_module.to("cuda")` invalidates `cpu_module`'s original
+        # Test that when `torch.__future__.overwrite_module_params_on_conversion()`
+        # is true, `cpu_module.to("cuda")` invalidates `cpu_module`'s original
         # parameters' gradients in any autograd graph they participate in.
         m = nn.Linear(20, 10)
         m.weight.grad = torch.randn(10, 20).requires_grad_()
         pgm = m.weight.grad.mul(m.weight.grad)
-        m.to("cuda")
+        m.to('cuda')
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pgm.backward(torch.randn(10, 20))
 
-        torch.__future__.change_nn_module_params_inplace_cpu_cuda = True
+        # yf225 TODO: add in-place `fn` and make sure the version counter bumps
+        # yf225 TODO: fix this comment
+        m = nn.Linear(20, 10)
+        m_weight_version_saved = m.weight._version
+        m = m._apply(lambda t: t.add_(1.0))
+        self.assertGreater(m.weight._version, m_weight_version_saved)
+
+        # yf225 TODO: add out-of-place `fn` and make sure the version counter doesn't bump
+        # yf225 TODO: fix this comment
+        m = nn.Linear(20, 10)
+        m_weight_version_saved = m.weight._version
+        m = m._apply(lambda t: torch.randn(t.shape))
+        self.assertEqual(m.weight._version, m_weight_version_saved)
+
+        torch.__future__.set_overwrite_module_params_on_conversion(False)
 
     def test_type(self):
         l = nn.Linear(10, 20)

@@ -681,6 +681,9 @@ inline Tensor & Tensor::trunc_() {
 inline Tensor Tensor::type_as(const Tensor & other) const {
     return dispatch_type().type_as(*this, other);
 }
+inline bool Tensor::has_same_tensorimpl_type_as(const Tensor & other) const {
+    return dispatch_type().has_same_tensorimpl_type_as(*this, other);
+}
 inline Tensor Tensor::unsqueeze(int64_t dim) const {
     return dispatch_type().unsqueeze(*this, dim);
 }
