@@ -287,10 +287,9 @@ def _model_to_graph(model, args, verbose=False, training=False,
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
-            method = model.forward
-            params = method.initial_ivalues()
+            method_graph, params = model.forward._lowered_graph()
             graph = _propagate_and_assign_input_and_output_shapes(
-                method.graph, tuple(args) + tuple(params), example_outputs, False, propagate)
+                method_graph, tuple(args) + tuple(params), example_outputs, False, propagate)
         except AttributeError:
             raise RuntimeError('\'forward\' method must be a script method')
     elif isinstance(model, torch.jit.Function):
