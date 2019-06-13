@@ -1,7 +1,7 @@
 # ---[ cuda
 
 # Poor man's include guard
-if(TARGET caffe2::cudart)
+if(TARGET torch::cudart)
   return()
 endif()
 
@@ -204,18 +204,18 @@ set_property(
 
 # cudart. CUDA_LIBRARIES is actually a list, so we will make an interface
 # library.
-add_library(caffe2::cudart INTERFACE IMPORTED)
+add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
-        TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
+        TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt dl)
 else()
     set_property(
-        TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
+        TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
         ${CUDA_LIBRARIES})
 endif()
 set_property(
-    TARGET caffe2::cudart PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    TARGET torch::cudart PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
 # cudnn
