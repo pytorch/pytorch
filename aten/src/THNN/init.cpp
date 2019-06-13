@@ -142,8 +142,6 @@
 #include <THNN/generic/SpatialDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/VolumetricConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
