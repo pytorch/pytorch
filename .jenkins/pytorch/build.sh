@@ -9,8 +9,6 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-echo "GITHUB_PYTORCHBOT_TOKEN: " ${GITHUB_PYTORCHBOT_TOKEN}
-
 # For distributed, four environmental configs:
 # (1) build with only NCCL
 # (2) build with NCCL and MPI
