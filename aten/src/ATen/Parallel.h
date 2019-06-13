@@ -107,10 +107,15 @@ CAFFE2_API void launch(std::function<void()> func);
 // Launches intra-op parallel task
 CAFFE2_API void intraop_launch(std::function<void()> func);
 
+// Returns number of intra-op threads used by default
+CAFFE2_API int intraop_default_num_threads();
+
 } // namespace at
 
 #if AT_PARALLEL_OPENMP
 #include <ATen/ParallelOpenMP.h>
 #elif AT_PARALLEL_NATIVE
 #include <ATen/ParallelNative.h>
+#elif AT_PARALLEL_NATIVE_TBB
+#include <ATen/ParallelNativeTBB.h>
 #endif

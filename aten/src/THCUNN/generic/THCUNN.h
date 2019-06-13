@@ -408,27 +408,6 @@ THC_API void THNN_(IndexLinear_updateParameters)(
                   accreal weightDecay,
                   accreal learningRate);
 
-THC_API void THNN_(SpatialAveragePooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  bool ceil_mode,
-                  bool count_include_pad);
-
-THC_API void THNN_(SpatialAveragePooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  bool ceil_mode,
-                  bool count_include_pad);
-
 THC_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -703,21 +682,6 @@ THC_API void THNN_(SpatialFullConvolution_accGradParameters)(
                   int padW, int padH,
                   int adjW, int adjH,
                   accreal scale);
-
-THC_API void THNN_(SpatialMaxUnpooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCIndexTensor *indices,
-                  int owidth, int oheight);
-
-THC_API void THNN_(SpatialMaxUnpooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCIndexTensor *indices,
-                  int owidth, int oheight);
 
 THC_API void THNN_(SpatialSubSampling_updateOutput)(
                   THCState *state,
@@ -1117,24 +1081,5 @@ THC_API void THNN_(VolumetricFullConvolution_accGradParameters)(
                   int padT, int padW, int padH,
                   int adjT, int adjW, int adjH,
                   accreal scale);
-
-THC_API void THNN_(VolumetricMaxUnpooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCIndexTensor *indices,
-                  int outputTime, int outputWidth, int outputHeight,
-                  int dT, int dW, int dH,
-                  int padT, int padW, int padH);
-
-THC_API void THNN_(VolumetricMaxUnpooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCIndexTensor *indices,
-                  int outputTime, int outputWidth, int outputHeight,
-                  int dT, int dW, int dH,
-                  int padT, int padW, int padH);
 
 #endif

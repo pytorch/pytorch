@@ -19,7 +19,7 @@ from torch.autograd.profiler import profile, format_time, EventList, FunctionEve
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
-                          load_tests, random_symmetric_pd_matrix)
+                          load_tests, random_symmetric_pd_matrix, IS_WINDOWS)
 from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
@@ -1624,6 +1624,19 @@ class TestAutograd(TestCase):
     def test_sparse_gather_both_scalar(self):
         self._test_sparse_gather((), (), 0)
 
+    # autograd tests via common_method_invocations don't allow input tensors to
+    # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when
+    # check_sparse_nnz is set to False.)
+    def test_sparse_mask_autograd(self):
+        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
+            tensor = torch.randn(3, requires_grad=True, device=device)
+            mask = torch.ones(3, device=device)
+            mask[1] = 0
+            mask = mask.to_sparse()
+            converted = tensor.sparse_mask(mask).to_dense()
+            converted.sum().backward()
+            self.assertEqual(tensor.grad, mask.to_dense())
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,
@@ -2174,6 +2187,14 @@ class TestAutograd(TestCase):
         f_args_tensor = deepcopy(unpack_variables(f_args_variable))
         run_functional_checks(self, "test_cat_empty", "cat",
                               lambda a, b: torch.cat((a, b)),
+                              True, f_args_variable, f_args_tensor)
+
+    def test_trapz(self):
+        f_args_variable = (torch.randn(2, 3, requires_grad=True),
+                           torch.tensor([[1.0, 2.0, 5.5], [2.3, 0.5, 6.2]], requires_grad=True))
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_trapz", "trapz",
+                              lambda y, x: torch.trapz(y, x),
                               True, f_args_variable, f_args_tensor)
 
     def test_cdist(self):
@@ -3114,6 +3135,25 @@ class TestAutograd(TestCase):
         b.data = a
         self.assertTrue(b_id_saved == id(b))
 
+    @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+    def test_thread_shutdown(self):
+        code = """import torch
+from torch.autograd import Function
+class MyFunction(Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad
+
+for shape in [(1,), ()]:
+    v = torch.ones(shape, requires_grad=True)
+    MyFunction.apply(v).backward()
+"""
+        s = TestCase.runWithPytorchAPIUsageStderr(code)
+        self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -3268,7 +3308,11 @@ def add_test(
                     args_variable, kwargs_variable = create_input(args, requires_grad=False, call_kwargs=kwargs)
                     output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
                     if isinstance(output_variable, torch.autograd.Variable):
-                        output_variable.backward(randn_like(output_variable))
+                        if output_variable.is_sparse:
+                            rand = randn_like(output_variable.to_dense()).to_sparse()
+                        else:
+                            rand = randn_like(output_variable)
+                        output_variable.backward(rand)
                         self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
                         self.assertTrue(self_variable.size() == self_variable.grad.size())
 

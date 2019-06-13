@@ -30,7 +30,7 @@ class ModuleAPITest(TestCase):
         Y[Y < 0] = 0
         qY = _quantize(Y, scale, zero_point)
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
-        qY_hat = F.relu(qX)
+        qY_hat = qF.relu(qX)
         np.testing.assert_equal(qY, qY_hat.int_repr())
 
     @given(Q=qtensors_conv(min_batch=1, max_batch=3,
@@ -38,7 +38,8 @@ class ModuleAPITest(TestCase):
                            min_out_channels=1, max_out_channels=5,
                            H_range=(6, 12), W_range=(6, 12),
                            kH_range=(3, 5), kW_range=(3, 5),
-                           dtypes=((torch.quint8, np.uint8, 0),)),
+                           dtypes=((torch.quint8, np.uint8, 0),),
+                           max_groups=4),
            padH=st.integers(1, 3), padW=st.integers(1, 3),
            dH=st.integers(1, 2), dW=st.integers(1, 2),
            sH=st.integers(1, 3), sW=st.integers(1, 3))
@@ -49,38 +50,33 @@ class ModuleAPITest(TestCase):
         """
         ref_op = qF.conv2d
 
-        # Not implemented parameters
-        o_padH, o_padW = 0, 0
-        groups = 1
-
         # Random iunputs
         X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
-        (inputs, filters, bias) = X
+        (inputs, filters, bias, groups) = X
 
         iC, oC = inputs.shape[1], filters.shape[0]
         assume(iC % groups == 0)
+        # assume(iC // groups > 0)
+        # assume(oC % groups == 0)
+        # assume(oC // groups > 0)
         iH, iW = inputs.shape[2:]
         kH, kW = filters.shape[2:]
         assume(kH // 2 >= padH)
         assume(kW // 2 >= padW)
-        oH = _conv_output_shape(iH, kH, padH, sH, dH, o_padH)
+        oH = _conv_output_shape(iH, kH, padH, sH, dH)
         assume(oH > 0)
-        oW = _conv_output_shape(iW, kW, padW, sW, dW, o_padW)
+        oW = _conv_output_shape(iW, kW, padW, sW, dW)
         assume(oW > 0)
-
         inputs = torch.from_numpy(inputs).to(torch.float)
         filters = torch.from_numpy(filters).to(torch.float)
         bias = torch.from_numpy(bias).to(torch.float)
-
         kernel_size = (kH, kW)
         stride = (sH, sW)
         i_padding = (padH, padW)
-        o_padding = (o_padH, o_padW)
         dilation = (dH, dW)
 
         i_NHWC = inputs.permute([0, 2, 3, 1]).contiguous()
-        w_RSCK = filters.permute([2, 3, 1, 0]).contiguous()
-
+        w_RSCK = filters.permute([0, 2, 3, 1]).contiguous()
         q_inputs = torch.quantize_linear(i_NHWC, scale, zero_point, torch.quint8)
         q_filters = torch.quantize_linear(w_RSCK, scale, zero_point, torch.qint8)
         q_bias = torch.quantize_linear(bias, scale, zero_point, torch.qint32)

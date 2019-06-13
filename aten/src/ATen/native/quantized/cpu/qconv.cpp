@@ -34,6 +34,35 @@ SmallVector<int64_t, 4> convOutputShape(
   return out_shape;
 }
 
+/*
+ * FBGEMM uses vpmaddubsw instruction to multiply activations (uint8_t) and
+ * weights (int8_t).
+ *
+ * https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm256_maddubs_epi16&expand=3284,3530
+ *
+ * vpmaddubsw operates on a vector of activations and a vector of
+ * weights. If these vectors are
+ *
+ *    A (uint8_t) = a0, a1, a2, a3 ...
+ *
+ * and
+ *
+ *    B (int8_t)  = b0, b1, b2, b3 ...
+ *
+ * the result of this instruction is an int16_t vector with values
+ *
+ *    C (int16_t) = a0*b0 + a1*b1, a2*b2 + a3*b3 ...
+ *
+ * For large values of A and/or B the result (a0*b0 + a1*b1) might not fit into
+ * an int16_t number. So the instruction saturates them to max (or min) possible
+ * value of an int16_t number. Such behavior is expected for the
+ * implementation below.
+ *
+ * For example, a0 = 255, a1 = 255, b0 = 127 and b1 = 127 the actual result
+ * 64770 overflows for an int16_t number (-32768, 32767) so the returned result
+ * is 32767.
+ *
+ */
 class QConv2dInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
