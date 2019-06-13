@@ -5,6 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from caffe2.python.optimizer import FP16_ENGINES, Optimizer
 from caffe2.python.helpers.arg_scope import get_current_scope
 from caffe2.python import schema
 from caffe2.python.layers.layers import (
@@ -17,9 +18,27 @@ from caffe2.python.layers.layers import (
 )
 import collections
 import functools
+import logging
 import math
 import numpy as np
 import operator
+
+logger = logging.getLogger(__name__)
+
+
+def get_trainer_version_based_on_optim(optim_def):
+    if isinstance(optim_def, Optimizer) and hasattr(optim_def, "engine"):
+        logger.info(
+            "Attempting to set trainer version for engine {}".format(optim_def.engine)
+        )
+        if optim_def.engine in FP16_ENGINES:
+            logger.info("Setting FP16 trainer for engine {}".format(optim_def.engine))
+            return "fp16"
+        else:
+            logger.info("Setting FP32 trainer for engine {}".format(optim_def.engine))
+            return "fp32"
+    else:
+        return "fp32"
 
 
 def get_sparse_lookup_predictor_version(version):
@@ -52,6 +71,14 @@ class SparseLookup(ModelLayer):
     _id_score_list_supported_reducers = [
         'PositionWeighted', 'RecencyWeighted', 'Mean', 'Sum', 'WeightedSum',
         'WeightedMean', 'None'
+    ]
+
+    _fp16_compatible_init_op_types = [
+        'Float16UniformFill'
+    ]
+
+    _fp16_compatible_reducers = [
+        'Sum', 'Mean', 'Sqrt', 'PositionWeighted', 'RecencyWeighted',
     ]
 
     def __init__(self, model, input_record, inner_shape, reducer,
@@ -88,9 +115,35 @@ class SparseLookup(ModelLayer):
         self.input_dim = input_dim
         self.shape = [input_dim] + inner_shape
 
+        self.trainer_version = get_trainer_version_based_on_optim(
+            weight_optim
+        )
+
         default_init_op = self._get_default_init_op()
 
         self.weight_init = weight_init or default_init_op
+
+        # If fp16 is used, make sure fp16 init op is used
+        if self.trainer_version == "fp16":
+            assert self.reducer in self._fp16_compatible_reducers, (
+                "Fp16 training is enabled. The reducer specified is not supported. "
+                "Got {}. Supported reducers: {}. Right now, in general, sum, mean, "
+                "positional pooling are supported. Attention is not. Please check "
+                "if there is fp16 trained sparse features using advanced pooling.".format(
+                    self.reducer, self._fp16_compatible_reducers)
+            )
+
+            # if init op is UniformFill, we replace it directly
+            if self.weight_init[0] == "UniformFill":
+                self.weight_init = ("Float16UniformFill", self.weight_init[1])
+            assert self.weight_init[0] in self._fp16_compatible_init_op_types, (
+                "Fp16 training is enabled. Init op for weight parameter must be fp16 "
+                "compatibale. Got {}. Supported ops: {}".format(
+                    self.weight_init[0],
+                    self._fp16_compatible_init_op_types)
+            )
+
+            assert regularizer is None, "Regularizer is not compatible with fp16"
 
         if _is_id_list(self.input_record):
             sparse_key = self.input_record.items()
@@ -159,21 +212,14 @@ class SparseLookup(ModelLayer):
     def _get_default_init_op(self):
         scale = math.sqrt(1.0 / self.input_dim)
 
-        cur_scope = get_current_scope()
-        trainer_version = get_sparse_lookup_trainer_version(
-            **cur_scope.get(get_sparse_lookup_trainer_version.__name__,
-                            {'version': 'fp32'}))
-
-        if trainer_version == 'fp32':
+        if self.trainer_version == 'fp32':
             default_weight_init = ('UniformFill', {'min': -scale, 'max': scale})
-        elif trainer_version == 'fp16':
+        elif self.trainer_version == 'fp16':
             default_weight_init = ("Float16UniformFill", {'min': -scale, 'max': scale})
         else:
             raise NotImplementedError(
                 "Train version {} is not currently supported".format(trainer_version)
             )
-
-        self.trainer_version = trainer_version
 
         return default_weight_init
 

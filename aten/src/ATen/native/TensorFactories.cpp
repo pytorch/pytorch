@@ -6,23 +6,24 @@
 
 #include <ATen/ATen.h>
 #include <ATen/CPUGenerator.h>
-#include <ATen/CheckGenerator.h>
+#include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 #include <ATen/LegacyTHDispatcher.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
 #include <c10/core/TensorOptions.h>
-#include <TH/THRandom.h>
-#include <TH/THGenerator.hpp>
+#include <TH/THAllocator.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <string>
 
 namespace at {
 namespace native {
@@ -31,17 +32,17 @@ void window_function_checks(
     const char* function_name,
     const TensorOptions& options,
     int64_t window_length) {
-  AT_CHECK(
+  TORCH_CHECK(
       options.layout() != kSparse,
       function_name,
       " is not implemented for sparse types, got: ",
       options);
-  AT_CHECK(
+  TORCH_CHECK(
       at::isFloatingType(typeMetaToScalarType(options.dtype())),
       function_name,
       " expects floating point dtypes, got: ",
       options);
-  AT_CHECK(
+  TORCH_CHECK(
       window_length >= 0,
       function_name,
       " requires non-negative window_length, got window_length=",
@@ -87,13 +88,18 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == Backend::CPU);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
 
-  auto* allocator = at::getCPUAllocator();
+  c10::Allocator* allocator;
+  if (options.pinned_memory()) {
+    allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
+  } else {
+    allocator = at::getCPUAllocator();
+  }
+
   int64_t nelements = prod_intlist(size);
   auto dtype = options.dtype();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
@@ -103,7 +109,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId());
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -135,13 +141,12 @@ Tensor& empty_out(Tensor& result, IntArrayRef size) {
 
 #define DEFINE_CAST_OP(_1, n, _2)                                \
   Tensor _cast_##n(const Tensor& self, bool non_blocking) {      \
-    auto& target_type = self.type().toScalarType(ScalarType::n); \
-    if (self.type() == target_type)                              \
+    if (self.scalar_type() == ScalarType::n)                     \
       return self;                                               \
-    return target_type.copy(self, non_blocking);                 \
+    return self.to(ScalarType::n, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
@@ -154,6 +159,15 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
     auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
+  }
+  if (self.is_quantized()) {
+    // TODO: uncomment when qscheme diff is landed
+    // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
+    //                       "empty_like for quantized Tensor only works for
+    //                        PerTensorAffine scheme right now");
+    return at::_empty_affine_quantized(self.sizes(), self.options(),
+                                       self.q_scale().toDouble(),
+                                       self.q_zero_point().toLong());
   }
   return at::empty(self.sizes(), options);
 }
@@ -174,7 +188,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n) {
 }
 
 Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
-  AT_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
+  TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
 
   if(m < 0) {
     m = n;
@@ -186,9 +200,10 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   int64_t sz = std::min<int64_t>(n, m);
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data<scalar_t>();
-    for(int64_t i = 0; i < sz; i++) {
-      result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
-    }
+    at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
+      for(int64_t i = p_begin; i < p_end; i++)
+        result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
+    });
   });
 
   return result;
@@ -237,9 +252,10 @@ Tensor logspace(
     Scalar start,
     Scalar end,
     int64_t steps,
+    double base,
     const TensorOptions& options) {
   Tensor result = at::empty({steps}, options);
-  return at::logspace_out(result, start, end, steps);
+  return at::logspace_out(result, start, end, steps, base);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -408,8 +424,7 @@ Tensor randn_like(const Tensor& self, const TensorOptions& options) {
 
 namespace {
 template <typename scalar_t>
-void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
-  std::lock_guard<std::mutex> lock(generator->mutex);
+void randperm_cpu(Tensor& result, int64_t n, CPUGenerator* generator) {
   scalar_t *r__data = result.data<scalar_t>();
 
   result.resize_({n});
@@ -421,20 +436,13 @@ void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
 
   for(int64_t i = 0; i < n - 1; i++)
   {
-    int64_t z = THRandom_random(generator) % (n-i);
+    int64_t z = generator->random() % (n-i);
     scalar_t sav = r__data[i*r__stride_0];
     r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
     r__data[(z+i)*r__stride_0] = sav;
   }
 }
 } // namespace
-
-
-THGenerator* get_generator(at::Generator* gen) {
-  auto default_gen = &at::globalContext().defaultGenerator(at::kCPU);
-  auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
-  return gen_->generator;
-}
 
 Tensor randperm(int64_t n, const TensorOptions& options) {
   return native::randperm(n, nullptr, options);
@@ -450,9 +458,11 @@ Tensor& randperm_out(Tensor& result, int64_t n) {
 }
 
 Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
-  AT_CHECK(n >= 0, "n must be non-negative, got", n);
+  TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   result.resize_({n});
-  auto gen = get_generator(generator);
+  auto gen = get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
+  std::lock_guard<std::mutex> lock(gen->mutex_);
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
   });
@@ -725,7 +735,7 @@ Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF_AND_QINT(TENSOR)
 #undef TENSOR
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ choice ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -935,6 +945,23 @@ Tensor choice_cpu(
 ){
   at::Tensor weights = at::empty({0}, input.options().dtype(at::kFloat));
   return native::choice_cpu(input, k, replace, weights);
+}
+
+Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
+    TORCH_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");
+    size_t my_size = size.value_or(0);
+    int flags = shared.value_or(false) ? TH_ALLOCATOR_MAPPED_SHARED : 0;
+    auto dtype = options.dtype();
+    auto storage_impl = c10::make_intrusive<at::StorageImpl>(
+      dtype,
+      my_size,
+      THMapAllocator::makeDataPtr(
+          filename.c_str(), flags, my_size * dtype.itemsize(), nullptr),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::CPUTensorId());
+    tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
+    return tensor;
 }
 
 } // namespace native

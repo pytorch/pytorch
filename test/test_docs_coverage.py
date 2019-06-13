@@ -2,8 +2,6 @@ import torch
 import unittest
 import os
 import re
-import ast
-import _ast
 import textwrap
 
 
@@ -30,6 +28,14 @@ class TestDocCoverage(unittest.TestCase):
         return ret
 
     def test_torch(self):
+        # TODO: The algorithm here is kind of unsound; we don't assume
+        # every identifier in torch.rst lives in torch by virtue of
+        # where it lives; instead, it lives in torch because at the
+        # beginning of the file we specified automodule.  This means
+        # that this script can get confused if you have, e.g., multiple
+        # automodule directives in the torch file.  "Don't do that."
+        # (Or fix this to properly handle that case.)
+
         # get symbols documented in torch.rst
         in_rst = self.parse_rst('torch.rst', r1)
         # get symbols in functional.py and _torch_docs.py
@@ -37,6 +43,7 @@ class TestDocCoverage(unittest.TestCase):
             # below are some jit functions
             'wait', 'fork', 'parse_type_comment', 'import_ir_module',
             'import_ir_module_from_buffer', 'merge_type_from_type_comment',
+            'parse_ir',
 
             # below are symbols mistakely binded to torch.*, but should
             # go to torch.nn.functional.* instead
@@ -53,16 +60,16 @@ class TestDocCoverage(unittest.TestCase):
             has_docstring & whitelist, whitelist,
             textwrap.dedent('''
             The whitelist in test_docs_coverage.py contains something
-            that don't have docstring or not in torch.*. If you just
-            removed something from torch.*, please remove it from whiltelist
+            that doesn't have a docstring or isn't in torch.*. If you just
+            removed something from torch.*, please remove it from the whitelist
             in test_docs_coverage.py'''))
         has_docstring -= whitelist
         # assert they are equal
         self.assertEqual(
             has_docstring, in_rst,
             textwrap.dedent('''
-            List of functions documented in torch.rst and in python are different.
-            Do you forget to add new thing to torch.rst, or whitelist things you
+            The lists of functions documented in torch.rst and in python are different.
+            Did you forget to add a new thing to torch.rst, or whitelist things you
             don't want to document?''')
         )
 
@@ -73,8 +80,8 @@ class TestDocCoverage(unittest.TestCase):
         self.assertEqual(
             has_docstring, in_rst,
             textwrap.dedent('''
-            List of tensor methods documented in tensor.rst and in python are
-            different. Do you forget to add new thing to tensor.rst, or whitelist
+            The lists of tensor methods documented in tensors.rst and in python are
+            different. Did you forget to add a new thing to tensors.rst, or whitelist
             things you don't want to document?''')
         )
 

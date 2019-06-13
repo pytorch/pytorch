@@ -169,6 +169,7 @@ REGISTER_CPU_OPERATOR(TextFileReaderRead, TextFileReaderReadOp);
 OPERATOR_SCHEMA(CreateTextFileReader)
     .NumInputs(0)
     .NumOutputs(1)
+    .ScalarType(TensorProto::UNDEFINED)
     .SetDoc("Create a text file reader. Fields are delimited by <TAB>.")
     .Arg("filename", "Path to the file.")
     .Arg("num_passes", "Number of passes over the file.")

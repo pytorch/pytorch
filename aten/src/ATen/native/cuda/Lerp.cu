@@ -13,7 +13,8 @@ void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, c
          const scalar_t& self_val,
          const scalar_t& end_val,
          const scalar_t& weight_val) {
-        ret_val = self_val + weight_val * (end_val - self_val);
+        ret_val = (weight_val < 0.5) ?
+            self_val + weight_val * (end_val - self_val) : end_val - (end_val - self_val) * (1 - weight_val);
       });
 }
 
@@ -25,7 +26,8 @@ void lerp_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor& end, s
          scalar_t& ret_val,
          const scalar_t& self_val,
          const scalar_t& end_val) {
-        ret_val = self_val + weight_val * (end_val - self_val);
+        ret_val = (weight_val < 0.5) ?
+            self_val + weight_val * (end_val - self_val) : end_val - (end_val - self_val) * (1 - weight_val);
       });
 }
 } // namespace
@@ -36,7 +38,7 @@ namespace native {
 Tensor& lerp_cuda_tensor_out(Tensor& result, const Tensor& self,
                             const Tensor& end, const Tensor& weight) {
   Tensor b_self, b_end, b_weight;
-  AT_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
+  TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
            "weight should be of dimension max(self.dim(), end.dim()) or lesser");
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_out_cuda");
   result.resize_as_(b_self);
@@ -60,10 +62,10 @@ Tensor& lerp_cuda_scalar_out(Tensor& result, const Tensor& self,
 Tensor& lerp_cuda_tensor_(Tensor& self, const Tensor& end, const Tensor& weight) {
   Tensor b_self, b_end, b_weight;
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp__cuda");
-  AT_CHECK(b_self.sizes() == self.sizes(),
+  TORCH_CHECK(b_self.sizes() == self.sizes(),
            "output with shape ", self.sizes(),
            " doesn't match the broadcast shape ", b_self.sizes());
-  AT_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
+  TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
            "weight should be of dimension max(self.dim(), end.dim()) or lesser");
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp__cuda", [&]{
     lerp_cuda<scalar_t>(self, b_self, b_end, b_weight);
@@ -74,7 +76,7 @@ Tensor& lerp_cuda_tensor_(Tensor& self, const Tensor& end, const Tensor& weight)
 Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, Scalar weight) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp__cuda");
-  AT_CHECK(b_self.sizes() == self.sizes(),
+  TORCH_CHECK(b_self.sizes() == self.sizes(),
            "output with shape ", self.sizes(),
            " doesn't match the broadcast shape ", b_self.sizes());
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lerp__cuda", [&]{
@@ -85,7 +87,7 @@ Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, Scalar weight) {
 
 Tensor lerp_cuda_tensor(const Tensor& self, const Tensor& end, const Tensor& weight) {
   Tensor b_self, b_end, b_weight;
-  AT_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
+  TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
            "weight should be of dimension max(self.dim(), end.dim()) or lesser");
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_cuda");
   Tensor result = at::empty_like(b_self);

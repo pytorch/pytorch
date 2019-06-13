@@ -4,7 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/cuda/Array.h>
+#include <ATen/core/Array.h>
 
 namespace at { namespace native {
 
@@ -28,9 +28,16 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     return;
   }
 
-  auto sizes = cuda::Array<int64_t, 25>(0);
-  auto strides = cuda::Array<int64_t, 25>(0);
-  auto index_ptrs = cuda::Array<char*, 25>(nullptr);
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      gpu_index_kernel(sub_iter, index_size, index_stride, f);
+    }
+    return;
+  }
+
+  auto sizes = detail::Array<int64_t, 25>(0);
+  auto strides = detail::Array<int64_t, 25>(0);
+  auto index_ptrs = detail::Array<char*, 25>(nullptr);
   for (int i = 0; i < num_indices; i++) {
     sizes[i] = index_size[i];
     strides[i] = index_stride[i];
@@ -81,7 +88,7 @@ void index_put_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArra
 }
 
 static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "index_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, iter.dtype(), "index_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_kernel_impl<dtype>(iter, index_size, index_stride);
   });
@@ -90,7 +97,7 @@ static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayR
 
 static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   AT_ASSERTM(!accumulate, "index_put does not support accumulate=true");
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "index_put", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, iter.dtype(), "index_put", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_put_kernel_impl<dtype>(iter, index_size, index_stride);
   });

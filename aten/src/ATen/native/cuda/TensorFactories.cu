@@ -31,7 +31,7 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n) {
 }
 
 Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
-  AT_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
+  TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
 
   if(m < 0) {
     m = n;
@@ -51,6 +51,7 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
   AT_ASSERT(options.backend() == at::Backend::CUDA);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
+  TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
@@ -63,7 +64,7 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options) {
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId(), false);
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId());
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -78,8 +79,8 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, const TensorOpti
 }
 
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
-  AT_CHECK(n >= 0, "n must be non-negative, got", n);
-  AT_CHECK(at::scalar_tensor(n, result.options()).defined(),
+  TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
+  TORCH_CHECK(at::scalar_tensor(n, result.options()).defined(),
   "n is too large for result tensor type: '", result.type().toString(), "'");
 
   result.resize_({n});
@@ -270,6 +271,9 @@ inline void get_coordinate_in_triu_trapezoid(
 
 template <typename scalar_t>
 __global__
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 void tril_indices_kernel(scalar_t * tensor,
                          int64_t row_offset,
                          int64_t m_first_row,
@@ -323,7 +327,7 @@ Tensor tril_indices_cuda(
     dim3 dim_grid;
     // using tril_size instead of tensor.numel(), as each thread takes care of
     // two elements in the tensor.
-    AT_CHECK(
+    TORCH_CHECK(
       cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 
@@ -399,7 +403,7 @@ Tensor triu_indices_cuda(
 
     // using triu_size instead of tensor.numel(), as each thread takes care of
     // two elements in the tensor.
-    AT_CHECK(
+    TORCH_CHECK(
       cuda::getApplyGrid(triu_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 

@@ -18,6 +18,7 @@ class TestGivenTensorFillOps(hu.HypothesisTestCase):
                (core.DataType.BOOL, np.bool_, "GivenTensorFill"),
                (core.DataType.INT32, np.int32, "GivenTensorFill"),
                (core.DataType.FLOAT, np.float32, "GivenTensorFill"),
+               (core.DataType.INT16, np.int16, "GivenTensorInt16Fill"),
                (core.DataType.INT32, np.int32, "GivenTensorIntFill"),
                (core.DataType.INT64, np.int64, "GivenTensorInt64Fill"),
                (core.DataType.BOOL, np.bool_, "GivenTensorBoolFill"),

@@ -142,7 +142,7 @@ if [[ $BUILD_ENVIRONMENT == *py2-cuda9.0-cudnn7-ubuntu16.04* ]]; then
   sudo dpkg -i ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
   sudo apt-key add /var/nvinfer-runtime-trt-repo-5.0.2-ga-cuda9.0/7fa2af80.pub
   sudo apt-get -qq update
-  sudo apt-get install libnvinfer5 libnvinfer-dev
+  sudo apt-get install -y --no-install-recommends libnvinfer5=5.0.2-1+cuda9.0 libnvinfer-dev=5.0.2-1+cuda9.0
   rm ./nvinfer-runtime-trt-repo-ubuntu1604-5.0.2-ga-cuda9.0_1-1_amd64.deb
 
   build_args+=("USE_TENSORRT=ON")

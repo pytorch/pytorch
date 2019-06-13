@@ -25,7 +25,7 @@ inline void check_device(const Tensor& input, const TensorList& params, const Te
   auto check_tensors = [&](const std::string& name, const Tensor& t) {
     if (!t.defined()) return;
     auto t_device = t.device();
-    AT_CHECK(input_device == t_device,
+    TORCH_CHECK(input_device == t_device,
              "Input and ", name, " tensors are not at the same device, found input tensor at ",
              input_device, " and ", name, " tensor at ", t_device);
   };

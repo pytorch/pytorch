@@ -228,17 +228,19 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
       bbox_deltas_sorted,
       bbox_weights,
       utils::BBOX_XFORM_CLIP_DEFAULT,
+      legacy_plus_one_,
       angle_bound_on_,
       angle_bound_lo_,
       angle_bound_hi_);
 
   // 2. clip proposals to image (may result in proposals with zero area
   // that will be removed in the next step)
-  proposals =
-      utils::clip_boxes(proposals, im_info[0], im_info[1], clip_angle_thresh_);
+  proposals = utils::clip_boxes(
+      proposals, im_info[0], im_info[1], clip_angle_thresh_, legacy_plus_one_);
 
   // 3. remove predicted boxes with either height or width < min_size
-  auto keep = utils::filter_boxes(proposals, min_size, im_info);
+  auto keep =
+      utils::filter_boxes(proposals, min_size, im_info, legacy_plus_one_);
   DCHECK_LE(keep.size(), scores_sorted.size());
 
   // 6. apply loose nms (e.g. threshold = 0.7)
@@ -246,9 +248,15 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   // 8. return the top proposals (-> RoIs top)
   if (post_nms_topN > 0 && post_nms_topN < keep.size()) {
     keep = utils::nms_cpu(
-        proposals, scores_sorted, keep, nms_thresh, post_nms_topN);
+        proposals,
+        scores_sorted,
+        keep,
+        nms_thresh,
+        post_nms_topN,
+        legacy_plus_one_);
   } else {
-    keep = utils::nms_cpu(proposals, scores_sorted, keep, nms_thresh);
+    keep = utils::nms_cpu(
+        proposals, scores_sorted, keep, nms_thresh, -1, legacy_plus_one_);
   }
 
   // Generate outputs
@@ -406,25 +414,24 @@ SHOULD_NOT_DO_GRADIENT(GenerateProposalsCPP);
 
 } // namespace caffe2
 
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+// clang-format off
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     GenerateProposals,
-    (std::vector<c10::Argument>{
-        c10::Argument("scores"),
-        c10::Argument("bbox_deltas"),
-        c10::Argument("im_info"),
-        c10::Argument("anchors"),
-        c10::Argument("spatial_scale", FloatType::get()),
-        c10::Argument("pre_nms_topN", IntType::get()),
-        c10::Argument("post_nms_topN", IntType::get()),
-        c10::Argument("nms_thresh", FloatType::get()),
-        c10::Argument("min_size", FloatType::get()),
-        c10::Argument("angle_bound_on", BoolType::get()),
-        c10::Argument("angle_bound_lo", IntType::get()),
-        c10::Argument("angle_bound_hi", IntType::get()),
-        c10::Argument("clip_angle_thresh", FloatType::get()),
-    }),
-    (std::vector<c10::Argument>{
-        c10::Argument("output_0"),
-        c10::Argument("output_1"),
-    }),
+    "_caffe2::GenerateProposals("
+      "Tensor scores, "
+      "Tensor bbox_deltas, "
+      "Tensor im_info, "
+      "Tensor anchors, "
+      "float spatial_scale, "
+      "int pre_nms_topN, "
+      "int post_nms_topN, "
+      "float nms_thresh, "
+      "float min_size, "
+      "bool angle_bound_on, "
+      "int angle_bound_lo, "
+      "int angle_bound_hi, "
+      "float clip_angle_thresh, "
+      "bool legacy_plus_one"
+    ") -> (Tensor output_0, Tensor output_1)",
     caffe2::GenerateProposalsOp<caffe2::CPUContext>);
+// clang-format on

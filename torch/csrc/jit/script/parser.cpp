@@ -45,8 +45,8 @@ Decl mergeTypesFromTypeComment(
 }
 
 struct ParserImpl {
-  explicit ParserImpl(const std::string& str)
-      : L(str), shared(sharedParserData()) {}
+  explicit ParserImpl(const std::shared_ptr<Source>& source)
+      : L(source), shared(sharedParserData()) {}
 
   Ident parseIdent() {
     auto t = L.expect(TK_IDENT);
@@ -59,7 +59,7 @@ struct ParserImpl {
     TreeList attributes;
     auto range = L.cur().range;
     TreeList inputs;
-    parseOperatorArguments(inputs, attributes);
+    parseArguments(inputs, attributes);
     return Apply::create(
         range,
         expr,
@@ -110,7 +110,7 @@ struct ParserImpl {
       case TK_NONE: {
         auto k = L.cur().kind;
         auto r = L.cur().range;
-        prefix = c(k, r, {});
+        prefix = create_compound(k, r, {});
         L.next();
       } break;
       case '(': {
@@ -162,6 +162,10 @@ struct ParserImpl {
       case TK_STRINGLITERAL: {
         prefix = parseConcatenatedStringLiterals();
       } break;
+      case TK_DOTS: {
+        prefix = Dots::create(L.cur().range);
+        L.next();
+      } break;
       default: {
         Ident name = parseIdent();
         prefix = Var::create(name.range(), name);
@@ -189,11 +193,11 @@ struct ParserImpl {
       case TK_TIMES_EQ:
       case TK_DIV_EQ: {
         int modifier = L.next().text()[0];
-        return c(modifier, r, {});
+        return create_compound(modifier, r, {});
       } break;
       default: {
         L.expect('=');
-        return c('=', r, {}); // no reduction
+        return create_compound('=', r, {}); // no reduction
       } break;
     }
   }
@@ -204,7 +208,7 @@ struct ParserImpl {
     auto cond = parseExp();
     L.expect(TK_ELSE);
     auto false_branch = parseExp(binary_prec);
-    return c(TK_IF_EXPR, range, {cond, std::move(true_branch), false_branch});
+    return create_compound(TK_IF_EXPR, range, {cond, std::move(true_branch), false_branch});
   }
   // parse the longest expression whose binary operators have
   // precedence strictly greater than 'precedence'
@@ -214,7 +218,7 @@ struct ParserImpl {
     return parseExp(0);
   }
   Expr parseExp(int precedence) {
-    TreeRef prefix = nullptr;
+    TreeRef prefix;
     int unary_prec;
     if (shared.isUnary(L.cur().kind, &unary_prec)) {
       auto kind = L.cur().kind;
@@ -228,7 +232,7 @@ struct ParserImpl {
       if (unary_kind == TK_UNARY_MINUS && subexp.kind() == TK_CONST) {
         prefix = Const::create(subexp.range(), "-" + Const(subexp).text());
       } else {
-        prefix = c(unary_kind, pos, {subexp});
+        prefix = create_compound(unary_kind, pos, {subexp});
       }
     } else {
       prefix = parseBaseExp();
@@ -259,24 +263,29 @@ struct ParserImpl {
         continue;
       }
 
-      prefix = c(kind, pos, {prefix, parseExp(binary_prec)});
+      prefix = create_compound(kind, pos, {prefix, parseExp(binary_prec)});
     }
     return Expr(prefix);
   }
+
   void parseSequence(
       int begin,
       int sep,
       int end,
       const std::function<void()>& parse) {
-    if (begin != TK_NOTHING)
+    if (begin != TK_NOTHING) {
       L.expect(begin);
-    if (L.cur().kind != end) {
-      do {
-        parse();
-      } while (L.nextIf(sep));
     }
-    if (end != TK_NOTHING)
-      L.expect(end);
+    while (end != L.cur().kind) {
+      parse();
+      if (!L.nextIf(sep)) {
+        if (end != TK_NOTHING) {
+          L.expect(end);
+        }
+        return;
+      }
+    }
+    L.expect(end);
   }
   template <typename T>
   List<T> parseList(int begin, int sep, int end, T (ParserImpl::*parse)()) {
@@ -307,40 +316,42 @@ struct ParserImpl {
     return parseExp();
   }
 
-  void parseOperatorArguments(TreeList& inputs, TreeList& attributes) {
-    L.expect('(');
-    if (L.cur().kind != ')') {
-      do {
-        if (L.cur().kind == TK_IDENT && L.lookahead().kind == '=') {
-          auto ident = parseIdent();
-          L.expect('=');
-          auto v = parseAttributeValue();
-          attributes.push_back(
-              Attribute::create(ident.range(), Ident(ident), v));
-        } else {
-          inputs.push_back(parseExp());
-        }
-      } while (L.nextIf(','));
-    }
-    L.expect(')');
+  void parseArguments(TreeList& inputs, TreeList& attributes) {
+    parseSequence('(', ',', ')', [&] {
+      if (L.cur().kind == TK_IDENT && L.lookahead().kind == '=') {
+        auto ident = parseIdent();
+        L.expect('=');
+        auto v = parseAttributeValue();
+        attributes.push_back(Attribute::create(ident.range(), Ident(ident), v));
+      } else {
+        inputs.push_back(parseExp());
+      }
+    });
   }
 
-  // Parse expr's of the form [a:], [:b], [a:b], [:]
+  // Parse expr's of the form [a:], [:b], [a:b], [:] and all variations with "::"
   Expr parseSubscriptExp() {
-    TreeRef first, second;
+    TreeRef first, second, third;
     auto range = L.cur().range;
     if (L.cur().kind != ':') {
       first = parseExp();
     }
     if (L.nextIf(':')) {
-      if (L.cur().kind != ',' && L.cur().kind != ']') {
+      if (L.cur().kind != ',' && L.cur().kind != ']' && L.cur().kind != ':') {
         second = parseExp();
       }
+    if (L.nextIf(':')) {
+      if (L.cur().kind != ',' && L.cur().kind != ']') {
+        third = parseExp();
+      }
+    }
       auto maybe_first = first ? Maybe<Expr>::create(range, Expr(first))
                                : Maybe<Expr>::create(range);
       auto maybe_second = second ? Maybe<Expr>::create(range, Expr(second))
                                  : Maybe<Expr>::create(range);
-      return SliceExpr::create(range, maybe_first, maybe_second);
+      auto maybe_third = third ? Maybe<Expr>::create(range, Expr(third))
+                                : Maybe<Expr>::create(range);
+      return SliceExpr::create(range, maybe_first, maybe_second, maybe_third);
     } else {
       return Expr(first);
     }
@@ -355,14 +366,17 @@ struct ParserImpl {
     return Subscript::create(range, Expr(value), subscript_exprs);
   }
 
-  TreeRef parseParam(bool kwarg_only) {
-    auto ident = parseIdent();
-    TreeRef type;
+  Maybe<Expr> maybeParseTypeAnnotation() {
     if (L.nextIf(':')) {
-      type = parseExp();
+      return Maybe<Expr>::create(L.cur().range, parseExp());
     } else {
-      type = Var::create(L.cur().range, Ident::create(L.cur().range, "Tensor"));
+      return Maybe<Expr>::create(L.cur().range);
     }
+  }
+
+  TreeRef parseFormalParam(bool kwarg_only) {
+    auto ident = parseIdent();
+    TreeRef type = maybeParseTypeAnnotation();
     TreeRef def;
     if (L.nextIf('=')) {
       def = Maybe<Expr>::create(L.cur().range, parseExp());
@@ -370,7 +384,7 @@ struct ParserImpl {
       def = Maybe<Expr>::create(L.cur().range);
     }
     return Param::create(
-        type->range(), Ident(ident), Expr(type), Maybe<Expr>(def), kwarg_only);
+        type->range(), Ident(ident), Maybe<Expr>(type), Maybe<Expr>(def), kwarg_only);
   }
 
   Param parseBareTypeAnnotation() {
@@ -378,7 +392,7 @@ struct ParserImpl {
     return Param::create(
         type.range(),
         Ident::create(type.range(), ""),
-        type,
+        Maybe<Expr>::create(type.range(), type),
         Maybe<Expr>::create(type.range()),
         /*kwarg_only=*/false);
   }
@@ -402,11 +416,12 @@ struct ParserImpl {
   // alone on a line:
   // first[,other,lhs] = rhs
   TreeRef parseAssign(const Expr& lhs) {
+    auto type = maybeParseTypeAnnotation();
     auto op = parseAssignmentOp();
     auto rhs = parseExpOrExpTuple();
     L.expect(TK_NEWLINE);
     if (op->kind() == '=') {
-      return Assign::create(lhs.range(), lhs, Expr(rhs));
+      return Assign::create(lhs.range(), lhs, Expr(rhs), type);
     } else {
       // this is an augmented assignment
       if (lhs.kind() == TK_TUPLE_LITERAL) {
@@ -435,7 +450,7 @@ struct ParserImpl {
       case TK_RETURN: {
         auto range = L.next().range;
         Expr value = L.cur().kind != TK_NEWLINE ? parseExpOrExpTuple()
-                                                : Expr(c(TK_NONE, range, {}));
+                                                : Expr(create_compound(TK_NONE, range, {}));
         L.expect(TK_NEWLINE);
         return Return::create(range, value);
       }
@@ -475,15 +490,6 @@ struct ParserImpl {
       }
     }
   }
-  TreeRef parseOptionalIdentList() {
-    TreeRef list = nullptr;
-    if (L.cur().kind == '(') {
-      list = parseList('(', ',', ')', &ParserImpl::parseIdent);
-    } else {
-      list = c(TK_LIST, L.cur().range, {});
-    }
-    return list;
-  }
   TreeRef parseIf(bool expect_if = true) {
     auto r = L.cur().range;
     if (expect_if)
@@ -516,11 +522,8 @@ struct ParserImpl {
   TreeRef parseFor() {
     auto r = L.cur().range;
     L.expect(TK_FOR);
-    auto targets =
-        parseList(TK_NOTHING, ',', TK_NOTHING, &ParserImpl::parseExp);
-    L.expect(TK_IN);
-    auto itrs = parseList(TK_NOTHING, ',', TK_NOTHING, &ParserImpl::parseExp);
-    L.expect(':');
+    auto targets = parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseExp);
+    auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
     auto body = parseStatements();
     return For::create(r, targets, itrs, body);
   }
@@ -534,7 +537,7 @@ struct ParserImpl {
     do {
       stmts.push_back(parseStmt());
     } while (!L.nextIf(TK_DEDENT));
-    return c(TK_LIST, r, std::move(stmts));
+    return create_compound(TK_LIST, r, std::move(stmts));
   }
 
   Maybe<Expr> parseReturnAnnotation() {
@@ -547,7 +550,7 @@ struct ParserImpl {
     }
   }
 
-  List<Param> parseParams() {
+  List<Param> parseFormalParams() {
     auto r = L.cur().range;
     std::vector<Param> params;
     bool kwarg_only = false;
@@ -555,14 +558,14 @@ struct ParserImpl {
       if (!kwarg_only && L.nextIf('*')) {
         kwarg_only = true;
       } else {
-        params.emplace_back(parseParam(kwarg_only));
+        params.emplace_back(parseFormalParam(kwarg_only));
       }
     });
     return List<Param>::create(r, params);
   }
   Decl parseDecl() {
     // Parse return type annotation
-    List<Param> paramlist = parseParams();
+    List<Param> paramlist = parseFormalParams();
     TreeRef return_type;
     Maybe<Expr> return_annotation = parseReturnAnnotation();
     L.expect(':');
@@ -616,17 +619,21 @@ struct ParserImpl {
 
  private:
   // short helpers to create nodes
-  TreeRef c(int kind, const SourceRange& range, TreeList&& trees) {
+  TreeRef create_compound(
+      int kind,
+      const SourceRange& range,
+      TreeList&& trees) {
     return Compound::create(kind, range, std::move(trees));
   }
   TreeRef makeList(const SourceRange& range, TreeList&& trees) {
-    return c(TK_LIST, range, std::move(trees));
+    return create_compound(TK_LIST, range, std::move(trees));
   }
   Lexer L;
   SharedParserData& shared;
 };
 
-Parser::Parser(const std::string& src) : pImpl(new ParserImpl(src)) {}
+Parser::Parser(const std::shared_ptr<Source>& src)
+    : pImpl(new ParserImpl(src)) {}
 
 Parser::~Parser() = default;
 

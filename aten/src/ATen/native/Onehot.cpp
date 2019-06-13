@@ -3,7 +3,7 @@
 namespace at { namespace native {
 
 Tensor one_hot(const Tensor &self, int64_t num_classes) {
-    AT_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
+    TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
     auto shape = self.sizes().vec();
 
     // empty tensor could be converted to one hot representation,
@@ -18,11 +18,11 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     }
 
     // non-empty tensor
-    AT_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
+    TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
     if (num_classes == -1) {
         num_classes = self.max().item().toLong() + 1;
     } else {
-        AT_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
+        TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
     }
 
     shape.push_back(num_classes);

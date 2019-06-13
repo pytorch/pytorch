@@ -15,7 +15,7 @@ static std::unordered_map<std::string, int> op_to_key = {
 
 namespace caffe2 {
 
-using at::Half; // for AT_FORALL_SCALAR_TYPES_AND_BOOL
+using at::Half; // for AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT
 
 template <class Context>
 class ATenOp : public Operator<Context> {
@@ -47,25 +47,29 @@ private:
       case at::k##aten_name: \
         return TypeMeta::Make<ctype>();
     switch(st) {
-      AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CASE)
+      AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CASE)
       default:
         CAFFE_THROW("Unknown ATen Type");
     }
     #undef DEFINE_CASE
   }
 
-  at::Type& typeFor(const Tensor& ten) {
-    at::Backend b = backend();
+  at::TensorOptions optionsFor(const Tensor& ten) {
+    at::Device device = ten.GetDevice();
 #ifdef __HIP_PLATFORM_HCC__
-    if (b == at::Backend::HIP) {
-      b = at::Backend::CUDA;
+    if (backend() == at::Backend::HIP) {
+      device = at::Device(kCUDA, device.index());
     }
 #endif
-    return at::getNonVariableType(b, typeMetaToScalarType(ten.meta()));
+    return at::TensorOptions(device).dtype(ten.dtype());
   }
+
   at::Tensor tensorWrapping(const Tensor& ten_) {
     auto& ten = const_cast<Tensor&>(ten_);
-    return typeFor(ten).tensorFromBlob(ten.raw_mutable_data(), ten.sizes());
+    return at::from_blob(
+        ten.raw_mutable_data(),
+        ten.sizes(),
+        optionsFor(ten));
   }
 
   at::Tensor peek(size_t i, size_t N) {
@@ -114,10 +118,10 @@ private:
     }
   }
 
-  // the AT_FORALL_SCALAR_TYPES_AND_BOOL macro just gives a 'i' or 'd' argument
-  // for each type to specify if it is stored as a integer or a double.
-  // We need this workaround here to extract the value in the scalar losslessly
-  // because in some cases like 'sum' Torch promotes float to double
+  // the AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT macro just gives a 'i' or
+  // 'd' argument for each type to specify if it is stored as a integer or a
+  // double. We need this workaround here to extract the value in the scalar
+  // losslessly because in some cases like 'sum' Torch promotes float to double
   // and will complain if we downcast it with toFloat, causing it
   // to lose precision
   double extract_d(const at::Scalar & s) {
@@ -134,8 +138,8 @@ private:
           auto value = extract_##native(scalar); \
           assignToValue<ctype>(dst, at::convert<ctype,decltype(value)>(value)); \
         } break;
-      AT_FORALL_SCALAR_TYPES_AND_BOOL(DEFINE_CASE)
-      #undef DEFINE_CASE
+      AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(DEFINE_CASE)
+#undef DEFINE_CASE
       default:
         CAFFE_THROW("Unknown ATen Type");
     }

@@ -16,6 +16,7 @@ class SoftmaxOp final : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...),
         axis_(this->template GetSingleArgument<int>("axis", 1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
+
   bool RunOnDevice() override;
 
  protected:

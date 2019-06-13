@@ -16,12 +16,17 @@
 #include "torch/csrc/jit/fuser/interface.h"
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/interpreter.h"
+#include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/passes/bailout_graph.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
+#include "torch/csrc/jit/passes/guard_elimination.h"
+#include "torch/csrc/jit/passes/insert_guards.h"
+#include "torch/csrc/jit/passes/liveness.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
@@ -38,8 +43,10 @@
 
 #include <torch/csrc/jit/testing/file_check.h>
 #include "ATen/core/ivalue.h"
+#include "torch/csrc/jit/profiling_record.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
+#include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
 
@@ -347,6 +354,39 @@ void testATenNativeBatchNorm() {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
+void testCustomFusion() {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = CompleteTensorType::create(s, at::kCPU, {2, 3, 4}, {12, 4, 1});
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto c = a * b;
+  auto d = c * a;
+  graph->registerOutput(d.value());
+
+  torch::jit::overrideCanFuseOnCPU(true);
+  CustomFuseGraph(
+      graph,
+      [](Node* n) { return n->kind() != prim::Param; },
+      Symbol::fromQualString("prim::FusionGroup"));
+  torch::jit::overrideCanFuseOnCPU(false);
+
+  const auto& nodes = graph->nodes();
+  auto fusion_group =
+      std::find_if(nodes.begin(), nodes.end(), [](const Node* node) {
+        return node->kind() == Symbol::fromQualString("prim::FusionGroup");
+      });
+  AT_ASSERT(fusion_group != nodes.end());
+
+  auto subgraph = fusion_group->g(attr::Subgraph);
+  auto hits = 0;
+  // two multiplications
+  for (const auto& n : subgraph->nodes()) {
+    hits++;
+  }
+  AT_ASSERT(hits == 2);
+}
+
 static const auto cf_examples = R"JIT(
   def if_test(a, b):
       # FIXME: use 0 instead of a.
@@ -369,11 +409,10 @@ static const auto cf_examples = R"JIT(
     return a
 )JIT";
 void testControlFlow() {
-  auto cu = std::make_shared<script::Module>();
-  script::defineMethodsInModule(
-      cu, cf_examples, script::nativeResolver, c10::nullopt);
+  auto cu = compile(cf_examples);
+
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu->get_method(name).graph();
+    auto graph = cu->get_function(name).graph();
     Code code(graph);
     InterpreterState interp(code);
     interp.run(stack);
@@ -575,15 +614,54 @@ void testTopologicalIndex() {
   }
 }
 
-void invokeTestRecordFunction(at::Tensor& t) {
-  autograd::profiler::GetPackedInputsCallback inputs_cb =
-    [t]() {
-      Stack st;
-      pack(st, t);
-      return st;
-    };
-  autograd::profiler::RecordFunction guard("test", inputs_cb);
-  t.add_(torch::ones_like(t));
+at::Tensor invokeTestRecordFunction(at::Tensor& t) {
+  RECORD_FUNCTION("test", std::vector<c10::IValue>({t}));
+
+  auto t2 = t.pow(2);
+  return t2;
+}
+
+static const auto invokeTestRecordFunction_JIT = R"JIT(
+  def forward(t):
+    t2 = t.pow(2)
+    return t2
+)JIT";
+
+at::Tensor invokeTestRecordFunctionJIT(at::Tensor& t) {
+  RECORD_FUNCTION("test", std::vector<c10::IValue>({t}));
+
+  auto cu = compile(invokeTestRecordFunction_JIT);
+  return cu->get_function("forward")({t}).toTensor();
+}
+
+using TracedTestInputs =
+    std::vector<std::tuple<std::string, std::vector<std::vector<int64_t>>>>;
+
+void checkTracedInputs(const TracedTestInputs& inputs) {
+  bool found_test = false;
+  bool found_pow = false;
+  bool found_mul = false;
+  for (const auto& input : inputs) {
+    const auto& fn = std::get<0>(input);
+    const auto& sizes = std::get<1>(input);
+    if (fn == "test") {
+      found_test = true;
+      TORCH_CHECK(sizes.size() == 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    } else if (fn == "test::pow") {
+      found_pow = true;
+      TORCH_CHECK(sizes.size() == 2);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+      TORCH_CHECK(sizes[1].empty());
+    } else if (fn.find("::mul") != std::string::npos) {
+      found_mul = true;
+      TORCH_CHECK(sizes.size() > 1);
+      TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
+    }
+  }
+  TORCH_CHECK(found_test);
+  TORCH_CHECK(found_pow);
+  TORCH_CHECK(found_mul);
 }
 
 std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
@@ -599,46 +677,97 @@ std::string getFullName(const autograd::profiler::RecordFunction* fn_ptr) {
   return full_name;
 }
 
-void invokeTestRecordFunctionNested() {
-  autograd::profiler::RecordFunction guard("inner");
-}
-
 void testRecordFunction() {
-  std::vector<std::vector<int64_t>> input_sizes;
-  autograd::profiler::pushCallback([&input_sizes](
-      const autograd::profiler::RecordFunction& fn) {
-    for (const auto& input : fn.inputs()) {
-      if (input.isTensor()) {
-        std::vector<int64_t> t = input.toTensor().sizes().vec();
-        input_sizes.push_back(t);
-      }
-    }
-  });
+  // [(fn, [[sizes], [sizes], ...]), ...]
+  TracedTestInputs traced_inputs;
+  autograd::profiler::pushCallback(
+      [&traced_inputs](const autograd::profiler::RecordFunction& fn) {
+        auto inputs = fn.inputs();
+        std::vector<std::vector<int64_t>> sizes;
+        for (const auto& input : inputs) {
+          if (input.isTensor()) {
+            sizes.push_back(input.toTensor().sizes().vec());
+          } else if (input.isScalar()) {
+            sizes.push_back(std::vector<int64_t>());
+          }
+        }
+        traced_inputs.push_back(
+            std::make_tuple(std::string(getFullName(&fn)), sizes));
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      /* needs_inputs */ true);
 
   auto t = torch::randn({1, 2, 3}, at::kCPU);
-  invokeTestRecordFunction(t);
+  t.set_requires_grad(true);
+  auto t2 = invokeTestRecordFunction(t);
+  t2.backward();
+  auto eager_inputs = traced_inputs;
+  traced_inputs.clear();
+
+  t = torch::randn({1, 2, 3}, at::kCPU);
+  t.set_requires_grad(true);
+  t2 = invokeTestRecordFunctionJIT(t);
+  t2.backward();
+  auto jit_inputs = traced_inputs;
+  traced_inputs.clear();
 
   autograd::profiler::popCallback();
 
-  AT_CHECK(input_sizes.size() == 1);
-  AT_CHECK(input_sizes[0] == at::IntArrayRef({1, 2, 3}));
+  checkTracedInputs(eager_inputs);
+  checkTracedInputs(jit_inputs);
 
-  // test nested RecordFunctions
-  std::vector<std::string> nested_names;
-  autograd::profiler::pushCallback([&nested_names](
-      const autograd::profiler::RecordFunction& fn) {
-    nested_names.push_back(getFullName(&fn));
-  });
+  // test sampled callbacks
+  int sampled_cb_ctr = 0;
+  autograd::profiler::pushCallback(
+      [&sampled_cb_ctr](const autograd::profiler::RecordFunction& fn) {
+        if (std::string(fn.name().str()) == "test") {
+          ++sampled_cb_ctr;
+        }
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      /* needs_inputs */ false,
+      /* sampled */ true);
 
-  {
-    autograd::profiler::RecordFunction guard("outer");
-    invokeTestRecordFunctionNested();;
-  }
+  int non_sampled_cb_ctr = 0;
+  autograd::profiler::pushCallback(
+      [&non_sampled_cb_ctr](const autograd::profiler::RecordFunction& fn) {
+        if (std::string(fn.name().str()) == "test") {
+          ++non_sampled_cb_ctr;
+        }
+      },
+      [](const autograd::profiler::RecordFunction&) {},
+      /* needs_inputs */ false,
+      /* sampled */ false);
+
+  auto run_test_function = []() {
+    auto t = torch::randn({1, 2, 3}, at::kCPU);
+    for (auto k = 0; k < 1000; k++) {
+      invokeTestRecordFunction(t);
+    }
+  };
+
+  autograd::profiler::setSamplingProbability(0.5);
+  run_test_function();
+
+  TORCH_CHECK(non_sampled_cb_ctr == 1000);
+  TORCH_CHECK(sampled_cb_ctr > 0 && sampled_cb_ctr < 1000);
+
+  sampled_cb_ctr = 0;
+  autograd::profiler::setSamplingProbability(0.0);
+  run_test_function();
+
+  TORCH_CHECK(non_sampled_cb_ctr == 2000);
+  TORCH_CHECK(sampled_cb_ctr == 0);
+
+  sampled_cb_ctr = 0;
+  autograd::profiler::setSamplingProbability(1.0);
+  run_test_function();
+
+  TORCH_CHECK(non_sampled_cb_ctr == 3000);
+  TORCH_CHECK(sampled_cb_ctr == 1000);
 
   autograd::profiler::popCallback();
-  AT_CHECK(nested_names.size() == 2);
-  AT_CHECK(nested_names[0] == "outer");
-  AT_CHECK(nested_names[1] == "outer::inner");
+  autograd::profiler::popCallback();
 }
 
 void testAutogradProfiler() {
@@ -666,13 +795,13 @@ void testAutogradProfiler() {
   for (size_t pos = 0; (pos = result.find("tanh", pos)) != std::string::npos;
        count++, pos++) {
   }
-  AT_CHECK(count == 200);
+  TORCH_CHECK(count == 200);
 }
 
 void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
-          "test::test_none() -> int?",
+          "prim::test_none() -> int?",
           [](const Node* node) {
             return [](Stack& stack) {
               push(stack, IValue());
@@ -680,7 +809,7 @@ void testNoneSchemaMatch() {
             };
           }),
       Operator(
-          "test::is_none(int? a) -> bool",
+          "prim::is_none(int? a) -> bool",
           [](const Node* node) {
             return [](Stack& stack) {
               IValue a = pop(stack);
@@ -700,8 +829,8 @@ void testNoneSchemaMatch() {
 
   auto r = std::make_shared<Graph>();
   auto& g = *r;
-  auto opt_int = g.insert(Symbol::fromQualString("test::test_none"), {});
-  auto out_bool = g.insert(Symbol::fromQualString("test::is_none"), {opt_int});
+  auto opt_int = g.insert(Symbol::fromQualString("prim::test_none"), {});
+  auto out_bool = g.insert(Symbol::fromQualString("prim::is_none"), {opt_int});
   g.registerOutput(out_bool);
   ConstantPropagation(r);
 
@@ -709,6 +838,238 @@ void testNoneSchemaMatch() {
   // checking that constant propagation ran wo/failure
   AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
+
+void testModuleDefine() {
+  auto m = std::make_shared<script::Module>();
+  m->register_parameter("foo", torch::ones({}), false);
+  m->define(R"(
+    def add_it(self, x, b : int = 4):
+      return self.foo + x + b
+  )");
+  auto result = m->run_method("add_it", torch::ones({}));
+  AT_ASSERT(result.toTensor().item<float>() == 6)
+}
+
+void testModuleConversion() {
+  auto m = std::make_shared<script::Module>();
+  {
+    // test cuda to cpu for params and buffers
+    m->register_parameter("foo", torch::ones({}, at::kCUDA), false);
+    m->register_buffer("bar", torch::ones({}, at::kCUDA));
+
+    m->to(at::kCUDA);
+    m->to(at::kCPU);
+    AT_ASSERT(m->get_parameter("foo").device().is_cpu());
+    AT_ASSERT(m->get_buffer("bar").device().is_cpu());
+  }
+  {
+    // test cpu to cuda for params and buffers
+    m->register_parameter("foo", torch::ones({}), false);
+    m->register_buffer("bar", torch::ones({}));
+
+    m->to(at::kCUDA);
+    AT_ASSERT(m->get_parameter("foo").device().is_cuda());
+    AT_ASSERT(m->get_buffer("bar").device().is_cuda());
+  }
+}
+
+static int testPassValue = 0;
+void fakePass(std::shared_ptr<Graph>& g) {
+  testPassValue++;
+  return;
+}
+
+RegisterPass p(fakePass);
+
+void testPassManagement() {
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  script::parseIR(
+      R"IR(
+graph(%a):
+  return (%a))IR",
+      &*graph);
+
+  std::vector<IValue> stack = {IValue(torch::randn({22}, at::kCPU))};
+  auto run = [&](std::shared_ptr<Graph>& graph, std::vector<IValue> stack) {
+    GraphExecutor executor(graph);
+    executor.run(stack);
+    return stack;
+  };
+  run(graph, stack);
+  AT_ASSERT(testPassValue);
+}
+
+static void checkShape(
+    Node* n,
+    std::vector<int64_t> expected,
+    bool prev = true) {
+  auto profile = (prev) ? n->inputs().at(0)->node() : n;
+  auto tp = profile->output()->type();
+  auto ptp = tp->expect<ProfiledTensorType>();
+  ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
+std::vector<std::size_t> values_to_value_ids(
+    const std::vector<Value*>& values) {
+  std::vector<std::size_t> result;
+  for (auto v : values) {
+    result.push_back(v->unique());
+  }
+  return result;
+};
+
+void testInsertAndEliminateGuards() {
+  static const auto basic_example = R"JIT(
+  def basic(x, y):
+    a = x + y
+    b = x * y
+    c = x + 1
+    d = a - c
+    e = b - c
+    return d + e
+  )JIT";
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("basic");
+  auto pr = ProfilingRecord::instrumentGraph(fun.graph());
+  auto x = at::randn({2, 3}, at::kCPU);
+  auto y = at::randn({2, 3}, at::kCPU);
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+  auto stack = createStack({v(x), v(y)});
+  // introduce some profiling information
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+  auto copy = pr->profiled_graph_->copy();
+  InsertGuards(copy);
+  auto nodes = copy->block()->nodes();
+  auto guard = std::find_if(nodes.begin(), nodes.end(), [](Node* n) {
+    return n->kind() == prim::Guard;
+  });
+  ASSERT_NE(guard, nodes.end());
+  ASSERT_EQ(guard->input()->type()->cast<ProfiledTensorType>(), nullptr);
+  checkShape(*guard, {2, 3}, false);
+  auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
+  int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 11);
+  // now eliminate as many guards as possible
+  // we should be left with two guards on x and y's defs
+  EliminateGuards(copy);
+  num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 2);
+}
+
+void testInsertBailOuts() {
+  static const auto basic_example = R"JIT(
+  def basic_loop(x, y):
+
+      a = x + 1
+      b = y + 2
+      c = x + y + 3
+
+      for i in range(10):
+          a = a + b
+          # invariant
+          d = b * c
+          #
+          a = a - d
+
+      e = a + 4
+      return e
+  )JIT";
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("basic_loop");
+  auto pr = ProfilingRecord::instrumentGraph(fun.graph());
+  auto x = at::randn({2, 3}, at::kCPU);
+  auto y = at::randn({2, 3}, at::kCPU);
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+  auto stack = createStack({v(x), v(y)});
+  // introduce some profiling information
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+  auto copy = pr->profiled_graph_->copy();
+  InsertGuards(copy);
+  EliminateGuards(copy);
+  auto nodes = copy->block()->nodes();
+  auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
+  auto num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 3);
+  InsertBailOuts(copy);
+  auto is_bailout = [](Node* n) { return n->kind() == prim::BailOut; };
+  auto num_bailouts = std::count_if(nodes.begin(), nodes.end(), is_bailout);
+  ASSERT_EQ(num_guards, num_bailouts);
+  std::vector<Node*> bailouts(num_bailouts);
+  std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
+  auto last_graph = bailouts[num_bailouts - 1]->g(attr::Subgraph);
+  ASSERT_EQ(last_graph->inputs().size(), 1);
+  ASSERT_EQ(last_graph->outputs().size(), 1);
+  auto lb_nodes = last_graph->nodes();
+  auto is_add = [](Node* n) { return n->kind() == aten::add; };
+  auto is_loop = [](Node* n) { return n->kind() == prim::Loop; };
+  auto lb_graph_num_adds =
+      std::count_if(lb_nodes.begin(), lb_nodes.end(), is_add);
+  auto lb_graph_num_loops =
+      std::count_if(lb_nodes.begin(), lb_nodes.end(), is_loop);
+  ASSERT_EQ(lb_graph_num_adds, 1);
+  ASSERT_EQ(lb_graph_num_loops, 0);
+  auto first_graph = bailouts[0]->g(attr::Subgraph);
+  auto fst_nodes = first_graph->nodes();
+  ASSERT_EQ(first_graph->inputs().size(), 2);
+  ASSERT_EQ(first_graph->outputs().size(), 1);
+  auto fst_graph_num_adds =
+      std::count_if(fst_nodes.begin(), fst_nodes.end(), is_add);
+  auto fst_graph_num_loops =
+      std::count_if(fst_nodes.begin(), fst_nodes.end(), is_loop);
+  ASSERT_EQ(fst_graph_num_loops, 1);
+  ASSERT_EQ(fst_graph_num_adds, 5);
+}
+
+void testProfiler() {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2 * input_size;
+
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+
+  auto input = at::randn({batch_size, input_size}, at::kCPU);
+  auto hx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto cx = at::randn({batch_size, hidden_size}, at::kCPU);
+  auto w_ih = t_def(at::randn({4 * hidden_size, input_size}, at::kCPU));
+  auto w_hh = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCPU));
+
+  auto g = build_lstm();
+  auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
+
+  auto& opt_graph = *g.get();
+  ArgumentSpecCreator arg_spec_creator(opt_graph);
+  ArgumentSpec spec =
+      arg_spec_creator.create(autograd::GradMode::is_enabled(), stack);
+  arg_spec_creator.specializeTypes(opt_graph, spec);
+  auto pr = ProfilingRecord::instrumentGraph(g);
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+
+  auto begin = pr->profiled_graph_->block()->nodes().begin();
+  auto end = pr->profiled_graph_->block()->nodes().end();
+  auto mm =
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mm; });
+  ASSERT_NE(mm, end);
+  std::vector<int64_t> mm_expected{4, 256};
+  std::vector<int64_t> eltwise{4, 512};
+  checkShape(*mm, mm_expected);
+  auto sigmoid_n = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::sigmoid; });
+  ASSERT_NE(sigmoid_n, end);
+  checkShape(*sigmoid_n, eltwise);
+  auto tanh_n =
+      std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
+  checkShape(*tanh_n, eltwise);
+}
+
 } // namespace test
 } // namespace jit
 } // namespace torch

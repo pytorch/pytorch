@@ -55,6 +55,8 @@ template <typename T, class Context>
 CAFFE2_API void Inv(int N, const T* X, T* Y, Context* context);
 template <typename T, class Context>
 CAFFE2_API void Erf(int N, const T* X, T* Y, Context* context);
+template <typename T, class Context>
+CAFFE2_API void CdfNorm(int N, const T* X, T* Y, Context* context);
 
 template <typename T, class Context>
 CAFFE2_API void Set(std::int64_t N, T alpha, T* X, Context* context);

@@ -7,7 +7,8 @@ class FunctionBackend(object):
     def __getattr__(self, name):
         fn = self.function_classes.get(name)
         if fn is None:
-            raise NotImplementedError
+            raise NotImplementedError(
+                "Could not find function class for [{}]".format(name))
         return fn
 
     def register_function(self, name, function_class):

@@ -41,7 +41,7 @@ void Tensor::print() const {
   }
 }
 
-const char * Tensor::toString() const {
+std::string Tensor::toString() const {
   return type().toString();
 }
 

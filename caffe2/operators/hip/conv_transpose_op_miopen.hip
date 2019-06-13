@@ -298,9 +298,14 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
   auto& Weight = Input(FILTER);
   auto& dY = Input(OUTPUT_GRAD);
   auto* dW = Output(FILTER_GRAD);
-  auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-  dX->ResizeLike(X);
   dW->ResizeLike(Weight);
+
+  bool doBwdDataComputation = (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2)));
+  Tensor* dX{nullptr};
+  if (doBwdDataComputation) {
+      dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
+      dX->ResizeLike(X);
+  }
 
   CAFFE_ENFORCE(X.ndim() >= 3 && X.ndim() <= 5);
   CAFFE_ENFORCE(
@@ -323,7 +328,6 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
   W_out = dY.ndim() > 3 ? dY.dim32(3) : 1;
   D_out = dY.ndim() > 4 ? dY.dim32(4) : 1;
 
-  bool doBwdDataComputation = (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2)));
   bool input_changed = (X.sizes() != mio_input_dims_);
   bool weight_changed = (Weight.sizes() != mio_weight_dims_);
 
@@ -398,7 +402,7 @@ bool MIOPENConvTransposeGradientOp<T>::RunOnDevice() {
 
       bestDataAlgoFound_ = true;
       bwdDataAlgo_ = perf.bwd_data_algo;
-  }
+    }
 
     while (!bestWeightAlgoFound_) {
         miopenConvAlgoPerf_t perf;

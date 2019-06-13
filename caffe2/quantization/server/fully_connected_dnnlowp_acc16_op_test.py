@@ -7,7 +7,7 @@ import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, workspace
 from caffe2.quantization.server import utils as dnnlowp_utils
-from dnnlowp_test_utils import check_quantized_results_close
+from dnnlowp_test_utils import check_quantized_results_close, run_conv_or_fc
 from hypothesis import given
 
 
@@ -104,12 +104,8 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(net)
-            outputs.append(
-                Output(Y=self.ws.blobs["Y"].fetch(), op_type=op_type, engine=engine)
+            run_conv_or_fc(
+                self, None, net, X, W, b, op_type, engine, None, gc, outputs
             )
 
         check_quantized_results_close(outputs)
@@ -224,13 +220,8 @@ class DNNLowPFullyConnectedAcc16OpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([dequantize])
 
-            self.ws.create_blob("X").feed(X, device_option=gc)
-            self.ws.create_blob("W").feed(W, device_option=gc)
-            self.ws.create_blob("b").feed(b, device_option=gc)
-            self.ws.run(init_net)
-            self.ws.run(net)
-            outputs.append(
-                Output(Y=self.ws.blobs["Y"].fetch(), op_type=op_type, engine=engine)
+            run_conv_or_fc(
+                self, init_net, net, X, W, b, op_type, engine, None, gc, outputs
             )
 
         check_quantized_results_close(outputs)

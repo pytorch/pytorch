@@ -1,13 +1,14 @@
 #pragma once
 
-#include <ATen/CPUGeneral.h>
-#include <ATen/Type.h>
+#include <ATen/core/ATenGeneral.h>
+#include <ATen/Tensor.h>
 #include <ATen/TypeExtendedInterface.h>
 #include <ATen/Utils.h>
 #include <ATen/LegacyTHDispatch.h>
 #include <ATen/LegacyTHDispatcher.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
+#include <ATen/CPUGenerator.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -47,8 +48,8 @@ class CAFFE2_API Context {
   }
   // The passed in Type must be delete'able
   // TODO: Just make it take a unique_ptr
-  void registerType(Backend b, ScalarType s, Type* t) {
-    globalLegacyTypeDispatch().registerType(b, s,
+  void registerType(Backend b, Type* t) {
+    globalLegacyTypeDispatch().registerType(b,
       LegacyTypeDispatch::TypeUniquePtr{t, LegacyTypeDeleter([](Type* p) { delete p; }) });
   }
 
@@ -57,13 +58,20 @@ class CAFFE2_API Context {
       LegacyTHDispatch::LegacyTHDispatcherUniquePtr{t, LegacyTHDispatcherDeleter([](LegacyTHDispatcher* p) { delete p; }) });
   }
 
-  Generator & defaultGenerator(DeviceType device_type) {
+  Generator & defaultGenerator(Device device) {
+    DeviceType device_type = device.type();
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
-    auto & generator = generator_registry[static_cast<int>(device_type)];
-    if(!generator)
+    if (device_type == at::kCPU) {
+      return *at::detail::getDefaultCPUGenerator();
+    } else if (device_type == at::kCUDA) {
+      auto & generator = generator_registry[static_cast<int>(device_type)];
+      if(!generator)
       AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
-    return *generator;
+      return *generator;
+    } else {
+      AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
+    }  
   }
   bool hasOpenMP() const;
   bool hasMKL() const;
@@ -164,12 +172,6 @@ CAFFE2_API Context& globalContext();
 
 static inline void init() {
   globalContext();
-  if (const char *env_p = std::getenv("OMP_NUM_THREADS")) {
-    at::set_num_threads(std::stoi(env_p));
-  }
-  if (const char *env_p = std::getenv("MKL_NUM_THREADS")) {
-    at::set_num_threads(std::stoi(env_p));
-  }
 }
 
 static inline TypeExtendedInterface& getNonVariableType(Backend p, ScalarType s) {
@@ -182,16 +184,24 @@ CAFFE2_API TypeExtendedInterface& getType(const Tensor&);
 
 CAFFE2_API Allocator* getCPUAllocator();
 
-static inline TypeExtendedInterface& CPU(ScalarType s) {
-  return getNonVariableType(Backend::CPU, s);
+static inline DeprecatedTypeProperties& getNonVariableDeprecatedTypeProperties(Backend p, ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      p, s, /*is_variable*/false);
 }
 
-static inline TypeExtendedInterface& CUDA(ScalarType s) {
-  return getNonVariableType(Backend::CUDA, s);
+static inline DeprecatedTypeProperties& CPU(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::CPU, s, /*is_variable*/false);
 }
 
-static inline TypeExtendedInterface& HIP(ScalarType s) {
-  return getNonVariableType(Backend::HIP, s);
+static inline DeprecatedTypeProperties& CUDA(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::CUDA, s, /*is_variable*/false);
+}
+
+static inline DeprecatedTypeProperties& HIP(ScalarType s) {
+  return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
+      Backend::HIP, s, /*is_variable*/false);
 }
 
 CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options);
@@ -250,7 +260,12 @@ static inline bool hasMKLDNN() {
 }
 
 static inline void manual_seed(uint64_t seed) {
-  globalContext().defaultGenerator(DeviceType::CPU).manualSeed(seed);
+  auto& gen = globalContext().defaultGenerator(DeviceType::CPU);
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen.mutex_);
+    gen.set_current_seed(seed);
+  }
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
   if (hasCUDA() && detail::getCUDAHooks().getNumGPUs() > 0) {

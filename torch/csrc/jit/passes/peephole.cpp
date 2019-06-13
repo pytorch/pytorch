@@ -157,12 +157,17 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       }
     } else if (
         node->matches(
-            "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
-      auto uses = node->output()->uses();
-      for (Use u : uses) {
-        if (u.user->matches(
-                "aten::_grad_sum_to_size(Tensor(a) self, int[] size) -> Tensor(a)")) {
-          u.user->replaceInput(0, node->inputs().at(0));
+            "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
+      if (node->input(1)->mustBeNone()) {
+        node->output()->replaceAllUsesWith(node->input(0));
+      } else {
+        auto uses = node->output()->uses();
+        for (Use u : uses) {
+          if (u.user->matches(
+                  "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)") &&
+              u.user->input(1)->type()->isSubtypeOf(ListType::ofInts())) {
+            u.user->replaceInput(0, node->inputs().at(0));
+          }
         }
       }
     } else if (node->kind() == prim::If) {
@@ -207,6 +212,36 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       auto input = node->input();
       if (input->mustNotBeNone()) {
         node->output()->replaceAllUsesWith(node->input());
+      }
+    } else if (node->matches("prim::dtype(Tensor a) -> int")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output = node->owningGraph()->insertConstant(
+            static_cast<int64_t>(dim_tensor->scalarType()));
+        node->output()->replaceAllUsesWith(output);
+      }
+    } else if (node->matches("prim::device(Tensor a) -> Device")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output = node->owningGraph()->insertConstant(dim_tensor->device());
+        node->output()->replaceAllUsesWith(output);
+      }
+    } else if (node->matches("aten::dim(Tensor self) -> int")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output = node->owningGraph()->insertConstant(dim_tensor->dim());
+        node->output()->replaceAllUsesWith(output);
+      }
+    } else if (node->matches("prim::is_cuda(Tensor a) -> bool")) {
+      if (auto dim_tensor =
+              node->input()->type()->cast<DimensionedTensorType>()) {
+        WithInsertPoint guard(node);
+        auto output =
+            node->owningGraph()->insertConstant(dim_tensor->device().is_cuda());
+        node->output()->replaceAllUsesWith(output);
       }
     }
   }

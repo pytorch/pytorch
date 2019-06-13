@@ -40,6 +40,9 @@ template <
     int BDims,
     CUDAHistogramMemoryType MemoryType = CUDAHistogramMemoryType::MULTI_BLOCK,
     typename Op>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
 __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
@@ -308,7 +311,7 @@ Tensor _histc_cuda_template(
   if (nbins <= 0) {
     AT_ERROR("bins must be > 0");
   }
-  Tensor output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(kLong));
+  Tensor output = native::zeros({nbins}, device(DeviceType::CUDA).dtype(self.scalar_type()));
   input_t minvalue = min;
   input_t maxvalue = max;
   if (min == max) {
@@ -319,7 +322,8 @@ Tensor _histc_cuda_template(
     minvalue = minvalue - 1;
     maxvalue = maxvalue + 1;
   }
-  auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
+
+  auto ret = cuda::CUDA_tensor_histogram<input_t, input_t, false>(
     output, self, Tensor(), nbins, minvalue, maxvalue);
   return output;
 }

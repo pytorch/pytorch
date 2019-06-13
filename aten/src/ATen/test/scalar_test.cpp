@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <iostream>
+#include <random>
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
 #define _USE_MATH_DEFINES
@@ -19,7 +20,7 @@ struct Foo {
   static void apply(Tensor a, Tensor b) {
     scalar_type s = 1;
     std::stringstream ss;
-    ss << "hello, dispatch: " << a.type().toString() << s << "\n";
+    ss << "hello, dispatch: " << a.dispatch_type().toString() << s << "\n";
     auto data = (scalar_type*)a.data_ptr();
     (void)data;
   }
@@ -58,8 +59,12 @@ TEST(TestScalar, TestScalar) {
   Scalar h2 = h;
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " "
        << bar.toDouble() << " " << what.isIntegral() << "\n";
-  Generator& gen = at::globalContext().defaultGenerator(at::kCPU);
-  ASSERT_NO_THROW(gen.seed());
+  auto gen = at::detail::getDefaultCPUGenerator();
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    ASSERT_NO_THROW(gen->set_current_seed(std::random_device()()));
+  }
   auto&& C = at::globalContext();
   if (at::hasCUDA()) {
     auto t2 = zeros({4, 4}, at::kCUDA);
@@ -90,8 +95,8 @@ TEST(TestScalar, TestScalar) {
   test_overflow();
 
   if (at::hasCUDA()) {
-    auto r = CUDA(Float).copy(next_h);
-    ASSERT_TRUE(CPU(Float).copy(r).equal(next_h));
+    auto r = next_h.to(at::Device(kCUDA), kFloat, /*non_blocking=*/ false, /*copy=*/ true);
+    ASSERT_TRUE(r.to(at::Device(kCPU), kFloat, /*non_blocking=*/ false, /*copy=*/ true).equal(next_h));
   }
   ASSERT_NO_THROW(randn({10, 10, 2}, options));
 
@@ -105,7 +110,7 @@ TEST(TestScalar, TestScalar) {
       scalar_t s = 1;
       std::stringstream ss;
       ASSERT_NO_THROW(
-          ss << "hello, dispatch" << x.type().toString() << s << "\n");
+          ss << "hello, dispatch" << x.dispatch_type().toString() << s << "\n");
       auto data = (scalar_t*)x.data_ptr();
       (void)data;
     });

@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 class IDEEPReluOp final : public IDEEPOperator {
  public:
@@ -84,4 +86,4 @@ REGISTER_IDEEP_OPERATOR(ReluGradient, IDEEPReluGradientOp);
 REGISTER_IDEEP_OPERATOR(LeakyRelu, IDEEPReluOp);
 REGISTER_IDEEP_OPERATOR(LeakyReluGradient, IDEEPReluGradientOp);
 
-} // namespace caffe2
+} // namespace

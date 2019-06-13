@@ -19,7 +19,8 @@ TEST(UtilsNMSTest, TestNMS) {
   auto proposals = input.block(0, 0, input.rows(), 4);
   auto scores = input.col(4);
   for (int i = 0; i < input_thresh.size(); i++) {
-    auto cur_out = utils::nms_cpu(proposals, scores, input_thresh[i]);
+    auto cur_out = utils::nms_cpu(
+        proposals, scores, input_thresh[i], true /* legacy_plus_one */);
     EXPECT_EQ(output_gt[i], cur_out);
   }
 
@@ -31,7 +32,13 @@ TEST(UtilsNMSTest, TestNMS) {
       indices.data() + indices.size(),
       [&scores](int lhs, int rhs) { return scores(lhs) > scores(rhs); });
   for (int i = 0; i < input_thresh.size(); i++) {
-    auto cur_out = utils::nms_cpu(proposals, scores, indices, input_thresh[i]);
+    auto cur_out = utils::nms_cpu(
+        proposals,
+        scores,
+        indices,
+        input_thresh[i],
+        -1, /* topN */
+        true /* legacy_plus_one */);
     EXPECT_EQ(output_gt[i], cur_out);
   }
 
@@ -39,8 +46,13 @@ TEST(UtilsNMSTest, TestNMS) {
   std::vector<int> top_n = {1, 1, 2, 2, 3};
   auto gt_out = output_gt;
   for (int i = 0; i < input_thresh.size(); i++) {
-    auto cur_out =
-        utils::nms_cpu(proposals, scores, indices, input_thresh[i], top_n[i]);
+    auto cur_out = utils::nms_cpu(
+        proposals,
+        scores,
+        indices,
+        input_thresh[i],
+        top_n[i],
+        true /* legacy_plus_one */);
     gt_out[i].resize(top_n[i]);
     EXPECT_EQ(gt_out[i], cur_out);
   }
@@ -92,7 +104,8 @@ TEST(UtilsNMSTest, TestNMS1) {
                              18, 19, 21, 23, 24, 25, 26, 30, 32,
                              33, 34, 35, 37, 43, 44, 47, 50};
 
-  auto cur_out = utils::nms_cpu(proposals, scores, 0.5);
+  auto cur_out =
+      utils::nms_cpu(proposals, scores, 0.5, true /* legacy_plus_one */);
   std::sort(cur_out.begin(), cur_out.end());
   EXPECT_EQ(output_gt, cur_out);
 }
@@ -148,7 +161,9 @@ TEST(UtilsNMSTest, TestSoftNMS) {
         0.5,
         overlap_thresh[i],
         0.0001,
-        method[i]);
+        method[i],
+        -1, /* topN */
+        true /* legacy_plus_one */);
     EXPECT_EQ(keep, keep_gt);
     {
       auto diff = expected_scores - out_scores;
@@ -165,7 +180,8 @@ TEST(UtilsNMSTest, TestSoftNMS) {
           overlap_thresh[i],
           0.0001,
           method[i],
-          topN);
+          topN,
+          true /* legacy_plus_one */);
       std::vector<int> expected_keep(keep_gt.begin(), keep_gt.begin() + topN);
       EXPECT_EQ(expected_keep, keep);
     }
@@ -180,7 +196,9 @@ TEST(UtilsNMSTest, TestSoftNMS) {
         0.5,
         overlap_thresh[i],
         0.0001,
-        method[i]);
+        method[i],
+        -1, /* topN */
+        true /* legacy_plus_one */);
     std::sort(keep.begin(), keep.end());
     EXPECT_EQ(indices, keep);
     {
@@ -198,7 +216,9 @@ TEST(UtilsNMSTest, TestSoftNMS) {
         0.5,
         overlap_thresh[i],
         score_thresh,
-        method[i]);
+        method[i],
+        -1, /* topN */
+        true /* legacy_plus_one */);
     {
       auto expected_keep =
           utils::GetArrayIndices(expected_scores >= score_thresh);
@@ -235,7 +255,8 @@ TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
 
   auto scores = input.col(4);
   for (int i = 0; i < input_thresh.size(); i++) {
-    auto cur_out = utils::nms_cpu(proposals, scores, input_thresh[i]);
+    auto cur_out = utils::nms_cpu(
+        proposals, scores, input_thresh[i], true /* legacy_plus_one */);
     EXPECT_EQ(output_gt[i], cur_out);
   }
 
@@ -247,7 +268,13 @@ TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
       indices.data() + indices.size(),
       [&scores](int lhs, int rhs) { return scores(lhs) > scores(rhs); });
   for (int i = 0; i < input_thresh.size(); i++) {
-    auto cur_out = utils::nms_cpu(proposals, scores, indices, input_thresh[i]);
+    auto cur_out = utils::nms_cpu(
+        proposals,
+        scores,
+        indices,
+        input_thresh[i],
+        -1, /* topN */
+        true /* legacy_plus_one */);
     EXPECT_EQ(output_gt[i], cur_out);
   }
 
@@ -255,8 +282,13 @@ TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
   std::vector<int> top_n = {1, 1, 2, 2, 3};
   auto gt_out = output_gt;
   for (int i = 0; i < input_thresh.size(); i++) {
-    auto cur_out =
-        utils::nms_cpu(proposals, scores, indices, input_thresh[i], top_n[i]);
+    auto cur_out = utils::nms_cpu(
+        proposals,
+        scores,
+        indices,
+        input_thresh[i],
+        top_n[i],
+        true /* legacy_plus_one */);
     gt_out[i].resize(top_n[i]);
     EXPECT_EQ(gt_out[i], cur_out);
   }
@@ -322,7 +354,9 @@ TEST(UtilsNMSTest, TestSoftNMSRotatedAngle0) {
         0.5,
         overlap_thresh[i],
         0.0001,
-        method[i]);
+        method[i],
+        -1, /* topN */
+        true /* legacy_plus_one */);
     EXPECT_EQ(keep, keep_gt);
     {
       auto diff = expected_scores - out_scores;
@@ -339,7 +373,8 @@ TEST(UtilsNMSTest, TestSoftNMSRotatedAngle0) {
           overlap_thresh[i],
           0.0001,
           method[i],
-          topN);
+          topN,
+          true /* legacy_plus_one */);
       std::vector<int> expected_keep(keep_gt.begin(), keep_gt.begin() + topN);
       EXPECT_EQ(expected_keep, keep);
     }
@@ -354,7 +389,9 @@ TEST(UtilsNMSTest, TestSoftNMSRotatedAngle0) {
         0.5,
         overlap_thresh[i],
         0.0001,
-        method[i]);
+        method[i],
+        -1, /* topN */
+        true /* legacy_plus_one */);
     std::sort(keep.begin(), keep.end());
     EXPECT_EQ(indices, keep);
     {
@@ -372,7 +409,9 @@ TEST(UtilsNMSTest, TestSoftNMSRotatedAngle0) {
         0.5,
         overlap_thresh[i],
         score_thresh,
-        method[i]);
+        method[i],
+        -1, /* topN */
+        true /* legacy_plus_one */);
     {
       auto expected_keep =
           utils::GetArrayIndices(expected_scores >= score_thresh);

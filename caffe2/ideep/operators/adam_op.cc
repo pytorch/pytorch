@@ -1,6 +1,8 @@
 #include <caffe2/ideep/ideep_utils.h>
 
-namespace caffe2 {
+using namespace caffe2;
+
+namespace {
 
 void adam_ideep_update(
     int N,
@@ -176,4 +178,4 @@ class IDEEPAdamOp final : public IDEEPOperator {
 
 REGISTER_IDEEP_OPERATOR(Adam, IDEEPAdamOp<float>);
 
-} // namespace caffe2
+} // namespace

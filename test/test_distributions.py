@@ -31,7 +31,7 @@ from random import shuffle
 
 import torch
 from torch._six import inf
-from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests, skipIfRocm
+from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
 from common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
@@ -51,12 +51,12 @@ from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
-                                            ComposeTransform, ExpTransform,
+                                            CatTransform, ComposeTransform, ExpTransform,
                                             LowerCholeskyTransform,
                                             PowerTransform, SigmoidTransform,
                                             SoftmaxTransform,
                                             StickBreakingTransform,
-                                            identity_transform)
+                                            identity_transform, StackTransform)
 from torch.distributions.utils import probs_to_logits, lazy_property
 from torch.nn.functional import softmax
 
@@ -651,6 +651,7 @@ BAD_EXAMPLES = [
 
 class TestDistributions(TestCase):
     _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = False
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
@@ -952,6 +953,18 @@ class TestDistributions(TestCase):
             self._check_log_prob(Binomial(total_count, probs), ref_log_prob)
             logits = probs_to_logits(probs, is_binary=True)
             self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
+
+    def test_binomial_stable(self):
+        logits = torch.tensor([-100., 100.], dtype=torch.float)
+        total_count = 1.
+        x = torch.tensor([0., 0.], dtype=torch.float)
+        log_prob = Binomial(total_count, logits=logits).log_prob(x)
+        self.assertTrue(torch.isfinite(log_prob).all())
+
+        # make sure that the grad at logits=0, value=0 is 0.5
+        x = torch.tensor(0., requires_grad=True)
+        y = Binomial(total_count, logits=x).log_prob(torch.tensor(0.))
+        self.assertEqual(grad(y, x)[0], torch.tensor(-0.5))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_log_prob_vectorized_count(self):
@@ -1726,10 +1739,8 @@ class TestDistributions(TestCase):
         # construct batch of PSD covariances
         tmp = torch.randn(6, 5, 3, 10)
         cov_batched = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
-        prec_batched = [C.inverse() for C in cov_batched.view((-1, 3, 3))]
-        prec_batched = torch.stack(prec_batched).view(cov_batched.shape)
-        scale_tril_batched = [torch.cholesky(C, upper=False) for C in cov_batched.view((-1, 3, 3))]
-        scale_tril_batched = torch.stack(scale_tril_batched).view(cov_batched.shape)
+        prec_batched = cov_batched.inverse()
+        scale_tril_batched = cov_batched.cholesky(upper=False)
 
         # ensure that sample, batch, event shapes all handled correctly
         self.assertEqual(MultivariateNormal(mean, cov).sample().size(), (5, 3))
@@ -1750,13 +1761,31 @@ class TestDistributions(TestCase):
         self.assertEqual(MultivariateNormal(mean, scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
 
         # check gradients
-        self._gradcheck_log_prob(MultivariateNormal, (mean, cov))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, cov))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, cov_batched))
-        self._gradcheck_log_prob(MultivariateNormal, (mean, None, prec))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, prec_batched))
-        self._gradcheck_log_prob(MultivariateNormal, (mean, None, None, scale_tril))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, None, scale_tril_batched))
+        # We write a custom gradcheck function to maintain the symmetry
+        # of the perturbed covariances and their inverses (precision)
+        def multivariate_normal_log_prob_gradcheck(mean, covariance=None, precision=None, scale_tril=None):
+            mvn_samples = MultivariateNormal(mean, covariance, precision, scale_tril).sample().requires_grad_()
+
+            def gradcheck_func(samples, mu, sigma, prec, scale_tril):
+                if sigma is not None:
+                    sigma = 0.5 * (sigma + sigma.transpose(-1, -2))  # Ensure symmetry of covariance
+                if prec is not None:
+                    prec = 0.5 * (prec + prec.transpose(-1, -2))  # Ensure symmetry of precision
+                return MultivariateNormal(mu, sigma, prec, scale_tril).log_prob(samples)
+            gradcheck(gradcheck_func, (mvn_samples, mean, covariance, precision, scale_tril), raise_exception=True)
+
+        multivariate_normal_log_prob_gradcheck(mean, cov)
+        multivariate_normal_log_prob_gradcheck(mean_multi_batch, cov)
+        multivariate_normal_log_prob_gradcheck(mean_multi_batch, cov_batched)
+        multivariate_normal_log_prob_gradcheck(mean, None, prec)
+        multivariate_normal_log_prob_gradcheck(mean_no_batch, None, prec_batched)
+        multivariate_normal_log_prob_gradcheck(mean, None, None, scale_tril)
+        multivariate_normal_log_prob_gradcheck(mean_no_batch, None, None, scale_tril_batched)
+
+    def test_multivariate_normal_stable_with_precision_matrix(self):
+        x = torch.randn(10)
+        P = torch.exp(-(x - x.unsqueeze(-1)) ** 2)  # RBF kernel
+        MultivariateNormal(x.new_zeros(10), precision_matrix=P)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):
@@ -1975,7 +2004,6 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @skipIfRocm
     def test_gamma_gpu_sample(self):
         set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -3441,7 +3469,7 @@ class TestKL(TestCase):
 
 
 class TestConstraints(TestCase):
-    def test_params_contains(self):
+    def test_params_constraints(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
@@ -3464,7 +3492,7 @@ class TestConstraints(TestCase):
                         Dist.__name__, i + 1, len(params), name, value)
                     self.assertTrue(constraint.check(value).all(), msg=message)
 
-    def test_support_contains(self):
+    def test_support_constraints(self):
         for Dist, params in EXAMPLES:
             self.assertIsInstance(Dist.support, Constraint)
             for i, param in enumerate(params):
@@ -4081,6 +4109,108 @@ class TestTransforms(TestCase):
             # check on different inputs
             x = self._generate_data(transform).requires_grad_()
             self.assertEqual(f(x), traced_f(x))
+
+
+class TestFunctors(TestCase):
+    def test_cat_transform(self):
+        x1 = -1 * torch.range(1, 100).view(-1, 100)
+        x2 = (torch.range(1, 100).view(-1, 100) - 1) / 100
+        x3 = torch.range(1, 100).view(-1, 100)
+        t1, t2, t3 = ExpTransform(), AffineTransform(1, 100), identity_transform
+        dim = 0
+        x = torch.cat([x1, x2, x3], dim=dim)
+        t = CatTransform([t1, t2, t3], dim=dim)
+        actual_dom_check = t.domain.check(x)
+        expected_dom_check = torch.cat([t1.domain.check(x1),
+                                        t2.domain.check(x2),
+                                        t3.domain.check(x3)], dim=dim)
+        self.assertEqual(expected_dom_check, actual_dom_check)
+        actual = t(x)
+        expected = torch.cat([t1(x1), t2(x2), t3(x3)], dim=dim)
+        self.assertEqual(expected, actual)
+        y1 = torch.range(1, 100).view(-1, 100)
+        y2 = torch.range(1, 100).view(-1, 100)
+        y3 = torch.range(1, 100).view(-1, 100)
+        y = torch.cat([y1, y2, y3], dim=dim)
+        actual_cod_check = t.codomain.check(y)
+        expected_cod_check = torch.cat([t1.codomain.check(y1),
+                                        t2.codomain.check(y2),
+                                        t3.codomain.check(y3)], dim=dim)
+        self.assertEqual(actual_cod_check, expected_cod_check)
+        actual_inv = t.inv(y)
+        expected_inv = torch.cat([t1.inv(y1), t2.inv(y2), t3.inv(y3)], dim=dim)
+        self.assertEqual(expected_inv, actual_inv)
+        actual_jac = t.log_abs_det_jacobian(x, y)
+        expected_jac = torch.cat([t1.log_abs_det_jacobian(x1, y1),
+                                  t2.log_abs_det_jacobian(x2, y2),
+                                  t3.log_abs_det_jacobian(x3, y3)], dim=dim)
+        self.assertEqual(actual_jac, expected_jac)
+
+    def test_cat_transform_non_uniform(self):
+        x1 = -1 * torch.range(1, 100).view(-1, 100)
+        x2 = torch.cat([(torch.range(1, 100).view(-1, 100) - 1) / 100,
+                        torch.range(1, 100).view(-1, 100)])
+        t1 = ExpTransform()
+        t2 = CatTransform([AffineTransform(1, 100), identity_transform], dim=0)
+        dim = 0
+        x = torch.cat([x1, x2], dim=dim)
+        t = CatTransform([t1, t2], dim=dim, lengths=[1, 2])
+        actual_dom_check = t.domain.check(x)
+        expected_dom_check = torch.cat([t1.domain.check(x1),
+                                        t2.domain.check(x2)], dim=dim)
+        self.assertEqual(expected_dom_check, actual_dom_check)
+        actual = t(x)
+        expected = torch.cat([t1(x1), t2(x2)], dim=dim)
+        self.assertEqual(expected, actual)
+        y1 = torch.range(1, 100).view(-1, 100)
+        y2 = torch.cat([torch.range(1, 100).view(-1, 100),
+                        torch.range(1, 100).view(-1, 100)])
+        y = torch.cat([y1, y2], dim=dim)
+        actual_cod_check = t.codomain.check(y)
+        expected_cod_check = torch.cat([t1.codomain.check(y1),
+                                        t2.codomain.check(y2)], dim=dim)
+        self.assertEqual(actual_cod_check, expected_cod_check)
+        actual_inv = t.inv(y)
+        expected_inv = torch.cat([t1.inv(y1), t2.inv(y2)], dim=dim)
+        self.assertEqual(expected_inv, actual_inv)
+        actual_jac = t.log_abs_det_jacobian(x, y)
+        expected_jac = torch.cat([t1.log_abs_det_jacobian(x1, y1),
+                                  t2.log_abs_det_jacobian(x2, y2)], dim=dim)
+        self.assertEqual(actual_jac, expected_jac)
+
+    def test_stack_transform(self):
+        x1 = -1 * torch.range(1, 100)
+        x2 = (torch.range(1, 100) - 1) / 100
+        x3 = torch.range(1, 100)
+        t1, t2, t3 = ExpTransform(), AffineTransform(1, 100), identity_transform
+        dim = 0
+        x = torch.stack([x1, x2, x3], dim=dim)
+        t = StackTransform([t1, t2, t3], dim=dim)
+        actual_dom_check = t.domain.check(x)
+        expected_dom_check = torch.stack([t1.domain.check(x1),
+                                          t2.domain.check(x2),
+                                          t3.domain.check(x3)], dim=dim)
+        self.assertEqual(expected_dom_check, actual_dom_check)
+        actual = t(x)
+        expected = torch.stack([t1(x1), t2(x2), t3(x3)], dim=dim)
+        self.assertEqual(expected, actual)
+        y1 = torch.range(1, 100)
+        y2 = torch.range(1, 100)
+        y3 = torch.range(1, 100)
+        y = torch.stack([y1, y2, y3], dim=dim)
+        actual_cod_check = t.codomain.check(y)
+        expected_cod_check = torch.stack([t1.codomain.check(y1),
+                                          t2.codomain.check(y2),
+                                          t3.codomain.check(y3)], dim=dim)
+        self.assertEqual(actual_cod_check, expected_cod_check)
+        actual_inv = t.inv(x)
+        expected_inv = torch.stack([t1.inv(x1), t2.inv(x2), t3.inv(x3)], dim=dim)
+        self.assertEqual(expected_inv, actual_inv)
+        actual_jac = t.log_abs_det_jacobian(x, y)
+        expected_jac = torch.stack([t1.log_abs_det_jacobian(x1, y1),
+                                    t2.log_abs_det_jacobian(x2, y2),
+                                    t3.log_abs_det_jacobian(x3, y3)], dim=dim)
+        self.assertEqual(actual_jac, expected_jac)
 
 
 class TestConstraintRegistry(TestCase):
