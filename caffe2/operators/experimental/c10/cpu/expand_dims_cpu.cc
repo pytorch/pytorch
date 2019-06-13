@@ -43,7 +43,7 @@ class expand_dims_cpu final : public c10::OperatorKernel {
         "Input needs at least ",
         (1 + dims_.get(dims_.size()-1) - dims_.size()),
         " dimensions given `dims`.");
-    for (const auto dim : dims_) {
+    for (const auto& dim : dims_) {
       newDims.insert(newDims.begin() + dim, 1);
     }
     output.Reshape(newDims);
