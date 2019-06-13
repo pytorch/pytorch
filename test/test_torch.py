@@ -45,6 +45,16 @@ if TEST_SCIPY:
 if TEST_LIBROSA:
     import librosa
 
+# We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
+# because if we do that, the TEST_CUDNN line from common_cuda will be executed
+# multiple times as well during the execution of this test suite, and it will
+# cause CUDA OOM error on Windows.
+TEST_CUDA = torch.cuda.is_available()
+TEST_MAGMA = TEST_CUDA
+if TEST_CUDA:
+    torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
+    TEST_MAGMA = torch.cuda.has_magma
+
 SIZE = 100
 
 can_retrieve_source = True
@@ -1026,7 +1036,7 @@ class _TestTorchMixin(object):
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions Fortran
-                        y = torch.randn(o, n, m, device=device).transpose(-1, -2)
+                        x = torch.randn(o, m, n, device=device).transpose(-1, -2)
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions non-contiguous
@@ -1059,6 +1069,12 @@ class _TestTorchMixin(object):
     def test_nuclear_norm_axes_small_brute_force(self):
         self._test_nuclear_norm_axes(self)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_nuclear_norm_axes_small_brute_force_cuda(self):
+        self._test_nuclear_norm_axes(self, device='cuda')
+
     @staticmethod
     def _test_nuclear_norm_exceptions(self, device='cpu'):
         for lst in [], [1], [1, 2]:
@@ -1072,6 +1088,11 @@ class _TestTorchMixin(object):
 
     def test_nuclear_norm_exceptions(self):
         self._test_nuclear_norm_exceptions(self)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_nuclear_norm_exceptions_cuda(self):
+        self._test_nuclear_norm_exceptions(self, device='cuda')
 
     @staticmethod
     def _test_dist(self, device):
