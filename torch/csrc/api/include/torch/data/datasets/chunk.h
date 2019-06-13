@@ -370,7 +370,10 @@ class ChunkDataset final
     
     batch_inteval_count_ ++;
     if (batch_inteval_count_ == save_inteval_) {
-      torch::save(this->chunk_sampler(), options_.checkpoint_file_name_);
+      {
+        std::lock_guard<std::mutex> lock(chunk_index_guard_);
+        torch::save(this->chunk_sampler(), options_.checkpoint_file_name_);
+      }
       batch_inteval_count_ = 0;
     }
 
@@ -432,7 +435,6 @@ class ChunkDataset final
   // provide a references to chunk sampler. Used mainly in distributed data
   // loading to set the epoch number for the sampler.
   ChunkSamplerType& chunk_sampler() {
-    std::lock_guard<std::mutex> lock(chunk_index_guard_);
     return chunk_sampler_;
   }
 
@@ -508,9 +510,13 @@ class ChunkDataset final
   // mutex to synchronize chunk sampler next() call.
   std::mutex chunk_index_guard_;
 
+  // minibatch save inteval.
   size_t save_inteval_;
+  
+  // counter for checkpoint save activity.
   size_t batch_inteval_count_;
 
+  // boolean value to indicate whether we need to load the checkpoint for chunk_sampler_.
   bool load_checkpoint_;
 };
 } // namespace datasets

@@ -1925,7 +1925,7 @@ TEST(DataLoaderTest, ChunkDatasetSaveOption) {
     using BatchType = datasets::ChunkDataReader<int>::ChunkType;
 
     BatchType read_chunk(size_t chunk_index) override {
-      return batch_data;
+      return batch_data_;
     }
 
     size_t chunk_count() override {
@@ -1933,7 +1933,7 @@ TEST(DataLoaderTest, ChunkDatasetSaveOption) {
     };
 
     void reset() override{};
-    BatchType batch_data = BatchType(chunk_size, 0);
+    BatchType batch_data_ = BatchType(chunk_size, 0);
   };
 
   const size_t prefetch_count = 1;
@@ -1966,7 +1966,7 @@ TEST(DataLoaderTest, ChunkDatasetSaveOption) {
             ChunkDatasetOptions(
                 prefetch_count,
                 batch_size,
-                chunk_size/*cache size*/,
+                chunk_size /*cache size*/,
                 ChunkDatasetOptions::CheckpointOption::Save,
                 tempfile.name,
                 save_inteval));
@@ -1994,8 +1994,8 @@ TEST(DataLoaderTest, ChunkDatasetSaveOption) {
           // configured to be the same as chunk size and batch size. So the
           // chunk data is written to the cache one by one. Only the current
           // batch is retrieved, the next chunk is writen. Now after the first
-          // batch is retrieved, when we tries to retrive the second batch, there are three possible scenarios for the
-          // writer thread:
+          // batch is retrieved, when we tries to retrive the second batch,
+          // there are three possible scenarios for the writer thread:
           // 1. it hasn't started loading the next chunk data yet, so the
           // sequential sampler index is still 0;
           // 2. it started to load the second chunk, so the sequencial sampler
@@ -2015,7 +2015,8 @@ TEST(DataLoaderTest, ChunkDatasetSaveOption) {
           // window of [0, 3].
           // This analysis applies to all scenarios. So extend it to a more
           // general case: the expected saved index should falling into the
-          // range of [iteration - 1, iteration + 2], which is the validation below.
+          // range of [iteration - 1, iteration + 2], which is the validation
+          // below.
           ASSERT_TRUE(
               new_sampler.index() >= std::max(0, iteration_count - 1) &&
               new_sampler.index() <= iteration_count + 2);
