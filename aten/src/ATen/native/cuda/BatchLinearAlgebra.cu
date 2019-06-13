@@ -629,7 +629,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
 
-  int info_tmp;
+  int info_tmp = 0;
   if (b.dim() == 2) {
     magmaCholeskySolve<scalar_t>(uplo, n, nrhs, A_data, n,
                                  b_data, n, &info_tmp);
