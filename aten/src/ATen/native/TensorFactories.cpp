@@ -10,6 +10,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHDispatcher.h>
+#include <ATen/core/Generator.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
@@ -744,12 +745,13 @@ void generate_keys(
   float *keys,
   float *weights,
   int n,
-  THGenerator* generator
+  CPUGenerator* generator
 ){
-  std::lock_guard<std::mutex> lock(generator->mutex);
+  std::lock_guard<std::mutex> lock(generator->mutex_);
+  at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
 
   for(int i = 0; i < n; i++){
-    float u = THRandom_standard_uniform(generator);
+    float u = standard_uniform(generator);
     keys[i] = weights[i] > 0 ? (float) std::pow(u, 1 / weights[i]):-1;
   }
 
@@ -759,12 +761,12 @@ void reservoir_generator_cpu(
   int64_t *indices,
   int64_t n,
   int64_t k,
-  THGenerator* generator
+  CPUGenerator* generator
 ){
-  std::lock_guard<std::mutex> lock(generator->mutex);
+  std::lock_guard<std::mutex> lock(generator->mutex_);
 
   for(int i = k; i < n; i++){
-    int64_t z = THRandom_random(generator) % (i + 1);
+    int64_t z = generator->random() % (i + 1);
     if (z < k) {
         std::swap(indices[z], indices[i]);
     }
@@ -791,7 +793,10 @@ Tensor reservoir_sampling_cpu(
   );
 
   auto options = x.options().dtype(at::kLong);
-  THGenerator* generator = get_generator(nullptr);
+  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(
+                              nullptr,
+                              detail::getDefaultCPUGenerator()
+                            );
 
   if (weights.numel() == 0){ // Uniform Sapling
     Tensor indices_n = at::arange({n}, options);
@@ -900,7 +905,11 @@ Tensor sampling_with_replacement_cpu(
 	    "The weights must 1-dimensional."
 	  );
 
-    THGenerator* generator = get_generator(nullptr);
+    CPUGenerator* generator = get_generator_or_default<CPUGenerator>(
+                                nullptr,
+                                detail::getDefaultCPUGenerator()
+                              );
+
     samples = at::empty({k}, x.options().dtype(at::kLong));
     int64_t *samples_ptr = samples.data<int64_t>();
 
@@ -912,10 +921,11 @@ Tensor sampling_with_replacement_cpu(
     );
 
     cdf /= cdf[-1];
+    at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
 
     float *cdf_ptr = cdf.data<float>();
     for(int i = 0; i < k; i++){
-      float u = THRandom_standard_uniform(generator);
+      float u = standard_uniform(generator);
       auto ptr = std::lower_bound(cdf_ptr, cdf_ptr + n, u);
       samples_ptr[i] = std::distance(cdf_ptr, ptr);
     }
