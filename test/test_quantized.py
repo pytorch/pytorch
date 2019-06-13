@@ -273,6 +273,32 @@ class TestQuantizedOps(TestCase):
 
         np.testing.assert_equal(a_pool.numpy(), a_pool_hat.numpy())
 
+    """Tests quantize concatenation (both fused and not)."""
+    @given(Q=qtensor(shapes=array_shapes(min_dims=3, max_dims=4,
+                                         min_side=1, max_side=10)),
+           num=st.integers(1, 4),
+           axis=st.integers(1, 4))
+    def test_cat(self, Q, num, axis):
+        tensors_q = []
+        tensors_ref = []
+        X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
+        assume(axis < X.ndim)
+        X = torch.from_numpy(X)
+        for idx in range(num):
+            tensors_q.append(torch.quantize_linear(X, scale, zero_point,
+                                                   torch_type))
+            tensors_ref.append(X)
+
+        cat_ref = torch.cat(tensors_ref, axis=axis)
+        cat_ref = torch.quantize_linear(cat_ref, scale, zero_point, torch_type)
+        cat_ref = cat_ref.dequantize()
+
+        q_cat_op = torch.ops.quantized.cat
+        cat_q = q_cat_op(tensors_q, axis=axis, scale=scale,
+                         zero_point=zero_point)
+        cat_q = cat_q.dequantize()
+
+        np.testing.assert_equal(cat_ref.numpy(), cat_q.numpy())
 
 @unittest.skipIf(
     TEST_WITH_UBSAN or not torch.fbgemm_is_cpu_supported(),
