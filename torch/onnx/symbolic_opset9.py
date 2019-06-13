@@ -393,6 +393,10 @@ def squeeze(g, self, dim=None):
 
 
 def prelu(g, self, weight):
+    if self.isCompleteTensor():
+        self_sizes = self.type().sizes()
+        if self_sizes and len(self_sizes) > 2:
+            weight = g.op("Unsqueeze", weight, axes_i=list(range(1, len(self_sizes) - 1)))
     return g.op("PRelu", self, weight)
 
 

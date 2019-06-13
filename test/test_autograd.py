@@ -2189,6 +2189,14 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
+    def test_trapz(self):
+        f_args_variable = (torch.randn(2, 3, requires_grad=True),
+                           torch.tensor([[1.0, 2.0, 5.5], [2.3, 0.5, 6.2]], requires_grad=True))
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_trapz", "trapz",
+                              lambda y, x: torch.trapz(y, x),
+                              True, f_args_variable, f_args_tensor)
+
     def test_cdist(self):
         for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
             f_args_variable = (torch.randn(S, S, requires_grad=True),

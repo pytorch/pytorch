@@ -324,7 +324,7 @@ static PyObject * THPStorage_(releaseIPCCounter)(PyObject *_unused, PyObject *ar
         sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
         nullptr);
     *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
-  } catch (c10::Error) {
+  } catch (c10::Error& err) {
     // Already warned inside of producer process
   }
   Py_RETURN_NONE;
@@ -430,7 +430,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
               sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
               nullptr);
           *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
-        } catch (c10::Error) {
+        } catch (c10::Error& err) {
           // Already warned inside of producer process
         }
       });
