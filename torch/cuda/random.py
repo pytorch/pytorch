@@ -1,4 +1,4 @@
-from torch import _C, device as torch_device, cuda
+from torch import _C, device as torch_device
 from . import _lazy_init, _lazy_call, device_count, current_device
 
 __all__ = ['get_rng_state', 'get_rng_state_all',
