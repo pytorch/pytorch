@@ -479,7 +479,7 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_resnet(self):
         state_dict = model_zoo.load_url(model_urls['resnet50'], progress=False)
         self.run_model_test(resnet50(), train=False, batch_size=BATCH_SIZE,
-                            state_dict=state_dict, atol=1e-6)
+                            state_dict=state_dict, atol=1e-5)
 
     def test_squeezenet(self):
         sqnet_v1_1 = SqueezeNet(version=1.1)
