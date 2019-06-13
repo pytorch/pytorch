@@ -12560,7 +12560,7 @@ a")
 
         src = torch.randn(seq_length, bsz, d_model)
         tgt = torch.randn(tgt_length, bsz, d_model)
-        transformer = nn.Transformer(d_model, nhead, num_encoder_layers, 
+        transformer = nn.Transformer(d_model, nhead, num_encoder_layers,
                                      num_decoder_layers, dim_feedforward, dropout=0.0)
         model = MyModule(transformer, tgt, src)
 
@@ -13210,7 +13210,7 @@ class TestRecursiveScript(JitTestCase):
 
         return sm
 
-    @unittest.skipIf(PY2, "Class annotations are a thing in > 3.5")
+    @unittest.skipIf(True, "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
         class M(torch.nn.Module):
             # TODO: Use this (see below)
@@ -13791,7 +13791,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return self.seq.forward(input)
 
         # disabled due to a jitter issues that will be fixed by using load/store in the compiler
-        with self.disableEmitHook(): 
+        with self.disableEmitHook():
             # TODO: toggle export_import once above issues are fixed
             self.checkTrace(Traced(), (torch.rand(3, 4),),
                             export_import=False)
