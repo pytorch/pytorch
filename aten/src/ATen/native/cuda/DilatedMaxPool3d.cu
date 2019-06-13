@@ -1,5 +1,5 @@
 #include <ATen/AccumulateType.h>
-#include <ATen/native/DilatedMaxPool.h>
+#include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
