@@ -1112,7 +1112,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_pixel_shuffle(self):
         underlying = nn.PixelShuffle(4)
-        shape = (1, 64, 5, 5)
+        shape = (1, 32, 5, 5)
         input = Variable(torch.randn(*shape),
                          requires_grad=True)
         self.run_model_test(underlying, train=False, input=(input),
