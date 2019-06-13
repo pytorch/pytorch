@@ -216,6 +216,55 @@ class TestMkldnn(TestCase):
         torch.add(mx, my, alpha=alpha, out=mkldnn_out)
         self.assertEqual(out, mkldnn_out.to_dense())
 
+    def test_mul(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 100, (1,)).item()
+        value = torch.randn(1, dtype=torch.float32).item()
+
+        x = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
+        y = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
+        mx = x.to_mkldnn()
+        my = y.to_mkldnn()
+
+        # mul
+        self.assertEqual(
+            x * y,
+            (mx * my).to_dense())
+
+        self.assertEqual(
+            x * value,
+            (mx * value).to_dense())
+
+        self.assertEqual(
+            torch.mul(x, y),
+            torch.mul(mx, my).to_dense())
+
+        self.assertEqual(
+            torch.mul(x, value),
+            torch.mul(mx, value).to_dense())
+
+        # mul_
+        x *= y
+        mx *= my
+        self.assertEqual(x, mx.to_dense())
+
+        x *= value
+        mx *= value
+        self.assertEqual(x, mx.to_dense())
+
+        # mul_out
+        out = x.clone()
+        mkldnn_out = out.to_mkldnn()
+        torch.mul(x, y, out=out)
+        torch.mul(mx, my, out=mkldnn_out)
+        self.assertEqual(out, mkldnn_out.to_dense())
+
+        out = x.clone()
+        mkldnn_out = out.to_mkldnn()
+        torch.mul(x, value, out=out)
+        torch.mul(mx, value, out=mkldnn_out)
+        self.assertEqual(out, mkldnn_out.to_dense())
+
     def test_view(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
         self.assertRaisesRegex(RuntimeError,
