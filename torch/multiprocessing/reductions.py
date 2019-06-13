@@ -275,8 +275,10 @@ def rebuild_storage_fd(cls, df, size):
         while True:
             try:
                 fd = multiprocessing.reduction.rebuild_handle(df)
+                break
             except OSError as e:
-                if e.errno != errno.EINTR:  # Retry on EINTR
+                # Retry on EINTR for platforms that support it
+                if e.errno != getattr(errno, 'EINTR', None):
                     raise
     else:
         fd = df.detach()
