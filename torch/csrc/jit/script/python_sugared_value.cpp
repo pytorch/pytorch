@@ -317,7 +317,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
               .attr("_make_strong_submodule")(field, attr, py_module_);
       if (!result.is_none()) {
         auto submodule = as_module(result);
-        AT_CHECK(
+        TORCH_CHECK(
             submodule,
             "Result of torch.jit._make_strong_submodule "
             "was not a ScriptModule");
@@ -488,6 +488,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (py::isinstance<py::function>(obj)) {
+    if (typeString(obj) == "builtin_function_or_method") {
+      throw ErrorReport(loc)
+          << "You are calling a python builtin_function_or_method "
+          << "which is currently not supported in Torchscript."
+          << "Please open a feature request to add it.";
+    }
+
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
     if (auto callee = as_function(compiled_fn)) {
