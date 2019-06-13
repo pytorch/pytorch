@@ -20,6 +20,7 @@ struct SwapPyThreadState {
       PyThreadState_Swap(old_tstate);
       PyThreadState_Clear(new_tstate);
       PyThreadState_Delete(new_tstate);
+      swappedThreadState = false;
   }
 
   PyThreadState* old_tstate;
