@@ -2192,6 +2192,12 @@
 - func: nuclear_norm(Tensor self, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
+- func: nuclear_norm(Tensor self, int[2] dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: nuclear_norm(Tensor self, int[2] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+
 - func: clone(Tensor self) -> Tensor
   variants: function, method
   dispatch:

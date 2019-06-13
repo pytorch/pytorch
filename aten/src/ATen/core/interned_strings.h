@@ -63,6 +63,7 @@ namespace c10 {
   _(prim, DictIndex)               \
   _(prim, StringIndex)             \
   _(prim, NumToTensor)             \
+  _(prim, Uninitialized)           \
   _(prim, ImplicitTensorToNum)     \
   _(prim, Bool)                    \
   _(prim, Int)                     \
@@ -75,6 +76,7 @@ namespace c10 {
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
   _(prim, Guard)                   \
+  _(prim, BailOut)                 \
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
   _(prim, MMTreeReduce)            \
@@ -82,6 +84,7 @@ namespace c10 {
   _(prim, min)                     \
   _(prim, max)                     \
   _(prim, abs)                     \
+  _(aten, divmod)                  \
   _(prim, rangelist)               \
   _(aten, _grad_sum_to_size)       \
   _(aten, _size_if_not_equal)      \

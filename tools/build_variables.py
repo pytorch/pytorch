@@ -73,6 +73,7 @@ libtorch_sources = [
     "torch/csrc/jit/operator.cpp",
     "torch/csrc/jit/passes/alias_analysis.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
+    "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/canonicalize_ops.cpp",
     "torch/csrc/jit/passes/decompose_ops.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",
@@ -103,6 +104,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/subgraph_rewrite.cpp",
     "torch/csrc/jit/passes/utils/subgraph_utils.cpp",
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
+    "torch/csrc/jit/print_handler.cpp",
     "torch/csrc/jit/register_prim_ops.cpp",
     "torch/csrc/jit/register_special_ops.cpp",
     "torch/csrc/jit/register_quantized_ops.cpp",
@@ -135,6 +137,7 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/fuser/cpu/dynamic_library_unix.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
+    "torch/csrc/jit/function.cpp",
     "test/cpp/jit/test.cpp",
 ]
 

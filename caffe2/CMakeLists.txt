@@ -383,6 +383,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/profiling_graph_executor_impl.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/alias_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/bailout_graph.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/constant_pooling.cpp
@@ -416,6 +417,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/quantization.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
@@ -445,6 +447,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     ${TORCH_ROOT}/test/cpp/jit/test.cpp
     )
 
@@ -1099,10 +1102,10 @@ if (BUILD_TEST)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if (INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
-      # Install PDB files for MSVC builds
-      if (MSVC AND BUILD_SHARED_LIBS)
-        install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
-      endif()
+        # Install PDB files for MSVC builds
+        if (MSVC AND BUILD_SHARED_LIBS)
+          install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+        endif()
     endif()
   endforeach()
 
