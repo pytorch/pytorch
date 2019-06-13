@@ -1535,24 +1535,6 @@ Operation listList(const Node* node) {
   };
 }
 
-template <typename T>
-int listContains(Stack& stack) {
-  // T to_find;
-  // pop(stack, to_find);
-  // std::vector<T> list;
-  // pop(stack, list);
-  // //
-  // // for (auto item : list) {
-  // //   if (item == to_find) {
-  // //     push(stack, true);
-  // //     return 0;
-  // //   }
-  // // }
-  //
-  // push(stack, false);
-  return 0;
-}
-
 template <class T>
 int listAdd(Stack& stack) {
   c10::ListPtr<T> a = c10::make_list<T>();
@@ -1959,7 +1941,6 @@ RegisterOperators reg2({
           "[]",                                                                     \
           listSlice<c_type::value_type>),                                           \
       Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList),       \
-      Operator("aten::__contains__(" decl_type "[] l) -> bool", listContains<c_type>),\
       Operator(                                                                     \
           "aten::mul(" decl_type "[] l, int n) -> " decl_type "[]",                 \
           listMulIntLeft<c_type::value_type>),                                      \
