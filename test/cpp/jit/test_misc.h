@@ -918,6 +918,7 @@ std::vector<std::size_t> values_to_value_ids(
   return result;
 };
 
+#if 0
 void testLivenessIf() {
   static const auto basic_example = R"JIT(
   def test_if_liveness(x, y, z):
@@ -994,6 +995,7 @@ void testLivenessFor() {
   auto actual_loop_liveness = values_to_value_ids(liveness[*loop_node]);
   ASSERT_EQ(actual_loop_liveness, expected_for);
 }
+#endif
 
 void testInsertAndEliminateGuards() {
   static const auto basic_example = R"JIT(
