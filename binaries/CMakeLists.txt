@@ -6,8 +6,13 @@ if (NOT ANDROID)
   caffe2_binary_target("parallel_info.cc")
   target_include_directories(parallel_info PUBLIC
     ${CMAKE_BINARY_DIR}/aten/src) # provides "ATen/TypeExtendedInterface.h" to ATen.h
+
   caffe2_binary_target("intra_inter_benchmark.cc")
   target_include_directories(intra_inter_benchmark PUBLIC
+    ${CMAKE_BINARY_DIR}/aten/src)
+
+  caffe2_binary_target("at_launch_benchmark.cc")
+  target_include_directories(at_launch_benchmark PUBLIC
     ${CMAKE_BINARY_DIR}/aten/src)
 endif()
 caffe2_binary_target("predictor_verifier.cc")
