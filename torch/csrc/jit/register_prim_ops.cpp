@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/error_report.h>
@@ -552,15 +553,19 @@ RegisterOperators reg(
          [](const Node* node) {
            size_t num_inputs = node->inputs().size();
            return [num_inputs](Stack& stack) {
+             std::stringstream ss;
              bool first = true;
              for (const IValue& i : last(stack, num_inputs)) {
                if (!first)
-                 std::cout << " ";
+                 ss << " ";
                first = false;
-               std::cout << i;
+               ss << i;
              }
              drop(stack, num_inputs);
-             std::cout << std::endl;
+             ss << std::endl;
+             auto* handler = getPrintHandler();
+             TORCH_INTERNAL_ASSERT(handler);
+             handler(ss.str());
              return 0;
            };
          }),

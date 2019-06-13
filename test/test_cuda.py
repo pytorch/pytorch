@@ -2355,6 +2355,7 @@ class TestCuda(TestCase):
         samples = probs.multinomial(1000000, replacement=True)
         self.assertGreater(probs[samples].min().item(), 0)
 
+    @skipCUDANonDefaultStreamIf(True)
     def test_multinomial_alias(self):
         _TestTorchMixin._test_multinomial_alias(self, lambda t: t.cuda())
 
