@@ -402,6 +402,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/liveness.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
