@@ -5,6 +5,9 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 #include <ATen/NativeFunctions.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/Storage.h>

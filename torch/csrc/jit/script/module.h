@@ -57,34 +57,19 @@ using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(Module* owner, Function* function);
+  Method(Module* owner, const std::shared_ptr<Function>& function);
 
   // the module that contains this method.
   Module& owner() const {
     return *owner_;
   }
 
-  void run(Stack& stack) {
-    for (auto input : initial_ivalues_) {
-      push(stack, input.value());
-    }
-    function_->run(stack);
-  }
+  void run(Stack& stack);
   void run(Stack&& stack) {
     run(stack);
   }
 
-  IValue operator()(
-      std::vector<IValue> stack,
-      const Kwargs& kwargs = Kwargs()) {
-    getSchema().checkAndNormalizeInputs(stack, kwargs);
-    for (auto input : initial_ivalues_) {
-      push(stack, input.value());
-    }
-    // use run rather than operator() to skip the second schema check.
-    function_->run(std::move(stack));
-    return stack.front();
-  }
+  IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs());
 
   const std::vector<Slot>& initial_ivalues() const {
     return initial_ivalues_;
@@ -113,6 +98,11 @@ struct TORCH_API Method {
   Function& function() const {
     return *function_;
   }
+
+  // Used for ONNX export. Return a tuple (graph, parameters) where 
+  // the last parameters.size() inputs to the graph are the trainable parameters
+  // used in this method. The remaining inputs are the true inputs to the function.
+  std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> _lowered_graph();
 
  private:
   // Methods are uniqued onwed by a single module. This raw pointer allows
@@ -209,21 +199,6 @@ struct TORCH_API Module {
   void register_module(
       const std::string& name,
       std::shared_ptr<Module> module) {
-    // We would like to enable more stringent error checking at this point,
-    // but because script functions are considered modules, it is possible
-    // to hit this situation without knowing it. For now this is disabled
-    // until a later PR that distinguishes script functions from script modules.
-    // See TestScript.test_submodule_twice for example failure
-    // if (module->parent_) {
-    //   AT_WARN(
-    //       "Attempting to assign submodule '",
-    //       name,
-    //       "' but it is already a submodule of another ScriptModule '",
-    //       module->parent_->name(), "'", " Modules of this form do not import
-    //       and export correctly. This use is deprecated and may be" " removed
-    //       in a future version.");
-    // }
-    module->parent_ = this;
     module->name_ = name;
     appendSlot(name, module->module_value_->type(), module->module_value_);
     insert(name, modules_, EntityType::MODULE, std::move(module));
@@ -315,7 +290,8 @@ struct TORCH_API Module {
       return methods_[*offset].get();
     }
 
-    if (Function* fn = class_compilation_unit().find_function(name).get()) {
+    if (const std::shared_ptr<Function>& fn =
+            class_compilation_unit().find_function(name)) {
       // lock because technically this is marked const,
       // but we have to update the internal Method cache.
       // This can be removed when class_compilation_unit() is the source of
@@ -348,8 +324,8 @@ struct TORCH_API Module {
   }
   /// True if the module is in training mode.
   bool is_training() {
-    if (auto p = find_buffer("training")) {
-      return p->value().toTensor().item<int64_t>() == 1;
+    if (auto p = find_attribute("training")) {
+      return p->value().toBool();
     }
     // We are in training mode by default
     return true;
@@ -448,8 +424,7 @@ struct TORCH_API Module {
   void define(const std::string& src, const ResolverPtr& resolver = nullptr);
 
   template <typename... Types>
-  IValue create_class(const c10::QualifiedName& name, Types&&... args)
-      const {
+  IValue create_class(const c10::QualifiedName& name, Types&&... args) const {
     return create_class(name, {IValue(std::forward<Types>(args))...});
   }
 
@@ -565,9 +540,6 @@ struct TORCH_API Module {
 
   ModulePtr module_value_;
 
-  // back reference to parent of this Module if present
-  Module* parent_ = nullptr;
-
   // Currently we are in a transitionary state
   // where we construct such first class functions but we lower them
   // to a form where the modules does not exist before execution.
@@ -581,6 +553,8 @@ struct TORCH_API Module {
   mutable std::recursive_mutex create_method_guard_;
   friend struct Method;
 };
+
+TORCH_API bool& getFirstClassMode();
 
 } // namespace script
 } // namespace jit

@@ -33,6 +33,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_NUMPY=0
+#     disables the NumPy build
+#
 #   BUILD_TEST=0
 #     disables the test build
 #
@@ -155,6 +158,7 @@
 #     possible values:
 #       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
+#       NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
 #
 #   USE_TBB
 #      use TBB for parallelization
@@ -187,6 +191,7 @@ from tools.setup_helpers.cudnn import USE_CUDNN, CUDNN_LIBRARY, CUDNN_INCLUDE_DI
 from tools.setup_helpers.rocm import USE_ROCM
 from tools.setup_helpers.miopen import USE_MIOPEN, MIOPEN_LIBRARY, MIOPEN_INCLUDE_DIR
 from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_SYSTEM_LIB, NCCL_INCLUDE_DIR
+from tools.setup_helpers.numpy_ import USE_NUMPY
 from tools.setup_helpers.dist_check import USE_DISTRIBUTED
 ################################################################################
 # Parameters parsed from environment
@@ -579,25 +584,6 @@ library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
 CAFFE2_LIBS = []
-if USE_CUDA:
-    CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
-if USE_ROCM:
-    CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_hip.so'), '-Wl,--as-needed'])
-
-# static library only
-if IS_DARWIN:
-    CAFFE2_LIBS = []
-    if USE_CUDA:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_gpu.dylib'))
-    if USE_ROCM:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_hip.dylib'))
-
-if IS_WINDOWS:
-    CAFFE2_LIBS = []
-    if USE_CUDA:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
-    if USE_ROCM:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
 
 main_compile_args = []
 main_libraries = ['shm', 'torch_python']
@@ -618,14 +604,6 @@ main_sources = ["torch/csrc/stub.cpp"]
 # looked up in libtorch_python.so first, by making sure it comes
 # before libcaffe2.so in the linker command.
 main_link_args.extend(CAFFE2_LIBS)
-
-try:
-    import numpy as np
-except ImportError:
-    USE_NUMPY = False
-else:
-    NUMPY_INCLUDE_DIR = np.get_include()
-    USE_NUMPY = True
 
 if USE_CUDA:
     if IS_WINDOWS:
@@ -726,7 +704,7 @@ build_update_message = """
       $ python setup.py install
     To develop locally:
       $ python setup.py develop
-    To force cmake to re-run (off by default):
+    To force cmake to re-generate native build files (off by default):
       $ python setup.py develop --cmake
 """
 

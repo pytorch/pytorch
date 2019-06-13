@@ -3468,7 +3468,9 @@ Example::
 
 add_docstr(torch.nonzero,
            r"""
-nonzero(input, out=None) -> LongTensor
+nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensors
+
+**When** :attr:`as_tuple` **is false or unspecified:**
 
 Returns a tensor containing the indices of all non-zero elements of
 :attr:`input`.  Each row in the result contains the indices of a non-zero
@@ -3479,9 +3481,28 @@ If :attr:`input` has `n` dimensions, then the resulting indices tensor
 :attr:`out` is of size :math:`(z \times n)`, where :math:`z` is the total number of
 non-zero elements in the :attr:`input` tensor.
 
+**When** :attr:`as_tuple` **is true:**
+
+Returns a tuple of 1-D tensors, one for each dimension in :attr:`input`,
+each containing the indices (in that dimension) of all non-zero elements of
+:attr:`input` .
+
+If :attr:`input` has `n` dimensions, then the resulting tuple contains `n` tensors
+of size `z`, where `z` is the total number of
+non-zero elements in the :attr:`input` tensor.
+
+As a special case, when :attr:`input` has zero dimensions and a nonzero scalar
+value, it is treated as a one-dimensional tensor with one element.
+
 Args:
     input (Tensor): the input tensor
     out (LongTensor, optional): the output tensor containing indices
+
+Returns:
+    LongTensor or tuple of LongTensor: If :attr:`as_tuple` is false, the output
+    tensor containing indices. If :attr:`as_tuple` is true, one 1-D tensor for
+    each dimension, containing the indices of each nonzero element along that
+    dimension.
 
 Example::
 
@@ -3498,6 +3519,15 @@ Example::
             [ 1,  1],
             [ 2,  2],
             [ 3,  3]])
+    >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]), as_tuple=True)
+    (tensor([0, 1, 2, 4]),)
+    >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
+                                    [0.0, 0.4, 0.0, 0.0],
+                                    [0.0, 0.0, 1.2, 0.0],
+                                    [0.0, 0.0, 0.0,-0.4]]), as_tuple=True)
+    (tensor([0, 1, 2, 3]), tensor([0, 1, 2, 3]))
+    >>> torch.nonzero(torch.tensor(5), as_tuple=True)
+    (tensor([0]),)
 """)
 
 add_docstr(torch.normal,
@@ -5252,8 +5282,8 @@ Args:
         1 and not referenced from :math:`A`. Default: ``False``.
 
 Returns:
-    A namedtuple :math:`(solution, cloned_coefficient)` where :math:`cloned_coefficient`
-    is a clone of :math:`A` and :math:`solution` is the solution :math:`X` to :math:`AX = b`
+    A namedtuple `(solution, cloned_coefficient)` where `cloned_coefficient`
+    is a clone of :math:`A` and `solution` is the solution :math:`X` to :math:`AX = b`
     (or whatever variant of the system of equations, depending on the keyword arguments.)
 
 Examples::
@@ -6526,6 +6556,51 @@ Example::
             [3, 3]])
 """)
 
+add_docstr(torch.trapz,
+           r"""
+.. function:: trapz(y, x, *, dim=-1) -> Tensor
+
+Estimate :math:`\int y\,dx` along `dim`, using the trapezoid rule.
+
+Arguments:
+    y (Tensor): The values of the function to integrate
+    x (Tensor): The points at which the function `y` is sampled.
+        If `x` is not in ascending order, intervals on which it is decreasing
+        contribute negatively to the estimated integral (i.e., the convention
+        :math:`\int_a^b f = -\int_b^a f` is followed).
+    dim (int): The dimension along which to integrate.
+        By default, use the last dimension.
+
+Returns:
+    A Tensor with the same shape as the input, except with `dim` removed.
+    Each element of the returned tensor represents the estimated integral
+    :math:`\int y\,dx` along `dim`.
+
+Example::
+
+    >>> y = torch.randn((2, 3))
+    >>> y
+    tensor([[-2.1156,  0.6857, -0.2700],
+            [-1.2145,  0.5540,  2.0431]])
+    >>> x = torch.tensor([[1, 3, 4], [1, 2, 3]])
+    >>> torch.trapz(y, x)
+    tensor([-1.2220,  0.9683])
+
+.. function:: trapz(y, *, dx=1, dim=-1) -> Tensor
+
+As above, but the sample points are spaced uniformly at a distance of `dx`.
+
+Arguments:
+    y (Tensor): The values of the function to integrate
+    dx (float): The distance between points at which `y` is sampled.
+    dim (int): The dimension along which to integrate.
+        By default, use the last dimension.
+
+Returns:
+    A Tensor with the same shape as the input, except with `dim` removed.
+    Each element of the returned tensor represents the estimated integral
+    :math:`\int y\,dx` along `dim`.
+""")
 
 add_docstr(torch.repeat_interleave,
            r"""
@@ -6570,4 +6645,123 @@ Example::
 If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
 `1` appears `n2` times, `2` appears `n3` times, etc.
+""")
+
+
+add_docstr(torch._C.Generator,
+           r"""
+Generator(device='cpu') -> Generator
+
+Creates and returns a generator object which manages the state of the algorithm that
+produces pseudo random numbers. Used as a keyword argument in many :ref:`inplace-random-sampling`
+functions. Currently only creation of CPU Generator is supported through
+this API.
+
+Arguments:
+    device (:class:`torch.device`, optional): the desired device for the generator.
+
+Returns:
+    Generator: An torch.Generator object.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+""")
+
+
+add_docstr(torch._C.Generator.set_state,
+           r"""
+Generator.set_state(new_state) -> void
+
+Sets the Generator state.
+
+Arguments:
+    new_state (torch.ByteTensor): The desired state.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu_other = torch.Generator()
+    >>> g_cpu.set_state(g_cpu_other.get_state())
+""")
+
+
+add_docstr(torch._C.Generator.get_state,
+           r"""
+Generator.get_state() -> Tensor
+
+Returns the Generator state as a ``torch.ByteTensor``.
+
+Returns:
+    Tensor: A ``torch.ByteTensor`` which contains all the necessary bits
+    to restore a Generator to a specific point in time.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.get_state()
+""")
+
+
+add_docstr(torch._C.Generator.manual_seed,
+           r"""
+Generator.manual_seed(seed) -> Generator
+
+Sets the seed for generating random numbers. Returns a `torch.Generator` object.
+It is recommended to set a large seed, i.e. a number that has a good balance of 0
+and 1 bits. Avoid having many 0 bits in the seed.
+
+Arguments:
+    seed (int): The desired seed.
+
+Returns:
+    Generator: An torch.Generator object.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.manual_seed(2147483647)
+""")
+
+
+add_docstr(torch._C.Generator.initial_seed,
+           r"""
+Generator.initial_seed() -> int
+
+Returns the initial seed for generating random numbers.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.initial_seed()
+    2147483647
+""")
+
+
+add_docstr(torch._C.Generator.seed,
+           r"""
+Generator.seed() -> int
+
+Gets a non-deterministic random number from std::random_device or the current
+time and uses it to seed a Generator.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.seed()
+    1516516984916
+""")
+
+
+add_docstr(torch._C.Generator.device,
+           r"""
+Generator.device -> device
+
+Gets the current device of the generator.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.device
+    device(type='cpu')
 """)

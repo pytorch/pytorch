@@ -68,7 +68,7 @@ class FunctionalAPITest(TestCase):
 
         # Quantized inputs
         i_NHWC = inputs.permute([0, 2, 3, 1]).contiguous()
-        w_RSCK = filters.permute([2, 3, 1, 0]).contiguous()
+        w_RSCK = filters.permute([0, 2, 3, 1]).contiguous()
 
         q_inputs = torch.quantize_linear(i_NHWC, scale, zero_point, torch.quint8)
         q_filters = torch.quantize_linear(w_RSCK, scale, zero_point, torch.qint8)

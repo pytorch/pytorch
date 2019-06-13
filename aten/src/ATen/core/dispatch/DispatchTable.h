@@ -68,7 +68,7 @@ class KernelTable_ final {
 
   void removeIfExists(TensorTypeId key, const std::string& operator_name) {
     auto num_removed = map_.erase(key);
-    assert(num_removed <= 1); // This is not a multi-map
+    TORCH_INTERNAL_ASSERT(num_removed <= 1); // This is not a multi-map
   }
 
   const DispatchTableEntry* lookup(TensorTypeId key) const {
@@ -233,7 +233,7 @@ private:
         reverse_index_of_first_tensor_arg_
       );
       if (C10_UNLIKELY(first_tensor_arg_is_tensor_list_)) {
-        const auto& tensor_list = first_tensor_arg.toTensorListRef();
+        auto tensor_list = first_tensor_arg.toTensorListRef();
         if (tensor_list.size() == 0) {
           throw std::runtime_error("Tried to dispatch operator " + operator_name + " based on an empty tensor list. When the first tensor argument of an operator is a tensor list, then it must not be empty.");
         }
