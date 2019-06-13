@@ -177,7 +177,7 @@ def get_caffe2_workflows():
             if not conf_options.is_important:
                 # If you update this, update
                 # pytorch_build_definitions.py too
-                sub_d["filters"] = {"branches": {"only": ["master", "/ci-all\/.*/"]}}
+                sub_d["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
 
             x.append({conf_options.construct_phase_name(phase): sub_d})
 
