@@ -3910,7 +3910,7 @@
   dispatch:
     CPU: legacy::cpu::_th_sort
     CUDA: legacy::cuda::_th_sort
-    QuantizedCPU: sort
+    QuantizedCPU: sort_quant
 
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
   variants: method, function
