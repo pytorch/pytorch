@@ -1250,6 +1250,16 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
                             use_gpu=False, example_outputs=(torch.ones(x.size()),))
 
+    def test_full_script(self):
+        class FullClass(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.full((4, 5), x, dtype=torch.long)
+
+        x = torch.tensor(12)
+        self.run_model_test(FullClass(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=FullClass()(x))
+
     def test_where_functional(self):
         class WhereFunctional(torch.nn.Module):
             def forward(self, x):
