@@ -1633,7 +1633,7 @@ def _copy_module_to_script_module(module):
         setattr(script_module, name, value)
 
     # Constants annotated via `Final[T]` rather than being added to `__constants__`
-    for name, ann in getattr(original, '__annotations__', {}).items():
+    for name, ann in getattr(module, '__annotations__', {}).items():
         if torch._jit_internal.is_final(ann):
             constants_set.add(name)
 
