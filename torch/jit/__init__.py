@@ -8,7 +8,6 @@ import torch.jit.annotations
 import torch._jit_internal as _jit_internal
 from torch._six import PY2, PY37, with_metaclass, get_function_from_type, \
     string_classes, builtins
-from torch._jit_internal import ignore, export  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
@@ -27,6 +26,11 @@ import copy
 import collections
 import inspect
 import pickle
+
+# These are imported so users can access them from the `torch.jit` module
+from torch._jit_internal import Final  # noqa: F401
+from torch._jit_internal import ignore, export  # noqa: F401
+
 if sys.version_info[0] > 2:
     import pathlib
 
@@ -1621,6 +1625,11 @@ if _enabled:
                     object.__setattr__(self, name, None)
                 else:
                     self.register_buffer(name, original._buffers[name])
+
+            # Constants annotated via `Final[T]` rather than being added to `__constants__`
+            for name, ann in getattr(original, '__annotations__', {}).items():
+                if torch._jit_internal.is_final(ann):
+                    constants_set.add(name)
 
             # Copy constants
             self.__dict__["_constants_set"] = constants_set

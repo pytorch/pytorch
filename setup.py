@@ -583,25 +583,6 @@ library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
 CAFFE2_LIBS = []
-if USE_CUDA:
-    CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
-if USE_ROCM:
-    CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_hip.so'), '-Wl,--as-needed'])
-
-# static library only
-if IS_DARWIN:
-    CAFFE2_LIBS = []
-    if USE_CUDA:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_gpu.dylib'))
-    if USE_ROCM:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_hip.dylib'))
-
-if IS_WINDOWS:
-    CAFFE2_LIBS = []
-    if USE_CUDA:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
-    if USE_ROCM:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
 
 main_compile_args = []
 main_libraries = ['shm', 'torch_python']
