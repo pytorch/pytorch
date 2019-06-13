@@ -155,20 +155,16 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
       case ENTER_TUPLE: {
         // consume tuple
         const IValue* iv = stack[stack_top]++;
-        AT_ASSERT(iv->isTuple());
-        // see [argspec refcounting]
-        auto p = *reinterpret_cast<const at::ivalue::Tuple* const*>(iv);
-        auto tup_ptr = &p->elements()[0];
+        AT_ASSERT(iv->isTuple(), "Expected Tuple but got ", iv->tagKind());
+        auto* tup_ptr = &iv->toTupleRef()[0];
         // push list of tuple elements to the stack
         stack[++stack_top] = tup_ptr;
       } break;
       case ENTER_OBJECT: {
         // consume object
         const IValue* iv = stack[stack_top]++;
-        AT_ASSERT(iv->isObject());
-        // see [argspec refcounting]
-        auto p = *reinterpret_cast<const at::ivalue::Object* const*>(iv);
-        auto obj_ptr = &p->slots()[0];
+        AT_ASSERT(iv->isObject(), "Expected Object but got ", iv->tagKind());
+        auto obj_ptr = &iv->toObjectRef().slots()[0];
         // push list of object elements to the stack
         stack[++stack_top] = obj_ptr;
       } break;

@@ -3921,6 +3921,41 @@ class _TestTorchMixin(object):
                 a_t, p_t = torch._multinomial_alias_setup(probs)
                 torch._multinomial_alias_draw(p_t.view(2, 2), a_t.view(2, 2))
 
+        MAX_SAMPLES = 200000
+        for probs in [get_probs(4, True),
+                      cast(torch.tensor([0.8, 0.2])),
+                      cast(torch.tensor([0.7, 0.2, 0.1]))]:
+            # Check how different the alias distribution and the original distribution are
+            alias_dist = torch.zeros_like(probs)
+            alias_table, prob_table = torch._multinomial_alias_setup(probs)
+            alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, MAX_SAMPLES)
+            alias_dist = torch.unique(alias_samples, return_counts=True)[1].to(dtype=probs.dtype) / MAX_SAMPLES
+            self.assertTrue(torch.allclose(alias_dist, probs, rtol=0.02, atol=0.0),
+                            "Actual: {}\nExpected: {}".format(alias_dist, probs))
+
+        for probs in [cast(torch.tensor([0.2501, 0.25, 0.2499, 0.25])),
+                      cast(torch.tensor([0.8, 0.199, 0.001])),
+                      cast(torch.tensor([0.25001, 0.25, 0.24999, 0.25])),
+                      cast(torch.tensor([0.33, 0.34, 0.33])),
+                      cast(torch.tensor([0.8, 0.1999, 0.0001]))]:
+            # Check the difference between the original probabilities and the reconstructed
+            # probabilities from the alias and probability tables output by _multinomial_alias_setup
+            alias_table, prob_table = torch._multinomial_alias_setup(probs)
+            actual = torch.zeros_like(probs)
+            for i, vals in enumerate(zip(alias_table, prob_table)):
+                idx, p = vals
+                actual[i] += p
+                actual[idx] += 1. - p
+            actual = actual / len(probs)
+            self.assertEqual(actual, probs, 1e-6)
+
+        # Some special cases
+        test_cases = [cast(torch.tensor([1.0, 0.0, 0.0])), cast(torch.tensor([0.0, 1.0]))]
+        for probs in test_cases:
+            alias_table, prob_table = torch._multinomial_alias_setup(probs)
+            alias_samples = torch._multinomial_alias_draw(prob_table, alias_table, MAX_SAMPLES)
+            self.assertEqual(alias_samples.unique(), probs.nonzero().squeeze(-1))
+
     def test_multinomial_alias(self):
         self._test_multinomial_alias(self, lambda t: t)
 
@@ -5319,6 +5354,25 @@ class _TestTorchMixin(object):
         self._test_solve_batched(self, lambda t: t)
 
     @staticmethod
+    def _test_solve_batched_many_batches(self, cast):
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        A = cast(random_fullrank_matrix_distinct_singular_value(5, 256, 256))
+        b = cast(torch.randn(5, 1))
+        x, _ = torch.solve(b, A)
+        self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 1)))
+
+        A = cast(random_fullrank_matrix_distinct_singular_value(3))
+        b = cast(torch.randn(512, 512, 3, 1))
+        x, _ = torch.solve(b, A)
+        self.assertEqual(torch.matmul(A, x), b)
+
+    @slowTest
+    @skipIfNoLapack
+    def test_solve_batched_many_batches(self):
+        self._test_solve_batched_many_batches(self, lambda t: t.cuda())
+
+    @staticmethod
     def _test_solve_batched_dims(self, cast):
         if not TEST_NUMPY:
             return
@@ -5575,7 +5629,37 @@ class _TestTorchMixin(object):
 
     @skipIfNoLapack
     def test_triangular_solve_batched(self):
-        _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t)
+        self._test_triangular_solve_batched(self, lambda t: t)
+
+    @staticmethod
+    def _test_triangular_solve_batched_many_batches(self, cast):
+        def triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular):
+            A = cast(torch.randn(*A_dims))
+            A = A.triu() if upper else A.tril()
+            if unitriangular:
+                A.diagonal(dim1=-2, dim2=-1).fill_(1.)
+            b = cast(torch.randn(*b_dims))
+            return A, b
+
+        for upper, transpose, unitriangular in product([True, False], repeat=3):
+            A, b = triangular_solve_test_helper((256, 256, 5, 5), (5, 1), cast, upper, unitriangular)
+            x, _ = torch.triangular_solve(b, A,
+                                          upper=upper, transpose=transpose, unitriangular=unitriangular)
+            if transpose:
+                A = A.transpose(-2, -1)
+            self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 1)))
+
+            A, b = triangular_solve_test_helper((3, 3), (512, 512, 3, 1), cast, upper, unitriangular)
+            x, _ = torch.triangular_solve(b, A,
+                                          upper=upper, transpose=transpose, unitriangular=unitriangular)
+            if transpose:
+                A = A.transpose(-2, -1)
+            self.assertEqual(torch.matmul(A, x), b)
+
+    @slowTest
+    @skipIfNoLapack
+    def test_triangular_solve_batched_many_batches(self):
+        self._test_triangular_solve_batched_many_batches(self, lambda t: t)
 
     @staticmethod
     def _test_triangular_solve_batched_dims(self, cast):
@@ -6006,9 +6090,28 @@ class _TestTorchMixin(object):
         expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
         self.assertEqual(matrices_inverse, conv_fn(expected_inv))
 
+    @staticmethod
+    def _test_inverse_slow(self, conv_fn):
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 256, 256))
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(torch.matmul(matrices_inverse, matrices),
+                         conv_fn(torch.eye(5)).expand_as(matrices))
+
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(3, 512, 512))
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(torch.matmul(matrices, matrices_inverse),
+                         conv_fn(torch.eye(3)).expand_as(matrices))
+
     @skipIfNoLapack
     def test_inverse(self):
         self._test_inverse(self, lambda t: t)
+
+    @slowTest
+    @skipIfNoLapack
+    def test_inverse_many_batches(self):
+        self._test_inverse_slow(self, lambda t: t)
 
     @staticmethod
     def _test_pinverse(self, conv_fn):
@@ -6809,6 +6912,30 @@ class _TestTorchMixin(object):
     @skipIfNoLapack
     def test_cholesky_solve_batched(self):
         self._test_cholesky_solve_batched(self, lambda t: t)
+
+    @staticmethod
+    def _test_cholesky_solve_batched_many_batches(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+
+        def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
+            A = cast(random_symmetric_pd_matrix(*A_dims))
+            L = torch.cholesky(A, upper)
+            b = cast(torch.randn(*b_dims))
+            return A, L, b
+
+        for upper in [True, False]:
+            A, L, b = cholesky_solve_test_helper((5, 256, 256), (5, 10), cast, upper)
+            x = torch.cholesky_solve(b, L, upper)
+            self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 10)))
+
+            A, L, b = cholesky_solve_test_helper((5,), (512, 512, 5, 10), cast, upper)
+            x = torch.cholesky_solve(b, L, upper)
+            self.assertEqual(torch.matmul(A, x), b)
+
+    @skipIfNoLapack
+    @slowTest
+    def test_cholesky_solve_batched_many_batches(self):
+        self._test_cholesky_solve_batched_many_batches(self, lambda t: t)
 
     @staticmethod
     def _test_cholesky_solve_batched_dims(self, cast):
@@ -9514,6 +9641,37 @@ class _TestTorchMixin(object):
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
 
+    def test_generator_cpu(self):
+        # test default generators are equal
+        self.assertEqual(torch.default_generator, torch.default_generator)
+
+        # tests Generator API
+        # manual_seed, seed, initial_seed, get_state, set_state
+        g1 = torch.Generator()
+        g2 = torch.Generator()
+        g1.manual_seed(12345)
+        g2.manual_seed(12345)
+        self.assertEqual(g1.initial_seed(), g2.initial_seed())
+
+        g1.seed()
+        g2.seed()
+        self.assertNotEqual(g1.initial_seed(), g2.initial_seed())
+
+        g1 = torch.Generator()
+        g2_state = g2.get_state()
+        g2_randn = torch.randn(1, generator=g2)
+        g1.set_state(g2_state)
+        g1_randn = torch.randn(1, generator=g1)
+        self.assertEqual(g1_randn, g2_randn)
+
+        default_state = torch.default_generator.get_state()
+        q = torch.Tensor(100)
+        g1_normal = q.normal_()
+        g2 = torch.Generator()
+        g2.set_state(default_state)
+        g2_normal = q.normal_(generator=g2)
+        self.assertEqual(g1_normal, g2_normal)
+
     def test_sobolengine_unscrambled_lowdim(self):
         engine_1d = torch.quasirandom.SobolEngine(1)
         expected_1d = torch.tensor([0.5, 0.75, 0.25, 0.375, 0.875, 0.625, 0.125, 0.1875, 0.6875, 0.9375])
@@ -10977,6 +11135,44 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 self.assertIsInstance(r2, torch.Tensor)
                 self.assertTrue(r2.dtype == t_dtype)
                 self.assertTrue(r2.requires_grad)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_trapz(self):
+        def test_dx(sizes, dim, dx, device):
+            t = torch.randn(sizes, device=device)
+            actual = torch.trapz(t, dx=dx, dim=dim)
+            expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
+
+        def test_x(sizes, dim, x, device):
+            t = torch.randn(sizes, device=device)
+            actual = torch.trapz(t, x=torch.tensor(x, device=device), dim=dim)
+            expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
+
+        for device in torch.testing.get_all_device_types():
+            test_dx((2, 3, 4), 1, 1, device)
+            test_dx((10, 2), 0, 0.1, device)
+            test_dx((1, 10), 0, 2.3, device)
+            test_dx((0, 2), 0, 1.0, device)
+            test_dx((0, 2), 1, 1.0, device)
+            test_x((2, 3, 4), 1, [1.0, 2.0, 3.0], device)
+            test_x((10, 2), 0, [2.0, 3.0, 4.0, 7.0, 11.0, 14.0, 22.0, 26.0, 26.1, 30.3], device)
+            test_x((1, 10), 0, [1.0], device)
+            test_x((0, 2), 0, [], device)
+            test_x((0, 2), 1, [1.0, 2.0], device)
+            with self.assertRaisesRegex(
+                    IndexError,
+                    'Dimension out of range'):
+                test_x((2, 3), 2, [], device)
+                test_dx((2, 3), 2, 1.0, device)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    'There must be one `x` value for each sample point'):
+                test_x((2, 3), 1, [1.0, 2.0], device)
+                test_x((2, 3), 1, [1.0, 2.0, 3.0, 4.0], device)
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(

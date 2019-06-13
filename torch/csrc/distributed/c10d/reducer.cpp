@@ -105,11 +105,14 @@ Reducer::Reducer(
         auto grad_accumulator = variable.grad_accumulator();
 
         // Hook to execute after the gradient accumulator has executed.
-        grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>([=] {
-          std::lock_guard<std::mutex> lock(this->mutex_);
-          this->mark_variable_ready(
-              replica_index, variable_index, /* called_from_autograd= */ true);
-        }));
+        hooks_[grad_accumulator->add_post_hook(
+            torch::make_unique<LambdaPostHook>([=] {
+                std::lock_guard<std::mutex> lock(this->mutex_);
+                this->mark_variable_ready(
+                    replica_index,
+                    variable_index,
+                    /* called_from_autograd= */ true);
+            }))] = grad_accumulator;
 
         // Map raw function pointer to replica index and parameter index.
         // This is used later on when the autograd graph is traversed
@@ -135,6 +138,19 @@ Reducer::Reducer(
         backward_stats_.begin(),
         backward_stats_.end(),
         [=](std::vector<int64_t>& v) { v.resize(variable_count); });
+  }
+}
+
+Reducer::~Reducer() noexcept(false) {
+  // Remove all hooks on variables registered by this Reducer. This is necessary
+  // to make DDP failure recoverable. Otherwise, multiple Reducer instances
+  // (from recoveries) will add their hooks to the original model, and those
+  // hooks will try to invoke methods on a deleted Reducer objects.
+  for (auto& hook : hooks_) {
+    auto& key = hook.first;
+    auto& grad_accumulator = hook.second;
+    AT_ASSERTM(grad_accumulator->del_post_hook(key),
+        "Reducer attempts to delete a non-existing hook.");
   }
 }
 
