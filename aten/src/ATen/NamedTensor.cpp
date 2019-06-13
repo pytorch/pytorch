@@ -33,5 +33,5 @@ void internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
   }
 }
 
-}
+} // namespace at
 #endif
