@@ -63,10 +63,6 @@ _sum = sum
 
 
 def _parse_arg(value, desc):
-<<<<<<< HEAD
-    #print("parse args", value, desc)
-=======
->>>>>>> master
     if desc == 'none':
         return value
     if desc == 'v' or not _is_value(value):
@@ -87,13 +83,7 @@ def _parse_arg(value, desc):
             raise RuntimeError("ONNX symbolic doesn't know to interpret Constant node")
     elif value.node().kind() == 'prim::ListConstruct':
         if desc == 'is':
-<<<<<<< HEAD
-            #print(value.node())
             for v in value.node().inputs():
-                #print(v)
-=======
-            for v in value.node().inputs():
->>>>>>> master
                 if v.node().kind() != 'onnx::Constant':
                     raise RuntimeError("Failed to export an ONNX attribute, "
                                        "since it's not constant, please try to make "
@@ -197,8 +187,6 @@ def _try_get_scalar_type(*args):
             pass
     return None
 
-<<<<<<< HEAD
-=======
 def _slice_op(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if _export_onnx_opset_version == 9:
         from torch.onnx.symbolic_opset9 import slice_op
@@ -206,7 +194,6 @@ def _slice_op(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if _export_onnx_opset_version == 10:
         from torch.onnx.symbolic_opset10 import slice_op
         return slice_op(g, input, axes, starts, ends, steps, dynamic_slice)
->>>>>>> master
 
 # ---------------------------------------------------------------------
 # ONNX operator version

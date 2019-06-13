@@ -26,9 +26,8 @@ def register_version(domain, version):
 def register_ops_helper(domain, version, iter_version):
     version_ops = get_ops_in_version(iter_version)
     for op in version_ops:
-        #print("Register op \n", op, version)
         if isfunction(op[1]) and \
-        not is_registered_op(op[0], domain, version):
+           not is_registered_op(op[0], domain, version):
             register_op(op[0], op[1], domain, version)
 
 
@@ -44,7 +43,7 @@ def register_ops_in_version(domain, version):
             iter_version = iter_version - 1
         else:
             iter_version = iter_version + 1
-    
+
     register_ops_helper(domain, version, 9)
 
 

@@ -29,30 +29,14 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
     # At least the op_name should be specified,
     # but the op's attributes can optionally be
     # specified as well
-<<<<<<< HEAD
-    #assert len(ops) == len(graph.node)
-    for i in range(0, len(ops)):
-        #assert graph.node[i].op_type == ops[i]['op_name']
-=======
     assert len(ops) == len(graph.node)
     for i in range(0, len(ops)):
         assert graph.node[i].op_type == ops[i]['op_name']
->>>>>>> master
         if "attributes" in ops[i] :
             attributes = ops[i]['attributes']
             assert len(attributes) == len(graph.node[i].attribute)
             for j in range(0, len(attributes)):
                 for attribute_field in attributes[j].keys():
-<<<<<<< HEAD
-                    #assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
-                    pass
-
-
-def check_onnx_opsets_operator(module, x, ops, opset_versions):
-    for opset_version in opset_versions:
-        f = io.BytesIO()
-        torch.onnx.export(module, x, f, opset_version=opset_version)
-=======
                     assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
 
 
@@ -63,7 +47,6 @@ def check_onnx_opsets_operator(module, x, ops, opset_versions, training=False, e
                           opset_version=opset_version,
                           training=training,
                           example_outputs=example_outputs)
->>>>>>> master
         model = onnx.load(io.BytesIO(f.getvalue()))
         check_onnx_opset_operator(model, ops[opset_version], opset_version)
 
@@ -161,7 +144,7 @@ class TestONNXOpset(TestCase):
                 {"name": "scales", "floats": [1.0, 1.0, 2.0, 2.0], "type": 6}]}]
         ops9 = [{"op_name" : "Constant"},
                 {"op_name" : "Upsample", "attributes" : [{"name": "mode", "s": ("linear").encode(), "type": 3}]}]
-        ops = {8 :ops8, 9 : ops9}
+        ops = {8 : ops8, 9 : ops9}
         x = torch.randn(2, 2, 2, 2)
         check_onnx_opsets_operator(module, x, ops, opset_versions=[8, 9])
 
@@ -169,22 +152,22 @@ class TestONNXOpset(TestCase):
         class MyModule(Module):
             def __init__(self):
                 super(MyModule, self).__init__()
+
             def forward(self, x):
                 return torch._dim_arange(x, 1)
 
         module = MyModule()
         ops_8 = [{"op_name" : "Shape"}, {"op_name" : "Constant"},
-                 {"op_name" : "Cast", "attributes": [{"name": "to", "i": 7, "type": 7}]},
-                 {"op_name" : "Gather", "attributes": [{"name": "axis", "i": 0, "type": 7}]},
+                 {"op_name" : "Cast", "attributes": [{"name": "to", "i": 7, "type": 2}]},
+                 {"op_name" : "Gather", "attributes": [{"name": "axis", "i": 0, "type": 2}]},
                  {"op_name" : "Range"}]
         ops_9 = [{"op_name" : "Shape"}, {"op_name" : "Constant"},
-                 {"op_name" : "Gather", "attributes": [{"name": "axis", "i": 0, "type": 7}]},
+                 {"op_name" : "Gather", "attributes": [{"name": "axis", "i": 0, "type": 2}]},
                  {"op_name" : "Range"}]
         ops = {8 : ops_8, 9 : ops_9}
         x = torch.ones(5, 6)
         check_onnx_opsets_operator(module, x, ops, opset_versions=[8, 9])
 
-            
     def test_slice(self):
         class MyModule(Module):
             def forward(self, x):

@@ -1,13 +1,9 @@
-import torch
-import torch.onnx
-import torch.onnx.utils
-
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented, _black_list_in_opset
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset
 
 
 black_listed_operators = ["nonzero", "where", "scatter", "erf", "sign", "isnan", "zeros",
-                          "zeros_like", "ones", "ones_like", "full", "full_like"]
+                          "zeros_like", "ones", "ones_like", "full", "full_like", "gather"]
 
 for black_listed_op in black_listed_operators:
     vars()[black_listed_op] = _black_list_in_opset(black_listed_op)

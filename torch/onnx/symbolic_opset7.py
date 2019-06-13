@@ -1,7 +1,3 @@
-import torch
-import torch.onnx
-import torch.onnx.utils
-
 from torch.onnx.symbolic_helper import _black_list_in_opset
 from torch.onnx.symbolic_opset9 import _adaptive_pool, _pair, _single, _triple, max_pool1d, max_pool2d, max_pool3d
 

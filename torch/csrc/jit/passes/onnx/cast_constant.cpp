@@ -17,7 +17,6 @@ void CastConstant(Block* block) {
     }
 
     if (node->kind() == onnx::Constant) {
-      printf("Constant found");
       auto val = node->t(attr::value);
       at::ScalarType dtype = val.scalar_type();
       if (dtype != at::ScalarType::Double && dtype != at::ScalarType::Float && dtype != at::ScalarType::Half) {
@@ -55,7 +54,6 @@ void CastConstant(Block* block) {
     }
   }
 }
-//} // namespace
 
 void CastConstant(const std::shared_ptr<Graph>& graph) {
   CastConstant(graph->block());
