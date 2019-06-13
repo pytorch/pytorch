@@ -18,6 +18,7 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/passes/bailout_graph.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
@@ -25,6 +26,7 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/guard_elimination.h"
 #include "torch/csrc/jit/passes/insert_guards.h"
+#include "torch/csrc/jit/passes/liveness.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
@@ -907,6 +909,92 @@ static void checkShape(
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
+std::vector<std::size_t> values_to_value_ids(
+    const std::vector<Value*>& values) {
+  std::vector<std::size_t> result;
+  for (auto v : values) {
+    result.push_back(v->unique());
+  }
+  return result;
+};
+
+void testLivenessIf() {
+  static const auto basic_example = R"JIT(
+  def test_if_liveness(x, y, z):
+      # type: (Tensor, Tensor, bool) -> Tensor
+      c = torch.empty(2)
+      a = x + y
+      if z:
+          t1 = x * 2
+          t2 = t1 + 1
+          c = t1
+      else:
+          d1 = y * 3
+          d2 = d1 + 2
+          c = d2
+
+      return c * a
+  )JIT";
+
+  std::vector<std::size_t> expected_liveness_add_before_if{0, 1, 2, 3, 16, 28};
+  std::vector<std::size_t> expected_liveness_if{0, 1, 2, 3, 16, 17, 28};
+  std::vector<std::size_t> expected_first_node_liveness{0, 1, 2};
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("test_if_liveness");
+  auto liveness = BuildLivenessSets(fun.graph());
+  auto nodes = fun.graph()->nodes();
+  auto if_node = std::find_if(nodes.begin(), nodes.end(), [](Node* n) {
+    return n->kind() == prim::If;
+  });
+
+  auto first_node = *fun.graph()->nodes().begin();
+  auto actual_first_node_liveness = values_to_value_ids(liveness[first_node]);
+  ASSERT_EQ(actual_first_node_liveness, expected_first_node_liveness);
+
+  auto actual_if_liveness = values_to_value_ids(liveness[*if_node]);
+  ASSERT_EQ(actual_if_liveness, expected_liveness_if);
+  auto add = if_node->prev();
+  auto actual_add_before_if_liveness = values_to_value_ids(liveness[add]);
+  ASSERT_EQ(actual_add_before_if_liveness, expected_liveness_add_before_if);
+}
+
+void testLivenessFor() {
+  static const auto basic_example = R"JIT(
+  def test_for_liveness(n, x):
+
+      # type: (int, Tensor) -> Tuple[int, Tensor, Tensor]
+      sum = 0
+      sum2 = 0
+      c = x
+      for i in range(n):
+          sum += i
+          j = i + 1
+          sum2 = sum2 + j + i
+          c = c * i
+
+      return (sum + sum2, c, x)
+  )JIT";
+
+  std::vector<std::size_t> expected_for{0, 1, 2, 7, 15};
+  std::vector<std::size_t> expected_first_node_liveness{0, 1};
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("test_for_liveness");
+  auto liveness = BuildLivenessSets(fun.graph());
+  auto nodes = fun.graph()->nodes();
+  auto loop_node = std::find_if(nodes.begin(), nodes.end(), [](Node* n) {
+    return n->kind() == prim::Loop;
+  });
+
+  auto first_node = *fun.graph()->nodes().begin();
+  auto actual_first_node_liveness = values_to_value_ids(liveness[first_node]);
+  ASSERT_EQ(actual_first_node_liveness, expected_first_node_liveness);
+
+  auto actual_loop_liveness = values_to_value_ids(liveness[*loop_node]);
+  ASSERT_EQ(actual_loop_liveness, expected_for);
+}
+
 void testInsertAndEliminateGuards() {
   static const auto basic_example = R"JIT(
   def basic(x, y):
@@ -946,6 +1034,73 @@ void testInsertAndEliminateGuards() {
   EliminateGuards(copy);
   num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
   ASSERT_EQ(num_guards, 2);
+}
+
+void testInsertBailOuts() {
+  static const auto basic_example = R"JIT(
+  def basic_loop(x, y):
+
+      a = x + 1
+      b = y + 2
+      c = x + y + 3
+
+      for i in range(10):
+          a = a + b
+          # invariant
+          d = b * c
+          #
+          a = a - d
+
+      e = a + 4
+      return e
+  )JIT";
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("basic_loop");
+  auto pr = ProfilingRecord::instrumentGraph(fun.graph());
+  auto x = at::randn({2, 3}, at::kCPU);
+  auto y = at::randn({2, 3}, at::kCPU);
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+  auto stack = createStack({v(x), v(y)});
+  // introduce some profiling information
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+  auto copy = pr->profiled_graph_->copy();
+  InsertGuards(copy);
+  EliminateGuards(copy);
+  auto nodes = copy->block()->nodes();
+  auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
+  auto num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 3);
+  InsertBailOuts(copy);
+  auto is_bailout = [](Node* n) { return n->kind() == prim::BailOut; };
+  auto num_bailouts = std::count_if(nodes.begin(), nodes.end(), is_bailout);
+  ASSERT_EQ(num_guards, num_bailouts);
+  std::vector<Node*> bailouts(num_bailouts);
+  std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
+  auto last_graph = bailouts[num_bailouts - 1]->g(attr::Subgraph);
+  ASSERT_EQ(last_graph->inputs().size(), 1);
+  ASSERT_EQ(last_graph->outputs().size(), 1);
+  auto lb_nodes = last_graph->nodes();
+  auto is_add = [](Node* n) { return n->kind() == aten::add; };
+  auto is_loop = [](Node* n) { return n->kind() == prim::Loop; };
+  auto lb_graph_num_adds =
+      std::count_if(lb_nodes.begin(), lb_nodes.end(), is_add);
+  auto lb_graph_num_loops =
+      std::count_if(lb_nodes.begin(), lb_nodes.end(), is_loop);
+  ASSERT_EQ(lb_graph_num_adds, 1);
+  ASSERT_EQ(lb_graph_num_loops, 0);
+  auto first_graph = bailouts[0]->g(attr::Subgraph);
+  auto fst_nodes = first_graph->nodes();
+  ASSERT_EQ(first_graph->inputs().size(), 2);
+  ASSERT_EQ(first_graph->outputs().size(), 1);
+  auto fst_graph_num_adds =
+      std::count_if(fst_nodes.begin(), fst_nodes.end(), is_add);
+  auto fst_graph_num_loops =
+      std::count_if(fst_nodes.begin(), fst_nodes.end(), is_loop);
+  ASSERT_EQ(fst_graph_num_loops, 1);
+  ASSERT_EQ(fst_graph_num_adds, 5);
 }
 
 void testProfiler() {
