@@ -148,7 +148,7 @@ namespace {
       outputHeight, outputWidth);
 
     Tensor input = input_.contiguous();
-    AT_CHECK(input.is_contiguous(), "output must be contiguous");
+    AT_CHECK(input.is_contiguous(), "input must be contiguous");
 
     output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
@@ -191,13 +191,13 @@ namespace {
     at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
       for (auto k = start; k < end; k++)
       {
+        scalar_t *gradInput_pi_k = gradInput_p + k*inputHeight*inputWidth;
         scalar_t *gradInput_p_k = gradInput_p + k*inputHeight*inputWidth;
         scalar_t *gradOutput_p_k = gradOutput_p + k*outputWidth*outputHeight;
 
-
         int64_t i;
         for(i=0; i<inputWidth*inputHeight; i++)
-          gradInput_p_k[i] = 0.0;
+          gradInput_pi_k[i] = 0.0;
 
         int64_t xx, yy;
         for(yy = 0; yy < outputHeight; yy++)
@@ -254,7 +254,7 @@ namespace {
   {
     at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
       for (auto p = start; p < end; p++) {
-        avg_pool2d_backward_single_out_frame(
+        avg_pool2d_backward_single_out_frame<scalar_t>(
           gradInput_data+p*nInputPlane*inputWidth*inputHeight,
           gradOutput_data+p*nInputPlane*outputWidth*outputHeight,
           nInputPlane,
@@ -280,6 +280,12 @@ namespace {
     bool count_include_pad
   )
   {
+    // XXX JIT: Pooling.cpp allows stride.empty().
+    TORCH_CHECK(kernel_size.size() == 2 &&
+              (stride.empty() || stride.size() == 2) &&
+              (padding.size() == 1 || padding.size() == 2),
+      "max_pool2d_with_indices: internal error: all IntArrayRef sizes must be 2");
+
     TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
       "non-empty 3D or 4D (batch mode) tensor expected for input");
 
@@ -294,7 +300,7 @@ namespace {
 
     /* get contiguous gradOutput */
     const Tensor gradOutput = gradOutput_.contiguous();
-    AT_CHECK(input.is_contiguous(), "output must be contiguous");
+    AT_CHECK(gradOutput.is_contiguous(), "gradOutput must be contiguous");
 
     /* resize */
     gradInput.resize_as_(input);
@@ -313,7 +319,7 @@ namespace {
     const int64_t outputWidth_for_shape_check = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
 
     avg_pool2d_shape_check(
-      input, gradOutput,
+      input, gradOutput_,
       kH, kW, dH, dW, padH, padW,
       ceil_mode,
       nInputPlane,
@@ -327,7 +333,7 @@ namespace {
         scalar_t *gradInput_data = gradInput.data<scalar_t>();
         scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
         
-        avg_pool2d_backward_out_frame(
+        avg_pool2d_backward_out_frame<scalar_t>(
           gradInput_data, gradOutput_data,
           nbatch,
           nInputPlane,
@@ -338,7 +344,7 @@ namespace {
           count_include_pad);
       }
     );
-
+    return gradInput;
   }
 } // namespace
 
