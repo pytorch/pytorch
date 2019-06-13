@@ -21,7 +21,7 @@
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/utils/auto_gil.h>
-#include <torch/csrc/utils/swap_thread_states.h>
+#include <torch/csrc/utils/swap_thread_state.h>
 #include <torch/csrc/Exceptions.h>
 
 #include <exception>
