@@ -35,7 +35,10 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
 
 Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   if (!data_.defined()) {
-    AT_ASSERT(was_default_constructed_);
+    // We have already checked if the variable was released
+    // And if it was released, we should not be unpacking it.
+    TORCH_INTERNAL_ASSERT(was_default_constructed_,
+        "We should not unpack variable if it was released.");
     return Variable();
   }
 
