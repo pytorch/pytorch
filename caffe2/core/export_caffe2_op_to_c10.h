@@ -12,16 +12,16 @@ namespace detail {
 constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
     "_caffe2_preallocated_outputs";
 
-using _CallCaffe2OpFunc = std::vector<at::Tensor>(
+using _CallCaffe2OpFunc = c10::ListPtr<at::Tensor>(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
-    std::vector<at::Tensor>&& outputs);
+    c10::ListPtr<at::Tensor>&& outputs);
 
 template <class Caffe2Operator>
-inline std::vector<at::Tensor> _call_caffe2_op(
+inline c10::ListPtr<at::Tensor> _call_caffe2_op(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
-    std::vector<at::Tensor>&& outputs) {
+    c10::ListPtr<at::Tensor>&& outputs) {
   Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
   op.Run();
   return std::move(op).move_newstyle_outputs();
@@ -54,7 +54,7 @@ inline void _call_caffe2_op_from_c10(
   const size_t num_inputs = schema.arguments().size() -
       1; // -1 because the last argument is the list of preallocated tensors
 
-  std::vector<at::Tensor> outputs;
+  c10::ListPtr<at::Tensor> outputs = c10::make_list<at::Tensor>();
   if (preallocated_outputs.isNone()) {
     // either the schema doesn't support preallocated outputs or it does but
     // they haven't been passed in. Pass a list of uninitialized tensors to
@@ -62,8 +62,7 @@ inline void _call_caffe2_op_from_c10(
     outputs.resize(num_outputs);
   } else {
     AT_ASSERT(preallocated_outputs.isTensorList());
-    outputs =
-        std::move(*std::move(preallocated_outputs).toTensorList()).elements();
+    outputs = std::move(preallocated_outputs).toTensorList();
   }
 
   // TODO Avoid vector allocation. One idea would be to keep the std::vector
@@ -72,8 +71,8 @@ inline void _call_caffe2_op_from_c10(
 
   outputs = (*call_op)(schema, std::move(inputs), std::move(outputs));
 
-  for (auto&& output : std::move(outputs)) {
-    torch::jit::push(*stack, std::move(output));
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    torch::jit::push(*stack, outputs.extract(i));
   }
 
   // postcondition: All inputs are cleared from the stack, there's now one
@@ -124,12 +123,12 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
  *
  * In caffe2/operators/MyOperator.h:
  *
- * > C10_DECLARE_CAFFE2_OPERATOR(C10MyOperator) // C10MyOperator is the name
+ * > C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(C10MyOperator) // C10MyOperator is the name
  *                                              // used by c10 for this operator
  *
  * In caffe2/operators/MyOperator.cc
  *
- * > C10_REGISTER_CAFFE2_OPERATOR_CPU(
+ * > C10_EXPORT_CAFFE2_OP_TO_C10_CPU (
  * >    C10MyOperator,
  * >    "_caffe2::C10MyOperator(Tensor input1, int argument2, float argument3) -> (Tensor output1, Tensor output2)"
  * >    caffe2::MyOperator<caffe2::CPUContext> // This is the caffe2 operator
@@ -138,15 +137,15 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
  *
  * In caffe2/operators/MyOperator.cu
  *
- * > C10_REGISTER_CAFFE2_OPERATOR_CUDA(C10MyOperator,
+ * > C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(C10MyOperator ,
  *   caffe2::MyOperator<caffe2::CUDAContext>)
  *
  * Notes:
  * - all macros must be defined in the top level namespace, not in namespace
  *   caffe2.
- * - all operators must call C10_DECLARE_CAFFE2_OPERATOR and
- *   C10_REGISTER_CAFFE2_OPERATOR_CPU.
- * - calling C10_REGISTER_CAFFE2_OPERATOR_CUDA is optional and can be omitted if
+ * - all operators must call C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10 and
+ *   C10_EXPORT_CAFFE2_OP_TO_C10_CPU .
+ * - calling C10_EXPORT_CAFFE2_OP_TO_C10_CUDA is optional and can be omitted i f
  *   you don't want to expose the operator for CUDA operations.
  * - caffe2 arguments must come after caffe2 inputs, in other words, any tensor
  *   inputs must precede any non-tensor inputs.
@@ -155,14 +154,14 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
  * - If your operator has a variable number of input tensors, make the first (!)
  *   input an input of type TensorList. There must be no other tensor inputs.
  */
-#define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)                  \
+#define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)          \
   namespace caffe2 {                                               \
   namespace _c10_ops {                                             \
   CAFFE2_API const FunctionSchema& schema_##OperatorName();        \
   }                                                                \
   }
 
-#define C10_REGISTER_CAFFE2_OPERATOR_CPU(                                    \
+#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU(                                     \
     OperatorName, OperatorSchema, OperatorClass)                             \
   /* Register the op schema with the c10 dispatcher */                       \
   namespace caffe2 {                                                         \
@@ -186,7 +185,7 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
                       OperatorClass>,                                        \
                   &::caffe2::detail::noCache));
 
-#define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)       \
+#define C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass)        \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
   static auto registry_##OperatorName##_##__COUNTER__ =                      \
       ::c10::RegisterOperators().op(                                         \
@@ -199,10 +198,10 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
                       OperatorClass>,                                        \
                   &::caffe2::detail::noCache));
 
-// You should never manually call the C10_REGISTER_CAFFE2_OPERATOR_HIP macro.
-// The C10_REGISTER_CAFFE2_OPERATOR_CUDA macro from above will be automatically
-// rewritten to C10_REGISTER_CAFFE2_OPERATOR_HIP by hipify.
-#define C10_REGISTER_CAFFE2_OPERATOR_HIP(OperatorName, OperatorClass)        \
+// You should never manually call the C10_EXPORT_CAFFE2_OP_TO_C10_HIP macro .
+// The C10_EXPORT_CAFFE2_OP_TO_C10_CUDA macro from above will be automatically
+// rewritten to C10_EXPORT_CAFFE2_OP_TO_C10_HIP by hipify .
+#define C10_EXPORT_CAFFE2_OP_TO_C10_HIP(OperatorName, OperatorClass)         \
   /* Register call_caffe2_op_from_c10 as a kernel with the c10 dispatcher */ \
   static auto registry_##OperatorName##_##__COUNTER__ =                      \
       ::c10::RegisterOperators().op(                                         \
@@ -217,8 +216,8 @@ inline std::unique_ptr<c10::KernelCache> noCache() {
 
 #else
 // Don't use c10 dispatcher on mobile because of binary size
-#define C10_DECLARE_CAFFE2_OPERATOR(OperatorName)
-#define C10_REGISTER_CAFFE2_OPERATOR_CPU(OperatorName, OperatorSchema, OperatorClass)
-#define C10_REGISTER_CAFFE2_OPERATOR_CUDA(OperatorName, OperatorClass)
-#define C10_REGISTER_CAFFE2_OPERATOR_HIP(OperatorName, OperatorClass)
+#define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)
+#define C10_EXPORT_CAFFE2_OP_TO_C10_CPU(OperatorName, OperatorSchema, OperatorClass)
+#define C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass)
+#define C10_EXPORT_CAFFE2_OP_TO_C10_HIP(OperatorName, OperatorClass)
 #endif

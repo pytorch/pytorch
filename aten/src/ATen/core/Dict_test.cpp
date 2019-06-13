@@ -8,30 +8,30 @@ using c10::DictPtr;
 using c10::make_dict;
 
 TEST(DictTest, givenEmptyDict_whenCallingEmpty_thenReturnsTrue) {
-    DictPtr<int, string> dict = make_dict<int, string>();
+    DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
     EXPECT_TRUE(dict.empty());
 }
 
 TEST(DictTest, givenNonemptyDict_whenCallingEmpty_thenReturnsFalse) {
-    DictPtr<int, string> dict = make_dict<int, string>();
+    DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
     dict.insert(3, "value");
     EXPECT_FALSE(dict.empty());
 }
 
 TEST(DictTest, givenEmptyDict_whenCallingSize_thenReturnsZero) {
-    DictPtr<int, string> dict = make_dict<int, string>();
+    DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
     EXPECT_EQ(0, dict.size());
 }
 
 TEST(DictTest, givenNonemptyDict_whenCallingSize_thenReturnsNumberOfElements) {
-    DictPtr<int, string> dict = make_dict<int, string>();
+    DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
     dict.insert(3, "value");
     dict.insert(4, "value2");
     EXPECT_EQ(2, dict.size());
 }
 
 TEST(DictTest, givenNonemptyDict_whenCallingClear_thenIsEmpty) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "value");
   dict.insert(4, "value2");
   dict.clear();
@@ -39,24 +39,24 @@ TEST(DictTest, givenNonemptyDict_whenCallingClear_thenIsEmpty) {
 }
 
 TEST(DictTest, whenInsertingNewKey_thenReturnsTrueAndIteratorToNewElement) {
-  DictPtr<int, string> dict = make_dict<int, string>();
-  std::pair<DictPtr<int, string>::iterator, bool> result = dict.insert(3, "value");
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
+  std::pair<DictPtr<int64_t, string>::iterator, bool> result = dict.insert(3, "value");
   EXPECT_TRUE(result.second);
   EXPECT_EQ(3, result.first->key());
   EXPECT_EQ("value", result.first->value());
 }
 
 TEST(DictTest, whenInsertingExistingKey_thenReturnsFalseAndIteratorToExistingElement) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "old_value");
-  std::pair<DictPtr<int, string>::iterator, bool> result = dict.insert(3, "new_value");
+  std::pair<DictPtr<int64_t, string>::iterator, bool> result = dict.insert(3, "new_value");
   EXPECT_FALSE(result.second);
   EXPECT_EQ(3, result.first->key());
   EXPECT_EQ("old_value", result.first->value());
 }
 
 TEST(DictTest, whenInsertingExistingKey_thenDoesNotModifyDict) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "old_value");
   dict.insert(3, "new_value");
   EXPECT_EQ(1, dict.size());
@@ -65,24 +65,24 @@ TEST(DictTest, whenInsertingExistingKey_thenDoesNotModifyDict) {
 }
 
 TEST(DictTest, whenInsertOrAssigningNewKey_thenReturnsTrueAndIteratorToNewElement) {
-  DictPtr<int, string> dict = make_dict<int, string>();
-  std::pair<DictPtr<int, string>::iterator, bool> result = dict.insert_or_assign(3, "value");
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
+  std::pair<DictPtr<int64_t, string>::iterator, bool> result = dict.insert_or_assign(3, "value");
   EXPECT_TRUE(result.second);
   EXPECT_EQ(3, result.first->key());
   EXPECT_EQ("value", result.first->value());
 }
 
 TEST(DictTest, whenInsertOrAssigningExistingKey_thenReturnsFalseAndIteratorToChangedElement) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "old_value");
-  std::pair<DictPtr<int, string>::iterator, bool> result = dict.insert_or_assign(3, "new_value");
+  std::pair<DictPtr<int64_t, string>::iterator, bool> result = dict.insert_or_assign(3, "new_value");
   EXPECT_FALSE(result.second);
   EXPECT_EQ(3, result.first->key());
   EXPECT_EQ("new_value", result.first->value());
 }
 
 TEST(DictTest, whenInsertOrAssigningExistingKey_thenDoesModifyDict) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "old_value");
   dict.insert_or_assign(3, "new_value");
   EXPECT_EQ(1, dict.size());
@@ -91,8 +91,8 @@ TEST(DictTest, whenInsertOrAssigningExistingKey_thenDoesModifyDict) {
 }
 
 TEST(DictTest, givenEmptyDict_whenIterating_thenBeginIsEnd) {
-  DictPtr<int, string> dict = make_dict<int, string>();
-  const DictPtr<int, string> cdict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
+  const DictPtr<int64_t, string> cdict = make_dict<int64_t, string>();
   EXPECT_EQ(dict.begin(), dict.end());
   EXPECT_EQ(dict.cbegin(), dict.cend());
   EXPECT_EQ(cdict.begin(), cdict.end());
@@ -100,12 +100,12 @@ TEST(DictTest, givenEmptyDict_whenIterating_thenBeginIsEnd) {
 }
 
 TEST(DictTest, givenMutableDict_whenIterating_thenFindsElements) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(5, "5");
   bool found_first = false;
   bool found_second = false;
-  for (DictPtr<int, string>::iterator iter = dict.begin(); iter != dict.end(); ++iter) {
+  for (DictPtr<int64_t, string>::iterator iter = dict.begin(); iter != dict.end(); ++iter) {
     if (iter->key() == 3) {
       EXPECT_EQ("3", iter->value());
       EXPECT_FALSE(found_first);
@@ -123,7 +123,7 @@ TEST(DictTest, givenMutableDict_whenIterating_thenFindsElements) {
 }
 
 TEST(DictTest, givenMutableDict_whenIteratingWithForeach_thenFindsElements) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(5, "5");
   bool found_first = false;
@@ -146,13 +146,13 @@ TEST(DictTest, givenMutableDict_whenIteratingWithForeach_thenFindsElements) {
 }
 
 TEST(DictTest, givenConstDict_whenIterating_thenFindsElements) {
-  DictPtr<int, string> dict_ = make_dict<int, string>();
+  DictPtr<int64_t, string> dict_ = make_dict<int64_t, string>();
   dict_.insert(3, "3");
   dict_.insert(5, "5");
-  const DictPtr<int, string>& dict = dict_;
+  const DictPtr<int64_t, string>& dict = dict_;
   bool found_first = false;
   bool found_second = false;
-  for (DictPtr<int, string>::const_iterator iter = dict.begin(); iter != dict.end(); ++iter) {
+  for (DictPtr<int64_t, string>::const_iterator iter = dict.begin(); iter != dict.end(); ++iter) {
     if (iter->key() == 3) {
       EXPECT_EQ("3", iter->value());
       EXPECT_FALSE(found_first);
@@ -170,10 +170,10 @@ TEST(DictTest, givenConstDict_whenIterating_thenFindsElements) {
 }
 
 TEST(DictTest, givenConstDict_whenIteratingWithForeach_thenFindsElements) {
-  DictPtr<int, string> dict_ = make_dict<int, string>();
+  DictPtr<int64_t, string> dict_ = make_dict<int64_t, string>();
   dict_.insert(3, "3");
   dict_.insert(5, "5");
-  const DictPtr<int, string>& dict = dict_;
+  const DictPtr<int64_t, string>& dict = dict_;
   bool found_first = false;
   bool found_second = false;
   for (const auto& elem : dict) {
@@ -194,28 +194,28 @@ TEST(DictTest, givenConstDict_whenIteratingWithForeach_thenFindsElements) {
 }
 
 TEST(DictTest, givenIterator_thenCanModifyValue) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "old_value");
   dict.begin()->setValue("new_value");
   EXPECT_EQ("new_value", dict.begin()->value());
 }
 
 TEST(DictTest, givenOneElementDict_whenErasingByConstIterator_thenDictIsEmpty) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.erase(dict.cbegin());
   EXPECT_TRUE(dict.empty());
 }
 
 TEST(DictTest, givenOneElementDict_whenErasingByIterator_thenDictIsEmpty) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.erase(dict.begin());
   EXPECT_TRUE(dict.empty());
 }
 
 TEST(DictTest, givenOneElementDict_whenErasingByKey_thenReturnsOneAndDictIsEmpty) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   bool result = dict.erase(3);
   EXPECT_EQ(1, result);
@@ -223,7 +223,7 @@ TEST(DictTest, givenOneElementDict_whenErasingByKey_thenReturnsOneAndDictIsEmpty
 }
 
 TEST(DictTest, givenOneElementDict_whenErasingByNonexistingKey_thenReturnsZeroAndDictIsUnchanged) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   bool result = dict.erase(4);
   EXPECT_EQ(0, result);
@@ -231,80 +231,80 @@ TEST(DictTest, givenOneElementDict_whenErasingByNonexistingKey_thenReturnsZeroAn
 }
 
 TEST(DictTest, whenCallingAtWithExistingKey_thenReturnsCorrectElement) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
   EXPECT_EQ("4", dict.at(4));
 }
 
 TEST(DictTest, whenCallingAtWithNonExistingKey_thenReturnsCorrectElement) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
   EXPECT_THROW(dict.at(5), std::out_of_range);
 }
 
 TEST(DictTest, givenMutableDict_whenCallingFindOnExistingKey_thenFindsCorrectElement) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
-  DictPtr<int, string>::iterator found = dict.find(3);
+  DictPtr<int64_t, string>::iterator found = dict.find(3);
   EXPECT_EQ(3, found->key());
   EXPECT_EQ("3", found->value());
 }
 
 TEST(DictTest, givenMutableDict_whenCallingFindOnNonExistingKey_thenReturnsEnd) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
-  DictPtr<int, string>::iterator found = dict.find(5);
+  DictPtr<int64_t, string>::iterator found = dict.find(5);
   EXPECT_EQ(dict.end(), found);
 }
 
 TEST(DictTest, givenConstDict_whenCallingFindOnExistingKey_thenFindsCorrectElement) {
-  DictPtr<int, string> dict_ = make_dict<int, string>();
+  DictPtr<int64_t, string> dict_ = make_dict<int64_t, string>();
   dict_.insert(3, "3");
   dict_.insert(4, "4");
-  const DictPtr<int, string>& dict = dict_;
-  DictPtr<int, string>::const_iterator found = dict.find(3);
+  const DictPtr<int64_t, string>& dict = dict_;
+  DictPtr<int64_t, string>::const_iterator found = dict.find(3);
   EXPECT_EQ(3, found->key());
   EXPECT_EQ("3", found->value());
 }
 
 TEST(DictTest, givenConstDict_whenCallingFindOnNonExistingKey_thenReturnsEnd) {
-  DictPtr<int, string> dict_ = make_dict<int, string>();
+  DictPtr<int64_t, string> dict_ = make_dict<int64_t, string>();
   dict_.insert(3, "3");
   dict_.insert(4, "4");
-  const DictPtr<int, string>& dict = dict_;
-  DictPtr<int, string>::const_iterator found = dict.find(5);
+  const DictPtr<int64_t, string>& dict = dict_;
+  DictPtr<int64_t, string>::const_iterator found = dict.find(5);
   EXPECT_EQ(dict.end(), found);
 }
 
 TEST(DictTest, whenCallingContainsWithExistingKey_thenReturnsTrue) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
   EXPECT_TRUE(dict.contains(3));
 }
 
 TEST(DictTest, whenCallingContainsWithNonExistingKey_thenReturnsFalse) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
   EXPECT_FALSE(dict.contains(5));
 }
 
 TEST(DictTest, whenCallingReserve_thenDoesntCrash) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.reserve(100);
 }
 
 TEST(DictTest, whenCopyConstructingDict_thenAreEqual) {
-  DictPtr<int, string> dict1 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict1 = make_dict<int64_t, string>();
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
-  DictPtr<int, string> dict2(dict1);
+  DictPtr<int64_t, string> dict2(dict1);
 
   EXPECT_EQ(2, dict2.size());
   EXPECT_EQ("3", dict2.at(3));
@@ -312,11 +312,11 @@ TEST(DictTest, whenCopyConstructingDict_thenAreEqual) {
 }
 
 TEST(DictTest, whenCopyAssigningDict_thenAreEqual) {
-  DictPtr<int, string> dict1 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict1 = make_dict<int64_t, string>();
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
-  DictPtr<int, string> dict2 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict2 = make_dict<int64_t, string>();
   dict2 = dict1;
 
   EXPECT_EQ(2, dict2.size());
@@ -325,11 +325,11 @@ TEST(DictTest, whenCopyAssigningDict_thenAreEqual) {
 }
 
 TEST(DictTest, whenCopyingDict_thenAreEqual) {
-  DictPtr<int, string> dict1 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict1 = make_dict<int64_t, string>();
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
-  DictPtr<int, string> dict2 = dict1.copy();
+  DictPtr<int64_t, string> dict2 = dict1.copy();
 
   EXPECT_EQ(2, dict2.size());
   EXPECT_EQ("3", dict2.at(3));
@@ -337,11 +337,11 @@ TEST(DictTest, whenCopyingDict_thenAreEqual) {
 }
 
 TEST(DictTest, whenMoveConstructingDict_thenNewIsCorrect) {
-  DictPtr<int, string> dict1 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict1 = make_dict<int64_t, string>();
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
-  DictPtr<int, string> dict2(std::move(dict1));
+  DictPtr<int64_t, string> dict2(std::move(dict1));
 
   EXPECT_EQ(2, dict2.size());
   EXPECT_EQ("3", dict2.at(3));
@@ -349,11 +349,11 @@ TEST(DictTest, whenMoveConstructingDict_thenNewIsCorrect) {
 }
 
 TEST(DictTest, whenMoveAssigningDict_thenNewIsCorrect) {
-  DictPtr<int, string> dict1 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict1 = make_dict<int64_t, string>();
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
-  DictPtr<int, string> dict2 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict2 = make_dict<int64_t, string>();
   dict2 = std::move(dict1);
 
   EXPECT_EQ(2, dict2.size());
@@ -362,95 +362,95 @@ TEST(DictTest, whenMoveAssigningDict_thenNewIsCorrect) {
 }
 
 TEST(DictTest, whenMoveConstructingDict_thenOldIsEmpty) {
-  DictPtr<int, string> dict1 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict1 = make_dict<int64_t, string>();
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
-  DictPtr<int, string> dict2(std::move(dict1));
+  DictPtr<int64_t, string> dict2(std::move(dict1));
   EXPECT_TRUE(dict1.empty());
 }
 
 TEST(DictTest, whenMoveAssigningDict_thenOldIsEmpty) {
-  DictPtr<int, string> dict1 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict1 = make_dict<int64_t, string>();
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
-  DictPtr<int, string> dict2 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict2 = make_dict<int64_t, string>();
   dict2 = std::move(dict1);
   EXPECT_TRUE(dict1.empty());
 }
 
 TEST(DictTest, givenMutableIterator_whenAssigningToConstIterator_thenWorks) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
-  DictPtr<int, string>::iterator iter = dict.begin();
-  DictPtr<int, string>::const_iterator const_iter = iter;
+  DictPtr<int64_t, string>::iterator iter = dict.begin();
+  DictPtr<int64_t, string>::const_iterator const_iter = iter;
   EXPECT_EQ(3, const_iter->key());
   EXPECT_EQ("3", const_iter->value());
 }
 
 TEST(DictTest, givenMutableIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
 
-  DictPtr<int, string>::iterator iter1 = dict.begin();
-  DictPtr<int, string>::iterator iter2 = iter1++;
+  DictPtr<int64_t, string>::iterator iter1 = dict.begin();
+  DictPtr<int64_t, string>::iterator iter2 = iter1++;
   EXPECT_NE(dict.begin()->key(), iter1->key());
   EXPECT_EQ(dict.begin()->key(), iter2->key());
 }
 
 TEST(DictTest, givenConstIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
 
-  DictPtr<int, string>::const_iterator iter1 = dict.cbegin();
-  DictPtr<int, string>::const_iterator iter2 = iter1++;
+  DictPtr<int64_t, string>::const_iterator iter1 = dict.cbegin();
+  DictPtr<int64_t, string>::const_iterator iter2 = iter1++;
   EXPECT_NE(dict.begin()->key(), iter1->key());
   EXPECT_EQ(dict.begin()->key(), iter2->key());
 }
 
 TEST(DictTest, givenMutableIterator_whenPrefixIncrementing_thenMovesToNextAndReturnsNewPosition) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
 
-  DictPtr<int, string>::iterator iter1 = dict.begin();
-  DictPtr<int, string>::iterator iter2 = ++iter1;
+  DictPtr<int64_t, string>::iterator iter1 = dict.begin();
+  DictPtr<int64_t, string>::iterator iter2 = ++iter1;
   EXPECT_NE(dict.begin()->key(), iter1->key());
   EXPECT_NE(dict.begin()->key(), iter2->key());
 }
 
 TEST(DictTest, givenConstIterator_whenPrefixIncrementing_thenMovesToNextAndReturnsNewPosition) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
 
-  DictPtr<int, string>::const_iterator iter1 = dict.cbegin();
-  DictPtr<int, string>::const_iterator iter2 = ++iter1;
+  DictPtr<int64_t, string>::const_iterator iter1 = dict.cbegin();
+  DictPtr<int64_t, string>::const_iterator iter2 = ++iter1;
   EXPECT_NE(dict.begin()->key(), iter1->key());
   EXPECT_NE(dict.begin()->key(), iter2->key());
 }
 
 TEST(DictTest, givenEqualMutableIterators_thenAreEqual) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
 
-  DictPtr<int, string>::iterator iter1 = dict.begin();
-  DictPtr<int, string>::iterator iter2 = dict.begin();
+  DictPtr<int64_t, string>::iterator iter1 = dict.begin();
+  DictPtr<int64_t, string>::iterator iter2 = dict.begin();
   EXPECT_TRUE(iter1 == iter2);
   EXPECT_FALSE(iter1 != iter2);
 }
 
 TEST(DictTest, givenDifferentMutableIterators_thenAreNotEqual) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
 
-  DictPtr<int, string>::iterator iter1 = dict.begin();
-  DictPtr<int, string>::iterator iter2 = dict.begin();
+  DictPtr<int64_t, string>::iterator iter1 = dict.begin();
+  DictPtr<int64_t, string>::iterator iter2 = dict.begin();
   iter2++;
 
   EXPECT_FALSE(iter1 == iter2);
@@ -458,45 +458,45 @@ TEST(DictTest, givenDifferentMutableIterators_thenAreNotEqual) {
 }
 
 TEST(DictTest, givenEqualConstIterators_thenAreEqual) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
 
-  DictPtr<int, string>::const_iterator iter1 = dict.cbegin();
-  DictPtr<int, string>::const_iterator iter2 = dict.cbegin();
+  DictPtr<int64_t, string>::const_iterator iter1 = dict.cbegin();
+  DictPtr<int64_t, string>::const_iterator iter2 = dict.cbegin();
   EXPECT_TRUE(iter1 == iter2);
   EXPECT_FALSE(iter1 != iter2);
 }
 
 TEST(DictTest, givenDifferentConstIterators_thenAreNotEqual) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
   dict.insert(4, "4");
 
-  DictPtr<int, string>::const_iterator iter1 = dict.cbegin();
-  DictPtr<int, string>::const_iterator iter2 = dict.cbegin();
+  DictPtr<int64_t, string>::const_iterator iter1 = dict.cbegin();
+  DictPtr<int64_t, string>::const_iterator iter2 = dict.cbegin();
   iter2++;
 
   EXPECT_FALSE(iter1 == iter2);
   EXPECT_TRUE(iter1 != iter2);
 }
 
-TEST(DictTest, givenMutableIterator_whenDereferencing_thenPointsToCorrectElement) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+TEST(DictTest, givenMutableIterator_whenDereferencing_thenPoint64_tsToCorrectElement) {
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
 
-  DictPtr<int, string>::iterator iter = dict.begin();
+  DictPtr<int64_t, string>::iterator iter = dict.begin();
   EXPECT_EQ(3, (*iter).key());
   EXPECT_EQ("3", (*iter).value());
   EXPECT_EQ(3, iter->key());
   EXPECT_EQ("3", iter->value());
 }
 
-TEST(DictTest, givenConstIterator_whenDereferencing_thenPointsToCorrectElement) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+TEST(DictTest, givenConstIterator_whenDereferencing_thenPoint64_tsToCorrectElement) {
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
 
-  DictPtr<int, string>::const_iterator iter = dict.cbegin();
+  DictPtr<int64_t, string>::const_iterator iter = dict.cbegin();
   EXPECT_EQ(3, (*iter).key());
   EXPECT_EQ("3", (*iter).value());
   EXPECT_EQ(3, iter->key());
@@ -504,10 +504,10 @@ TEST(DictTest, givenConstIterator_whenDereferencing_thenPointsToCorrectElement) 
 }
 
 TEST(DictTest, givenMutableIterator_whenWritingToValue_thenWorks) {
-  DictPtr<int, string> dict = make_dict<int, string>();
+  DictPtr<int64_t, string> dict = make_dict<int64_t, string>();
   dict.insert(3, "3");
 
-  DictPtr<int, string>::iterator iter = dict.begin();
+  DictPtr<int64_t, string>::iterator iter = dict.begin();
 
   (*iter).setValue("new_value");
   EXPECT_EQ("new_value", dict.begin()->value());
@@ -517,9 +517,9 @@ TEST(DictTest, givenMutableIterator_whenWritingToValue_thenWorks) {
 }
 
 TEST(DictTest, isReferenceType) {
-  DictPtr<int, string> dict1 = make_dict<int, string>();
-  DictPtr<int, string> dict2(dict1);
-  DictPtr<int, string> dict3 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict1 = make_dict<int64_t, string>();
+  DictPtr<int64_t, string> dict2(dict1);
+  DictPtr<int64_t, string> dict3 = make_dict<int64_t, string>();
   dict3 = dict1;
 
   dict1.insert(3, "three");
@@ -529,9 +529,9 @@ TEST(DictTest, isReferenceType) {
 }
 
 TEST(DictTest, copyHasSeparateStorage) {
-  DictPtr<int, string> dict1 = make_dict<int, string>();
-  DictPtr<int, string> dict2(dict1.copy());
-  DictPtr<int, string> dict3 = make_dict<int, string>();
+  DictPtr<int64_t, string> dict1 = make_dict<int64_t, string>();
+  DictPtr<int64_t, string> dict2(dict1.copy());
+  DictPtr<int64_t, string> dict3 = make_dict<int64_t, string>();
   dict3 = dict1.copy();
 
   dict1.insert(3, "three");
