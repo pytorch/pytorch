@@ -6556,6 +6556,51 @@ Example::
             [3, 3]])
 """)
 
+add_docstr(torch.trapz,
+           r"""
+.. function:: trapz(y, x, *, dim=-1) -> Tensor
+
+Estimate :math:`\int y\,dx` along `dim`, using the trapezoid rule.
+
+Arguments:
+    y (Tensor): The values of the function to integrate
+    x (Tensor): The points at which the function `y` is sampled.
+        If `x` is not in ascending order, intervals on which it is decreasing
+        contribute negatively to the estimated integral (i.e., the convention
+        :math:`\int_a^b f = -\int_b^a f` is followed).
+    dim (int): The dimension along which to integrate.
+        By default, use the last dimension.
+
+Returns:
+    A Tensor with the same shape as the input, except with `dim` removed.
+    Each element of the returned tensor represents the estimated integral
+    :math:`\int y\,dx` along `dim`.
+
+Example::
+
+    >>> y = torch.randn((2, 3))
+    >>> y
+    tensor([[-2.1156,  0.6857, -0.2700],
+            [-1.2145,  0.5540,  2.0431]])
+    >>> x = torch.tensor([[1, 3, 4], [1, 2, 3]])
+    >>> torch.trapz(y, x)
+    tensor([-1.2220,  0.9683])
+
+.. function:: trapz(y, *, dx=1, dim=-1) -> Tensor
+
+As above, but the sample points are spaced uniformly at a distance of `dx`.
+
+Arguments:
+    y (Tensor): The values of the function to integrate
+    dx (float): The distance between points at which `y` is sampled.
+    dim (int): The dimension along which to integrate.
+        By default, use the last dimension.
+
+Returns:
+    A Tensor with the same shape as the input, except with `dim` removed.
+    Each element of the returned tensor represents the estimated integral
+    :math:`\int y\,dx` along `dim`.
+""")
 
 add_docstr(torch.repeat_interleave,
            r"""

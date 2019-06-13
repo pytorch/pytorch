@@ -572,7 +572,7 @@ struct to_ir {
     cu.define({def}, {resolver}, nullptr);
     Stack stack;
     cu.get_function("defaults").run(stack);
-    return stack.at(0).toTuple()->elements();
+    return stack.at(0).toTupleRef().vec();
   }
 
   std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {
@@ -1951,8 +1951,12 @@ struct to_ir {
     switch (stmt.lhs().kind()) {
       case TK_VAR: {
         auto v = Var(stmt.lhs());
+        TypePtr type = nullptr;
+        if (stmt.type().present()) {
+          type = typeParser_.parseTypeFromExpr(stmt.type().get());
+        }
         environment_stack->setSugaredVar(
-            v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1));
+            v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1, type));
       } break;
       case TK_TUPLE_LITERAL:
         emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());
