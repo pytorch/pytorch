@@ -1,6 +1,6 @@
 if(C10D_USE_CUDA)
   cuda_add_library(c10d_cuda_test CUDATest.cu)
-  add_dependencies(c10d_cuda_test caffe2)
+  add_dependencies(c10d_cuda_test torch)
   target_link_libraries(c10d_cuda_test c10d)
 endif()
 
