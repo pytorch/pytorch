@@ -6,15 +6,11 @@
 #include <torch/csrc/jit/script/function_schema_parser.h>
 
 /**
- * This file tests the legacy lambda-based API for registering kernels:
+ * This file tests the shorthand lambda-based API for registering kernels:
  *
- * > auto registry = torch::jit::RegisterOperators()
+ * > auto registry = c10::RegisterOperators()
  * >    .op("myfunc(Tensor a) -> Tensor", [] (Tensor a) -> Tensor {...});
  */
-
-// This intentionally tests a deprecated API
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 using c10::RegisterOperators;
 using c10::TensorTypeId;
@@ -24,6 +20,8 @@ using c10::guts::make_unique;
 using c10::intrusive_ptr;
 using c10::DictPtr;
 using c10::make_dict;
+using c10::ListPtr;
+using c10::make_list;
 using at::Tensor;
 using std::string;
 using std::unique_ptr;
@@ -44,46 +42,46 @@ void expectCallsIncrement(TensorTypeId type_id) {
   EXPECT_EQ(6, result[0].toInt());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators().opWithDeprecatedAPI_("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernel_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
       return input + 1;
     });
   expectCallsIncrement(TensorType1());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegisteredInConstructor_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernel_whenRegisteredInConstructor_thenCanBeCalled) {
   auto registrar = RegisterOperators("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
       return input + 1;
     });
   expectCallsIncrement(TensorType1());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
+      .op("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
           return input + 1;
         })
-      .opWithDeprecatedAPI_("_test::error(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
+      .op("_test::error(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
           EXPECT_TRUE(false); // this kernel should never be called
           return 0;
         });
   expectCallsIncrement(TensorType1());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
-  auto registrar1 = RegisterOperators().opWithDeprecatedAPI_("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInMultipleRegistrars_thenCallsRightKernel) {
+  auto registrar1 = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
       return input + 1;
     });
-  auto registrar2 = RegisterOperators().opWithDeprecatedAPI_("_test::error(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
+  auto registrar2 = RegisterOperators().op("_test::error(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
       EXPECT_TRUE(false); // this kernel should never be called
       return 0;
     });
   expectCallsIncrement(TensorType1());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernel_whenRegistrationRunsOutOfScope_thenCannotBeCalledAnymore) {
   {
-    auto registrar = RegisterOperators().opWithDeprecatedAPI_("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
+    auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", [] (const Tensor& tensor, int64_t input) -> int64_t {
         return input + 1;
       });
 
@@ -96,8 +94,8 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegistrat
 
 bool was_called = false;
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithoutOutput_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators().opWithDeprecatedAPI_("_test::no_return(Tensor dummy) -> ()", [] (const Tensor&) -> void {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithoutOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators().op("_test::no_return(Tensor dummy) -> ()", [] (const Tensor&) -> void {
     was_called = true;
   });
 
@@ -109,8 +107,8 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithoutOutput_
   EXPECT_EQ(0, result.size());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithZeroOutputs_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators().opWithDeprecatedAPI_("_test::zero_outputs(Tensor dummy) -> ()", [] (const Tensor&) -> std::tuple<> {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithZeroOutputs_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators().op("_test::zero_outputs(Tensor dummy) -> ()", [] (const Tensor&) -> std::tuple<> {
     was_called = true;
     return std::make_tuple();
   });
@@ -123,9 +121,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithZeroOutput
   EXPECT_EQ(0, result.size());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithIntOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::int_output(Tensor dummy, int a, int b) -> int", [] (Tensor, int64_t a, int64_t b) -> int64_t {
+      .op("_test::int_output(Tensor dummy, int a, int b) -> int", [] (Tensor, int64_t a, int64_t b) -> int64_t {
         return a + b;
       });
 
@@ -137,9 +135,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntOutput_
   EXPECT_EQ(9, result[0].toInt());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithTensorOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::returning_tensor(Tensor input) -> Tensor", [] (const Tensor& input) -> Tensor {
+      .op("_test::returning_tensor(Tensor input) -> Tensor", [] (const Tensor& input) -> Tensor {
         return input;
       });
 
@@ -155,10 +153,10 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorOutp
   EXPECT_EQ(TensorType2(), result[0].toTensor().type_id());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithTensorListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]", [] (const Tensor& input1, const Tensor& input2, const Tensor& input3) -> std::vector<Tensor> {
-        return {input1, input2, input3};
+      .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]", [] (const Tensor& input1, const Tensor& input2, const Tensor& input3) -> ListPtr<Tensor> {
+        return make_list<Tensor>({input1, input2, input3});
       });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
@@ -172,10 +170,10 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorList
   EXPECT_EQ(TensorType1(), result[0].toTensorListRef()[2].type_id());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithIntListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::list_output(Tensor dummy, int input1, int input2, int input3) -> int[]", [](const Tensor&, int64_t input1, int64_t input2, int64_t input3) -> std::vector<int64_t> {
-        return {input1, input2, input3};
+      .op("_test::list_output(Tensor dummy, int input1, int input2, int input3) -> int[]", [](const Tensor&, int64_t input1, int64_t input2, int64_t input3) -> ListPtr<int64_t> {
+        return make_list<int64_t>({input1, input2, input3});
       });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
@@ -189,16 +187,16 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListOut
   EXPECT_EQ(6, result[0].toIntListRef()[2]);
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-     .opWithDeprecatedAPI_("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", [] (Tensor) -> std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>> {
+     .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", [] (Tensor) -> std::tuple<Tensor, int64_t, ListPtr<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>> {
        DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
        dict.insert("first", dummyTensor(TensorType1()));
        dict.insert("second", dummyTensor(TensorType2()));
-       return std::tuple<Tensor, int64_t, std::vector<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>>(
+       return std::tuple<Tensor, int64_t, ListPtr<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>>(
          dummyTensor(TensorType2()),
          5,
-         {dummyTensor(TensorType1()), dummyTensor(TensorType2())},
+         make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}),
          c10::optional<int64_t>(c10::in_place, 0),
          dict
        );
@@ -221,9 +219,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMultipleOu
   EXPECT_EQ(TensorType2(), result_dict.at("second").type_id());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithTensorInputByReference_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::tensor_input(Tensor input) -> Tensor", [] (const Tensor& input1) -> Tensor {
+      .op("_test::tensor_input(Tensor input) -> Tensor", [] (const Tensor& input1) -> Tensor {
         return input1;
       });
 
@@ -239,9 +237,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInpu
   EXPECT_EQ(TensorType2(), result[0].toTensor().type_id());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithTensorInputByValue_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::tensor_input(Tensor input) -> Tensor", [](Tensor input1) -> Tensor {
+      .op("_test::tensor_input(Tensor input) -> Tensor", [](Tensor input1) -> Tensor {
         return input1;
       });
 
@@ -259,9 +257,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInpu
 
 Tensor captured_input;
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithTensorInputByReference_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::tensor_input(Tensor input) -> ()", [] (const Tensor& input1) -> void {
+      .op("_test::tensor_input(Tensor input) -> ()", [] (const Tensor& input1) -> void {
         captured_input = input1;
       });
 
@@ -277,9 +275,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInpu
   EXPECT_EQ(TensorType2(), captured_input.type_id());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithTensorInputByValue_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::tensor_input(Tensor input) -> ()", [] (Tensor input1) -> void {
+      .op("_test::tensor_input(Tensor input) -> ()", [] (Tensor input1) -> void {
         captured_input = input1;
       });
 
@@ -297,9 +295,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorInpu
 
 int64_t captured_int_input = 0;
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithIntInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::int_input(Tensor dummy, int input) -> ()", [](Tensor, int64_t input1) -> void {
+      .op("_test::int_input(Tensor dummy, int input) -> ()", [](Tensor, int64_t input1) -> void {
         captured_int_input = input1;
       });
 
@@ -312,9 +310,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntInput_w
   EXPECT_EQ(3, captured_int_input);
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithIntInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::int_input(Tensor dummy, int input) -> int", [] (Tensor, int64_t input1) -> int64_t {
+      .op("_test::int_input(Tensor dummy, int input) -> int", [] (Tensor, int64_t input1) -> int64_t {
         return input1 + 1;
       });
 
@@ -328,9 +326,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntInput_w
 
 int64_t captured_input_list_size = 0;
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithIntListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::int_list_input(Tensor dummy, int[] input) -> ()", [] (Tensor, const std::vector<int64_t>& input1) -> void {
+      .op("_test::int_list_input(Tensor dummy, int[] input) -> ()", [] (Tensor, const ListPtr<int64_t>& input1) -> void {
         captured_input_list_size = input1.size();
       });
 
@@ -338,28 +336,28 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListInp
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::make_list<int64_t>({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), make_list<int64_t>({2, 4, 6}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(3, captured_input_list_size);
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithIntListInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithIntListInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::int_list_input(Tensor dummy, int[] input) -> int", [](Tensor, const std::vector<int64_t>& input1) -> int64_t {
+      .op("_test::int_list_input(Tensor dummy, int[] input) -> int", [](Tensor, const ListPtr<int64_t>& input1) -> int64_t {
         return input1.size();
       });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::int_list_input", "");
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::make_list<int64_t>({2, 4, 6}));
+  auto outputs = callOp(*op, dummyTensor(TensorType1()), make_list<int64_t>({2, 4, 6}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(3, outputs[0].toInt());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::tensor_list_input(Tensor[] input) -> ()", [] (const std::vector<Tensor>& input1) -> void {
+      .op("_test::tensor_list_input(Tensor[] input) -> ()", [] (const ListPtr<Tensor>& input1) -> void {
         captured_input_list_size = input1.size();
       });
 
@@ -367,93 +365,35 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorList
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
-  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(0, outputs.size());
   EXPECT_EQ(2, captured_input_list_size);
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithTensorListRefInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithTensorListRefInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::tensor_list_input(Tensor[] input) -> int", [] (const std::vector<Tensor>& input1) -> int64_t {
+      .op("_test::tensor_list_input(Tensor[] input) -> int", [] (const ListPtr<Tensor>& input1) -> int64_t {
         return input1.size();
       });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
   ASSERT_TRUE(op.has_value());
 
-  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
+  auto outputs = callOp(*op, make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ(2, outputs[0].toInt());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTensorListRefInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithStringListOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::tensor_list_input(Tensor[] input) -> ()", [] (const std::vector<Tensor>& input1) -> void {
-        captured_input_list_size = input1.size();
-      });
-
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
-  ASSERT_TRUE(op.has_value());
-
-  captured_input_list_size = 0;
-  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
-  EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(2, captured_input_list_size);
-}
-
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTensorListRefInput_withOutput_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::tensor_list_input(Tensor[] input) -> int", [] (const std::vector<Tensor>& input1) -> int64_t {
-        return input1.size();
-      });
-
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
-  ASSERT_TRUE(op.has_value());
-
-  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
-  EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ(2, outputs[0].toInt());
-}
-
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTensorListInput_withoutOutput_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::tensor_list_input(Tensor[] input) -> ()", [] (std::vector<Tensor> input1) -> void {
-        captured_input_list_size = input1.size();
-      });
-
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
-  ASSERT_TRUE(op.has_value());
-
-  captured_input_list_size = 0;
-  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
-  EXPECT_EQ(0, outputs.size());
-  EXPECT_EQ(2, captured_input_list_size);
-}
-
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithLegacyTensorListInput_withOutput_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::tensor_list_input(Tensor[] input) -> int", [] (std::vector<Tensor> input1) -> int64_t {
-        return input1.size();
-      });
-
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
-  ASSERT_TRUE(op.has_value());
-
-  auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
-  EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ(2, outputs[0].toInt());
-}
-
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithStringListOutput_whenRegistered_thenCanBeCalled) {
-  auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::stringlist_output(str[] input) -> str[]", [](std::vector<std::string> input) {
+      .op("_test::stringlist_output(str[] input) -> str[]", [](ListPtr<std::string> input) {
         return input;
       });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::stringlist_output", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::ListPtr<std::string> list = c10::make_list<std::string>({"value1", "value2"});
+  ListPtr<std::string> list = make_list<std::string>({"value1", "value2"});
   auto outputs = callOp(*op, list);
   EXPECT_EQ(1, outputs.size());
   auto output = std::move(outputs[0]).toGenericList();
@@ -463,11 +403,11 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithStringList
   EXPECT_EQ("value2", output.get(1).toString()->string());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithDictInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   int captured_dict_size = 0;
 
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::dict_input(Dict(str, Tensor) input) -> ()", [&] (DictPtr<string, Tensor> input1) {
+      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", [&] (DictPtr<string, Tensor> input1) {
         captured_dict_size = input1.size();
       });
 
@@ -483,9 +423,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_
   EXPECT_EQ(2, captured_dict_size);
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithDictInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::dict_input(Dict(str, str) input) -> str", [&] (DictPtr<string, string> input1) {
+      .op("_test::dict_input(Dict(str, str) input) -> str", [&] (DictPtr<string, string> input1) {
         return input1.at("key2");
       });
 
@@ -500,9 +440,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictInput_
   EXPECT_EQ("value2", outputs[0].toString()->string());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithDictOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-    .opWithDeprecatedAPI_("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", [] (DictPtr<string, string> input) {
+    .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", [] (DictPtr<string, string> input) {
       return input;
     });
 
@@ -521,11 +461,11 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithDictOutput
   EXPECT_EQ("value2", output.at("key2"));
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapInput_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithUnorderedMapInput_withoutOutput_whenRegistered_thenCanBeCalled) {
   int captured_dict_size = 0;
 
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::dict_input(Dict(str, Tensor) input) -> ()", [&] (std::unordered_map<string, Tensor> input1) {
+      .op("_test::dict_input(Dict(str, Tensor) input) -> ()", [&] (DictPtr<string, Tensor> input1) {
         captured_dict_size = input1.size();
       });
 
@@ -533,7 +473,7 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedM
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
-  c10::DictPtr<string, Tensor> dict = c10::make_dict<string, Tensor>();
+  DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
   dict.insert("key1", dummyTensor(TensorType1()));
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
@@ -541,16 +481,16 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedM
   EXPECT_EQ(2, captured_dict_size);
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapInput_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithUnorderedMapInput_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::dict_input(Dict(str, str) input) -> str", [&] (std::unordered_map<string, string> input1) {
+      .op("_test::dict_input(Dict(str, str) input) -> str", [&] (DictPtr<string, string> input1) {
         return input1.at("key2");
       });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::DictPtr<string, string> dict = c10::make_dict<string, string>();
+  DictPtr<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -558,16 +498,16 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedM
   EXPECT_EQ("value2", outputs[0].toString()->string());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedMapOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithUnorderedMapOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-    .opWithDeprecatedAPI_("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", [] (std::unordered_map<string, string> input) {
+    .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", [] (DictPtr<string, string> input) {
       return input;
     });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::DictPtr<string, string> dict = c10::make_dict<string, string>();
+  DictPtr<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -579,21 +519,21 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithUnorderedM
   EXPECT_EQ("value2", output.at("key2"));
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMapOfList_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithMapOfList_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::dict_output(Dict(str, int[]) input) -> Dict(str, int[])", [](std::unordered_map<string, std::vector<int64_t>> input) {
+      .op("_test::dict_output(Dict(str, int[]) input) -> Dict(str, int[])", [](DictPtr<string, ListPtr<int64_t>> input) {
         return input;
       });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::DictPtr<string, c10::ListPtr<int64_t>> dict = c10::make_dict<string, c10::ListPtr<int64_t>>();
-  dict.insert("key1", c10::make_list<int64_t>({10, 20}));
-  dict.insert("key2", c10::make_list<int64_t>({30, 40}));
+  DictPtr<string, ListPtr<int64_t>> dict = make_dict<string, ListPtr<int64_t>>();
+  dict.insert("key1", make_list<int64_t>({10, 20}));
+  dict.insert("key2", make_list<int64_t>({30, 40}));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  auto output = c10::impl::toTypedDict<string, c10::ListPtr<int64_t>>(outputs[0].toGenericDict());
+  auto output = c10::impl::toTypedDict<string, ListPtr<int64_t>>(outputs[0].toGenericDict());
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ(2, output.at("key1").size());
@@ -605,27 +545,27 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMapOfList_
 }
 
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMapOfListOfMap_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithMapOfListOfMap_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::dict_output(Dict(str, Dict(int,str)[]) input) -> Dict(str, Dict(int,str)[])", [](std::unordered_map<string, std::vector<std::unordered_map<int64_t, string>>> input) {
+      .op("_test::dict_output(Dict(str, Dict(int,str)[]) input) -> Dict(str, Dict(int,str)[])", [](DictPtr<string, ListPtr<DictPtr<int64_t, string>>> input) {
         return input;
       });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::DictPtr<string, c10::ListPtr<c10::DictPtr<int64_t, string>>> dict = c10::make_dict<string, c10::ListPtr<c10::DictPtr<int64_t, string>>>();
-  auto dict1 = c10::make_dict<int64_t, string>();
+  DictPtr<string, ListPtr<DictPtr<int64_t, string>>> dict = make_dict<string, ListPtr<DictPtr<int64_t, string>>>();
+  auto dict1 = make_dict<int64_t, string>();
   dict1.insert(10, "10");
   dict1.insert(20, "20");
-  dict.insert("key1", c10::make_list<c10::DictPtr<int64_t, string>>({dict1}));
-  auto dict2 = c10::make_dict<int64_t, string>();
+  dict.insert("key1", make_list<DictPtr<int64_t, string>>({dict1}));
+  auto dict2 = make_dict<int64_t, string>();
   dict2.insert(30, "30");
   dict2.insert(40, "40");
-  dict.insert("key2", c10::make_list<c10::DictPtr<int64_t, string>>({dict2}));
+  dict.insert("key2", make_list<DictPtr<int64_t, string>>({dict2}));
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  auto output = c10::impl::toTypedDict<string, c10::ListPtr<std::unordered_map<int64_t, string>>>(outputs[0].toGenericDict());
+  auto output = c10::impl::toTypedDict<string, ListPtr<DictPtr<int64_t, string>>>(outputs[0].toGenericDict());
 
   EXPECT_EQ(2, output.size());
   EXPECT_EQ(1, output.at("key1").size());
@@ -637,22 +577,22 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithMapOfListO
   EXPECT_EQ("40", output.at("key2").get(0).at(40));
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithListOfMap_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithListOfMap_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::list_output(Dict(str, int)[] input) -> Dict(str, int)[]", [](std::vector<std::unordered_map<string, int64_t>> input) {
+      .op("_test::list_output(Dict(str, int)[] input) -> Dict(str, int)[]", [](ListPtr<DictPtr<string, int64_t>> input) {
         return input;
       });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::DictPtr<string, int64_t> dict1 = c10::make_dict<string, int64_t>();
+  DictPtr<string, int64_t> dict1 = make_dict<string, int64_t>();
   dict1.insert("1", 1);
   dict1.insert("2", 2);
-  c10::DictPtr<string, int64_t> dict2 = c10::make_dict<string, int64_t>();
+  DictPtr<string, int64_t> dict2 = make_dict<string, int64_t>();
   dict2.insert("3", 3);
   dict2.insert("4", 4);
-  c10::ListPtr<c10::DictPtr<string, int64_t>> list = c10::make_list<c10::DictPtr<string, int64_t>>({dict1, dict2});
+  ListPtr<DictPtr<string, int64_t>> list = make_list<DictPtr<string, int64_t>>({dict1, dict2});
   auto outputs = callOp(*op, list);
   EXPECT_EQ(1, outputs.size());
   c10::impl::GenericListPtr output = std::move(outputs[0]).toGenericList();
@@ -666,23 +606,23 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithListOfMap_
   EXPECT_EQ(4, output.get(1).toGenericDict().at("4").toInt());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithListOfMapOfIntList_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithListOfMapOfIntList_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::list_output(Dict(str, int[])[] input) -> Dict(str, int[])[]", [](std::vector<std::unordered_map<string, std::vector<int64_t>>> input) {
+      .op("_test::list_output(Dict(str, int[])[] input) -> Dict(str, int[])[]", [](ListPtr<DictPtr<string, ListPtr<int64_t>>> input) {
         return input;
       });
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
   ASSERT_TRUE(op.has_value());
 
-  c10::DictPtr<string, c10::ListPtr<int64_t>> dict1 = c10::make_dict<string, c10::ListPtr<int64_t>>();
-  dict1.insert("1", c10::make_list<int64_t>({1, 2}));
-  dict1.insert("3", c10::make_list<int64_t>({3, 4}));
-  c10::DictPtr<string, c10::ListPtr<int64_t>> dict2 = c10::make_dict<string, c10::ListPtr<int64_t>>();
-  dict2.insert("5", c10::make_list<int64_t>({5, 6}));
-  dict2.insert("7", c10::make_list<int64_t>({7, 8}));
-  c10::ListPtr<c10::DictPtr<string, c10::ListPtr<int64_t>>> list =
-      c10::make_list<c10::DictPtr<string, c10::ListPtr<int64_t>>>({ dict1, dict2 });
+  DictPtr<string, ListPtr<int64_t>> dict1 = make_dict<string, ListPtr<int64_t>>();
+  dict1.insert("1", make_list<int64_t>({1, 2}));
+  dict1.insert("3", make_list<int64_t>({3, 4}));
+  DictPtr<string, ListPtr<int64_t>> dict2 = make_dict<string, ListPtr<int64_t>>();
+  dict2.insert("5", make_list<int64_t>({5, 6}));
+  dict2.insert("7", make_list<int64_t>({7, 8}));
+  ListPtr<DictPtr<string, ListPtr<int64_t>>> list =
+      make_list<DictPtr<string, ListPtr<int64_t>>>({ dict1, dict2 });
   auto outputs = callOp(*op, list);
   EXPECT_EQ(1, outputs.size());
   c10::impl::GenericListPtr output = std::move(outputs[0]).toGenericList();
@@ -703,13 +643,13 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithListOfMapO
   EXPECT_EQ(8, output.get(1).toGenericDict().at("7").toIntListRef()[1]);
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenFallbackKernelWithoutAnyArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   bool called = false;
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::no_tensor_args() -> ()", [&] () {called = true;});
+      .op("_test::no_tensor_args() -> ()", [&] () {called = true;});
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
   ASSERT_TRUE(op.has_value());
@@ -719,12 +659,12 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithou
   EXPECT_TRUE(called);
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenFallbackKernelWithoutTensorArguments_whenRegistered_thenCanBeCalled) {
   // note: non-fallback kernels without tensor arguments don't work because there
   // is no way to get the dispatch key. For operators that only have a fallback
   // kernel, this must work for backwards compatibility.
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::no_tensor_args(int arg) -> int", [] (int64_t arg) {return arg + 1;});
+      .op("_test::no_tensor_args(int arg) -> int", [] (int64_t arg) {return arg + 1;});
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
   ASSERT_TRUE(op.has_value());
@@ -734,13 +674,13 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenFallbackKernelWithou
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
   bool called;
   c10::optional<Tensor> called_arg2;
   c10::optional<int64_t> called_arg3;
   c10::optional<std::string> called_arg4;
 
-  auto registrar = RegisterOperators().opWithDeprecatedAPI_(
+  auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> ()",
     [&] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
       called = true;
@@ -773,13 +713,13 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
   EXPECT_FALSE(called_arg4.has_value());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
   bool called;
   c10::optional<Tensor> called_arg2;
   c10::optional<int64_t> called_arg3;
   c10::optional<std::string> called_arg4;
 
-  auto registrar = RegisterOperators().opWithDeprecatedAPI_(
+  auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> Tensor?",
     [&] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
       called = true;
@@ -815,13 +755,13 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
   EXPECT_FALSE(called_arg4.has_value());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
   bool called;
   c10::optional<Tensor> called_arg2;
   c10::optional<int64_t> called_arg3;
   c10::optional<std::string> called_arg4;
 
-  auto registrar = RegisterOperators().opWithDeprecatedAPI_(
+  auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> (Tensor?, int?, str?)",
     [] (Tensor arg1, const c10::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
       return std::make_tuple(arg2, arg3, arg4);
@@ -842,9 +782,9 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernelWithOptionalIn
   EXPECT_TRUE(outputs[2].isNone());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenInfersSchema) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenInfersSchema) {
   auto registrar = RegisterOperators()
-      .opWithDeprecatedAPI_("_test::no_schema_specified", [] (Tensor arg1, int64_t arg2, const std::vector<Tensor>& arg3) -> std::tuple<int64_t, Tensor> {return {};});
+      .op("_test::no_schema_specified", [] (Tensor arg1, int64_t arg2, const ListPtr<Tensor>& arg3) -> std::tuple<int64_t, Tensor> {return {};});
 
   auto op = c10::Dispatcher::singleton().findSchema("_test::no_schema_specified", "");
   ASSERT_TRUE(op.has_value());
@@ -853,167 +793,165 @@ TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenKernel_whenRegistere
   EXPECT_FALSE(differences.has_value());
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentNumArguments_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenMismatchedKernel_withDifferentNumArguments_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
-      .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> int", [] (Tensor) -> int64_t {return 0;});
+      .op("_test::mismatch(Tensor arg) -> int", [] (Tensor) -> int64_t {return 0;});
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg, Tensor arg2) -> int", [] (Tensor) -> int64_t {return 0;});
+        .op("_test::mismatch(Tensor arg, Tensor arg2) -> int", [] (Tensor) -> int64_t {return 0;});
     }, "The number of arguments is different. 2 vs 1"
   );
 
   // assert this does not fail because it matches
   RegisterOperators()
-      .opWithDeprecatedAPI_("_test::mismatch(Tensor arg, Tensor arg2) -> ()", [] (Tensor, Tensor) -> void {});
+      .op("_test::mismatch(Tensor arg, Tensor arg2) -> ()", [] (Tensor, Tensor) -> void {});
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch() -> ()", [] (Tensor, Tensor) -> void {});
+        .op("_test::mismatch() -> ()", [] (Tensor, Tensor) -> void {});
     }, "The number of arguments is different. 0 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> ()", [] (Tensor, Tensor) -> void {});
+        .op("_test::mismatch(Tensor arg) -> ()", [] (Tensor, Tensor) -> void {});
     }, "The number of arguments is different. 1 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg, Tensor arg2, Tensor arg3) -> ()", [] (Tensor, Tensor) -> void {});
+        .op("_test::mismatch(Tensor arg, Tensor arg2, Tensor arg3) -> ()", [] (Tensor, Tensor) -> void {});
     }, "The number of arguments is different. 3 vs 2"
   );
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentArgumentType_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenMismatchedKernel_withDifferentArgumentType_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
-      .opWithDeprecatedAPI_("_test::mismatch(Tensor arg1, int arg2) -> int", [] (Tensor, int64_t) -> int64_t {return 0;});
+      .op("_test::mismatch(Tensor arg1, int arg2) -> int", [] (Tensor, int64_t) -> int64_t {return 0;});
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg1, float arg2) -> int", [] (Tensor, int64_t) -> int64_t {return 0;});
+        .op("_test::mismatch(Tensor arg1, float arg2) -> int", [] (Tensor, int64_t) -> int64_t {return 0;});
     }, "Type mismatch in argument 2: float vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(int arg1, int arg2) -> int", [] (Tensor, int64_t) -> int64_t {return 0;});
+        .op("_test::mismatch(int arg1, int arg2) -> int", [] (Tensor, int64_t) -> int64_t {return 0;});
     }, "Type mismatch in argument 1: int vs Tensor"
   );
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentNumReturns_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenMismatchedKernel_withDifferentNumReturns_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
-      .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> int", [] (Tensor) -> int64_t {return 0;});
+      .op("_test::mismatch(Tensor arg) -> int", [] (Tensor) -> int64_t {return 0;});
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> ()", [] (Tensor) -> int64_t {return 0;});
+        .op("_test::mismatch(Tensor arg) -> ()", [] (Tensor) -> int64_t {return 0;});
     }, "The number of returns is different. 0 vs 1"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> (int, int)", [] (Tensor) -> int64_t {return 0;});
+        .op("_test::mismatch(Tensor arg) -> (int, int)", [] (Tensor) -> int64_t {return 0;});
     }, "The number of returns is different. 2 vs 1"
   );
 
   // assert this does not fail because it matches
   RegisterOperators()
-      .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> ()", [] (Tensor) -> void {});
+      .op("_test::mismatch(Tensor arg) -> ()", [] (Tensor) -> void {});
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> Tensor", [] (Tensor) -> void {});
+        .op("_test::mismatch(Tensor arg) -> Tensor", [] (Tensor) -> void {});
     }, "The number of returns is different. 1 vs 0"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> (Tensor, Tensor)", [] (Tensor) -> void {});
+        .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor)", [] (Tensor) -> void {});
     }, "The number of returns is different. 2 vs 0"
   );
 
   // assert this does not fail because it matches
   RegisterOperators()
-      .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> (Tensor, Tensor)", [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
+      .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor)", [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> ()", [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
+        .op("_test::mismatch(Tensor arg) -> ()", [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
     }, "The number of returns is different. 0 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> Tensor", [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
+        .op("_test::mismatch(Tensor arg) -> Tensor", [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
     }, "The number of returns is different. 1 vs 2"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> (Tensor, Tensor, Tensor)", [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
+        .op("_test::mismatch(Tensor arg) -> (Tensor, Tensor, Tensor)", [] (Tensor) -> std::tuple<Tensor, Tensor> {return {};});
     }, "The number of returns is different. 3 vs 2"
   );
 }
 
-TEST(OperatorRegistrationTest_LegacyLambdaBasedKernel, givenMismatchedKernel_withDifferentReturnTypes_whenRegistering_thenFails) {
+TEST(OperatorRegistrationTest_ShorthandLambdaBasedKernel, givenMismatchedKernel_withDifferentReturnTypes_whenRegistering_thenFails) {
   // assert this does not fail because it matches
   RegisterOperators()
-      .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> int", [] (Tensor) -> int64_t {return 0;});
+      .op("_test::mismatch(Tensor arg) -> int", [] (Tensor) -> int64_t {return 0;});
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> Tensor", [] (Tensor) -> int64_t {return 0;});
+        .op("_test::mismatch(Tensor arg) -> Tensor", [] (Tensor) -> int64_t {return 0;});
     }, "Type mismatch in return 1: Tensor vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> float", [] (Tensor) -> int64_t {return 0;});
+        .op("_test::mismatch(Tensor arg) -> float", [] (Tensor) -> int64_t {return 0;});
     }, "Type mismatch in return 1: float vs int"
   );
 
   // assert this does not fail because it matches
   RegisterOperators()
-      .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> Tensor", [] (Tensor) -> Tensor {return {};});
+      .op("_test::mismatch(Tensor arg) -> Tensor", [] (Tensor) -> Tensor {return {};});
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> float", [] (Tensor) -> Tensor {return {};});
+        .op("_test::mismatch(Tensor arg) -> float", [] (Tensor) -> Tensor {return {};});
     }, "Type mismatch in return 1: float vs Tensor"
   );
 
   // assert this does not fail because it matches
   RegisterOperators()
-      .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> (Tensor, int)", [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};});
+      .op("_test::mismatch(Tensor arg) -> (Tensor, int)", [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};});
 
   // and now a set of mismatching schemas
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> (Tensor, float)", [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};});
+        .op("_test::mismatch(Tensor arg) -> (Tensor, float)", [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};});
     }, "Type mismatch in return 2: float vs int"
   );
 
   expectThrows<c10::Error>([] {
     RegisterOperators()
-        .opWithDeprecatedAPI_("_test::mismatch(Tensor arg) -> (int, int)", [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};});
+        .op("_test::mismatch(Tensor arg) -> (int, int)", [] (Tensor) -> std::tuple<Tensor, int64_t> {return {};});
     }, "Type mismatch in return 1: int vs Tensor"
   );
 }
 
 }
-
-#pragma GCC diagnostic pop

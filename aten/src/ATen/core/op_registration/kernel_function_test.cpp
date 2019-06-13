@@ -13,6 +13,8 @@ using c10::guts::make_unique;
 using c10::intrusive_ptr;
 using c10::DictPtr;
 using c10::make_dict;
+using c10::ListPtr;
+using c10::make_list;
 using at::Tensor;
 using std::string;
 using std::unique_ptr;

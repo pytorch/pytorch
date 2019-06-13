@@ -375,7 +375,7 @@ public:
    // enable_if: only enable it if FuncType is actually a function, but not a stack based KernelFunction.
    guts::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction>::value, RegisterOperators&&>
    op(const std::string& schemaOrName, FuncType* func, Options&& options = RegisterOperators::options()) && {
-     constexpr bool AllowLegacyTypes = true;
+     constexpr bool AllowLegacyTypes = false;
      return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, func));
    }
 
@@ -400,8 +400,17 @@ public:
     op(const std::string& schemaOrName, FuncType&& func, Options&& options = RegisterOperators::options()) && {
       static_assert(!std::is_base_of<OperatorKernel, FuncType>::value, "c10::OperatorKernel is part of the new kernel registration API and shouldn't be used together with the deprecated registration API. Please use the new RegisterOperators::options().kernel() based API instead.");
 
-      constexpr bool AllowLegacyTypes = true;
+      constexpr bool AllowLegacyTypes = false;
       return std::move(*this).op(schemaOrName, std::move(options).kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, std::forward<FuncType>(func)));
+    }
+
+    // for use from the deprecated torch::jit::RegisterOperators() API
+    template<class FuncType>
+    RegisterOperators&& opWithDeprecatedAPI_(const std::string& schemaOrName, FuncType&& func) {
+      static_assert(!std::is_base_of<OperatorKernel, FuncType>::value, "c10::OperatorKernel is part of the new kernel registration API and shouldn't be used together with the deprecated registration API. Please use the new RegisterOperators::options().kernel() based API instead.");
+
+      constexpr bool AllowLegacyTypes = true;
+      return std::move(*this).op(schemaOrName, RegisterOperators::options().kernelFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>, AllowLegacyTypes>(c10::nullopt, std::forward<FuncType>(func)));
     }
 
 private:

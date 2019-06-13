@@ -598,14 +598,23 @@ struct ArgTypeTestKernel final : OperatorKernel {
   }
 
   static void test(TestModernAPI, InputType input, std::function<void(const InputType&)> inputExpectation, OutputType output, std::function<void(const c10::Stack&)> outputExpectation, const std::string& schema) {
-    return test_([&] {
+    // test modern options based API
+    test_([&] {
       return c10::RegisterOperators().op("_test::my_op" + schema, c10::RegisterOperators::options().catchAllKernel<ArgTypeTestKernel>(input, inputExpectation, output));
+    }, input, inputExpectation, output, outputExpectation, schema);
+
+    // test modern shorthand API
+    test_([&] {
+      return c10::RegisterOperators().op("_test::my_op" + schema, [=] (InputType input) -> OutputType {
+        inputExpectation(std::move(input));
+        return output;
+      });
     }, input, inputExpectation, output, outputExpectation, schema);
   }
 
   static void test(TestLegacyAPI, InputType input, std::function<void(const InputType&)> inputExpectation, OutputType output, std::function<void(const c10::Stack&)> outputExpectation, const std::string& schema) {
     return test_([&] {
-      return c10::RegisterOperators().op("_test::my_op" + schema, [=] (InputType input) -> OutputType {
+      return c10::RegisterOperators().opWithDeprecatedAPI_("_test::my_op" + schema, [=] (InputType input) -> OutputType {
         inputExpectation(std::move(input));
         return output;
       });

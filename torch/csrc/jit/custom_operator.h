@@ -34,7 +34,8 @@ struct TORCH_API RegisterOperators {
   RegisterOperators& op(
       const std::string& name,
       Implementation&& implementation) {
-    registrars_.emplace_back(std::make_shared<c10::RegisterOperators>(name, std::forward<Implementation>(implementation)));
+    auto registry = torch::RegisterOperators().opWithDeprecatedAPI_(name, std::forward<Implementation>(implementation));
+    registrars_.emplace_back(std::make_shared<torch::RegisterOperators>(std::move(registry)));
 
     return *this;
   }
