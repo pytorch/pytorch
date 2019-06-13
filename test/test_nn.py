@@ -821,7 +821,7 @@ class TestNN(NNTestCase):
             module(input)
 
     def test_invalid_conv2d(self):
-        module = nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2)
+        module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2)
         input = torch.empty(1, 1, 4, 4)
         self.assertRaises(RuntimeError, lambda: module(input))
 
@@ -839,7 +839,7 @@ class TestNN(NNTestCase):
             module(input)
 
     def test_invalid_conv3d(self):
-        module = nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2)
+        module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2)
         input = torch.empty(1, 1, 4, 4, 4)
         self.assertRaises(RuntimeError, lambda: module(input))
 
@@ -1763,19 +1763,19 @@ class TestNN(NNTestCase):
         expected_output = m(input)
 
         # add weight normalization
-        m = nn.utils.weight_norm(m)
+        m = torch.nn.utils.weight_norm(m)
         self.assertEqual(m.weight_v.size(), m.weight.size())
         self.assertEqual(m.weight_g.size(), (7, 1))
         self.assertEqual(m(input), expected_output)
 
         # remove weight norm
-        m = nn.utils.remove_weight_norm(m)
+        m = torch.nn.utils.remove_weight_norm(m)
         self.assertFalse(hasattr(m, 'weight_g'))
         self.assertFalse(hasattr(m, 'weight_v'))
         self.assertEqual(m(input), expected_output)
 
         # test with dim=1
-        m = nn.utils.weight_norm(m, dim=1)
+        m = torch.nn.utils.weight_norm(m, dim=1)
         self.assertEqual(m.weight_v.size(), m.weight.size())
         self.assertEqual(m.weight_g.size(), (1, 5))
         self.assertEqual(m(input), expected_output)
@@ -1783,7 +1783,7 @@ class TestNN(NNTestCase):
         # test with dim=None
         m = nn.Linear(5, 7)
         expected_output = m(input)
-        m = nn.utils.weight_norm(m, dim=None)
+        m = torch.nn.utils.weight_norm(m, dim=None)
         self.assertEqual(m(input), expected_output)
 
         with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
@@ -1791,14 +1791,14 @@ class TestNN(NNTestCase):
             m = torch.nn.utils.weight_norm(m)
 
     def test_weight_norm_pickle(self):
-        m = nn.utils.weight_norm(nn.Linear(5, 7))
+        m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
     def test_spectral_norm(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
-        m = nn.utils.spectral_norm(m)
+        m = torch.nn.utils.spectral_norm(m)
 
         self.assertEqual(m.weight_u.size(), torch.Size([m.weight.size(0)]))
         # weight_orig should be trainable
@@ -1816,7 +1816,7 @@ class TestNN(NNTestCase):
         self.assertEqual(m.weight_orig.size(), m.weight.size())
         self.assertEqual(m.weight_orig.stride(), m.weight.stride())
 
-        m = nn.utils.remove_spectral_norm(m)
+        m = torch.nn.utils.remove_spectral_norm(m)
         self.assertFalse(hasattr(m, 'weight_orig'))
         self.assertFalse(hasattr(m, 'weight_u'))
         # weight should be converted back as a parameter
@@ -1999,7 +1999,7 @@ class TestNN(NNTestCase):
     def test_spectral_norm_dim(self):
         inp = torch.randn(2, 3, 10, 12)
         m = nn.ConvTranspose2d(3, 4, (5, 6))
-        m = nn.utils.spectral_norm(m)
+        m = torch.nn.utils.spectral_norm(m)
         # this should not run into incompatible shapes
         x = m(inp)
         # check that u refers to the same dimension
@@ -2008,7 +2008,7 @@ class TestNN(NNTestCase):
     def test_spectral_norm_forward(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
-        m = nn.utils.spectral_norm(m)
+        m = torch.nn.utils.spectral_norm(m)
         # naive forward
         _weight, _bias, _u = m.weight_orig, m.bias, m.weight_u
         _weight_mat = _weight.view(_weight.size(0), -1)
@@ -2017,12 +2017,12 @@ class TestNN(NNTestCase):
         _u = torch.mv(_weight_mat, _v)
         _u = F.normalize(_u, dim=0, eps=1e-12)
         _weight.data /= torch.dot(_u, torch.matmul(_weight_mat, _v))
-        out_hat = F.linear(input, _weight, _bias)
+        out_hat = torch.nn.functional.linear(input, _weight, _bias)
         expect_out = m(input)
         self.assertAlmostEqual(expect_out, out_hat)
 
     def test_spectral_norm_pickle(self):
-        m = nn.utils.spectral_norm(nn.Linear(5, 7))
+        m = torch.nn.utils.spectral_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
@@ -2228,7 +2228,7 @@ class TestNN(NNTestCase):
         ], dtype=torch.long)
         embeddings = torch.rand(4, 3, requires_grad=True)
 
-        embed_old = nn.Embedding(4, 3)
+        embed_old = torch.nn.Embedding(4, 3)
         embed_old.weight.data = embeddings.data
         res_old = embed_old(a)
 
@@ -2296,7 +2296,6 @@ class TestNN(NNTestCase):
         logits = logits.to(dtype).requires_grad_()
         if cuda:
             logits = logits.cuda()
-
         probs = logits.softmax(dim=-1)
 
         counts = torch.zeros_like(logits)
@@ -4574,9 +4573,9 @@ class TestNN(NNTestCase):
         inputs = Variable(torch.randn(4, 1, 7, 7).float())
         weights = Variable(torch.randn(1, 1, 3, 3).double())
         # inconsistent types should raise an exception
-        self.assertRaises(RuntimeError, lambda: F.conv2d(inputs, weights))
+        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
         # but it should work with the same type
-        F.conv2d(inputs.float(), weights.float())
+        nn.functional.conv2d(inputs.float(), weights.float())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_inconsistent_types_on_GPU_without_cudnn(self):
@@ -4586,11 +4585,11 @@ class TestNN(NNTestCase):
 
         with torch.backends.cudnn.flags(enabled=False):
             # inconsistent types should raise an exception
-            self.assertRaises(RuntimeError, lambda: F.conv2d(inputs, weights))
-            self.assertRaises(RuntimeError, lambda: F.conv2d(inputs, weights.float(), bias))
+            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
 
             # but it should work with the same type
-            F.conv2d(inputs.float(), weights.float(), bias.float())
+            nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -4601,11 +4600,11 @@ class TestNN(NNTestCase):
 
         with torch.backends.cudnn.flags(enabled=True):
             # inconsistent types should raise an exception
-            self.assertRaises(RuntimeError, lambda: F.conv2d(inputs, weights))
-            self.assertRaises(RuntimeError, lambda: F.conv2d(inputs, weights.float(), bias))
+            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
 
             # but it should work with the same type
-            F.conv2d(inputs.float(), weights.float(), bias.float())
+            nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -4662,8 +4661,8 @@ class TestNN(NNTestCase):
     def test_Conv2d_deterministic_cudnn(self, dtype=torch.float):
         inputs = torch.randn(2, 3, 5, 5, device="cuda", dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
-            conv1 = nn.Conv2d(3, 3, 3).to("cuda", dtype)
-            conv2 = nn.Conv2d(3, 3, 3).to("cuda", dtype)
+            conv1 = torch.nn.Conv2d(3, 3, 3).to("cuda", dtype)
+            conv2 = torch.nn.Conv2d(3, 3, 3).to("cuda", dtype)
             conv2.bias.data.copy_(conv1.bias.data)
             conv2.weight.data.copy_(conv1.weight.data)
             out1 = conv1(inputs)
@@ -4700,7 +4699,7 @@ class TestNN(NNTestCase):
 
         def run_test(benchmark):
             with torch.backends.cudnn.flags(benchmark=benchmark):
-                conv = nn.Conv2d(256, 256, kernel_size=3, padding=1).to("cuda", dtype)
+                conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).to("cuda", dtype)
                 for size in sizes:
                     x = torch.randn(size, device="cuda", dtype=dtype)
                     out = conv(x.detach().clone().requires_grad_())
@@ -5040,10 +5039,10 @@ class TestNN(NNTestCase):
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
         log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
-        res = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         expected = ctcloss_reference(log_probs, targets.cuda(), input_lengths, target_lengths).float()
         with torch.backends.cudnn.flags(enabled=False):
-            res2 = F.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths)
+            res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths)
         self.assertEqual(res, expected)
         self.assertEqual(res2, res)
 
@@ -5440,6 +5439,179 @@ class TestNN(NNTestCase):
 
             (hx + cx).sum().backward()
 
+    def test_Transformer_cell(self):
+        # this is just a smoke test; these modules are implemented through
+        # autograd so no Jacobian test is needed
+        d_model = 512
+        nhead = 16
+        num_encoder_layers = 4
+        num_decoder_layers = 3
+        dim_feedforward = 256
+        dropout = 0.3
+        bsz = 8
+        seq_length = 35
+        tgt_length = 15
+
+        transformer = nn.Transformer(d_model, nhead, num_encoder_layers, num_decoder_layers,
+                                     dim_feedforward, dropout)
+        src = torch.randn(seq_length, bsz, d_model)
+        src_mask = transformer.generate_square_subsequent_mask(seq_length).double()
+        tgt = torch.randn(tgt_length, bsz, d_model)
+        tgt_mask = transformer.generate_square_subsequent_mask(tgt_length).double()
+        memory_mask = torch.randn(tgt_length, seq_length).double()
+
+        output = transformer(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask, memory_mask=memory_mask)
+        output.sum().backward()
+
+    def test_transformerencoderlayer(self):
+        # this is a deterministic test for TransformerEncoderLayer
+        d_model = 4
+        nhead = 2
+        dim_feedforward = 16
+        dropout = 0.0
+        bsz = 2
+
+        model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout)
+
+        # set constant weights of the model
+        for idx, p in enumerate(model.parameters()):
+            x = p.data
+            sz = x.view(-1).size(0)
+            shape = x.shape
+            x = torch.cos(torch.arange(0, sz).float().view(shape))
+            p.data.copy_(x)
+
+        # deterministic input
+        encoder_input = torch.Tensor([[[20, 30, 40, 50]]])
+        result = model(encoder_input)
+        ref_output = torch.Tensor([[[2.258703, 0.127985, -0.697881, 0.170862]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # deterministic input
+        encoder_input = torch.Tensor([[[1, 2, 3, 4]],
+                                      [[5, 6, 7, 8]]])
+        result = model(encoder_input)
+        ref_output = torch.Tensor([[[2.272644, 0.119035, -0.691669, 0.153486]],
+                                   [[2.272644, 0.119035, -0.691669, 0.153486]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # deterministic input
+        encoder_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                       [0.5387, 0.1655, 0.3565, 0.0471]],
+                                      [[0.8335, 0.2799, 0.5031, 0.2947],
+                                       [0.1402, 0.0318, 0.7636, 0.1346]],
+                                      [[0.6333, 0.9344, 0.1376, 0.9938],
+                                       [0.8924, 0.2872, 0.6692, 0.2944]],
+                                      [[0.9897, 0.6915, 0.3154, 0.1733],
+                                       [0.8645, 0.3513, 0.3064, 0.0767]],
+                                      [[0.8117, 0.2366, 0.4838, 0.7881],
+                                       [0.3718, 0.4945, 0.9511, 0.0864]]])
+        result = model(encoder_input)
+        ref_output = torch.Tensor([[[2.428589, 0.020835, -0.602055, -0.085249],
+                                    [2.427987, 0.021213, -0.602496, -0.084103]],
+                                   [[2.424689, 0.019155, -0.604793, -0.085672],
+                                    [2.413863, 0.022211, -0.612486, -0.072490]],
+                                   [[2.433774, 0.021598, -0.598343, -0.087548],
+                                    [2.425104, 0.019748, -0.604515, -0.084839]],
+                                   [[2.436185, 0.022682, -0.596625, -0.087261],
+                                    [2.433556, 0.021891, -0.598509, -0.086832]],
+                                   [[2.416246, 0.017512, -0.610712, -0.082961],
+                                    [2.422901, 0.024187, -0.606178, -0.074929]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+    def test_transformerdecoderlayer(self):
+        # this is a deterministic test for TransformerDecoderLayer
+        d_model = 4
+        nhead = 2
+        dim_feedforward = 16
+        dropout = 0.0
+        bsz = 2
+        seq_length = 5
+        tgt_length = 3
+
+        model = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout)
+
+        # set constant weights of the model
+        for idx, p in enumerate(model.parameters()):
+            x = p.data
+            sz = x.view(-1).size(0)
+            shape = x.shape
+            x = torch.cos(torch.arange(0, sz).float().view(shape))
+            p.data.copy_(x)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[20, 30, 40, 50]]])
+        memory_input = torch.Tensor([[[60, 70, 80, 90]]])
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor([[[2.314351, 0.094805, -0.671322, 0.101977]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[9, 10, 11, 12]],
+                                     [[11, 12, 13, 14]]])
+        memory_input = torch.Tensor([[[1, 2, 3, 4]]])
+        result = model(decoder_input, memory_input)
+        result = result.detach().numpy()
+        ref_output = torch.Tensor([[[2.422245, 0.051716, -0.606338, -0.024756]],
+                                   [[2.422245, 0.051716, -0.606338, -0.024756]]])
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[1, 2, 3, 4]],
+                                      [[5, 6, 7, 8]]])
+        memory_input = torch.Tensor([[[9, 10, 11, 12]],
+                                     [[11, 12, 13, 14]]])
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor([[[2.343536, 0.085561, -0.654954, 0.074991]],
+                                   [[2.343536, 0.085561, -0.654954, 0.074991]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
+        # deterministic input
+        decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
+                                       [0.2678, 0.3677, 0.4459, 0.7166]],
+                                      [[0.8100, 0.3716, 0.4096, 0.1976],
+                                       [0.6958, 0.8844, 0.6081, 0.8315]],
+                                      [[0.0494, 0.9343, 0.5955, 0.3830],
+                                       [0.5404, 0.3464, 0.9378, 0.6200]]])
+        memory_input = torch.Tensor([[[0.7462, 0.6653, 0.5679, 0.4891],
+                                      [0.5387, 0.1655, 0.3565, 0.0471]],
+                                     [[0.8335, 0.2799, 0.5031, 0.2947],
+                                      [0.1402, 0.0318, 0.7636, 0.1346]],
+                                     [[0.6333, 0.9344, 0.1376, 0.9938],
+                                      [0.8924, 0.2872, 0.6692, 0.2944]],
+                                     [[0.9897, 0.6915, 0.3154, 0.1733],
+                                      [0.8645, 0.3513, 0.3064, 0.0767]],
+                                     [[0.8117, 0.2366, 0.4838, 0.7881],
+                                      [0.3718, 0.4945, 0.9511, 0.0864]]])
+        result = model(decoder_input, memory_input)
+        ref_output = torch.Tensor([[[2.430065, 0.027862, -0.601136, -0.073096],
+                                    [2.431935, 0.028907, -0.599809, -0.072488]],
+                                   [[2.428457, 0.027053, -0.602275, -0.073462],
+                                    [2.431970, 0.029387, -0.599789, -0.071621]],
+                                   [[2.431934, 0.028196, -0.599802, -0.073809],
+                                    [2.432306, 0.028858, -0.599542, -0.072846]]])
+        result = result.detach().numpy()
+        ref_output = ref_output.detach().numpy()
+        self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
     def test_cudnn_rnn_dropout_states_device(self):
         rnn = nn.RNN(10, 20, num_layers=2, dropout=.5)
@@ -5597,6 +5769,103 @@ class TestNN(NNTestCase):
                         self.assertEqual(hx[1].grad.data, hx_cuda[1].grad.data)
                     else:
                         self.assertEqual(hx.grad.data, hx_cuda.grad.data)
+
+    def test_transformer_args_check(self):
+        model_name = 'Transformer'
+        d_model = 128
+        nhead = 4
+        num_encoder_layers = 2
+        num_decoder_layers = 3
+        dim_feedforward = 65
+        dropout = 0.3
+        bsz = 3
+        seq_len = 35
+        tgt_len = 15
+
+        wrong_bsz = 7
+        wrong_d_model = 63
+        wrong_nhead = 5
+
+        def test(encoder_input_shape, decoder_input_shape, 
+                 src_mask_len=None, tgt_mask_len=None, memory_mask_size=None):
+            encoder_input = torch.randn(encoder_input_shape)
+            decoder_input = torch.randn(decoder_input_shape)
+            model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers, 
+                                            num_decoder_layers, dim_feedforward, dropout)
+
+            if src_mask_len is not None:
+                src_mask = model.generate_square_subsequent_mask(src_mask_len)
+            else:
+                src_mask = None
+
+            if tgt_mask_len is not None:
+                tgt_mask = model.generate_square_subsequent_mask(tgt_mask_len)
+            else:
+                tgt_mask = None
+
+            if memory_mask_size is not None:
+                memory_task = torch.rand(memory_mask_size)
+            else:
+                memory_task = None
+
+            with self.assertRaises(RuntimeError):
+                model(encoder_input, decoder_input, 
+                      src_mask=src_mask, tgt_mask=tgt_mask, memory_mask=memory_task)
+
+        correct_encoder_input_shape = (seq_len, bsz, d_model)
+        correct_decoder_input_shape = (tgt_len, bsz, d_model)
+
+        def update_shape(shape, dim, new_dim_size):
+            new_shape = list(shape)
+            new_shape[dim] = new_dim_size
+            return tuple(new_shape)
+
+        # Incorrect encoder_input batch size
+        encoder_input_shape = update_shape(correct_encoder_input_shape, 1, wrong_bsz)
+        decoder_input_shape = correct_decoder_input_shape
+        test(encoder_input_shape, decoder_input_shape)
+
+        # Incorrect decoder_input batch size
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = update_shape(correct_decoder_input_shape, 1, wrong_bsz)
+        test(encoder_input_shape, decoder_input_shape)
+
+        # Incorrect encoder_input input size
+        encoder_input_shape = update_shape(correct_encoder_input_shape, 2, wrong_d_model)
+        decoder_input_shape = correct_decoder_input_shape
+        test(encoder_input_shape, decoder_input_shape)
+
+        # Incorrect decoder_input input size
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = update_shape(correct_decoder_input_shape, 2, wrong_d_model)
+        test(encoder_input_shape, decoder_input_shape)
+
+        # Incorrect nhead
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = correct_decoder_input_shape
+        with self.assertRaises(AssertionError):
+            model = getattr(nn, model_name)(d_model, wrong_nhead, num_encoder_layers, 
+                                            num_decoder_layers, dim_feedforward, dropout)
+
+        # Incorrect src_mask
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = correct_decoder_input_shape
+        wrong_src_mask_size = seq_len + 1
+        test(encoder_input_shape, decoder_input_shape, src_mask_len=wrong_src_mask_size)
+
+        # Incorrect tgt_mask
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = correct_decoder_input_shape
+        wrong_tgt_mask_size = tgt_len + 1
+        test(encoder_input_shape, decoder_input_shape, tgt_mask_len=wrong_tgt_mask_size)
+
+        # Incorrect tgt_mask
+        encoder_input_shape = correct_encoder_input_shape
+        decoder_input_shape = correct_decoder_input_shape
+        wrong_tgt_mask_size = tgt_len + 1
+        test(encoder_input_shape, decoder_input_shape, 
+             tgt_mask_len=wrong_tgt_mask_size, 
+             memory_mask_size=(wrong_tgt_mask_size, wrong_src_mask_size))
 
     def test_rnn_args_check(self):
         input_size = 3
@@ -7039,12 +7308,12 @@ class TestNN(NNTestCase):
                 mode='nearest',
                 prefilter=False)
 
-            affine_tensor = F.affine_grid(
+            affine_tensor = torch.nn.functional.affine_grid(
                 transform_tensor,
                 torch.Size(output_size)
             )
 
-            gridsample_ary = F.grid_sample(
+            gridsample_ary = torch.nn.functional.grid_sample(
                 torch.tensor(input_ary, device=device).to(device),
                 affine_tensor,
                 padding_mode='border'
@@ -7084,12 +7353,12 @@ class TestNN(NNTestCase):
             assert np.abs(scipy_ary[-1, -1] - input_ary[0, 0, -1, 0]).max() < 1e-6
             assert np.abs(scipy_ary[-1, 0] - input_ary[0, 0, 0, 0]).max() < 1e-6
 
-            affine_tensor = F.affine_grid(
+            affine_tensor = torch.nn.functional.affine_grid(
                 transform_tensor,
                 torch.Size(output_size)
             )
 
-            gridsample_ary = F.grid_sample(
+            gridsample_ary = torch.nn.functional.grid_sample(
                 torch.tensor(input_ary, device=device).to(device),
                 affine_tensor,
                 padding_mode='border'
@@ -7123,12 +7392,12 @@ class TestNN(NNTestCase):
                 mode='nearest',
                 prefilter=False)
 
-            affine_tensor = F.affine_grid(
+            affine_tensor = torch.nn.functional.affine_grid(
                 transform_tensor,
                 torch.Size(output_size)
             )
 
-            gridsample_ary = F.grid_sample(
+            gridsample_ary = torch.nn.functional.grid_sample(
                 torch.tensor(input_ary, device=device).to(device),
                 affine_tensor,
                 padding_mode='border'
@@ -7164,12 +7433,12 @@ class TestNN(NNTestCase):
                 mode='nearest',
                 prefilter=False)
 
-            affine_tensor = F.affine_grid(
+            affine_tensor = torch.nn.functional.affine_grid(
                 transform_tensor,
                 torch.Size(output_size)
             )
 
-            gridsample_ary = F.grid_sample(
+            gridsample_ary = torch.nn.functional.grid_sample(
                 torch.tensor(input_ary, device=device).to(device),
                 affine_tensor,
                 padding_mode='border'
@@ -7215,12 +7484,12 @@ class TestNN(NNTestCase):
                 mode='nearest',
                 prefilter=False)
 
-            affine_tensor = F.affine_grid(
+            affine_tensor = torch.nn.functional.affine_grid(
                 transform_tensor,
                 torch.Size(output_size)
             )
 
-            gridsample_ary = F.grid_sample(
+            gridsample_ary = torch.nn.functional.grid_sample(
                 torch.tensor(input_ary, device=device).to(device),
                 affine_tensor,
                 padding_mode='border'
