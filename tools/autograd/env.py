@@ -1,6 +1,6 @@
 import os
 
-# This file copied from tools/setup_helpers/env.py
+# This file copied from tools/setup_helpers/env.py.
 # PLEASE DO NOT ADD ANYTHING TO THIS FILE, the NAMEDTENSOR_ENABLED flag is temporary.
 def check_env_flag(name, default=''):
     return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
