@@ -205,6 +205,7 @@ def add_torch_libs():
         "torch/csrc/jit/init.cpp",
         "torch/csrc/jit/passes/inline_fork_wait.cpp",
         "torch/csrc/jit/passes/onnx.cpp",
+        "torch/csrc/jit/passes/onnx/cast_constant.cpp",
         "torch/csrc/jit/passes/onnx/constant_fold.cpp",
         "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
         "torch/csrc/jit/passes/onnx/peephole.cpp",

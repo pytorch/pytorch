@@ -186,6 +186,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
     if operator_export_type != OperatorExportTypes.RAW:
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
+        #torch._C._jit_pass_onnx_cast_constant(graph)
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_onnx_peephole(graph)
         torch._C._jit_pass_lint(graph)
@@ -297,6 +298,9 @@ def _model_to_graph(model, args, verbose=False, training=False,
     if do_constant_folding and _export_onnx_opset_version == 9:
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict)
         torch._C._jit_pass_dce(graph)
+
+    if _export_onnx_opset_version < 9:
+        torch._C._jit_pass_onnx_cast_constant(graph)
 
     if verbose:
         print(graph)
