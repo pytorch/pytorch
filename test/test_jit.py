@@ -15630,6 +15630,23 @@ class TestClassType(JitTestCase):
         input = torch.ones(2, 3)
         self.assertEqual(fn(input), input)
 
+    def test_in(self):
+        @torch.jit.script  # noqa: B903
+        class FooTest(object):
+            def __init__(self):
+                pass
+
+            def __contains__(self, key):
+                # type: (str) -> bool
+                return key == 'hi'
+
+        @torch.jit.script
+        def fn():
+            foo = FooTest()
+            return 'hi' in foo, 'no' in foo
+
+        self.assertEqual(fn(), (True, False))
+
     def test_set_attr_in_method(self):
         @torch.jit.script
         class FooTest(object):

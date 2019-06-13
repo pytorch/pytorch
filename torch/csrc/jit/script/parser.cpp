@@ -244,7 +244,7 @@ struct ParserImpl {
         break;
 
       if (L.cur().kind == TK_IN && in_for) {
-        // Don't parse for for-in loops
+        // Don't parse for for-in loops, but do parse in comparison ops
         break;
       }
 
@@ -270,7 +270,13 @@ struct ParserImpl {
         continue;
       }
 
-      prefix = create_compound(kind, pos, {prefix, parseExp(binary_prec)});
+      if (kind == TK_IN) {
+        // for `in` comparison ops, reverse the order of the compound to make
+        // it consistent with other ops (so the self object comes first)
+        prefix = create_compound(kind, pos, {parseExp(binary_prec), prefix});
+      } else {
+        prefix = create_compound(kind, pos, {prefix, parseExp(binary_prec)});
+      }
     }
     return Expr(prefix);
   }
