@@ -8,7 +8,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include "caffe2/core/operator.h"
-#include "caffe2/core/c10_operator.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 
 namespace caffe2 {
 
@@ -16,7 +16,11 @@ namespace caffe2 {
  * To make a c10 operator "C10Add" callable from caffe2 as "C2MyAddOpName", just
  * write
  *
- *     REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(C10Add, C2MyAddOpName)
+ *  To export the CPU kernel
+ *     C10_EXPORT_C10_OP_TO_CAFFE2_CPU(C10Add, C2MyAddOp)
+ *
+ *  To export the CUDA kernel
+ *     C10_EXPORT_C10_OP_TO_CAFFE2_CUDA(C10Add, C2MyAddOp)
  *
  */
 
@@ -105,7 +109,7 @@ class C10OperatorWrapper final : public Operator<Context> {
         AT_ASSERTM(
             input_tensor_index == 0,
             "Error in caffe2->c10 wrapper: Schema can only have either one or more Tensor inputs or one TensorList input.");
-        stack_.emplace_back(ivalue::TensorList::create(array_inputs_()));
+        stack_.emplace_back(array_inputs_());
         input_tensor_index = InputSize();
 
       } else {
@@ -138,8 +142,8 @@ class C10OperatorWrapper final : public Operator<Context> {
     stack_.clear();
   }
 
-  std::vector<at::Tensor> array_inputs_() {
-    std::vector<at::Tensor> result;
+  c10::ListPtr<at::Tensor> array_inputs_() {
+    c10::ListPtr<at::Tensor> result = c10::make_list<at::Tensor>();
     result.reserve(InputSize());
     for (size_t i = 0; i < InputSize(); ++i) {
       result.emplace_back(Input(i));
@@ -147,8 +151,8 @@ class C10OperatorWrapper final : public Operator<Context> {
     return result;
   }
 
-  std::vector<at::Tensor> preallocated_outputs_() {
-    std::vector<at::Tensor> result;
+  c10::ListPtr<at::Tensor> preallocated_outputs_() {
+    c10::ListPtr<at::Tensor> result = c10::make_list<at::Tensor>();
     result.reserve(OutputSize());
     for (size_t i = 0; i < OutputSize(); ++i) {
       result.emplace_back(OperatorBase::OutputTensorOrUndefined(i));
@@ -231,29 +235,29 @@ createC10OperatorWrapper(const char* op_name, const char* overload_name) {
 
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(        \
-    OperatorName, Name)                                       \
-  REGISTER_CPU_OPERATOR_CREATOR(                              \
-      Name,                                                   \
-      ::caffe2::detail::createC10OperatorWrapper<CPUContext>( \
+#define C10_EXPORT_C10_OP_TO_CAFFE2_CPU(                       \
+    OperatorName, Name)                                        \
+  REGISTER_CPU_OPERATOR_CREATOR(                               \
+      Name,                                                    \
+      ::caffe2::detail::createC10OperatorWrapper<CPUContext>(  \
           OperatorName, ""))
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA(        \
+#define C10_EXPORT_C10_OP_TO_CAFFE2_CUDA(                      \
     OperatorName, Name)                                        \
   REGISTER_CUDA_OPERATOR_CREATOR(                              \
       Name,                                                    \
       ::caffe2::detail::createC10OperatorWrapper<CUDAContext>( \
           OperatorName, ""))
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP(        \
-    OperatorName, Name)                                       \
-  REGISTER_HIP_OPERATOR_CREATOR(                              \
-      Name,                                                   \
-      ::caffe2::detail::createC10OperatorWrapper<HIPContext>( \
+#define C10_EXPORT_C10_OP_TO_CAFFE2_HIP(                       \
+    OperatorName, Name)                                        \
+  REGISTER_HIP_OPERATOR_CREATOR(                               \
+      Name,                                                    \
+      ::caffe2::detail::createC10OperatorWrapper<HIPContext>(  \
           OperatorName, ""))
 #else
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU( \
+#define C10_EXPORT_C10_OP_TO_CAFFE2_CPU(                       \
     OperatorName, Name)
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CUDA( \
+#define C10_EXPORT_C10_OP_TO_CAFFE2_CUDA(                      \
     OperatorName, Name)
-#define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_HIP( \
+#define C10_EXPORT_C10_OP_TO_CAFFE2_HIP(                       \
     OperatorName, Name)
 #endif

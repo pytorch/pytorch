@@ -12,26 +12,14 @@ namespace torch {
 namespace jit {
 namespace script {
 
-struct RecursiveMethodCallError : public std::exception {};
-void placeholderCreator(Function&) {
-  throw RecursiveMethodCallError();
-}
-
-void Function::ensure_defined() {
-  try {
-    if (function_creator_) {
-      auto creator = function_creator_;
-      function_creator_ = placeholderCreator;
-      creator(*this);
-      function_creator_ = nullptr;
-    }
-  } catch (RecursiveMethodCallError&) {
-    throw ErrorReport() // TODO: once lower_first_class methods is removed
-                        // re-establish callsite info for debugging
-        << " method '" << name() << "' is called recursively. "
-        << "Recursive calls are not supported";
-  }
-  check_single_output();
+// first class mode runs models as first class objects,
+// and does not force inlining everywhere. This is experimental
+// as we bring up the system since it will degrade performance
+// and may introduce bugs. test_jit.py provides context managers
+// that enable it for specific tests.
+thread_local bool experimental_run_as_first_class = false;
+bool& getFirstClassMode() {
+  return experimental_run_as_first_class;
 }
 
 void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
@@ -213,10 +201,58 @@ static FunctionSchema sliceFirst(const FunctionSchema& schema) {
   return schema.cloneWithArguments(std::move(sliced));
 }
 
-Method::Method(Module* owner, Function* first_class_function)
+Method::Method(
+    Module* owner,
+    const std::shared_ptr<Function>& first_class_function)
     : owner_(owner), schema_(sliceFirst(first_class_function->getSchema())) {
-  std::tie(function_, initial_ivalues_) =
-      owner->lower_first_class_method(first_class_function);
+  if (experimental_run_as_first_class) {
+    function_ = first_class_function;
+    // initial_ivalues_ left blank
+  } else {
+    std::tie(function_, initial_ivalues_) =
+        owner->lower_first_class_method(first_class_function.get());
+  }
+}
+
+void Method::run(Stack& stack) {
+  if (experimental_run_as_first_class) {
+    stack.insert(stack.begin(), owner().module_object());
+  }
+  for (const auto& input : initial_ivalues_) {
+    push(stack, input.value());
+  }
+  function_->run(stack);
+}
+
+IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
+  getSchema().checkAndNormalizeInputs(stack, kwargs);
+  if (experimental_run_as_first_class) {
+    stack.insert(stack.begin(), owner().module_object());
+  }
+  for (const auto& input : initial_ivalues_) {
+    push(stack, input.value());
+  }
+  // use run rather than operator() to skip the second schema check.
+  function_->run(stack);
+  return stack.front();
+}
+
+
+static std::vector<at::Tensor> loadTensors(const std::vector<Slot>& slots) {
+  std::vector<at::Tensor> result;
+  result.reserve(slots.size());
+  for(const Slot& slot : slots) {
+    result.emplace_back(slot.value().toTensor());
+  }
+  return result;
+}
+std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_graph() {
+  if(getFirstClassMode()) {
+    auto result = lower_graph(owner().module_object(), *graph());
+    return std::make_pair(result.first, loadTensors(result.second));
+  } else {
+    return std::make_pair(graph(), loadTensors(initial_ivalues()));
+  }
 }
 
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
@@ -314,11 +350,6 @@ void Module::train(bool on) {
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
-  // Classes live in the top-level compilation unit.
-  if (parent_) {
-    return parent_->create_class(name, std::move(stack));
-  }
-
   // Look up the class
   const auto classType =
       class_compilation_unit().get_class(c10::QualifiedName(name));
