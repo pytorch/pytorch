@@ -18,16 +18,16 @@ Device ${Type}::getDeviceFromPtr(void * data) const {
   return DeviceType::${DeviceType};
 }
 
-std::unique_ptr<Generator> ${Type}::generator() const {
-  AT_ERROR("generator is not implemented for ${Type}");
-}
-
 Backend ${Type}::backend() const {
   return Backend::${Backend};
 }
 
-size_t ${Type}::elementSizeInBytes() const {
-  AT_ERROR("elementSizeInBytes is not implemented for ${Type}");
+const char * ${Type}::toString() const {
+  return "${Type}";
+}
+
+TypeID ${Type}::ID() const {
+  return ${TypeID};
 }
 
 ${type_method_definitions}

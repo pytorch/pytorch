@@ -18,18 +18,10 @@ data into the output blob Y for further processing.
 std::function<void(OpSchema&)> MaxPoolDocGenerator(
     const char* dim,
     bool relu_fused = false) {
-  auto suffix = relu_fused ? " Output will go through rectified linear "
-                             "function, where y = max(0, x)."
-                           : "";
   return [=](OpSchema& schema) {
     string doc = "MaxPool{dim} {pool_doc}";
     c10::ReplaceAll(doc, "{dim}", dim);
     c10::ReplaceAll(doc, "{pool_doc}", kMaxPoolDoc_int8);
-    string output_doc =
-        "Output data tensor from max pooling across the input "
-        "tensor. Dimensions will vary based on various kernel, stride, and pad "
-        "sizes.{suffix}";
-    c10::ReplaceAll(output_doc, "{suffix}", suffix);
     schema.SetDoc(doc);
     schema.Input(
         0,
@@ -40,7 +32,14 @@ std::function<void(OpSchema&)> MaxPoolDocGenerator(
         "size, C is the number of channels, and H and W are the height and the "
         "width of the data. The corresponding permutation of dimensions is "
         "used in the latter case.");
-    schema.Output(0, "Y", output_doc.c_str());
+    schema.Output(0, "Y", relu_fused ?
+        "Output data tensor from max pooling across the input "
+        "tensor. Dimensions will vary based on various kernel, stride, and pad "
+        "sizes. Output will go through rectified linear"
+        "function, where y = max(0, x)." :
+        "Output data tensor from max pooling across the input "
+        "tensor. Dimensions will vary based on various kernel, stride, and pad "
+        "sizes. Output will go through rectified linear");
   };
 }
 

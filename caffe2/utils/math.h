@@ -18,6 +18,7 @@ extern "C" {
 #include "caffe2/utils/math/broadcast.h"
 #include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math/reduce.h"
+#include "caffe2/utils/math/transpose.h"
 #include "caffe2/utils/math/utils.h"
 
 namespace caffe2 {
@@ -163,16 +164,6 @@ ColwiseMax(const int N, const int D, const T* x, T* y, Context* context);
 template <typename T, class Context>
 CAFFE2_API void
 Maximum(const int N, const float alpha, const T* x, T* y, Context* context);
-
-// Transpose tensor X with dims by axes and write the result to tensor Y.
-template <typename T, class Context>
-CAFFE2_API void Transpose(
-    const int ndim,
-    const int* dims,
-    const int* axes,
-    const T* X,
-    T* Y,
-    Context* context);
 
 // Decaf gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
@@ -332,35 +323,6 @@ CAFFE2_API void Select(
     T* y,
     Context* context);
 
-template <typename T, class Context>
-CAFFE2_API void
-Axpy(const int N, const float alpha, const T* x, T* y, Context* context);
-
-// Different from the Axpy function above, if alpha is passed in
-// as a pointer, we will assume that it lives on the Context device,
-// for example on GPU.
-template <typename T, class Context>
-CAFFE2_API void
-Axpy(const int N, const float* alpha, const T* x, T* y, Context* context);
-
-template <typename TCoeff, typename TData, class Context>
-CAFFE2_API void Axpby(
-    const int N,
-    const TCoeff alpha,
-    const TData* x,
-    const TCoeff b,
-    TData* y,
-    Context* context);
-
-template <typename TCoeff, typename TData, class Context>
-CAFFE2_API void Axpby(
-    const int N,
-    const TCoeff* alpha,
-    const TData* x,
-    const TCoeff* b,
-    TData* y,
-    Context* context);
-
 // groups must be 1 for GPU
 // For NHWC order with groups > 1, the result will be layout in
 // NHW G RS C/G order to make data within the same group to be contiguous.
@@ -496,24 +458,6 @@ CAFFE2_API void CopyMatrix(
 
 template <typename T, class Context>
 CAFFE2_API void CopyVector(const int N, const T* A, T* B, Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void NCHW2NHWC(
-    const int N,
-    const int C,
-    const int HxW,
-    const T* X,
-    T* Y,
-    Context* context);
-
-template <typename T, class Context>
-CAFFE2_API void NHWC2NCHW(
-    const int N,
-    const int C,
-    const int HxW,
-    const T* X,
-    T* Y,
-    Context* context);
 
 } // namespace math
 } // namespace caffe2

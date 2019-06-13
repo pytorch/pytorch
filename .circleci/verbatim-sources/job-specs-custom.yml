@@ -1,13 +1,18 @@
   pytorch_short_perf_test_gpu:
     environment:
       BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:300"
       PYTHON_VERSION: "3.6"
       USE_CUDA_DOCKER_RUNTIME: "1"
     resource_class: gpu.medium
     machine:
-      image: default
+      image: ubuntu-1604:201903-01
     steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_workspace:
+        at: ~/workspace
+    - run:
+        <<: *should_run_job
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -24,8 +29,10 @@
 
           docker cp $id:/var/lib/jenkins/workspace/env /home/circleci/project/env
           # This IAM user allows write access to S3 bucket for perf test numbers
-          echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_PERF_TEST_S3_BUCKET_V3}" >> /home/circleci/project/env
-          echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_PERF_TEST_S3_BUCKET_V3}" >> /home/circleci/project/env
+          set +x
+          echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_PERF_TEST_S3_BUCKET_V4}" >> /home/circleci/project/env
+          echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_PERF_TEST_S3_BUCKET_V4}" >> /home/circleci/project/env
+          set -x
           docker cp /home/circleci/project/env $id:/var/lib/jenkins/workspace/env
 
           export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -34,11 +41,16 @@
   pytorch_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn7-py3:291"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:300"
     resource_class: large
     machine:
-      image: default
+      image: ubuntu-1604:201903-01
     steps:
+    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+    - attach_workspace:
+        at: ~/workspace
+    - run:
+        <<: *should_run_job
     - run:
         <<: *setup_linux_system_environment
     - run:
@@ -81,16 +93,21 @@
           docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
 
   pytorch_macos_10_13_py3_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
       xcode: "9.0"
     steps:
+      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+      - attach_workspace:
+          at: ~/workspace
+      - run:
+          <<: *should_run_job
       - checkout
       - run:
           <<: *macos_brew_update
       - run:
           name: Build
-          environment:
-            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
           no_output_timeout: "1h"
           command: |
             set -e
@@ -103,8 +120,10 @@
 
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            set -x
 
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
@@ -119,44 +138,51 @@
             - "*"
 
   pytorch_macos_10_13_py3_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
       xcode: "9.0"
     steps:
-      - run:
-          name: Prepare workspace
-          command: |
-            sudo mkdir -p /Users/distiller/pytorch-ci-env
-            sudo chmod -R 777 /Users/distiller/pytorch-ci-env
+      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+      # This workspace also carries binaries from the build job
       - attach_workspace:
-          at: /Users/distiller/pytorch-ci-env
+          at: ~/workspace
+      - run:
+          <<: *should_run_job
       - run:
           <<: *macos_brew_update
       - run:
           name: Test
-          environment:
-            BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
           no_output_timeout: "1h"
           command: |
             set -e
             export IN_CIRCLECI=1
 
             # copy with -a to preserve relative structure (e.g., symlinks), and be recursive
-            cp -a /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
+            # TODO: I'm not sure why we can't just run our job in
+            # ~/workspace and call it a day
+            # NB: Yes, you need workspace twice
+            cp -a ~/workspace/workspace/. /Users/distiller/project
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
 
   pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
     macos:
       xcode: "9.0"
     steps:
+      # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
+      - attach_workspace:
+          at: ~/workspace
+      - run:
+          <<: *should_run_job
       - checkout
       - run:
           <<: *macos_brew_update
       - run:
           name: Build
-          environment:
-            BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
           no_output_timeout: "1h"
           command: |
             set -e
@@ -184,10 +210,11 @@
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V3}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V3}
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}
+            set -x
 
-            git submodule sync && git submodule update -q --init
+            git submodule sync && git submodule update -q --init --recursive
             chmod a+x .jenkins/pytorch/macos-build.sh
             unbuffer .jenkins/pytorch/macos-build.sh 2>&1 | ts
-

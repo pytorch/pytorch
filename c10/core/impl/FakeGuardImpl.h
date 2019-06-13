@@ -54,8 +54,8 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
     current_streams_[s.device_index()] = s.id();
     return Stream(Stream::UNSAFE, s.device(), old_id);
   }
-  DeviceIndex deviceCount() const override {
-    return 1;
+  DeviceIndex deviceCount() const noexcept override {
+    return kFakeGuardImplMaxDevices;
   }
   // Convenience methods for testing
   static DeviceIndex getDeviceIndex() {

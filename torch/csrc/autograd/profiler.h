@@ -1,13 +1,11 @@
 #pragma once
 
-#include <thread>
 #include <iostream>
 #include <mutex>
 #include <memory>
 #include <vector>
 #include <cstdint>
 #include <string>
-#include <list>
 #include <sstream>
 #include <forward_list>
 #include <tuple>
@@ -17,7 +15,7 @@
 #include <ctime>
 #endif
 
-#include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/autograd/record_function.h>
 
 typedef struct CUevent_st* CUDAEventStub;
 
@@ -90,22 +88,49 @@ inline int64_t getTime() {
 #endif
 }
 
-enum class EventKind : uint16_t {
+// Old GCC versions generate warnings incorrectly
+// see https://stackoverflow.com/questions/2463113/g-c0x-enum-class-compiler-warnings
+#ifndef _MSC_VER
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wattributes"
+#endif
+enum class TORCH_API ProfilerState {
+    Disabled,
+    CPU, // CPU-only profiling
+    CUDA, // CPU + CUDA events
+    NVTX,  // only emit NVTX markers
+};
+
+struct TORCH_API ProfilerConfig {
+  ProfilerConfig(ProfilerState state, bool report_input_shapes)
+      : state(state), report_input_shapes(report_input_shapes) {}
+  ~ProfilerConfig();
+  ProfilerState state;
+  bool report_input_shapes;
+};
+
+enum class TORCH_API EventKind : uint16_t {
   Mark,
   PushRange,
   PopRange
 };
+#ifndef _MSC_VER
+#  pragma GCC diagnostic pop
+#endif
 
 struct TORCH_API Event final {
-  Event(EventKind kind, std::string name, uint16_t thread_id, bool record_cuda)
-  : owned_name_(new std::string(std::move(name)))
-  , name_ptr_(owned_name_->c_str())
-  , kind_(kind)
-  , thread_id_(thread_id) { record(record_cuda); }
-  Event(EventKind kind, const char* name, uint16_t thread_id, bool record_cuda)
-  : name_ptr_(name)
-  , kind_(kind)
-  , thread_id_(thread_id) { record(record_cuda); }
+  Event(
+      EventKind kind,
+      StringView name,
+      uint16_t thread_id,
+      bool record_cuda,
+      std::vector<std::vector<int64_t>>&& shapes = {})
+      : name_(std::move(name)),
+        kind_(kind),
+        thread_id_(thread_id),
+        shapes_(shapes) {
+    record(record_cuda);
+  }
 
   void record(bool record_cuda);
   std::string kind() const {
@@ -117,10 +142,13 @@ struct TORCH_API Event final {
     throw std::runtime_error("unknown EventKind");
   }
   const char* name() const {
-    return name_ptr_;
+    return name_.str();
   }
   uint16_t thread_id() const {
     return thread_id_;
+  }
+  std::vector<std::vector<int64_t>> shapes() const {
+    return shapes_;
   }
   double cpu_elapsed_us(const Event & e) {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
@@ -133,14 +161,12 @@ struct TORCH_API Event final {
     return device_;
   }
 private:
-  int64_t cpu_ns_ = 0; // signed to allow for negative intervals, initialized for safety.
-  // std::string is a very large object (usually around 32B),
-  // and this field is used only for user-created ranges, so
-  // it's better to save on size of Events.
-  std::unique_ptr<std::string> owned_name_;
-  const char * name_ptr_;
+  // signed to allow for negative intervals, initialized for safety.
+  int64_t cpu_ns_ = 0;
+  StringView name_;
   EventKind kind_;
   uint16_t thread_id_;
+  std::vector<std::vector<int64_t>> shapes_;
   int device_ = -1;
   struct CUevent_st* event = nullptr;
 };
@@ -191,36 +217,15 @@ struct RangeEventList {
   std::forward_list<block_type> blocks;
 };
 
-enum class ProfilerState {
-    Disabled,
-    CPU, // CPU-only profiling
-    CUDA, // CPU + CUDA events
-    NVTX,  // only emit NVTX markers
-};
-
 TORCH_API RangeEventList& getEventList();
 TORCH_API void mark(std::string name, bool include_cuda = true);
 TORCH_API void pushRange(std::string name);
 TORCH_API void popRange();
 
-struct TORCH_API RecordFunction {
-  explicit RecordFunction(Function* fn);
-
-  explicit RecordFunction(std::string name);
-
-  explicit RecordFunction(const char* name);
-
-  explicit RecordFunction(const char* name, int64_t current_sequence_nr);
-
-  ~RecordFunction() {
-    popRange();
-  }
-};
-
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
 // there no autograd functions are being executed when these function are used.
-TORCH_API void enableProfiler(ProfilerState new_state);
+TORCH_API void enableProfiler(ProfilerConfig);
 TORCH_API thread_event_lists disableProfiler();
 
 

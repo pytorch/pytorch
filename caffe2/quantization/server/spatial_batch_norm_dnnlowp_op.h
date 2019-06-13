@@ -40,4 +40,19 @@ class SpatialBNDNNLowPOp final : public DNNLowPOp<T, SpatialBNOp<CPUContext>> {
   OUTPUT_TAGS(OUTPUT);
 };
 
+namespace internal {
+
+template <typename T>
+void SpatialBNNHWCAVX2(
+    const int N,
+    const int C,
+    const int HxW,
+    const int in_zero_point,
+    const int out_zero_point,
+    const T* X,
+    const float* alpha,
+    const float* beta,
+    T* Y);
+
+} // namespace internal
 } // namespace caffe2

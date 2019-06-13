@@ -7,8 +7,6 @@
 
 namespace caffe2 {
 
-namespace {
-
 template <class SIndex, class Context>
 bool SliceImpl(
     Tensor* output,
@@ -129,7 +127,7 @@ bool SliceImpl(
 
     char* src_offset_bytes = src_bytes + itemsize * src_offset;
     char* dst_offset_bytes = dst_bytes;
-    for (int i = 0; i < num_blocks; ++i) {
+    for (size_t i = 0; i < num_blocks; ++i) {
       char* local_src_offset_bytes =
           src_offset_bytes + i * src_block_size_bytes;
       char* local_dst_offset_bytes =
@@ -175,7 +173,7 @@ bool SliceImpl(
       return true;
     }
 
-    for (int i = 0; i < num_blocks; ++i) {
+    for (size_t i = 0; i < num_blocks; ++i) {
       char* local_src_offset_bytes =
           src_offset_bytes + i * src_block_size_bytes;
       char* local_dst_offset_bytes =
@@ -195,8 +193,6 @@ bool SliceImpl(
   }
   return true;
 }
-
-} // namespace
 
 template <class Context>
 class SliceOp : public Operator<Context> {

@@ -2,7 +2,7 @@
 
 // ${generated_comment}
 
-#include <ATen/Type.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/UndefinedType.h>
 #include <ATen/core/VariableHooksInterface.h>
@@ -13,7 +13,7 @@ namespace at {
 
 void register_cpu_types(Context * context) {
   ${cpu_type_registrations}
-  context->registerType(Backend::Undefined, ScalarType::Undefined, new UndefinedType());
+  context->registerType(Backend::Undefined, new UndefinedType());
 }
 
 } // namespace at

@@ -276,7 +276,6 @@ def _save(obj, f, pickle_module, pickle_protocol):
                     location,
                     obj.size(),
                     view_metadata)
-
         return None
 
     sys_info = dict(
@@ -377,10 +376,12 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
     """
     new_fd = False
     if isinstance(f, str) or \
-            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+            (sys.version_info[0] == 2 and isinstance(f, unicode)):
         new_fd = True
         f = open(f, 'rb')
+    elif (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+        new_fd = True
+        f = f.open('rb')
     try:
         return _load(f, map_location, pickle_module, **pickle_load_args)
     finally:
@@ -577,6 +578,7 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
     for key in deserialized_storage_keys:
         assert key in deserialized_objects
         deserialized_objects[key]._set_from_file(f, offset, f_should_read_directly)
-        offset = None
+        if offset is not None:
+            offset = f.tell()
 
     return result

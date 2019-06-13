@@ -76,6 +76,12 @@ void convertNetDefToIR(
     Graph* g,
     std::unordered_map<std::string, Value*>* valueMapPtr,
     const std::string& prefix) {
+  if (!valueMapPtr) {
+    std::unordered_map<std::string, Value*> localValueMap;
+    // If valueMapPtr is null, we just use a local map since we don't need
+    // to return the valueMap to the caller.
+    return convertNetDefToIR(net, g, &localValueMap, prefix);
+  }
   std::unordered_map<std::string, Value*>& valueMap = *valueMapPtr;
   std::unordered_map<Value*, std::string> namesMap;
   valueMap.clear();

@@ -20,6 +20,7 @@ from setuptools.command.build_ext import build_ext
 
 IS_WINDOWS = sys.platform == 'win32'
 
+NAMEDTENSOR_ENABLED = os.getenv('USE_NAMEDTENSOR', '').upper() == '1'
 
 def _find_cuda_home():
     '''Finds the CUDA install path.'''
@@ -232,8 +233,10 @@ class BuildExtension(build_ext, object):
         self._check_abi()
         for extension in self.extensions:
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
+            if NAMEDTENSOR_ENABLED:
+                self._add_compile_flag(extension, '-DNAMEDTENSOR_ENABLED')
             self._define_torch_extension_name(extension)
-            self._add_gnu_abi_flag_if_binary(extension)
+            self._add_gnu_cpp_abi_flag(extension)
 
         # Register .cu and .cuh as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh']
@@ -370,7 +373,7 @@ class BuildExtension(build_ext, object):
         check_compiler_abi_compatibility(compiler)
 
     def _add_compile_flag(self, extension, flag):
-        extension.extra_compile_args = copy.copy(extension.extra_compile_args)
+        extension.extra_compile_args = copy.deepcopy(extension.extra_compile_args)
         if isinstance(extension.extra_compile_args, dict):
             for args in extension.extra_compile_args.values():
                 args.append(flag)
@@ -387,15 +390,9 @@ class BuildExtension(build_ext, object):
         define = '-DTORCH_EXTENSION_NAME={}'.format(name)
         self._add_compile_flag(extension, define)
 
-    def _add_gnu_abi_flag_if_binary(self, extension):
-        # If the version string looks like a binary build,
-        # we know that PyTorch was compiled with gcc 4.9.2.
-        # if the extension is compiled with gcc >= 5.1,
-        # then we have to define _GLIBCXX_USE_CXX11_ABI=0
-        # so that the std::string in the API is resolved to
-        # non-C++11 symbols
-        if _is_binary_build():
-            self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=0')
+    def _add_gnu_cpp_abi_flag(self, extension):
+        # use the same CXX ABI as what PyTorch was compiled with
+        self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI)))
 
 
 def CppExtension(name, sources, *args, **kwargs):
@@ -435,7 +432,6 @@ def CppExtension(name, sources, *args, **kwargs):
         libraries = kwargs.get('libraries', [])
         libraries.append('c10')
         libraries.append('caffe2')
-        libraries.append('torch')
         libraries.append('torch_python')
         libraries.append('_C')
         kwargs['libraries'] = libraries
@@ -480,8 +476,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('cudart')
     if IS_WINDOWS:
         libraries.append('c10')
+        libraries.append('c10_cuda')
         libraries.append('caffe2')
-        libraries.append('torch')
         libraries.append('torch_python')
         libraries.append('caffe2_gpu')
         libraries.append('_C')
@@ -519,7 +515,11 @@ def include_paths(cuda=False):
         os.path.join(lib_include, 'THC')
     ]
     if cuda:
-        paths.append(_join_cuda_home('include'))
+        cuda_home_include = _join_cuda_home('include')
+        # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
+        # but gcc dosn't like having /usr/include passed explicitly
+        if cuda_home_include != '/usr/include':
+            paths.append(cuda_home_include)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
     return paths
@@ -835,7 +835,11 @@ def _write_ninja_file_and_build(name,
                                 verbose,
                                 with_cuda):
     verify_ninja_availability()
-    check_compiler_abi_compatibility(os.environ.get('CXX', 'c++'))
+    if IS_WINDOWS:
+        compiler = os.environ.get('CXX', 'cl')
+    else:
+        compiler = os.environ.get('CXX', 'c++')
+    check_compiler_abi_compatibility(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
     extra_ldflags = _prepare_ldflags(
@@ -888,7 +892,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
 
         extra_ldflags.append('c10.lib')
         extra_ldflags.append('caffe2.lib')
-        extra_ldflags.append('torch.lib')
         extra_ldflags.append('torch_python.lib')
         if with_cuda:
             extra_ldflags.append('caffe2_gpu.lib')
@@ -983,9 +986,14 @@ def _write_ninja_file(path,
     extra_ldflags = [flag.strip() for flag in extra_ldflags]
     extra_include_paths = [flag.strip() for flag in extra_include_paths]
 
+    if IS_WINDOWS:
+        compiler = os.environ.get('CXX', 'cl')
+    else:
+        compiler = os.environ.get('CXX', 'c++')
+
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
-    config.append('cxx = {}'.format(os.environ.get('CXX', 'c++')))
+    config.append('cxx = {}'.format(compiler))
     if with_cuda:
         config.append('nvcc = {}'.format(_join_cuda_home('bin', 'nvcc')))
 
@@ -1006,11 +1014,12 @@ def _write_ninja_file(path,
 
     common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
     common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
+    if NAMEDTENSOR_ENABLED:
+        common_cflags.append('-DNAMEDTENSOR_ENABLED')
     common_cflags += ['-I{}'.format(include) for include in user_includes]
     common_cflags += ['-isystem {}'.format(include) for include in system_includes]
 
-    if _is_binary_build():
-        common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=0']
+    common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
 
     cflags = common_cflags + ['-fPIC', '-std=c++11'] + extra_cflags
     if IS_WINDOWS:
@@ -1022,6 +1031,7 @@ def _write_ninja_file(path,
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS
         if IS_WINDOWS:
             cuda_flags = _nt_quote_args(cuda_flags)
+            cuda_flags += _nt_quote_args(extra_cuda_cflags)
         else:
             cuda_flags += ['--compiler-options', "'-fPIC'"]
             cuda_flags += extra_cuda_cflags

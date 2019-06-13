@@ -172,7 +172,7 @@ void DataChannelGloo::allGatherT(
           "allGather got input and output on different devices");
     }
   }
-  uint64_t tensor_bytes = input.type().elementSizeInBytes() * input.numel();
+  uint64_t tensor_bytes = input.element_size() * input.numel();
   uint64_t all_tensor_bytes = tensor_bytes * output.size();
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_GATHER, T>(
       group_id,
@@ -236,7 +236,7 @@ void DataChannelGloo::allReduceT(
     at::Tensor& t,
     THDReduceOp operation,
     THDGroup group_id) {
-  uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
+  uint64_t tensor_bytes = t.element_size() * t.numel();
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_REDUCE, T>(
       group_id,
       _groups.at(group_id),
@@ -276,7 +276,7 @@ void DataChannelGloo::broadcastT(
     at::Tensor& data,
     rank_type src_rank,
     THDGroup group_id) {
-  uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
+  uint64_t tensor_bytes = data.element_size() * data.numel();
   auto ret = _cache->getAlgorithm<CollectiveType::BROADCAST, T>(
       group_id,
       _groups.at(group_id),

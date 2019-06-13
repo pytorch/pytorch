@@ -7,6 +7,11 @@ def _is_script_module(module):
     return isinstance(module, torch.jit.ScriptModule)
 
 
+def _is_script_method(module):
+    import torch.jit
+    return isinstance(module, torch._C.ScriptMethod)
+
+
 def _init_script_module():
     import torch.jit
     return torch.jit.ScriptModule()
@@ -56,31 +61,13 @@ def _replicatable_module(module, memo=None):
     return True
 
 
-def _build_param_dict(modules, module_copies, module_indices):
-    param_dict = {}
-    for module in modules:
-        if not _is_script_module(module):
-            continue
-        replica = module_copies[module_indices[module]]
-        for name, param in module.named_parameters(recurse=False):
-            param_dict[param] = (replica, name)
-        for name, buffer in module.named_buffers(recurse=False):
-            param_dict[buffer] = (replica, name)
-    return param_dict
-
-
 def _copy_scriptmodule_methods(modules, module_copies, module_indices):
-    param_dict = _build_param_dict(modules, module_copies, module_indices)
     for i, module in enumerate(modules):
         if not _is_script_module(module):
             continue
         replica = module_copies[i]
-        for method_name in module._method_names():
-            method = module._get_method(method_name)
-            param_list = []
-            for param in method.initial_ivalues():
-                param_list.append(param_dict[param])
-            replica._copy_method(method_name, param_list, module)
+        for method_name in module._c._method_names():
+            replica._c.clone_method(module._c, method_name)
 
 
 def _broadcast_coalesced_reshape(tensors, devices, detach=False):
@@ -127,7 +114,7 @@ def replicate(network, devices, detach=False):
     modules = list(network.modules())
     module_copies = [[] for device in devices]
     module_indices = {}
-    scriptmodule_skip_attr = {"_parameters", "_buffers", "_modules"}
+    scriptmodule_skip_attr = {"_parameters", "_buffers", "_modules", "forward", "_c"}
 
     for i, module in enumerate(modules):
         module_indices[module] = i
@@ -136,9 +123,17 @@ def replicate(network, devices, detach=False):
                 # we have to initialize ScriptModule properly so that
                 # it works with pybind11
                 replica = _init_script_module()
-                keys = set(module.__dict__.keys()) - scriptmodule_skip_attr
+
+                attribute_names = set(entry[0] for entry in module._c._get_attributes())
+
+                keys = set(module.__dict__.keys()) - scriptmodule_skip_attr - attribute_names
                 for key in keys:
-                    replica.__dict__[key] = module.__dict__[key]
+                    if not _is_script_method(module.__dict__[key]):
+                        replica.__dict__[key] = module.__dict__[key]
+                for name, the_type, value in module._c._get_attributes():
+                    if name in module._buffers.keys():
+                        continue
+                    replica._c._register_attribute(name, the_type, value)
             else:
                 replica = module.__new__(type(module))
                 replica.__dict__ = module.__dict__.copy()

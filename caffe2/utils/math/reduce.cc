@@ -16,6 +16,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/math.h"
 #include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math/utils.h"
 
@@ -662,6 +663,7 @@ DELEGATE_REDUCE_FUNCTION(double, ReduceL2, 0.0, true)
     MomentsImpl<T>(ndim, X_dims, Y_dims, X, mean, var, context); \
   }
 CAFFE2_SPECIALIZED_MOMENTS(float)
+CAFFE2_SPECIALIZED_MOMENTS(double)
 #undef CAFFE2_SPECIALIZED_MOMENTS
 
 } // namespace math

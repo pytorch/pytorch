@@ -19,6 +19,10 @@ VALGRIND=${VALGRIND:=ON}
 ./undefined_tensor_test
 ./extension_backend_test
 ./xla_tensor_test
+./tensor_iterator_test
+./Dimname_test
+./NamedTensor_test
+./cpu_generator_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi
@@ -33,6 +37,9 @@ if [[ -x ./stream_test ]]; then
 fi
 if [[ -x ./cuda_half_test ]]; then
   ./cuda_half_test
+fi
+if [[ -x ./cuda_distributions_test ]]; then
+  ./cuda_distributions_test
 fi
 if [[ -x ./cuda_optional_test ]]; then
   ./cuda_optional_test

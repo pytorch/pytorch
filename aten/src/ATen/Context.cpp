@@ -10,7 +10,6 @@
 #include <string>
 #include <stdexcept>
 
-#include <ATen/CPUGenerator.h>
 #include <ATen/RegisterCPU.h>
 #include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
@@ -36,9 +35,6 @@ Context::Context()
 
   THSetDefaultErrorHandler(errorHandler,nullptr);
   THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
-
-  generator_registry[static_cast<int>(DeviceType::CPU)]
-    .reset(new CPUGenerator(this));
   register_cpu_types(this);
 }
 
@@ -84,6 +80,14 @@ bool Context::hasMKL() const {
 #endif
 }
 
+bool Context::hasMKLDNN() const {
+#if AT_MKLDNN_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool Context::hasOpenMP() const {
 #ifdef _OPENMP
   return true;
@@ -104,9 +108,12 @@ bool Context::setFlushDenormal(bool on) {
   return at::cpu::set_flush_denormal(on);
 }
 
+// NOTE: We also check `at::NonVariableTypeMode`, and if it's enabled we always
+// return non-Variable type in this function.
+// See NOTE [ Treating Variables as non-Variables in type dispatch ]
 TypeExtendedInterface& getType(TensorOptions options) {
   return globalContext().getType(
-            options.backend(), typeMetaToScalarType(options.dtype()), options.is_variable());
+            options.backend(), typeMetaToScalarType(options.dtype()), options.is_variable() && !at::NonVariableTypeMode::is_enabled());
 }
 
 // NOTE: We also check `at::NonVariableTypeMode`, and if it's enabled we always
@@ -115,7 +122,7 @@ TypeExtendedInterface& getType(TensorOptions options) {
 TypeExtendedInterface& getType(const TensorImpl* impl) {
   Backend backend = tensorTypeIdToBackend(impl->type_id());
   return globalContext().getType(
-            backend, typeMetaToScalarType(impl->dtype()), impl->is_variable() && !at::NonVariableTypeMode::is_enabled());
+            backend, typeMetaToScalarType(impl->dtype()), impl->is_variable());
 }
 
 TypeExtendedInterface& getType(const Tensor& t) {

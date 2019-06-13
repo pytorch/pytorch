@@ -1062,7 +1062,7 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
             for i, peer in enumerate(devices):
                 if i == 0:
                     continue  # Skip the first device
-                if p2p_access_pattern is not None and not p2p_access_pattern[
+                if p2p_access_pattern is not None and p2p_access_pattern.size and not p2p_access_pattern[
                     devices[0], peer
                 ]:
                     # Copy from peer to d0

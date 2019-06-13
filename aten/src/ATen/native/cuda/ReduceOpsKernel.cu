@@ -12,6 +12,7 @@
 #include <limits>
 #include <tuple>
 #include <THC/THCNumerics.cuh>
+#include <thrust/tuple.h>
 
 
 namespace at { namespace native {
@@ -25,12 +26,16 @@ void sum_kernel_impl(TensorIterator& iter) {
 
 template <typename scalar_t>
 void std_var_kernel_impl(TensorIterator& iter, bool unbiased, bool take_sqrt) {
-  gpu_reduce_kernel<scalar_t, scalar_t>(iter, WelfordOps<scalar_t, scalar_t, int32_t, float> { unbiased, take_sqrt }, WelfordData<scalar_t, int32_t, float> {});
+  // reducing unrolling factor to 2 for welford kernel
+  // This is necessary to lower register usage that leads to register spills.
+  gpu_reduce_kernel<scalar_t, scalar_t, 2>(iter, WelfordOps<scalar_t, scalar_t, int32_t, float, thrust::tuple<scalar_t, scalar_t>> { unbiased, take_sqrt }, WelfordData<scalar_t, int32_t, float> {});
 }
 
 template <>
 void std_var_kernel_impl<at::Half>(TensorIterator& iter, bool unbiased, bool take_sqrt) {
-  gpu_reduce_kernel<at::Half, at::Half>(iter, WelfordOps<at::Half, float, int32_t, float> { unbiased, take_sqrt }, WelfordData<float, int32_t, float> {});
+  // reducing unrolling factor to 2 for welford kernel
+  // This is necessary to lower register usage that leads to register spills.
+  gpu_reduce_kernel<at::Half, at::Half, 2>(iter, WelfordOps<at::Half, float, int32_t, float, thrust::tuple<at::Half, at::Half>> { unbiased, take_sqrt }, WelfordData<float, int32_t, float> {});
 }
 
 template <typename scalar_t, typename acc_t=scalar_t>
@@ -83,7 +88,7 @@ static void sum_kernel_cuda(TensorIterator& iter) {
     // type promotion that does cast and reduction in a single kernel
     return sum_kernel_impl<at::Half, float, float>(iter);
   }
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "sum_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, iter.dtype(), "sum_cuda", [&]() {
     sum_kernel_impl<scalar_t>(iter);
   });
 }

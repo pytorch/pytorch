@@ -72,31 +72,41 @@ std::vector<Tensor> toListOfOptionalTensor(const IValue& v) {
 }
 
 template<size_t N>
-std::array<bool, N> as_bool_array(const std::vector<bool>& vec) {
+std::array<bool, N> as_bool_array(const c10::ListPtr<bool>& list) {
   std::array<bool, N> res;
-  AT_ASSERT(vec.size() == N);
-  std::copy(vec.begin(), vec.end(), res.begin());
+  AT_ASSERT(list.size() == N);
+  std::copy(list.begin(), list.end(), res.begin());
   return res;
 }
 
 RegisterOperators reg({
   Operator(
-  "aten::get_device(Tensor self) -> int",
-  [](Stack & stack) {
-      autograd::profiler::RecordFunction record("get_device");
-      auto result = at::get_device(
-          (std::move(peek(stack, 0, 1))).toTensor()
-      );
-      drop(stack, 1);
-      pack(stack, std::move(result));
-      return 0;
-  }
+      "aten::get_device(Tensor self) -> int",
+      [](Stack & stack) {
+          RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
+          auto result = at::get_device(
+              (std::move(peek(stack, 0, 1))).toTensor()
+          );
+          drop(stack, 1);
+          pack(stack, std::move(result));
+          return 0;
+      }
   ),
   Operator(
       "aten::storage_offset(Tensor self) -> int",
       [](Stack & stack) {
-          autograd::profiler::RecordFunction record("storage_offset");
+          RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
           auto result = ((std::move(peek(stack, 0, 1))).toTensor()).storage_offset();
+          drop(stack, 1);
+          pack(stack, std::move(result));
+          return 0;
+      }
+  ),
+  Operator(
+      "aten::is_contiguous(Tensor self) -> bool",
+      [](Stack & stack) {
+          RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
+          auto result = ((std::move(peek(stack, 0, 1))).toTensor()).is_contiguous();
           drop(stack, 1);
           pack(stack, std::move(result));
           return 0;

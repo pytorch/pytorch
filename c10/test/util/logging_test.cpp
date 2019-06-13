@@ -77,6 +77,13 @@ TEST(LoggingTest, Join) {
   EXPECT_EQ(s, "1, 2, 3");
 }
 
+TEST(LoggingTest, TestDanglingElse) {
+  if (true)
+    DCHECK_EQ(1, 1);
+  else
+    GTEST_FAIL();
+}
+
 #if GTEST_HAS_DEATH_TEST
 TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   bool kTrue = true;

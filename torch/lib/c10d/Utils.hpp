@@ -34,7 +34,7 @@ inline std::string toString(at::IntArrayRef l) {
 }
 
 inline void assertSameType(
-    const at::Type& type,
+    const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
   for (size_t i = 0; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
@@ -66,7 +66,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 
   // Ensure all tensors have identical type and shape
-  auto& type = tensors[0].type();
+  auto type = tensors[0].type();
   auto sizes = tensors[0].sizes();
   for (size_t i = 1; i < tensors.size(); i++) {
     if (tensors[i].type() != type) {
@@ -88,7 +88,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
 
 inline void assertTypeMatch(
     std::function<void(const std::string&)> fn,
-    const at::Type& type,
+    const at::DeprecatedTypeProperties& type,
     const at::ArrayRef<at::Tensor>& tensors,
     size_t index) {
   if (tensors[index].type() != type) {
@@ -179,7 +179,7 @@ inline void assertCPU(
 inline void assertTypeAndSizesMatch(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor>& tensors,
-    const at::Type& type,
+    const at::DeprecatedTypeProperties& type,
     const at::IntArrayRef& sizes) {
   for (size_t i = 0; i < tensors.size(); i++) {
     assertTypeMatch(fn, type, tensors, i);
@@ -272,8 +272,13 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
 
 template <typename T>
 inline T* getDataPointer(const at::Tensor& tensor) {
-  // NB: This does NOT respect storage_offset from the tensor
-  return static_cast<T*>(tensor.storage().data());
+  // This method is only used in ProcessGroupGloo for now. Call sites must make
+  // sure that the input tensor is contiguous. It is OK if the tensor does not
+  // start from the beginning of the storage. For example, it could come from
+  // chunk(..., dim=0)[1]. Hence, we need to use data_ptr() instead of
+  // tensor.storage().data()
+  // NB: not using tensor.data<T>() because tensor is not aware of gloo::TYPE
+  return static_cast<T*>(tensor.data_ptr());
 }
 
 template <typename T>
@@ -304,6 +309,8 @@ while (true) {                                                \
   if (!(success_cond)) {                                      \
     if (errno == EINTR) {                                     \
       continue;                                               \
+    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
+      throw std::runtime_error("Socket Timeout");             \
     } else {                                                  \
       throw std::system_error(errno, std::system_category()); \
     }                                                         \
