@@ -79,11 +79,12 @@ std::future<void> intraop_launch_future(std::function<void()> func) {
   auto future = func_promise.get_future();
   tg_.run(
     std::bind(
-      [func](std::promise<void>&& fp) {
-        func();
+      [](std::promise<void>&& fp, std::function<void()>&& f) {
+        f();
         fp.set_value();
       },
-      std::move(func_promise)
+      std::move(func_promise),
+      std::move(func)
     )
   );
   return future;

@@ -74,7 +74,7 @@ inline void parallel_for(
         internal::_get_intraop_pool().run(
           std::bind(
             // copy task_id, local_start, local_end
-            [task, task_id, local_start, local_end](std::promise<void>&& fp) {
+            [&task, task_id, local_start, local_end](std::promise<void>&& fp) {
               task(task_id, local_start, local_end);
               fp.set_value();
             },
@@ -147,7 +147,7 @@ inline scalar_t parallel_reduce(
         internal::_get_intraop_pool().run(
           std::bind(
             // copy task_id, local_start, local_end
-            [&, task_id, local_start, local_end](std::promise<void>&& fp) {
+            [&task, task_id, local_start, local_end](std::promise<void>&& fp) {
               task(task_id, local_start, local_end);
               fp.set_value();
             }
