@@ -860,11 +860,18 @@ target_compile_definitions(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 # Parallelism settings
 #  OPENMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
+#  NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
 set(PARALLEL_BACKEND "OPENMP" CACHE STRING "ATen parallel backend")
+message(STATUS "Using parallel backend: ${PARALLEL_BACKEND}")
 if ("${PARALLEL_BACKEND}" STREQUAL "OPENMP")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_OPENMP=1")
 elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE")
   target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE=1")
+elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE_TBB")
+  if (NOT USE_TBB)
+    message(FATAL_ERROR "Using NATIVE_TBB backend but USE_TBB is off")
+  endif()
+  target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE_TBB=1")
 else()
   message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
 endif()
