@@ -26,7 +26,8 @@ class FunctionalAPITest(TestCase):
                            min_out_channels=1, max_out_channels=7,
                            H_range=(6, 12), W_range=(6, 12),
                            kH_range=(3, 5), kW_range=(3, 5),
-                           dtypes=((torch.quint8, np.uint8, 0),)),
+                           dtypes=((torch.quint8, np.uint8, 0),),
+                           max_groups=4),
            padH=st.integers(1, 3), padW=st.integers(1, 3),
            sH=st.integers(1, 3), sW=st.integers(1, 3),
            dH=st.integers(1, 2), dW=st.integers(1, 2),
@@ -37,16 +38,12 @@ class FunctionalAPITest(TestCase):
         The correctness is defined by the behavior being similar to the
         `quantized._ops` implementation.
         """
-        # Not implemented parameters
-        o_padH, o_padW = 0, 0
-        groups = 1
-
         # Random iunputs
         X, (scale, zero_point), (qmin, qmax), (torch_type, np_type) = Q
-        (inputs, filters, bias) = X
+        (inputs, filters, bias, groups) = X
 
         iC, oC = inputs.shape[1], filters.shape[0]
-        assume(iC % groups == 0)
+
         iH, iW = inputs.shape[2:]
         kH, kW = filters.shape[2:]
         assume(kH // 2 >= padH)
@@ -63,7 +60,6 @@ class FunctionalAPITest(TestCase):
         kernel_size = (kH, kW)
         stride = (sH, sW)
         i_padding = (padH, padW)
-        o_padding = (o_padH, o_padW)
         dilation = (dH, dW)
 
         # Quantized inputs
