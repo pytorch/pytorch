@@ -125,6 +125,7 @@ void intraop_launch(std::function<void()> func) {
 
 std::future<void> intraop_launch_future(std::function<void()> func) {
   std::promise<void> func_promise;
+  auto future = func_promise.get_future();
   if (!in_parallel_region() && get_num_threads() > 1) {
     internal::_get_intraop_pool().run(
       std::bind([func](std::promise<void>&& fp) {
@@ -138,7 +139,7 @@ std::future<void> intraop_launch_future(std::function<void()> func) {
     func();
     func_promise.set_value();
   }
-  return func_promise.get_future();
+  return future;
 }
 
 } // namespace at
