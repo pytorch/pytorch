@@ -243,7 +243,7 @@ struct ParserImpl {
         // not greater than 'precedence'
         break;
 
-      if (L.cur().kind == TK_IN && in_for) {
+      if (L.cur().kind == TK_IN && parse_TK_IN_as_comp_op) {
         // Don't parse for for-in loops, but do parse in comparison ops
         break;
       }
@@ -261,9 +261,9 @@ struct ParserImpl {
       }
 
       if (kind == TK_FOR) {
-        in_for = true;
+        parse_TK_IN_as_comp_op = true;
         auto target = parseExp();
-        in_for = false;
+        parse_TK_IN_as_comp_op = false;
         L.expect(TK_IN);
         auto iter = parseExp();
         prefix = ListComp::create(pos, Expr(prefix), target, iter);
@@ -535,10 +535,11 @@ struct ParserImpl {
   TreeRef parseFor() {
     auto r = L.cur().range;
     L.expect(TK_FOR);
-    in_for = true;
-    auto targets = parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseExp);
+    parse_TK_IN_as_comp_op = true;
+    auto targets = parseList(TK_NOTHING, ',', TK_NOTHING, &ParserImpl::parseExp);
+    parse_TK_IN_as_comp_op = false;
+    L.expect(TK_IN);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
-    in_for = false;
     auto body = parseStatements();
     return For::create(r, targets, itrs, body);
   }
@@ -645,7 +646,7 @@ struct ParserImpl {
   }
   Lexer L;
   SharedParserData& shared;
-  bool in_for = false;
+  bool parse_TK_IN_as_comp_op = false;
 };
 
 Parser::Parser(const std::shared_ptr<Source>& src)

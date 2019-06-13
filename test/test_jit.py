@@ -13153,6 +13153,17 @@ a")
         self.checkScript(fn, ({'hi': 2, 'bye': 3},))
         self.checkScript(fn, ({'bye': 3},))
 
+    def test_in_for_and_comp_expr(self):
+        def fn(d):
+            # type: (Dict[str, int]) -> List[int]
+            out = [1]
+            for i in range(d["hi"] if "hi" in d else 6):
+                out.append(i)
+            return out
+
+        self.checkScript(fn, ({'hi': 2, 'bye': 3},))
+        self.checkScript(fn, ({'bye': 3},))
+
     def test_split(self):
         def split_two(tensor):
             a, b, c = torch.split(tensor, 2, dim=1)
