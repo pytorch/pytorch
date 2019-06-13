@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import copy
 import itertools
 
@@ -272,6 +273,7 @@ class DistributedDataParallel(Module):
         self.module = module
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
+        self.sync_grads = True
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -377,6 +379,27 @@ class DistributedDataParallel(Module):
                                "init_process_group and have not passed "
                                "process_group argument to DDP constructor")
 
+    @contextmanager
+    def no_sync(self):
+        r"""
+        A context manager to disable gradient synchronizations across DDP
+        processes. Within this context, gradients will be accumulated on module
+        variables, which will later be synchronized in the first
+        forward-backward pass exiting the context.
+
+        Example::
+
+            >>> ddp = torch.nn.DistributedDataParallel(model, pg)
+            >>> with ddp.no_sync():
+            ...   for input in inputs:
+            ...     ddp(input).backward()  # no synchronization, accumulate grads
+            ... ddp(another_input).backward()  # synchronize grads
+        """
+        old_sync_grads = self.sync_grads
+        self.sync_grads = False
+        yield
+        self.sync_grads = old_sync_grads
+
     def forward(self, *inputs, **kwargs):
         self._sync_params()
         if self.device_ids:
@@ -389,7 +412,7 @@ class DistributedDataParallel(Module):
         else:
             output = self.module(*inputs, **kwargs)
 
-        if torch.is_grad_enabled():
+        if torch.is_grad_enabled() and self.sync_grads:
             # We'll return the output object verbatim since it is a freeform
             # object. We need to find any tensors in this object, though,
             # because we need to figure out which parameters were used during
