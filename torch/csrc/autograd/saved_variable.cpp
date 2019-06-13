@@ -35,9 +35,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
 
 Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   if (!data_.defined()) {
-    if (!was_default_constructed_) {
-      throw std::runtime_error(ERR_BACKWARD_TWICE);
-    }
+    AT_ASSERT(was_default_constructed_);
     return Variable();
   }
 
