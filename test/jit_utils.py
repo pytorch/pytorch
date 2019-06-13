@@ -59,9 +59,18 @@ class JitTestCase(TestCase):
         yield None
         self.setHooks()
 
+    def _isHookExceptionOk(self, e):
+        se = str(e)
+        allowed = ("Could not export Python function",
+                   "closures are not exportable")
+        for a in allowed:
+            if a in se:
+                return True
+        return False
+
     def emitFunctionHook(self, func):
         # func has invalid names for export, skip the jitter check
-        if func.name == "<lambda>" or "aten::" in func.name:
+        if func.name == "<lambda>" or "aten::" in func.name or _in_first_class_mode:
             return
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with self.disableEmitHook():
@@ -72,9 +81,7 @@ class JitTestCase(TestCase):
                 src2, constants2 = _jit_python_print(func2)
                 self.assertMultiLineEqual(src, src2)
             except RuntimeError as e:
-                se = str(e)
-                if "Could not export Python function" not in se and \
-                   "closures are not exportable" not in se:
+                if not self._isHookExceptionOk(e):
                     raise
 
     def emitModuleHook(self, module):
@@ -109,13 +116,9 @@ class JitTestCase(TestCase):
                 # check that we have no duplicate names
                 self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
                 main_module = archive.open('archive/code/archive.py')
-                main_module_code = ""
-                for line in main_module:
-                    main_module_code += line.decode()
+                main_module_code = "".join([line.decode() for line in main_module])
             except RuntimeError as e:
-                se = str(e)
-                if "Could not export Python function" not in se and \
-                   "closures are not exportable" not in se:
+                if not self._isHookExceptionOk(e):
                     raise
                 else:
                     return
@@ -131,10 +134,7 @@ class JitTestCase(TestCase):
             saved_module_buffer_2.seek(0)
             archive2 = zipfile.ZipFile(saved_module_buffer_2)
             main_module_2 = archive2.open('archive/code/archive.py')
-
-            main_module_2_code = ""
-            for line in main_module_2:
-                main_module_2_code += line.decode()
+            main_module_2_code = "".join([line.decode() for line in main_module_2])
 
             self.assertMultiLineEqual(main_module_code, main_module_2_code)
 
@@ -427,6 +427,19 @@ def enable_profiling_mode():
     torch._C._jit_set_profiling_mode(True)
     yield
     torch._C._jit_set_profiling_mode(False)
+
+
+_in_first_class_mode = False
+@contextmanager
+def enable_first_class_mode():
+    global _in_first_class_mode
+    old = _in_first_class_mode
+    torch._C._jit_set_first_class_mode(True)
+    _in_first_class_mode = True
+    yield
+    torch._C._jit_set_first_class_mode(old)
+    _in_first_class_mode = old
+
 
 # note: not re-entrant, use unnested only
 @contextmanager
