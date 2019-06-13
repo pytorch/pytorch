@@ -81,5 +81,12 @@ void intraop_launch(std::function<void()> func) {
   func();
 }
 
+std::future<void> intraop_launch_future(std::function<void()> func) {
+  func();
+  std::promise<void> func_promise;
+  func_promise.set_value();
+  return func_promise.get_future();
+}
+
 } // namespace at
 #endif
