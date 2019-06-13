@@ -95,7 +95,7 @@ MatchTypeReturn tryToInferContainerType(py::handle input);
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
 //   input is a None
-//   input is an empty container (list, dict, tuple)
+//   input is an empty container (list, dict)
 //   input is an list with element types that cannot be unified
 //   input is an dict with key or value types that cannot be unified
 inline MatchTypeReturn tryToInferType(py::handle input) {
@@ -177,8 +177,11 @@ inline MatchTypeReturn tryToInferContainerType(py::handle input) {
       auto unified_key =
           unifyOrInitializeType(key_type, *entry_key_type_match.type);
       if (!unified_key) {
-        return MatchTypeReturn(
-            "Dictionary inputs to traced functions must have consistent type");
+        return MatchTypeReturn(c10::str(
+            "Dictionary inputs to traced functions must have consistent type. Found ",
+            key_type->python_str(),
+            " and ",
+            (*entry_key_type_match.type)->python_str()));
       }
 
       // Try to infer the value type and unify it with the existing one
@@ -189,8 +192,11 @@ inline MatchTypeReturn tryToInferContainerType(py::handle input) {
       auto unified_value =
           unifyOrInitializeType(value_type, *entry_value_type_match.type);
       if (!unified_value) {
-        return MatchTypeReturn(
-            "Dictionary inputs to traced functions must have consistent type");
+        return MatchTypeReturn(c10::str(
+            "Dictionary inputs to traced functions must have consistent type. Found ",
+            value_type->python_str(),
+            " and ",
+            (*entry_value_type_match.type)->python_str()));
       }
 
       key_type = *unified_key;
@@ -208,15 +214,20 @@ inline MatchTypeReturn tryToInferContainerType(py::handle input) {
     for (auto elem : list) {
       auto element_type_match = tryToInferType(elem);
       if (!element_type_match.type) {
-        return MatchTypeReturn("Could not infer type of list element");
+        return MatchTypeReturn(c10::str(
+            "Could not infer type of list element: ",
+            element_type_match.errMsg));
       }
-      auto unify =
+      auto unified_type =
           unifyOrInitializeType(element_type, *element_type_match.type);
-      if (!unify) {
-        return MatchTypeReturn(
-            "List inputs to traced functions must have consistent element type");
+      if (!unified_type) {
+        return MatchTypeReturn(c10::str(
+            "List inputs to traced functions must have consistent element type. Found ",
+            element_type->python_str(),
+            " and ",
+            (*element_type_match.type)->python_str()));
       }
-      element_type = *unify;
+      element_type = *unified_type;
     }
     return MatchTypeReturn(ListType::create(element_type));
   } else {
@@ -238,31 +249,30 @@ inline IValue toIValue(
     c10::optional<int32_t> N = c10::nullopt);
 
 inline TypedIValue toTraceableIValue(py::handle input) {
-  try {
+  // try {
+    auto match = tryToInferType(input);
+    if (!match.type) {
+      AT_ERROR(
+          "Tracer cannot infer type of ", py::str(input), "\n:", match.errMsg);
+    }
+    auto type = *match.type;
 
-  auto match = tryToInferType(input);
-  if (!match.type) {
+    if (type->kind() == TypeKind::ListType ||
+        type->kind() == TypeKind::DictType ||
+        type->kind() == TypeKind::TupleType ||
+        type->isSubtypeOf(TensorType::get())) {
+      return TypedIValue(toIValue(input, type), type);
+    }
+
     AT_ERROR(
-        "Tracer cannot infer type of ", py::str(input), "\n:", match.errMsg);
-  }
-  auto type = *match.type;
-
-  if (type->kind() == TypeKind::ListType ||
-      type->kind() == TypeKind::DictType ||
-      type->kind() == TypeKind::TupleType ||
-      type->isSubtypeOf(TensorType::get())) {
-    return TypedIValue(toIValue(input, type), type);
-  }
-
-  AT_ERROR(
-      "Type '",
-      type->python_str(),
-      "' cannot be traced. Only Tensors and Lists, Dicts, and"
-      " Tuples of Tensors can be traced");
-  } catch(...) {
-    tracer::abandon();
-    throw;
-  }
+        "Type '",
+        type->python_str(),
+        "' cannot be traced. Only Tensors and Lists, Dicts, and"
+        " Tuples of Tensors can be traced");
+  // } catch (...) {
+  //   tracer::abandon();
+  //   throw;
+  // }
 }
 
 inline IValue toIValue(py::handle input) {
