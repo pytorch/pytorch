@@ -88,6 +88,56 @@ namespace {
     check_dim_size(gradOutput, ndim, ndim-2, outputHeight);
     check_dim_size(gradOutput, ndim, ndim-1, outputWidth);
   }
+
+  static inline void
+  avg_pool3d_shape_check(
+    const Tensor& input,
+    int64_t nslices,
+    int kT, int kH, int kW,
+    int dT, int dH, int dW,
+    int pT, int pH, int pW,
+    int64_t itime, int64_t iheight, int64_t iwidth,
+    int64_t otime, int64_t oheight, int64_t owidth)
+  {
+    TORCH_CHECK(kT > 0 && kW > 0 && kH > 0,
+              "kernel size should be greater than zero, but got ",
+              "kT: ", kT, " kH: ", kH, " kW: ", kW);
+    TORCH_CHECK(dT > 0 && dW > 0 && dH > 0,
+              "stride should be greater than zero, but got ",
+              "dT: ", dT, " dH: ", dH, " dW: ", dW);
+
+    TORCH_CHECK(itime >= kT && iheight >= kH && iwidth >= kW,
+              "input image (T: ", itime, " H: ", iheight, " W: ", iwidth, ") smaller then",
+              "kernel size (kT: ", kT, " kH: ", kH, " kW: ", kW, ")");
+
+    TORCH_CHECK(kT/2 >= pT && kH/2 >= pH && kW/2 >= pW,
+              "pad should not be greater then half of kernel size, but got",
+              "pT = ", pT, ", pW = ", pW, ", pH = ", pH, ", kT = ", kT, ", kW = ", kW, ", kH = ", kH);
+
+    if (otime < 1 || owidth < 1 || oheight < 1)
+      AT_ERROR("Given input size: (", nslices, "x", itime,"x", iheight,"x", iwidth,")",
+                "Calculated output size: (", nslices,"x", otime,"x", oheight, "x", owidth,")",
+                "Output size is too small");
+  }
+
+  static inline void
+  avg_pool3d_shape_check(
+    const Tensor& input,
+    const Tensor& gradOutput,
+    int64_t nslices,
+    int kT, int kH, int kW,
+    int dT, int dH, int dW,
+    int pT, int pH, int pW,
+    int64_t itime, int64_t iheight, int64_t iwidth,
+    int64_t otime, int64_t oheight, int64_t owidth)
+  {
+    const int64_t ndim = input.ndimension();
+
+    check_dim_size(gradOutput, ndim, ndim-4, nslices);
+    check_dim_size(gradOutput, ndim, ndim-3, otime);
+    check_dim_size(gradOutput, ndim, ndim-2, oheight);
+    check_dim_size(gradOutput, ndim, ndim-1, owidth);
+  }  
 } // namespace
 
 } // at::native

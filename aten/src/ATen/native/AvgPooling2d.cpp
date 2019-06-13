@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/AvgPooling2d.h>
+#include <ATen/native/AvgPooling.h>
 #include <tuple>
 
 
