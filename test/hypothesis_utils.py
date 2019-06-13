@@ -108,7 +108,7 @@ Args:
                       tuples of `(min, max)`
     kH_range, kW_range: Ranges to generate kernel height and width. Must be
                         tuples of `(min, max)`
-    groups: Maximum number of groups to generate
+    max_groups: Maximum number of groups to generate
     dtypes: A list of data types to generate. See note below.
 Generates:
     (X, w, b, g): Tensors of type `float32` of the following drawen shapes:
@@ -183,4 +183,4 @@ def qtensors_conv(draw, min_batch=1, max_batch=3,
     scale = draw(st.floats(min_value=np.finfo(np.float32).resolution,
                            max_value=(np.finfo(np.float32).max)))
     return ((X, w, b, g), (scale, zero_point), (qmin, qmax),
-            (torch_type, np_type),)
+            (torch_type, np_type))

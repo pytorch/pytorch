@@ -55,10 +55,6 @@ class ModuleAPITest(TestCase):
         (inputs, filters, bias, groups) = X
 
         iC, oC = inputs.shape[1], filters.shape[0]
-        assume(iC % groups == 0)
-        # assume(iC // groups > 0)
-        # assume(oC % groups == 0)
-        # assume(oC // groups > 0)
         iH, iW = inputs.shape[2:]
         kH, kW = filters.shape[2:]
         assume(kH // 2 >= padH)
