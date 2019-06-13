@@ -1,4 +1,5 @@
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/CUDAGenerator.h>
 
 // TODO: No need to have this whole header, we can just put it all in
 // the cpp file
