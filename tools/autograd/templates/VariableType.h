@@ -21,9 +21,9 @@ using at::Context;
 using at::Device;
 using at::Generator;
 using at::IntArrayRef;
+using at::MemoryFormat;
 using at::Scalar;
 using at::ScalarType;
-using at::SparseTensorRef;
 using at::Storage;
 using at::Tensor;
 using at::TensorList;
@@ -36,7 +36,6 @@ struct TORCH_API VariableType final : public at::TypeDefault {
   at::Backend backend() const override;
   at::Allocator* allocator() const override;
   at::Device getDeviceFromPtr(void * data) const override;
-  std::unique_ptr<at::Generator> generator() const override;
   const char * toString() const override;
   at::TypeID ID() const override;
   at::Type & toBackend(at::Backend b) const override;
@@ -64,7 +63,6 @@ private:
   static Variable & checked_cast_variable(Tensor & t, const char * name, int pos);
   static at::Tensor & unpack(Tensor & t, const char * name, int pos);
   static const at::Tensor & unpack(const Tensor & t, const char * name, int pos);
-  static at::SparseTensorRef unpack(SparseTensorRef t, const char * name, int pos);
   static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
   static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
 

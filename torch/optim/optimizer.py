@@ -30,6 +30,7 @@ class Optimizer(object):
     """
 
     def __init__(self, params, defaults):
+        torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
 
         if isinstance(params, torch.Tensor):

@@ -63,7 +63,10 @@ _sum = sum
 
 
 def _parse_arg(value, desc):
+<<<<<<< HEAD
     #print("parse args", value, desc)
+=======
+>>>>>>> master
     if desc == 'none':
         return value
     if desc == 'v' or not _is_value(value):
@@ -84,9 +87,13 @@ def _parse_arg(value, desc):
             raise RuntimeError("ONNX symbolic doesn't know to interpret Constant node")
     elif value.node().kind() == 'prim::ListConstruct':
         if desc == 'is':
+<<<<<<< HEAD
             #print(value.node())
             for v in value.node().inputs():
                 #print(v)
+=======
+            for v in value.node().inputs():
+>>>>>>> master
                 if v.node().kind() != 'onnx::Constant':
                     raise RuntimeError("Failed to export an ONNX attribute, "
                                        "since it's not constant, please try to make "
@@ -190,6 +197,16 @@ def _try_get_scalar_type(*args):
             pass
     return None
 
+<<<<<<< HEAD
+=======
+def _slice_op(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
+    if _export_onnx_opset_version == 9:
+        from torch.onnx.symbolic_opset9 import slice_op
+        return slice_op(g, input, axes, starts, ends)
+    if _export_onnx_opset_version == 10:
+        from torch.onnx.symbolic_opset10 import slice_op
+        return slice_op(g, input, axes, starts, ends, steps, dynamic_slice)
+>>>>>>> master
 
 # ---------------------------------------------------------------------
 # ONNX operator version
@@ -216,7 +233,6 @@ def _try_get_scalar_type(*args):
 # and export_to_pretty_string(), and _export_onnx_opset_version will be set
 # and the symbolic functions should check it to determine the behavior
 # of the exporter.
-#change
 
 
 _default_onnx_opset_version = 9
@@ -251,8 +267,11 @@ cast_pytorch_to_onnx = {
     'Int': torch.onnx.TensorProtoDataType.INT32,
     'Long': torch.onnx.TensorProtoDataType.INT64,
     'Short': torch.onnx.TensorProtoDataType.INT16,
+    'Bool': torch.onnx.TensorProtoDataType.BOOL,
+    'ComplexFloat': torch.onnx.TensorProtoDataType.COMPLEX64,
+    'ComplexDouble': torch.onnx.TensorProtoDataType.COMPLEX128,
+    'Undefined': torch.onnx.TensorProtoDataType.UNDEFINED,
 }
-
 
 scalar_name_to_pytorch = {
     'uint8_t': 'Byte',
@@ -263,6 +282,9 @@ scalar_name_to_pytorch = {
     'int': 'Int',
     'int64_t': 'Long',
     'int16_t': 'Short',
+    'bool': 'Bool',
+    'complex64': '',
+    'complex128': ''
 }
 
 
@@ -270,14 +292,17 @@ scalar_name_to_pytorch = {
 # torch type. Related source:
 # https://github.com/pytorch/pytorch/blob/da7468853ae322252270bbb58032668bd21b7457/c10/core/ScalarType.h
 scalar_type_to_pytorch_type = [
-    torch.uint8,    # 0
-    torch.int8,     # 1
-    torch.short,    # 2
-    torch.int,      # 3
-    torch.int64,    # 4
-    torch.half,     # 5
-    torch.float,    # 6
-    torch.double,   # 7
+    torch.uint8,        # 0
+    torch.int8,         # 1
+    torch.short,        # 2
+    torch.int,          # 3
+    torch.int64,        # 4
+    torch.half,         # 5
+    torch.float,        # 6
+    torch.double,       # 7
+    torch.complex64,    # 9
+    torch.complex128,   # 10
+    torch.bool,         # 11
 ]
 
 
@@ -294,4 +319,8 @@ scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Half"],
     cast_pytorch_to_onnx["Float"],
     cast_pytorch_to_onnx["Double"],
+    cast_pytorch_to_onnx["Undefined"],
+    cast_pytorch_to_onnx["ComplexFloat"],
+    cast_pytorch_to_onnx["ComplexDouble"],
+    cast_pytorch_to_onnx["Bool"],
 ]

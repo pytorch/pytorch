@@ -16,7 +16,7 @@ from .._jit_internal import weak_script, List
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
-conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
+conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 1D convolution over an input signal composed of several input
 planes.
@@ -37,7 +37,6 @@ Args:
       a one-element tuple `(dW,)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
-    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -47,7 +46,7 @@ Examples::
 """)
 
 conv2d = _add_docstr(torch.conv2d, r"""
-conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
+conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 2D convolution over an input image composed of several input
 planes.
@@ -68,7 +67,6 @@ Args:
       a tuple `(dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
       number of groups. Default: 1
-    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -79,7 +77,7 @@ Examples::
 """)  # noqa: E501
 
 conv3d = _add_docstr(torch.conv3d, r"""
-conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1, padding_mode='zeros') -> Tensor
+conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 3D convolution over an input image composed of several input
 planes.
@@ -100,7 +98,6 @@ Args:
       a tuple `(dT, dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
       the number of groups. Default: 1
-    padding_mode: the type of paddings applied to both sided can be: `zeros` or `circular`. Default: `zeros`
 
 Examples::
 
@@ -1151,6 +1148,19 @@ Applies element-wise :math:`\text{LogSigmoid}(x_i) = \log \left(\frac{1}{1 + \ex
 See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
+@weak_script
+def gelu(input):
+    r"""gelu(input) -> Tensor
+
+    Applies element-wise the function
+    :math:`\text{GeLU}(x) = x * \Phi(x)`
+
+    where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
+
+    See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
+    """
+    return torch._C._nn.gelu(input)
+
 
 @weak_script
 def hardshrink(input, lambd=0.5):
@@ -1270,7 +1280,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     # type: (Tensor, float, bool, float, int) -> Tensor
     r"""
-    Samples from the `Gumbel-Softmax distribution`_ and optionally discretizes.
+    Samples from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretizes.
 
     Args:
       logits: `[..., num_features]` unnormalized log probabilities
@@ -1303,8 +1313,9 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
         >>> # Sample hard categorical using "Straight-through" trick:
         >>> F.gumbel_softmax(logits, tau=1, hard=True)
 
-    .. _Gumbel-Softmax distribution:
+    .. _Link 1:
         https://arxiv.org/abs/1611.00712
+    .. _Link 2:
         https://arxiv.org/abs/1611.01144
     """
 
@@ -1930,22 +1941,11 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    if log_input:
-        loss = torch.exp(input) - target * input
-    else:
-        loss = input - target * torch.log(input + eps)
-    if full:
-        mask = target > 1
-        loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
-    if reduction == 'none':
-        ret = loss
-    elif reduction == 'mean':
-        ret = torch.mean(loss)
-    elif reduction == 'sum':
-        ret = torch.sum(loss)
-    else:
+    if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
         ret = input
         raise ValueError(reduction + " is not valid")
+
+    ret = torch.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
     return ret
 
 
@@ -2436,8 +2436,8 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             ``'trilinear'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to ``True``, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to ``False``, the input and
+            If set to ``False``, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to ``True``, the input and
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
             This only has effect when :attr:`mode` is ``'linear'``,
@@ -2483,8 +2483,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             ``'trilinear'`` | ``'area'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
             input and output as squares rather than points.
-            If set to ``True``, the input and output tensors are aligned by the
-            center points of their corner pixels. If set to ``False``, the input and
+            If set to ``False``, the input and output tensors are aligned by the
+            center points of their corner pixels. If set to ``True``, the input and
             output tensors are aligned by the corner points of their corner
             pixels, and the interpolation uses edge value padding for out-of-boundary values.
             This only has effect when :attr:`mode` is ``'linear'``,
@@ -3088,3 +3088,202 @@ def _pad_circular(input, padding):
         input = torch.cat([input[:, :, :, :, -(padding[-5] + padding[-6]):-padding[-5]], input], dim=4)
 
     return input
+
+
+@weak_script
+def multi_head_attention_forward(query,                  # type: Tensor
+                                 key,                    # type: Tensor
+                                 value,                  # type: Tensor
+                                 embed_dim_to_check,     # type: int
+                                 num_heads,              # type: int
+                                 in_proj_weight,         # type: Tensor
+                                 in_proj_bias,           # type: Tensor
+                                 bias_k,                 # type: Optional[Tensor]
+                                 bias_v,                 # type: Optional[Tensor]
+                                 add_zero_attn,          # type: bool
+                                 dropout_p,              # type: float
+                                 out_proj_weight,        # type: Tensor
+                                 out_proj_bias,          # type: Tensor
+                                 training=True,          # type: bool
+                                 key_padding_mask=None,  # type: Optional[Tensor]
+                                 need_weights=True,      # type: bool
+                                 attn_mask=None          # type: Optional[Tensor]
+                                 ):
+    # type: (...) -> Tuple[Tensor, Optional[Tensor]]
+    r"""
+    Args:
+        query, key, value: map a query and a set of key-value pairs to an output.
+            See "Attention Is All You Need" for more details.
+        embed_dim_to_check: total dimension of the model.
+        num_heads: parallel attention heads.
+        in_proj_weight, in_proj_bias: input projection weight and bias.
+        bias_k, bias_v: bias of the key and value sequences to be added at dim=0.
+        add_zero_attn: add a new batch of zeros to the key and
+                       value sequences at dim=1.
+        dropout_p: probability of an element to be zeroed.
+        out_proj_weight, out_proj_bias: the output projection weight and bias.
+        training: apply dropout if is ``True``.
+        key_padding_mask: if provided, specified padding elements in the key will
+            be ignored by the attention.
+        need_weights: output attn_output_weights.
+        attn_mask: mask that prevents attention to certain positions.
+
+
+    Shape:
+        Inputs:
+        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
+        - attn_mask: :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+
+        Outputs:
+        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
+          E is the embedding dimension.
+        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
+          L is the target sequence length, S is the source sequence length.
+    """
+
+    qkv_same = torch.equal(query, key) and torch.equal(key, value)
+    kv_same = torch.equal(key, value)
+
+    tgt_len, bsz, embed_dim = query.size()
+    assert embed_dim == embed_dim_to_check
+    assert list(query.size()) == [tgt_len, bsz, embed_dim]
+    assert key.size() == value.size()
+
+    head_dim = embed_dim // num_heads
+    assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
+    scaling = float(head_dim) ** -0.5
+
+    if qkv_same:
+        # self-attention
+        q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
+
+    elif kv_same:
+        # encoder-decoder attention
+        _b = in_proj_bias
+        _start = 0
+        _end = embed_dim
+        _w = in_proj_weight[_start:_end, :]
+        if _b is not None:
+            _b = _b[_start:_end]
+        q = linear(query, _w, _b)
+
+        if key is None:
+            assert value is None
+            k = None
+            v = None
+        else:
+
+            _b = in_proj_bias
+            _start = embed_dim
+            _end = None
+            _w = in_proj_weight[_start:, :]
+            if _b is not None:
+                _b = _b[_start:]
+            k, v = linear(key, _w, _b).chunk(2, dim=-1)
+
+    else:
+        _b = in_proj_bias
+        _start = 0
+        _end = embed_dim
+        _w = in_proj_weight[_start:_end, :]
+        if _b is not None:
+            _b = _b[_start:_end]
+        q = linear(query, _w, _b)
+
+        _b = in_proj_bias
+        _start = embed_dim
+        _end = embed_dim * 2
+        _w = in_proj_weight[_start:_end, :]
+        if _b is not None:
+            _b = _b[_start:_end]
+        k = linear(key, _w, _b)
+
+        _b = in_proj_bias
+        _start = embed_dim * 2
+        _end = None
+        _w = in_proj_weight[_start:, :]
+        if _b is not None:
+            _b = _b[_start:]
+        v = linear(value, _w, _b)
+    q *= scaling
+
+    if bias_k is not None and bias_v is not None:
+        k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+        v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
+        if attn_mask is not None:
+            attn_mask = torch.cat([attn_mask,
+                                  torch.zeros((attn_mask.size(0), 1),
+                                              dtype=attn_mask.dtype,
+                                              device=attn_mask.device)], dim=1)
+        if key_padding_mask is not None:
+            key_padding_mask = torch.cat(
+                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
+                                               dtype=key_padding_mask.dtype,
+                                               device=key_padding_mask.device)], dim=1)
+    else:
+        assert bias_k is None
+        assert bias_v is None
+
+    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    if k is not None:
+        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+    if v is not None:
+        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+
+    src_len = k.size(1)
+
+    if key_padding_mask is not None:
+        assert key_padding_mask.size(0) == bsz
+        assert key_padding_mask.size(1) == src_len
+
+    if add_zero_attn:
+        src_len += 1
+        k = torch.cat([k, torch.zeros((k.size(0), 1) + k.size()[2:], dtype=k.dtype, device=k.device)], dim=1)
+        v = torch.cat([v, torch.zeros((v.size(0), 1) + v.size()[2:], dtype=v.dtype, device=v.device)], dim=1)
+        if attn_mask is not None:
+            attn_mask = torch.cat([attn_mask, torch.zeros((attn_mask.size(0), 1),
+                                                          dtype=attn_mask.dtype,
+                                                          device=attn_mask.device)], dim=1)
+        if key_padding_mask is not None:
+            key_padding_mask = torch.cat(
+                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
+                                               dtype=key_padding_mask.dtype,
+                                               device=key_padding_mask.device)], dim=1)
+
+    attn_output_weights = torch.bmm(q, k.transpose(1, 2))
+    assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
+
+    if attn_mask is not None:
+        attn_mask = attn_mask.unsqueeze(0)
+        attn_output_weights += attn_mask
+
+    if key_padding_mask is not None:
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        attn_output_weights = attn_output_weights.masked_fill(
+            key_padding_mask.unsqueeze(1).unsqueeze(2),
+            float('-inf'),
+        )
+        attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+
+    attn_output_weights = softmax(
+        attn_output_weights.float(), dim=-1,
+        dtype=torch.float32 if attn_output_weights.dtype == torch.float16 else attn_output_weights.dtype)
+    attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
+
+    attn_output = torch.bmm(attn_output_weights, v)
+    assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
+    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+    attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+
+    if need_weights:
+        # average attention weights over heads
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
+        return attn_output, attn_output_weights.sum(dim=1) / num_heads
+    else:
+        return attn_output, None

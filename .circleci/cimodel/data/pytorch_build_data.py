@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
-from cimodel.lib.conf_tree import ConfigNode, X
+from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 
 CONFIG_TREE_DATA = [
     ("trusty", [
         (None, [
-            X("2.7.9"),
+            XImportant("2.7.9"),
             X("2.7"),
             X("3.5"),
             X("nightly"),
@@ -14,10 +14,10 @@ CONFIG_TREE_DATA = [
         ("gcc", [
             ("4.8", [X("3.6")]),
             ("5.4", [
-                X("3.6"),
+                XImportant("3.6"),
                 ("3.6", [
-                    ("xla", [X(True)]),
-                    ("namedtensor", [X(True)]),
+                    ("xla", [XImportant(True)]),
+                    ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
             ("7", [X("3.6")]),
@@ -25,10 +25,14 @@ CONFIG_TREE_DATA = [
     ]),
     ("xenial", [
         ("clang", [
-            ("5", [X("3.6")]),
+            ("5", [
+                XImportant("3.6"),  # This is actually the ASAN build
+                ("3.6", [
+                    ("namedtensor", [XImportant(True)]),  # ASAN
+                ]),
+            ]),
         ]),
         ("cuda", [
-            ("8", [X("3.6")]),
             ("9", [
                 # Note there are magic strings here
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L21
@@ -38,13 +42,16 @@ CONFIG_TREE_DATA = [
                 # https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/build.sh#L153
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
                 X("2.7"),
-                X("3.6"),
+                XImportant("3.6"),
+                ("2.7", [
+                    ("namedtensor", [XImportant(True)]),
+                ]),
             ]),
             ("9.2", [X("3.6")]),
             ("10", [X("3.6")]),
         ]),
         ("android", [
-            ("r19c", [X("3.6")]),
+            ("r19c", [XImportant("3.6")]),
         ]),
     ]),
 ]
@@ -136,6 +143,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         next_nodes = {
             "xla": XlaConfigNode,
             "namedtensor": NamedTensorConfigNode,
+            "important": ImportantConfigNode,
         }
         return next_nodes[experimental_feature]
 
@@ -147,6 +155,9 @@ class XlaConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["is_xla"] = node_name
 
+    def child_constructor(self):
+        return ImportantConfigNode
+
 
 class NamedTensorConfigNode(TreeConfigNode):
     def modify_label(self, label):
@@ -154,6 +165,20 @@ class NamedTensorConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_namedtensor"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class ImportantConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "IMPORTANT=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_important"] = node_name
+
+    def get_children(self):
+        return []
 
 
 class XenialCompilerConfigNode(TreeConfigNode):

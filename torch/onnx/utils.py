@@ -16,7 +16,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
-from torch._C import ListType, _propagate_and_assign_input_and_output_shapes
+from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -56,7 +56,7 @@ def set_training(model, mode):
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
-           do_constant_folding=False, strip_doc_string=True):
+           do_constant_folding=False, example_outputs=None, strip_doc_string=True, dynamic_axes=None):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -112,9 +112,46 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             optimization is applied to the model during export. Constant-folding
             optimization will replace some of the ops that have all constant
             inputs, with pre-computed constant nodes.
+        example_outputs (tuple of Tensors, default None): example_outputs must be provided
+            when exporting a ScriptModule or TorchScript Function.
         strip_doc_string (bool, default True): if True, strips the field
             "doc_string" from the exported model, which information about the stack
             trace.
+        example_outputs: example outputs of the model that is being exported.
+        dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict): 
+            a dictionary to specify dynamic axes of input/output, such that:            
+            - KEY:  input and/or output names
+            - VALUE: index of dynamic axes for given key and potentially the name to be used for
+            exported dynamic axes. In general the value is defined according to one of the following
+            ways or a combination of both:
+
+            (1). A list of integers specifiying the dynamic axes of provided input. In this scenario
+            automated names will be generated and applied to dynamic axes of provided input/output 
+            during export. 
+
+            OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in 
+            corresponding input/output TO the name that is desired to be applied on such axis of 
+            such input/output during export.
+
+            Example. if we have the following shape for inputs and outputs:             
+                shape(input_1) = ('b', 3, 'w', 'h')
+                and shape(input_2) = ('b', 4)           
+                and shape(output)  = ('b', 'd', 5)      
+
+            Then dynamic axes can be defined either as:
+            (a). ONLY INDICES:
+                 dynamic_axes = {'input_1':[0, 2, 3], 'input_2':[0], 'output':[0, 1]}
+                 where automatic names will be generated for exported dynamic axes
+
+            OR (b). INDICES WITH CORRESPONDING NAMES: 
+                dynamic_axes = {'input_1':{0:'batch', 1:'width', 2:'height'}, 
+                                 'input_2':{0:'batch'},
+                                 'output':{0:'batch', 1:'detections'}
+                 where provided names will be applied to exported dynamic axes
+
+            OR (c). MIXED MODE OF (a) and (b)
+                 dynamic_axes = {'input_1':[0, 2, 3], 'input_2':{0:'batch'}, 'output':[0,1]}
+
     """
     if aten or export_raw_ir:
         assert operator_export_type is None
@@ -128,7 +165,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
-            strip_doc_string=strip_doc_string)
+            example_outputs=example_outputs, strip_doc_string=strip_doc_string, dynamic_axes=dynamic_axes)
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -177,10 +214,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
     # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
     torch._C._jit_pass_prepare_division_for_onnx(graph)
-    # onnx only supports tensors, so we turn all out number types into tensors
-    torch._C._jit_pass_erase_number_types(graph)
     # onnx does not support tuples, so try to remove them
     torch._C._jit_pass_lower_all_tuples(graph)
+    # onnx only supports tensors, so we turn all out number types into tensors
+    torch._C._jit_pass_erase_number_types(graph)
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lint(graph)
 
@@ -251,18 +288,19 @@ def _model_to_graph(model, args, verbose=False, training=False,
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
-            method = model.forward
-            params = method.initial_ivalues()
-            graph = _propagate_and_assign_input_and_output_shapes(
-                method.graph, tuple(args) + tuple(params), example_outputs, False, propagate)
+            method_graph, params = model.forward._lowered_graph()
+            in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
+            graph = _propagate_and_assign_input_shapes(
+                method_graph, tuple(in_vars), False, propagate)
         except AttributeError:
             raise RuntimeError('\'forward\' method must be a script method')
     elif isinstance(model, torch.jit.Function):
         assert example_outputs is not None, "example_outputs must be provided when exporting a TorchScript Function"
         method = model
         params = ()
-        graph = _propagate_and_assign_input_and_output_shapes(
-            model.graph, tuple(args), example_outputs, False, propagate)
+        in_vars, in_desc = torch.jit._flatten(tuple(args))
+        graph = _propagate_and_assign_input_shapes(
+            model.graph, tuple(in_vars), False, propagate)
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
         state_dict = _unique_state_dict(model)
@@ -277,6 +315,10 @@ def _model_to_graph(model, args, verbose=False, training=False,
 
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop)
+
+    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.Function):
+        out_vars, _ = torch.jit._flatten(tuple(example_outputs))
+        graph = _assign_output_shapes(graph, out_vars)
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
@@ -351,7 +393,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=False,
-            strip_doc_string=True):
+            strip_doc_string=True, dynamic_axes=None):
     global __IN_ONNX_EXPORT
     assert __IN_ONNX_EXPORT is False
     __IN_ONNX_EXPORT = True
@@ -368,11 +410,17 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
 
         # TODO: Don't allocate a in-memory string for the protobuf
         defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
+        if dynamic_axes is None:
+            dynamic_axes = {}
+
+        _validate_dynamic_axes(dynamic_axes, model, input_names, output_names)
+
         if export_params:
-            proto, export_map = graph._export_onnx(params_dict, opset_version, defer_weight_export, operator_export_type,
-                                                   strip_doc_string)
+            proto, export_map = graph._export_onnx(
+                params_dict, opset_version, dynamic_axes, defer_weight_export, operator_export_type, strip_doc_string)
         else:
-            proto, export_map = graph._export_onnx({}, opset_version, False, operator_export_type, strip_doc_string)
+            proto, export_map = graph._export_onnx(
+                {}, opset_version, dynamic_axes, False, operator_export_type, strip_doc_string)
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)
@@ -723,6 +771,45 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     import torch.onnx.symbolic_registry as sym_registry
     sym_registry.register_op(op_name, symbolic_fn, ns, opset_version)
 
+# This helper function ensures dynamic axes argument is following the expected format
+def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
+    if len(dynamic_axes) == 0:
+        return
+
+    if(hasattr(model, 'graph')):
+        # Extracting set of valid input/output names that shall be used for dynamic_axes
+        if (input_names is None) or len(input_names) == 0:
+            input_names = [x.uniqueName() for x in model.graph.inputs()]
+        if (output_names is None) or len(output_names) == 0:
+            output_names = [y.uniqueName() for y in model.graph.outputs()]
+
+    valid_names = set()
+    if input_names is not None:
+        valid_names.add(x for x in input_names)
+    if output_names is not None:
+        valid_names.add(x for x in output_names)
+
+    # If dynamic axes are provided as a list rather than dictionary, they should
+    # first get converted to a dictionary in expected format. If desired axes names
+    # are not provided for dynamic axes, automatic names shall be generated for
+    # provided dynamic axes of specified input/output
+    for key, value in dynamic_axes.items():
+        if key not in valid_names:
+            warnings.warn("Provided key {} for dynamic axes is not a valid input/output name".format(key))
+        if isinstance(value, list):
+            warnings.warn('No names were found for specified dynamic axes of provided input.' 
+                          'Automatically generated names will be applied to each dynamic axes of input {}'.format(key))
+
+            value_dict = {}
+            for i, x in enumerate(value):
+                if not isinstance(x, int):
+                    raise ValueError("The type of axis index is expected to be an integer")
+                if x in value_dict:
+                    warnings.warn('Duplicate dynamic axis index {} was provided for input {}.'
+                                  .format(x, key))
+                else:
+                    value_dict[x] = str(key) + '_dynamic_axes_' + str(i + 1)
+            dynamic_axes[key] = value_dict
 
 torch._C.Graph.op = _graph_op
 torch._C.Graph.at = _graph_at

@@ -33,6 +33,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_NUMPY=0
+#     disables the NumPy build
+#
 #   BUILD_TEST=0
 #     disables the test build
 #
@@ -149,6 +152,17 @@
 #   LIBRARY_PATH
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
+#
+#   PARALLEL_BACKEND
+#     parallel backend to use for intra- and inter-op parallelism
+#     possible values:
+#       OPENMP - use OpenMP for intra-op and native backend for inter-op tasks
+#       NATIVE - use native thread pool for both intra- and inter-op tasks
+#       NATIVE_TBB - using TBB for intra- and native thread pool for inter-op parallelism
+#
+#   USE_TBB
+#      use TBB for parallelization
+#
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, find_packages
@@ -177,6 +191,7 @@ from tools.setup_helpers.cudnn import USE_CUDNN, CUDNN_LIBRARY, CUDNN_INCLUDE_DI
 from tools.setup_helpers.rocm import USE_ROCM
 from tools.setup_helpers.miopen import USE_MIOPEN, MIOPEN_LIBRARY, MIOPEN_INCLUDE_DIR
 from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_SYSTEM_LIB, NCCL_INCLUDE_DIR
+from tools.setup_helpers.numpy_ import USE_NUMPY
 from tools.setup_helpers.dist_check import USE_DISTRIBUTED
 ################################################################################
 # Parameters parsed from environment
@@ -188,10 +203,16 @@ RUN_BUILD_DEPS = True
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
 RERUN_CMAKE = False
+CMAKE_ONLY = False
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == '--cmake':
         RERUN_CMAKE = True
+        continue
+    if arg == '--cmake-only':
+        # Stop once cmake terminates. Leave users a chance to adjust build
+        # options.
+        CMAKE_ONLY = True
         continue
     if arg == 'rebuild' or arg == 'build':
         arg = 'build'  # rebuild is gone, make it build
@@ -238,7 +259,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.1.0a0'
+version = '1.2.0a0'
 sha = 'Unknown'
 
 try:
@@ -279,10 +300,15 @@ def build_deps():
     check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
     check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
     check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
     check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'foxi', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
     check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'fbgemm', 'third_party',
+                            'asmjit', 'CMakeLists.txt'))
+    check_file(os.path.join(third_party_path, 'onnx', 'third_party',
+                            'benchmark', 'CMakeLists.txt'))
 
     check_pydep('yaml', 'pyyaml')
     check_pydep('typing', 'typing')
@@ -291,7 +317,13 @@ def build_deps():
                  cmake_python_library=cmake_python_library,
                  build_python=True,
                  rerun_cmake=RERUN_CMAKE,
+                 cmake_only=CMAKE_ONLY,
                  build_dir='build')
+    if CMAKE_ONLY:
+        report('Finished running cmake. Run "ccmake build" or '
+               '"cmake-gui build" to adjust build options and '
+               '"python setup.py install" to build.')
+        sys.exit()
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
@@ -552,25 +584,6 @@ library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
 CAFFE2_LIBS = []
-if USE_CUDA:
-    CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
-if USE_ROCM:
-    CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_hip.so'), '-Wl,--as-needed'])
-
-# static library only
-if IS_DARWIN:
-    CAFFE2_LIBS = []
-    if USE_CUDA:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_gpu.dylib'))
-    if USE_ROCM:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_hip.dylib'))
-
-if IS_WINDOWS:
-    CAFFE2_LIBS = []
-    if USE_CUDA:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
-    if USE_ROCM:
-        CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
 
 main_compile_args = []
 main_libraries = ['shm', 'torch_python']
@@ -591,13 +604,6 @@ main_sources = ["torch/csrc/stub.cpp"]
 # looked up in libtorch_python.so first, by making sure it comes
 # before libcaffe2.so in the linker command.
 main_link_args.extend(CAFFE2_LIBS)
-
-try:
-    import numpy as np
-    NUMPY_INCLUDE_DIR = np.get_include()
-    USE_NUMPY = True
-except ImportError:
-    USE_NUMPY = False
 
 if USE_CUDA:
     if IS_WINDOWS:
@@ -698,7 +704,7 @@ build_update_message = """
       $ python setup.py install
     To develop locally:
       $ python setup.py develop
-    To force cmake to re-run (off by default):
+    To force cmake to re-generate native build files (off by default):
       $ python setup.py develop --cmake
 """
 

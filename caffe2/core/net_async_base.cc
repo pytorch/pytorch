@@ -16,6 +16,11 @@ C10_DEFINE_bool(
     false,
     "If set, use one single chain containing all ops");
 
+C10_DEFINE_bool(
+    caffe2_net_async_profile_operators,
+    false,
+    "If set, profile operators of the net regardless of net being prof_dag.");
+
 C10_DEFINE_int(
     caffe2_net_async_max_gpus,
     16,
@@ -534,6 +539,9 @@ ExecutionOptions::ExecutionOptions(
     }
   }
 
+  if (FLAGS_caffe2_net_async_profile_operators) {
+    report_stats_ = true;
+  }
   run_root_tasks_inline_ = FLAGS_caffe2_net_async_run_root_tasks_inline;
 }
 

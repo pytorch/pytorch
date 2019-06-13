@@ -62,9 +62,9 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   } catch (const c10::Error& error) {
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("Expected value of type Tensor[][] for argument 'a' in "
-                  "position 0, but instead got value of type t[][][]") == 0);
-
+            .find("nested_loop() expected a value of type 'List[List[Tensor]]'"
+                  " for argument 'a' but instead found type "
+                  "'List[List[List[t]]]'") == 0);
   };
 
   std::vector<torch::jit::IValue> gen_list;
@@ -81,9 +81,9 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
     //so the error message is not helpful here.
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("Expected value of type Tensor[][] for argument 'a' in "
-                  "position 0, but instead got value of type Tensor[][]") == 0);
-
+            .find("nested_loop() expected a value of type "
+                  "'List[List[Tensor]]' for argument 'a' but "
+                  "instead found type 'List[List[Tensor]]'") == 0);
   };
 }
 
@@ -93,8 +93,8 @@ TEST(TorchScriptTest, TestDictArgMatching) {
       def dict_op(a: Dict[str, Tensor], b: str):
         return a[b]
     )JIT");
-  c10::ivalue::UnorderedMap dict;
-  dict[std::string("hello")] = torch::ones({2});
+  c10::impl::GenericDictPtr dict = c10::impl::make_generic_dict();
+  dict.insert("hello", torch::ones({2}));
   auto output = module->run_method("dict_op", dict, std::string("hello"));
   ASSERT_EQ(1, output.toTensor()[0].item<int64_t>());
 }
@@ -106,7 +106,7 @@ TEST(TorchScriptTest, TestTupleArgMatching) {
     )JIT");
 
   std::vector<int64_t> int_list = {1};
-  auto tuple_generic_list = torch::jit::Tuple::create({ int_list });
+  auto tuple_generic_list = c10::ivalue::TuplePtr::create({ int_list });
 
   // doesn't fail on arg matching
   module->run_method("tuple_op", tuple_generic_list);
@@ -122,7 +122,7 @@ TEST(TorchScriptTest, TestOptionalArgMatching) {
           return a[0]
     )JIT");
 
-  auto optional_tuple = torch::jit::Tuple::create({2, std::string("hi")});
+  auto optional_tuple = c10::ivalue::TuplePtr::create({2, std::string("hi")});
 
   ASSERT_EQ(2, module->run_method("optional_tuple_op", optional_tuple).toInt());
   ASSERT_EQ(

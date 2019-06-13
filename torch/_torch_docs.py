@@ -2147,7 +2147,15 @@ add_docstr(torch.get_num_threads,
            r"""
 get_num_threads() -> int
 
-Gets the number of threads used for parallelizing CPU operations
+Returns the number of threads used for parallelizing CPU operations
+""")
+
+add_docstr(torch.get_num_interop_threads,
+           r"""
+get_num_interop_threads() -> int
+
+Returns the number of threads used for inter-op parallelism on CPU
+(e.g. in JIT interpreter)
 """)
 
 add_docstr(torch.gt,
@@ -3460,7 +3468,9 @@ Example::
 
 add_docstr(torch.nonzero,
            r"""
-nonzero(input, out=None) -> LongTensor
+nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensors
+
+**When** :attr:`as_tuple` **is false or unspecified:**
 
 Returns a tensor containing the indices of all non-zero elements of
 :attr:`input`.  Each row in the result contains the indices of a non-zero
@@ -3471,9 +3481,28 @@ If :attr:`input` has `n` dimensions, then the resulting indices tensor
 :attr:`out` is of size :math:`(z \times n)`, where :math:`z` is the total number of
 non-zero elements in the :attr:`input` tensor.
 
+**When** :attr:`as_tuple` **is true:**
+
+Returns a tuple of 1-D tensors, one for each dimension in :attr:`input`,
+each containing the indices (in that dimension) of all non-zero elements of
+:attr:`input` .
+
+If :attr:`input` has `n` dimensions, then the resulting tuple contains `n` tensors
+of size `z`, where `z` is the total number of
+non-zero elements in the :attr:`input` tensor.
+
+As a special case, when :attr:`input` has zero dimensions and a nonzero scalar
+value, it is treated as a one-dimensional tensor with one element.
+
 Args:
     input (Tensor): the input tensor
     out (LongTensor, optional): the output tensor containing indices
+
+Returns:
+    LongTensor or tuple of LongTensor: If :attr:`as_tuple` is false, the output
+    tensor containing indices. If :attr:`as_tuple` is true, one 1-D tensor for
+    each dimension, containing the indices of each nonzero element along that
+    dimension.
 
 Example::
 
@@ -3490,6 +3519,15 @@ Example::
             [ 1,  1],
             [ 2,  2],
             [ 3,  3]])
+    >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]), as_tuple=True)
+    (tensor([0, 1, 2, 4]),)
+    >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
+                                    [0.0, 0.4, 0.0, 0.0],
+                                    [0.0, 0.0, 1.2, 0.0],
+                                    [0.0, 0.0, 0.0,-0.4]]), as_tuple=True)
+    (tensor([0, 1, 2, 3]), tensor([0, 1, 2, 3]))
+    >>> torch.nonzero(torch.tensor(5), as_tuple=True)
+    (tensor([0]),)
 """)
 
 add_docstr(torch.normal,
@@ -3575,13 +3613,13 @@ Example::
 
 add_docstr(torch.ones,
            r"""
-ones(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+ones(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the shape defined
 by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}
@@ -3780,13 +3818,15 @@ Example::
 
 add_docstr(torch.qr,
            r"""
-qr(input, out=None) -> (Tensor, Tensor)
+qr(input, some=True, out=None) -> (Tensor, Tensor)
 
-Computes the QR decomposition of a matrix :attr:`input`, and returns a namedtuple
-(Q, R) of matrices such that :math:`\text{input} = Q R`, with :math:`Q` being an
-orthogonal matrix and :math:`R` being an upper triangular matrix.
+Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
+and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
+with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
+:math:`R` being an upper triangular matrix or batch of upper triangular matrices.
 
-This returns the thin (reduced) QR factorization.
+If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
+Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
 .. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
           are large
@@ -3795,12 +3835,16 @@ This returns the thin (reduced) QR factorization.
           give you the same one across platforms - it will depend on your
           LAPACK implementation.
 
-.. note:: Irrespective of the original strides, the returned matrix :math:`Q` will be
-          transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
-
 Args:
-    input (Tensor): the input 2-D tensor
+    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
+                batch dimensions consisting of matrices of dimension :math:`m \times n`.
+    some (bool, optional): Set to ``True`` for reduced QR decomposition and ``False`` for
+                complete QR decomposition.
     out (tuple, optional): tuple of `Q` and `R` tensors
+                satisfying :code:`input = torch.matmul(Q, R)`.
+                The dimensions of `Q` and `R` are :math:`(*, m, k)` and :math:`(*, k, n)`
+                respectively, where :math:`k = \min(m, n)` if :attr:`some:` is ``True`` and
+                :math:`k = m` otherwise.
 
 Example::
 
@@ -3822,6 +3866,12 @@ Example::
     tensor([[ 1.,  0.,  0.],
             [ 0.,  1., -0.],
             [ 0., -0.,  1.]])
+    >>> a = torch.randn(3, 4, 5)
+    >>> q, r = torch.qr(a, some=False)
+    >>> torch.allclose(torch.matmul(q, r), a)
+    True
+    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(5))
+    True
 """)
 
 add_docstr(torch.rand,
@@ -4304,6 +4354,16 @@ To ensure that the correct number of threads is used, set_num_threads
 must be called before running eager, JIT or autograd code.
 """)
 
+add_docstr(torch.set_num_interop_threads,
+           r"""
+set_num_interop_threads(int)
+
+Sets the number of threads used for interop parallelism
+(e.g. in JIT interpreter) on CPU.
+WARNING: Can only be called once and before any inter-op parallel work
+is started (e.g. JIT execution).
+""")
+
 add_docstr(torch.sigmoid,
            r"""
 sigmoid(input, out=None) -> Tensor
@@ -4658,6 +4718,56 @@ Example::
             [ 0.1264, -0.5080,  1.6420,  0.1992]])
     >>> torch.std(a, dim=1)
     tensor([ 1.0311,  0.7477,  1.2204,  0.9087])
+""".format(**multi_dim_common))
+
+add_docstr(torch.std_mean,
+           r"""
+.. function:: std_mean(input, unbiased=True) -> (Tensor, Tensor)
+
+Returns the standard-deviation and mean of all elements in the :attr:`input` tensor.
+
+If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
+via the biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[0.3364, 0.3591, 0.9462]])
+    >>> torch.std_mean(a)
+    (tensor(0.3457), tensor(0.5472))
+
+.. function:: std(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
+
+Returns the standard-deviation and mean of each row of the :attr:`input` tensor in the
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
+reduce over all of them.
+
+{keepdim_details}
+
+If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
+via the biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    {dim}
+    {keepdim}
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.5648, -0.5984, -1.2676, -1.4471],
+            [ 0.9267,  1.0612,  1.1050, -0.6014],
+            [ 0.0154,  1.9301,  0.0125, -1.0904],
+            [-1.9711, -0.7748, -1.3840,  0.5067]])
+    >>> torch.std_mean(a, 1)
+    (tensor([0.9110, 0.8197, 1.2552, 1.0608]), tensor([-0.6871,  0.6229,  0.2169, -0.9058]))
 """.format(**multi_dim_common))
 
 add_docstr(torch.sum,
@@ -5172,8 +5282,8 @@ Args:
         1 and not referenced from :math:`A`. Default: ``False``.
 
 Returns:
-    A namedtuple :math:`(solution, cloned_coefficient)` where :math:`cloned_coefficient`
-    is a clone of :math:`A` and :math:`solution` is the solution :math:`X` to :math:`AX = b`
+    A namedtuple `(solution, cloned_coefficient)` where `cloned_coefficient`
+    is a clone of :math:`A` and `solution` is the solution :math:`X` to :math:`AX = b`
     (or whatever variant of the system of equations, depending on the keyword arguments.)
 
 Examples::
@@ -5513,15 +5623,64 @@ Example::
     tensor([ 1.7444,  1.1363,  0.7356,  0.5112])
 """.format(**multi_dim_common))
 
+add_docstr(torch.var_mean,
+           r"""
+.. function:: var_mean(input, unbiased=True) -> (Tensor, Tensor)
+
+Returns the variance and mean of all elements in the :attr:`input` tensor.
+
+If :attr:`unbiased` is ``False``, then the variance will be calculated via the
+biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[0.0146, 0.4258, 0.2211]])
+    >>> torch.var_mean(a)
+    (tensor(0.0423), tensor(0.2205))
+
+.. function:: var_mean(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
+
+Returns the variance and mean of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim`.
+
+{keepdim_details}
+
+If :attr:`unbiased` is ``False``, then the variance will be calculated via the
+biased estimator. Otherwise, Bessel's correction will be used.
+
+Args:
+    input (Tensor): the input tensor
+    {dim}
+    {keepdim}
+    unbiased (bool): whether to use the unbiased estimation or not
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[-1.5650,  2.0415, -0.1024, -0.5790],
+            [ 0.2325, -2.6145, -1.6428, -0.3537],
+            [-0.2159, -1.1069,  1.2882, -1.3265],
+            [-0.6706, -1.5893,  0.6827,  1.6727]])
+    >>> torch.var_mean(a, 1)
+    (tensor([2.3174, 1.6403, 1.4092, 2.0791]), tensor([-0.0512, -1.0946, -0.3403,  0.0239]))
+""".format(**multi_dim_common))
+
 add_docstr(torch.zeros,
            r"""
-zeros(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+zeros(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the shape defined
 by the variable argument :attr:`sizes`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}
@@ -6397,6 +6556,51 @@ Example::
             [3, 3]])
 """)
 
+add_docstr(torch.trapz,
+           r"""
+.. function:: trapz(y, x, *, dim=-1) -> Tensor
+
+Estimate :math:`\int y\,dx` along `dim`, using the trapezoid rule.
+
+Arguments:
+    y (Tensor): The values of the function to integrate
+    x (Tensor): The points at which the function `y` is sampled.
+        If `x` is not in ascending order, intervals on which it is decreasing
+        contribute negatively to the estimated integral (i.e., the convention
+        :math:`\int_a^b f = -\int_b^a f` is followed).
+    dim (int): The dimension along which to integrate.
+        By default, use the last dimension.
+
+Returns:
+    A Tensor with the same shape as the input, except with `dim` removed.
+    Each element of the returned tensor represents the estimated integral
+    :math:`\int y\,dx` along `dim`.
+
+Example::
+
+    >>> y = torch.randn((2, 3))
+    >>> y
+    tensor([[-2.1156,  0.6857, -0.2700],
+            [-1.2145,  0.5540,  2.0431]])
+    >>> x = torch.tensor([[1, 3, 4], [1, 2, 3]])
+    >>> torch.trapz(y, x)
+    tensor([-1.2220,  0.9683])
+
+.. function:: trapz(y, *, dx=1, dim=-1) -> Tensor
+
+As above, but the sample points are spaced uniformly at a distance of `dx`.
+
+Arguments:
+    y (Tensor): The values of the function to integrate
+    dx (float): The distance between points at which `y` is sampled.
+    dim (int): The dimension along which to integrate.
+        By default, use the last dimension.
+
+Returns:
+    A Tensor with the same shape as the input, except with `dim` removed.
+    Each element of the returned tensor represents the estimated integral
+    :math:`\int y\,dx` along `dim`.
+""")
 
 add_docstr(torch.repeat_interleave,
            r"""
@@ -6441,4 +6645,123 @@ Example::
 If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
 `1` appears `n2` times, `2` appears `n3` times, etc.
+""")
+
+
+add_docstr(torch._C.Generator,
+           r"""
+Generator(device='cpu') -> Generator
+
+Creates and returns a generator object which manages the state of the algorithm that
+produces pseudo random numbers. Used as a keyword argument in many :ref:`inplace-random-sampling`
+functions. Currently only creation of CPU Generator is supported through
+this API.
+
+Arguments:
+    device (:class:`torch.device`, optional): the desired device for the generator.
+
+Returns:
+    Generator: An torch.Generator object.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+""")
+
+
+add_docstr(torch._C.Generator.set_state,
+           r"""
+Generator.set_state(new_state) -> void
+
+Sets the Generator state.
+
+Arguments:
+    new_state (torch.ByteTensor): The desired state.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu_other = torch.Generator()
+    >>> g_cpu.set_state(g_cpu_other.get_state())
+""")
+
+
+add_docstr(torch._C.Generator.get_state,
+           r"""
+Generator.get_state() -> Tensor
+
+Returns the Generator state as a ``torch.ByteTensor``.
+
+Returns:
+    Tensor: A ``torch.ByteTensor`` which contains all the necessary bits
+    to restore a Generator to a specific point in time.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.get_state()
+""")
+
+
+add_docstr(torch._C.Generator.manual_seed,
+           r"""
+Generator.manual_seed(seed) -> Generator
+
+Sets the seed for generating random numbers. Returns a `torch.Generator` object.
+It is recommended to set a large seed, i.e. a number that has a good balance of 0
+and 1 bits. Avoid having many 0 bits in the seed.
+
+Arguments:
+    seed (int): The desired seed.
+
+Returns:
+    Generator: An torch.Generator object.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.manual_seed(2147483647)
+""")
+
+
+add_docstr(torch._C.Generator.initial_seed,
+           r"""
+Generator.initial_seed() -> int
+
+Returns the initial seed for generating random numbers.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.initial_seed()
+    2147483647
+""")
+
+
+add_docstr(torch._C.Generator.seed,
+           r"""
+Generator.seed() -> int
+
+Gets a non-deterministic random number from std::random_device or the current
+time and uses it to seed a Generator.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.seed()
+    1516516984916
+""")
+
+
+add_docstr(torch._C.Generator.device,
+           r"""
+Generator.device -> device
+
+Gets the current device of the generator.
+
+Example::
+
+    >>> g_cpu = torch.Generator()
+    >>> g_cpu.device
+    device(type='cpu')
 """)

@@ -1,5 +1,5 @@
 #include <ATen/core/jit_type.h>
-
+#include <ATen/core/Dict.h>
 #include <iostream>
 
 namespace c10 {
@@ -24,7 +24,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     }
     out << ")";
   } else if (auto value = t.cast<ProfiledTensorType>()) {
-    out << "Tensor(dtype = ";
+    out << "ProfiledTensor(dtype = ";
     if  (value->scalarType().has_value())
     {
         out << *value->scalarType();
@@ -60,8 +60,10 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << *(tup->elements()[i]);
     }
     out << ")";
+  } else if (t.kind() == TypeKind::FunctionType) {
+    out << "Function";
   } else {
-    out << t.str();
+     out << t.str();
   }
   return out;
 }
@@ -153,9 +155,11 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
   } else if (value.isDoubleList()) {
     return ListType::ofFloats();
   } else if (value.isTuple()) {
-    return TupleType::create(fmap(value.toTuple()->elements(), incompleteInferTypeFrom));
+    return TupleType::create(fmap(value.toTupleRef(), incompleteInferTypeFrom));
   } else if (value.isDevice()) {
     return DeviceObjType::get();
+  } else if (value.isObject()) {
+    return value.toObject()->type();
   }
   AT_ERROR("Type cannot be accurately recovered from this IValue.");
 }
@@ -167,20 +171,20 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
 // XXX: only used for better error messages, should not be used elsewhere
 TypePtr attemptToRecoverType(const IValue& ivalue) {
   if (ivalue.isGenericList()) {
-    auto& ivalue_list = ivalue.toGenericListRef();
+    auto ivalue_list = ivalue.toGenericListRef();
     if (ivalue_list.size() == 0) {
       return ListType::create(VarType::create("t"));
     }
     return ListType::create(attemptToRecoverType(ivalue_list[0]));
   }
   if (ivalue.isGenericDict()) {
-    const auto& dict = ivalue.toGenericDictRef();
+    auto dict = ivalue.toGenericDict();
     if (dict.size() == 0) {
       return DictType::create(VarType::create("t"), VarType::create("t"));
     }
     auto item = dict.begin();
     return DictType::create(
-        attemptToRecoverType(item->first), attemptToRecoverType(item->second));
+        attemptToRecoverType(item->key()), attemptToRecoverType(item->value()));
   }
   return incompleteInferTypeFrom(ivalue);
 }
@@ -197,15 +201,15 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   }
 
   if (ivalue.isTuple()) {
-    const auto& ivalue_elem = ivalue.toTuple()->elements();
+    auto elems = ivalue.toTupleRef();
     auto tuple_type = type->cast<TupleType>();
-    if (!tuple_type || tuple_type->elements().size() != ivalue_elem.size()) {
+    if (!tuple_type || tuple_type->elements().size() != elems.size()) {
       return false;
     }
     auto type_elem = tuple_type->elements();
     bool is_subvalue = true;
     for (size_t i = 0; i < type_elem.size() && is_subvalue; ++i) {
-      is_subvalue = isSubvalueOf(ivalue_elem[i], type_elem[i]);
+      is_subvalue = isSubvalueOf(elems[i], type_elem[i]);
     }
     return is_subvalue;
   }
@@ -214,7 +218,7 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     if (!list_type) {
       return false;
     }
-    auto& ivalue_list = ivalue.toGenericListRef();
+    auto ivalue_list = ivalue.toGenericListRef();
     auto element_type = list_type->getElementType();
     return std::all_of(ivalue_list.begin(), ivalue_list.end(), [&](const IValue& list_elem) {
       return isSubvalueOf(list_elem, element_type);
@@ -222,11 +226,11 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   }
   if (ivalue.isGenericDict()) {
     auto dict_type = type->expect<DictType>();
-    const auto& dict = ivalue.toGenericDictRef();
+    const auto dict = ivalue.toGenericDict();
     return std::all_of(
-        dict.begin(), dict.end(), [=](const std::pair<IValue, IValue>& item) {
-          return isSubvalueOf(item.first, dict_type->getKeyType()) &&
-              isSubvalueOf(item.second, dict_type->getValueType());
+        dict.begin(), dict.end(), [=](const c10::impl::GenericDictPtr::const_iterator::value_type& item) {
+          return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
+              isSubvalueOf(item.value(), dict_type->getValueType());
         });
   }
   return incompleteInferTypeFrom(ivalue)->isSubtypeOf(type);
@@ -323,8 +327,8 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     }
     std::stringstream ss;
-    ss << "type variable '" << vt->name() <<"' previously matched to type " <<
-      it->second->str() << " is matched to type " << actual->str();
+    ss << "Type variable '" << vt->name() << "' previously matched to type " <<
+      it->second->python_str() << " is matched to type " << actual->python_str();
     ret.errMsg = ss.str();
     return ret;
   } else if(auto lt_formal = formal->cast<ListType>()) {
@@ -341,14 +345,15 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a list to " << actual->str();
+      ss << "Cannot match " << lt_formal->python_str() << " to "
+         << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
   } else if(auto tp_formal = formal->cast<TupleType>()) {
     if(auto tp_actual = actual->cast<TupleType>()) {
       if(tp_formal->elements().size() != tp_actual->elements().size()) {
-        ret.errMsg = "cannot match tuples of mismatched size";
+        ret.errMsg = "Cannot match tuples of mismatched size";
         return ret;
       }
       std::vector<TypePtr> elements;
@@ -366,7 +371,7 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a tuple to " << actual->str();
+      ss << "Cannot match a tuple to " << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
@@ -381,7 +386,7 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a future to " << actual->str();
+      ss << "Cannot match a future to " << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
@@ -401,7 +406,9 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       // unknown type).
       return matchTypeVariables(opt_formal->getElementType(), actual, type_env);
     } else {
-      ret.errMsg = "cannot match an Optional[T] to None, because there is no way to determine T from None.";
+      ret.errMsg =
+          "Cannot match an Optional[T] to None, because there is no "
+          "way to determine T from None.";
       return ret;
     }
   } else if (auto dict_formal = formal->cast<DictType>()) {
@@ -426,13 +433,13 @@ MatchTypeReturn matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type
       return ret;
     } else {
       std::stringstream ss;
-      ss << "cannot match a dict to " << actual->str();
+      ss << "Cannot match a dict to " << actual->python_str();
       ret.errMsg = ss.str();
       return ret;
     }
   }
 
-  AT_ERROR("unhandled free variable container: ", formal->str());
+  AT_ERROR("Unhandled free variable container: ", formal->python_str());
 }
 
 // change return types like List[List[t]] into List[List[int]]

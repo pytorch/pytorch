@@ -94,6 +94,11 @@ inline TypedIValue toTypedIValue(py::handle input) {
     if (ten.is_sparse()) {
       AT_ERROR("sparse tensors not supported");
     }
+    if (ten.is_mkldnn()) {
+      // mkldnn tensor as opaque tensor doesn't have strides, so we can
+      // not create a CompleteTensorType
+      return TypedIValue(ten, DimensionedTensorType::create(ten));
+    }
     return TypedIValue(ten, CompleteTensorType::create(ten));
   } else if (six::isTuple(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
@@ -106,11 +111,11 @@ inline TypedIValue toTypedIValue(py::handle input) {
       s.push_back(info.first);
       t.push_back(info.second);
     }
-    return TypedIValue(Tuple::create(s), TupleType::create(t));
+    return TypedIValue(c10::ivalue::TuplePtr::create(s), TupleType::create(t));
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
-    at::ivalue::UnorderedMap elems;
+    c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
 
     size_t len = py::len(dict);
     if (!len) {
@@ -131,10 +136,10 @@ inline TypedIValue toTypedIValue(py::handle input) {
       }
       keyType = *unifiedKey;
       valueType = *unifiedValue;
-      elems.insert(std::make_pair(keyInfo.first, valInfo.first));
+      elems.insert(keyInfo.first, valInfo.first);
     }
     return TypedIValue(
-        at::ivalue::GenericDict::create(std::move(elems)),
+        std::move(elems),
         DictType::create(keyType, valueType));
   } else if (PyList_Check(input.ptr())) {
     auto list = py::cast<py::list>(input);
@@ -174,13 +179,13 @@ inline IValue toIValue(py::handle input) {
 }
 
 inline Stack toStack(const py::tuple& inputs) {
-  return toIValue(inputs).toTuple()->elements();
+  return toIValue(inputs).toTupleRef().vec();
 }
 
 inline TypedStack toTypedStack(const py::tuple& inputs) {
   auto info = toTypedIValue(inputs);
   return TypedStack(
-      info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
+      info.ivalue().toTupleRef().vec(), info.type()->expect<TupleType>());
 }
 
 inline IValue toIValue(
@@ -189,24 +194,24 @@ inline IValue toIValue(
     c10::optional<int32_t> N = c10::nullopt);
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
-  std::vector<IValue> elems;
+  c10::ListPtr<IValue> elems = c10::make_list<IValue>();
   for (auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
-  return List<IValue>::create(std::move(elems));
+  return IValue(std::move(elems));
 }
 
 inline IValue createGenericDict(
     py::handle obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
-  at::ivalue::UnorderedMap elems;
+  c10::impl::GenericDictPtr elems = c10::impl::make_generic_dict();
   elems.reserve(py::len(obj));
   for (auto key : obj) {
-    elems.insert(std::make_pair(
-        toIValue(key, key_type), toIValue(obj[key], value_type)));
+    elems.insert(
+        toIValue(key, key_type), toIValue(obj[key], value_type));
   }
-  return at::ivalue::GenericDict::create(std::move(elems));
+  return IValue(std::move(elems));
 }
 
 inline IValue toIValue(
@@ -251,7 +256,7 @@ inline IValue toIValue(
       for (size_t i = 0; i < tuple_size; ++i) {
         values.push_back(toIValue(tuple[i], elem_types[i]));
       }
-      return Tuple::create(std::move(values));
+      return c10::ivalue::TuplePtr::create(std::move(values));
     }
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
@@ -321,6 +326,8 @@ inline IValue toIValue(
     case TypeKind::VarType:
     case TypeKind::FutureType:
       break;
+    case TypeKind::FunctionType:
+      AT_ERROR("Function Values aren't yet supported");
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",
@@ -336,21 +343,11 @@ inline IValue argumentToIValue(
   try {
     return toIValue(object, argument.type(), argument.N());
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(c10::str(
-        schema.name(),
-        "() expected value of type ",
-        argument.type()->str(),
-        " for argument '",
-        argument.name(),
-        "' in position ",
-        argumentPosition,
-        ", but instead got value of type ",
+    throw std::runtime_error(schema.formatTypeMismatchMsg(
+        argument,
         py::str(object.get_type().attr("__name__")),
-        ".",
-        "\nValue: ",
-        py::repr(object),
-        "\nDeclaration: ",
-        schema));
+        argumentPosition,
+        py::repr(object)));
   }
 }
 
@@ -379,49 +376,47 @@ inline py::object toPyObject(IValue&& ivalue) {
     }
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
-    return py::cast(ivalue.toDouble());
+    return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isInt()) {
-    return py::cast(ivalue.toInt());
+    return py::cast(std::move(ivalue).toInt());
   } else if (ivalue.isBool()) {
-    return py::cast(ivalue.toBool());
+    return py::cast(std::move(ivalue).toBool());
   } else if (ivalue.isString()) {
-    return py::cast(ivalue.toStringRef());
+    return py::cast(std::move(ivalue).toStringRef());
   } else if (ivalue.isIntList()) {
-    return py::cast(ivalue.toIntListRef());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toIntList()));
   } else if (ivalue.isDoubleList()) {
-    return py::cast(ivalue.toDoubleListRef());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toDoubleList()));
   } else if (ivalue.isBoolList()) {
-    return py::cast(ivalue.toBoolListRef());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toBoolList()));
   } else if (ivalue.isTensorList()) {
-    return py::cast(ivalue.toTensorListRef());
+    return py::cast(c10::impl::toVector(std::move(ivalue).toTensorList()));
   } else if (ivalue.isGenericList()) {
-    auto list = ivalue.toGenericList();
-    const auto& elements = list->elements();
-    py::list t{elements.size()};
-    for (size_t i = 0; i < elements.size(); ++i) {
-      t[i] = toPyObject(IValue{elements[i]});
+    auto list = std::move(ivalue).toGenericList();
+    py::list t{list.size()};
+    for (size_t i = 0; i < list.size(); ++i) {
+      t[i] = toPyObject(IValue{list.get(i)});
     }
     return std::move(t);
   } else if (ivalue.isTuple()) {
-    auto tuple = ivalue.toTuple();
-    const auto& elements = tuple->elements();
+    auto tuple = std::move(ivalue).toTuple();
+    const auto& elements = tuple.elements();
     py::tuple t{elements.size()};
     for (size_t i = 0; i < elements.size(); ++i) {
-      t[i] = toPyObject(IValue{elements[i]});
+      t[i] = toPyObject(IValue{elements.get(i)});
     }
     return std::move(t);
   } else if (ivalue.isDevice()) {
-    return py::cast<py::object>(THPDevice_New(ivalue.toDevice()));
+    return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
   } else if (ivalue.isGenericDict()) {
-    auto dict = ivalue.toGenericDict();
-    const auto& elements = dict->elements();
+    auto dict = std::move(ivalue).toGenericDict();
     py::dict py_dict;
-    for (auto pair : elements) {
-      py_dict[toPyObject(IValue{pair.first})] = toPyObject(IValue{pair.second});
+    for (auto& pair : dict) {
+      py_dict[toPyObject(IValue{pair.key()})] = toPyObject(IValue{pair.value()});
     }
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
-    const auto obj = ivalue.toObject();
+    const auto obj = std::move(ivalue).toObject();
     auto& pyCu = script::CompilationUnit::_get_python_cu();
     const auto classType = pyCu.get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);

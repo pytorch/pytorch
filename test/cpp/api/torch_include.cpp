@@ -9,4 +9,6 @@ TEST(TorchIncludeTest, GetSetNumThreads) {
   torch::init_num_threads();
   torch::set_num_threads(2);
   ASSERT_EQ(torch::get_num_threads(), 2);
+  torch::set_num_interop_threads(2);
+  ASSERT_EQ(torch::get_num_interop_threads(), 2);
 }

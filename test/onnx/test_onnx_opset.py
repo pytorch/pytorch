@@ -29,14 +29,21 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
     # At least the op_name should be specified,
     # but the op's attributes can optionally be
     # specified as well
+<<<<<<< HEAD
     #assert len(ops) == len(graph.node)
     for i in range(0, len(ops)):
         #assert graph.node[i].op_type == ops[i]['op_name']
+=======
+    assert len(ops) == len(graph.node)
+    for i in range(0, len(ops)):
+        assert graph.node[i].op_type == ops[i]['op_name']
+>>>>>>> master
         if "attributes" in ops[i] :
             attributes = ops[i]['attributes']
             assert len(attributes) == len(graph.node[i].attribute)
             for j in range(0, len(attributes)):
                 for attribute_field in attributes[j].keys():
+<<<<<<< HEAD
                     #assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
                     pass
 
@@ -45,6 +52,18 @@ def check_onnx_opsets_operator(module, x, ops, opset_versions):
     for opset_version in opset_versions:
         f = io.BytesIO()
         torch.onnx.export(module, x, f, opset_version=opset_version)
+=======
+                    assert attributes[j][attribute_field] == getattr(graph.node[i].attribute[j], attribute_field)
+
+
+def check_onnx_opsets_operator(module, x, ops, opset_versions, training=False, example_outputs=None):
+    for opset_version in opset_versions:
+        f = io.BytesIO()
+        torch.onnx.export(module, x, f,
+                          opset_version=opset_version,
+                          training=training,
+                          example_outputs=example_outputs)
+>>>>>>> master
         model = onnx.load(io.BytesIO(f.getvalue()))
         check_onnx_opset_operator(model, ops[opset_version], opset_version)
 
@@ -148,6 +167,102 @@ class TestONNXOpset(TestCase):
         check_onnx_opsets_operator(module, x, ops, opset_versions=[8, 9])
 
             
+    def test_slice(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return x[0:1]
+
+        ops_9 = [{"op_name" : "Slice",
+                  "attributes" :
+                  [{"name": "axes", "ints": [0], "type": 7},
+                   {"name": "ends", "ints": [1], "type": 7},
+                   {"name": "starts", "ints": [0], "type": 7}]}]
+        ops_10 = [{"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Slice",
+                   "attributes" : []}]
+        ops = {9 : ops_9, 10 : ops_10}
+        x = torch.randn(3)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+
+        class DynamicSliceModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x[1:x.size(0)] 
+
+        ops_9 = [{"op_name" : "Constant"},
+                 {"op_name" : "Constant"},
+                 {"op_name" : "Shape"},
+                 {"op_name" : "Gather",
+                 "attributes" : [{"name" : "axis", "i" : 0, "type" : 2}]},
+                 {"op_name" : "Unsqueeze",
+                 "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
+                 {"op_name" : "Unsqueeze",
+                 "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
+                 {"op_name" : "Unsqueeze",
+                 "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
+                 {"op_name" : "DynamicSlice"}]
+        ops_10 = [{"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Shape"},
+                  {"op_name" : "Gather",
+                   "attributes" : [{"name" : "axis", "i" : 0, "type" : 2}]},
+                  {"op_name" : "Unsqueeze",
+                   "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
+                  {"op_name" : "Unsqueeze",
+                   "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
+                  {"op_name" : "Unsqueeze",
+                   "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Slice",
+                   "attributes" : []}]
+        ops = {9 : ops_9, 10 : ops_10}
+        module = DynamicSliceModel()
+        x = torch.rand(1, 2)
+        example_output = module(x)
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[9, 10], example_outputs=example_output)
+
+    def test_flip(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return torch.flip(x, dims=[0])
+
+        ops_10 = [{"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Constant"},
+                  {"op_name" : "Slice",
+                   "attributes" : []}]
+        ops = {10 : ops_10}
+        import numpy
+        x = torch.tensor(numpy.arange(6.0).reshape(2, 3))
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[10])
+
+    def test_dropout(self):
+        class MyModule(Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        x = torch.randn(1, 2, 3)
+
+        # we should only export the onnx Dropout op in training mode; test both modes
+
+        # test training mode
+        ops = [{"op_name" : "Dropout", "attributes" : [{"name" : "ratio", "f" : 0.5, "type" : 1}]}]
+        ops = {9 : ops, 10 : ops}
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=True)
+
+        # test eval mode
+        ops = []
+        ops = {9 : ops, 10 : ops}
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=False)
+
 
 if __name__ == '__main__':
     run_tests()
