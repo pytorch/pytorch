@@ -4700,28 +4700,28 @@
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool2d_forward_out
-    CUDA: legacy::cuda::_thnn_avg_pool2d_forward_out
+    CPU: avg_pool2d_out_cpu
+    CUDA: avg_pool2d_out_cuda
     MkldnnCPU: mkldnn_avg_pool2d_out
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool2d_forward
-    CUDA: legacy::cuda::_thnn_avg_pool2d_forward
+    CPU: avg_pool2d_cpu
+    CUDA: avg_pool2d_cuda
     MkldnnCPU: mkldnn_avg_pool2d
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool2d_backward_out
-    CUDA: legacy::cuda::_thnn_avg_pool2d_backward_out
+    CPU: avg_pool2d_backward_out_cpu
+    CUDA: avg_pool2d_backward_out_cuda
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool2d_backward
-    CUDA: legacy::cuda::_thnn_avg_pool2d_backward
+    CPU: avg_pool2d_backward_cpu
+    CUDA: avg_pool2d_backward_cuda
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

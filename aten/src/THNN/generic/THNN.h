@@ -427,26 +427,6 @@ TH_API void THNN_(SpatialConvolutionMM_accGradParameters)(
           int padW, int padH,
           accreal scale);
 
-TH_API void THNN_(SpatialAveragePooling_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          bool ceil_mode,
-          bool count_include_pad);
-TH_API void THNN_(SpatialAveragePooling_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          bool ceil_mode,
-          bool count_include_pad);
-
 TH_API void THNN_(SpatialDilatedConvolution_updateOutput)(
           THNNState *state,
           THTensor *input,
