@@ -124,8 +124,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     return ScalarType::Long;
   }
   if (PyBool_Check(obj)) {
-    // TODO: infer Bool when we have Bool ScalarType
-    return ScalarType::Byte;
+    return ScalarType::Bool;
   }
   if (THPVariable_Check(obj)) {
     auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
@@ -221,7 +220,7 @@ Tensor internal_new_from_data(
 
 #ifdef USE_NUMPY
   if (PyObject_HasAttrString(data, "__cuda_array_interface__")) {
-    AT_CHECK(!pin_memory, "Can't pin tensor constructed from __cuda_array_interface__");
+    TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from __cuda_array_interface__");
     auto tensor = autograd::make_variable(tensor_from_cuda_array_interface(data), /*requires_grad=*/false);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
     auto device = device_opt.has_value() ? *device_opt : at::Device(type.device_type());
@@ -477,7 +476,7 @@ Tensor indexing_tensor_from_data(
   // Specific to tensor indexing, converts an indexing list to an
   // indexing tensor (type Byte or Long)
   ScalarType inferred_scalar_type = infer_scalar_type(data);
-  if (inferred_scalar_type == ScalarType::Byte) {
+  if (inferred_scalar_type == ScalarType::Byte || inferred_scalar_type == ScalarType::Bool) {
     auto& idx_type = type.toScalarType(inferred_scalar_type);
     return internal_new_from_data(idx_type, inferred_scalar_type, std::move(device), data, false, false, false);
   } else {

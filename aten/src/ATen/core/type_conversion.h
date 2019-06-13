@@ -114,7 +114,14 @@ struct getTypePtr_<std::vector<T>> final {
   }
 };
 template <class T>
-struct getTypePtr_<ArrayRef<T>> final {
+struct getTypePtr_<c10::ArrayRef<T>> final {
+  static TypePtr call() {
+    static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template <class T>
+struct getTypePtr_<c10::ListPtr<T>> final {
   static TypePtr call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;

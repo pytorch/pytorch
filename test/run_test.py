@@ -21,6 +21,7 @@ TESTS = [
     'autograd',
     'cpp_extensions',
     'c10d',
+    'c10d_spawn',
     'cuda',
     'cuda_primary_ctx',
     'dataloader',

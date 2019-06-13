@@ -787,14 +787,14 @@ struct PythonPrintPass {
     } else if (v.isTensorList()) {
       stmt << "[";
       const char* delim = "";
-      for (const auto& t : v.toTensorListRef()) {
+      for (const at::Tensor& t : v.toTensorListRef()) {
         stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
         delim = ", ";
       }
       stmt << "]";
     } else if (v.isBoolList()) {
       printMaybeAnnotatedConstantList(
-          stmt, "bool", v.toBoolListRef().size(), v);
+          stmt, "bool", v.toBoolList().size(), v);
     } else if (v.isIntList()) {
       printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
     } else if (v.isDoubleList()) {
@@ -855,6 +855,9 @@ struct PythonPrintPass {
           value->writeScalars(stmt);
         }
         printValueList(stmt, node->inputs(), "(", ")");
+      } break;
+      case prim::Uninitialized: {
+        stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
       } break;
       case prim::Constant: {
         if (node->kind() == prim::Constant && !node->mustBeNone()) {
@@ -1028,7 +1031,7 @@ struct PythonPrintPass {
   }
 
  public:
-  void printFunction(const script::Function& func) {
+  void printFunction(const Function& func) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
@@ -1119,7 +1122,7 @@ struct PythonPrintPass {
 
 void PythonPrint(
     std::ostream& out,
-    const script::Function& func,
+    const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
     std::vector<ClassTypePtr>& class_table,
@@ -1162,6 +1165,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
       prim::Constant,
+      prim::Uninitialized,
       prim::fork,
       prim::ListConstruct,
       prim::DictConstruct,

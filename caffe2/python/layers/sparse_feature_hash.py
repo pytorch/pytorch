@@ -21,11 +21,23 @@ import numpy as np
 class SparseFeatureHash(ModelLayer):
 
     def __init__(self, model, input_record, seed=0, modulo=None,
-                 use_hashing=True, name='sparse_feature_hash', **kwargs):
+                 use_hashing=True, use_divide_mod=False, divisor=None, name='sparse_feature_hash', **kwargs):
         super(SparseFeatureHash, self).__init__(model, name, input_record, **kwargs)
+
+        assert use_hashing + use_divide_mod < 2, "use_hashing and use_divide_mod cannot be set true at the same time."
+
+        if use_divide_mod:
+            assert divisor >= 1, 'Unexpected divisor: {}'.format(divisor)
+
+            self.divisor = self.create_param(param_name='divisor',
+                                             shape=[1],
+                                             initializer=('GivenTensorInt64Fill', {'values': np.array([divisor])}),
+                                             optimizer=model.NoOptim)
 
         self.seed = seed
         self.use_hashing = use_hashing
+        self.use_divide_mod = use_divide_mod
+
         if schema.equal_schemas(input_record, IdList):
             self.modulo = modulo or self.extract_hash_size(input_record.items.metadata)
             metadata = schema.Metadata(
@@ -91,6 +103,12 @@ class SparseFeatureHash(ModelLayer):
                 input_blob, output_blob, seed=self.seed, modulo=self.modulo
             )
         else:
-            net.Mod(
-                input_blob, output_blob, divisor=self.modulo, sign_follow_divisor=True
-            )
+            if self.use_divide_mod:
+                quotient = net.Div([input_blob, self.divisor], [net.NextScopedBlob('quotient')])
+                net.Mod(
+                    quotient, output_blob, divisor=self.modulo, sign_follow_divisor=True
+                )
+            else:
+                net.Mod(
+                    input_blob, output_blob, divisor=self.modulo, sign_follow_divisor=True
+                )
