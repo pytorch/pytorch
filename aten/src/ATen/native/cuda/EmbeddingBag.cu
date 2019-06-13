@@ -119,8 +119,8 @@ __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
     int64_t* segment_offsets, int64_t num_of_segments) {
 
   using accscalar_t = acc_type<scalar_t, true>;
-  const int id = blockIdx.x * blockDim.x + threadIdx.x;
-  const int startFeature = blockIdx.y * blockDim.y + threadIdx.y;
+  const int id = blockIdx.y * blockDim.y + threadIdx.y;
+  const int startFeature = blockIdx.x * blockDim.x + threadIdx.x;
   if (startFeature >= stride) {
     return;
   }
@@ -131,8 +131,6 @@ __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
 
   for (int idx=segment_offsets[id]; idx < idx_end; ++idx) {
     const int weightRow = ((int)input[idx]) * stride;
-
-    // Note: only this line changes from LookupTable_accgradParametersKernel
     const int origRow = ((int)indices[idx]);
     const int seq_number = offset2bag[origRow];
     const int gradOutputRow = ((int)seq_number) * stride;
@@ -246,7 +244,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
   int64_t num_of_segments = thrust::get<0>(ends) - dummy_dev;
 
 
-  dim3 grid(THCCeilDiv(num_of_segments, (ptrdiff_t)32), THCCeilDiv(stride, (int64_t)32));
+  dim3 grid(THCCeilDiv(stride, (ptrdiff_t)32), THCCeilDiv(num_of_segments, (int64_t)32));
   dim3 block(32, 32);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad.scalar_type(), "embedding_bag_backward_cuda_sum_avg_kernel", [&] {
