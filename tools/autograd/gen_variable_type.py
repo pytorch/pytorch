@@ -26,7 +26,7 @@ from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
-from ..setup_helpers.env import NAMEDTENSOR_ENABLED
+from .env import NAMEDTENSOR_ENABLED
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
