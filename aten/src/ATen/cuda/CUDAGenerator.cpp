@@ -27,6 +27,19 @@ uint64_t CUDAGenerator::current_seed() const {
 }
 
 /**
+ * Gets a nondeterminstic random number from /dev/urandom or time,
+ * seeds the CPUGenerator with it and then returns that number.
+ * 
+ * FIXME: You can move this function to Generator.cpp if the algorithm
+ * in getNonDeterministicRandom is unified for both CPU and CUDA
+ */
+uint64_t CUDAGenerator::seed() {
+  auto random = detail::getNonDeterministicRandom(true);
+  this->set_current_seed(random);
+  return random;
+}
+
+/**
  * Sets the philox_offset_per_thread_ to be used by curandStatePhilox4_32_10
  * 
  * See Note [Acquire lock when using random generators]

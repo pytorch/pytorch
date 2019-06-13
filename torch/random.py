@@ -111,13 +111,11 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
     cpu_rng_state = torch.get_rng_state()
     gpu_rng_states = []
     for device in devices:
-        with torch.cuda.device(device):
-            gpu_rng_states.append(torch.cuda.get_rng_state())
+        gpu_rng_states.append(torch.cuda.get_rng_state(device))
 
     try:
         yield
     finally:
         torch.set_rng_state(cpu_rng_state)
         for device, gpu_rng_state in zip(devices, gpu_rng_states):
-            with torch.cuda.device(device):
-                torch.cuda.set_rng_state(gpu_rng_state)
+            torch.cuda.set_rng_state(gpu_rng_state, device)

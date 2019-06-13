@@ -135,10 +135,9 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
 static PyObject * THPGenerator_seed(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
-  uint64_t seed_val = at::detail::getNonDeterministicRandom();
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(self->cdata->mutex_);
-  self->cdata->set_current_seed(seed_val);
+  uint64_t seed_val = self->cdata->seed();
   return THPUtils_packUInt64(seed_val);
   END_HANDLE_TH_ERRORS
 }

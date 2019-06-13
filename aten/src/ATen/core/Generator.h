@@ -68,6 +68,7 @@ struct CAFFE2_API Generator {
   // Common methods for all generators
   virtual void set_current_seed(uint64_t seed) = 0;
   virtual uint64_t current_seed() const = 0;
+  virtual uint64_t seed() = 0;
   Device device() const;
 
   // See Note [Acquire lock when using random generators]

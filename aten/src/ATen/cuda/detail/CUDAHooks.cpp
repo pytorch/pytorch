@@ -92,8 +92,7 @@ CUDAGenerator* CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) cons
   TORCH_CHECK(idx >= 0 && idx < num_gpus);
   std::call_once(cuda_gens_init_flag[idx], [&] {
     default_gens_cuda[idx] = std::make_shared<CUDAGenerator>(idx);
-    default_gens_cuda[idx]->set_current_seed(at::detail::getNonDeterministicRandom(true));
-    default_gens_cuda[idx]->set_philox_offset_per_thread(0);
+    default_gens_cuda[idx]->seed();
   });
   return default_gens_cuda[idx].get();
 }

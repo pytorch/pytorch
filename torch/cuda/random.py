@@ -1,4 +1,4 @@
-from torch._C import default_cuda_generators, device as torch_device
+from torch import _C, device as torch_device, cuda
 from . import _lazy_init, _lazy_call, device_count, current_device
 
 __all__ = ['get_rng_state', 'get_rng_state_all',
@@ -24,7 +24,7 @@ def get_rng_state(device=torch_device('cuda')):
     idx = device.index
     if idx is None:
         idx = current_device()
-    default_generator = default_cuda_generators[idx]
+    default_generator = _C._cuda_default_generators[idx]
     return default_generator.get_state()
 
 
@@ -45,6 +45,7 @@ def set_rng_state(new_state, device=torch_device('cuda')):
         device (torch.device or int, optional): The device to set the RNG state.
             Default: ``torch.device('cuda')`` (i.e., the current CUDA device).
     """
+    new_state_copy = new_state.clone()
     if isinstance(device, int):
         device = torch_device('cuda', device)
 
@@ -52,8 +53,8 @@ def set_rng_state(new_state, device=torch_device('cuda')):
         idx = device.index
         if idx is None:
             idx = current_device()
-        default_generator = default_cuda_generators[idx]
-        default_generator.set_state(new_state)
+        default_generator = _C._cuda_default_generators[idx]
+        default_generator.set_state(new_state_copy)
 
     _lazy_call(cb)
 
@@ -83,7 +84,7 @@ def manual_seed(seed):
 
     def cb():
         idx = current_device()
-        default_generator = default_cuda_generators[idx]
+        default_generator = _C._cuda_default_generators[idx]
         default_generator.manual_seed(seed)
 
     _lazy_call(cb)
@@ -101,7 +102,7 @@ def manual_seed_all(seed):
 
     def cb():
         for i in range(device_count()):
-            default_generator = default_cuda_generators[i]
+            default_generator = _C._cuda_default_generators[i]
             default_generator.manual_seed(seed)
 
     _lazy_call(cb)
@@ -118,7 +119,7 @@ def seed():
     """
     def cb():
         idx = current_device()
-        default_generator = default_cuda_generators[idx]
+        default_generator = _C._cuda_default_generators[idx]
         default_generator.seed()
 
     _lazy_call(cb)
@@ -133,7 +134,7 @@ def seed_all():
         random_seed = 0
         seeded = False
         for i in range(device_count()):
-            default_generator = default_cuda_generators[i]
+            default_generator = _C._cuda_default_generators[i]
             if not seeded:
                 default_generator.seed()
                 random_seed = default_generator.initial_seed()
@@ -152,5 +153,5 @@ def initial_seed():
     """
     _lazy_init()
     idx = current_device()
-    default_generator = default_cuda_generators[idx]
+    default_generator = _C._cuda_default_generators[idx]
     return default_generator.initial_seed()

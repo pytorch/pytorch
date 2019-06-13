@@ -48,7 +48,10 @@
 #include <cudnn.h>
 #endif
 
+#ifdef USE_CUDA
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <c10/cuda/CUDAFunctions.h>
+#endif
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
@@ -748,7 +751,8 @@ PyObject* initModule() {
   // This reference is meant to be given away, so no need to incref here.
   ASSERT_TRUE(set_module_attr("default_generator", cpu_generator_tuple, /* incref= */ false));
 
-  auto num_gpus = at::detail::getCUDAHooks().getNumGPUs();
+#ifdef USE_CUDA
+  auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for(int i = 0; i < num_gpus; i++) {
     auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(i);
@@ -757,7 +761,8 @@ PyObject* initModule() {
     PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
   }
   // This reference is meant to be given away, so no need to incref here.
-  ASSERT_TRUE(set_module_attr("default_cuda_generators", default_cuda_generators, /* incref= */ false));
+  ASSERT_TRUE(set_module_attr("_cuda_default_generators", default_cuda_generators, /* incref= */ false));
+#endif
 
 #ifdef USE_NUMPY
   if (_import_array() < 0) return nullptr;
