@@ -578,6 +578,10 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
  * registering the kernel. In this case, the operator registration logic will
  * check that the kernel function signature matches the one you specified.
  */
+struct TestModernAPI final {};
+struct TestLegacyAPI final {};
+struct TestModernAndLegacyAPI final {};
+
 template<class InputType, class OutputType = InputType>
 struct ArgTypeTestKernel final : OperatorKernel {
   explicit ArgTypeTestKernel(InputType input, std::function<void(const InputType&)> inputExpectation, OutputType output)
@@ -588,15 +592,34 @@ struct ArgTypeTestKernel final : OperatorKernel {
     return output_;
   }
 
-  static void test(InputType input, std::function<void(const InputType&)> inputExpectation, OutputType output, std::function<void(const c10::Stack&)> outputExpectation, const std::string& schema) {
-    auto registry = c10::RegisterOperators().op("_test::my_op" + schema, c10::RegisterOperators::options().catchAllKernel<ArgTypeTestKernel>(input, std::move(inputExpectation), std::move(output)));
-    auto op = Dispatcher::singleton().findSchema("_test::my_op", "");
-    ASSERT_TRUE(op.has_value()); // assert schema is registered
-    auto actualOutput = callOp(*op, std::move(input));
-    outputExpectation(actualOutput);
+  static void test(TestModernAndLegacyAPI, InputType input, std::function<void(const InputType&)> inputExpectation, OutputType output, std::function<void(const c10::Stack&)> outputExpectation, const std::string& schema) {
+    test(TestModernAPI(), input, inputExpectation, output, outputExpectation, schema);
+    test(TestLegacyAPI(), input, inputExpectation, output, outputExpectation, schema);
+  }
+
+  static void test(TestModernAPI, InputType input, std::function<void(const InputType&)> inputExpectation, OutputType output, std::function<void(const c10::Stack&)> outputExpectation, const std::string& schema) {
+    return test_([&] {
+      return c10::RegisterOperators().op("_test::my_op" + schema, c10::RegisterOperators::options().catchAllKernel<ArgTypeTestKernel>(input, inputExpectation, output));
+    }, input, inputExpectation, output, outputExpectation, schema);
+  }
+
+  static void test(TestLegacyAPI, InputType input, std::function<void(const InputType&)> inputExpectation, OutputType output, std::function<void(const c10::Stack&)> outputExpectation, const std::string& schema) {
+    return test_([&] {
+      return c10::RegisterOperators().op("_test::my_op" + schema, [=] (InputType input) -> OutputType {
+        inputExpectation(std::move(input));
+        return output;
+      });
+    }, input, inputExpectation, output, outputExpectation, schema);
   }
 
 private:
+  static void test_(std::function<c10::RegisterOperators()> registration, InputType input, std::function<void(const InputType&)> inputExpectation, OutputType output, std::function<void(const c10::Stack&)> outputExpectation, const std::string& schema) {
+    auto registry = registration();
+    auto op = Dispatcher::singleton().findSchema("_test::my_op", "");
+    ASSERT_TRUE(op.has_value()); // assert schema is registered
+    auto actualOutput = callOp(*op, input);
+    outputExpectation(actualOutput);
+  }
 
   InputType input_;
   std::function<void(const InputType&)> inputExpectation_;
@@ -606,10 +629,11 @@ private:
 
 template<class InputType, class OutputType = InputType>
 struct testArgTypes final {
+  template<class APIType = TestModernAndLegacyAPI>
   static void test(InputType input, std::function<void(const InputType&)> inputExpectation, OutputType output, std::function<void(const IValue&)> outputExpectation, const std::string& schema) {
     // Test with explicitly specified schema
     ArgTypeTestKernel<InputType, OutputType>::test(
-      input, inputExpectation, output, [&] (const c10::Stack& output) {
+      APIType(), input, inputExpectation, output, [&] (const c10::Stack& output) {
         EXPECT_EQ(1, output.size());
         outputExpectation(output[0]);
       }, schema
@@ -617,7 +641,7 @@ struct testArgTypes final {
 
     // Test with inferred schema
     ArgTypeTestKernel<InputType, OutputType>::test(
-      input, inputExpectation, output, [&] (const c10::Stack& output) {
+      APIType(), input, inputExpectation, output, [&] (const c10::Stack& output) {
         EXPECT_EQ(1, output.size());
         outputExpectation(output[0]);
       }, ""
@@ -625,12 +649,12 @@ struct testArgTypes final {
 
     // Test taking argument and returning nothing
     ArgTypeTestKernel<InputType, std::tuple<>>::test(
-      input, inputExpectation, {}, [] (const c10::Stack&) {}, ""
+      APIType(), input, inputExpectation, {}, [] (const c10::Stack&) {}, ""
     );
 
     // Test taking argument and returning multiple outputs
     ArgTypeTestKernel<InputType, std::tuple<int64_t, OutputType>>::test(
-      input, inputExpectation, std::tuple<int64_t, OutputType>{3, output}, [&] (const c10::Stack& output) {
+      APIType(), input, inputExpectation, std::tuple<int64_t, OutputType>{3, output}, [&] (const c10::Stack& output) {
         EXPECT_EQ(2, output.size());
         EXPECT_EQ(3, output[0].toInt());
         outputExpectation(output[1]);
@@ -724,81 +748,142 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
 
 
   // list types (with empty list)
-  testArgTypes<std::vector<double>>::test(
-    std::vector<double>(), [] (const std::vector<double>& v) {EXPECT_EQ(0, v.size());},
-    std::vector<double>(), [] (const IValue& v) {EXPECT_EQ(0, v.toDoubleListRef().size());},
+  testArgTypes<c10::ListPtr<double>>::test(
+    c10::make_list<double>(), [] (const c10::ListPtr<double>& v) {EXPECT_EQ(0, v.size());},
+    c10::make_list<double>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::ListPtr<double>>().size());},
     "(float[] a) -> float[]");
-  testArgTypes<std::vector<int64_t>, std::vector<int64_t>>::test(
-    std::vector<int64_t>(), [] (const std::vector<int64_t>& v) {EXPECT_EQ(0, v.size());},
-    std::vector<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.toIntListRef().size());},
+  testArgTypes<c10::ListPtr<int64_t>, c10::ListPtr<int64_t>>::test(
+    c10::make_list<int64_t>(), [] (const c10::ListPtr<int64_t>& v) {EXPECT_EQ(0, v.size());},
+    c10::make_list<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::ListPtr<int64_t>>().size());},
     "(int[] a) -> int[]");
-  testArgTypes<std::vector<bool>>::test(
-    std::vector<bool>(), [] (const std::vector<bool>& v) {EXPECT_EQ(0, v.size());},
-    std::vector<bool>(), [] (const IValue& v) {EXPECT_EQ(0, v.toBoolListRef().size());},
+  testArgTypes<c10::ListPtr<bool>>::test(
+    c10::make_list<bool>(), [] (const c10::ListPtr<bool>& v) {EXPECT_EQ(0, v.size());},
+    c10::make_list<bool>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::ListPtr<bool>>().size());},
     "(bool[] a) -> bool[]");
-  testArgTypes<std::vector<std::string>>::test(
-    std::vector<std::string>(), [] (const std::vector<std::string>& v) {EXPECT_EQ(0, v.size());},
-    std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
+  testArgTypes<c10::ListPtr<std::string>>::test(
+    c10::make_list<std::string>(), [] (const c10::ListPtr<std::string>& v) {EXPECT_EQ(0, v.size());},
+    c10::make_list<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
     "(str[] a) -> str[]");
-  testArgTypes<std::vector<Tensor>>::test(
-    std::vector<Tensor>({}), [] (const std::vector<Tensor>& v) {EXPECT_EQ(0, v.size());},
-    std::vector<Tensor>({}), [] (const IValue& v) {EXPECT_EQ(0, v.toTensorListRef().size());},
+  testArgTypes<c10::ListPtr<Tensor>>::test(
+    c10::make_list<Tensor>({}), [] (const c10::ListPtr<Tensor>& v) {EXPECT_EQ(0, v.size());},
+    c10::make_list<Tensor>({}), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::ListPtr<at::Tensor>>().size());},
     "(Tensor[] a) -> Tensor[]");
 
 
   // list types (with non-empty list)
-  testArgTypes<std::vector<double>>::test(
-    std::vector<double>({1.5, 2.5}), [] (const std::vector<double>& v) {EXPECT_EQ(std::vector<double>({1.5, 2.5}), v);},
-    std::vector<double>({3.5, 4.5}), [] (const IValue& v) {EXPECT_EQ(std::vector<double>({3.5, 4.5}), v.toDoubleListRef());},
+  testArgTypes<c10::ListPtr<double>>::test(
+    c10::make_list<double>({1.5, 2.5}), [] (const c10::ListPtr<double>& v) {expectListEquals({1.5, 2.5}, v);},
+    c10::make_list<double>({3.5, 4.5}), [] (const IValue& v) {expectListEquals({3.5, 4.5}, v.to<c10::ListPtr<double>>());},
     "(float[] a) -> float[]");
-  testArgTypes<std::vector<int64_t>>::test(
-    std::vector<int64_t>({1, 2}), [] (const std::vector<int64_t>& v) {EXPECT_EQ(std::vector<int64_t>({1, 2}), v);},
-    std::vector<int64_t>({3, 4}), [] (const IValue& v) {EXPECT_EQ(std::vector<int64_t>({3, 4}), v.toIntListRef());},
+  testArgTypes<c10::ListPtr<int64_t>>::test(
+    c10::make_list<int64_t>({1, 2}), [] (const c10::ListPtr<int64_t>& v) {expectListEquals({1, 2}, v);},
+    c10::make_list<int64_t>({3, 4}), [] (const IValue& v) {expectListEquals({3, 4}, v.to<c10::ListPtr<int64_t>>());},
     "(int[] a) -> int[]");
-  testArgTypes<std::vector<bool>>::test(
-    std::vector<bool>({true, false}), [] (const std::vector<bool>& v) {EXPECT_EQ(std::vector<bool>({true, false}), v);},
-    std::vector<bool>({true, false}), [] (const IValue& v) {EXPECT_EQ(std::vector<bool>({true, false}), v.toBoolListRef());},
+  testArgTypes<c10::ListPtr<bool>>::test(
+    c10::make_list<bool>({true, false}), [] (const c10::ListPtr<bool>& v) {expectListEquals({true, false}, v);},
+    c10::make_list<bool>({true, false}), [] (const IValue& v) {expectListEquals({true, false}, v.to<c10::ListPtr<bool>>());},
     "(bool[] a) -> bool[]");
-  testArgTypes<std::vector<std::string>>::test(
-    std::vector<std::string>({"first", "second"}), [] (const std::vector<std::string>& v) {EXPECT_EQ(std::vector<std::string>({"first", "second"}), v);},
+  testArgTypes<c10::ListPtr<std::string>>::test(
+    c10::make_list<std::string>({"first", "second"}), [] (const c10::ListPtr<std::string>& v) {expectListEquals({"first", "second"}, v);},
+    c10::make_list<std::string>({"first", "second"}), [] (const IValue& v) {
+      EXPECT_EQ(2, v.toGenericListRef().size());
+      EXPECT_EQ("first", v.toGenericListRef()[0].toStringRef());
+      EXPECT_EQ("second", v.toGenericListRef()[1].toStringRef());
+    },
+    "(str[] a) -> str[]");
+  testArgTypes<c10::ListPtr<Tensor>>::test(
+    c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}), [] (const c10::ListPtr<Tensor>& v) {
+      EXPECT_EQ(2, v.size());
+      EXPECT_EQ(TensorType1(), v.get(0).type_id());
+      EXPECT_EQ(TensorType2(), v.get(1).type_id());
+    },
+    c10::make_list<Tensor>({dummyTensor(TensorType2()), dummyTensor(TensorType1())}), [] (const IValue& v) {
+      EXPECT_EQ(2, v.to<c10::ListPtr<at::Tensor>>().size());
+      EXPECT_EQ(TensorType2(), v.to<c10::ListPtr<at::Tensor>>().get(0).type_id());
+      EXPECT_EQ(TensorType1(), v.to<c10::ListPtr<at::Tensor>>().get(1).type_id());
+    },
+    "(Tensor[] a) -> Tensor[]");
+
+  // deprecated list types (with empty list)
+  testArgTypes<std::vector<double>>::test<TestLegacyAPI>(
+    std::vector<double>(), [] (const std::vector<double>& v) {EXPECT_EQ(0, v.size());},
+    std::vector<double>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::ListPtr<double>>().size());},
+    "(float[] a) -> float[]");
+  testArgTypes<std::vector<int64_t>, std::vector<int64_t>>::test<TestLegacyAPI>(
+    std::vector<int64_t>(), [] (const std::vector<int64_t>& v) {EXPECT_EQ(0, v.size());},
+    std::vector<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::ListPtr<int64_t>>().size());},
+    "(int[] a) -> int[]");
+  //Note: vector<bool> is not supported, use ListPtr<bool> instead.
+  testArgTypes<std::vector<std::string>>::test<TestLegacyAPI>(
+    std::vector<std::string>(), [] (const std::vector<std::string>& v) {EXPECT_EQ(0, v.size());},
+    std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
+    "(str[] a) -> str[]");
+  testArgTypes<std::vector<Tensor>>::test<TestLegacyAPI>(
+    std::vector<Tensor>({}), [] (const std::vector<Tensor>& v) {EXPECT_EQ(0, v.size());},
+    std::vector<Tensor>({}), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::ListPtr<at::Tensor>>().size());},
+    "(Tensor[] a) -> Tensor[]");
+
+
+  // deprecated list types (with non-empty list)
+  testArgTypes<std::vector<double>>::test<TestLegacyAPI>(
+    std::vector<double>({1.5, 2.5}), [] (const std::vector<double>& v) {expectListEquals({1.5, 2.5}, v);},
+    std::vector<double>({3.5, 4.5}), [] (const IValue& v) {expectListEquals({3.5, 4.5}, v.to<c10::ListPtr<double>>());},
+    "(float[] a) -> float[]");
+  testArgTypes<std::vector<int64_t>>::test<TestLegacyAPI>(
+    std::vector<int64_t>({1, 2}), [] (const std::vector<int64_t>& v) {expectListEquals({1, 2}, v);},
+    std::vector<int64_t>({3, 4}), [] (const IValue& v) {expectListEquals({3, 4}, v.to<c10::ListPtr<int64_t>>());},
+    "(int[] a) -> int[]");
+  //Note: vector<bool> is not supported, use ListPtr<bool> instead.
+  testArgTypes<std::vector<std::string>>::test<TestLegacyAPI>(
+    std::vector<std::string>({"first", "second"}), [] (const std::vector<std::string>& v) {expectListEquals({"first", "second"}, v);},
     std::vector<std::string>({"first", "second"}), [] (const IValue& v) {
       EXPECT_EQ(2, v.toGenericListRef().size());
       EXPECT_EQ("first", v.toGenericListRef()[0].toStringRef());
       EXPECT_EQ("second", v.toGenericListRef()[1].toStringRef());
     },
     "(str[] a) -> str[]");
-  testArgTypes<std::vector<Tensor>>::test(
+  testArgTypes<std::vector<Tensor>>::test<TestLegacyAPI>(
     std::vector<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}), [] (const std::vector<Tensor>& v) {
       EXPECT_EQ(2, v.size());
-      EXPECT_EQ(TensorType1(), v[0].type_id());
-      EXPECT_EQ(TensorType2(), v[1].type_id());
+      EXPECT_EQ(TensorType1(), v.at(0).type_id());
+      EXPECT_EQ(TensorType2(), v.at(1).type_id());
     },
     std::vector<Tensor>({dummyTensor(TensorType2()), dummyTensor(TensorType1())}), [] (const IValue& v) {
-      EXPECT_EQ(2, v.toTensorListRef().size());
-      EXPECT_EQ(TensorType2(), v.toTensorListRef()[0].type_id());
-      EXPECT_EQ(TensorType1(), v.toTensorListRef()[1].type_id());
+      EXPECT_EQ(2, v.to<c10::ListPtr<at::Tensor>>().size());
+      EXPECT_EQ(TensorType2(), v.to<c10::ListPtr<at::Tensor>>().get(0).type_id());
+      EXPECT_EQ(TensorType1(), v.to<c10::ListPtr<at::Tensor>>().get(1).type_id());
     },
     "(Tensor[] a) -> Tensor[]");
 
   // Test optional of list (with nullopt)
-  testArgTypes<c10::optional<std::vector<int64_t>>>::test(
-    c10::optional<std::vector<int64_t>>(c10::nullopt), [] (const c10::optional<std::vector<int64_t>>& v) {EXPECT_FALSE(v.has_value());},
-    c10::optional<std::vector<int64_t>>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
+  testArgTypes<c10::optional<c10::ListPtr<int64_t>>>::test(
+    c10::optional<c10::ListPtr<int64_t>>(c10::nullopt), [] (const c10::optional<c10::ListPtr<int64_t>>& v) {EXPECT_FALSE(v.has_value());},
+    c10::optional<c10::ListPtr<int64_t>>(c10::nullopt), [] (const IValue& v) {EXPECT_TRUE(v.isNone());},
     "(int[]? a) -> int[]?");
 
   // Test optional of list (with empty list)
-  testArgTypes<c10::optional<std::vector<int64_t>>>::test(
-    c10::optional<std::vector<int64_t>>(std::vector<int64_t>{}), [] (const c10::optional<std::vector<int64_t>>& v) {EXPECT_EQ(0, v.value().size());},
-    c10::optional<std::vector<int64_t>>(std::vector<int64_t>{}), [] (const IValue& v) {EXPECT_EQ(0, v.toIntListRef().size());},
+  testArgTypes<c10::optional<c10::ListPtr<int64_t>>>::test(
+    c10::optional<c10::ListPtr<int64_t>>(c10::make_list<int64_t>({})), [] (const c10::optional<c10::ListPtr<int64_t>>& v) {EXPECT_EQ(0, v.value().size());},
+    c10::optional<c10::ListPtr<int64_t>>(c10::make_list<int64_t>({})), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::ListPtr<int64_t>>().size());},
     "(int[]? a) -> int[]?");
 
   // Test optional of list (with values)
-  testArgTypes<c10::optional<std::vector<int64_t>>>::test(
-    c10::optional<std::vector<int64_t>>({1, 2}), [] (const c10::optional<std::vector<int64_t>>& v) {EXPECT_EQ(std::vector<int64_t>({1, 2}), v.value());},
-    c10::optional<std::vector<int64_t>>({3, 4}), [] (const IValue& v) {EXPECT_EQ(std::vector<int64_t>({3, 4}), v.toIntListRef());},
+  testArgTypes<c10::optional<c10::ListPtr<int64_t>>>::test(
+    c10::optional<c10::ListPtr<int64_t>>(c10::make_list<int64_t>({1, 2})), [] (const c10::optional<c10::ListPtr<int64_t>>& v) {expectListEquals({1, 2}, v.value());},
+    c10::optional<c10::ListPtr<int64_t>>(c10::make_list<int64_t>({3, 4})), [] (const IValue& v) {expectListEquals({3, 4}, v.to<c10::ListPtr<int64_t>>());},
     "(int[]? a) -> int[]?");
 
-  // TODO Do we want to support list of optional ?
+  // Test list of optional (with empty list)
+  testArgTypes<c10::ListPtr<c10::optional<int64_t>>>::test(
+    c10::ListPtr<c10::optional<int64_t>>(c10::make_list<c10::optional<int64_t>>({})), [] (const c10::ListPtr<c10::optional<int64_t>>& v) {EXPECT_EQ(0, v.size());},
+    c10::ListPtr<c10::optional<int64_t>>(c10::make_list<c10::optional<int64_t>>({})), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::ListPtr<c10::optional<int64_t>>>().size());},
+    "(int?[] a) -> int?[]");
+
+  // Test list of optional (with values)
+  testArgTypes<c10::ListPtr<c10::optional<int64_t>>>::test(
+    c10::ListPtr<c10::optional<int64_t>>(c10::make_list<c10::optional<int64_t>>({3, c10::nullopt, 2})), [] (const c10::ListPtr<c10::optional<int64_t>>& v) {expectListEquals<c10::optional<int64_t>>({3, c10::nullopt, 2}, v);},
+    c10::ListPtr<c10::optional<int64_t>>(c10::make_list<c10::optional<int64_t>>({3, c10::nullopt, 2})), [] (const IValue& v) {expectListEquals<c10::optional<int64_t>>({3, c10::nullopt, 2}, v.to<c10::ListPtr<c10::optional<int64_t>>>());},
+    "(int?[] a) -> int?[]");
 
   // dict types
   c10::DictPtr<std::string, std::string> str_dict = c10::make_dict<std::string, std::string>();
@@ -811,7 +896,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
       EXPECT_EQ("value2", v.at("key2"));
     },
     str_dict, [] (const IValue& v) {
-      c10::DictPtr<std::string, std::string> dict = c10::impl::toTypedDict<std::string, std::string>(std::move(v.toGenericDict()->elements()));
+      c10::DictPtr<std::string, std::string> dict = c10::impl::toTypedDict<std::string, std::string>(v.toGenericDict());
       EXPECT_EQ(2, dict.size());
       EXPECT_EQ("value1", dict.at("key1"));
       EXPECT_EQ("value2", dict.at("key2"));
@@ -827,12 +912,64 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
       EXPECT_EQ(TensorType2(), v.at(2).type_id());
     },
     tensor_dict, [] (const IValue& v) {
-      c10::DictPtr<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(std::move(v.toGenericDict()->elements()));
+      c10::DictPtr<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(v.toGenericDict());
       EXPECT_EQ(2, dict.size());
       EXPECT_EQ(TensorType1(), dict.at(1).type_id());
       EXPECT_EQ(TensorType2(), dict.at(2).type_id());
     },
     "(Dict(int, Tensor) a) -> Dict(int, Tensor)");
+
+  // deprecated dict types
+  std::unordered_map<std::string, std::string> str_map;
+  str_map.emplace("key1", "value1");
+  str_map.emplace("key2", "value2");
+  testArgTypes<std::unordered_map<std::string, std::string>>::test<TestLegacyAPI>(
+    str_map, [] (std::unordered_map<std::string, std::string> v) {
+      EXPECT_EQ(2, v.size());
+      EXPECT_EQ("value1", v.at("key1"));
+      EXPECT_EQ("value2", v.at("key2"));
+    },
+    str_map, [] (const IValue& v) {
+      c10::DictPtr<std::string, std::string> dict = c10::impl::toTypedDict<std::string, std::string>(v.toGenericDict());
+      EXPECT_EQ(2, dict.size());
+      EXPECT_EQ("value1", dict.at("key1"));
+      EXPECT_EQ("value2", dict.at("key2"));
+    },
+    "(Dict(str, str) a) -> Dict(str, str)");
+  std::unordered_map<int64_t, Tensor> tensor_map;
+  tensor_map.emplace(1, dummyTensor(TensorType1()));
+  tensor_map.emplace(2, dummyTensor(TensorType2()));
+  testArgTypes<std::unordered_map<int64_t, Tensor>>::test<TestLegacyAPI>(
+    tensor_map, [] (std::unordered_map<int64_t, Tensor> v) {
+      EXPECT_EQ(2, v.size());
+      EXPECT_EQ(TensorType1(), v.at(1).type_id());
+      EXPECT_EQ(TensorType2(), v.at(2).type_id());
+    },
+    tensor_map, [] (const IValue& v) {
+      c10::DictPtr<int64_t, Tensor> dict = c10::impl::toTypedDict<int64_t, Tensor>(v.toGenericDict());
+      EXPECT_EQ(2, dict.size());
+      EXPECT_EQ(TensorType1(), dict.at(1).type_id());
+      EXPECT_EQ(TensorType2(), dict.at(2).type_id());
+    },
+    "(Dict(int, Tensor) a) -> Dict(int, Tensor)");
+
+  // weird deeply nested type
+  using DeeplyNestedType = c10::ListPtr<c10::DictPtr<std::string, c10::ListPtr<c10::optional<c10::DictPtr<int64_t, std::string>>>>>;
+  auto makeDeeplyNestedObject = [] () -> DeeplyNestedType {
+    auto inner3 = c10::make_dict<int64_t, std::string>();
+    inner3.insert(1, "1");
+    auto inner2 = c10::make_list<c10::optional<c10::DictPtr<int64_t, std::string>>>();
+    inner2.push_back(std::move(inner3));
+    auto inner1 = c10::make_dict<std::string, c10::ListPtr<c10::optional<c10::DictPtr<int64_t, std::string>>>>();
+    inner1.insert("key", std::move(inner2));
+    auto result = c10::make_list<c10::DictPtr<std::string, c10::ListPtr<c10::optional<c10::DictPtr<int64_t, std::string>>>>>();
+    result.push_back(inner1);
+    return result;
+  };
+  testArgTypes<DeeplyNestedType>::test(
+    makeDeeplyNestedObject(), [] (const DeeplyNestedType& v) {EXPECT_EQ("1", v.get(0).at("key").get(0).value().at(1));},
+    makeDeeplyNestedObject(), [] (const IValue& v) {EXPECT_EQ("1", v.to<DeeplyNestedType>().get(0).at("key").get(0).value().at(1));},
+    "(Dict(str, Dict(int, str)?[])[] a) -> Dict(str, Dict(int, str)?[])[]");
 }
 
 }

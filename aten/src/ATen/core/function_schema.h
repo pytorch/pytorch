@@ -64,7 +64,7 @@ struct Argument {
           "because it was not annotated with an explicit type.\n");
     }
     return c10::str(
-        "Expected a value of type '",
+        "expected a value of type '",
         type()->python_str(),
         "' for argument '",
         name(),
