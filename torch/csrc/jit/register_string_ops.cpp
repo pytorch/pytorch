@@ -41,10 +41,10 @@ int64_t stringFindImpl(
     bool reverse = false) {
   int64_t size = string.size();
   if (start < 0) {
-    start = std::max(0L, size + start);
+    start = std::max(int64_t(0), int64_t(size + start));
   }
   if (end < 0) {
-    end = std::max(0L, size + end + 1);
+    end = std::max(int64_t(0), int64_t(size + end + 1));
   }
   if (end > start) {
     string = string.substr(start, end - start);
@@ -240,10 +240,10 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             return 0L;
           }
           if (start < 0) {
-            start = std::max(0L, size + start);
+            start = std::max(int64_t(0), int64_t(size + start));
           }
           if (end < 0) {
-            end = std::max(0L, size + end + 1);
+            end = std::max(int64_t(0), int64_t(size + end + 1));
           }
 
           int64_t occurrences = 0;
@@ -264,10 +264,10 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
 
           int64_t size = string.size();
           if (start < 0) {
-            start = std::max(0L, size + start);
+            start = std::max(int64_t(0), int64_t(size + start));
           }
           if (end < 0) {
-            end = std::max(0L, size + end + 1);
+            end = std::max(int64_t(0), int64_t(size + end + 1));
           }
 
           string = string.substr(start, end - start);
@@ -285,10 +285,10 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
 
           int64_t size = string.size();
           if (start < 0) {
-            start = std::max(0L, size + start);
+            start = std::max(int64_t(0), int64_t(size + start));
           }
           if (end < 0) {
-            end = std::max(0L, size + end + 1);
+            end = std::max(int64_t(0), int64_t(size + end + 1));
           }
 
           string = string.substr(start, end - start);
@@ -411,7 +411,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             throw std::runtime_error(
                 "TypeError: The fill character must be exactly one character long");
           }
-          auto to_append = std::max(0L, width - static_cast<int64_t>(string.size()));
+          auto to_append = std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
           std::stringstream ss;
           ss << string;
@@ -429,7 +429,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
             throw std::runtime_error(
                 "TypeError: The fill character must be exactly one character long");
           }
-          auto to_append = std::max(0L, width - static_cast<int64_t>(string.size()));
+          auto to_append = std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
           std::stringstream ss;
           for (auto i = 0; i < to_append; ++i) {
@@ -441,7 +441,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
 
     .op("aten::zfill(str self, int width) -> str",
         [](std::string string, int64_t width) {
-          auto to_append = std::max(0L, width - static_cast<int64_t>(string.size()));
+          auto to_append = std::max(int64_t(0), width - static_cast<int64_t>(string.size()));
 
           std::stringstream ss;
           for (auto i = 0; i < to_append; ++i) {
