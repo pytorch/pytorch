@@ -26,6 +26,7 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/guard_elimination.h"
 #include "torch/csrc/jit/passes/insert_guards.h"
+#include "torch/csrc/jit/passes/liveness.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
@@ -906,6 +907,92 @@ static void checkShape(
   auto tp = profile->output()->type();
   auto ptp = tp->expect<ProfiledTensorType>();
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
+std::vector<std::size_t> values_to_value_ids(
+    const std::vector<Value*>& values) {
+  std::vector<std::size_t> result;
+  for (auto v : values) {
+    result.push_back(v->unique());
+  }
+  return result;
+};
+
+void testLivenessIf() {
+  static const auto basic_example = R"JIT(
+  def test_if_liveness(x, y, z):
+      # type: (Tensor, Tensor, bool) -> Tensor
+      c = torch.empty(2)
+      a = x + y
+      if z:
+          t1 = x * 2
+          t2 = t1 + 1
+          c = t1
+      else:
+          d1 = y * 3
+          d2 = d1 + 2
+          c = d2
+
+      return c * a
+  )JIT";
+
+  std::vector<std::size_t> expected_liveness_add_before_if{0, 1, 2, 3, 16, 28};
+  std::vector<std::size_t> expected_liveness_if{0, 1, 2, 3, 16, 17, 28};
+  std::vector<std::size_t> expected_first_node_liveness{0, 1, 2};
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("test_if_liveness");
+  auto liveness = BuildLivenessSets(fun.graph());
+  auto nodes = fun.graph()->nodes();
+  auto if_node = std::find_if(nodes.begin(), nodes.end(), [](Node* n) {
+    return n->kind() == prim::If;
+  });
+
+  auto first_node = *fun.graph()->nodes().begin();
+  auto actual_first_node_liveness = values_to_value_ids(liveness[first_node]);
+  ASSERT_EQ(actual_first_node_liveness, expected_first_node_liveness);
+
+  auto actual_if_liveness = values_to_value_ids(liveness[*if_node]);
+  ASSERT_EQ(actual_if_liveness, expected_liveness_if);
+  auto add = if_node->prev();
+  auto actual_add_before_if_liveness = values_to_value_ids(liveness[add]);
+  ASSERT_EQ(actual_add_before_if_liveness, expected_liveness_add_before_if);
+}
+
+void testLivenessFor() {
+  static const auto basic_example = R"JIT(
+  def test_for_liveness(n, x):
+
+      # type: (int, Tensor) -> Tuple[int, Tensor, Tensor]
+      sum = 0
+      sum2 = 0
+      c = x
+      for i in range(n):
+          sum += i
+          j = i + 1
+          sum2 = sum2 + j + i
+          c = c * i
+
+      return (sum + sum2, c, x)
+  )JIT";
+
+  std::vector<std::size_t> expected_for{0, 1, 2, 7, 15};
+  std::vector<std::size_t> expected_first_node_liveness{0, 1};
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("test_for_liveness");
+  auto liveness = BuildLivenessSets(fun.graph());
+  auto nodes = fun.graph()->nodes();
+  auto loop_node = std::find_if(nodes.begin(), nodes.end(), [](Node* n) {
+    return n->kind() == prim::Loop;
+  });
+
+  auto first_node = *fun.graph()->nodes().begin();
+  auto actual_first_node_liveness = values_to_value_ids(liveness[first_node]);
+  ASSERT_EQ(actual_first_node_liveness, expected_first_node_liveness);
+
+  auto actual_loop_liveness = values_to_value_ids(liveness[*loop_node]);
+  ASSERT_EQ(actual_loop_liveness, expected_for);
 }
 
 void testInsertAndEliminateGuards() {
