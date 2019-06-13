@@ -481,14 +481,14 @@ Tensor reservoir_sampling_cuda(
   int64_t k
 ){
 
-  AT_CHECK(
+  TORCH_CHECK(
     x.dim() > 0,
     "The input Tensor must have at least one dimension"
   );
 
   int n = x.size(0);
 
-  AT_CHECK(
+  TORCH_CHECK(
     n >= k,
     "Cannot take a larger sample than population when 'replace=False'"
   );
@@ -529,7 +529,7 @@ Tensor reservoir_sampling_cuda(
 
     AT_CUDA_CHECK(cudaGetLastError());
 
-    // This must be done in a separeted kernel 
+    // This must be done in a separeted kernel
     // since this algorithm isn't thread safe
     generate_reservoir<<<1, 1>>>(
       indices_n.data<int64_t>(),
@@ -548,33 +548,33 @@ Tensor reservoir_sampling_cuda(
       )
     );
 
-  } else { // Weighted Sapling
+  } else { // Weighted Sampling
 
     // If the weights are contiguous floating points, then
-		// the next step won't generate a copy.
+    // the next step won't generate a copy.
 	  Tensor weights_contiguous = weights.contiguous().to(at::kFloat);
 
-	  AT_CHECK(
+	  TORCH_CHECK(
 	    weights_contiguous.device() == x.device(),
 	    "The weights must share the same device as the inputs."
 	  );
 
-	  AT_CHECK(
+	  TORCH_CHECK(
 	    n == weights_contiguous.numel(),
 	    "The weights must have the same number of elements as the input's first dimension."
 	  );
 
-	  AT_CHECK(
+	  TORCH_CHECK(
 	    weights_contiguous.dim() == 1,
 	    "The weights must 1-dimensional."
 	  );
 
-	  AT_CHECK(
+	  TORCH_CHECK(
 	    weights_contiguous.nonzero().numel() >= k,
 	    "Cannot have less non-zero weights than the number of samples."
 	  );
 
-	  AT_CHECK(
+	  TORCH_CHECK(
 	    weights_contiguous.min().item().toLong() >= 0,
 	    "All the weights must be non-negative."
 	  );
@@ -602,7 +602,7 @@ Tensor sampling_with_replacement_cuda(
   int64_t k
 ){
 
-  AT_CHECK(
+  TORCH_CHECK(
     x.dim() > 0,
     "The input Tensor must have at least one dimension"
   );
@@ -614,22 +614,18 @@ Tensor sampling_with_replacement_cuda(
     samples = at::randint(0, n, {k}, x.options().dtype(at::kLong));
   } else { // Weighted Sapling
 
-    AT_CHECK(
+    TORCH_CHECK(
       weights.min().item().toLong() >= 0,
       "All the weights must be non-negative."
     );
 
-    AT_CHECK(
-      weights.max().item().toLong() > 0,
-      "The sum of all the weights must be strictly greater than zero."
-    );
 
-    AT_CHECK(
+    TORCH_CHECK(
 	    n == weights.numel(),
 	    "The weights must have the same number of elements as the input's first dimension."
 	  );
 
-	  AT_CHECK(
+	  TORCH_CHECK(
 	    weights.dim() == 1,
 	    "The weights must 1-dimensional."
 	  );
@@ -639,6 +635,12 @@ Tensor sampling_with_replacement_cuda(
 
     samples = at::empty({k}, x.options().dtype(at::kLong));
     Tensor cdf = weights.cumsum(0).to(at::kFloat);
+
+    TORCH_CHECK(
+      cdf[-1].item().toFloat() > 0.0,
+      "The sum of all the weights must be strictly greater than zero."
+    );
+
     cdf /= cdf[-1];
 
     dim3 threads(threadsPerBlock);
