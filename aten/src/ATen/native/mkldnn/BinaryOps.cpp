@@ -77,7 +77,7 @@ Tensor& mkldnn_add_(Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
   AT_ASSERTM(result.sizes() == self.sizes(),
-             "mkldnn_mul_out: currently mkldnn not support broadcasting");
+             "mkldnn_mul_out: the output size should be same as input size");
   ideep::tensor& z = itensor_from_mkldnn(result);
   ideep::tensor& x = itensor_from_mkldnn(self);
 
