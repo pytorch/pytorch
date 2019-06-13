@@ -233,15 +233,22 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
       angle_bound_lo_,
       angle_bound_hi_);
 
+  std::cout << "debugging bk 1 " << static_cast<int>(bbox_weights.size()) << std::endl;
+  std::cout << bbox_weights[0] << " " << bbox_weights[3] << std::endl;
+
   // 2. clip proposals to image (may result in proposals with zero area
   // that will be removed in the next step)
   proposals = utils::clip_boxes(
       proposals, im_info[0], im_info[1], clip_angle_thresh_, legacy_plus_one_);
 
+  std::cout << "proposals size and min_size " <<  proposals.size() << " " << min_size;
+
   // 3. remove predicted boxes with either height or width < min_size
   auto keep =
       utils::filter_boxes(proposals, min_size, im_info, legacy_plus_one_);
   DCHECK_LE(keep.size(), scores_sorted.size());
+
+  std::cout << "keep size " <<  keep.size() << std::endl;
 
   // 6. apply loose nms (e.g. threshold = 0.7)
   // 7. take after_nms_topN (e.g. 300)
@@ -255,10 +262,14 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
         nms_thresh,
         post_nms_topN,
         legacy_plus_one_);
+    std::cout << "debugging bk 2 " << static_cast<int>(bbox_weights.size()) << std::endl;
+    std::cout << bbox_weights[0] << " " << bbox_weights[3] << std::endl;
   } else {
     std::cout << "else statement " <<  post_nms_topN << " - " << keep.size() << " -- " << legacy_plus_one_ << std::endl;
     keep = utils::nms_cpu(
         proposals, scores_sorted, keep, nms_thresh, -1, legacy_plus_one_);
+    std::cout << "debugging bk 3 " << static_cast<int>(bbox_weights.size()) << std::endl;
+    std::cout << bbox_weights[0] << " " << bbox_weights[3] << std::endl;
   }
 
   // Generate outputs
