@@ -89,7 +89,7 @@ static FunctionDescription THVector_(adds_DISPATCHTABLE)[] = {
   FUNCTION_IMPL(THVector_(adds_DEFAULT), SIMDExtension_DEFAULT)
 };
 // Dispatch stubs that just call the pointers
-TH_API void THVector_(adds)(scalar_t *r_, const scalar_t *t, const scalar_t value, const ptrdiff_t n) {
+void THVector_(adds)(scalar_t *r_, const scalar_t *t, const scalar_t value, const ptrdiff_t n) {
   THVector_(adds_DISPATCHPTR)(r_, t, value, n);
 }
 

@@ -519,7 +519,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
   endif()
 
-
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 endif()
 
@@ -528,37 +527,37 @@ endif()
 # ==========================================================
 
 
+# Instead of separate .so libraries, GPU sources are now conditionally
+# compiled into the main torch.so library.
+if(USE_CUDA)
+  list(APPEND Caffe2_CPU_SRCS ${Caffe2_GPU_SRCS})
+  foreach(tmp ${Caffe2_GPU_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
+endif()
+
+
+if(USE_ROCM)
+  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
+  set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+
+  list(APPEND Caffe2_CPU_SRCS ${Caffe2_HIP_SRCS})
+endif()
+
+
 # Compile exposed libraries.
-add_library(caffe2 ${Caffe2_CPU_SRCS})
+IF (USE_ROCM)
+  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+  hip_add_library(torch ${Caffe2_CPU_SRCS})
+  set(CUDA_LINK_LIBRARIES_KEYWORD)
+ELSEIF(USE_CUDA)
+  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+  cuda_add_library(torch ${Caffe2_CPU_SRCS})
+  set(CUDA_LINK_LIBRARIES_KEYWORD)
+ELSE()
+  add_library(torch ${Caffe2_CPU_SRCS})
+ENDIF()
 
-
-option(TORCH_STATIC "Build libtorch.a rather than libtorch.so" OFF)
-
-
-# This is required for older versions of CMake, which don't allow
-# specifying add_library() without a list of source files
-set(DUMMY_EMPTY_FILE ${CMAKE_BINARY_DIR}/empty.cpp)
-
-if (MSVC)
-  set(DUMMY_FILE_CONTENT "__declspec(dllexport) int ignore_this_library_placeholder(){return 0\\;}")
-else()
-  set(DUMMY_FILE_CONTENT "")
-endif()
-
-file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
-
-
-# Wrapper library for transition to merged libcaffe and libtorch.
-# Only necessary on Windows?
-# Contains "caffe2" and "caffe2_gpu".
-if (TORCH_STATIC)
-  add_library(torch STATIC ${DUMMY_EMPTY_FILE})
-else()
-  add_library(torch SHARED ${DUMMY_EMPTY_FILE})
-endif()
-
-
-target_link_libraries(torch caffe2)
 
 # ==========================================================
 # formerly-libtorch flags
@@ -570,9 +569,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   # Adding the generated header file to the ${TORCH_SRCS} list is not sufficient
   # to establish the dependency, since the generation procedure is declared in a different CMake file.
   # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
-  add_dependencies(caffe2 Caffe2_PROTO)
+  add_dependencies(torch Caffe2_PROTO)
 
-  target_compile_definitions(caffe2 PUBLIC _THP_CORE)
+  target_compile_definitions(torch PUBLIC _THP_CORE)
 
 
   # until they can be unified, keep these lists synced with setup.py
@@ -584,7 +583,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       set(MSVC_DEBINFO_OPTION "/Zi")
     endif()
 
-    target_compile_options(caffe2 PUBLIC
+    target_compile_options(torch PUBLIC
       ${MSVC_RUNTIME_LIBRARY_OPTION}
       ${MSVC_DEBINFO_OPTION}
       /EHa
@@ -603,7 +602,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       /bigobj
       )
   else()
-    target_compile_options(caffe2 PUBLIC
+    target_compile_options(torch PUBLIC
       #    -std=c++11
       -Wall
       -Wextra
@@ -617,7 +616,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       )
 
     if(NOT APPLE)
-      target_compile_options(caffe2 PRIVATE
+      target_compile_options(torch PRIVATE
         # Considered to be flaky.  See the discussion at
         # https://github.com/pytorch/pytorch/pull/9608
         -Wno-maybe-uninitialized)
@@ -627,12 +626,12 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   if (MSVC)
   elseif (WERROR)
-    target_compile_options(caffe2 PRIVATE -Werror -Wno-strict-overflow)
+    target_compile_options(torch PRIVATE -Werror -Wno-strict-overflow)
   endif()
 
 
   if (NOT NO_API)
-    target_include_directories(caffe2 PRIVATE
+    target_include_directories(torch PRIVATE
       ${TORCH_SRC_DIR}/csrc/api
       ${TORCH_SRC_DIR}/csrc/api/include)
   endif()
@@ -649,7 +648,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       set(TORCH_CUDA_LIBRARIES
         ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
         ${CUDA_LIBRARIES})
-      target_include_directories(caffe2 PUBLIC "${NVTOOLEXT_HOME}/include")
+      target_include_directories(torch PUBLIC "${NVTOOLEXT_HOME}/include")
 
     elseif(APPLE)
       set(TORCH_CUDA_LIBRARIES
@@ -665,7 +664,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${CUDA_LIBRARIES})
     endif()
 
-    target_compile_definitions(caffe2 PRIVATE USE_CUDA)
+    target_compile_definitions(torch PRIVATE USE_CUDA)
   endif()
 
 
@@ -676,7 +675,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_ROOT}/aten/src
     ${CMAKE_CURRENT_BINARY_DIR}/aten/src
     ${CMAKE_BINARY_DIR}/aten/src)
-  target_include_directories(caffe2 PRIVATE ${TH_CPU_INCLUDE})
+  target_include_directories(torch PRIVATE ${TH_CPU_INCLUDE})
 
   set(ATen_CPU_INCLUDE
     ${TORCH_ROOT}/aten/src
@@ -686,20 +685,20 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
 IF (USE_TBB)
   list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
-  target_link_libraries(caffe2 PUBLIC tbb)
+  target_link_libraries(torch PUBLIC tbb)
 ENDIF()
 
 
-  target_include_directories(caffe2 PRIVATE ${ATen_CPU_INCLUDE})
+  target_include_directories(torch PRIVATE ${ATen_CPU_INCLUDE})
 
-  target_include_directories(caffe2 PRIVATE
+  target_include_directories(torch PRIVATE
     ${TORCH_SRC_DIR}/csrc)
 
-  target_include_directories(caffe2 PRIVATE
+  target_include_directories(torch PRIVATE
     ${TORCH_ROOT}/third_party/miniz-2.0.8)
 
 
-  set_property(TARGET caffe2 PROPERTY CXX_STANDARD 11)
+  set_property(TARGET torch PROPERTY CXX_STANDARD 11)
 
 
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
@@ -781,20 +780,8 @@ endif()
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 if (NOT NO_API)
-  target_include_directories(caffe2 PUBLIC
+  target_include_directories(torch PUBLIC
     $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api>
     $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api/include>)
 endif()
@@ -805,21 +792,17 @@ if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  target_compile_options(caffe2 INTERFACE ${OpenMP_CXX_FLAGS})
-  target_link_libraries(caffe2 PRIVATE ${OpenMP_CXX_LIBRARIES})
+  target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
+  target_link_libraries(torch PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
 
 if(USE_ROCM)
-
-  # XXX kostmo
-#  target_link_libraries(caffe2 PUBLIC caffe2_hip_library)
-
-  target_compile_definitions(caffe2 PRIVATE
+  target_compile_definitions(torch PRIVATE
     USE_ROCM
     __HIP_PLATFORM_HCC__
     )
-  target_include_directories(caffe2 PRIVATE
+  target_include_directories(torch PRIVATE
     /opt/rocm/include
     /opt/rocm/hcc/include
     /opt/rocm/rocblas/include
@@ -836,17 +819,17 @@ if (NOT WIN32 AND NOT USE_ASAN)
   # Unfortunately, hidden visibility messes up some ubsan warnings because
   # templated classes crossing library boundary get duplicated (but identical)
   # definitions. It's easier to just disable it.
-  target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
+  target_compile_options(torch PRIVATE "-fvisibility=hidden")
 endif()
 
 
 if(NOT BUILD_ATEN_ONLY)
   caffe2_interface_library(caffe2_protos caffe2_protos_whole)
-  target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
+  target_link_libraries(torch PRIVATE caffe2_protos_whole)
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
-    target_link_libraries(caffe2 INTERFACE protobuf::libprotobuf)
+    target_link_libraries(torch INTERFACE protobuf::libprotobuf)
   else()
-    target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
+    target_link_libraries(torch PUBLIC protobuf::libprotobuf)
   endif()
 endif()
 
@@ -854,33 +837,34 @@ if (USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "Caffe2 is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  target_link_libraries(caffe2 PRIVATE ${OpenMP_CXX_LIBRARIES})
+  target_link_libraries(torch PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
-target_link_libraries(caffe2 PUBLIC c10)
-target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
-target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
-target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
-target_include_directories(caffe2 INTERFACE $<INSTALL_INTERFACE:include>)
-target_include_directories(caffe2 PRIVATE ${Caffe2_CPU_INCLUDE})
-target_include_directories(caffe2 SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
+target_link_libraries(torch PUBLIC c10)
+target_link_libraries(torch PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
+target_link_libraries(torch PRIVATE ${Caffe2_DEPENDENCY_LIBS})
+target_link_libraries(torch PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
+target_include_directories(torch INTERFACE $<INSTALL_INTERFACE:include>)
+target_include_directories(torch PRIVATE ${Caffe2_CPU_INCLUDE})
+target_include_directories(torch SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 # Set standard properties on the target
-torch_set_target_props(caffe2)
+torch_set_target_props(torch)
 
-#if (NOT MSVC)
-#  target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
-#endif()
 
-target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+target_compile_options(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+# NB: This must be target_compile_definitions, not target_compile_options,
+# as the latter is not respected by nvcc
+target_compile_definitions(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+
 
 # Parallelism settings
 #  OPENMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
 set(PARALLEL_BACKEND "OPENMP" CACHE STRING "ATen parallel backend")
 if ("${PARALLEL_BACKEND}" STREQUAL "OPENMP")
-  target_compile_definitions(caffe2 PUBLIC "-DAT_PARALLEL_OPENMP=1")
+  target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_OPENMP=1")
 elseif ("${PARALLEL_BACKEND}" STREQUAL "NATIVE")
-  target_compile_definitions(caffe2 PUBLIC "-DAT_PARALLEL_NATIVE=1")
+  target_compile_definitions(torch PUBLIC "-DAT_PARALLEL_NATIVE=1")
 else()
   message(FATAL_ERROR "Unknown parallel backend: ${PARALLEL_BACKEND}")
 endif()
@@ -952,91 +936,53 @@ if (MSVC AND NOT BUILD_SHARED_LIBS)
   #
   # NB: This must be target_compile_definitions, not target_compile_options,
   # as the latter is not respected by nvcc
-  target_compile_definitions(caffe2 PUBLIC "AT_CORE_STATIC_WINDOWS=1")
+  target_compile_definitions(torch PUBLIC "AT_CORE_STATIC_WINDOWS=1")
 endif()
 if (MSVC AND BUILD_SHARED_LIBS)
   # ONNX is linked statically and needs to be exported from this library
   # to be used externally. Make sure that references match the export.
-  target_compile_options(caffe2 PRIVATE "-DONNX_BUILD_MAIN_LIB")
+  target_compile_options(torch PRIVATE "-DONNX_BUILD_MAIN_LIB")
 endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
-target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
+target_compile_options(torch PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
+
+install(TARGETS torch EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 
-install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
-
-install(TARGETS torch DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-
-if (MSVC AND NOT TORCH_STATIC)
-  install(FILES $<TARGET_PDB_FILE:torch> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
-endif()
-
-
-caffe2_interface_library(caffe2 caffe2_library)
-list(APPEND Caffe2_MAIN_LIBS caffe2_library)
+caffe2_interface_library(torch torch_library)
+list(APPEND Caffe2_MAIN_LIBS torch_library)
 if (USE_TBB)
   list(APPEND Caffe2_MAIN_LIB tbb)
 endif()
 
 # Install PDB files for MSVC builds
 if (MSVC AND BUILD_SHARED_LIBS)
-  install(FILES $<TARGET_PDB_FILE:caffe2> DESTINATION lib OPTIONAL)
+  install(FILES $<TARGET_PDB_FILE:torch> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
 endif()
 
 # ---[ CUDA library.
 if(USE_CUDA)
 
-  set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
-  torch_cuda_based_add_library(caffe2_gpu ${Caffe2_GPU_SRCS})
-  set(CUDA_LINK_LIBRARIES_KEYWORD)
-  target_link_libraries(caffe2_gpu INTERFACE caffe2::cudart)
-  target_link_libraries(caffe2_gpu PUBLIC c10_cuda)
+  target_link_libraries(torch INTERFACE torch::cudart)
+  target_link_libraries(torch PUBLIC c10_cuda)
 
-  target_link_libraries(caffe2_gpu PUBLIC ${TORCH_CUDA_LIBRARIES})
+  target_link_libraries(torch PUBLIC ${TORCH_CUDA_LIBRARIES})
 
   target_include_directories(
-      caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
+      torch INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(
-      caffe2_gpu PRIVATE ${Caffe2_GPU_INCLUDE})
+      torch PRIVATE ${Caffe2_GPU_INCLUDE})
   target_link_libraries(
-      caffe2_gpu PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
+      torch PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
-  target_link_libraries(
-      caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  target_link_libraries(torch PUBLIC ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 
-  # See Note [Supporting both static and dynamic libraries on Window]
-  # TODO: I'm actually not sure why this is necessary, because caffe2_gpu
-  # should depend on caffe2 (which itself would give us the necessary
-  # macro definition).
-  if (MSVC AND NOT BUILD_SHARED_LIBS)
-      target_compile_options(caffe2_gpu PUBLIC "-DAT_CORE_STATIC_WINDOWS=1")
-  endif()
-
-  # NB: This must be target_compile_definitions, not target_compile_options,
-  # as the latter is not respected by nvcc
-  if (MSVC)
-    target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_CUDA_BUILD_MAIN_LIB")
-  endif()
-
-  # Set standard properties on the target
-  torch_set_target_props(caffe2_gpu)
-
-  install(TARGETS caffe2_gpu EXPORT Caffe2Targets DESTINATION lib)
-  caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
-  list(APPEND Caffe2_MAIN_LIBS caffe2_gpu_library)
-
-
-  # Install PDB files for MSVC builds
-  if (MSVC AND BUILD_SHARED_LIBS)
-    install(FILES $<TARGET_PDB_FILE:caffe2_gpu> DESTINATION lib OPTIONAL)
-  endif()
-
-  target_link_libraries(torch caffe2_gpu)
 
 endif()
+
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
@@ -1052,44 +998,28 @@ if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
   hip_include_directories(${Caffe2_HIP_INCLUDE})
 
-  filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
-  set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-
-  # FindHIP.CMake checks if the SHARED flag is set and adds extra logic accordingly.
-  hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
-
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
-  target_compile_options(caffe2_hip PRIVATE ${HIP_CXX_FLAGS})
-  target_link_libraries(caffe2_hip PUBLIC caffe2)
-  target_link_libraries(caffe2_hip PUBLIC c10_hip)
+  target_compile_options(torch PRIVATE ${HIP_CXX_FLAGS})
+  target_link_libraries(torch PUBLIC c10_hip)
+
   if(NOT INTERN_BUILD_MOBILE)
     # TODO: Cut this over to ATEN_HIP_FILES_GEN_LIB.  At the moment, we
     # only generate CUDA files
     # NB: This dependency must be PRIVATE, because we don't install
     # ATEN_CUDA_FILES_GEN_LIB (it's a synthetic target just to get the
     # correct dependency from generated files.)
-    target_link_libraries(caffe2_hip PRIVATE ATEN_CUDA_FILES_GEN_LIB)
+    target_link_libraries(torch PRIVATE ATEN_CUDA_FILES_GEN_LIB)
   endif()
-  target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
+  target_link_libraries(torch PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
 
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
-  target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDE})
-  target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
-
-  # Set standard properties on the target
-  torch_set_target_props(caffe2_hip)
-
-  caffe2_interface_library(caffe2_hip caffe2_hip_library)
-  list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
-  install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
+  target_include_directories(torch PRIVATE ${Caffe2_HIP_INCLUDE})
+  target_include_directories(torch INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
 # ---[ Check if warnings should be errors.
 if (WERROR)
-  target_compile_options(caffe2 PRIVATE -Werror)
-  if(USE_CUDA)
-    target_compile_options(caffe2_gpu PRIVATE -Werror)
-  endif()
+  target_compile_options(torch PRIVATE -Werror)
 endif()
 
 # ---[ Test binaries.
@@ -1223,7 +1153,7 @@ if (BUILD_PYTHON)
   target_include_directories(caffe2_pybind11_state PRIVATE ${Caffe2_CPU_INCLUDE})
 
   target_link_libraries(
-      caffe2_pybind11_state caffe2_library)
+      caffe2_pybind11_state torch_library)
   if (WIN32)
     target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
     target_link_libraries(caffe2_pybind11_state onnx_proto)
@@ -1248,8 +1178,7 @@ if (BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
-    target_link_libraries(
-        caffe2_pybind11_state_gpu caffe2_library caffe2_gpu_library)
+    target_link_libraries(caffe2_pybind11_state_gpu torch_library)
     if (WIN32)
       target_link_libraries(caffe2_pybind11_state_gpu ${PYTHON_LIBRARIES})
       target_link_libraries(caffe2_pybind11_state_gpu onnx_proto)
@@ -1274,8 +1203,7 @@ if (BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_hip PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
-    target_link_libraries(
-        caffe2_pybind11_state_hip caffe2_library caffe2_hip_library)
+    target_link_libraries(caffe2_pybind11_state_hip torch_library)
     if (WIN32)
       target_link_libraries(caffe2_pybind11_state_hip ${PYTHON_LIBRARIES})
     endif(WIN32)

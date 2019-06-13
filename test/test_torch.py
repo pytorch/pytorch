@@ -5354,6 +5354,25 @@ class _TestTorchMixin(object):
         self._test_solve_batched(self, lambda t: t)
 
     @staticmethod
+    def _test_solve_batched_many_batches(self, cast):
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        A = cast(random_fullrank_matrix_distinct_singular_value(5, 256, 256))
+        b = cast(torch.randn(5, 1))
+        x, _ = torch.solve(b, A)
+        self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 1)))
+
+        A = cast(random_fullrank_matrix_distinct_singular_value(3))
+        b = cast(torch.randn(512, 512, 3, 1))
+        x, _ = torch.solve(b, A)
+        self.assertEqual(torch.matmul(A, x), b)
+
+    @slowTest
+    @skipIfNoLapack
+    def test_solve_batched_many_batches(self):
+        self._test_solve_batched_many_batches(self, lambda t: t.cuda())
+
+    @staticmethod
     def _test_solve_batched_dims(self, cast):
         if not TEST_NUMPY:
             return
@@ -5610,7 +5629,37 @@ class _TestTorchMixin(object):
 
     @skipIfNoLapack
     def test_triangular_solve_batched(self):
-        _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t)
+        self._test_triangular_solve_batched(self, lambda t: t)
+
+    @staticmethod
+    def _test_triangular_solve_batched_many_batches(self, cast):
+        def triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular):
+            A = cast(torch.randn(*A_dims))
+            A = A.triu() if upper else A.tril()
+            if unitriangular:
+                A.diagonal(dim1=-2, dim2=-1).fill_(1.)
+            b = cast(torch.randn(*b_dims))
+            return A, b
+
+        for upper, transpose, unitriangular in product([True, False], repeat=3):
+            A, b = triangular_solve_test_helper((256, 256, 5, 5), (5, 1), cast, upper, unitriangular)
+            x, _ = torch.triangular_solve(b, A,
+                                          upper=upper, transpose=transpose, unitriangular=unitriangular)
+            if transpose:
+                A = A.transpose(-2, -1)
+            self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 1)))
+
+            A, b = triangular_solve_test_helper((3, 3), (512, 512, 3, 1), cast, upper, unitriangular)
+            x, _ = torch.triangular_solve(b, A,
+                                          upper=upper, transpose=transpose, unitriangular=unitriangular)
+            if transpose:
+                A = A.transpose(-2, -1)
+            self.assertEqual(torch.matmul(A, x), b)
+
+    @slowTest
+    @skipIfNoLapack
+    def test_triangular_solve_batched_many_batches(self):
+        self._test_triangular_solve_batched_many_batches(self, lambda t: t)
 
     @staticmethod
     def _test_triangular_solve_batched_dims(self, cast):
@@ -6041,9 +6090,28 @@ class _TestTorchMixin(object):
         expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
         self.assertEqual(matrices_inverse, conv_fn(expected_inv))
 
+    @staticmethod
+    def _test_inverse_slow(self, conv_fn):
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 256, 256))
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(torch.matmul(matrices_inverse, matrices),
+                         conv_fn(torch.eye(5)).expand_as(matrices))
+
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(3, 512, 512))
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(torch.matmul(matrices, matrices_inverse),
+                         conv_fn(torch.eye(3)).expand_as(matrices))
+
     @skipIfNoLapack
     def test_inverse(self):
         self._test_inverse(self, lambda t: t)
+
+    @slowTest
+    @skipIfNoLapack
+    def test_inverse_many_batches(self):
+        self._test_inverse_slow(self, lambda t: t)
 
     @staticmethod
     def _test_pinverse(self, conv_fn):
@@ -6844,6 +6912,30 @@ class _TestTorchMixin(object):
     @skipIfNoLapack
     def test_cholesky_solve_batched(self):
         self._test_cholesky_solve_batched(self, lambda t: t)
+
+    @staticmethod
+    def _test_cholesky_solve_batched_many_batches(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+
+        def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
+            A = cast(random_symmetric_pd_matrix(*A_dims))
+            L = torch.cholesky(A, upper)
+            b = cast(torch.randn(*b_dims))
+            return A, L, b
+
+        for upper in [True, False]:
+            A, L, b = cholesky_solve_test_helper((5, 256, 256), (5, 10), cast, upper)
+            x = torch.cholesky_solve(b, L, upper)
+            self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 10)))
+
+            A, L, b = cholesky_solve_test_helper((5,), (512, 512, 5, 10), cast, upper)
+            x = torch.cholesky_solve(b, L, upper)
+            self.assertEqual(torch.matmul(A, x), b)
+
+    @skipIfNoLapack
+    @slowTest
+    def test_cholesky_solve_batched_many_batches(self):
+        self._test_cholesky_solve_batched_many_batches(self, lambda t: t)
 
     @staticmethod
     def _test_cholesky_solve_batched_dims(self, cast):
