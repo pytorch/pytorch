@@ -1,10 +1,10 @@
 import types
 import math
+import warnings
 from torch._six import inf
 from collections import Counter
 from functools import partial, wraps
-import warnings
-import bisect import bisect_right
+from bisect import bisect_right
 
 from .optimizer import Optimizer
 
@@ -89,8 +89,8 @@ class _LRScheduler(object):
             epoch = self.last_epoch + 1
         else:
             warnings.warn("The epoch parameter overrides the recursive form by the closed "
-                    "form of a scheduler whenever available, and will be deprecated.",
-                    DeprecationWarning)
+                          "form of a scheduler whenever available, and will be deprecated.",
+                          DeprecationWarning)
             if hasattr(self, 'legacy_get_lr'):
                 get_lr = self.legacy_get_lr()
 

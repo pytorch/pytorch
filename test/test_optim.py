@@ -3,7 +3,6 @@ import math
 import unittest
 import functools
 from copy import deepcopy
-from bisect import bisect_right
 import torch
 from torch._six import inf
 import torch.optim as optim
