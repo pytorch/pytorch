@@ -131,21 +131,39 @@ class TestONNXOpset(TestCase):
         class MyModule(Module):
             def __init__(self):
                 super(MyModule, self).__init__()
+
             def forward(self, x):
                 size = [v * 2 for v in x.size()[2:]]
-                # work around for now: turn the dynamic sizes into constant
                 size = [int(i) for i in size]
-                return torch.nn.functional.interpolate(x,
-                                                 size=size,
-                                                 mode='nearest')
+                return torch.nn.functional.interpolate(x, size=size, mode='nearest')
 
         module = MyModule()
-        ops_8 = [{"op_name" : "Upsample", "attributes": [{"name": "mode", "s": "nearest", "type": 8},
-                 {"name": "scales", "floats": [1.0, 1.0, 2.0, 2.0], "type": 6}]}]
-        ops_9 = [{"op_name" : "Upsample", "attributes": [{"name": "mode", "s": "nearest", "type": 8}]}]
-        ops = {8 : ops_8, 9 : ops_9}
+        ops8 = [{"op_name" : "Upsample", "attributes" : [{"name": "mode", "s": ("nearest").encode(), "type": 3},
+                {"name": "scales", "floats": [1.0, 1.0, 2.0, 2.0], "type": 6}]}]
+        ops9 = [{"op_name" : "Constant"},
+                {"op_name" : "Upsample", "attributes" : [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
+        ops = {8 : ops8, 9 : ops9}
         x = torch.randn(2, 2, 2, 2)
-        check_onnx_opsets_operator(module, x, ops, opset_versions=[9])
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[8, 9])
+
+    def test_upsample_bilinear(self):
+        class MyModule(Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                size = [v * 2 for v in x.size()[2:]]
+                size = [int(i) for i in size]
+                return torch.nn.functional.interpolate(x, size=size, mode='bilinear')
+
+        module = MyModule()
+        ops8 = [{"op_name" : "Upsample", "attributes" : [{"name": "mode", "s": ("linear").encode(), "type": 3},
+                {"name": "scales", "floats": [1.0, 1.0, 2.0, 2.0], "type": 6}]}]
+        ops9 = [{"op_name" : "Constant"},
+                {"op_name" : "Upsample", "attributes" : [{"name": "mode", "s": ("linear").encode(), "type": 3}]}]
+        ops = {8 :ops8, 9 : ops9}
+        x = torch.randn(2, 2, 2, 2)
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[8, 9])
 
     def test_cast_constant(self):
         class MyModule(Module):
