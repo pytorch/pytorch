@@ -111,7 +111,7 @@ Args:
     max_groups: Maximum number of groups to generate
     dtypes: A list of data types to generate. See note below.
 Generates:
-    (X, w, b): Tensors of type `float32` of the following drawen shapes:
+    (X, w, b, g): Tensors of type `float32` of the following drawen shapes:
         X: (`nbatch, iChannels, H, W`)
         w: (`oChannels, iChannels // groups, kH, kW)
         b: `(oChannels,)`
