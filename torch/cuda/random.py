@@ -1,6 +1,5 @@
-from torch import device
-from torch._C import default_cuda_generators
-from . import _lazy_init, _lazy_call, device_count, device as device_ctx_manager, current_device
+from torch._C import default_cuda_generators, device as torch_device
+from . import _lazy_init, device_count, current_device
 
 __all__ = ['get_rng_state', 'get_rng_state_all',
            'set_rng_state', 'set_rng_state_all',
@@ -8,7 +7,7 @@ __all__ = ['get_rng_state', 'get_rng_state_all',
            'seed', 'seed_all', 'initial_seed']
 
 
-def get_rng_state(device=device('cuda')):
+def get_rng_state(device=torch_device('cuda')):
     r"""Returns the random number generator state of the current
     GPU as a ByteTensor.
 
@@ -21,13 +20,12 @@ def get_rng_state(device=device('cuda')):
     """
     _lazy_init()
     if isinstance(device, int):
-        device = device('cuda', device)
-    with device_ctx_manager(device):
-        idx = device.index
-        if idx is None:
-            idx = current_device()
-        default_generator = default_cuda_generators[idx]
-        return default_generator.get_state()
+        device = torch_device('cuda', device)
+    idx = device.index
+    if idx is None:
+        idx = current_device()
+    default_generator = default_cuda_generators[idx]
+    return default_generator.get_state()
 
 
 def get_rng_state_all():
@@ -39,7 +37,7 @@ def get_rng_state_all():
     return results
 
 
-def set_rng_state(new_state, device=device('cuda')):
+def set_rng_state(new_state, device=torch_device('cuda')):
     r"""Sets the random number generator state of the current GPU.
 
     Args:
@@ -47,24 +45,14 @@ def set_rng_state(new_state, device=device('cuda')):
         device (torch.device or int, optional): The device to set the RNG state.
             Default: ``torch.device('cuda')`` (i.e., the current CUDA device).
     """
-
-    # NB: What if device=-1?  You might be afraid that the "current"
-    # device would change by the time we actually get around to invoking
-    # the lazy callback.  But actually, this is not possible: changing
-    # the current device involves a CUDA call, which would in turn
-    # initialize the state.  So then _lazy_call would execute cb
-    # immediately.
-    def cb():
-        with device_ctx_manager(device):
-            if isinstance(device, int):
-                device = device('cuda', device)
-            idx = device.index
-            if idx is None:
-                idx = current_device()
-            default_generator = default_cuda_generators[idx]
-            default_generator.set_state(new_state)
-
-    _lazy_call(cb)
+    _lazy_init()
+    if isinstance(device, int):
+        device = torch_device('cuda', device)
+    idx = device.index
+    if idx is None:
+        idx = current_device()
+    default_generator = default_cuda_generators[idx]
+    default_generator.set_state(new_state)
 
 
 def set_rng_state_all(new_states):
@@ -88,14 +76,11 @@ def manual_seed(seed):
         If you are working with a multi-GPU model, this function is insufficient
         to get determinism.  To seed all GPUs, use :func:`manual_seed_all`.
     """
+    _lazy_init()
     seed = int(seed)
-
-    def cb():
-        idx = current_device()
-        default_generator = default_cuda_generators[idx]
-        default_generator.manual_seed(seed)
-
-    _lazy_call(cb)
+    idx = current_device()
+    default_generator = default_cuda_generators[idx]
+    default_generator.manual_seed(seed)
 
 
 def manual_seed_all(seed):
@@ -106,15 +91,11 @@ def manual_seed_all(seed):
     Args:
         seed (int): The desired seed.
     """
+    _lazy_init()
     seed = int(seed)
-
-    def cb():
-        for i in range(device_count()):
-            with device_ctx_manager(i):
-                default_generator = default_cuda_generators[i]
-                default_generator.manual_seed(seed)
-
-    _lazy_call(cb)
+    for i in range(device_count()):
+        default_generator = default_cuda_generators[i]
+        default_generator.manual_seed(seed)
 
 
 def seed():
@@ -126,12 +107,10 @@ def seed():
         If you are working with a multi-GPU model, this function will only initialize
         the seed on one GPU.  To initialize all GPUs, use :func:`seed_all`.
     """
-    def cb():
-        idx = current_device()
-        default_generator = default_cuda_generators[idx]
-        default_generator.seed()
-
-    _lazy_call(cb)
+    _lazy_init()
+    idx = current_device()
+    default_generator = default_cuda_generators[idx]
+    default_generator.seed()
 
 
 def seed_all():
@@ -139,20 +118,17 @@ def seed_all():
     It's safe to call this function if CUDA is not available; in that
     case, it is silently ignored.
     """
-    def cb():
-        random_seed = 0
-        seeded = False
-        for i in range(device_count()):
-            with device_ctx_manager(i):
-                default_generator = default_cuda_generators[i]
-                if not seeded:
-                    default_generator.seed()
-                    random_seed = default_generator.initial_seed()
-                    seeded = True
-                else:
-                    default_generator.manual_seed(random_seed)
-
-    _lazy_call(cb)
+    _lazy_init()
+    random_seed = 0
+    seeded = False
+    for i in range(device_count()):
+        default_generator = default_cuda_generators[i]
+        if not seeded:
+            default_generator.seed()
+            random_seed = default_generator.initial_seed()
+            seeded = True
+        else:
+            default_generator.manual_seed(random_seed)
 
 
 def initial_seed():
