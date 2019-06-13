@@ -248,31 +248,46 @@ inline IValue toIValue(
     const TypePtr& type,
     c10::optional<int32_t> N = c10::nullopt);
 
+inline bool isTraceableType(TypePtr type) {
+  if (type->isSubtypeOf(TensorType::get())) {
+    return true;
+  }
+
+  if (auto list_type = type->cast<ListType>()) {
+    return isTraceableType(list_type->getElementType());
+  }
+
+  if (auto tuple_type = type->cast<TupleType>()) {
+    return std::all_of(
+        tuple_type->elements().begin(),
+        tuple_type->elements().end(),
+        [](TypePtr element_type) { return isTraceableType(element_type); });
+  }
+
+  if (auto dict_type = type->cast<DictType>()) {
+    return isTraceableType(dict_type->getValueType());
+  }
+
+  return false;
+}
+
 inline TypedIValue toTraceableIValue(py::handle input) {
-  // try {
-    auto match = tryToInferType(input);
-    if (!match.type) {
-      AT_ERROR(
-          "Tracer cannot infer type of ", py::str(input), "\n:", match.errMsg);
-    }
-    auto type = *match.type;
-
-    if (type->kind() == TypeKind::ListType ||
-        type->kind() == TypeKind::DictType ||
-        type->kind() == TypeKind::TupleType ||
-        type->isSubtypeOf(TensorType::get())) {
-      return TypedIValue(toIValue(input, type), type);
-    }
-
+  auto match = tryToInferType(input);
+  if (!match.type) {
     AT_ERROR(
-        "Type '",
-        type->python_str(),
-        "' cannot be traced. Only Tensors and Lists, Dicts, and"
-        " Tuples of Tensors can be traced");
-  // } catch (...) {
-  //   tracer::abandon();
-  //   throw;
-  // }
+        "Tracer cannot infer type of ", py::str(input), "\n:", match.errMsg);
+  }
+  auto type = *match.type;
+
+  if (isTraceableType(type)) {
+    return TypedIValue(toIValue(input, type), type);
+  }
+
+  AT_ERROR(
+      "Type '",
+      type->python_str(),
+      "' cannot be traced. Only Tensors and Lists, Dicts, and"
+      " Tuples of Tensors can be traced");
 }
 
 inline IValue toIValue(py::handle input) {
