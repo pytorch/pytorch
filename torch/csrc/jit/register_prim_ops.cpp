@@ -1774,8 +1774,8 @@ int dictGetDefault(Stack& stack) {
 }
 
 int dictContains(Stack& stack) {
+  auto dict = pop(stack).toGenericDict();
   auto key = pop(stack);
-  auto dict = pop(stack).toGenericDict()->elements();
   push(stack, dict.contains(key));
   return 0;
 }

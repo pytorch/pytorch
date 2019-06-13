@@ -400,6 +400,7 @@ class ExprBuilder(Builder):
         ast.Gt: '>',
         ast.Is: 'is',
         ast.IsNot: 'is not',
+        ast.In: 'in',
     }
 
     @staticmethod

@@ -245,7 +245,6 @@ struct ParserImpl {
 
       if (L.cur().kind == TK_IN && in_for) {
         // Don't parse for for-in loops
-        std::cout << "Skipping loop\n";
         break;
       }
 
@@ -262,7 +261,9 @@ struct ParserImpl {
       }
 
       if (kind == TK_FOR) {
+        in_for = true;
         auto target = parseExp();
+        in_for = false;
         L.expect(TK_IN);
         auto iter = parseExp();
         prefix = ListComp::create(pos, Expr(prefix), target, iter);
