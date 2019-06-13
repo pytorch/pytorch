@@ -267,7 +267,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
       default_intlist = parse_intlist_args(str, size);
     }
   } else if (type_ == ParameterType::SCALARTYPE) {
-    if (str == "None" || str == "c10::nullopt") {
+    if (str == "None") {
       default_scalartype = at::ScalarType::Undefined;
     } else if (str == "torch.int64") {
       default_scalartype = at::ScalarType::Long;
