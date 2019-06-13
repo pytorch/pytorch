@@ -533,7 +533,7 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
 def tensordot(a, b, dims=2):
     r"""Returns a contraction of a and b over multiple dimensions.
 
-    :attr:`tensordot` implements a generalizes the matrix product.
+    :attr:`tensordot` implements a generalized matrix product.
 
     Args:
       a (Tensor): Left tensor to contract
@@ -696,9 +696,11 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
     elif p == "nuc":
         if dtype is not None:
             raise ValueError("dtype argument is not supported in nuclear norm")
-        if out is None:
-            torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
-        return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
+        if dim is None:
+            if out is None:
+                return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
+            return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
+        return torch._C._VariableFunctions.nuclear_norm(input, dim, keepdim=keepdim, out=out)
     else:
         if dim is None:
             dim = tuple(range(ndim))

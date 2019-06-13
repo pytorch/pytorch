@@ -1651,6 +1651,29 @@ class TestCaffe2Backend(unittest.TestCase):
 
         self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3, use_gpu=False)
 
+    def test_tuple_input_output(self):
+        class TupleModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                # type: (Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+                return a
+
+        x = (torch.randn(3, 4), torch.randn(4, 3))
+        self.run_model_test(TupleModel(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(x,))
+
+    def test_nested_tuple_input_output(self):
+        class NestedTupleModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a, b):
+                # type: (Tensor, Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
+                return a + b[0] + b[1][0] + b[1][1]
+
+        x = torch.randn(4, 5)
+        y = (torch.randn(4, 5), (torch.randn(4, 5), torch.randn(4, 5)))
+        self.run_model_test(NestedTupleModel(), train=False, input=(x, y), batch_size=BATCH_SIZE,
+                            example_outputs=x + y[0] + y[1][0] + y[1][1])
+
     def test_topk(self):
         class TopKModel(torch.nn.Module):
             def forward(self, input):
