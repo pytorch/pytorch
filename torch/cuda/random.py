@@ -45,9 +45,10 @@ def set_rng_state(new_state, device=torch_device('cuda')):
         device (torch.device or int, optional): The device to set the RNG state.
             Default: ``torch.device('cuda')`` (i.e., the current CUDA device).
     """
+    if isinstance(device, int):
+        device = torch_device('cuda', device)
+
     def cb():
-        if isinstance(device, int):
-            device = torch_device('cuda', device)
         idx = device.index
         if idx is None:
             idx = current_device()
