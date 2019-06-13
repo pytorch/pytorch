@@ -63,6 +63,7 @@ _sum = sum
 
 
 def _parse_arg(value, desc):
+    #print("parse args", value, desc)
     if desc == 'none':
         return value
     if desc == 'v' or not _is_value(value):
@@ -83,7 +84,9 @@ def _parse_arg(value, desc):
             raise RuntimeError("ONNX symbolic doesn't know to interpret Constant node")
     elif value.node().kind() == 'prim::ListConstruct':
         if desc == 'is':
+            #print(value.node())
             for v in value.node().inputs():
+                #print(v)
                 if v.node().kind() != 'onnx::Constant':
                     raise RuntimeError("Failed to export an ONNX attribute, "
                                        "since it's not constant, please try to make "
@@ -213,11 +216,12 @@ def _try_get_scalar_type(*args):
 # and export_to_pretty_string(), and _export_onnx_opset_version will be set
 # and the symbolic functions should check it to determine the behavior
 # of the exporter.
+#change
 
 
 _default_onnx_opset_version = 9
 _onnx_master_opset = 10
-_onnx_stable_opsets = [9, 10]
+_onnx_stable_opsets = [8, 9, 10]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 

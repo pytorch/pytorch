@@ -23,19 +23,29 @@ def register_version(domain, version):
     register_ops_in_version(domain, version)
 
 
+def register_ops_helper(domain, version, iter_version):
+    version_ops = get_ops_in_version(iter_version)
+    for op in version_ops:
+        #print("Register op \n", op, version)
+        if isfunction(op[1]) and \
+        not is_registered_op(op[0], domain, version):
+            register_op(op[0], op[1], domain, version)
+
+
 def register_ops_in_version(domain, version):
     # iterates through the symbolic functions of
     # the specified opset version, and the previous
     # opset versions for operators supported in
     # previous versions
     iter_version = version
-    while iter_version >= 9:
-        version_ops = get_ops_in_version(iter_version)
-        for op in version_ops:
-            if isfunction(op[1]) and \
-               not is_registered_op(op[0], domain, version):
-                register_op(op[0], op[1], domain, version)
-        iter_version = iter_version - 1
+    while iter_version != 9:
+        register_ops_helper(domain, version, iter_version)
+        if iter_version > 9:
+            iter_version = iter_version - 1
+        else:
+            iter_version = iter_version + 1
+    
+    register_ops_helper(domain, version, 9)
 
 
 def get_ops_in_version(version):
