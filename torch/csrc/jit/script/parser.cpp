@@ -217,7 +217,10 @@ struct ParserImpl {
   Expr parseExp() {
     return parseExp(0);
   }
-  Expr parseExp(int precedence) {
+  Expr parseExpWithoutIn() {
+    return parseExp(0, /*parse_tk_in_as_comp_op=*/false);
+  }
+  Expr parseExp(int precedence, bool parse_tk_in_as_comp_op=true) {
     TreeRef prefix;
     int unary_prec;
     if (shared.isUnary(L.cur().kind, &unary_prec)) {
@@ -243,8 +246,11 @@ struct ParserImpl {
         // not greater than 'precedence'
         break;
 
-      if (L.cur().kind == TK_IN && parse_TK_IN_as_comp_op) {
-        // Don't parse for for-in loops, but do parse in comparison ops
+      if (L.cur().kind == TK_IN && !parse_tk_in_as_comp_op) {
+        // Since we don't have a separation between our `comparison`s and
+        // `expr`s like Python does, we have now way of knowing whether this
+        // `in` is the end of a list of `for` idents or if it's being used as
+        // a comparison operator (e.g. `"a" in a_dict`)
         break;
       }
 
@@ -261,9 +267,7 @@ struct ParserImpl {
       }
 
       if (kind == TK_FOR) {
-        parse_TK_IN_as_comp_op = true;
-        auto target = parseExp();
-        parse_TK_IN_as_comp_op = false;
+        auto target = parseExpWithoutIn();
         L.expect(TK_IN);
         auto iter = parseExp();
         prefix = ListComp::create(pos, Expr(prefix), target, iter);
@@ -532,12 +536,12 @@ struct ParserImpl {
     auto body = parseStatements();
     return While::create(r, Expr(cond), List<Stmt>(body));
   }
+
   TreeRef parseFor() {
     auto r = L.cur().range;
     L.expect(TK_FOR);
-    parse_TK_IN_as_comp_op = true;
-    auto targets = parseList(TK_NOTHING, ',', TK_NOTHING, &ParserImpl::parseExp);
-    parse_TK_IN_as_comp_op = false;
+    auto targets =
+        parseList(TK_NOTHING, ',', TK_NOTHING, &ParserImpl::parseExpWithoutIn);
     L.expect(TK_IN);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
     auto body = parseStatements();
@@ -646,7 +650,6 @@ struct ParserImpl {
   }
   Lexer L;
   SharedParserData& shared;
-  bool parse_TK_IN_as_comp_op = false;
 };
 
 Parser::Parser(const std::shared_ptr<Source>& src)
