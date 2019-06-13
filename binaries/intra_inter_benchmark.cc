@@ -12,7 +12,7 @@
 C10_DEFINE_int(iter, 100, "Number of iterations (tasks)");
 C10_DEFINE_int(sub_iter, 100, "Number of subtasks")
 C10_DEFINE_int(warmup_iter, 10, "Number of warmup iterations")
-C10_DEFINE_int(inter_op_threads, 0, "Number of inter-op iterations");
+C10_DEFINE_int(inter_op_threads, 0, "Number of inter-op threads");
 C10_DEFINE_int(intra_op_threads, 0, "Number of intra-op threads");
 C10_DEFINE_int(tensor_dim, 2000, "Tensor dim");
 C10_DEFINE_int(benchmark_iter, 3, "Number of times to run benchmark")
