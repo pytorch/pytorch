@@ -247,8 +247,10 @@ sum = _reduce_with_dtype('ReduceSum', 'sum')
 mean = _reduce_with_dtype('ReduceMean', 'mean')
 prod = _reduce_with_dtype('ReduceProd', 'prod')
 
-@parse_args('v', 'i')
-def cumsum(g, input, dim):
+@parse_args('v', 'i', 'none')
+def cumsum(g, input, dim, dtype):
+    if dtype.node().kind() != 'prim::Constant':
+        return _unimplemented(name, "dtype")
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
 
 
