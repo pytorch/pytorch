@@ -762,8 +762,32 @@ class TestDataLoader(TestCase):
             finally:
                 p.terminate()
 
-    def test_iterable_dataset(self):
-        # Test that unsupported options raises error
+    def test_invalid_ctor_args_combinations(self):
+        # general
+        with self.assertRaisesRegex(ValueError, "num_workers option should be non-negative"):
+            DataLoader(self.dataset, num_workers=-1)
+        with self.assertRaisesRegex(ValueError, "timeout option should be non-negative"):
+            DataLoader(self.dataset, timeout=-1)
+
+        # map-style
+        sampler = torch.utils.data.SequentialSampler(self.dataset)
+        batch_sampler = torch.utils.data.BatchSampler(sampler, 3, False)
+        with self.assertRaisesRegex(ValueError, "sampler option is mutually exclusive with shuffle"):
+            DataLoader(self.dataset, batch_size=11, sampler=sampler, shuffle=True)
+        with self.assertRaisesRegex(ValueError, "sampler option is mutually exclusive with shuffle"):
+            DataLoader(self.dataset, batch_sampler=batch_sampler, sampler=sampler, shuffle=True)
+        with self.assertRaisesRegex(ValueError, "sampler option is mutually exclusive with shuffle"):
+            DataLoader(self.dataset, batch_sampler=batch_sampler, sampler=sampler, shuffle=3)
+        with self.assertRaisesRegex(ValueError, "batch_sampler option is mutually exclusive with"):
+            DataLoader(self.dataset, batch_size=11, batch_sampler=batch_sampler)
+        with self.assertRaisesRegex(ValueError, "batch_sampler option is mutually exclusive with"):
+            DataLoader(self.dataset, shuffle=True, batch_sampler=batch_sampler)
+        with self.assertRaisesRegex(ValueError, "batch_sampler option is mutually exclusive with"):
+            DataLoader(self.dataset, drop_last=True, batch_sampler=batch_sampler)
+        with self.assertRaisesRegex(ValueError, "batch_sampler option is mutually exclusive with"):
+            DataLoader(self.dataset, drop_last=3, batch_sampler=batch_sampler)
+
+        # iterable-style
         dataset = CountingIterableDataset(20)
         with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified shuffle"):
             DataLoader(dataset, shuffle=True)
@@ -779,6 +803,7 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified batch_sampler"):
             DataLoader(dataset, batch_sampler=3)
 
+    def test_iterable_dataset(self):
         # [non-batched] single process loading
         dataset = CountingIterableDataset(20)
         fetched = list(DataLoader(dataset))

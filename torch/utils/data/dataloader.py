@@ -116,32 +116,22 @@ class DataLoader(object):
                  worker_init_fn=None):
         torch._C._log_api_usage_once("python.data_loader")
         self.dataset = dataset
-        self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
-        self.drop_last = drop_last
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
 
         if self.num_workers < 0:
-            raise ValueError('num_workers option cannot be negative; '
+            raise ValueError('num_workers option should be non-negative; '
                              'use num_workers=0 to disable multiprocessing.')
 
         if timeout < 0:
             raise ValueError('timeout option should be non-negative')
 
-        if sampler is not None and shuffle:
-            raise ValueError('sampler option is mutually exclusive with '
-                             'shuffle')
-
-        if batch_sampler is not None:
-            if batch_size > 1 or shuffle or sampler is not None or drop_last:
-                raise ValueError('batch_sampler option is mutually exclusive '
-                                 'with batch_size, shuffle, sampler, and '
-                                 'drop_last')
-            self.batch_size = None
-            self.drop_last = False
-
+        # Arg-check dataset related before checking samplers because we want to
+        # tell users that iterable-style datasets are incompatible with custom
+        # samplers first, so that they don't learn that this combo doesn't work
+        # after spending time fixing the custom sampler errors.
         if isinstance(dataset, IterableDataset):
             self.dataset_kind = _DatasetKind.Iterable
             # NOTE [ Custom Samplers and `IterableDataset` ]
@@ -183,27 +173,52 @@ class DataLoader(object):
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
                     "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
-            # See NOTE [ Custom Samplers and IterableDataset ]
-            sampler = _InfiniteConstantSampler()
         else:
             self.dataset_kind = _DatasetKind.Map
-            if sampler is None:
+
+        if sampler is not None and shuffle:
+            raise ValueError('sampler option is mutually exclusive with '
+                             'shuffle')
+
+        if batch_sampler is not None:
+            # auto_collation with custom batch_sampler
+            if batch_size != 1 or shuffle or sampler is not None or drop_last:
+                raise ValueError('batch_sampler option is mutually exclusive '
+                                 'with batch_size, shuffle, sampler, and '
+                                 'drop_last')
+            batch_size = None
+            drop_last = False
+        elif batch_size is None:
+            # no auto_collation
+            if shuffle or sampler is not None or drop_last:
+                raise ValueError('batch_size=None option disables auto-batching '
+                                 'and is mutually exclusive with '
+                                 'shuffle, sampler, and drop_last')
+
+        if sampler is None:  # give default samplers
+            if self.dataset_kind == _DatasetKind.Iterable:
+                # See NOTE [ Custom Samplers and IterableDataset ]
+                sampler = _InfiniteConstantSampler()
+            else:  # map-style
                 if shuffle:
                     sampler = RandomSampler(dataset)
                 else:
                     sampler = SequentialSampler(dataset)
 
         if batch_size is not None and batch_sampler is None:
+            # auto_collation without custom batch_sampler
             batch_sampler = BatchSampler(sampler, batch_size, drop_last)
 
+        self.batch_size = batch_size
+        self.drop_last = drop_last
         self.sampler = sampler
         self.batch_sampler = batch_sampler
 
         if collate_fn is None:
-            if batch_sampler is None:
-                collate_fn = _utils.collate.default_convert
-            else:
+            if self._auto_collation:
                 collate_fn = _utils.collate.default_collate
+            else:
+                collate_fn = _utils.collate.default_convert
 
         self.collate_fn = collate_fn
         self.__initialized = True
