@@ -4,6 +4,7 @@ from torch._six import inf
 from collections import Counter
 from functools import partial, wraps
 import warnings
+import bisect import bisect_right
 
 from .optimizer import Optimizer
 

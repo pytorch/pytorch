@@ -1248,7 +1248,7 @@ class TestLRScheduler(TestCase):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
         for epoch in range(epochs):
-            [scheduler.step(epoch) for scheduler in schedulers]
+            [scheduler.step() for scheduler in schedulers]
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertAlmostEqual(target[epoch], param_group['lr'],
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
@@ -1257,7 +1257,7 @@ class TestLRScheduler(TestCase):
     def _test_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs=10):
         for index, epoch in enumerate(torch.arange(0, epochs, 0.1)):
             epoch = round(epoch.item(), 1)
-            scheduler.step(epoch)
+            scheduler.step()
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertAlmostEqual(target[index], param_group['lr'],
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
@@ -1265,7 +1265,7 @@ class TestLRScheduler(TestCase):
 
     def _test_interleaved_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs):
         for index, epoch in enumerate(epochs):
-            scheduler.step(epoch)
+            scheduler.step()
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertAlmostEqual(target[index], param_group['lr'],
                                        msg='LR is wrong in epoch {}: expected {}, got {}'.format(
@@ -1293,7 +1293,7 @@ class TestLRScheduler(TestCase):
                 if isinstance(scheduler, ReduceLROnPlateau):
                     scheduler.step(metrics[epoch])
                 else:
-                    scheduler.step(epoch)
+                    scheduler.step()
             if verbose:
                 print('epoch{}:\tlr={}'.format(epoch, self.opt.param_groups[0]['lr']))
             for param_group, target in zip(self.opt.param_groups, targets):
