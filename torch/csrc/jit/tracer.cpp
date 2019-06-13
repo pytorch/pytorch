@@ -56,12 +56,9 @@ void delValueTrace(const IValue& var) {
   getTracingState()->delValue(var);
 }
 void TracingState::delValue(const IValue& var) {
-  at::Tensor t = var.toTensor();
-  AT_ASSERT(t.defined());
   for (size_t i = 0; i < env_stack.size(); ++i) {
-    auto& value_map = env_stack.at(env_stack.size() - 1 - i).value_map;
-
-    auto it = value_map.find(t);
+    auto& value_map = env_stack.at(env_stack.size() - 1 - i);
+    auto it = value_map.find(var);
     if (it == value_map.end()) {
       continue;
     }
@@ -94,14 +91,14 @@ Value* TracingState::getValue(const IValue& var) {
             TensorType::get(),
             fmap(
                 var.toTensorListRef(),
-                [](const IValue& val) { return getValueTrace(val); })))
+                [&](const IValue& val) { return getValue(val); })))
         ->output();
   } else if (var.isTuple()) {
     return graph
         ->insertNode(graph->createTuple(fmap(
             var.toTupleRef(),
-            [](const IValue& val) { return getValueTrace(val); })))
-        ->output();
+            [&](const IValue& val) { return getValue(val); })))
+        ->output(); 
   } if (var.isTensor()) {
     auto ten = var.toTensor();
     if (!ten.defined()) {
@@ -109,8 +106,8 @@ Value* TracingState::getValue(const IValue& var) {
       return graph->insertNode(n)->output();
     }
     for (size_t i = 0; i < env_stack.size(); ++i) {
-      auto& value_map = env_stack.at(env_stack.size() - 1 - i).value_map;
-      auto it = value_map.find(ten);
+      auto& value_map = env_stack.at(env_stack.size() - 1 - i);
+      auto it = value_map.find(var);
       if (it == value_map.end()) {
         continue;
       }
@@ -137,14 +134,12 @@ Value* TracingState::getValue(const IValue& var) {
     Value* constant = graph->insertConstant(ten);
     recordSourceLocation(constant->node());
     constant->inferTypeFrom(ten);
-    auto it = env_stack.back().value_map.find(ten);
-    it = env_stack.back().value_map.emplace_hint(it, ten, constant);
-    return it->second;
-  } else if (var.isFuture()) {
-    auto fut = var.toFuture();
+    auto it = env_stack.back().emplace(var, constant);
+    return it.first->second;
+  } else if (var.isFuture() || var.isObject()) {
     for (size_t i = 0; i < env_stack.size(); ++i) {
-      auto& future_map = env_stack.at(env_stack.size() - 1 - i).future_map;
-      auto it = future_map.find(fut);
+      auto& future_map = env_stack.at(env_stack.size() - 1 - i);
+      auto it = future_map.find(var);
       if (it == future_map.end()) {
         continue;
       }
@@ -152,7 +147,7 @@ Value* TracingState::getValue(const IValue& var) {
     }
 
     std::ostringstream oss;
-    oss << "Tried to trace Future that the tracer was not aware of.";
+    oss << "Tried to trace Future or Object that the tracer was not aware of.";
     throw std::runtime_error(oss.str());
   } else {
     // If the values are non-tensors, we try to create constants
@@ -170,12 +165,9 @@ Value* TracingState::getValue(const IValue& var) {
   }
 }
 bool TracingState::hasValue(const IValue& var) const {
-  if (var.isTensor()) {
-    at::Tensor t = var.toTensor();
-    for(const auto & frame : env_stack) {
-      if (frame.value_map.count(t)) {
-        return true;
-      }
+  for(const auto & frame : env_stack) {
+    if (frame.count(var)) {
+      return true;
     }
   }
   return false;
@@ -190,8 +182,8 @@ Value* TracingState::getOutput(const IValue& iv) {
        return graph->insertNode(n)->output();
      }
 
-     auto &value_map = getTracingState()->env_stack.back().value_map;
-     auto it = value_map.find(var);
+     auto &value_map = getTracingState()->env_stack.back();
+     auto it = value_map.find(iv);
      if (it == value_map.end()) {
        std::ostringstream os;
        os << "output of traced region did not have observable "
@@ -356,7 +348,7 @@ void TracingState::setValue(const IValue& v, Value* value) {
   if (v.isTensor()) {
     auto var = v.toTensor();
     AT_ASSERT(var.defined());
-    env_stack.back().value_map[var] = value;
+    env_stack.back()[v] = value;
   } else if (v.isTensorList()) {
     auto outputs = v.toTensorList();
     Node* unpack_node =
@@ -377,9 +369,8 @@ void TracingState::setValue(const IValue& v, Value* value) {
     for (size_t i = 0; i < elements.size(); ++i) {
       setValue(elements[i], unpack_node->outputs()[i]);
     }
-  } else if (v.isFuture()) {
-    auto fut = v.toFuture();
-    env_stack.back().future_map[fut] = value;
+  } else if (v.isFuture() || v.isObject()) {
+    env_stack.back()[v] = value;
   } else {
     std::ostringstream os;
     os << "Tracer cannot set value trace for type " << v.tagKind() << ". "
