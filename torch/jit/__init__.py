@@ -1812,8 +1812,8 @@ class TracedModule(ScriptModule):
             raise ValueError("Modules that have hooks assigned can't be compiled")
 
         for name, submodule in orig._modules.items():
-            if isinstance(submodule, ScriptModule) and not isinstance(submodule, TracedModule):
-                self._modules[name] = submodule.copy()
+            if isinstance(submodule, ScriptModule):
+                self._modules[name] = submodule
             else:
                 self._modules[name] = TracedModule(submodule, id_set, optimize=optimize)
 

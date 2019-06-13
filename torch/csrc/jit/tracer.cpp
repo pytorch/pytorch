@@ -145,9 +145,13 @@ Value* TracingState::getValue(const IValue& var) {
       }
       return it->second;
     }
-
-    std::ostringstream oss;
-    oss << "Tried to trace Future or Object that the tracer was not aware of.";
+    std::ostringstream oss; 
+    if (var.isFuture()) {
+      oss << "Tried to trace Future or Object that the tracer was not aware of.";
+    } else {
+      oss << "Tried to trace " << var << " but it is not part of the active trace. Modules that are called during a trace"
+      << " must be registered as submodules of the thing being traced.";
+    }
     throw std::runtime_error(oss.str());
   } else {
     // If the values are non-tensors, we try to create constants
@@ -282,6 +286,9 @@ static void gatherParametersAndBuffers(
     Value* self_value,
     const script::Module& self) {
   Graph& g = *self_value->owningGraph();
+  
+  state->setValue(self.module_object(), self_value);
+
   for (auto& param : self.get_parameters()) {
     addInput(state, param.value(), param.type(), g.insertGetAttr(self_value, param.name()));
   }
