@@ -607,8 +607,8 @@ class CyclicLR(_LRScheduler):
             if last_epoch == -1:
                 for momentum, group in zip(base_momentums, optimizer.param_groups):
                     group['momentum'] = momentum
-        self.base_momentums = list(map(lambda group: group['momentum'], optimizer.param_groups))
-        self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
+            self.base_momentums = list(map(lambda group: group['momentum'], optimizer.param_groups))
+            self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
 
         super(CyclicLR, self).__init__(optimizer, last_epoch)
 
