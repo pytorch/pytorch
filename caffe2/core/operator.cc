@@ -14,6 +14,9 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <ATen/core/List.h>
+#endif
 
 #include "caffe2/core/export_c10_op_to_caffe2.h"
 
@@ -46,6 +49,9 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       device_option_(
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
+#if !defined(CAFFE2_IS_XPLAT_BUILD)
+      newstyle_outputs_(c10::make_list<at::Tensor>()),
+#endif
       input_size_(operator_def.input_size()),
       event_(caffe2::make_unique<Event>(device_option_)) {
   static GlobalInitIsCalledGuard guard;
@@ -106,7 +112,7 @@ compute_input_size_(const std::vector<c10::IValue>& inputs) {
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     std::vector<c10::IValue> inputs,
-    std::vector<at::Tensor> outputs)
+    c10::ListPtr<at::Tensor> outputs)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       newstyle_inputs_(std::move(inputs)),
       newstyle_outputs_(std::move(outputs)),
