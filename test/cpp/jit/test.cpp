@@ -77,6 +77,8 @@ namespace jit {
   _(NoneSchemaMatch)               \
   _(ClassParser)                   \
   _(Profiler)                      \
+  _(LivenessIf)                    \
+  _(LivenessFor)                   \
   _(InsertAndEliminateGuards)      \
   _(InsertBailOuts)                \
   _(PeepholeOptimize)              \
