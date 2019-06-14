@@ -18,6 +18,8 @@ struct CAFFE2_API Dimname {
   Symbol full_name() const { return full_name_; }
   Symbol untagged_name() const { return untagged_name_; }
 
+  bool can_refer_to(const Dimname& other) const;
+
  private:
   Dimname(Symbol name)
     : untagged_name_(name), full_name_(name), type_(NameType::NORMAL) {}
@@ -28,7 +30,7 @@ struct CAFFE2_API Dimname {
   //
   // For "C.in":
   // - "C.in" is the "full name"
-  // - "C" is the "name"
+  // - "C" is the "untagged name"
   // - "in" is the "tag"
   Symbol untagged_name_;
   Symbol full_name_;
