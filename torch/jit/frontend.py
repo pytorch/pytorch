@@ -339,8 +339,14 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
+        target = stmt.target.id
+        target_range = ctx.make_range(
+            stmt.target.lineno,
+            stmt.target.col_offset,
+            stmt.target.col_offset + len(target)
+        )
         return For(
-            r, [build_expr(ctx, stmt.target)],
+            r, [Ident(target_range, target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
 
     @staticmethod

@@ -1756,8 +1756,8 @@ int dictGetDefault(Stack& stack) {
 }
 
 int dictContains(Stack& stack) {
-  auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
+  auto key = pop(stack);
   push(stack, dict.contains(key));
   return 0;
 }
@@ -2337,8 +2337,8 @@ RegisterOperators reg2({
           " key, t default_value) -> t(*)",                                   \
           dictGetDefault),                                                    \
       Operator(                                                               \
-          "aten::__contains__(Dict(" key_type ", t) dict, " key_type          \
-          " key) -> bool",                                                    \
+          "aten::__contains__(" key_type " key, Dict(" key_type               \
+          ", t) dict) -> bool",                                               \
           dictContains),                                                      \
       Operator(                                                               \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \

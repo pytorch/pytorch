@@ -328,9 +328,13 @@ using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 // builtins operators and functions that call a method if it exists
 // on a class type, like 'len(x)' and 'x + y'
 struct TORCH_API MagicMethod : public SugaredValue {
-  MagicMethod(std::string desugared_name, SugaredValuePtr base)
+  MagicMethod(
+      std::string desugared_name,
+      SugaredValuePtr base,
+      size_t class_arg_position)
       : base_value_(std::move(base)),
-        desugared_name_(std::move(desugared_name)) {}
+        desugared_name_(std::move(desugared_name)),
+        class_arg_position_(class_arg_position) {}
 
   std::string kind() const override {
     return desugared_name_;
@@ -361,6 +365,7 @@ struct TORCH_API MagicMethod : public SugaredValue {
  private:
   SugaredValuePtr base_value_;
   std::string desugared_name_;
+  size_t class_arg_position_;
 };
 
 // These SugaredValues have special handling in the compiler because they

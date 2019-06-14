@@ -217,10 +217,7 @@ struct ParserImpl {
   Expr parseExp() {
     return parseExp(0);
   }
-  Expr parseExpWithoutIn() {
-    return parseExp(0, /*parse_tk_in_as_comp_op=*/false);
-  }
-  Expr parseExp(int precedence, bool parse_tk_in_as_comp_op=true) {
+  Expr parseExp(int precedence) {
     TreeRef prefix;
     int unary_prec;
     if (shared.isUnary(L.cur().kind, &unary_prec)) {
@@ -246,14 +243,6 @@ struct ParserImpl {
         // not greater than 'precedence'
         break;
 
-      if (L.cur().kind == TK_IN && !parse_tk_in_as_comp_op) {
-        // Since we don't have a separation between our `comparison`s and
-        // `expr`s like Python does, we have now way of knowing whether this
-        // `in` is the end of a list of `for` idents or if it's being used as
-        // a comparison operator (e.g. `"a" in a_dict`)
-        break;
-      }
-
       int kind = L.cur().kind;
       auto pos = L.cur().range;
       L.next();
@@ -267,20 +256,14 @@ struct ParserImpl {
       }
 
       if (kind == TK_FOR) {
-        auto target = parseExpWithoutIn();
+        auto target = parseIdent();
         L.expect(TK_IN);
         auto iter = parseExp();
         prefix = ListComp::create(pos, Expr(prefix), target, iter);
         continue;
       }
 
-      if (kind == TK_IN) {
-        // for `in` comparison ops, reverse the order of the compound to make
-        // it consistent with other ops (so the self object comes first)
-        prefix = create_compound(kind, pos, {parseExp(binary_prec), prefix});
-      } else {
-        prefix = create_compound(kind, pos, {prefix, parseExp(binary_prec)});
-      }
+      prefix = create_compound(kind, pos, {prefix, parseExp(binary_prec)});
     }
     return Expr(prefix);
   }
@@ -541,7 +524,7 @@ struct ParserImpl {
     auto r = L.cur().range;
     L.expect(TK_FOR);
     auto targets =
-        parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseExpWithoutIn);
+        parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseIdent);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
     auto body = parseStatements();
     return For::create(r, targets, itrs, body);

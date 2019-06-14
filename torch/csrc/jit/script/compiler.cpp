@@ -154,8 +154,9 @@ static Value* asSimple(const SugaredValuePtr& value) {
 
 static std::shared_ptr<MagicMethod> makeMagic(
     const std::string& name,
-    SugaredValuePtr base) {
-  return std::make_shared<MagicMethod>(name, base);
+    SugaredValuePtr base,
+    size_t class_arg_position = 0) {
+  return std::make_shared<MagicMethod>(name, base, class_arg_position);
 }
 
 // Auxiliary data structure for desugaring variable binding into our always
@@ -931,7 +932,7 @@ struct to_ir {
     const auto expr_stmt = ExprStmt::create(lc.range(), apply_append);
     const auto stmt_list = List<Stmt>::create(lc.range(), {expr_stmt});
     const auto iters_list = List<Expr>::create(lc.range(), {lc.iter()});
-    const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
+    const auto targets_list = List<Ident>::create(lc.range(), {lc.target()});
     const auto for_loop =
         For::create(lc.range(), targets_list, iters_list, stmt_list);
     emitFor(for_loop);
@@ -1500,11 +1501,10 @@ struct to_ir {
           << "Iteration variable unpacking is not supported";
     }
 
-    if (targets[0].kind() != TK_VAR) {
+    if (targets[0].kind() != TK_IDENT) {
       throw ErrorReport(targets[0])
           << "unexpected expression in variable initialization of for loop";
     }
-    auto target = Var(targets[0]).name();
 
     // match range(<expr>) style loops
     // itrs must consist of a single Apply node
@@ -1514,7 +1514,7 @@ struct to_ir {
         Var var = Var(range_iterator.callee());
         if (var.name().name() == "range") {
           return emitForRange(
-              stmt.range(), target, range_iterator.inputs(), body);
+              stmt.range(), targets[0], range_iterator.inputs(), body);
         }
       }
     }
@@ -1539,7 +1539,7 @@ struct to_ir {
     }
 
     auto instances = sv->asTuple(stmt.range(), method);
-    const std::string& target_name = target.name();
+    const std::string& target_name = targets[0].name();
     pushFrame(environment_stack->block());
     for (const auto& inst : instances) {
       environment_stack->setSugaredVar(itrs[0].range(), target_name, inst);
@@ -2460,9 +2460,17 @@ struct to_ir {
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto overload = getOperatorOverload(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+        auto class_arg_position = 0;
+
+        if (tree->kind() == TK_IN) {
+          class_arg_position = 1;
+        }
+
         return asSimple(
             makeMagic(
-                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+                overload,
+                std::make_shared<BuiltinFunction>(kind, at::nullopt),
+                class_arg_position)
                 ->call(tree->range(), method, named_values, {}, 0));
       }
       case TK_NOT: {
