@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
-#include <ATen/NamedTensor.h>
+#include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/utils/memory.h>
 
