@@ -991,14 +991,14 @@ class _TestTorchMixin(object):
             ans = torch.norm(x, "nuc", dim=axes)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
-            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03))
+            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True))
 
             out = torch.zeros(expected.shape, dtype=x.dtype, device=x.device)
             ans = torch.norm(x, "nuc", dim=axes, out=out)
             self.assertIs(ans, out)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
-            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03))
+            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True))
 
         for n in range(1, 3):
             for m in range(1, 3):
@@ -1026,7 +1026,7 @@ class _TestTorchMixin(object):
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions Fortran
-                        y = torch.randn(o, n, m, device=device).transpose(-1, -2)
+                        x = torch.randn(o, m, n, device=device).transpose(-1, -2)
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions non-contiguous
