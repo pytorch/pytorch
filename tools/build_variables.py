@@ -170,6 +170,7 @@ def add_torch_libs():
         "torch/csrc/MemoryFormat.cpp",
         "torch/csrc/Module.cpp",
         "torch/csrc/PtrWrapper.cpp",
+        "torch/csrc/python_dimname.cpp",
         "torch/csrc/Size.cpp",
         "torch/csrc/Storage.cpp",
         "torch/csrc/TypeInfo.cpp",
