@@ -13042,14 +13042,31 @@ a")
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
 
-    def test_named_tuple_error(self):
-        _GoogLeNetOutputs = namedtuple('GoogLeNetOuputs', ['logits', 'aux_logits2', 'aux_logits1'])
+    def test_named_tuple_py2(self):
+        _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
 
-        with self.assertRaisesRegex(RuntimeError, 'NamedTuple is currently not supported'):
-            @torch.jit.script
-            def foo(x):
-                return _GoogLeNetOutputs(x, x, x)
+        @torch.jit.script
+        def foo(x):
+            # type: (_GoogLeNetOutputs) -> _GoogLeNetOutputs
+            return x
 
+        vals = torch.rand(3), torch.rand(4), torch.rand(5)
+        out = foo(_GoogLeNetOutputs(logits=vals[0], aux_logits2=vals[1], aux_logits1=vals[2]))
+        self.assertEqual(out.logits, vals[0])
+        self.assertEqual(out.aux_logits2, vals[1])
+        self.assertEqual(out.aux_logits1, vals[2])
+
+    def test_named_tuple_good_error(self):
+        _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
+
+        @torch.jit.script
+        def foo(x):
+            # type: (_GoogLeNetOutputs) -> _GoogLeNetOutputs
+            return x
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'aka NamedTuple\(logits, aux_logits2, aux_logits1\)'):
+            out = foo(_GoogLeNetOutputs(logits=3, aux_logits2=4, aux_logits1=5))
 
     def _test_pickle_checkpoint(self, device):
         with TemporaryFileName() as fname:
