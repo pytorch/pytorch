@@ -429,6 +429,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/inline_loop_condition.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp

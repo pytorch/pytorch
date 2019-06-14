@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/break_continue_transform.h>
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/inline_loop_condition.h>
 #include <torch/csrc/jit/script/mini_environment.h>
 
 namespace torch {
@@ -268,7 +269,9 @@ struct SSATransformer {
 // so that breaks and continues are removed, then we add loads and stores
 // to control flow nodes, then we stitch together Loads & Stores into SSA form.
 void ConvertToSSA(std::shared_ptr<Graph>& graph) {
+  TransformContinues(graph);
   TransformBreaks(graph);
+  InlineLoopCondition(graph);
   ControlFlowLoadStores ctrl;
   ctrl.run(graph);
   SSATransformer ssa;

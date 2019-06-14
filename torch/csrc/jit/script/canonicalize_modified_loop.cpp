@@ -20,10 +20,6 @@ void canonicalizeModifiedLoops(Node* n) {
     return;
   }
 
-  TORCH_INTERNAL_ASSERT(
-      constant_as<bool>(n->inputs().at(1)).value_or(false) == true,
-      "non-constant loop input condition NYI");
-
   auto g = n->owningGraph();
   WithInsertPoint node_insert(n);
   auto zero = g->insertConstant(0);
@@ -32,6 +28,11 @@ void canonicalizeModifiedLoops(Node* n) {
   auto condition = g->insert(aten::gt, {max_trip_count, zero});
   loop.replaceMaxTripCount(
       g->insertConstant(std::numeric_limits<int64_t>::max()));
+
+  auto inp_condition = toIValue(loop.inputCond());
+  if (inp_condition == c10::nullopt || inp_condition->toInt() == false) {
+    condition = g->insert(aten::__and__, {condition, loop.inputCond()});
+  }
   loop.replaceInputCondition(condition);
   n->addOutput()->setType(IntType::get());
   WithInsertPoint loop_insert(loop.bodyBlock());

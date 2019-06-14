@@ -14,9 +14,9 @@ namespace script {
 void moveBlockBeforeNode(Node* before_node, Block* block);
 
 /**
- * This pass transforms the graph_ so that break & continue statements are
- * removed. We transform the graph_ so that ops following a break or continue
- * are not run.
+ * This pass transforms the graph so that break & continue statements are
+ * removed. We transform the graph so that ops following a break or continue are
+ * not run.
  */
 
 // Will a block or node continue or break
@@ -32,21 +32,33 @@ struct LoopTransformer {
     true_val_ = graph_->insertConstant(true);
     false_val_ = graph_->insertConstant(false);
     transform_ = transform;
+    incrementCurString();
   };
 
-  const std::string& getVarname() {
+  const std::string getVarname() {
+    return cur_string;
+  }
+
+  void incrementCurString() {
     static const std::string& break_name = "$did_break";
     static const std::string& continue_name = "$did_continue";
-    return transform_ == BREAKS ? break_name : continue_name;
+    const auto& name = transform_ == BREAKS ? break_name : continue_name;
+    loop_count++;
+    cur_string = name + std::to_string(loop_count);
+  }
+
+  void setCurString(const std::string& new_string) {
+    cur_string = new_string;
   }
 
   Symbol transformKind() {
     return transform_ == BREAKS ? prim::BreakStmt : prim::ContinueStmt;
   }
 
-  // Recurses on the if node and returns its return status
-  // If status != WONT, sets the block_return_val and sentinel val
-  // of its parent block before exit
+  // Recursively transform both blocks of the if node.
+  // If both blocks have hit the transform variable, then the return status,
+  // is WILL, if both will not hit the transform variable it is false.
+  // Otherwise we may have hit it.
   LoopStatus handleIf(Node* node) {
     auto true_block = node->blocks().at(0);
     auto false_block = node->blocks().at(1);
@@ -63,14 +75,15 @@ struct LoopTransformer {
     }
   }
 
+  // if an if node might hit a break or continue statement,
+  // we guard all subsequent nodes in the block, and only execute them
+  // if the transform is false.
+  // The LoopStatus is the result of recursing on the newly created if.
   LoopStatus guardBlockNodes(
       Block* block,
-      generic_graph_node_list_iterator<Node>& iter) {
-    // if an if node might hit a break or continue statement,
-    // we guard all subsequent nodes in the block, and only execute them
-    // if we did break / did continue is false.
-
-    auto new_if = graph_->create(prim::If, 0)->insertBefore(*iter);
+      graph_node_list::iterator& remaining_block_nodes) {
+    auto new_if =
+        graph_->create(prim::If, 0)->insertBefore(*remaining_block_nodes);
     auto sentinel =
         graph_->createLoad(getVarname(), BoolType::get())->insertBefore(new_if);
     new_if->addInput(sentinel->output());
@@ -78,8 +91,8 @@ struct LoopTransformer {
     auto hit_control_flow_block = new_if->addBlock();
     auto guard_block = new_if->addBlock();
 
-    while (iter != block->nodes().end()) {
-      auto node = *iter++;
+    while (remaining_block_nodes != block->nodes().end()) {
+      auto node = *remaining_block_nodes++;
       node->moveBefore(guard_block->return_node());
     }
 
@@ -89,11 +102,14 @@ struct LoopTransformer {
       // In a graph like:
       // for i in range(3):
       //     if cond == 2:
+      //         k : Optional[int] = None
       //         if cond == 2:
       //             m = 2
       //             break
       //         k = 1
+      //         j = 2
       //     else:
+      //         j = 1
       //         k = 2
       //     m += k
       // We transform the inner cond == 2 block to look like:
@@ -130,65 +146,59 @@ struct LoopTransformer {
     iter->destroy();
   }
 
-  void inlineLoopConditionIntoLoopBody(Node* n) {
-    auto body_block = n->blocks().at(0);
-    auto pre_header = n->blocks().at(1);
-    moveBlockBeforeNode(body_block->return_node(), pre_header);
-    body_block->insertOutput(0, pre_header->outputs().at(0));
-    n->eraseBlock(1);
+  void handleLoop(Node* loop_node) {
+    const std::string prev_string = getVarname();
+    // Give current loop unique identifier
+    incrementCurString();
+    // transform the loop
+    transformLoop(loop_node);
+
+    // restore previous identifier
+    setCurString(prev_string);
   }
 
-  void handleLoop(Node* loop_node) {
-    // transform the loop, then ensure that that it does not accidentally
-    // pick up or assign the current transform variable outside of the loop.
-    transformLoop(loop_node);
-    Block* body_block = loop_node->blocks().at(0);
-    graph_->createStore(getVarname(), false_val_)
-        ->insertAfter(body_block->param_node());
-    graph_->createStore(getVarname(), false_val_)
-        ->insertBefore(body_block->return_node());
+  // Create a check for the current transform variable.
+  // if transform is true, loop continue condition is false, otherwise
+  // run original condition
+  void guardConditionBlock(Block* condition_block) {
+    WithInsertPoint insert(*condition_block->nodes().begin());
+    auto did_break =
+        graph_->insertNode(graph_->createLoad(getVarname(), BoolType::get()))
+            ->output();
+    auto new_loop_condition = graph_->insertNode(graph_->create(prim::If));
+    new_loop_condition->addInput(did_break);
+    new_loop_condition->output()->setType(BoolType::get());
+    new_loop_condition->addBlock()->registerOutput(false_val_);
+    auto original_condition = new_loop_condition->addBlock();
+
+    Node* n = new_loop_condition;
+    for (n = n->next(); n != condition_block->return_node();) {
+      auto cur = n;
+      n = n->next();
+      cur->moveBefore(original_condition->return_node());
+    }
+    original_condition->insertOutput(0, condition_block->outputs().at(0));
+    condition_block->eraseOutput(0);
+    condition_block->registerOutput(new_loop_condition->output());
   }
 
   void transformLoop(Node* n) {
     Block* body_block = n->blocks().at(0);
     auto ret_status = handleTransforms(body_block);
 
-    // When we're transforming breaks:
-    // the body condition has not yet been inlined. If we we are not breaking
-    // we need to inline the condition block into the end of the loop.
-    // if we might break, we create an if statement and only execute the loop
-    // header if we did not break.
-    // Since we run the continue pass before the break pass,
-    // we do not need to do any additional work in continues; guardBlock nodes
-    // ensures that we do not execute any ops present in the block after a
-    // continue, and loop condition is inlined after.
-
-    if (transform_ == CONTINUES) {
+    // loop header should run even if we have continued
+    if (transform_ == CONTINUES || ret_status == WONT) {
       return;
     }
 
-    if (ret_status == WONT) {
-      inlineLoopConditionIntoLoopBody(n);
-      return;
-    }
-
-    WithInsertPoint insert(body_block);
-    auto did_break =
-        graph_->insertNode(graph_->createLoad(getVarname(), BoolType::get()))
-            ->output();
-
-    auto new_loop_condition = graph_->insertNode(graph_->create(prim::If));
-    new_loop_condition->addInput(did_break);
-    new_loop_condition->output()->setType(BoolType::get());
-
-    // if we did break, we do not continue
-    new_loop_condition->addBlock()->registerOutput(false_val_);
-    auto original_condition = new_loop_condition->addBlock();
-    auto pre_header = n->blocks().at(1);
-    moveBlockBeforeNode(original_condition->return_node(), pre_header);
-    original_condition->insertOutput(0, pre_header->outputs().at(0));
-    n->eraseBlock(1);
-    body_block->registerOutput(new_loop_condition->output());
+    // because the condition block will get inlined as the start loop condition,
+    // we need to make sure that it is defined before the loop executes
+    // (and false so original condition is run). Also insert it into the block
+    // so it is not an unneccessary loop carried var.
+    graph_->createStore(getVarname(), false_val_)->insertBefore(n);
+    graph_->createStore(getVarname(), false_val_)
+        ->insertAfter(body_block->param_node());
+    guardConditionBlock(n->blocks().at(1));
   };
 
   LoopStatus handleTransforms(Block* block) {
@@ -205,7 +215,6 @@ struct LoopTransformer {
           if (node->kind() != transformKind()) {
             continue;
           }
-          WithInsertPoint b(block);
           node->destroy();
           loop_status = WILL;
         } break;
@@ -244,81 +253,26 @@ struct LoopTransformer {
     handleTransforms(graph_->block());
   }
 
+  size_t loop_count = 0;
   Transform transform_;
   Value* true_val_ = nullptr;
   Value* false_val_ = nullptr;
+  std::string cur_string = "";
 
   std::shared_ptr<Graph> graph_;
 };
 
-void moveBlockBeforeNode(Node* before_node, Block* block) {
-  for (auto it = block->nodes().begin(); it != block->nodes().end();) {
-    auto block_node = *it++;
-    block_node->moveBefore(before_node);
-  }
-}
+// These passes are run before SSA, so they need to handle before the
+// Loop body and loop condition as a separate block.
 
-// The loop node is initially emitted as:
-// Loop(max_trip_count)
-//    block0(loop_counter) {
-//      <body>
-//    }
-//    block1 {
-//      <loop condition>
-//      -> (condition)
-//    }
-// Here, we inline the loop condition into:
-// Loop(max_trip_count, start_condition)
-//    block0(loop_counter) {
-//      <body>
-//    }
-//    block1 {
-//      <loop condition>
-//      -> (condition)
-//    }
-
-void inlineLoopStartCondition(Node* n) {
-  auto pre_header = n->blocks().at(1);
-  auto header_block = n->addBlock();
-  header_block->cloneFrom(pre_header, [](Value* v) { return v; });
-  moveBlockBeforeNode(n, header_block);
-  n->addInput(header_block->outputs().at(0));
-  n->eraseBlock(2);
-}
-
-void inlineLoopStartCondition(Block* block) {
-  for (Node* n : block->nodes()) {
-    switch (n->kind()) {
-      case prim::If:
-      case prim::Function: {
-        for (auto b : n->blocks()) {
-          inlineLoopStartCondition(b);
-        }
-      } break;
-      case prim::Loop: {
-        inlineLoopStartCondition(n->blocks().at(0));
-        inlineLoopStartCondition(n);
-      } break;
-    }
-  }
-}
-
-// First we inline the loop input condition.
-// Then, we transform the continues. Because the loop body condition
-// has not yet been inlined, we can safely ignore it in the continue pass.
-// Then, we transform breaks, inlining the loop body condition as part of the
-// pass. Because they have not been inlined yet, we can generated nice graph_s
-// of the form
-// if did_break
-//    ... loop_continue = False
-// else:
-//    ... loop_continue = original_condition
 void TransformBreaks(std::shared_ptr<Graph>& graph) {
-  inlineLoopStartCondition(graph->block());
-  LoopTransformer continues(graph, CONTINUES);
-  continues.run();
   LoopTransformer breaks(graph, BREAKS);
   breaks.run();
+}
+
+void TransformContinues(std::shared_ptr<Graph>& graph) {
+  LoopTransformer continues(graph, CONTINUES);
+  continues.run();
 }
 
 } // namespace script
