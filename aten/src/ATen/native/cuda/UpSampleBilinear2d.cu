@@ -13,6 +13,76 @@ namespace at {
 namespace native {
 namespace {
 
+template <
+    typename scalar_t,
+    typename std::enable_if<std::is_same<c10::Half, scalar_t>::value>::type* =
+        nullptr>
+__device__ __forceinline__ void fastSpecializedAtomicAdd(
+    scalar_t* tensor,
+    size_t index,
+    const size_t numel,
+    scalar_t value) {
+#if (                         \
+    (CUDA_VERSION < 10000) || \
+    (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
+  atomicAdd(
+      reinterpret_cast<at::Half*>(tensor) + index,
+      static_cast<at::Half>(value));
+#else
+  if (index % 2 == 0 && index < (numel - 1)) {
+    __half2 value2;
+    value2.x = value;
+    value2.y = __int2half_rz(0);
+    atomicAdd(reinterpret_cast<__half2*>(tensor) + index / 2, value2);
+
+  } else if (index % 2 == 1) {
+    __half2 value2;
+    value2.x = __int2half_rz(0);
+    value2.y = value;
+    atomicAdd(reinterpret_cast<__half2*>(tensor) + index / 2, value2);
+
+  } else {
+    atomicAdd(
+        reinterpret_cast<__half*>(tensor) + index, static_cast<__half>(value));
+  }
+#endif
+}
+
+template <
+    typename scalar_t,
+    typename std::enable_if<!std::is_same<c10::Half, scalar_t>::value>::type* =
+        nullptr>
+__device__ __forceinline__ void fastSpecializedAtomicAdd(
+    scalar_t* tensor,
+    size_t index,
+    const size_t numel,
+    scalar_t value) {
+  atomicAdd(tensor + index, value);
+}
+
+template <class scalar_t>
+__device__ __forceinline__ void fastAtomicAdd(
+    scalar_t* tensor,
+    size_t index,
+    const size_t numel,
+    scalar_t value,
+    bool fast_atomics) {
+  if (fast_atomics) {
+    fastSpecializedAtomicAdd(tensor, index, numel, value);
+  } else {
+    atomicAdd(tensor + index, value);
+  }
+}
+
+__device__ __forceinline__ size_t
+idx(const size_t nc,
+    const size_t height,
+    const size_t width,
+    const size_t y,
+    const size_t x) {
+  return (nc * height + y) * width + x;
+}
+
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_bilinear2d_out_frame(
@@ -79,36 +149,26 @@ __global__ void upsample_bilinear2d_out_frame(
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_bilinear2d_backward_out_frame(
-    const int n,
+    const size_t nc,
+    const int height1,
+    const int width1,
+    const int height2,
+    const int width2,
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    PackedTensorAccessor<scalar_t, 4> idata,
-    const PackedTensorAccessor<scalar_t, 4> odata) {
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
-
-  const int batchsize = idata.size(0);
-  const int channels = idata.size(1);
-  const int height1 = idata.size(2);
-  const int width1 = idata.size(3);
-  const int height2 = odata.size(2);
-  const int width2 = odata.size(3);
-
-  if (index < n) {
-    const int w2 = index % width2; // 0:width2-1
-    const int h2 = index / width2; // 0:height2-1
-    // special case: just copy
-    if (height1 == height2 && width1 == width2) {
-      const int h1 = h2;
-      const int w1 = w2;
-      for (int n = 0; n < batchsize; n++) {
-        for (int c = 0; c < channels; ++c) {
-          const scalar_t val = odata[n][c][h1][w1];
-          idata[n][c][h2][w2] = val;
-        }
-      }
-      return;
-    }
+    scalar_t* __restrict__ idata,
+    const scalar_t* __restrict__ odata,
+    const bool fast_atomics) {
+  const size_t o_numel = nc * width2 * height2;
+  const size_t i_numel = nc * width1 * height1;
+  for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < o_numel;
+       index += blockDim.x * gridDim.x) {
+    size_t index_temp = index;
+    const int w2 = index_temp % width2; // 0:width2-1
+    index_temp /= width2;
+    const int h2 = index_temp % height2; // 0:height2-1
+    const size_t nc = index_temp / height2;
     //
     const accscalar_t h1r = area_pixel_compute_source_index<accscalar_t>(
         rheight, h2, align_corners, /*cubic=*/false);
@@ -124,23 +184,31 @@ __global__ void upsample_bilinear2d_backward_out_frame(
     const accscalar_t w1lambda = w1r - w1;
     const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
     //
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; ++c) {
-        const scalar_t d2val = odata[n][c][h2][w2];
-        atomicAdd(
-            &idata[n][c][h1][w1],
-            static_cast<scalar_t>(h0lambda * w0lambda * d2val));
-        atomicAdd(
-            &idata[n][c][h1][w1 + w1p],
-            static_cast<scalar_t>(h0lambda * w1lambda * d2val));
-        atomicAdd(
-            &idata[n][c][h1 + h1p][w1],
-            static_cast<scalar_t>(h1lambda * w0lambda * d2val));
-        atomicAdd(
-            &idata[n][c][h1 + h1p][w1 + w1p],
-            static_cast<scalar_t>(h1lambda * w1lambda * d2val));
-      }
-    }
+    const scalar_t d2val = odata[index];
+    fastAtomicAdd(
+        idata,
+        idx(nc, height1, width1, h1, w1),
+        i_numel,
+        static_cast<scalar_t>(h0lambda * w0lambda * d2val),
+        fast_atomics);
+    fastAtomicAdd(
+        idata,
+        idx(nc, height1, width1, h1, w1 + w1p),
+        i_numel,
+        static_cast<scalar_t>(h0lambda * w1lambda * d2val),
+        fast_atomics);
+    fastAtomicAdd(
+        idata,
+        idx(nc, height1, width1, h1 + h1p, w1),
+        i_numel,
+        static_cast<scalar_t>(h1lambda * w0lambda * d2val),
+        fast_atomics);
+    fastAtomicAdd(
+        idata,
+        idx(nc, height1, width1, h1 + h1p, w1 + w1p),
+        i_numel,
+        static_cast<scalar_t>(h1lambda * w1lambda * d2val),
+        fast_atomics);
   }
 }
 
@@ -176,7 +244,6 @@ static void upsample_bilinear2d_out_cuda_template(
       output_width);
 
   output.resize_({input.size(0), input.size(1), output_height, output_width});
-  output.zero_();
 
   AT_ASSERT(
       input_height > 0 && input_width > 0 && output_height > 0 &&
@@ -253,9 +320,12 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   Tensor grad_output = grad_output_.contiguous();
 
   grad_input.resize_({nbatch, channels, input_height, input_width});
+  // initialization to zero is required here. As we launch one thread per output
+  // element, and atomicAdd to input gradient. Given a sparse sampling case, our
+  // threads are not covering the whole input tensor.
   grad_input.zero_();
 
-  const int num_kernels = output_height * output_width;
+  const size_t num_kernels = nbatch * channels * output_height * output_width;
   const int num_threads = std::min(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -264,20 +334,32 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       grad_output.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = grad_input.packed_accessor<scalar_t, 4>();
-        auto odata = grad_output.packed_accessor<scalar_t, 4>();
+        auto idata = grad_input.data<scalar_t>();
+        auto odata = grad_output.data<scalar_t>();
 
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners);
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners);
 
+        const bool fast_atomics = grad_input.is_contiguous();
+
         upsample_bilinear2d_backward_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
+            <<<cuda::ATenCeilDiv(num_kernels, static_cast<size_t>(num_threads)),
                num_threads,
                0,
                stream>>>(
-                num_kernels, rheight, rwidth, align_corners, idata, odata);
+                nbatch * channels,
+                input_height,
+                input_width,
+                output_height,
+                output_width,
+                rheight,
+                rwidth,
+                align_corners,
+                idata,
+                odata,
+                fast_atomics);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
