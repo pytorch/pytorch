@@ -47,7 +47,7 @@ class C10_API TensorTypeIdRegistry final {
  private:
   using TypeIdName = std::string;
   ska::flat_hash_map<TensorTypeId, TypeIdName> registeredTypeIds_;
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
 
   C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
 };

@@ -41,6 +41,8 @@ void TensorTypeIdRegistry::deregisterId(TensorTypeId id) {
 }
 
 const std::string& TensorTypeIdRegistry::toString(TensorTypeId id) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+
   auto found = registeredTypeIds_.find(id);
   TORCH_INTERNAL_ASSERT(found != registeredTypeIds_.end());
   return found->second;
