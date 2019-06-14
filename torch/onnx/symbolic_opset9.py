@@ -1739,7 +1739,8 @@ def index(g, self, index):
         #           representing ":" in python indexing. E.g. tensor[:, :]
         #   2. prim::Constant[value=...] or tensor output
         #           representing advanced indexing. E.g. tensor[[0, 1], [2, 0]].
-        # For more info on advanced indexing, check https://docs.scipy.org/doc/numpy/reference/arrays.indexing.html#advanced-indexing
+        # For more info on advanced indexing,
+        # check https://docs.scipy.org/doc/numpy/reference/arrays.indexing.html#advanced-indexing
 
         # Consider a general case of
         #       t: [x_1, y_1, y_2, ..., x_m, ..., y_n]
@@ -1802,7 +1803,8 @@ def index(g, self, index):
                 self = g.op("Reshape", self, folded_adv_idx_shape)
 
                 # Transpose folded advanced indexed axis to its original location.
-                adv_idx_permute = list(range(1, adv_idx_indices[0]+1)) + [0] + list(range(adv_idx_indices[0]+1, rank - adv_idx_count + 1))
+                adv_idx_permute = list(range(1, adv_idx_indices[0] + 1))                    \
+                    + [0] + list(range(adv_idx_indices[0] + 1, rank - adv_idx_count + 1))
                 self = g.op("Transpose", self, perm_i=adv_idx_permute)
 
                 # unfold advanced index axes
