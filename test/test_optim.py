@@ -536,8 +536,9 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
+            warnings.simplefilter("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
-            self.assertEqual(len(ws), 1, "Only Deprecation Warning should be raised")
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         def old_pattern():
             for e in range(epochs):
@@ -553,8 +554,9 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
+            warnings.simplefilter("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
-            self.assertEqual(len(ws), 1, "Only Deprecation Warning should be raised")
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         def old_pattern2():
             for e in range(epochs):
@@ -570,8 +572,9 @@ class TestLRScheduler(TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
+            warnings.simplefilter("ignore", category=DeprecationWarning)
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
-            self.assertEqual(len(ws), 1, "Only Deprecation Warning should be raised")
+            self.assertTrue(len(ws) == 0, "No warning should be raised")
 
         # emulate use-case with optimizer.step overriden
         import types
