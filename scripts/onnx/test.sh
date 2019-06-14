@@ -54,6 +54,6 @@ pytest "${args[@]}" \
 # onnxruntime only support py3
 if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   pip install --user onnxruntime
-  pytest "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py"
+  pytest "${args[@]}" "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py"
 fi
 
