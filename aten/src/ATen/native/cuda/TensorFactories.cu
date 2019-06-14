@@ -507,7 +507,7 @@ Tensor reservoir_sampling_cuda(
   dim3 threads(threadsPerBlock);
 
   THCState *state = at::globalContext().getTHCState();
-  THCGenerator *gen = state->rngState->gen;
+  THCGenerator* gen = THCRandom_getGenerator(state);
   uint64_t offset = gen->state.philox_seed_offset.fetch_add(4);
   std::pair<uint64_t, uint64_t> next_philox_seed = std::make_pair(
                                                     gen->state.initial_seed,
@@ -645,7 +645,7 @@ Tensor sampling_with_replacement_cuda(
 	  );
 
     THCState *state = at::globalContext().getTHCState();
-    THCGenerator *gen = state->rngState->gen;
+    THCGenerator* gen = THCRandom_getGenerator(state);
     uint64_t offset = gen->state.philox_seed_offset.fetch_add(4);
     std::pair<uint64_t, uint64_t> next_philox_seed = std::make_pair(
                                                       gen->state.initial_seed,
