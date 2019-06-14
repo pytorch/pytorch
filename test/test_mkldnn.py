@@ -45,7 +45,7 @@ class TestMkldnn(TestCase):
             with self.assertRaises(RuntimeError) as context:
                 torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cuda')).to_mkldnn()
         # some factory functions
-        for creator in [torch.ones, torch.zeros, torch.randn, torch.rand]:
+        for creator in [torch.ones, torch.randn, torch.rand]:
             with self.assertRaises(RuntimeError) as context:
                 creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
 
@@ -356,6 +356,15 @@ class TestMkldnn(TestCase):
         x2 = torch.empty(4, 5, 2, 3, dtype=torch.float32, layout=torch._mkldnn)
         self.assertEqual(x1.size(), x2.to_dense().size())
         self.assertEqual(x1.dtype, x2.to_dense().dtype)
+
+    def test_zero_(self):
+        x1 = torch.randn(4, 5, dtype=torch.float32) * 10
+        x2 = x1.clone().to_mkldnn()
+        self.assertEqual(
+            x1.zero_(),
+            x2.zero_().to_dense(),
+        )
+
 
 if __name__ == '__main__':
     run_tests()

@@ -78,10 +78,10 @@ struct SoftMaxBackwardEpilogue {
 ////////////////////////////////////////////////////////////////////////////////
 // Let's assume that our input has been flattened to have only three dimension:
 //     outer x dim x inner
-// The spatial algorithm tries to paralellize along all of them.
-// Within a 2d block threadIdx.y paralellizes over dim slices, and threads that
+// The spatial algorithm tries to parallelize along all of them.
+// Within a 2d block threadIdx.y parallelizes over dim slices, and threads that
 // share it will speed up reductions over dim (along axis x).
-// The 2d grid is used to paralellize inner dimension over y axis and outer over x.
+// The 2d grid is used to parallelize inner dimension over y axis and outer over x.
 inline dim3 SpatialSoftMax_getGridSize(
     dim3 block, uint32_t max_active_blocks,
     uint64_t outer_size, uint64_t dim_size, uint64_t inner_size) {
