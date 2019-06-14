@@ -645,7 +645,6 @@ class SummaryWriter(object):
         """
         if hasattr(model, 'forward'):
             # A valid PyTorch model should have a 'forward' method
-            from distutils.version import LooseVersion
             self._get_file_writer().add_graph(graph(model, input_to_model, verbose))
         else:
             # Caffe2 models do not have the 'forward' method
