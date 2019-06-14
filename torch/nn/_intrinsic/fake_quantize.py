@@ -59,10 +59,10 @@ class FakeQuantize(Module):
 
     def forward(self, X):
         self.scale, self.zero_point = self.calcqparam(self.observer(X))
-        print('forward', X.requires_grad)
+        print('FakeQuantize forward', X.requires_grad)
         X = ops.quantized.fake_quantize_per_tensor_affine_forward(X, scale=self.scale, zero_point=self.zero_point, quant_min=self.qmin,
             quant_max=self.qmax, quant_delay=self.quant_delay, iter=self.iter)
-        print('forward', X.requires_grad)
+        print('FakeQuantize forward', X.requires_grad)
         self.iter += 1
         return X
 

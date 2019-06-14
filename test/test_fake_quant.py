@@ -73,7 +73,7 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
         np.testing.assert_allclose(dX, dX_prime, rtol=tolerance, atol=tolerance)
 
     @given(device = st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
-    def test_numerical_consistency(self, is_cuda):
+    def test_numerical_consistency(self, device):
         '''
         Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
         '''
@@ -106,8 +106,9 @@ class TestFakeQuantizePerTensorAffine(unittest.TestCase):
             'qmax': quant_max,
         }
         fq_module = _intrinsic.FakeQuantize(qconfig)
+        print('before calling fq_module, X_torch:', X_torch.requires_grad)
         Y_prime = fq_module(X_torch)
-        print(X_torch.requires_grad, Y_prime.requires_grad)
+        print("after calling fq_modeule, X_troch, Y_prime:", X_torch.requires_grad, Y_prime.requires_grad)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
         Y = _fake_quantize_per_tensor_affine_reference(X, fq_module.scale, fq_module.zero_point, quant_min, quant_max)
