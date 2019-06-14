@@ -21,7 +21,22 @@ from subprocess import Popen, PIPE
 from multiprocessing.util import register_after_fork as _register_after_fork
 from ._utils import _get_device_index
 
+# CUDA initialization refers to internal initialization of the CUDA
+# library, such you can no longer fork and then use CUDA in
+# subprocesses.  It doesn't have anything to do with our library
+# initialization (performed by _lazy_init()); for example, if
+# you call cudaGetDeviceCount, that's sufficient to initialize the CUDA
+# context, even if we don't actually initialize our stuff.
+#
+# Why do we have do all of this faffing about?  In some contexts, we
+# are linked with a FAKE cuda driver library, which will happily report
+# that the CUDA driver is available, but actually will blow up on you
+# if you try to do anything more interesting.  So we need to distinguish
+# between "we poked cudaGetDeviceCount" and "we initialized PyTorch's
+# CUDA context".
+_cuda_initialized = False
 _initialized = False
+
 _queued_calls = []  # don't invoke these until initialization occurs
 _in_bad_fork = False  # this global is also used in torch.manual_seed
 _original_pid = False
@@ -72,15 +87,13 @@ def is_available():
     if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
             not torch._C._cuda_isDriverSufficient()):
         return False
-    # Lazy initialization here is necessary, as once we
-    # call cudaGetDeviceCount() we have initialized the CUDA
-    # API and forks are no longer permissible.  Calling
-    # _lazy_init() is required so we can give a good error
-    # message in this case.
+    # Once we call cudaGetDeviceCount() we have initialized the CUDA API
+    # and forks are no longer permissible.  We haven't initialized
+    # PyTorch's CUDA context yet, but we have to record something here.
     #
     # See https://github.com/pytorch/pytorch/issues/15734 for
     # more context.
-    _lazy_init()
+    _cuda_initialized = True
     return torch._C._cuda_getDeviceCount() > 0
 
 
@@ -198,6 +211,7 @@ def _lazy_init():
     _cudart.cudaGetErrorName.restype = ctypes.c_char_p
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
     _original_pid = os.getpid()
+    _cuda_initialized = True
     _initialized = True
     # Important to do this after _initialized, since some queued calls
     # may themselves call _lazy_init()
@@ -212,7 +226,7 @@ def _lazy_init():
 
 def _after_fork(arg):
     global _initialized, _in_bad_fork
-    if _initialized and _original_pid != os.getpid():
+    if _cuda_initialized and _original_pid != os.getpid():
         _initialized = False
         _in_bad_fork = True
         _CudaBase.__new__ = _lazy_new
