@@ -30,13 +30,13 @@ Tensor& mkldnn_zero_(Tensor& self) {
   ideep::tensor& x = itensor_from_mkldnn(self);
 
   auto n = x.get_nelems();
-  auto* x_ = static_cast<float *>(x.get_data_handle());
-  parallel_for(0, n, 2048, [x_](int64_t begin, int64_t end){
+  auto* x_ = static_cast<float*>(x.get_data_handle());
+  parallel_for(0, n, 2048, [x_](int64_t begin, int64_t end) {
     vec256::map(
-      [](Vec a) {return 0.0;},
-      x_ + begin,
-      x_ + begin,
-      end - begin);
+        [](Vec /* unused */) { return 0.0; },
+        x_ + begin,
+        x_ + begin,
+        end - begin);
   });
 
   return self;
@@ -46,4 +46,3 @@ Tensor& mkldnn_zero_(Tensor& self) {
 } // namespace at
 
 #endif // AT_MKLDNN_EBABLED
-
