@@ -27,6 +27,20 @@ bool is_valid_identifier(const std::string& name) {
   return true;
 }
 
+bool Dimname::can_refer_to(const Dimname& other) const {
+  switch (type()) {
+    case NameType::WILDCARD:
+      return false;
+
+    // "C" can be used to refer to "C" or "C.in".
+    case NameType::NORMAL:
+      return untagged_name() == other.untagged_name();
+
+    default:
+      return full_name() == other.full_name();
+  }
+}
+
 static void check_valid_identifier(const std::string& name) {
   TORCH_CHECK(
       is_valid_identifier(name),
