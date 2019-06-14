@@ -99,6 +99,13 @@ struct LoopView {
     bodyBlock()->permuteInputs(adjusted_block_order);
   }
 
+  void replaceMaxTripCount(Value* new_max_trip_count) {
+    replaceInput(0, new_max_trip_count);
+  }
+  void replaceInputCondition(Value* new_input_condition) {
+    replaceInput(1, new_input_condition);
+  }
+
   // our way of encoding loops makes them difficult to turn back into python
   // syntax. we have to check properties of the condition and trip count inputs
   // to figure out which one it initially was. ModifiedLoops are not directly
@@ -132,6 +139,11 @@ struct LoopView {
 
  private:
   Node* node_;
+
+  void replaceInput(size_t index, Value* new_input) {
+    node_->removeInput(index);
+    node_->insertInput(index, new_input);
+  }
 
   // adjust index_ordering by adding indices 0 - thorugh adjust, and
   // incrementing all existing inputs by adjust

@@ -52,7 +52,7 @@ namespace c10 {
   _(prim, BreakStmt)               \
   _(prim, ContinueStmt)            \
   _(prim, Store)                   \
-  _(prim, VarEscape)               \
+  _(prim, NewVarEscape)            \
   _(prim, AutogradZero)            \
   _(prim, AutogradAnyNonZero)      \
   _(prim, Starred)                 \

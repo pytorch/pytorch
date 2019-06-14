@@ -84,30 +84,10 @@ struct ControlFlowLoadStores {
     auto true_vars = addControlFlowLoadStores(true_block);
     auto false_vars = addControlFlowLoadStores(false_block);
 
-    // BLOCK EXITS:
-    // In a graph like:
-    // for i in range(3):
-    //     if cond == 2:
-    //         if cond == 2:
-    //             m = 2
-    //             break
-    //         k = 1
-    //     else:
-    //         k = 2
-    //     m += k
-    // We transform the inner cond == 2 block to look like:
-    // if cond == 2:
-    //     m = 2
-    //     $did_break = True
-    // else:
-    //     $did_break = False
-    // if $did_break...
-    //    prim::VarEscape
-    // else:
-    //    k = 1
-    // For these new if nodes that guard ops after a continue/break may have
-    // occurred, the new variables that are defined need to escape scope.
-    // Otherwise, in the example above, we would error in the m += k call.
+    // If escape for true block is set, if a variable is
+    // defined in false and is defined in true, create a new uninitialized
+    // variable to match it so that the new variable escapes scope,
+    // and vice versa
 
     bool true_escape = block_exits.count(true_block) == 1;
     bool false_escape = block_exits.count(false_block) == 1;
@@ -203,7 +183,7 @@ struct ControlFlowLoadStores {
         case prim::Store: {
           environment_stack->setVar(n->s(attr::name), n->input()->type());
         } break;
-        case prim::VarEscape: {
+        case prim::NewVarEscape: {
           block_exits.insert(block);
           it++;
           n->destroy();

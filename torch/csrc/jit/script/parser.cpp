@@ -612,6 +612,8 @@ struct ParserImpl {
   }
 
   TreeRef parseFunction(bool is_method) {
+    size_t old_loop_count = cur_loop_count;
+    cur_loop_count = 0;
     L.expect(TK_DEF);
     auto name = parseIdent();
     auto decl = parseDecl();
@@ -626,6 +628,7 @@ struct ParserImpl {
     }
 
     auto stmts_list = parseStatements(false);
+    cur_loop_count = old_loop_count;
     return Def::create(
         name.range(), Ident(name), Decl(decl), List<Stmt>(stmts_list));
   }

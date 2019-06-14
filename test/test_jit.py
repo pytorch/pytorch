@@ -2,7 +2,7 @@ from __future__ import division
 
 # Torch
 from torch import Tensor
-from torch._C import TensorType, parse_ir, _propagate_shapes, _jit_python_print
+from torch._C import TensorType, parse_ir, _propagate_shapes, _jit_python_print, BoolType
 from torch._six import inf, PY2, PY37, builtins, StringIO
 from torch.autograd import Variable, Function
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
@@ -6781,6 +6781,69 @@ a")
 
         self.assertEqual(script_output, eager_output)
 
+    def test_nested_breaks(self):
+        def no_bool_loop_outputs(g):
+            # did_continue/did_break not loop outputs
+            loops = g.findAllNodes("prim::Loop")
+            for loop in loops:
+                for out in loop.outputs():
+                    self.assertTrue(out.type() != BoolType.get())
+
+        def test(y):
+            # type: (int)
+            ret = 0
+            tensor = torch.tensor(0)
+            while int(tensor.add_(1)) < 4:
+                if y == 1:
+                    continue
+                for i in range(y):
+                    continue
+                    ret += 1
+                ret += 1
+            return ret, int(tensor)
+
+        self.checkScript(test, (1,))
+        self.checkScript(test, (2,))
+
+        def foo():
+            y = torch.tensor(0)
+            z = 0
+            while int(y.add_(1)) < 20:
+                if int(y) < 10:
+                    for i in range(6):
+                        if i == 3:
+                            continue
+                        else:
+                            if i > 3:
+                                break
+                        z += 2
+                if int(y) == 18:
+                    break
+                if int(y) == 15:
+                    continue
+                z += 1
+            return int(y), z
+
+        no_bool_loop_outputs(torch.jit.script(foo).graph)
+        self.checkScript(foo, ())
+
+        def test_nested_two():
+            i = 0
+            k = 0
+            while i < 5:
+                for j in range(5):
+                    k += 1
+                    if j == 3:
+                        continue
+                i += 1
+                k += 1
+                if i == 4:
+                    break
+            return i, k
+
+        self.checkScript(test_nested_two, ())
+        no_bool_loop_outputs(torch.jit.script(test_nested_two).graph)
+
     def test_breaks_continues(self):
         def assign_after_break(y):
             # type: (int)
@@ -6918,10 +6981,19 @@ a")
         self.checkScript(test_varexit, (3,))
         self.checkScript(test_varexit, (2,))
 
+    def test_break_continue_error(self):
         with self.assertRaisesRegex(RuntimeError, "Syntax"):
             cu = torch.jit.CompilationUnit('''
             def other_func(a):
                 break
+                ''')
+
+        with self.assertRaisesRegex(RuntimeError, "Syntax"):
+            cu = torch.jit.CompilationUnit('''
+            def other_func(a):
+                for i in range(5):
+                    def foo():
+                        break
                 ''')
 
     def test_python_call(self):

@@ -30,10 +30,9 @@ void canonicalizeModifiedLoops(Node* n) {
   auto one = g->insertConstant(1);
   auto max_trip_count = loop.maxTripCount();
   auto condition = g->insert(aten::gt, {max_trip_count, zero});
-  n->removeInput(0);
-  n->insertInput(0, g->insertConstant(std::numeric_limits<int64_t>::max()));
-  n->removeInput(1);
-  n->insertInput(1, condition);
+  loop.replaceMaxTripCount(
+      g->insertConstant(std::numeric_limits<int64_t>::max()));
+  loop.replaceInputCondition(condition);
   n->addOutput()->setType(IntType::get());
   WithInsertPoint loop_insert(loop.bodyBlock());
   n->addInput(zero);
