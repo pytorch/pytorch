@@ -301,6 +301,7 @@ struct PreprocessGraph {
 // C - index into constant table
 // P - jump offset relative to beginning of current instruction
 // F - index into function table
+// T - index into the type table, used for guard instructions
 
 #define FORALL_OPCODES(_)                                                   \
   _(OP, "O") /* invoke operator X */                                        \
@@ -316,7 +317,9 @@ struct PreprocessGraph {
   _(LOOP, "PI") /* perform a loop, X is where to branch if cond is false */ \
   _(RET, "") /* exit execution */                                           \
   _(WAIT, "") /* wait for a future to be complete */                        \
-  _(CALL, "F") /* call function X */
+  _(CALL, "F") /* call function X */                                        \
+  _(GUARD, "T") /* check guard against type_table, true if passes */        \
+  _(TAIL_CALL, "F") /* replace current frame with function F */
 
 enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,
@@ -384,6 +387,16 @@ struct WithCurrentNode {
   Node* old_value_;
 };
 
+// BailoutBlocks are used to temporarily store
+// instructions (typically, argument LOADs and TAIL_CALL)
+// generated for prim::BailOut nodes
+// before they are merged back into
+// CodeImpl._instructions_ by insertBailoutBlocks
+struct BailoutBlock {
+  size_t jf_instruction_index; // this node gets patched to jump here on failure
+  std::vector<Instruction> instructions; // ends in a TAIL_CALL
+};
+
 struct CodeImpl {
   friend struct InterpreterState;
   std::vector<Instruction> instructions_;
@@ -396,6 +409,7 @@ struct CodeImpl {
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
   std::vector<std::shared_ptr<Function>> function_table_;
+  std::vector<TypePtr> type_table_;
   int register_size_ = 0;
   size_t n_outputs;
   size_t n_inputs;
@@ -421,6 +435,9 @@ struct CodeImpl {
                        // of node being emitted
   Node* last_inserted_op_ = nullptr;
 
+  // out-of-line jumps for bailouts that are patched in at the end
+  std::vector<BailoutBlock> bailout_blocks_;
+
   CodeImpl(const std::shared_ptr<Graph>& graph)
       : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
     graph_ = preprocess_.graph;
@@ -429,6 +446,9 @@ struct CodeImpl {
     // std::cout << *graph_ << "\n";
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
+    // we deferred the emission of bailout blocks so they appear at the end
+    // emit them now and patch up the jumps
+    insertBailoutBlocks();
   }
 
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
@@ -447,6 +467,24 @@ struct CodeImpl {
       }
       last_inserted_op_ = current_node_;
     }
+  }
+
+  void truncateInstructions(size_t size) {
+    while(instructions_.size() > size) {
+      instructions_.pop_back();
+      instructions_source_.pop_back();
+    }
+  }
+
+  void createBailoutBlock(size_t jf_index) {
+    bailout_blocks_.emplace_back(BailoutBlock{jf_index});
+    auto& bailout_instructions = bailout_blocks_.back().instructions;
+
+    bailout_instructions.insert(
+        bailout_instructions.end(),
+        instructions_.begin() + jf_index + 1,
+        instructions_.end());
+    truncateInstructions(jf_index + 1);
   }
 
   int allocRegs(at::ArrayRef<Value*> vs) {
@@ -587,6 +625,43 @@ struct CodeImpl {
         break;
     }
   }
+
+  void emitBailOut(Node* node) {
+    // BailOut node has the `attr::Subgraph` which
+    // contains the original deoptimized version
+    // of a computational graph starting from the
+    // bailout point.
+    // BailOut node's first input is a guarded tensor
+    // the rest are inputs we need to be able to
+    // execute the bailout graph
+    emitLoadInputs(node->inputs().slice(0, 1));
+    insertInstruction(GUARD, type_table_.size());
+    type_table_.emplace_back(node->outputs().at(0)->type());
+    insertInstruction(JF, 0 /* to be patched */);
+    size_t jf_index = instructions_.size() - 1;
+    emitLoadInputs(node->inputs().slice(1));
+    insertInstruction(TAIL_CALL, function_table_.size());
+    auto func = std::make_shared<Function>("bailout", /*optimize=*/true, node->g(attr::Subgraph), nullptr);
+    function_table_.emplace_back(func);
+    createBailoutBlock(jf_index);
+  }
+
+  void insertBailoutBlocks() {
+    for(const BailoutBlock& block : bailout_blocks_) {
+      TORCH_INTERNAL_ASSERT(instructions_[block.jf_instruction_index].op == JF)
+      instructions_[block.jf_instruction_index].X =
+          instructions_.size() - block.jf_instruction_index;
+      instructions_.insert(
+          instructions_.end(),
+          block.instructions.begin(),
+          block.instructions.end());
+      instructions_source_.insert(
+          instructions_source_.end(),
+          block.instructions.size(),
+          instructions_source_[block.jf_instruction_index]);
+    }
+  }
+
   void emitNode(Node* node) {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
@@ -620,6 +695,9 @@ struct CodeImpl {
             node->inputs().at(0)->type()->expect<ClassType>()->getMethod(
                 node->s(attr::name)),
             node->inputs());
+        break;
+      case prim::BailOut:
+        emitBailOut(node);
         break;
     }
   }
@@ -664,7 +742,7 @@ struct CodeImpl {
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code& code) {
-    enterFrame(code);
+    enterFrame(code, 0);
   }
 
  private:
@@ -685,9 +763,22 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // minimizing the total number or register
   std::vector<IValue> registers;
 
+  // A Frame captures function's state
+  // (e.g. `pc` and `base_pointer`)
+  // Each Frame corresponds to a call to a `Frame::function`
+  // which has not yet returned
+  // The arguments for `Frame::function`
+  // are located at [base_pointer + arg_number]
   struct Frame {
     std::shared_ptr<CodeImpl> function;
+    // program counter corresponds to the index
+    // of the currently executed instruction
     size_t pc;
+    // marks the start index of the frame
+    // base_pointer is used by TAIL_CALL
+    // to replace the current frame
+    // with a frame of a bailout graph
+    size_t base_pointer;
   };
 
   // saved-by-value stuff that can exist on the stack inside runInterpreter
@@ -697,12 +788,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     IValue* constants;
     Operation* operators;
     std::shared_ptr<Function>* functions;
+    TypePtr* types;
+
     ActiveFrame(const Frame& frame)
         : pc(frame.pc),
           instructions(frame.function->instructions_.data()),
           constants(frame.function->constant_table_.data()),
           operators(frame.function->operator_table_.data()),
-          functions(frame.function->function_table_.data()) {}
+          functions(frame.function->function_table_.data()),
+          types(frame.function->type_table_.data()) {}
   };
 
   std::vector<Frame> frames;
@@ -712,8 +806,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     return c10::intrusive_ptr<InterpreterStateImpl>::reclaim(this);
   }
 
-  void enterFrame(const Code& code) {
-    frames.emplace_back(Frame{code.pImpl, 0});
+  void enterFrame(const Code& code, size_t base_pointer) {
+    frames.emplace_back(Frame{code.pImpl, 0, base_pointer});
     registers.resize(registers.size() + code.pImpl->register_size_);
     // frames.back().function->dump(std::cout);
   }
@@ -813,7 +907,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             const Code& code =
                 af.functions[inst.X]->get_executor().getPlanFor(stack).code;
             frames.back().pc = af.pc + 1;
-            enterFrame(code);
+            enterFrame(code, stack.size() - code.num_inputs());
             af = ActiveFrame(frames.back());
           } break;
           case RET:
@@ -832,7 +926,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               }
             }
             return false;
-          case WAIT:
+          case WAIT: {
             auto future = stack.back().toFuture();
             if (!future->completed()) {
               getOrCreateFuture();
@@ -879,7 +973,29 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             stack.pop_back();
             stack.emplace_back(future->value());
             ++af.pc;
-            break;
+          } break;
+          case GUARD: {
+            auto actual = ProfiledTensorType::create(stack.back().toTensor());
+            const TypePtr& expected = af.types[inst.X];
+            push(stack, *expected == *actual);
+            ++af.pc;
+          } break;
+          case TAIL_CALL: {
+            const Code& code =
+                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
+            size_t num_inputs = code.num_inputs();
+            size_t base_pointer = frames.back().base_pointer;
+            TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
+            size_t inputs_start = stack.size() - num_inputs;
+            for (size_t i = 0; i < num_inputs; ++i) {
+              stack.at(base_pointer + i) =
+                  std::move(stack.at(inputs_start + i));
+            }
+            stack.resize(base_pointer + num_inputs);
+            leaveFrame();
+            enterFrame(code, base_pointer);
+            af = ActiveFrame(frames.back());
+          } break;
         }
       }
     } catch (std::exception& e) {
@@ -960,6 +1076,14 @@ Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
+}
+
+size_t Code::num_inputs() const {
+  return pImpl->n_inputs;
+}
+
+size_t Code::num_outputs() const {
+  return pImpl->n_outputs;
 }
 
 InterpreterState::InterpreterState(const Code& code)
