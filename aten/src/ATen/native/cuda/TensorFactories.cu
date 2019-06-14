@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cmath>
 
+THCGenerator* THCRandom_getGenerator(THCState* state);
 // This is to keep thread safety in curand with curandStateMtgp32
 int const threadsPerBlock = 256;
 
