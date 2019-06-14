@@ -79,7 +79,9 @@ struct TORCH_API Method {
     return function_->name();
   }
 
-  size_t num_inputs() const { return function_->num_inputs(); }
+  size_t num_inputs() const {
+    return function_->num_inputs();
+  }
 
   GraphExecutor& get_executor() {
     return function_->get_executor();
@@ -117,8 +119,7 @@ struct TORCH_API Module {
                 std::make_shared<CompilationUnit>(),
                 /*is_module=*/true),
             0)) {}
-  Module()
-  : Module("$Module") {}
+  Module() : Module("$Module") {}
   ~Module() {
     // ClassType own the compilation unit of their Functions, but each
     // Function has a self argument which owns the ClassType, created a
@@ -419,7 +420,7 @@ struct TORCH_API Module {
 
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
-private:
+ private:
   void to_impl(
       const c10::optional<at::Device>& device,
       const c10::optional<at::ScalarType>& dtype,
@@ -539,7 +540,7 @@ private:
   friend struct Method;
 };
 
-TORCH_API bool &getInlineEverythingMode();
+TORCH_API bool& getInlineEverythingMode();
 
 } // namespace script
 } // namespace jit

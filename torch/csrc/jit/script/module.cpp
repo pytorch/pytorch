@@ -18,7 +18,9 @@ namespace script {
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
 thread_local bool inline_everything = true;
-bool &getInlineEverythingMode() { return inline_everything; }
+bool& getInlineEverythingMode() {
+  return inline_everything;
+}
 
 void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
   to_impl(device, dtype, non_blocking);
@@ -81,8 +83,10 @@ void Module::to_impl(
 // parameters/attributes with extra_ivalue input Slots that hold what value to
 // pass into the graph. Used for ONNX export to remove first-class modules
 // so it can deal purely with parameters and inputs
-std::pair<std::shared_ptr<Graph>, std::vector<Slot>>
-lower_graph(const ModulePtr &self, Graph &g_, size_t self_offset = 0) {
+std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
+    const ModulePtr& self,
+    Graph& g_,
+    size_t self_offset = 0) {
   std::shared_ptr<Graph> g = g_.copy();
   std::vector<Slot> extra_ivalues;
   std::unordered_map<Slot, size_t> slot_to_offset;
@@ -160,7 +164,7 @@ lower_graph(const ModulePtr &self, Graph &g_, size_t self_offset = 0) {
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-Method::Method(Module *owner, std::shared_ptr<Function> function)
+Method::Method(Module* owner, std::shared_ptr<Function> function)
     : owner_(owner), function_(std::move(function)) {}
 
 void Method::run(Stack& stack) {

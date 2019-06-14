@@ -53,16 +53,18 @@ struct ParamValue {
   IValue value;
 };
 
-static void gatherParams(script::Module &module, Value *module_value,
-                         std::vector<ParamValue> &params) {
-  for (const Use &u : module_value->uses()) {
+static void gatherParams(
+    script::Module& module,
+    Value* module_value,
+    std::vector<ParamValue>& params) {
+  for (const Use& u : module_value->uses()) {
     if (u.user->kind() != prim::GetAttr) {
       continue;
     }
     const std::string& field = u.user->s(attr::name);
-    if (const auto &sub = module.find_module(field)) {
+    if (const auto& sub = module.find_module(field)) {
       gatherParams(*sub, u.user->output(), params);
-    } else if (script::Slot *slot = module.find_parameter(field)) {
+    } else if (script::Slot* slot = module.find_parameter(field)) {
       params.emplace_back(ParamValue{u.user->output(), slot->value()});
     }
   }

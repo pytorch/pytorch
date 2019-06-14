@@ -463,16 +463,21 @@ struct VISIBILITY_HIDDEN tuple_slice {
   int64_t e;
 };
 
-inline Stack createStackForSchema(const FunctionSchema &schema,
-                                  const tuple_slice &args,
-                                  const py::kwargs &kwargs,
-                                  c10::optional<IValue> self) {
+inline Stack createStackForSchema(
+    const FunctionSchema& schema,
+    const tuple_slice& args,
+    const py::kwargs& kwargs,
+    c10::optional<IValue> self) {
   size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
   if (all_arguments > schema.arguments().size()) {
-    throw std::runtime_error(
-        c10::str(schema.name(), "() expected at most ",
-                 schema.arguments().size(), " argument(s) but received ",
-                 all_arguments, " argument(s). Declaration: ", schema));
+    throw std::runtime_error(c10::str(
+        schema.name(),
+        "() expected at most ",
+        schema.arguments().size(),
+        " argument(s) but received ",
+        all_arguments,
+        " argument(s). Declaration: ",
+        schema));
   }
   Stack stack;
   stack.reserve(schema.arguments().size());
@@ -491,7 +496,7 @@ inline Stack createStackForSchema(const FunctionSchema &schema,
   // has one.
   size_t consumed_kwargs = 0;
   for (size_t i = stack.size(); i < schema.arguments().size(); ++i) {
-    const auto &arg = schema.arguments()[i];
+    const auto& arg = schema.arguments()[i];
     if (kwargs.contains(arg.name().c_str())) {
       push(stack, argumentToIValue(schema, i, kwargs[arg.name().c_str()]));
       consumed_kwargs += 1;
@@ -556,12 +561,13 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
   return result;
 }
 
-inline py::object
-invokeScriptFunctionFromPython(Function &callee, tuple_slice args,
-                               py::kwargs kwargs,
-                               c10::optional<IValue> self = c10::nullopt) {
-  auto stack = createStackForSchema(callee.getSchema(), std::move(args),
-                                    std::move(kwargs), std::move(self));
+inline py::object invokeScriptFunctionFromPython(
+    Function& callee,
+    tuple_slice args,
+    py::kwargs kwargs,
+    c10::optional<IValue> self = c10::nullopt) {
+  auto stack = createStackForSchema(
+      callee.getSchema(), std::move(args), std::move(kwargs), std::move(self));
   {
     AutoNoGIL no_gil_guard;
     callee.run(stack);
@@ -569,18 +575,23 @@ invokeScriptFunctionFromPython(Function &callee, tuple_slice args,
   return toPyObject(std::move(stack.back()));
 }
 
-inline py::object invokeScriptMethodFromPython(script::Method &callee,
-                                               tuple_slice args,
-                                               py::kwargs kwargs) {
-  return invokeScriptFunctionFromPython(callee.function(), std::move(args),
-                                        std::move(kwargs),
-                                        callee.owner().module_object());
+inline py::object invokeScriptMethodFromPython(
+    script::Method& callee,
+    tuple_slice args,
+    py::kwargs kwargs) {
+  return invokeScriptFunctionFromPython(
+      callee.function(),
+      std::move(args),
+      std::move(kwargs),
+      callee.owner().module_object());
 }
-inline py::object invokeOperatorFromPython(const Operator &op, py::args args,
-                                           py::kwargs kwargs) {
+inline py::object invokeOperatorFromPython(
+    const Operator& op,
+    py::args args,
+    py::kwargs kwargs) {
   // Create a stack full of the arguments and keyword arguments.
-  auto stack = createStackForSchema(op.schema(), std::move(args),
-                                    std::move(kwargs), c10::nullopt);
+  auto stack = createStackForSchema(
+      op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
 
   // Invoke the operation, which puts the return values onto the stack.
   op.getOperation()(stack);

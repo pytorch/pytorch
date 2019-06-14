@@ -298,7 +298,8 @@ static void gatherParametersAndBuffers(
     }
   }
   for (const auto& sub : self.get_modules()) {
-    gatherParametersAndBuffers(state, g.insertGetAttr(self_value, sub->field_name()),  *sub);
+    gatherParametersAndBuffers(
+        state, g.insertGetAttr(self_value, sub->field_name()), *sub);
   }
 }
 

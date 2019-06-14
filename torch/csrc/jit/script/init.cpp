@@ -548,9 +548,8 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def_property_readonly("graph", &Method::graph)
       .def("_lowered_graph", &Method::_lowered_graph)
-      .def_property_readonly("schema", [](Method& m) {
-        return m.function().getSchema();
-      })
+      .def_property_readonly(
+          "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
