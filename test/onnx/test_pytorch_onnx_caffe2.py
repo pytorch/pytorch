@@ -1761,6 +1761,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_prim_shape(self):
         x = torch.randn(4, 5, requires_grad=True)
+
         @torch.jit.script
         def view_by_prim_shape(x):
             return x.view(x.shape)
