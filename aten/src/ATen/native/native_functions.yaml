@@ -2262,6 +2262,7 @@
     CUDA: legacy::cuda::_th_zero_
     SparseCPU: zero_sparse_
     SparseCUDA: zero_sparse_
+    MkldnnCPU: mkldnn_zero_
 
 - func: sub(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
 
