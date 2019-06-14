@@ -353,6 +353,16 @@ struct CAFFE2_API IValue final {
     return static_cast<at::MemoryFormat>(toInt());
   }
 
+  // QScheme
+  IValue(at::QScheme qscheme)
+  : tag(Tag::Int), is_intrusive_ptr(false) {
+    payload.as_int = static_cast<int64_t>(qscheme);
+  }
+
+  at::QScheme toQScheme() const {
+    return static_cast<at::QScheme>(toInt());
+  }
+
 
   // for debugging
   std::string tagKind() const {

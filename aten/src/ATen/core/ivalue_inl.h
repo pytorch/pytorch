@@ -399,6 +399,7 @@ DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
+DEFINE_TO(at::QScheme, toQScheme)
 
 template <class T>
 struct _fake_type {};
