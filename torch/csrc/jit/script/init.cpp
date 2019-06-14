@@ -414,10 +414,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_method_names",
           [](Module& self) {
-            return fmap(
-                self.get_methods(), [](const Method& method) {
-                  return method.name();
-                });
+            return fmap(self.get_methods(), [](const Method& method) {
+              return method.name();
+            });
           })
       .def(
           "_create_method_from_trace",

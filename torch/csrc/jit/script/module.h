@@ -57,10 +57,10 @@ using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(Module* owner, std::shared_ptr<Function> function);
+  Method(const Module* owner, std::shared_ptr<Function> function);
 
   // the module that contains this method.
-  Module& owner() const {
+  const Module& owner() const {
     return *owner_;
   }
 
@@ -99,7 +99,7 @@ struct TORCH_API Method {
  private:
   // Methods are uniqued onwed by a single module. This raw pointer allows
   // looking up the module.
-  Module* owner_;
+  const Module* owner_;
 
   // Underlying unbound function
   // This is the _lowered_ function and is different than the
@@ -214,7 +214,7 @@ struct TORCH_API Module {
 
   // each module owns its method. The reference returned here
   // is guarenteed to stay valid until this module has been destroyed
-  Method get_method(const std::string &name) const {
+  Method get_method(const std::string& name) const {
     if (auto method = find_method(name)) {
       return *method;
     }
@@ -235,12 +235,17 @@ struct TORCH_API Module {
     return attributes_;
   }
   const std::vector<Method> get_methods() const {
-    return fmap(class_compilation_unit().get_functions(),
-                [&](const std::shared_ptr<Function> &func) {
-                  return Method(const_cast<Module *>(this), func);
-                });
+    return fmap(
+        class_compilation_unit().get_functions(),
+        [&](const std::shared_ptr<Function>& func) {
+          return Method(this, func);
+        });
   }
 
+  const Slot* find_parameter(const std::string& name) const {
+    auto offset = find_offset(name, EntityType::PARAMETER);
+    return offset ? &parameters_[*offset] : nullptr;
+  }
   Slot* find_parameter(const std::string& name) {
     auto offset = find_offset(name, EntityType::PARAMETER);
     return offset ? &parameters_[*offset] : nullptr;
@@ -256,14 +261,14 @@ struct TORCH_API Module {
     }
     return nullptr;
   }
-  std::shared_ptr<Module> find_module(const std::string& name) {
+  std::shared_ptr<Module> find_module(const std::string& name) const {
     auto offset = find_offset(name, EntityType::MODULE);
     return offset ? modules_[*offset] : nullptr;
   }
-  c10::optional<Method> find_method(const std::string &name) const {
-    if (const std::shared_ptr<Function> &fn =
+  c10::optional<Method> find_method(const std::string& name) const {
+    if (const std::shared_ptr<Function>& fn =
             class_compilation_unit().find_function(name)) {
-      return Method(const_cast<Module *>(this), fn);
+      return Method(const_cast<Module*>(this), fn);
     }
     return c10::nullopt;
   }
@@ -414,10 +419,12 @@ struct TORCH_API Module {
   size_t get_offset(const std::string& name, EntityType expected_type) const {
     auto it = dict_.find(name);
     if (it == dict_.end()) {
-      AT_ERROR(toString(expected_type), " '", name, "' is not defined.");
+      TORCH_CHECK(
+          false, toString(expected_type), " '", name, "' is not defined.");
     }
     if (it->second.type != expected_type) {
-      AT_ERROR(
+      TORCH_CHECK(
+          false,
           "The field '",
           name,
           "' is a ",
