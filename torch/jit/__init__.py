@@ -728,6 +728,12 @@ def trace(func,
     if not _enabled:
         return func
 
+    if isinstance(func, torch.jit.ScriptModule):
+        # it is hard to trace it because the forward method on ScriptModule is already defined, so it
+        # would result in an error.
+        warnings.warn('The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.')
+        return func
+
     if isinstance(func, torch.nn.Module):
         return trace_module(func, {'forward': example_inputs}, optimize,
                             check_trace, wrap_check_inputs(check_inputs),
