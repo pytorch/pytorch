@@ -27,7 +27,7 @@ struct CAFFE2_API Dimname {
   //
   // For "C.in":
   // - "C.in" is the "full name"
-  // - "C" is the "name"
+  // - "C" is the "untagged name"
   // - "in" is the "tag"
   Symbol untagged_name_;
   Symbol full_name_;
