@@ -105,7 +105,7 @@ public:
     return kind_;
   }
 
-  virtual bool requires_grad() const { 
+  virtual bool requires_grad() const {
     for(const auto& ct : containedTypes()) {
       if (ct->requires_grad()) {
         return true;
@@ -877,7 +877,7 @@ struct CAFFE2_API TupleType : public Type {
       return a->isSubtypeOf(b);
     });
   }
-  
+
   std::string str() const override {
     std::stringstream ss;
     ss << "(";
@@ -1435,9 +1435,9 @@ struct CAFFE2_API ClassType : public Type {
   }
 
   std::shared_ptr<Function> getMethod(const std::string& name) const;
-  CompilationUnit& compilation_unit();
-  const CompilationUnit& compilation_unit() const;
   std::vector<Function*> methods() const;
+  std::shared_ptr<CompilationUnit> compilation_unit();
+  std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
 
   size_t numAttributes() const {
