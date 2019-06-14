@@ -798,7 +798,7 @@ Tensor reservoir_sampling_cpu(
                               detail::getDefaultCPUGenerator()
                             );
 
-  if (weights.numel() == 0){ // Uniform Sapling
+  if (weights.numel() == 0){ // Uniform Sampling
     Tensor indices_n = at::arange({n}, options);
 
     // This is a trick to speed up the reservoir sampling.
@@ -886,9 +886,9 @@ Tensor sampling_with_replacement_cpu(
   int n = x.size(0);
   Tensor samples;
 
-  if (weights.numel() == 0){ // Uniform Sapling
+  if (weights.numel() == 0){ // Uniform Sampling
     samples = at::randint(0, n, {k}, x.options().dtype(at::kLong));
-  } else { // Weighted Sapling
+  } else { // Weighted Sampling
 
     TORCH_CHECK(
       weights.min().item().toLong() >= 0,

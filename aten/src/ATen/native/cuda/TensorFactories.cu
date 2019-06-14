@@ -432,7 +432,7 @@ __global__ void generate_samples(
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(seeds.first, idx, seeds.second, &state);
+  curand_init(seeds.first, thread_id, seeds.second, &state);
   int64_t s = curand4(&state).x % (thread_id + k + 1);
   if (thread_id < n){
     samples[thread_id] = s;
@@ -447,7 +447,7 @@ __global__ void generate_keys(
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(seeds.first, idx, seeds.second, &state);
+  curand_init(seeds.first, thread_id, seeds.second, &state);
   float u = curand_uniform4(&state).x;
   if(thread_id < n){
     keys[thread_id] = weights[thread_id] > 0 ? (float) __powf(u, (float) 1 / weights[thread_id]):-1;
@@ -463,7 +463,7 @@ __global__ void sampling_with_replacement_kernel(
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(seeds.first, idx, seeds.second, &state);
+  curand_init(seeds.first, thread_id, seeds.second, &state);
   float u = curand_uniform4(&state).x;
   if(thread_id < k){
     auto ptr = thrust::lower_bound(thrust::device, cdf, cdf + n, u);
@@ -514,7 +514,7 @@ Tensor reservoir_sampling_cuda(
                                                     offset
                                                   );
 
-  if (weights.numel() == 0){ // Uniform Sapling
+  if (weights.numel() == 0){ // Uniform Sampling
     Tensor indices_n = at::arange({n}, options);
 
     // This is a trick to speed up the reservoir sampling.
@@ -624,9 +624,9 @@ Tensor sampling_with_replacement_cuda(
   int n = x.size(0);
   Tensor samples;
 
-  if (weights.numel() == 0){ // Uniform Sapling
+  if (weights.numel() == 0){ // Uniform Sampling
     samples = at::randint(0, n, {k}, x.options().dtype(at::kLong));
-  } else { // Weighted Sapling
+  } else { // Weighted Sampling
 
     TORCH_CHECK(
       weights.min().item().toLong() >= 0,
