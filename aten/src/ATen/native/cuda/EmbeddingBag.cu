@@ -116,9 +116,8 @@ __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
     scalar_t *gradWeight, int64_t *offset2bag, int64_t *count, ptrdiff_t numel,
     int64_t stride, int mode, const int64_t *bag_size,
     scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
-    int64_t* segment_offsets, int64_t num_of_segments) {
+    int64_t* segment_offsets, int64_t num_of_segments, scalar_t *grad_weight_per_segment) {
 
-  using accscalar_t = acc_type<scalar_t, true>;
   const int id = blockIdx.y * blockDim.y + threadIdx.y;
   const int startFeature = blockIdx.x * blockDim.x + threadIdx.x;
   if (startFeature >= stride) {
@@ -129,28 +128,54 @@ __global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
   }
   const int idx_end = (id == num_of_segments-1)?numel:segment_offsets[id+1];
 
+  // FIXME: use `acc_type<scalar_t, true>` for improved accuracy.
+  scalar_t weight = 0;
+  int tt = input[segment_offsets[id]];
   for (int idx=segment_offsets[id]; idx < idx_end; ++idx) {
-    const int weightRow = ((int)input[idx]) * stride;
-    const int origRow = ((int)indices[idx]);
+    if(tt != input[idx]) {
+      printf("WTF\n");
+    }
+
+    const int origRow = indices[idx];
     const int seq_number = offset2bag[origRow];
     const int gradOutputRow = ((int)seq_number) * stride;
 
-    accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
+    scalar_t scale = count ? 1.0 / count[idx] : 1.0;
     if (per_sample_weights) {
       scale *= per_sample_weights[origRow * per_sample_weights_stride];
     }
 
-    accscalar_t gradient = static_cast<accscalar_t>(gradOutput[gradOutputRow + startFeature]);
+    scalar_t gradient = gradOutput[gradOutputRow + startFeature];
 
     if (mode == MODE_MEAN) {
       gradient /= bag_size[seq_number];
     }
-    accscalar_t weight = static_cast<accscalar_t>(gradWeight[weightRow + startFeature]);
     weight += gradient * scale;
-
-    gradWeight[weightRow + startFeature] = static_cast<scalar_t>(weight);
   }
+  grad_weight_per_segment[id * stride + startFeature] = weight;
 }
+
+// This kernel assumes that all input tensors are contiguous.
+template <typename scalar_t>
+__global__ void EmbeddingBag_accGradParametersKernel_scatter(
+    int64_t *input, int64_t *indices, scalar_t *gradOutput,
+    scalar_t *gradWeight, int64_t *offset2bag, int64_t *count, ptrdiff_t numel,
+    int64_t stride, int mode, const int64_t *bag_size,
+    scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
+    int64_t* segment_offsets, int64_t num_of_segments, const scalar_t *grad_weight_per_segment) {
+
+  const int id = blockIdx.y * blockDim.y + threadIdx.y;
+  const int startFeature = blockIdx.x * blockDim.x + threadIdx.x;
+  if (startFeature >= stride) {
+    return;
+  }
+  if (id >= num_of_segments) {
+    return;
+  }
+  const int weightRow = ((int)input[segment_offsets[id]]) * stride;
+  gradWeight[weightRow + startFeature] = grad_weight_per_segment[id*stride + startFeature];
+}
+
 
 
 Tensor embedding_bag_backward_cuda_sum_avg(
@@ -242,7 +267,15 @@ Tensor embedding_bag_backward_cuda_sum_avg(
           dummy_dev,
           segment_offsets_dev);
   int64_t num_of_segments = thrust::get<0>(ends) - dummy_dev;
-
+/*
+  std::cout << "\n\nnumel: " << numel <<  std::endl;
+  std::cout << "sorted_indices/input" <<  std::endl;
+  std::cout << sorted_indices << std::endl;
+  std::cout << "segment_offsets" <<  std::endl;
+  std::cout << segment_offsets << std::endl;
+  std::cout << "num_of_segments: " <<  num_of_segments << std::endl;
+*/
+  auto grad_weight_per_segment = at::empty({num_of_segments, stride}, grad.options());
 
   dim3 grid(THCCeilDiv(stride, (ptrdiff_t)32), THCCeilDiv(num_of_segments, (int64_t)32));
   dim3 block(32, 32);
@@ -257,10 +290,32 @@ Tensor embedding_bag_backward_cuda_sum_avg(
             mode, bag_size.data<int64_t>(),
             per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
             per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-            segment_offsets.data<int64_t>(), num_of_segments);
+            segment_offsets.data<int64_t>(), num_of_segments, grad_weight_per_segment.data<scalar_t>());
       });
-
   THCudaCheck(cudaGetLastError());
+/*
+  std::cout << "grad_weight_per_segment" <<  std::endl;
+  std::cout << grad_weight_per_segment << std::endl;
+*/
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    grad.scalar_type(), "EmbeddingBag_accGradParametersKernel_scatter", [&] {
+      EmbeddingBag_accGradParametersKernel_scatter<
+          scalar_t><<<grid, block, 0, stream>>>(
+          sorted_indices.data<int64_t>(), orig_indices.data<int64_t>(),
+          grad.data<scalar_t>(), grad_weight.data<scalar_t>(),
+          offset2bag.data<int64_t>(),
+          count.defined() ? count.data<int64_t>() : nullptr, numel, stride,
+          mode, bag_size.data<int64_t>(),
+          per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
+          per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
+          segment_offsets.data<int64_t>(), num_of_segments, grad_weight_per_segment.data<scalar_t>());
+    });
+  THCudaCheck(cudaGetLastError());
+
+/*
+  std::cout << "grad_weight" <<  std::endl;
+  std::cout << grad_weight << std::endl;
+*/
   return grad_weight;
 }
 
