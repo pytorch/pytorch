@@ -41,7 +41,7 @@ class GroupNormOp final : public Operator<Context> {
     const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    const int HxW = X.numel() / (N * C);
+    const size_t HxW = X.numel() / (N * C);
     CAFFE_ENFORCE_EQ(C % group_, 0);
     CAFFE_ENFORCE_EQ(gamma.numel(), C);
     CAFFE_ENFORCE_EQ(beta.numel(), C);
