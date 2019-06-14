@@ -20,8 +20,6 @@ namespace detail {
     uint32_t tmp = src;
     if (isSmallEndian()) {
       tmp <<= 16;
-    } else {
-      tmp >>= 16;
     }
 
     memcpy(&res, &tmp, sizeof(tmp));
@@ -34,7 +32,7 @@ namespace detail {
     if (isSmallEndian()) {
         return res >>= 16;
     } else {
-      return res <<= 16;
+      return res;
     }
   }
 } // namespace detail

@@ -19,8 +19,11 @@
 // because we are C++11.  However, aspirationally, we would like
 // to use this version, because as of C++14 it is the correct and
 // portable way to declare something deprecated.
-#if (defined(__cplusplus) && __cplusplus >= 201402L) || \
-    (defined(_MSVC_LANG) && _MSVC_LANG >= 201402L)
+// NB: __cplusplus doesn't work for MSVC, so for now MSVC always uses
+// the "__declspec(deprecated)" implementation and not the C++14 "[[deprecated]]"
+// attribute. We tried enabling "[[deprecated]]" for C++14 on MSVC, but
+// ran into issues with some older MSVC versions.
+#if (defined(__cplusplus) && __cplusplus >= 201402L)
 # define C10_DEPRECATED [[deprecated]]
 # define C10_DEPRECATED_MESSAGE(message) [[deprecated(message)]]
 #elif defined(__GNUC__)

@@ -7,7 +7,6 @@ using caffe2::CPUContext;
 using caffe2::Tensor;
 using caffe2::TensorCPU;
 using std::vector;
-using c10::ivalue::TensorList;
 
 namespace caffe2 {
 namespace {
