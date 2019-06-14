@@ -37,6 +37,7 @@ from caffe2.python.operator_test.torch_integration_test import (generate_rois_ro
                                                                 create_bbox_transform_inputs)
 
 import onnx
+from onnx import helper, TensorProto
 import caffe2.python.onnx.backend as c2
 
 from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda
@@ -1186,6 +1187,49 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_dynamicslice_3inputs_onnx2caffe2(self):
+        node_def = helper.make_node(
+            "DynamicSlice", ["X1", "X2", "X3"], ["Y"])
+        graph_def = helper.make_graph(
+            [node_def],
+            "test",
+            [helper.make_tensor_value_info("X1", TensorProto.FLOAT, (2, 4)),
+             helper.make_tensor_value_info("X2", TensorProto.INT32, (1, 2)),
+             helper.make_tensor_value_info("X3", TensorProto.INT32, (1, 2))],
+            [helper.make_tensor_value_info("Y", TensorProto.FLOAT, (1, 2))])
+        self.assertRaises(AttributeError, helper.make_model, graph_def, xxx=1)
+        model_def = helper.make_model(graph_def, producer_name='test')
+
+        x = [[1,2,3,4],[5,6,7,8]]
+       # torch.randn(2, 4, requires_grad=False)
+        start = [0, 0]
+        end = [-1, 4]
+        prepared = c2.prepare(model_def)
+        caffe2_out = prepared.run(inputs=[np.array(x), np.array(start), np.array(end)])
+        assert caffe2_out[0].shape == (1,4)
+
+    def test_dynamicslice_onnx2caffe2(self):
+        node_def = helper.make_node(
+            "DynamicSlice", ["X1", "X2", "X3", "axes"], ["Y"])
+        graph_def = helper.make_graph(
+            [node_def],
+            "test",
+            [helper.make_tensor_value_info("X1", TensorProto.FLOAT, (2, 4)),
+             helper.make_tensor_value_info("X2", TensorProto.INT32, (1, 2)),
+             helper.make_tensor_value_info("X3", TensorProto.INT32, (1, 2)),
+             helper.make_tensor_value_info("axes", TensorProto.INT32, (1, 2))],
+            [helper.make_tensor_value_info("Y", TensorProto.FLOAT, (1, 2))])
+        self.assertRaises(AttributeError, helper.make_model, graph_def, xxx=1)
+        model_def = helper.make_model(graph_def, producer_name='test')
+
+        x = [[1,2,3,4],[5,6,7,8]]
+        start = [0, 1]
+        end = [4, 5]
+        axes = [1, 0]
+        prepared = c2.prepare(model_def)
+        caffe2_out = prepared.run(inputs=[np.array(x), np.array(start), np.array(end), np.array(axes)])
+        assert caffe2_out[0].shape == (1,4)
 
     def test_dynamic_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
