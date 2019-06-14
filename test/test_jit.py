@@ -12126,30 +12126,6 @@ a")
 
         self.checkScript(fn, ("abcde",))
 
-    def test_str_ops(self):
-        def test_str_is(s):
-            # type: (str) -> Tuple[bool, bool, bool, bool, bool, bool]
-            return s.isupper(), s.islower(), s.isdigit(), s.isspace(), \
-                s.isalnum(), s.isalpha()
-
-        def test_str_to(s):
-            # type: (str) -> Tuple[str, str]
-            return s.upper(), s.lower()
-
-        inputs = ["", "12a", "!B", "12", "a", "B", "aB", "$12", "B12", "AB ",
-                  "  \t", "  \n", "\na", "abc"]
-
-        for input in inputs:
-            self.checkScript(test_str_is, (input,))
-            self.checkScript(test_str_to, (input,))
-
-        def test_str_cmp(a, b):
-            # type: (str, str) -> Tuple[bool, bool, bool, bool, bool, bool]
-            return a != b, a == b, a < b, a > b, a <= b, a >= b
-
-        for i in range(len(inputs) - 1):
-            self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
-
     def test_ord(self):
         def fn(x):
             # type: (str) -> int
