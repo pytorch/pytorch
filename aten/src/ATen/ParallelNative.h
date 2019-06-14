@@ -64,25 +64,20 @@ inline void parallel_for(
     // using shared_ptr to share ownership of the future with the lambda,
     // to ensure we don't destroy future while lambda is still
     // running in markCompleted
-    std::vector<std::future<void>> futures(num_tasks);
+    std::vector<std::promise<void>> promises(num_tasks);
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      std::promise<void> func_promise;
-      futures[task_id] = func_promise.get_future();
       int64_t local_start = begin + task_id * chunk_size;
       if (local_start < end) {
         int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
         internal::_get_intraop_pool().run(
-          std::bind(
-            // copy task_id, local_start, local_end
-            [&task, task_id, local_start, local_end](std::promise<void>&& fp) {
-              task(task_id, local_start, local_end);
-              fp.set_value();
-            },
-            std::move(func_promise)
-          )
+          // copy task_id, local_start, local_end
+          [&task, &promises, task_id, local_start, local_end]() {
+            task(task_id, local_start, local_end);
+            promises[task_id].set_value();
+          }
         );
       } else {
-        func_promise.set_value();
+        promises[task_id].set_value();
       }
     }
 
@@ -90,7 +85,7 @@ inline void parallel_for(
     task(0, begin, first_task_end);
     // wait for all tasks to finish
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      futures[task_id].wait();
+      promises[task_id].get_future().wait();
     }
     if (eptr) {
       std::rethrow_exception(eptr);
@@ -137,32 +132,27 @@ inline scalar_t parallel_reduce(
       internal::_unset_thread_num();
     };
 
-    std::vector<std::future<void>> futures(num_tasks);
+    std::vector<std::promise<void>> promises(num_tasks);
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      std::promise<void> func_promise;
-      futures[task_id] = func_promise.get_future();
       int64_t local_start = begin + task_id * chunk_size;
       if (local_start < end) {
         int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
         internal::_get_intraop_pool().run(
-          std::bind(
-            // copy task_id, local_start, local_end
-            [&task, task_id, local_start, local_end](std::promise<void>&& fp) {
-              task(task_id, local_start, local_end);
-              fp.set_value();
-            }
-          ),
-          std::move(func_promise)
+          // copy task_id, local_start, local_end
+          [&task, &promises, task_id, local_start, local_end](std::promise<void>&& fp) {
+            task(task_id, local_start, local_end);
+            promises[task_id].set_value();
+          }
         );
       } else {
-        func_promise.set_value();
+        promises[task_id].set_value();
       }
     }
 
     int64_t first_task_end = std::min(end, (int64_t)(chunk_size + begin));
     task(0, begin, first_task_end);
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      futures[task_id].wait();
+      promises[task_id].get_future().wait();
     }
     if (eptr) {
       std::rethrow_exception(eptr);
