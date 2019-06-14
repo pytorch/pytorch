@@ -22,7 +22,7 @@ static void check_unique_names(DimnameList names) {
     }
     auto dup = find_untagged_name(it + 1, names.end(), it->untagged_name());
     while (dup != names.end()) {
-      TORCH_CHECK(it->name() != dup->name(),
+      TORCH_CHECK(it->full_name() != dup->full_name(),
           "Cannot construct a tensor with duplicate names. Got names: ",
           names, ".");
 
@@ -85,14 +85,14 @@ int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
   // Lookup the name by full name (name + tag)
   const auto it = std::find_if(
       names.begin(), names.end(),
-      [&dim](const Dimname& candidate) { return candidate.name() == dim.name(); });
+      [&dim](const Dimname& candidate) { return candidate.full_name() == dim.full_name(); });
   if (it != names.end()) {
     return std::distance(names.begin(), it);
   }
 
   // Lookup the name by untagged_name.
   if (dim.type() == NameType::NORMAL) {
-    const auto untagged_name = dim.name();
+    const auto untagged_name = dim.untagged_name();
     const auto it = find_untagged_name(names.begin(), names.end(), untagged_name);
     if (it != names.end()) {
       const auto dup = find_untagged_name(it + 1, names.end(), untagged_name);
