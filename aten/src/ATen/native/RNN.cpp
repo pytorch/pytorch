@@ -4,10 +4,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 
-#include <condition_variable>
-#include <mutex>
-
-
 namespace at { namespace native {
 
 namespace {
@@ -389,32 +385,18 @@ struct FullBidirectionalLayer : Layer<Tensor, pair_of<dir_hidden_type>, pair_of<
       rev_output = at::stack(rev_result.outputs, 0);
     });
 #else
-    std::atomic<bool> task_finished {false};
-    std::mutex task_mutex;
-    std::condition_variable task_cv;
-
     unstacked_output_type fw_result;
     at::Tensor fw_output;
-    at::intraop_launch([&]() {
+    auto fut = at::intraop_launch_future([&]() {
       fw_result = layer_(step_inputs, input_hidden.first, params.first);
       fw_output = at::stack(fw_result.outputs, 0);
-      {
-        std::unique_lock<std::mutex> lock(task_mutex);
-        task_finished = true;
-        task_cv.notify_all();
-      }
     });
 
     auto rev_result = layer_(step_inputs, input_hidden.second, params.second, /* reverse */ true);
     auto rev_output = at::stack(rev_result.outputs, 0);
 
     // wait for the forward pass
-    if (!task_finished) {
-      std::unique_lock<std::mutex> lock(task_mutex);
-      while (!task_finished) {
-        task_cv.wait(lock);
-      }
-    }
+    fut.wait();
 #endif
 
     return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
@@ -529,12 +511,8 @@ struct PackedBidirectionalLayer : Layer<PackedSequence, pair_of<dir_hidden_type>
       rev_result = rev_layer_(input, input_hidden.second, params.second);
     });
 #else
-    std::atomic<int> task_finished {false};
-    std::mutex task_mutex;
-    std::condition_variable task_cv;
-
     typename PackedLayer<dir_hidden_type, cell_params>::output_type fw_result;
-    at::intraop_launch([&]() {
+    auto fut = at::intraop_launch_future([&]() {
       fw_result = layer_(input, input_hidden.first, params.first);
       {
         std::unique_lock<std::mutex> lock(task_mutex);
@@ -545,12 +523,7 @@ struct PackedBidirectionalLayer : Layer<PackedSequence, pair_of<dir_hidden_type>
 
     auto rev_result = rev_layer_(input, input_hidden.second, params.second);
 
-    if (!task_finished) {
-      std::unique_lock<std::mutex> lock(task_mutex);
-      while (!task_finished) {
-        task_cv.wait(lock);
-      }
-    }
+    fut.wait();
 #endif
 
     PackedSequence output { at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1), input.batch_sizes };
