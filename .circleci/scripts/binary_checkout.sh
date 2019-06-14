@@ -39,10 +39,10 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-git clone -q https://github.com/peterjc123/builder.git "$BUILDER_ROOT"
+git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
 pushd "$BUILDER_ROOT"
 git fetch origin
-git reset origin/path_fix --hard
+git reset origin/master --hard
 echo "Using builder from "
 git --no-pager log --max-count 1
 popd
