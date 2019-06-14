@@ -407,7 +407,18 @@ at::Tensor _convolution(
       auto stride = params.stride;
       auto padding = params.padding;
       auto dilation = params.dilation;
-      output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
+      //output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
+      if (params.use_cudnn(input)) {
+        if (params.transposed) {
+          output = at::cudnn_convolution_transpose(
+              input, weight, bias,
+              params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+        } else {
+          output = at::cudnn_convolution(
+              input, weight, bias,
+              params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+        }
+      }
   } else if (params.use_cudnn(input)) {
     TORCH_CHECK(input.type() == weight.type(),
              "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
