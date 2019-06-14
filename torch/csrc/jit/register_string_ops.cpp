@@ -237,7 +237,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
         [](std::string string, std::string substr, int64_t start, int64_t end) {
           int64_t size = string.size();
           if (start > size) {
-            return 0L;
+            return int64_t(0);
           }
           if (start < 0) {
             start = std::max(int64_t(0), int64_t(size + start));
