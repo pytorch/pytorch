@@ -1565,7 +1565,7 @@ class TestNN(NNTestCase):
         mw = m.weight[:]
         m.to('cuda')
         mw[0][0] = 5
-        with self.assertRaisesRegex(RuntimeError, "Expected object of backend CPU but got backend CUDA")
+        with self.assertRaisesRegex(RuntimeError, "Expected object of backend CPU but got backend CUDA"):
             self.assertEqual(mw[0][0], mw._base[0][0])
 
         torch.__future__.set_overwrite_module_params_on_conversion(True)
