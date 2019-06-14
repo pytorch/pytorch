@@ -53,11 +53,18 @@ void div_kernel_cuda(TensorIterator& iter) {
 }
 
 void mul_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "mul_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "mul_cuda", [&]() {
+    if (iter.dtype() == ScalarType::Bool) {
+      // Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
+        return a && b;
+      });
+    } else {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return a * b;
-    });
-  });
+      });
+    }
+  }
 }
 
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
