@@ -3305,7 +3305,7 @@ def add_test(
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
                     def fn(*inputs):
-                        output = getattr(torch, name)(*inputs)
+                        output = getattr(torch, name)(*inputs, **kwargs)
                         return output_process_fn(output)
 
                     f_args_variable = (self_variable,) + args_variable
