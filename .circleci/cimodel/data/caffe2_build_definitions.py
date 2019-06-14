@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 
-DOCKER_IMAGE_VERSION = 276
+DOCKER_IMAGE_VERSION = 287
 
 
 @dataclass
@@ -175,7 +175,9 @@ def get_caffe2_workflows():
                 requires.append(conf_options.construct_phase_name("build"))
 
             if not conf_options.is_important:
-                sub_d["filters"] = {"branches": {"only": "master"}}
+                # If you update this, update
+                # pytorch_build_definitions.py too
+                sub_d["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
 
             x.append({conf_options.construct_phase_name(phase): sub_d})
 
