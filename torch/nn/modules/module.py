@@ -213,10 +213,12 @@ class Module(object):
                     param.data = fn(param.data)
                 else:
                     # Tensors stored in modules are graph leaves, and we don't want to
-                    # create copy nodes, so we have to use `with torch.no_grad():`  yf225 TODO: is this comment still relevant??
+                    # track autograd history of `param_applied`, so we have to use
+                    # `with torch.no_grad():`
                     with torch.no_grad():
                         param_applied = fn(param)
                     self._parameters[key] = Parameter(param_applied, param.requires_grad)
+                    assert isinstance(self._parameters[key], Parameter)
 
                 if param.grad is not None:
                     if should_use_data:
