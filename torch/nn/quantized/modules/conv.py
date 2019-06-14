@@ -38,8 +38,8 @@ class _ConvNd(Module):
         self.groups = groups
         self.padding_mode = padding_mode
 
-        weight = ops.quantized.fbgemm_conv_prepack(weight, groups)
-        self.weight = weight  # torch.nn.Parameter(weight, requires_grad=False)
+        self.weight = weight
+        self._packed_weight = ops.quantized.fbgemm_conv_prepack(weight, groups)
         self.bias = bias  # torch.nn.Parameter(bias, requires_grad=False)
 
         self.dtype = dtype
@@ -80,7 +80,7 @@ class Conv2d(_ConvNd):
     @weak_script_method
     def forward(self, input):
         return qF.conv2d(input=input,
-                         weight=self.weight,
+                         weight=self._packed_weight,
                          bias=self.bias,
                          stride=self.stride,
                          padding=self.padding,
