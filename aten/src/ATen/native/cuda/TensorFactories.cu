@@ -428,10 +428,12 @@ __global__ void generate_samples(
   int64_t *samples,
   int64_t k,
   int64_t n,
-  curandStateMtgp32 *state
+  std::pair<uint64_t, uint64_t> seeds
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-  int64_t s = curand(state) % (thread_id + k + 1);
+  curandStatePhilox4_32_10_t state;
+  curand_init(seeds.first, idx, seeds.second, &state);
+  int64_t s = curand4(&state).x % (thread_id + k + 1);
   if (thread_id < n){
     samples[thread_id] = s;
   }
@@ -441,10 +443,12 @@ __global__ void generate_keys(
   float *keys,
   float *weights,
   int64_t n,
-  curandStateMtgp32 *state
+  std::pair<uint64_t, uint64_t> seeds
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-  float u = curand_uniform(state);
+  curandStatePhilox4_32_10_t state;
+  curand_init(seeds.first, idx, seeds.second, &state);
+  float u = curand_uniform4(&state).x;
   if(thread_id < n){
     keys[thread_id] = weights[thread_id] > 0 ? (float) __powf(u, (float) 1 / weights[thread_id]):-1;
   }
@@ -455,10 +459,12 @@ __global__ void sampling_with_replacement_kernel(
   float *cdf,
   int64_t n,
   int64_t k,
-  curandStateMtgp32 *state
+  std::pair<uint64_t, uint64_t> seeds
 ){
   int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-  float u = curand_uniform(state);
+  curandStatePhilox4_32_10_t state;
+  curand_init(seeds.first, idx, seeds.second, &state);
+  float u = curand_uniform4(&state).x;
   if(thread_id < k){
     auto ptr = thrust::lower_bound(thrust::device, cdf, cdf + n, u);
     samples[thread_id] = thrust::distance(cdf, ptr);
@@ -501,7 +507,12 @@ Tensor reservoir_sampling_cuda(
   dim3 threads(threadsPerBlock);
 
   THCState *state = at::globalContext().getTHCState();
-  curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
+  THCGenerator *gen = state->rngState->gen;
+  uint64_t offset = gen->state.philox_seed_offset.fetch_add(4);
+  std::pair<uint64_t, uint64_t> next_philox_seed = std::make_pair(
+                                                    gen->state.initial_seed,
+                                                    offset
+                                                  );
 
   if (weights.numel() == 0){ // Uniform Sapling
     Tensor indices_n = at::arange({n}, options);
@@ -528,7 +539,7 @@ Tensor reservoir_sampling_cuda(
       samples.data<int64_t>(),
       split,
       n,
-      gen_states
+      next_philox_seed
     );
 
     AT_CUDA_CHECK(cudaGetLastError());
@@ -556,32 +567,32 @@ Tensor reservoir_sampling_cuda(
 
     // If the weights are contiguous floating points, then
     // the next step won't generate a copy.
-	  Tensor weights_contiguous = weights.contiguous().to(at::kFloat);
+    Tensor weights_contiguous = weights.contiguous().to(at::kFloat);
 
-	  TORCH_CHECK(
-	    weights_contiguous.device() == x.device(),
-	    "The weights must share the same device as the inputs."
-	  );
+    TORCH_CHECK(
+      weights_contiguous.device() == x.device(),
+      "The weights must share the same device as the inputs."
+    );
 
-	  TORCH_CHECK(
-	    n == weights_contiguous.numel(),
-	    "The weights must have the same number of elements as the input's first dimension."
-	  );
+    TORCH_CHECK(
+      n == weights_contiguous.numel(),
+      "The weights must have the same number of elements as the input's first dimension."
+    );
 
-	  TORCH_CHECK(
-	    weights_contiguous.dim() == 1,
-	    "The weights must 1-dimensional."
-	  );
+    TORCH_CHECK(
+      weights_contiguous.dim() == 1,
+      "The weights must 1-dimensional."
+    );
 
-	  TORCH_CHECK(
-	    weights_contiguous.nonzero().numel() >= k,
-	    "Cannot have less non-zero weights than the number of samples."
-	  );
+    TORCH_CHECK(
+      weights_contiguous.nonzero().numel() >= k,
+      "Cannot have less non-zero weights than the number of samples."
+    );
 
-	  TORCH_CHECK(
-	    weights_contiguous.min().item().toLong() >= 0,
-	    "All the weights must be non-negative."
-	  );
+    TORCH_CHECK(
+      weights_contiguous.min().item().toLong() >= 0,
+      "All the weights must be non-negative."
+    );
 
     Tensor keys = at::empty({n}, weights_contiguous.options());
     dim3 all_blocks((n + threadsPerBlock - 1)/threadsPerBlock);
@@ -590,14 +601,13 @@ Tensor reservoir_sampling_cuda(
       keys.data<float>(),
       weights_contiguous.data<float>(),
       n,
-      gen_states
+      next_philox_seed
     );
 
     AT_CUDA_CHECK(cudaGetLastError());
 
     return x.index_select(0, std::get<1>(keys.topk(k)));
   }
-
 }
 
 Tensor sampling_with_replacement_cuda(
@@ -635,7 +645,13 @@ Tensor sampling_with_replacement_cuda(
 	  );
 
     THCState *state = at::globalContext().getTHCState();
-    curandStateMtgp32 *gen_states = THCRandom_generatorStates(state);
+    THCGenerator *gen = state->rngState->gen;
+    uint64_t offset = gen->state.philox_seed_offset.fetch_add(4);
+    std::pair<uint64_t, uint64_t> next_philox_seed = std::make_pair(
+                                                      gen->state.initial_seed,
+                                                      offset
+                                                    );
+
 
     samples = at::empty({k}, x.options().dtype(at::kLong));
     Tensor cdf = weights.cumsum(0).to(at::kFloat);
@@ -655,7 +671,7 @@ Tensor sampling_with_replacement_cuda(
       cdf.data<float>(),
       n,
       k,
-      gen_states
+      next_philox_seed
     );
 
     AT_CUDA_CHECK(cudaGetLastError());

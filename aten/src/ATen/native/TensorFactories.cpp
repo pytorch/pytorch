@@ -833,34 +833,34 @@ Tensor reservoir_sampling_cpu(
 
     // If the weights are contiguous floating points, then
     // the next step won't generate a copy.
-	  Tensor weights_contiguous = weights.contiguous().to(at::kFloat);
+    Tensor weights_contiguous = weights.contiguous().to(at::kFloat);
 
-	  TORCH_CHECK(
-	    weights_contiguous.device() == x.device(),
-	    "The weights must share the same device as the inputs."
-	  );
+    TORCH_CHECK(
+      weights_contiguous.device() == x.device(),
+      "The weights must share the same device as the inputs."
+    );
 
-	  TORCH_CHECK(
-	    n == weights_contiguous.numel(),
-	    "The weights must have the same number of elements as the input's first dimension."
-	  );
+    TORCH_CHECK(
+      n == weights_contiguous.numel(),
+      "The weights must have the same number of elements as the input's first dimension."
+    );
 
-	  TORCH_CHECK(
-	    weights_contiguous.dim() == 1,
-	    "The weights must 1-dimensional."
-	  );
+    TORCH_CHECK(
+      weights_contiguous.dim() == 1,
+      "The weights must 1-dimensional."
+    );
 
-	  TORCH_CHECK(
-	    weights_contiguous.nonzero().numel() >= k,
-	    "Cannot have less non-zero weights than the number of samples."
-	  );
+    TORCH_CHECK(
+      weights_contiguous.nonzero().numel() >= k,
+      "Cannot have less non-zero weights than the number of samples."
+    );
 
-	  TORCH_CHECK(
-	    weights_contiguous.min().item().toLong() >= 0,
-	    "All the weights must be non-negative."
-	  );
+    TORCH_CHECK(
+      weights_contiguous.min().item().toLong() >= 0,
+      "All the weights must be non-negative."
+    );
 
-	  Tensor keys = at::empty({n}, weights_contiguous.options());
+    Tensor keys = at::empty({n}, weights_contiguous.options());
 
     generate_keys(
       keys.data<float>(),
@@ -868,7 +868,7 @@ Tensor reservoir_sampling_cpu(
       n,
       generator);
 
-	  return x.index_select(0, std::get<1>(keys.topk(k)));
+    return x.index_select(0, std::get<1>(keys.topk(k)));
   }
 }
 
