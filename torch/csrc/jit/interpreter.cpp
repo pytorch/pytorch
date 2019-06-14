@@ -828,7 +828,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 future_->markCompleted(stack.back());
               } else {
                 future_->markCompleted(
-                    Tuple::create(jit::last(stack, num_outputs).vec()));
+                    c10::ivalue::TuplePtr::create(jit::last(stack, num_outputs).vec()));
               }
             }
             return false;
@@ -884,11 +884,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       }
     } catch (std::exception& e) {
       frames.back().pc = af.pc;
-      // Error from the current thread
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
-      // TODO: stack trace
       handleError(ExceptionMessage(e), is_jit_exception);
-      //    is_jit_exception);
       return false;
     }
   }
@@ -943,8 +940,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (num_outputs == 1) {
         push(stack, future_->value());
       } else {
-        auto tuple = future_->value().toTuple();
-        for (const auto& value : tuple->elements()) {
+        auto tuple = future_->value().toTupleRef();
+        for (const IValue& value : tuple) {
           push(stack, value);
         }
       }
