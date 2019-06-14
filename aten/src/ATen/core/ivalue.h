@@ -49,14 +49,9 @@ struct Object;
   _(Object)
 
 struct CAFFE2_API IValue final {
-  IValue()
-  : payload{0}
-  , tag(Tag::None)
-  , is_intrusive_ptr(false) {}
+  IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
   IValue(const IValue& rhs)
-      : payload(rhs.payload),
-        tag(rhs.tag),
-        is_intrusive_ptr(rhs.is_intrusive_ptr) {
+      : IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr) {
     if (is_intrusive_ptr) {
       c10::raw::intrusive_ptr::incref(payload.as_intrusive_ptr);
     }
@@ -408,7 +403,8 @@ struct CAFFE2_API IValue final {
     tag = Tag::None;
     is_intrusive_ptr = false;
   }
-  union {
+private:
+  union Payload {
     int64_t as_int;
     double as_double;
     bool as_bool;
@@ -417,8 +413,105 @@ struct CAFFE2_API IValue final {
       DeviceType type;
       DeviceIndex index;
     } as_device;
-  } payload;
+  };
+
+  IValue(Payload p, Tag t, bool i)
+  : payload(p), tag(t), is_intrusive_ptr(i) {}
+
+  Payload payload;
   Tag tag;
+  bool is_intrusive_ptr;
+  friend struct WeakIValue;
+};
+
+struct CAFFE2_API WeakIValue final {
+  WeakIValue()
+  : payload{0}
+  , tag(IValue::Tag::None)
+  , is_intrusive_ptr(false) {}
+
+  WeakIValue(const WeakIValue& rhs)
+      : payload(rhs.payload),
+        tag(rhs.tag),
+        is_intrusive_ptr(rhs.is_intrusive_ptr) {
+    if (is_intrusive_ptr) {
+      c10::raw::weak_intrusive_ptr::incref(payload.as_intrusive_ptr);
+    }
+  }
+  WeakIValue(const IValue& rhs)
+      : payload(rhs.payload),
+        tag(rhs.tag),
+        is_intrusive_ptr(rhs.is_intrusive_ptr) {
+    if (is_intrusive_ptr) {
+      c10::raw::weak_intrusive_ptr::incref(payload.as_intrusive_ptr);
+    }
+  }
+  WeakIValue(WeakIValue&& rhs) noexcept : WeakIValue() {
+    swap(rhs);
+  }
+  ~WeakIValue() {
+    if (is_intrusive_ptr) {
+      c10::raw::weak_intrusive_ptr::decref(payload.as_intrusive_ptr);
+    }
+  }
+  WeakIValue & operator=(WeakIValue && rhs) & noexcept {
+    WeakIValue(std::move(rhs)).swap(*this); // this also sets rhs to None
+    return *this;
+  }
+  WeakIValue & operator=(WeakIValue const & rhs) & {
+    WeakIValue(rhs).swap(*this);
+    return *this;
+  }
+  void swap(WeakIValue & rhs) noexcept {
+    std::swap(payload, rhs.payload);
+    std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
+    std::swap(tag, rhs.tag);
+  }
+
+  IValue lock() const {
+    if (!is_intrusive_ptr) {
+      return IValue(payload, tag, false);
+    }
+    auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
+        payload.as_intrusive_ptr);
+    IValue::Payload pl;
+    pl.as_intrusive_ptr = temp.lock().release();
+    temp.release();
+    if (!pl.as_intrusive_ptr) {
+      return IValue();
+    } else {
+      return IValue(pl, tag, true);
+    }
+  }
+
+  size_t use_count() const noexcept {
+    if (!is_intrusive_ptr) {
+      return 1;
+    }
+    auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
+        payload.as_intrusive_ptr);
+    size_t result = temp.use_count();
+    temp.release();
+    return result;
+  }
+
+  size_t weak_use_count() const noexcept {
+    if (!is_intrusive_ptr) {
+      return 1;
+    }
+    auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
+        payload.as_intrusive_ptr);
+    size_t result = temp.weak_use_count();
+    temp.release();
+    return result;
+  }
+  size_t hash() const {
+    return payload.as_int;
+  }
+
+private:
+  IValue::Payload payload;
+  IValue::Tag tag;
   bool is_intrusive_ptr;
 };
 
