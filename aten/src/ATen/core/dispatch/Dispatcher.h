@@ -146,10 +146,10 @@ private:
 
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
 
-  void deregisterSchema_(const OperatorHandle& op);
+  void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
 
   std::list<OperatorDef> operators_;
-  ska::flat_hash_map<OperatorName, OperatorHandle> operatorLookupTable_;
+  LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };

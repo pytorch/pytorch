@@ -42,12 +42,13 @@ C10_EXPORT Dispatcher& Dispatcher::singleton() {
 }
 
 c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
-  const auto found = operatorLookupTable_.find(overload_name);
-  if (found == operatorLookupTable_.end()) {
-    return c10::nullopt;
-  }
-
-  return found->second;
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> c10::optional<OperatorHandle> {
+    auto found = operatorLookupTable.find(overload_name);
+    if (found == operatorLookupTable.end()) {
+      return c10::nullopt;
+    }
+    return found->second;
+  });
 }
 
 OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options) {
@@ -64,9 +65,12 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
     return *found;
   }
 
+  OperatorName op_name = schema.operator_name();
   operators_.emplace_back(std::move(schema), std::move(options));
   OperatorHandle handle(--operators_.end());
-  operatorLookupTable_.emplace(schema.operator_name(), handle);
+  operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
+    operatorLookupTable.emplace(op_name, handle);
+  });
 
   return handle;
 }
@@ -74,6 +78,8 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
 SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
+
+  OperatorName op_name = schema.operator_name();
 
   auto op = findOrRegisterSchema_(std::move(schema), std::move(options));
 
@@ -83,16 +89,16 @@ SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, O
     listeners_->callOnOperatorRegistered(op);
   }
 
-  TORCH_INTERNAL_ASSERT(op.schema().operator_name() == schema.operator_name());
-
-  return SchemaRegistrationHandleRAII {op, RegistrationHandleRAII([this, op] {
-    deregisterSchema_(op);
+  return SchemaRegistrationHandleRAII {op, RegistrationHandleRAII([this, op, op_name] {
+    deregisterSchema_(op, op_name);
   })};
 }
 
-void Dispatcher::deregisterSchema_(const OperatorHandle& op) {
+void Dispatcher::deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
+
+  TORCH_INTERNAL_ASSERT(op.schema().operator_name() == op_name);
 
   // reduce refcount and actually deregister if no references left
   TORCH_INTERNAL_ASSERT(op.operatorIterator_->refcount > 0);
@@ -104,7 +110,9 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op) {
     listeners_->callOnOperatorDeregistered(op);
 
     operators_.erase(op.operatorIterator_);
-    operatorLookupTable_.erase(op.schema().operator_name());
+    operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
+      operatorLookupTable.erase(op_name);
+    });
   }
 }
 
