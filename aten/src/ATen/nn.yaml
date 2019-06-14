@@ -129,7 +129,7 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_avg_pool2d(Tensor self, IntArrayRef[2] kernel_size, IntArrayRef[2] stride={}, IntArrayRef[2] padding=0, bool ceil_mode=false, bool count_include_pad=true, Scalar divisor=0)
+- name: _thnn_avg_pool2d(Tensor self, IntArrayRef[2] kernel_size, int64_t divisor_override, IntArrayRef[2] stride={}, IntArrayRef[2] padding=0, bool ceil_mode=false, bool count_include_pad=true)
   cname: SpatialAveragePooling
   default_init:
     stride: kernel_size
@@ -140,7 +140,7 @@
     forward_scalar_types: ['Float', 'Double', 'Long']
     backward_scalar_types: ['Float', 'Double', 'Long']
 
-- name: _thnn_avg_pool3d(Tensor self, IntArrayRef[3] kernel_size, IntArrayRef[3] stride={}, IntArrayRef[3] padding=0, bool ceil_mode=false, bool count_include_pad=true, Scalar divisor=0)
+- name: _thnn_avg_pool3d(Tensor self, IntArrayRef[3] kernel_size, int64_t divisor_override, IntArrayRef[3] stride={}, IntArrayRef[3] padding=0, bool ceil_mode=false, bool count_include_pad=true)
   cname: VolumetricAveragePooling
   default_init:
     stride: kernel_size

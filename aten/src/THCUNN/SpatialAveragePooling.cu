@@ -10,7 +10,7 @@ __global__ void AvePoolForward(const int nthreads,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
-    Dtype* const top_data, const int divisor) {
+    Dtype* const top_data, const int divisor_override) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     const int pw = index % pooled_width;
     const int ph = (index / pooled_width) % pooled_height;
@@ -34,7 +34,7 @@ __global__ void AvePoolForward(const int nthreads,
     }
     int divide_factor;
     if (USE_DIVISOR) {
-      divide_factor = divisor;
+      divide_factor = divisor_override;
     } else {
       if(COUNT_INCLUDE_PAD) {
         divide_factor = pool_size;
@@ -52,7 +52,7 @@ __global__ void AvePoolBackward(const int nthreads, const Dtype* const top_diff,
     const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
-    Dtype* const bottom_diff, int divisor) {
+    Dtype* const bottom_diff, int divisor_override) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     // find out the local index
     // find out the local offset
@@ -81,7 +81,7 @@ __global__ void AvePoolBackward(const int nthreads, const Dtype* const top_diff,
         wend = min(wend, width);
         int divide_factor;
         if (USE_DIVISOR) {
-          divide_factor = divisor;
+          divide_factor = divisor_override;
         } else {
           if(COUNT_INCLUDE_PAD) {
             divide_factor = pool_size;

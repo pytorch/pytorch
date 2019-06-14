@@ -28,7 +28,7 @@ Tensor mkldnn_avg_pool2d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    Scalar divisor) {
+    c10::optional<int64_t> divisor_override) {
   AT_ERROR("mkldnn_avg_pool2d: ATen not compiled with MKLDNN support");
 }
 
@@ -40,7 +40,7 @@ Tensor& mkldnn_avg_pool2d_out(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    Scalar divisor) {
+    c10::optional<int64_t> divisor_override) {
   AT_ERROR("mkldnn_avg_pool2d_out: ATen not compiled with MKLDNN support");
 }
 
@@ -128,8 +128,8 @@ Tensor mkldnn_avg_pool2d(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    Scalar divisor) {
-  AT_CHECK(divisor.to<int>() == 0,
+    c10::optional<int64_t> divisor_override) {
+  AT_CHECK(divisor_override.has_value(),
     "Currently Mkldnn Avg Pooling operator does not support divisor.");
   return _mkldnn_pool2d(
       input,
@@ -150,7 +150,7 @@ Tensor& mkldnn_avg_pool2d_out(
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    Scalar divisor) {
+    c10::optional<int64_t> divisor_override) {
   AT_ERROR(
       "mkldnn_avg_pool2d_out: in-place mkldnn operations are not supported yet");
 }

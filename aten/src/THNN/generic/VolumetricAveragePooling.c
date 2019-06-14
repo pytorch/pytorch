@@ -96,6 +96,7 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           int64_t otime,
           int64_t owidth,
           int64_t oheight,
+          int divisor_override,
           int kT,
           int kW,
           int kH,
@@ -105,8 +106,7 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           int padT,
           int padW,
           int padH,
-          bool count_include_pad,
-          int divisor)
+          bool count_include_pad)
 {
   int64_t k;
 #pragma omp parallel for private(k)
@@ -157,8 +157,8 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
             }
           }
           int divide_factor;
-          if (divisor) {
-            divide_factor = divisor;
+          if (divisor_override) {
+            divide_factor = divisor_override;
           } else {
             if (count_include_pad) {
               divide_factor = pool_size;
@@ -178,6 +178,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
+          int divisor_override,
           int kT,
           int kW,
           int kH,
@@ -188,8 +189,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
           int padW,
           int padH,
           bool ceil_mode,
-          bool count_include_pad,
-          int divisor)
+          bool count_include_pad)
 {
   int64_t nslices;
   int64_t itime;
@@ -242,11 +242,11 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
       input_data, output_data, nslices,
       itime, iwidth, iheight,
       otime, owidth, oheight,
+      divisor_override,
       kT, kW, kH,
       dT, dW, dH,
       padT, padW, padH,
-      count_include_pad,
-      divisor
+      count_include_pad
     );
   }
   else  /* batch mode */
@@ -270,11 +270,11 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
         input_data + p * istride, output_data + p * ostride, nslices,
         itime, iwidth, iheight,
         otime, owidth, oheight,
+        divisor_override,
         kT, kW, kH,
         dT, dW, dH,
         padT, padW, padH,
-        count_include_pad,
-        divisor
+        count_include_pad
       );
     }
   }
@@ -295,6 +295,7 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
           int64_t otime,
           int64_t owidth,
           int64_t oheight,
+          int divisor_override,
           int kT,
           int kW,
           int kH,
@@ -304,8 +305,7 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
           int padT,
           int padW,
           int padH,
-          bool count_include_pad,
-          int divisor)
+          bool count_include_pad)
 {
   int64_t k;
 #pragma omp parallel for private(k)
@@ -341,8 +341,8 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
           wend = std::min(wend, iwidth);
 
           int64_t divide_factor;
-          if (divisor) {
-            divide_factor = divisor;
+          if (divisor_override) {
+            divide_factor = divisor_override;
           } else {
             if (count_include_pad) {
               divide_factor = pool_size;
@@ -376,6 +376,7 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
+          int divisor_override,
           int kT,
           int kW,
           int kH,
@@ -386,8 +387,7 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
           int padW,
           int padH,
           bool ceil_mode,
-          bool count_include_pad,
-          int divisor)
+          bool count_include_pad)
 {
   int64_t nslices;
   int64_t itime;
@@ -443,11 +443,11 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
       gradInput_data, gradOutput_data, nslices,
       itime, iwidth, iheight,
       otime, owidth, oheight,
+      divisor_override,
       kT, kW, kH,
       dT, dW, dH,
       padT, padW, padH,
-      count_include_pad,
-      divisor
+      count_include_pad
     );
   }
   else /* batch mode */
@@ -465,11 +465,11 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
         gradInput_data  + p * istride, gradOutput_data + p * ostride, nslices,
         itime, iwidth, iheight,
         otime, owidth, oheight,
+        divisor_override,
         kT, kW, kH,
         dT, dW, dH,
         padT, padW, padH,
-        count_include_pad,
-        divisor
+        count_include_pad
       );
     }
   }

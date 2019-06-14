@@ -522,6 +522,10 @@ class TestAvgPool(TestCase):
                 expected = avg_pool2d(input, (i, j))
                 self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
 
+    def test_avg_pool2d_with_zero_divisor(self):
+        self.assertRaisesRegex(RuntimeError, "divisor must not be zero",
+            lambda: torch.nn.functional.avg_pool2d(torch.zeros(3, 3), (2, 2), divisor_override=0))
+
     def test_doubletensor_sum_pool2d(self):
         n = 3
         m = 3
@@ -529,7 +533,7 @@ class TestAvgPool(TestCase):
         for i in range(1, n + 1):
             for j in range(1, m + 1):
                 for divisor in [1, 7, i * j]:
-                    acctual = torch.nn.functional.avg_pool2d(input[0], (i, j), divisor=divisor)
+                    acctual = torch.nn.functional.avg_pool2d(input[0], (i, j), divisor_override=divisor)
                     acctual = acctual.view(1, acctual.numel())
                     expected = self._sum_pool2d(input, (i, j)) / divisor
                     self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
@@ -559,10 +563,14 @@ class TestAvgPool(TestCase):
             for j in range(1, w + 1):
                 for k in range(1, d + 1):
                     for divisor in [1, 7, i * j]:
-                        acctual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k), divisor=divisor)
+                        acctual = torch.nn.functional.avg_pool3d(input.unsqueeze(0), (i, j, k), divisor_override=divisor)
                         acctual = acctual.view(1, acctual.numel())
                         expected = self._sum_pool3d(input, (i, j, k)) / divisor
                         self.assertTrue(torch.allclose(acctual, expected, rtol=0, atol=1e-5))
+
+    def test_avg_pool3d_with_zero_divisor(self):
+        self.assertRaisesRegex(RuntimeError, "divisor must not be zero",
+            lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
 
 class TestLongTensor(TestCase):
     def test_longtensor_conv2d_same_as_doubletensor(self):
@@ -626,8 +634,8 @@ class TestLongTensor(TestCase):
         d_input = l_input.clone().double()
         for i in range(n):
             for j in range(m):
-                l_result = torch.nn.functional.avg_pool2d(l_input, (i + 1, j + 1), divisor=1)
-                d_result = torch.nn.functional.avg_pool2d(d_input, (i + 1, j + 1), divisor=1)
+                l_result = torch.nn.functional.avg_pool2d(l_input, (i + 1, j + 1), divisor_override=1)
+                d_result = torch.nn.functional.avg_pool2d(d_input, (i + 1, j + 1), divisor_override=1)
                 self.assertTrue(torch.allclose(l_result.double(), d_result, atol=1e-5))
 
     def test_longtensor_avg_pool3d_same_as_doubletensor(self):
@@ -639,8 +647,8 @@ class TestLongTensor(TestCase):
         for i in range(n):
             for j in range(m):
                 for k in range(l):
-                    l_result = torch.nn.functional.avg_pool3d(l_input, (i + 1, j + 1, k + 1), divisor=1)
-                    d_result = torch.nn.functional.avg_pool3d(d_input, (i + 1, j + 1, k + 1), divisor=1)
+                    l_result = torch.nn.functional.avg_pool3d(l_input, (i + 1, j + 1, k + 1), divisor_override=1)
+                    d_result = torch.nn.functional.avg_pool3d(d_input, (i + 1, j + 1, k + 1), divisor_override=1)
                     self.assertTrue(torch.allclose(l_result.double(), d_result, atol=1e-5))
 
 class TestNN(NNTestCase):

@@ -57,12 +57,12 @@ void THNN_(SpatialAveragePooling_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
+           int divisor_override,
            int kW, int kH,
            int dW, int dH,
            int padW, int padH,
            bool ceil_mode,
-           bool count_include_pad,
-           int divisor)
+           bool count_include_pad)
 {
   THCUNN_assertSameGPU(state, 2, input, output);
   THNN_(SpatialAveragePooling_shapeCheck)
@@ -98,25 +98,25 @@ void THNN_(SpatialAveragePooling_updateOutput)(
 
   int count = THCTensor_(nElement)(state, output);
 
-  if (divisor) {
+  if (divisor_override) {
     AvePoolForward<scalar_t, accreal, false, true>
       <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>(
         count, input_data,
         batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
-        kH, kW, dH, dW, padH, padW, output_data, divisor);
+        kH, kW, dH, dW, padH, padW, output_data, divisor_override);
   } else {
     if(count_include_pad)
       AvePoolForward<scalar_t, accreal, true, false>
         <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>(
           count, input_data,
           batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
-          kH, kW, dH, dW, padH, padW, output_data, divisor);
+          kH, kW, dH, dW, padH, padW, output_data, 0);
     else
       AvePoolForward<scalar_t, accreal, false, false>
         <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>(
           count, input_data,
           batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
-          kH, kW, dH, dW, padH, padW, output_data, divisor);
+          kH, kW, dH, dW, padH, padW, output_data, 0);
   }
   THCudaCheck(cudaGetLastError());
 
@@ -132,12 +132,12 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
+           int divisor_override,
            int kW, int kH,
            int dW, int dH,
            int padW, int padH,
            bool ceil_mode,
-           bool count_include_pad,
-           int divisor)
+           bool count_include_pad)
 {
   THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
   THNN_(SpatialAveragePooling_shapeCheck)
@@ -175,14 +175,14 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
 
   int count = THCTensor_(nElement)(state, input);
 
-  if (divisor) {
+  if (divisor_override) {
     AvePoolBackward<scalar_t, accreal, false, true>
       <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
         (count,
         THCTensor_(data)(state, gradOutput),
         batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
         kH, kW, dH, dW, padH, padW,
-        THCTensor_(data)(state, gradInput), divisor);
+        THCTensor_(data)(state, gradInput), divisor_override);
   } else {
     if(count_include_pad)
       AvePoolBackward<scalar_t, accreal, true, false>
@@ -191,7 +191,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
           THCTensor_(data)(state, gradOutput),
           batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
           kH, kW, dH, dW, padH, padW,
-          THCTensor_(data)(state, gradInput), divisor);
+          THCTensor_(data)(state, gradInput), 0);
     else
       AvePoolBackward<scalar_t, accreal, false, false>
         <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
@@ -199,7 +199,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
           THCTensor_(data)(state, gradOutput),
           batchSize, nInputPlane, nInputRows, nInputCols, nOutputRows, nOutputCols,
           kH, kW, dH, dW, padH, padW,
-          THCTensor_(data)(state, gradInput), divisor);
+          THCTensor_(data)(state, gradInput), 0);
   }
   THCudaCheck(cudaGetLastError());
 

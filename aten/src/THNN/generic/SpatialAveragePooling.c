@@ -58,6 +58,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
+          int divisor_override,
           int kW,
           int kH,
           int dW,
@@ -65,8 +66,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
           int padW,
           int padH,
           bool ceil_mode,
-          bool count_include_pad,
-          int divisor)
+          bool count_include_pad)
 {
   scalar_t *output_data;
   scalar_t *input_data;
@@ -150,8 +150,8 @@ void THNN_(SpatialAveragePooling_updateOutput)(
           }
           /* Update output */
           int divide_factor;
-          if (divisor) {
-            divide_factor = divisor;
+          if (divisor_override) {
+            divide_factor = divisor_override;
           } else {
             if(count_include_pad) {
               divide_factor = pool_size;
@@ -175,6 +175,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
+          int divisor_override,
           int kW,
           int kH,
           int dW,
@@ -182,8 +183,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
           int padW,
           int padH,
           bool ceil_mode,
-          bool count_include_pad,
-          int divisor)
+          bool count_include_pad)
 {
   int dimw = 2;
   int dimh = 1;
@@ -265,8 +265,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
           scalar_t z = *ptr_gradOutput++;
 
           int divide_factor;
-          if (divisor) {
-            divide_factor = divisor;
+          if (divisor_override) {
+            divide_factor = divisor_override;
           } else {
             if(count_include_pad) {
               divide_factor = pool_size;

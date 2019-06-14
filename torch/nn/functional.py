@@ -255,7 +255,7 @@ Examples::
 """)
 
 avg_pool2d = _add_docstr(torch._C._nn.avg_pool2d, r"""
-avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor=0) -> Tensor
+avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None) -> Tensor
 
 Applies 2D average-pooling operation in :math:`kH \times kW` regions by step size
 :math:`sH \times sW` steps. The number of output features is equal to the number of
@@ -275,12 +275,12 @@ Args:
         to compute the output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
         averaging calculation. Default: ``True``
-    divisor: when 0, will use attr:`kernel_size` to calculate averadge, otherwise
-        will use divisor. Default: 0
+    divisor_override: if specified, it will be used as divisor, otherwise
+        attr:`kernel_size` will be used. Default: None
 """)
 
 avg_pool3d = _add_docstr(torch._C._nn.avg_pool3d, r"""
-avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor=0) -> Tensor
+avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None) -> Tensor
 
 Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions by step
 size :math:`sT \times sH \times sW` steps. The number of output features is equal to
@@ -300,8 +300,8 @@ Args:
         to compute the output shape
     count_include_pad: when True, will include the zero-padding in the
         averaging calculation
-    divisor: when 0, will use attr:`kernel_size` to calculate averadge, otherwise
-        will use divisor. Default: 0
+    divisor_override: if specified, it will be used as divisor, otherwise
+        attr:`kernel_size` will be used. Default: None
 """)
 
 @weak_script

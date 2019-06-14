@@ -20,12 +20,12 @@ TH_API void THNN_(SpatialAveragePooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
+          int divisor_override,
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
           bool ceil_mode,
-          bool count_include_pad,
-          int divisor);
+          bool count_include_pad);
 
 TH_API void THNN_(SpatialDilatedConvolution_updateOutput)(
           THNNState *state,
@@ -97,10 +97,11 @@ TH_API void THNN_(VolumetricAveragePooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
+          int divisor_override,
           int kT, int kW, int kH,
           int dT, int dW, int dH,
           int padT, int padW, int padH,
-          bool ceil_mode, bool count_include_pad, int divisor);
+          bool ceil_mode, bool count_include_pad);
 
 #if !defined(TH_REAL_IS_LONG)
 
@@ -549,12 +550,12 @@ TH_API void THNN_(SpatialAveragePooling_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
+          int divisor_override,
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
           bool ceil_mode,
-          bool count_include_pad,
-          int divisor);
+          bool count_include_pad);
 
 TH_API void THNN_(SpatialDilatedConvolution_updateGradInput)(
           THNNState *state,
@@ -728,10 +729,11 @@ TH_API void THNN_(VolumetricAveragePooling_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
+          int divisor_override,
           int kT, int kW, int kH,
           int dT, int dW, int dH,
           int padT, int padW, int padH,
-          bool ceil_mode, bool count_include_pad, int divisor);
+          bool ceil_mode, bool count_include_pad);
 
 TH_API void THNN_(VolumetricDilatedConvolution_updateGradInput)(
           THNNState *state,

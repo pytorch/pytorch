@@ -90,12 +90,12 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
+           int divisor_override,
            int kT, int kW, int kH,
            int dT, int dW, int dH,
            int padT, int padW, int padH,
            bool ceil_mode,
-           bool count_include_pad,
-           int divisor)
+           bool count_include_pad)
 {
   int batchSize;
   int inputSlices;
@@ -197,7 +197,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
             dT, dH, dW,
             padT, padH, padW,
             count_include_pad,
-            offsetZ, divisor);
+            offsetZ, divisor_override);
         break;
       }
     totalZ -= 65535;
@@ -214,12 +214,12 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
+           int divisor_override,
            int kT, int kW, int kH,
            int dT, int dW, int dH,
            int padT, int padW, int padH,
            bool ceil_mode,
-           bool count_include_pad,
-           int divisor)
+           bool count_include_pad)
 {
   THNN_(VolumetricAveragePooling_shapeCheck)
        (state, input, gradOutput, kT, kW, kH, dT, dW, dH,
@@ -317,14 +317,14 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
         cuda_VolumetricAveragePooling_updateGradInput_atomicAdd<scalar_t, accreal>
           <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
             cudaGradOutput, cudaGradInput, kT, kH, kW, dT, dH, dW,
-            padT, padH, padW, count_include_pad, offsetZ, divisor);
+            padT, padH, padW, count_include_pad, offsetZ, divisor_override);
       }
       else
       {
         cuda_VolumetricAveragePooling_updateGradInput<scalar_t, accreal>
           <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
             cudaGradOutput, cudaGradInput, kT, kH, kW, dT, dH, dW,
-            padT, padH, padW, count_include_pad, offsetZ, divisor);
+            padT, padH, padW, count_include_pad, offsetZ, divisor_override);
       }
       THCudaCheck(cudaGetLastError());
       totalZ -= 65535;

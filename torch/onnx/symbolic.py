@@ -741,11 +741,11 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'i')
-    def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor):
+    def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override):
         if ceil_mode and input.type().kind() != "CompleteTensorType":
             return _unimplemented(name, "input size not accesible")
-        if divisor:
-            return _unimplemented(name, "does nto support divisor")
+        if divisor_override:
+            return _unimplemented(name, "does not support divisor_override")
         if not stride:
             stride = kernel_size
         padding = tuple(tuple_fn(padding))

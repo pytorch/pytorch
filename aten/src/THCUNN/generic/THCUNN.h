@@ -412,24 +412,24 @@ THC_API void THNN_(SpatialAveragePooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
+                  int divisor_override,
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
                   bool ceil_mode,
-                  bool count_include_pad,
-                  int divisor);
+                  bool count_include_pad);
 
 THC_API void THNN_(SpatialAveragePooling_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
+                  int divisor_override,
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
                   bool ceil_mode,
-                  bool count_include_pad,
-                  int divisor);
+                  bool count_include_pad);
 
 THC_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCState *state,
@@ -1081,24 +1081,24 @@ THC_API void THNN_(VolumetricAveragePooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
+                  int divisor_override,
                   int kT, int kW, int kH,
                   int dT, int dW, int dH,
                   int padT, int padW, int padH,
                   bool ceil_mode,
-                  bool count_include_pad,
-                  int divisor);
+                  bool count_include_pad);
 
 THC_API void THNN_(VolumetricAveragePooling_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
+                  int divisor_override,
                   int kT, int kW, int kH,
                   int dT, int dW, int dH,
                   int padT, int padW, int padH,
                   bool ceil_mode,
-                  bool count_include_pad,
-                  int divisor);
+                  bool count_include_pad);
 
 // VolumetricConvolution is legacy and purposefully not bound by ATen
 THC_API void THNN_(VolumetricConvolution_updateOutput)(
