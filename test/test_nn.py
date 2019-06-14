@@ -1558,10 +1558,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_global_flag_overwrite_module_params_on_conversion(self):
-        def add_one_inplace(t):
-            with torch.no_grad():
-                return t.add_(1.0)
-
         torch.__future__.set_overwrite_module_params_on_conversion(False)
 
         # yf225 TODO: add comment for this test! Saying that the current default behavior is just wrong
@@ -1591,6 +1587,10 @@ class TestNN(NNTestCase):
         m.to('cuda')
         self.assertNotEqual(weight_ref.device, m.weight.device)
         self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
+
+        def add_one_inplace(t):
+            with torch.no_grad():
+                return t.add_(1.0)
 
         # yf225 TODO: add in-place `fn` and make sure the version counter bumps
         # yf225 TODO: fix this comment
