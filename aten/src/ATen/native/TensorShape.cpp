@@ -453,7 +453,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
 #ifdef NAMEDTENSOR_ENABLED
     if (self.names().has_value()) {
       AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
-                     self.sizes(), " at dimension ", self.names()->at(dim).name().toUnqualString());
+                     self.sizes(), " at dimension ", self.names()->at(dim));
     }
 #endif
     AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
