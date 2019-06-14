@@ -647,7 +647,7 @@ OPERATOR_SCHEMA(HuffmanTreeHierarchy)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 HuffmanTreeHierarchy is an operator to generate huffman tree hierarchy given
-the input labels. It returns the tree as seralized HierarchyProto
+the input labels. It returns the tree as serialized HierarchyProto
 )DOC")
     .Arg("num_classes", "The number of classes used to build the hierarchy.")
     .Input(0, "Labels", "The labels vector")

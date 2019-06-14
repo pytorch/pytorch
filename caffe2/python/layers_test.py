@@ -275,8 +275,10 @@ class TestLayers(LayersTestCase):
     @given(
         use_hashing=st.booleans(),
         modulo=st.integers(min_value=100, max_value=200),
+        use_divide_mod=st.booleans(),
+        divisor=st.integers(min_value=10, max_value=20),
     )
-    def testSparseFeatureHashIdList(self, use_hashing, modulo):
+    def testSparseFeatureHashIdList(self, use_hashing, modulo, use_divide_mod, divisor):
         record = schema.NewRecord(
             self.model.net,
             schema.List(schema.Scalar(
@@ -284,10 +286,14 @@ class TestLayers(LayersTestCase):
                 metadata=schema.Metadata(categorical_limit=60000)
             ))
         )
+        use_divide_mod = use_divide_mod if use_hashing is False else False
         output_schema = self.model.SparseFeatureHash(
             record,
             modulo=modulo,
-            use_hashing=use_hashing)
+            use_hashing=use_hashing,
+            use_divide_mod=use_divide_mod,
+            divisor=divisor,
+        )
 
         self.model.output_schema = output_schema
 
@@ -295,6 +301,10 @@ class TestLayers(LayersTestCase):
         self.assertEqual(output_schema._items.metadata.categorical_limit,
                 modulo)
         train_init_net, train_net = self.get_training_nets()
+        if use_divide_mod:
+            self.assertEqual(len(train_net.Proto().op), 3)
+        else:
+            self.assertEqual(len(train_net.Proto().op), 2)
 
     @given(
         use_hashing=st.booleans(),

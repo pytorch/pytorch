@@ -11,6 +11,7 @@ try:
 except ImportError:
     from yaml import Loader
 
+from env import NAMEDTENSOR_ENABLED
 
 # [temp translations]
 # We're currently incrementally moving from the custom func schema to the
@@ -70,6 +71,8 @@ def type_argument_translations(arg):
     elif t == 'int64_t?':
         raise RuntimeError("Please use int? and not int64_t?. "
                            "See [temp translations] for details.")
+    elif t == 'Dimname[]?':
+        t = 'DimnameList?'
     # Enables float by translating to legacy double.
     elif t == 'float':
         t = 'double'
@@ -364,6 +367,9 @@ def propagate_field_names(output_arguments, return_arguments):
             if 'field_name' in r:
                 output_arguments[i]['field_name'] = r['field_name']
 
+def is_named_tensor_only(declaration):
+    return any(['Dimname' in arg['type'] for arg in declaration['arguments']])
+
 
 def run(paths):
     declarations = []
@@ -398,6 +404,8 @@ def run(paths):
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')
+                if not NAMEDTENSOR_ENABLED and is_named_tensor_only(declaration):
+                    continue
                 declarations.append(declaration)
             except Exception as e:
                 msg = '''Exception raised in processing function:
