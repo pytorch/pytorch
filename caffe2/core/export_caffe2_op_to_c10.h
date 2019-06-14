@@ -12,16 +12,16 @@ namespace detail {
 constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
     "_caffe2_preallocated_outputs";
 
-using _CallCaffe2OpFunc = std::vector<at::Tensor>(
+using _CallCaffe2OpFunc = c10::ListPtr<at::Tensor>(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
-    std::vector<at::Tensor>&& outputs);
+    c10::ListPtr<at::Tensor>&& outputs);
 
 template <class Caffe2Operator>
-inline std::vector<at::Tensor> _call_caffe2_op(
+inline c10::ListPtr<at::Tensor> _call_caffe2_op(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
-    std::vector<at::Tensor>&& outputs) {
+    c10::ListPtr<at::Tensor>&& outputs) {
   Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
   op.Run();
   return std::move(op).move_newstyle_outputs();
@@ -54,7 +54,7 @@ inline void _call_caffe2_op_from_c10(
   const size_t num_inputs = schema.arguments().size() -
       1; // -1 because the last argument is the list of preallocated tensors
 
-  std::vector<at::Tensor> outputs;
+  c10::ListPtr<at::Tensor> outputs = c10::make_list<at::Tensor>();
   if (preallocated_outputs.isNone()) {
     // either the schema doesn't support preallocated outputs or it does but
     // they haven't been passed in. Pass a list of uninitialized tensors to
@@ -62,8 +62,7 @@ inline void _call_caffe2_op_from_c10(
     outputs.resize(num_outputs);
   } else {
     AT_ASSERT(preallocated_outputs.isTensorList());
-    outputs =
-        std::move(*std::move(preallocated_outputs).toTensorList()).elements();
+    outputs = std::move(preallocated_outputs).toTensorList();
   }
 
   // TODO Avoid vector allocation. One idea would be to keep the std::vector
@@ -72,8 +71,8 @@ inline void _call_caffe2_op_from_c10(
 
   outputs = (*call_op)(schema, std::move(inputs), std::move(outputs));
 
-  for (auto&& output : std::move(outputs)) {
-    torch::jit::push(*stack, std::move(output));
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    torch::jit::push(*stack, outputs.extract(i));
   }
 
   // postcondition: All inputs are cleared from the stack, there's now one

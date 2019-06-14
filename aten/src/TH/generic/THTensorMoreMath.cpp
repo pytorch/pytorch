@@ -3,7 +3,8 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
-#include <TH/THGenerator.hpp>
+#include <ATen/CPUGenerator.h>
+#include <ATen/Utils.h>
 
 #define TENSOR_IMPLEMENT_LOGICAL(NAME,OP) \
   void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, scalar_t value) \
