@@ -514,11 +514,6 @@ struct PackedBidirectionalLayer : Layer<PackedSequence, pair_of<dir_hidden_type>
     typename PackedLayer<dir_hidden_type, cell_params>::output_type fw_result;
     auto fut = at::intraop_launch_future([&]() {
       fw_result = layer_(input, input_hidden.first, params.first);
-      {
-        std::unique_lock<std::mutex> lock(task_mutex);
-        task_finished = true;
-        task_cv.notify_all();
-      }
     });
 
     auto rev_result = rev_layer_(input, input_hidden.second, params.second);
