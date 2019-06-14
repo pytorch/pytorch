@@ -2025,6 +2025,21 @@ def _get_script_class(name):
 # torch.jit.Error
 Error = torch._C.JITException
 
+def _get_named_tuple_properties(obj):
+    assert issubclass(obj, tuple) and hasattr(obj, '_fields')
+    fields = list(obj._fields)
+    annotations = []
+    has_annotations = hasattr(obj, '__annotations__')
+    for field in fields:
+        if has_annotations and field in obj.__annotations__:
+            annotations.append(torch.jit.annotations.ann_to_type(obj.__annotations__[field]))
+        else:
+            annotations.append(torch._C.TensorType.get())
+    return type(obj).__name__, fields, annotations
+
+def _create_named_tuple(t, names, unqual_name):
+    TupleType = collections.namedtuple(unqual_name, names)
+    return TupleType(*t)
 
 class _disable_tracing(object):
     def __enter__(self):

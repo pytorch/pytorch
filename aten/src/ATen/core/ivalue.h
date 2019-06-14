@@ -14,7 +14,7 @@ template<class Key, class Value> class DictPtr;
 template<class T> class ListPtr;
 struct IValue;
 namespace ivalue {
-struct TuplePtr;
+struct Tuple;
 struct Future;
 struct ConstantString;
 struct GenericDict;
@@ -145,11 +145,10 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
   // Tuple
-  IValue(ivalue::TuplePtr v);
+  IValue(c10::intrusive_ptr<ivalue::Tuple> v);
   bool isTuple() const { return Tag::Tuple == tag; }
-  ivalue::TuplePtr toTuple() &&;
-  ivalue::TuplePtr toTuple() const &;
-  c10::ArrayRef<IValue> toTupleRef() const;
+  c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
+  c10::intrusive_ptr<ivalue::Tuple> toTuple() const &;
 
   // Double
   IValue(double d)
