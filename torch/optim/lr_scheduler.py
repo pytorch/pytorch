@@ -92,7 +92,7 @@ class _LRScheduler(object):
             get_lr = self.get_lr_closed_form
             warnings.warn(
                 "If an epoch parameter different from the current epoch is passed, "
-                "the recursive form of the scheduler is overriden by its closed form "
+                "the recursive form of the scheduler is overridden by its closed form "
                 "whenver available, and will be deprecated.",
                 DeprecationWarning
             )

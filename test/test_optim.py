@@ -565,7 +565,7 @@ class TestLRScheduler(TestCase):
 
         self.assertWarnsRegex(old_pattern2, r'how-to-adjust-learning-rate')
 
-    def test_old_pattern_warning_with_overriden_optim_step(self):
+    def test_old_pattern_warning_with_overridden_optim_step(self):
         epochs = 35
         for i, group in enumerate(self.opt.param_groups):
             group['initial_lr'] = 0.01
@@ -576,7 +576,7 @@ class TestLRScheduler(TestCase):
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3, last_epoch=10)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
-        # emulate use-case with optimizer.step overriden
+        # emulate use-case with optimizer.step overridden
         import types
 
         old_step = self.opt.step
@@ -622,14 +622,14 @@ class TestLRScheduler(TestCase):
                 scheduler.step(e)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
-    def test_new_pattern_no_warning_with_overriden_optim_step(self):
+    def test_new_pattern_no_warning_with_overridden_optim_step(self):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
             scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
             self.assertTrue(len(ws) == 0, "No warning should be raised")
 
-        # emulate use-case with optimizer.step overriden
+        # emulate use-case with optimizer.step overridden
         import types
 
         old_step = self.opt.step
