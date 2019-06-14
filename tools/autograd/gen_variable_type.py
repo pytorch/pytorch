@@ -26,6 +26,7 @@ from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
+from .env import NAMEDTENSOR_ENABLED
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
@@ -272,6 +273,11 @@ def find_factory_functions(declarations):
 
 
 def should_trace(declaration):
+    if NAMEDTENSOR_ENABLED:
+        # Short-term plan: Don't support tracing Dimname.
+        # Long-term plan: Add Dimname as a first-class type to the JIT.
+        if any('Dimname' in arg['simple_type'] for arg in declaration['arguments']):
+            return False
     # Operations involving Storage or Type are not traceable at the moment
     if any(arg['simple_type'] in {'Storage', 'Type'} for arg in declaration['arguments']):
         return False
@@ -400,6 +406,8 @@ def format_prerecord_trace(declaration):
 
 
 def format_trace(declaration):
+    if not should_trace(declaration):
+        return ('', '')
     return (format_prerecord_trace(declaration), format_postrecord_trace(declaration))
 
 
@@ -663,11 +671,6 @@ def emit_body(declaration):
                 stmts.append('}')
         return stmts
 
-    def emit_record_trace(env):
-        if not should_trace(declaration):
-            return ('', '')
-        return format_trace(declaration)
-
     def declare_returned_variables():
         if modifies_arguments:
             return ''
@@ -860,7 +863,7 @@ def emit_body(declaration):
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables())
 
-    pre_record_trace, post_record_trace = emit_record_trace(env)
+    pre_record_trace, post_record_trace = format_trace(declaration)
 
     body.append(pre_record_trace)
     body.append(emit_call(env))

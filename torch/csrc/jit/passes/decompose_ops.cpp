@@ -64,12 +64,12 @@ RegisterOperators reg_ln_view({Operator(
     [](const Node* node) {
       return [](Stack& stack) {
         const int64_t normalized_ndim = pop(stack).toInt();
-        auto input_shape = pop(stack).toIntListRef();
+        auto input_shape = pop(stack).toIntList();
         auto self = pop(stack).toTensor();
         const int64_t input_ndim = input_shape.size();
         c10::SmallVector<int64_t, 8> sizes(input_ndim, 1);
         for (int i = 0; i < input_ndim - normalized_ndim; ++i) {
-          sizes.at(i) = input_shape[i];
+          sizes.at(i) = input_shape.get(i);
         }
         push(stack, self.reshape(sizes));
         return 0;
@@ -169,7 +169,7 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       Value* bias = it->namedInput(attr::bias);
       if (isDefined(weight).value()) {
         new_output = graph->insert(aten::mul, {new_output, weight});
-      } 
+      }
       if (isDefined(bias).value()) {
         new_output = graph->insert(aten::add, {new_output, bias});
       }

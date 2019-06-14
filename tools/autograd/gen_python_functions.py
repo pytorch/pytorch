@@ -42,6 +42,7 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
     'sub(Tensor, Scalar, Scalar)', 'sub_(Tensor, Scalar, Scalar)',
     'mul(Tensor, Scalar)', 'mul_(Tensor, Scalar)',
     'div(Tensor, Scalar)', 'div_(Tensor, Scalar)',
+    'empty(IntArrayRef, DimnameList?, TensorOptions)',
 ]
 
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
