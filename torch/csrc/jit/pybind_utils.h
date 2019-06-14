@@ -286,7 +286,7 @@ inline TypedIValue toTraceableIValue(py::handle input) {
   AT_ERROR(
       "Type '",
       type->python_str(),
-      "' cannot be traced. Only Tensors and Lists, Dicts, and"
+      "' cannot be traced. Only Tensors and (possibly nested) Lists, Dicts, and"
       " Tuples of Tensors can be traced");
 }
 

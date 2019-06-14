@@ -8588,7 +8588,7 @@ a")
     def test_non_tensor_tracing(self):
         def f(x):
             return x + param
-        with self.assertRaisesRegex(RuntimeError, "Only tensors .* Got int"):
+        with self.assertRaisesRegex(RuntimeError, "Type 'Tuple\[int\]' cannot be traced"):
             torch.jit.trace(f, (1,))
 
     def test_type_annotation_module(self):
@@ -12549,7 +12549,7 @@ a")
 
         src = torch.randn(seq_length, bsz, d_model)
         tgt = torch.randn(tgt_length, bsz, d_model)
-        transformer = nn.Transformer(d_model, nhead, num_encoder_layers, 
+        transformer = nn.Transformer(d_model, nhead, num_encoder_layers,
                                      num_decoder_layers, dim_feedforward, dropout=0.0)
         model = MyModule(transformer, tgt, src)
 
