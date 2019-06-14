@@ -91,11 +91,11 @@ class _LRScheduler(object):
                 and hasattr(self, 'get_lr_closed_form')):
             get_lr = self.get_lr_closed_form
             warnings.warn(
-                    "If an epoch parameter different from the current epoch is passed, "
-                    "the recursive form of the scheduler is overriden by its closed form "
-                    "whenver available, and will be deprecated.",
-                    DeprecationWarning
-                    )
+                "If an epoch parameter different from the current epoch is passed, "
+                "the recursive form of the scheduler is overriden by its closed form "
+                "whenver available, and will be deprecated.",
+                DeprecationWarning
+            )
 
         self.last_epoch = epoch
         for param_group, lr in zip(self.optimizer.param_groups, get_lr()):
