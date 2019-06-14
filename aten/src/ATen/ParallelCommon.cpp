@@ -1,6 +1,7 @@
 #include <ATen/Parallel.h>
 
 #include <ATen/Config.h>
+#include <ATen/PTThreadPool.h>
 #include <ATen/Version.h>
 
 #include <sstream>
@@ -18,9 +19,25 @@ namespace at {
 
 namespace {
 
-const char* get_env_var(const char* var_name) {
+const char* get_env_var(
+    const char* var_name, const char* def_value = nullptr) {
   const char* value = std::getenv(var_name);
-  return value ? value : "[not set]";
+  return value ? value : def_value;
+}
+
+size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
+  try {
+    if (auto* value = std::getenv(var_name)) {
+      int nthreads = std::stoi(value);
+      TORCH_CHECK(nthreads > 0);
+      return nthreads;
+    }
+  } catch (const std::exception& e) {
+    std::ostringstream oss;
+    oss << "Invalid " << var_name << " variable value, " << e.what();
+    TORCH_WARN(oss.str());
+  }
+  return def_value;
 }
 
 } // namespace
@@ -47,10 +64,31 @@ std::string get_parallel_info() {
      << std::thread::hardware_concurrency() << std::endl;
 
   ss << "Environment variables:" << std::endl;
-  ss << "\tOMP_NUM_THREADS : " << get_env_var("OMP_NUM_THREADS") << std::endl;
-  ss << "\tMKL_NUM_THREADS : " << get_env_var("MKL_NUM_THREADS") << std::endl;
+  ss << "\tOMP_NUM_THREADS : "
+     << get_env_var("OMP_NUM_THREADS", "[not set]") << std::endl;
+  ss << "\tMKL_NUM_THREADS : "
+     << get_env_var("MKL_NUM_THREADS", "[not set]") << std::endl;
+
+  ss << "Parallel backend: ";
+  #if AT_PARALLEL_OPENMP
+  ss << "OpenMP";
+  #elif AT_PARALLEL_NATIVE
+  ss << "native thread pool";
+  #elif AT_PARALLEL_NATIVE_TBB
+  ss << "native thread pool and TBB";
+  #endif
+  ss << std::endl;
 
   return ss.str();
+}
+
+int intraop_default_num_threads() {
+  size_t nthreads = get_env_num_threads("OMP_NUM_THREADS", 0);
+  nthreads = get_env_num_threads("MKL_NUM_THREADS", nthreads);
+  if (nthreads == 0) {
+    nthreads = TaskThreadPoolBase::defaultNumThreads();
+  }
+  return nthreads;
 }
 
 } // namespace at

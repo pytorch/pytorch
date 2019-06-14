@@ -10,11 +10,11 @@ from .linear import Linear
 from .normalization import LayerNorm
 
 class Transformer(Module):
-    r"""A transformer model. User is able to modified the attributes as needed. The architechture
-        is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
-        Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
-        Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
-        Processing Systems, pages 6000-6010.
+    r"""A transformer model. User is able to modify the attributes as needed. The architechture
+    is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
+    Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
+    Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
+    Processing Systems, pages 6000-6010.
 
     Args:
         d_model: the number of expected features in the encoder/decoder inputs (default=512).
@@ -66,22 +66,24 @@ class Transformer(Module):
             memory_mask: the mask for the encoder output (optional).
 
         Shape:
-            src: :math:`(S, N, E)`
-            tgt: :math:`(T, N, E)`
-            src_mask: math:`(S, S)`
-            tgt_mask: :math:`(T, T)`
-            memory_mask: :math:`(T, S)`
-            Note: The maksed positions are filled with float('-inf').
-                  Unmasked positions are filled with float(0.0). Masks ensure that the predictions 
-                  for position i depend only on the information before position i.
+            - src: :math:`(S, N, E)`.
+            - tgt: :math:`(T, N, E)`.
+            - src_mask: :math:`(S, S)`.
+            - tgt_mask: :math:`(T, T)`.
+            - memory_mask: :math:`(T, S)`.
 
-            output: :math:`(T, N, E)`
+            Note: The maksed positions are filled with float('-inf'). Unmasked positions
+            are filled with float(0.0). Masks ensure that the predictions 
+            for position i depend only on the information before position i.
+
+            - output: :math:`(T, N, E)`.
+
             Note: Due to the multi-head attention architecture in the transformer model,
-                  the output sequence length of a transformer is same as the input sequence
-                  (i.e. target) length of the decode.
+            the output sequence length of a transformer is same as the input sequence
+            (i.e. target) length of the decode.
 
-            where S is the source sequence length, T is the target sequence length,
-                N is the batch size, E is the feature number
+            where S is the source sequence length, T is the target sequence length, N is the
+            batch size, E is the feature number
 
         Examples:
             >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
@@ -122,6 +124,7 @@ class TransformerEncoder(Module):
         norm: the layer normalization component (optional).
 
     Examples::
+        >>> encoder_layer = nn.TransformerEncoderLayer(d_model, nhead)
         >>> transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers)
     """
 
@@ -161,6 +164,7 @@ class TransformerDecoder(Module):
         norm: the layer normalization component (optional).
 
     Examples::
+        >>> decoder_layer = nn.TransformerDecoderLayer(d_model, nhead)
         >>> transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers)
     """
 
@@ -194,12 +198,11 @@ class TransformerDecoder(Module):
 
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
-        This standard encoder layer is based on the paper "Attention Is All You Need".
-        Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, 
-        Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in 
-        Neural Information Processing Systems, pages 6000-6010.
-
-        Users may modify or implement in a different way during application.
+    This standard encoder layer is based on the paper "Attention Is All You Need".
+    Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, 
+    Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in 
+    Neural Information Processing Systems, pages 6000-6010. Users may modify or implement 
+    in a different way during application.
 
     Args:
         d_model: the number of expected features in the input (required).
@@ -245,12 +248,11 @@ class TransformerEncoderLayer(Module):
 
 class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
-        This standard decoder layer is based on the paper "Attention Is All You Need".
-        Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, 
-        Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in 
-        Neural Information Processing Systems, pages 6000-6010.
-
-        Users may modify or implement in a different way during application.
+    This standard decoder layer is based on the paper "Attention Is All You Need".
+    Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, 
+    Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in 
+    Neural Information Processing Systems, pages 6000-6010. Users may modify or implement 
+    in a different way during application.
 
     Args:
         d_model: the number of expected features in the input (required).

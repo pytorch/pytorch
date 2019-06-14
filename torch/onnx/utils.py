@@ -16,7 +16,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
-from torch._C import ListType, _propagate_and_assign_input_and_output_shapes
+from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -214,10 +214,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
     # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
     torch._C._jit_pass_prepare_division_for_onnx(graph)
-    # onnx only supports tensors, so we turn all out number types into tensors
-    torch._C._jit_pass_erase_number_types(graph)
     # onnx does not support tuples, so try to remove them
     torch._C._jit_pass_lower_all_tuples(graph)
+    # onnx only supports tensors, so we turn all out number types into tensors
+    torch._C._jit_pass_erase_number_types(graph)
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lint(graph)
 
@@ -288,16 +288,18 @@ def _model_to_graph(model, args, verbose=False, training=False,
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
             method_graph, params = model.forward._lowered_graph()
-            graph = _propagate_and_assign_input_and_output_shapes(
-                method_graph, tuple(args) + tuple(params), example_outputs, False, propagate)
+            in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
+            graph = _propagate_and_assign_input_shapes(
+                method_graph, tuple(in_vars), False, propagate)
         except AttributeError:
             raise RuntimeError('\'forward\' method must be a script method')
     elif isinstance(model, torch.jit.Function):
         assert example_outputs is not None, "example_outputs must be provided when exporting a TorchScript Function"
         method = model
         params = ()
-        graph = _propagate_and_assign_input_and_output_shapes(
-            model.graph, tuple(args), example_outputs, False, propagate)
+        in_vars, in_desc = torch.jit._flatten(tuple(args))
+        graph = _propagate_and_assign_input_shapes(
+            model.graph, tuple(in_vars), False, propagate)
     else:
         graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
         state_dict = _unique_state_dict(model)
@@ -312,6 +314,10 @@ def _model_to_graph(model, args, verbose=False, training=False,
 
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop)
+
+    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.Function):
+        out_vars, _ = torch.jit._flatten(tuple(example_outputs))
+        graph = _assign_output_shapes(graph, out_vars)
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
