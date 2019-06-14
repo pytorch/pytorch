@@ -30,7 +30,7 @@ void canonicalizeModifiedLoops(Node* n) {
       g->insertConstant(std::numeric_limits<int64_t>::max()));
 
   auto inp_condition = toIValue(loop.inputCond());
-  if (inp_condition == c10::nullopt || inp_condition->toInt() == false) {
+  if (inp_condition == c10::nullopt || inp_condition->toBool() == false) {
     condition = g->insert(aten::__and__, {condition, loop.inputCond()});
   }
   loop.replaceInputCondition(condition);

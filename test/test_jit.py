@@ -6981,6 +6981,18 @@ a")
         self.checkScript(test_varexit, (3,))
         self.checkScript(test_varexit, (2,))
 
+        def test_break_true():
+            i = 0
+            while True:
+                i += 1
+                if i == 3:
+                    break
+            while False:
+                i += 1
+            return i
+
+        self.checkScript(test_break_true, ())
+
     def test_break_continue_error(self):
         with self.assertRaisesRegex(RuntimeError, "Syntax"):
             cu = torch.jit.CompilationUnit('''
