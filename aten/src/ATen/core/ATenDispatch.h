@@ -18,46 +18,52 @@ namespace at {
 // an implementation for variables.
 class CAFFE2_API ATenOpTable {
  public:
-  ATenOpTable(std::string schema) : schema_(schema) {}
+  ATenOpTable(std::string schema)
+    : schema_(schema) {}
 
   template<class FuncType>
   FuncType* getOp(Backend backend, bool is_variable) const {
     if (is_variable) {
-      return reinterpret_cast<FuncType*>(getVariableWrapper());
+      return reinterpret_cast<FuncType*>(getVariableOp());
     }
     return reinterpret_cast<FuncType*>(getBaseOp(backend));
   }
  private:
   void registerOp(Backend backend, void* fn) {
+    TORCH_CHECK(function_table_[static_cast<int64_t>(backend)] == nullptr,
+        "Attempting to register variable function for schema ", schema_,
+        " and backend ", toString(backend),
+        " but there is already a function registered");
     function_table_[static_cast<int64_t>(backend)] = fn;
   }
 
-  void registerVariableWrapper(void* wrapper) {
-    wrapper_ = wrapper;
+  void registerVariableOp(void* fn) {
+    TORCH_CHECK(variable_function_ == nullptr,
+        "Attempting to register variable function for schema ", schema_,
+        " but there is already a function registered");
+    variable_function_ = fn;
   }
 
   void* getBaseOp(Backend backend) const {
     if (function_table_[static_cast<int64_t>(backend)] == nullptr) {
-      if (function_table_[static_cast<int64_t>(Backend::Undefined)] == nullptr) {
-        AT_ERROR("No function is registered for schema ", schema_, " on backend ", toString(backend));
-      }
+      TORCH_CHECK(function_table_[static_cast<int64_t>(Backend::Undefined)] != nullptr,
+          "No function is registered for schema ", schema_, " on backend ", toString(backend));
       return function_table_[static_cast<int64_t>(Backend::Undefined)];
     }
     return function_table_[static_cast<int64_t>(backend)];
   }
 
-  void* getVariableWrapper() const {
-    if (wrapper_ == nullptr) {
-      AT_ERROR("No variable function registered for ", schema_);
-    }
-    return wrapper_;
+  void* getVariableOp() const {
+    TORCH_CHECK(variable_function_ != nullptr,
+        "No variable function registered for ", schema_);
+    return variable_function_;
   }
 
   friend class ATenDispatch;
 
   std::string schema_;
   void* function_table_[static_cast<int64_t>(Backend::NumOptions)] = {nullptr};
-  void* wrapper_ = nullptr;
+  void* variable_function_ = nullptr;
 };
 
 class CAFFE2_API ATenDispatch {
@@ -72,19 +78,18 @@ class CAFFE2_API ATenDispatch {
   }
 
   template <class FuncType>
-  ATenDispatch& registerVariableWrapper(const char* schema, FuncType* fn) {
+  ATenDispatch& registerVariableOp(const char* schema, FuncType* fn) {
     if (op_tables_.find(schema) == op_tables_.end()) {
       op_tables_.insert(std::make_pair(schema, ATenOpTable(schema)));
     }
-    op_tables_.at(schema).registerVariableWrapper(reinterpret_cast<void*>(fn));
+    op_tables_.at(schema).registerVariableOp(reinterpret_cast<void*>(fn));
     return *this;
   }
 
   const ATenOpTable* getOpTable(const char* schema) const {
     auto iter = op_tables_.find(schema);
-    if (iter == op_tables_.end()) {
-      AT_ERROR("No functions are registered for schema ", schema);
-    }
+    TORCH_CHECK(iter != op_tables_.end(),
+        "No functions are registered for schema ", schema);
     return &iter->second;
   }
 
