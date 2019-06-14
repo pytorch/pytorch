@@ -29,7 +29,7 @@ static void check_unique_names(DimnameList names) {
     }
     auto dup = find_untagged_name(it + 1, names.end(), it->untagged_name());
     while (dup != names.end()) {
-      TORCH_CHECK(it->name() != dup->name(),
+      TORCH_CHECK(it->full_name() != dup->full_name(),
           "Cannot construct a tensor with duplicate names. Got names: ",
           names, ".");
 
