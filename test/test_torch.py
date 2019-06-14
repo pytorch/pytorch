@@ -1256,6 +1256,10 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             x = torch.randn(shape, device=device)
 
+            for fn in [torch.max, torch.min]:
+                ident_err = 'operation does not have an identity'
+                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x))
+
             for item in fns_to_test:
                 name, fn, identity = item
                 if identity is None:
