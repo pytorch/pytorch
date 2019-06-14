@@ -119,7 +119,9 @@ class Conf:
             parameters["requires"].append(dependency_build.gen_build_name("build"))
 
         if not self.is_important:
-            parameters["filters"] = {"branches": {"only": "master"}}
+            # If you update this, update
+            # caffe2_build_definitions.py too
+            parameters["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
 
         return {self.gen_build_name(phase): parameters}
 

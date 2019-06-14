@@ -24,6 +24,8 @@ class Reducer {
       std::vector<std::vector<size_t>> bucket_indices,
       std::shared_ptr<c10d::ProcessGroup> process_group);
 
+  ~Reducer() noexcept(false);
+
   // To (re-)initialize bucket assignment, pass a list of buckets, each
   // of which is specified by a list of indices in the variables list.
   // This function performs validation that the variables within a bucket
@@ -52,6 +54,8 @@ class Reducer {
   std::vector<std::vector<std::shared_ptr<torch::autograd::Function>>>
       grad_accumulators_;
   std::unordered_map<torch::autograd::Function*, std::tuple<int, int>> func_;
+  std::unordered_map<uintptr_t, std::shared_ptr<torch::autograd::Function>>
+      hooks_;
 
   bool expect_autograd_hooks_;
   bool require_finalize_;

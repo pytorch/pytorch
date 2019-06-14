@@ -17,7 +17,7 @@ CONFIG_TREE_DATA = [
                 XImportant("3.6"),
                 ("3.6", [
                     ("xla", [XImportant(True)]),
-                    ("namedtensor", [X(True)]),
+                    ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
             ("7", [X("3.6")]),
@@ -25,7 +25,12 @@ CONFIG_TREE_DATA = [
     ]),
     ("xenial", [
         ("clang", [
-            ("5", [XImportant("3.6")]),  # This is actually the ASAN build
+            ("5", [
+                XImportant("3.6"),  # This is actually the ASAN build
+                ("3.6", [
+                    ("namedtensor", [XImportant(True)]),  # ASAN
+                ]),
+            ]),
         ]),
         ("cuda", [
             ("9", [
@@ -38,6 +43,9 @@ CONFIG_TREE_DATA = [
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
                 X("2.7"),
                 XImportant("3.6"),
+                ("2.7", [
+                    ("namedtensor", [XImportant(True)]),
+                ]),
             ]),
             ("9.2", [X("3.6")]),
             ("10", [X("3.6")]),
@@ -157,6 +165,9 @@ class NamedTensorConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_namedtensor"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
 
 
 class ImportantConfigNode(TreeConfigNode):
