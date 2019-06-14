@@ -827,8 +827,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               if (num_outputs == 1) {
                 future_->markCompleted(stack.back());
               } else {
-                future_->markCompleted(
-                    c10::ivalue::TuplePtr::create(jit::last(stack, num_outputs).vec()));
+                future_->markCompleted(c10::ivalue::Tuple::create(
+                    jit::last(stack, num_outputs).vec()));
               }
             }
             return false;
@@ -940,8 +940,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (num_outputs == 1) {
         push(stack, future_->value());
       } else {
-        auto tuple = future_->value().toTupleRef();
-        for (const IValue& value : tuple) {
+        auto tuple = future_->value().toTuple();
+        for (const IValue& value : tuple->elements()) {
           push(stack, value);
         }
       }
