@@ -1393,7 +1393,7 @@ struct to_ir {
     auto itrs = stmt.itrs();
     auto body = stmt.body();
     auto& range = stmt.range();
-    auto target = Var(targets[0]).name();
+    auto target = targets[0];
 
     auto listArg = siv->asValue(range, method);
     auto max_trip_count_val = emitBuiltinCall(
@@ -1422,7 +1422,7 @@ struct to_ir {
 
   void emitForInTensorLoop(const For& stmt, Value* tensorArg) {
     auto targets = stmt.targets();
-    auto target = Var(targets[0]).name();
+    auto target = targets[0];
     auto itrs = stmt.itrs();
     auto body = stmt.body();
     auto& range = stmt.range();

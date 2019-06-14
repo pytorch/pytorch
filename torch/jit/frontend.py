@@ -642,9 +642,15 @@ class ExprBuilder(Builder):
             raise NotSupportedError(r, "comprehension ifs not supported yet")
 
         elt_expr = build_expr(ctx, stmt.elt)
-        target_expr = build_expr(ctx, stmt.generators[0].target)
+
+        target = stmt.generators[0].target
+        target_range = ctx.make_range(
+            target.lineno,
+            target.col_offset,
+            target.col_offset + len(target.id)
+        )
         iter_expr = build_expr(ctx, stmt.generators[0].iter)
-        return ListComp(r, elt_expr, target_expr, iter_expr)
+        return ListComp(r, elt_expr, Ident(target_range, target.id), iter_expr)
 
     @staticmethod
     def build_Starred(ctx, expr):

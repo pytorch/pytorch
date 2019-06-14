@@ -10042,7 +10042,7 @@ a")
             SomeModule()
 
     def test_single_starred_expr_for_loop(self):
-        with self.assertRaisesRegex(RuntimeError, 'unexpected expression'):
+        with self.assertRaisesRegex(RuntimeError, 'expected ident but found'):
             cu = torch.jit.CompilationUnit('''
             def test():
                 x = 0
