@@ -27,7 +27,7 @@ inline c10::ListPtr<at::Tensor> _call_caffe2_op(
   return std::move(op).move_newstyle_outputs();
 }
 
-at::Tensor unwrap_tensor(at::Tensor&& tensor) {
+inline at::Tensor unwrap_tensor(at::Tensor&& tensor) {
   if (tensor.is_variable()) {
     auto tensor_impl = tensor.unsafeGetTensorImpl();
     auto tensor_impl_copy = tensor_impl->shallow_copy_and_detach(
@@ -39,7 +39,7 @@ at::Tensor unwrap_tensor(at::Tensor&& tensor) {
   }
 }
 
-IValue unwrap(IValue&& ivalue) {
+inline IValue unwrap(IValue&& ivalue) {
   // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
   if (ivalue.isTensor() && ivalue.toTensor().defined()) {
     return unwrap_tensor(std::move(ivalue).toTensor());
