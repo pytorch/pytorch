@@ -32,6 +32,8 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"MemoryFormat", ParameterType::MEMORY_FORMAT},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
+  {"Dimname", ParameterType::DIMNAME},
+  {"DimnameList", ParameterType::DIMNAME_LIST},
 };
 
 // Default arg name translations for compatibility with NumPy.
@@ -157,6 +159,7 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       return false;
     }
+    case ParameterType::DIMNAME_LIST:
     case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -196,6 +199,9 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::MEMORY_FORMAT: return "torch.memory_format";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
+#ifdef NAMEDTENSOR_ENABLED
+    case ParameterType::DIMNAME_LIST: return "tuple of names";
+#endif
     default: throw std::runtime_error("unknown parameter type");
   }
 }
