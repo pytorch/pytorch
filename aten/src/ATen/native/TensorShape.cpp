@@ -460,7 +460,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
                    self.sizes(), " at dimension ", dim);
   }
 #ifdef NAMEDTENSOR_ENABLED
-  const auto outnames = namedinference::reduction_op(self.names(), dim);
+  const auto outnames = namedinference::erase_name(self.names(), dim);
 #endif
   if (index < 0) {
     index += size;
