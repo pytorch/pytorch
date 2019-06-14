@@ -139,7 +139,7 @@ inline scalar_t parallel_reduce(
         int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
         internal::_get_intraop_pool().run(
           // copy task_id, local_start, local_end
-          [&task, &promises, task_id, local_start, local_end](std::promise<void>&& fp) {
+          [&task, &promises, task_id, local_start, local_end]() {
             task(task_id, local_start, local_end);
             promises[task_id].set_value();
           }
