@@ -30,6 +30,7 @@ OpRegistrationListener::~OpRegistrationListener() {}
 
 Dispatcher::Dispatcher()
 : operators_()
+, operatorLookupTable_()
 , listeners_(guts::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
@@ -40,20 +41,17 @@ C10_EXPORT Dispatcher& Dispatcher::singleton() {
   return _singleton;
 }
 
-c10::optional<OperatorHandle> Dispatcher::findSchema(const char* operator_name, const char* overload_name) {
-  const auto found = std::find_if(operators_.begin(), operators_.end(), [&] (const OperatorDef& opDef) {
-    return opDef.op.schema().name() == operator_name && opDef.op.schema().overload_name() == overload_name;
-  });
-
-  if (found == operators_.end()) {
+c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
+  const auto found = operatorLookupTable_.find(overload_name);
+  if (found == operatorLookupTable_.end()) {
     return c10::nullopt;
   }
 
-  return OperatorHandle(found);
+  return found->second;
 }
 
 OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options) {
-  const auto found = findSchema(schema.name().c_str(), schema.overload_name().c_str());
+  const auto found = findSchema(schema.operator_name());
   if (found != c10::nullopt) {
     if (found->schema() != schema) {
       std::ostringstream str;
@@ -67,7 +65,10 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
   }
 
   operators_.emplace_back(std::move(schema), std::move(options));
-  return OperatorHandle(--operators_.end());
+  OperatorHandle handle(--operators_.end());
+  operatorLookupTable_.emplace(schema.operator_name(), handle);
+
+  return handle;
 }
 
 SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options) {
@@ -81,6 +82,8 @@ SchemaRegistrationHandleRAII Dispatcher::registerSchema(FunctionSchema schema, O
     // note: call listeners *after* operator is added, i.e. dispatcher is already valid for new op
     listeners_->callOnOperatorRegistered(op);
   }
+
+  TORCH_INTERNAL_ASSERT(op.schema().operator_name() == schema.operator_name());
 
   return SchemaRegistrationHandleRAII {op, RegistrationHandleRAII([this, op] {
     deregisterSchema_(op);
@@ -101,6 +104,7 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op) {
     listeners_->callOnOperatorDeregistered(op);
 
     operators_.erase(op.operatorIterator_);
+    operatorLookupTable_.erase(op.schema().operator_name());
   }
 }
 

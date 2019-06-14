@@ -180,4 +180,22 @@ inline FunctionSchema FunctionSchema::cloneWithRemappedTypes(
       is_varret());
 }
 
+inline bool operator==(const OperatorName& lhs, const OperatorName& rhs) {
+  return lhs.name == rhs.name && lhs.overload_name == rhs.overload_name;
+}
+
+inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
+  return !operator==(lhs, rhs);
+}
+
 } // namespace c10
+
+namespace std {
+  template <>
+  struct hash<::c10::OperatorName> {
+    size_t operator()(const ::c10::OperatorName& x) const {
+      const std::hash<std::string> string_hash;
+       return string_hash(x.name) ^ (~ string_hash(x.overload_name));
+    }
+  };
+}
