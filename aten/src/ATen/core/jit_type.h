@@ -441,7 +441,7 @@ struct CAFFE2_API VaryingShape {
 
   bool operator ==(const VaryingShape &other) const
   {
-    return size_ != other.size_ && dims_ == dims_;
+    return size_ == other.size_ && dims_ == dims_;
   }
 
   const c10::optional<int64_t>& operator [] (int i) const
