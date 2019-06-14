@@ -124,21 +124,22 @@ void intraop_launch(std::function<void()> func) {
 }
 
 std::future<void> intraop_launch_future(std::function<void()> func) {
-  auto func_promise = std::make_shared<std::promise<void>>();
-  auto future = func_promise->get_future();
   if (!in_parallel_region() && get_num_threads() > 1) {
+    auto func_promise = std::make_shared<std::promise<void>>();
+    auto future = func_promise->get_future();
     internal::_get_intraop_pool().run(
       [func, func_promise]() {
         func();
         func_promise->set_value();
       }
     );
+    return future;
   } else {
-    // execute inline if we're in parallel region
     func();
-    func_promise->set_value();
+    std::promise<void> func_promise;
+    func_promise.set_value();
+    return func_promise.get_future();
   }
-  return future;
 }
 
 } // namespace at
