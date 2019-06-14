@@ -43,7 +43,8 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
-    if (N == 0) {
+    if (X.numel() == 0) {
+      VLOG(2) << "Number of elements is 0 in PoolOp";
       return true;
     }
     if (global_pooling_) {
@@ -76,7 +77,8 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     ConvPoolOpBase<Context>::SetOutputSize(X, Y, C);
     const T* X_data = X.template data<T>();
     T* Y_data = Y->template mutable_data<T>();
-    if (N == 0) {
+    if (X.numel() == 0) {
+      VLOG(2) << "Number of elements is 0 in PoolOp";
       return true;
     }
     if (global_pooling_) {
@@ -120,6 +122,10 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     const auto& dY = Input(2);
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
     const int N = X.dim32(0);
+    if (X.numel() == 0) {
+      VLOG(2) << "Number of elements is 0 in PoolGradientOp";
+      return true;
+    }
     const int C = X.dim32(1);
     const std::vector<int> X_HW_dims = GetDims(X);
     const std::vector<int> Y_HW_dims = GetDims(Y);
@@ -159,6 +165,10 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
     auto* dX = Output(0, X.sizes(), at::dtype<T>());
     const int ndim = X.dim();
     const int N = X.dim32(0);
+    if (X.numel() == 0) {
+      VLOG(2) << "Number of elements is 0 in PoolGradientOp";
+      return true;
+    }
     const int C = X.dim32(ndim - 1);
     const std::vector<int> X_HW_dims = GetDims(X);
     const std::vector<int> Y_HW_dims = GetDims(Y);

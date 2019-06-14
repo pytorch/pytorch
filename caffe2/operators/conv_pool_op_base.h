@@ -236,6 +236,7 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
+    CAFFE_ENFORCE_GE(input.dim(), 2);
     const int inner_size = input.size_from_dim(1);
     CAFFE_ENFORCE_GT(inner_size, 0);
     std::vector<int> output_dims;

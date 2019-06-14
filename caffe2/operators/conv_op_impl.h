@@ -45,9 +45,9 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     kernel_size *= kernel_[i];
   }
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
-
-  if (N == 0) {
+  if (X.numel() == 0) {
     Y->template mutable_data<T>();
+    VLOG(2) << "Number of elements is 0 in ConvOp";
     return true;
   }
 
@@ -220,8 +220,9 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
   ConvPoolOpBase<Context>::SetOutputSize(X, Y, M);
 
-  if (N == 0) {
+  if (X.numel() == 0) {
     Y->template mutable_data<T>();
+    VLOG(2) << "Number of elements is 0 in ConvOp";
     return true;
   }
 
@@ -517,6 +518,25 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   CAFFE_ENFORCE_EQ(M % group_, 0);
   auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
+  if (X.numel() == 0) {
+    VLOG(2) << "Number of elements is 0 in ConvGradientOp";
+    T* dfilter_data = dfilter->template mutable_data<T>();
+    // Pre-setting the gradients to zero.
+    math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
+    if (!no_bias_) {
+      auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T>());
+      T* dbias_data = dbias->template mutable_data<T>();
+      math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
+    }
+    if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
+      // Set the size for the gradient w.r.t. the input.
+      /* auto* dX = */ Output(
+          no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD,
+          X.sizes(),
+          at::dtype<T>());
+    }
+    return true;
+  }
   // The dimension of each kernel
   const int kernel_dim = C / group_ * kernel_dims_size;
   // The col buffer is stored in CHW order as well - kernel_dim, and the height
@@ -745,6 +765,25 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
   CAFFE_ENFORCE_EQ(M % group_, 0);
   auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T>());
+  if (dY.dim32(0) == 0) {
+    T* dfilter_data = dfilter->template mutable_data<T>();
+    // Pre-setting the gradients to zero.
+    math::Set<T, Context>(dfilter->numel(), 0, dfilter_data, &context_);
+    VLOG(2) << "Batch size for dY is 0 in ConvGradientOp";
+    if (!no_bias_) {
+      auto* dbias = Output(BIAS_OR_INPUT_GRAD, {M}, at::dtype<T>());
+      T* dbias_data = dbias->template mutable_data<T>();
+      math::Set<T, Context>(dbias->numel(), 0, dbias_data, &context_);
+    }
+    if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
+      // Compute the gradient w.r.t. the input.
+      /* auto* dX = */ Output(
+          no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD,
+          X.sizes(),
+          at::dtype<T>());
+    }
+    return true;
+  }
   // The dimension of each kernel
   const int kernel_dim = C / group_ * kernel_dims_size;
 

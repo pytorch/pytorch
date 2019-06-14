@@ -519,6 +519,10 @@ bool CudnnConvOp::DoRunWithType() {
   CAFFE_ENFORCE(X.dim() >= 3 && X.dim() <= 5);
   CAFFE_ENFORCE(filter.dim() >= 3 && filter.dim() <= 5);
   const int M = filter.dim32(0);
+  if (X.numel() == 0) {
+    VLOG(2) << "Number of elements is 0 in CudnnConvOp";
+    return true;
+  }
   auto output_sizes = ConvPoolOpBase<CUDAContext>::GetOutputSize(X, M);
   auto* Y = Output(0, output_sizes, at::dtype<T_Y>());
 
@@ -950,7 +954,8 @@ bool CudnnConvGradientOp::DoRunWithType() {
   }
   auto* dfilter = Output(FILTER_GRAD, filter.sizes(), at::dtype<T_DW>());
 
-  if (N == 0) {
+  if (X.numel() == 0) {
+    VLOG(2) << "Number of elements is 0 in CudnnConvOp";
     math::Set<T_DW, CUDAContext>(
         dfilter->numel(),
         T_DW(0),
@@ -965,11 +970,11 @@ bool CudnnConvGradientOp::DoRunWithType() {
           &context_);
     }
     if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
-      auto* dX = Output(
+      // Compute the gradient w.r.t. the input.
+      /* auto* dX = */ Output(
           no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD,
           X.sizes(),
           at::dtype<T_DX>());
-      dX->template mutable_data<T_DX>();
     }
     return true;
   }
@@ -1403,8 +1408,10 @@ bool CudnnConvGradientOp::DoRunWithType() {
           dfilter->template mutable_data<T_DW>() + i * group_offset_filter));
       if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
         // Compute the gradient w.r.t. the input.
-        auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-        dX->ResizeLike(X);
+        auto* dX = Output(
+            no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD,
+            X.sizes(),
+            at::dtype<T_DX>());
         CUDNN_ENFORCE(cudnnConvolutionBackwardData(
             state->cudnn_handle(),
             cudnnTypeWrapper<T_W>::kOne(),
