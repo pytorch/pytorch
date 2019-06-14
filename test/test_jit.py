@@ -13153,6 +13153,26 @@ a")
         self.checkScript(fn, ({'hi': 2, 'bye': 3},))
         self.checkScript(fn, ({'bye': 3},))
 
+
+        # Check evaluation order
+        @torch.jit.script
+        def a():
+            print("a")
+            return 3
+
+        @torch.jit.script
+        def b():
+            print("b")
+            return {3: 2, 4: 1}
+
+        @torch.jit.script
+        def fn():
+            return a() in b()
+
+        with self.capture_stdout() as captured:
+            self.assertTrue(fn())
+        self.assertEqual(captured[0], "a\nb\n")
+
     def test_in_for_and_comp_expr(self):
         def fn(d):
             # type: (Dict[str, int]) -> List[int]
