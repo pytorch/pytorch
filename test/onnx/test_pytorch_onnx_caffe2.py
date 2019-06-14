@@ -1691,14 +1691,6 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(4, 3, requires_grad=True)
         self.run_model_test(TopKModel(), train=False, input=(x,), batch_size=BATCH_SIZE, example_outputs=torch.topk(x, 3, dim=0))
 
-    def test_topk(self):
-        class TopKModel(torch.nn.Module):
-            def forward(self, input):
-                return torch.topk(input, 3)
-        model = TopKModel()
-        x = torch.arange(1., 6.)
-        self.run_model_test(TopKModel(), train=False, input=x, batch_size=BATCH_SIZE)
-
     def test_floor(self):
         class FloorModel(torch.nn.Module):
             def forward(self, input):
