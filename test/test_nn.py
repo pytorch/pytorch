@@ -1556,37 +1556,37 @@ class TestNN(NNTestCase):
         with self.assertRaises(TypeError):
             net.to(cpu, torch.tensor(3, dtype=torch.long), non_blocking=True)
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_global_flag_overwrite_module_params_on_conversion(self):
+    def test_overwrite_module_params_on_conversion(self):
         torch.__future__.set_overwrite_module_params_on_conversion(False)
 
+        # Test that the current default behavior of
         # yf225 TODO: add comment for this test! Saying that the current default behavior is just wrong
-        m = nn.Linear(2,3)
+        m = nn.Linear(2,3).float()
         mw = m.weight[:]
-        m.to('cuda')
+        m.double()
         mw[0][0] = 5
-        with self.assertRaisesRegex(RuntimeError, "Expected object of backend CPU but got backend CUDA"):
+        with self.assertRaisesRegex(RuntimeError, "Expected object of scalar type Float but got scalar type Double"):
             self.assertTrue(mw[0][0] == mw._base[0][0])
 
         torch.__future__.set_overwrite_module_params_on_conversion(True)
 
         # yf225 TODO: add comment for this test! Saying that the future behavior (aka. not doing cpu-cuda inplace) is correct
-        m = nn.Linear(2,3)
+        m = nn.Linear(2,3).float()
         mw = m.weight[:]
-        m.to('cuda')
+        m.double()
         mw[0][0] = 5   # yf225 TODO: fix comment: We have a view on the old thing, and that needs to be consistent
         self.assertTrue(mw[0][0] == mw._base[0][0])
 
         # Test that when `torch.__future__.get_overwrite_module_params_on_conversion()`
-        # is true, `cpu_module.to("cuda")` doesn't preserve previous references
-        # to `cpu_module`'s parameters or gradients.
-        m = nn.Linear(20, 10)
-        m.weight.grad = torch.randn(10, 20)
+        # is true, `float_module.double()` doesn't preserve previous references
+        # to `float_module`'s parameters or gradients.
+        m = nn.Linear(20, 10).float()
+        m.weight.grad = torch.randn(10, 20).float()
         weight_ref = m.weight
         weight_grad_ref = m.weight.grad
-        m.to('cuda')
-        self.assertNotEqual(weight_ref.device, m.weight.device)
-        self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
+        m.double()
+        self.assertNotEqual(weight_ref.dtype, m.weight.dtype)
+        self.assertNotEqual(weight_grad_ref.dtype, m.weight.grad.dtype)
 
         def add_one_inplace(t):
             with torch.no_grad():
@@ -1639,6 +1639,11 @@ class TestNN(NNTestCase):
         self.assertEqual(weight_grad_ref._version, m_weight_grad_version_saved)
 
         torch.__future__.set_overwrite_module_params_on_conversion(False)
+
+        # yf225 TODO: add _apply test for converting to sparse type, because it has to use a different TensorImpl type
+
+    def test_overwrite_module_params_on_device_conversion(self):
+        # yf225 TODO: also test cpu-cuda conversion!
 
     def test_type(self):
         l = nn.Linear(10, 20)
