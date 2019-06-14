@@ -15,7 +15,7 @@ from functools import reduce
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
-from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent
+from torch.autograd.profiler import profile, format_time, EventList, FunctionEvent, emit_nvtx
 from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, skipIfRocm,
@@ -2571,6 +2571,18 @@ class TestAutograd(TestCase):
         if sys.platform != "win32":
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
+
+    @skipIfRocm
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    def test_profiler_emit_nvtx(self):
+        # This test is not intended to ensure correctness of nvtx ranges.
+        # That would require something a great deal more complex (you'd have to create a
+        # profile in a subprocess, open it, and parse the sql somehow).
+        # This test is merely intended to catch if emit_nvtx breaks on construction.
+        a = torch.tensor([1, 2, 3], dtype=torch.float32, device='cuda')
+        with torch.cuda.profiler.profile():
+            with emit_nvtx():
+                a.add(1.0)
 
     def test_dir(self):
         x = torch.randn(10, 10)
