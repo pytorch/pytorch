@@ -1673,6 +1673,11 @@
     CPU: _rsqrt_out_cpu
     CUDA: _rsqrt_out_cuda
 
+- func: select(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
+  variants: function, method
+  device_guard: False
+  named_guard: False
+
 - func: select(Tensor(a) self, int dim, int index) -> Tensor(a)
   variants: function, method
   device_guard: False

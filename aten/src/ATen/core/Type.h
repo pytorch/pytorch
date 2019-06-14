@@ -22,6 +22,10 @@
 #include <limits>
 #include <memory>
 
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/Dimname.h>
+#endif
+
 // To solve the conflict of s_addr in inaddr.h
 #ifdef _MSC_VER
 #ifdef s_addr
@@ -296,6 +300,7 @@ struct CAFFE2_API Type {
   virtual Tensor hardshrink_backward(const Tensor & grad_out, const Tensor & self, Scalar lambd) const = 0;
   virtual Tensor rsqrt(const Tensor & self) const = 0;
   virtual Tensor & rsqrt_(Tensor & self) const = 0;
+  virtual Tensor select(const Tensor & self, Dimname dim, int64_t index) const = 0;
   virtual Tensor select(const Tensor & self, int64_t dim, int64_t index) const = 0;
   virtual Tensor sigmoid(const Tensor & self) const = 0;
   virtual Tensor & sigmoid_(Tensor & self) const = 0;

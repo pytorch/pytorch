@@ -479,6 +479,12 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   return result;
 }
 
+#ifdef NAMEDTENSOR_ENABLED
+Tensor select(const Tensor& self, Dimname dim, int64_t index) {
+  return at::select(self, dimname_to_position(self, dim), index);
+}
+#endif
+
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {

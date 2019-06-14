@@ -513,6 +513,7 @@ class CAFFE2_API Tensor {
   Tensor hardshrink_backward(const Tensor & grad_out, Scalar lambd) const;
   Tensor rsqrt() const;
   Tensor & rsqrt_();
+  Tensor select(Dimname dim, int64_t index) const;
   Tensor select(int64_t dim, int64_t index) const;
   Tensor sigmoid() const;
   Tensor & sigmoid_();
