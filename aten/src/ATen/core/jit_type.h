@@ -105,7 +105,14 @@ public:
     return kind_;
   }
 
-  virtual bool requires_grad() const { return false; }
+  virtual bool requires_grad() const { 
+    for(const auto& ct : containedTypes()) {
+      if (ct->requires_grad()) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   // Dynamically cast this object to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid.
@@ -193,9 +200,7 @@ struct SingleElementType : public Type {
   at::ArrayRef<TypePtr> containedTypes() const override {
     return elem;
   }
-  bool requires_grad() const override {
-    return elem->requires_grad();
-  }
+
   bool operator==(const Type& rhs) const override {
     if(auto rhs_ = rhs.cast<T>()) {
       return *getElementType() == *rhs_->getElementType();
@@ -790,10 +795,6 @@ struct CAFFE2_API DictType : public Type {
     return types;
   }
 
-  bool requires_grad() const override {
-    return getValueType()->requires_grad() || getKeyType()->requires_grad();
-  }
-
   bool operator==(const Type& rhs) const override {
     if (auto dict_rhs = rhs.cast<DictType>()) {
       return *getKeyType() == *(dict_rhs->getKeyType()) &&
@@ -876,10 +877,7 @@ struct CAFFE2_API TupleType : public Type {
       return a->isSubtypeOf(b);
     });
   }
-  bool requires_grad() const override {
-    return std::any_of(elements_.begin(), elements_.end(),
-                       [](const TypePtr& ptr) { return ptr->requires_grad(); });
-  }
+  
   std::string str() const override {
     std::stringstream ss;
     ss << "(";

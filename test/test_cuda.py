@@ -2178,6 +2178,11 @@ class TestCuda(TestCase):
     def test_inverse(self):
         _TestTorchMixin._test_inverse(self, lambda t: t.cuda())
 
+    @slowTest
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_inverse_many_batches(self):
+        _TestTorchMixin._test_inverse_slow(self, lambda t: t.cuda())
+
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_pinverse(self):
         _TestTorchMixin._test_pinverse(self, lambda t: t.cuda())
@@ -2205,6 +2210,11 @@ class TestCuda(TestCase):
     def test_solve_batched(self):
         _TestTorchMixin._test_solve_batched(self, lambda t: t.cuda())
 
+    @slowTest
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_solve_batched_many_batches(self):
+        _TestTorchMixin._test_solve_batched_many_batches(self, lambda t: t.cuda())
+
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_solve_batched_dims(self):
         _TestTorchMixin._test_solve_batched_dims(self, lambda t: t.cuda())
@@ -2216,6 +2226,11 @@ class TestCuda(TestCase):
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_solve_batched(self):
         _TestTorchMixin._test_cholesky_solve_batched(self, lambda t: t.cuda())
+
+    @slowTest
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_cholesky_solve_batched_many_batches(self):
+        _TestTorchMixin._test_cholesky_solve_batched_many_batches(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_cholesky_solve_batched_dims(self):
@@ -2677,10 +2692,12 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipCUDANonDefaultStreamIf(True)
     def test_nuclear_norm_axes_small_brute_force(self):
         _TestTorchMixin._test_nuclear_norm_axes(self, device='cuda')
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipCUDANonDefaultStreamIf(True)
     def test_nuclear_norm_exceptions(self):
         _TestTorchMixin._test_nuclear_norm_exceptions(self, device='cuda')
 
@@ -2699,6 +2716,11 @@ class TestCuda(TestCase):
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_triangular_solve_batched(self):
         _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t.cuda())
+
+    @slowTest
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_triangular_solve_batched_many_batches(self):
+        _TestTorchMixin._test_triangular_solve_batched_many_batches(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_triangular_solve_batched_dims(self):

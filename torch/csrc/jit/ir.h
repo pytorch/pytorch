@@ -464,7 +464,8 @@ struct TORCH_API Node {
   // defining a new Value to represent any term that has multiple
   // definitions depending on how control flowed. Outputs of the node containing
   // control flow serve a similiar purpose defining new values for variables
-  // that would have different defintions depending on which way control flowed.
+  // that would have different definitions depending on which way control
+  // flowed.
 
   at::ArrayRef<Block*> blocks() {
     return blocks_;
