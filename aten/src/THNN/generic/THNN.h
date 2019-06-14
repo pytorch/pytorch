@@ -102,44 +102,6 @@ TH_API void THNN_(HardTanh_updateGradInput)(
           accreal max_val,             // upper threshold
           bool inplace);
 
-TH_API void THNN_(Im2Col_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int64_t kH, int64_t kW,
-          int64_t dilationH, int64_t dilationW,
-          int64_t padH, int64_t padW,
-          int64_t dH, int64_t dW);
-
-TH_API void THNN_(Im2Col_updateGradInput)(
-          THNNState *state,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t isizeH, int64_t isizeW,
-          int64_t kH, int64_t kW,
-          int64_t dilationH, int64_t dilationW,
-          int64_t padH, int64_t padW,
-          int64_t dH, int64_t dW);
-
-TH_API void THNN_(Col2Im_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int64_t outputHeight, int64_t outputWidth,
-          int64_t kH, int64_t kW,
-          int64_t dilationH, int64_t dilationW,
-          int64_t padH, int64_t padW,
-          int64_t dH, int64_t dW);
-
-TH_API void THNN_(Col2Im_updateGradInput)(
-          THNNState *state,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t kH, int64_t kW,
-          int64_t dilationH, int64_t dilationW,
-          int64_t padH, int64_t padW,
-          int64_t dH, int64_t dW);
-
 TH_API void THNN_(LeakyReLU_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // [MODIFIED] input tensor
