@@ -370,6 +370,7 @@ def add_torch_libs():
         deps=[
             ":libtorch",
             ":thnn",
+            "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/THD:THD_cpu",
             "//caffe2/torch/lib/c10d:c10d_cpu",
             "//caffe2/torch/lib/libshm:libshm",
@@ -390,6 +391,7 @@ def add_torch_libs():
         deps=[
             ":libtorch_cuda",
             ":thnn",
+            "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/THD:THD",
             "//caffe2/torch/lib/c10d:c10d",
             "//caffe2/torch/lib/libshm:libshm",
