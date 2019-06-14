@@ -791,41 +791,11 @@ class CAFFE2_API Tensor {
     return func(*this, std::forward<Args>(params)...);
   }
 
-  friend struct WeakTensor;
-
 protected:
   friend class ::caffe2::Tensor;
 
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
-};
-
-struct CAFFE2_API WeakTensor {
-  WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
-
-  // XXX: this can return undefined tensors
-  // Ideally it would be c10::optional<Tensor>, but MSVC is too cool for that
-  Tensor lock() const {
-    return Tensor(weak_impl_.lock());
-  }
-
-  bool is_same(const WeakTensor& other) const noexcept {
-    return weak_impl_ == other.weak_impl_;
-  }
-
-  size_t use_count() const noexcept {
-    return weak_impl_.use_count();
-  }
-  size_t weak_use_count() const noexcept {
-    return weak_impl_.weak_use_count();
-  }
-
-  TensorImpl* unsafeGetTensorImpl() const {
-    return weak_impl_._unsafe_get_target();
-  }
-
-private:
-  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_impl_;
 };
 
 namespace detail {
