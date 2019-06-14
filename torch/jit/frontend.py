@@ -8,8 +8,8 @@ from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 
-# Borrowed from cPython implementation 
-# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411# 
+# Borrowed from cPython implementation
+# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
 
 _reserved_prefix = '__jit'
 _reserved_names = {'print'}
@@ -283,6 +283,13 @@ class StmtBuilder(Builder):
         return Assign(lhs, rhs)
 
     @staticmethod
+    def build_AnnAssign(ctx, stmt):
+        rhs = build_expr(ctx, stmt.value)
+        lhs = build_expr(ctx, stmt.target)
+        the_type = build_expr(ctx, stmt.annotation)
+        return Assign(lhs, rhs, the_type)
+
+    @staticmethod
     def build_Return(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("return"))
         return Return(r, None if stmt.value is None else build_expr(ctx, stmt.value))
@@ -526,10 +533,8 @@ class ExprBuilder(Builder):
         def build_SliceExpr(ctx, base, slice_expr):
             lower = build_expr(ctx, slice_expr.lower) if slice_expr.lower is not None else None
             upper = build_expr(ctx, slice_expr.upper) if slice_expr.upper is not None else None
-            if slice_expr.step is not None:
-                step = build_expr(ctx, slice_expr.step)
-                raise NotSupportedError(step.range(), "slices with ranges are not supported yet")
-            return SliceExpr(base.range(), lower, upper)
+            step = build_expr(ctx, slice_expr.step) if slice_expr.step is not None else None
+            return SliceExpr(base.range(), lower, upper, step)
 
         def build_Index(ctx, base, index_expr):
             if isinstance(index_expr.value, ast.Tuple) or \

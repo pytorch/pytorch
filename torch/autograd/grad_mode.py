@@ -10,6 +10,8 @@ class no_grad(object):
     consumption for computations that would otherwise have `requires_grad=True`.
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`.
+    This context manager is thread local; it will not affect computation
+    in other threads.
 
     Also functions as a decorator.
 
@@ -49,6 +51,8 @@ class enable_grad(object):
 
     Enables gradient calculation inside a :class:`~no_grad` context. This has
     no effect outside of :class:`~no_grad`.
+    This context manager is thread local; it will not affect computation
+    in other threads.
 
     Also functions as a decorator.
 
@@ -93,6 +97,8 @@ class set_grad_enabled(object):
 
     ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.
     It can be used as a context-manager or as a function.
+    This context manager is thread local; it will not affect computation
+    in other threads.
 
     Arguments:
         mode (bool): Flag whether to enable grad (``True``), or disable

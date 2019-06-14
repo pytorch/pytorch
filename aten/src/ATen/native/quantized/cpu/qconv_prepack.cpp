@@ -21,34 +21,35 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
   Tensor operator()(Tensor weight, int64_t groups) {
     TORCH_CHECK(
         weight.ndimension() == 4, "Weights are expected to have 4 dimensions");
-    TORCH_CHECK(groups == 1, "Groupwise convolutions are not supported yet");
-    // weights in RS(C/G)K format
+    // weights in KRS(C/G) format
     // matrix dimensions after im2col
-    int NDim = weight.size(3) / groups;
-    int KDim = weight.size(0) * weight.size(1) * groups * weight.size(2);
-    auto weight_config = weight.contiguous();
+    int output_channels = weight.size(0);
+    int kernel_h = weight.size(1);
+    int kernel_w = weight.size(2);
+    int input_channels_per_group = weight.size(3);
+    int NDim = output_channels / groups;
+    int KDim_per_group = kernel_h * kernel_w * input_channels_per_group;
+    auto weight_contig = weight.contiguous();
     int weight_zero_point_int32 = weight.q_zero_point().toInt();
     TORCH_CHECK(
         weight_zero_point_int32 == 0,
         "Only symmetric quantization is supported for weights yet");
     const int8_t* weight_ptr_int8 =
-        reinterpret_cast<int8_t*>(weight_config.data<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_contig.data<c10::qint8>());
 
     std::vector<int32_t> col_offsets(NDim * groups);
-    std::vector<int64_t> kernel{static_cast<int64_t>(weight.size(0)),
-                                static_cast<int64_t>(weight.size(1))};
-    std::vector<int8_t> weight_int8(KDim * NDim * groups);
+
     auto ret_ptr = guts::make_unique<PackedConvWeight>(
         PackedConvWeight{guts::make_unique<fbgemm::PackBMatrix<int8_t>>(
-                             fbgemm::matrix_op_t::NoTranspose,
-                             KDim,
+                             fbgemm::matrix_op_t::Transpose,
+                             KDim_per_group * groups,
                              NDim,
                              weight_ptr_int8,
-                             NDim,
+                             KDim_per_group,
                              nullptr, // PackBMatrix manages ownership of pmat
                              groups),
                          col_offsets,
-                         kernel,
+                         {kernel_h, kernel_w},
                          weight.q_scale().toFloat(),
                          weight_zero_point_int32});
     // TODO: we will need to replace this with torchscript classes at a later

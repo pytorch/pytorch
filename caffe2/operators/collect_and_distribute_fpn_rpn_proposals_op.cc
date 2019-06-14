@@ -621,7 +621,7 @@ SHOULD_NOT_DO_GRADIENT(DistributeFpnProposals);
 } // namespace caffe2
 
 // clang-format off
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     CollectAndDistributeFpnRpnProposals,
     "_caffe2::CollectAndDistributeFpnRpnProposals("
       "Tensor[] input_list, "
@@ -643,7 +643,7 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
     ")",
     caffe2::CollectAndDistributeFpnRpnProposalsOp<caffe2::CPUContext>);
 
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     CollectRpnProposals,
     "_caffe2::CollectRpnProposals("
       "Tensor[] input_list, "
@@ -655,7 +655,7 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
     ")",
     caffe2::CollectRpnProposalsOp<caffe2::CPUContext>);
 
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     DistributeFpnProposals,
     "_caffe2::DistributeFpnProposals("
       "Tensor rois, "

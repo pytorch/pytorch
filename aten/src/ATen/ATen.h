@@ -9,6 +9,9 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Formatting.h>
 #include <ATen/Functions.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensor.h>
+#endif
 #include <ATen/ScalarOps.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>

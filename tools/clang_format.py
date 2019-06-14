@@ -23,7 +23,7 @@ CLANG_FORMAT_WHITELIST = ["torch/csrc/jit/", "test/cpp/jit/"]
 CPP_FILE_REGEX = re.compile("^.*\\.(h|cpp|cc|c|hpp)$")
 CPP_FILE_REGEX = re.compile(".*\\.(h|cpp|cc|c|hpp)$")
 # @@ -start,count +start,count @@
-CHUNK_PATTERN = r"^@@\s+-\d+,\d+\s+\+(\d+)(?:,(\d+))?\s+@@"
+CHUNK_PATTERN = r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@"
 
 
 def parse_args():
@@ -149,6 +149,12 @@ def main():
     if len(name_to_lines) == 0:
         return
 
+    name_to_diff = {}
+    for filename, lines in name_to_lines.items():
+        diff = get_clang_format_diff(filename, lines)
+        if diff is not None:
+            name_to_diff[filename] = diff
+
     if args.accept_changes:
         # run clang-format on the necessary files
         for name, lines in name_to_lines.items():
@@ -159,14 +165,15 @@ def main():
         args.extend(name_to_lines.keys())
         subprocess.check_output(args)
     else:
+        if len(name_to_diff) == 0:
+            return
+
         print("ERROR: Running clang-format created changes: ")
-        for name, lines in name_to_lines.items():
-            diff = get_clang_format_diff(name, lines)
-            if diff is not None:
-                print("In " + name)
-                for l in diff:
-                    print(l)
-                print("\n")
+        for name, diff in name_to_diff.items():
+            print("In " + name)
+            for l in diff:
+                print(l)
+            print("\n")
 
 
 if __name__ == "__main__":

@@ -374,9 +374,9 @@
 ]]
 [[
   name: _th_equal
-  cpu_bool: True
   cname: equal
   cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: bool
@@ -498,6 +498,8 @@
 [[
   name: _th_ixor_
   cname: __ixor__
+  cpu_bool: True
+  cuda_bool: True
   variants:
     - function
   return: argument 0
@@ -2412,6 +2414,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* output
       output: True
@@ -2460,6 +2463,7 @@
   variants:
     - function
   return: argument 0,1
+  scalar_check: false
   arguments:
     - arg: THTensor* res1
       output: True
@@ -2478,6 +2482,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
@@ -2521,6 +2526,7 @@
   variants:
     - function
   return: argument 0
+  scalar_check: false
   arguments:
     - arg: THTensor* result
       output: True
