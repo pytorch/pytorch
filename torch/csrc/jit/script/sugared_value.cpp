@@ -49,6 +49,12 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
+
+  if (symbol == prim::range) {
+    std::vector<Value*> input_vals = toValues(*m.graph(), inputs);
+    return std::make_shared<RangeValue>(loc, m, input_vals);
+  }
+    
   return std::make_shared<SimpleValue>(
       emitBuiltinCall(loc, *m.graph(), symbol, self, inputs, attributes, true));
 }
@@ -234,6 +240,122 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
     return FunctionValue(fn).call(loc, m, ctx_inputs, attributes, n_binders);
   }
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
+}
+
+Value* SimpleValue::len(const SourceRange& loc, Function& m) {
+  // List, Tuple, Tensor, fill in missing information desugaring
+  Value* val = getValue();
+  TypePtr val_type = val->type();
+  Graph& g = *m.graph();
+  if (val_type->cast<ListType>()) {
+    return g.insert(aten::len, {val}, {}, loc);
+  } else if (val_type->isSubtypeOf(TensorType::get())) {
+    Value* outermost_dim_index = g.insertConstant(0, IntType::get(), loc);
+    // zero-dim tensor error handling
+    Value* num_dim = g.insert(aten::dim, {val}, {}, loc);
+    Value* cond_value = g.insert(aten::eq, {num_dim, outermost_dim_index}, {}, loc);
+    Node* if_node = g.insertNode(g.create(prim::If, 0)->setSourceRange(loc));
+    if_node->addInput(cond_value);
+
+    Block* true_block = if_node->addBlock();
+    if_node->addBlock();
+    {
+      WithInsertPoint guard(true_block);
+      g.insert(prim::RaiseException,
+          {std::string("iteration over a 0-d tensor!")}, {}, loc);
+    }
+
+    // fill in max_trip_count_val
+    Value* sizes_tuple = g.insert(aten::size, {val}, {}, loc);
+    return g.insert(aten::select, {sizes_tuple, outermost_dim_index}, {}, loc);
+  } else {
+    throw ErrorReport(loc)
+      << "Value type " << val_type->str() << " does not length information";
+  }
+}
+
+Value* SimpleValue::get_elem(const SourceRange&loc, Function& m, Value* i) {
+  Value* val = getValue();
+  TypePtr val_type = val->type();
+  Graph& g = *m.graph();
+  Value* cur_elem = nullptr;
+  if (val_type->cast<ListType>()) {
+    cur_elem = g.insert(aten::select, {val, i}, {}, loc);
+  } else if (val_type->isSubtypeOf(TensorType::get())) {
+    cur_elem = g.insert(aten::select, {val, 0, i}, {}, loc);
+  } else {
+    throw ErrorReport(loc)
+      << "Could not get element of the value type " << val_type->str();
+  }
+  return cur_elem;
+}
+
+RangeValue::RangeValue(const SourceRange& loc, Function& m, std::vector<Value*> inputs) {
+  Graph& g = *m.graph();
+  if(inputs.size() == 0) {
+    throw ErrorReport(loc) << "range expected at least 1 arguments, got 0";
+  } else if (inputs.size() == 1) {
+      end_ = inputs[0];
+      start_ = g.insertConstant(0, nullptr, loc);
+      step_ = g.insertConstant(1, nullptr, loc);
+      is_simple_ = true;
+    } else if (inputs.size() <= 3) {
+      start_ = inputs[0];
+      end_ = inputs[1];
+      if (inputs.size() == 3) {
+        step_ = inputs[2];
+        // error handling when step_val = 0 during runtime
+        Value* cond_val = g.insert(aten::eq, {step_, g.insertConstant(0, nullptr, loc)}, {}, loc);
+        Node* if_node = g.insertNode(g.create(prim::If, 0)->setSourceRange(loc));
+        if_node->addInput(cond_val);
+        auto true_block = if_node->addBlock();
+        if_node->addBlock();
+        WithInsertPoint guard(true_block);
+        g.insert(prim::RaiseException,
+            {std::string("range() arg 3 must not be zero")}, {}, loc);
+      } else {
+        step_ = g.insertConstant(1, nullptr, loc);
+      }
+      is_simple_ = false;
+    } else {
+      throw ErrorReport(loc)
+          << "range expected at most 3 arguments, got " << inputs.size();
+    }
+}
+
+Value* RangeValue::len(const SourceRange& loc, Function& m) {
+  if (is_simple_) {
+    return end_;
+  } else{
+    auto& g = *m.graph();
+    return g.insert(aten::__range_length, {start_, end_, step_}, {}, loc);
+  }
+}
+
+Value* RangeValue::get_elem(const SourceRange&loc, Function& m, Value* i)  {
+  if (is_simple_) {
+    return i;
+  } else {
+    auto& g = *m.graph();
+    return g.insert(aten::__derive_index, {i, start_, step_}, {}, loc);
+  }
+}
+
+std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
+  std::vector<SugaredValuePtr> base_iters {};
+
+  for(SugaredValuePtr sv: children_) {
+    if (auto iv = std::dynamic_pointer_cast<IterableTree>(sv)) {
+      std::vector<SugaredValuePtr> child_iters = iv->get_base_iterables();
+      //merge child iters with the base_iters
+      base_iters.insert(base_iters.end(), std::make_move_iterator(child_iters.begin()), std::make_move_iterator(child_iters.end()));
+
+    } else {
+      base_iters.emplace_back(sv);
+    }
+  }
+
+  return base_iters;
 }
 
 std::shared_ptr<SugaredValue> ClassValue::call(

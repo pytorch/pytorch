@@ -158,6 +158,7 @@ static std::shared_ptr<MagicMethod> makeMagic(
   return std::make_shared<MagicMethod>(name, base);
 }
 
+
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down nested control structures in
 // the frontend (which themselves don't introduce scopes)
@@ -379,6 +380,9 @@ struct Environment {
           {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
+          {"range", std::make_shared<BuiltinFunction>(prim::range, at::nullopt)},
+          {"zip", std::make_shared<IterableValue>(prim::zip)},
+          {"enumerate", std::make_shared<IterableValue>(prim::enumerate)},
           {"rangelist",
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
       };
@@ -1250,12 +1254,12 @@ struct to_ir {
   // true. In the convert to ssa pass, the loop condition will correctly
   // inlined. and inputs and outputs added so that the loop conforms to the
   // semantics specified at
-  // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
+  // https://github.com/onnx/onnx/blob/master/docs/Operators.md#Loop
   void emitLoopCommon(
       SourceRange range,
       const List<Stmt>& body,
-      const std::function<void(Value*, std::shared_ptr<Environment>)>&
-          current_element_assigner,
+      SugaredValuePtr iter_val,
+      c10::optional<List<Expr>> targets,
       c10::optional<Expr> cond,
       Value* max_trip_count_val = nullptr) {
     if (!max_trip_count_val) {
@@ -1288,8 +1292,8 @@ struct to_ir {
 
       // current_element_assigner uses an induction variable
       // to set a current element
-      if (current_element_assigner) {
-        current_element_assigner(trip_count, environment_stack);
+      if (iter_val != nullptr && targets) {
+        emitTargetAssign(targets.value()[0], iter_val, trip_count);
       }
 
       emitStatements(body);
@@ -1298,196 +1302,34 @@ struct to_ir {
     }
   }
 
-  void emitForRange(
-      const SourceRange& range,
-      const Ident& target,
-      const List<Expr>& args,
-      const List<Stmt>& body) {
-    Value *end_val = nullptr, *start_val = nullptr, *step_val = nullptr;
-    bool isSimpleRange = (args.size() == 1);
-    std::vector<Value*> argVals;
-    for (auto i : args) {
-      argVals.push_back(ensureInt(range, emitExpr(i)));
-    }
-    if (isSimpleRange) {
-      end_val = argVals[0];
-      start_val = end_val->owningGraph()->insertConstant(0);
-      step_val = end_val->owningGraph()->insertConstant(1);
-      start_val->node()->setSourceRange(range);
-      end_val->node()->setSourceRange(range);
-    } else if (args.size() == 2 || args.size() == 3) {
-      start_val = argVals[0];
-      end_val = argVals[1];
-      if (args.size() == 3) {
-        step_val = argVals[2];
-      } else {
-        step_val = end_val->owningGraph()->insertConstant(1);
-        step_val->node()->setSourceRange(range);
+  // recursively assign the targets base on the iterable tree structure
+  void emitTargetAssign(Expr targets, SugaredValuePtr root, Value* trip_count) {
+    auto iterable_tree = std::dynamic_pointer_cast<IterableTree>(root); 
+    if (iterable_tree) {
+      if (targets.kind()!= TK_TUPLE_LITERAL) {
+        throw ErrorReport(targets)
+            << "unexpected expression in variable initialization of for loop.";
       }
-    } else if (args.size() == 0) {
-      throw ErrorReport(range) << "range expected 1 arguments, got 0";
-    } else {
-      throw ErrorReport(range)
-          << "range expected at most 3 arguments, got " << args.size();
-    }
-    const auto& ident_name = target.name();
-    TORCH_CHECK(
-        end_val != nullptr && start_val != nullptr && step_val != nullptr,
-        "Expected non-null pointers for range() arguments");
-    auto addOp = [end_val, range](
-                     Graph* g, NodeKind kind, ArrayRef<Value*> inputs) {
-      return g->insertNode(g->create(kind, inputs, 1))
-          ->setSourceRange(range)
-          ->output()
-          ->setType(IntType::get());
-    };
-    auto assigner =
-        [addOp, ident_name, range, start_val, step_val, isSimpleRange](
-            Value* index, std::shared_ptr<Environment> env) {
-          Value* derived_index;
-          if (isSimpleRange) {
-            derived_index = index;
-          } else {
-            auto g = index->owningGraph();
-            derived_index =
-                addOp(g, aten::__derive_index, {index, start_val, step_val});
-          }
-          env->setVar(range, ident_name, derived_index);
-        };
-    Value* max_trip_count_val;
-    if (isSimpleRange) {
-      max_trip_count_val = end_val;
-    } else {
-      auto g = start_val->owningGraph();
-      Value* cond_value = emitBuiltinCall(
-          range,
-          *g,
-          aten::eq,
-          c10::nullopt,
-          {step_val, g->insertConstant(0)},
-          {},
-          /*required=*/true);
-      Node* n = g->insertNode(create(prim::If, range, 0));
-      n->addInput(cond_value);
-      auto true_block = n->addBlock();
-      n->addBlock();
-      {
-        WithInsertPoint guard(true_block);
-        g->insert(
-            prim::RaiseException,
-            {std::string("range() arg 3 must not be zero")},
-            {},
-            range);
+
+      // if the target is a Tuple, construct the tuple and assign the tuple with
+      // the corresponding iterable tree children
+      auto tp_targets = TupleLiteral(targets).inputs();
+      for(size_t i = 0; i < tp_targets.size(); ++ i) {
+        emitTargetAssign(tp_targets[i], iterable_tree->get_children()[i], trip_count);
       }
-      max_trip_count_val =
-          addOp(g, aten::__range_length, {start_val, end_val, step_val});
+    } else {
+      // leaf of the iterable tree, which contains SimpleValue or RangeValue
+      if (targets.kind() != TK_VAR)  {
+        throw ErrorReport(targets)
+            << "unexpected expression in variable initialization of for loop.";
+      }
+      std::string target_name = Var(targets).name().name();
+      const SourceRange& loc = targets.range();
+      environment_stack->setVar(loc, target_name, root->get_elem(loc, method, trip_count));
     }
-    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
-  }
-
-  void emitForInListLoop(
-      const For& stmt,
-      const std::shared_ptr<torch::jit::script::SimpleValue>& siv) {
-    auto targets = stmt.targets();
-    auto itrs = stmt.itrs();
-    auto body = stmt.body();
-    auto& range = stmt.range();
-    auto target = Var(targets[0]).name();
-
-    auto listArg = siv->asValue(range, method);
-    auto max_trip_count_val = emitBuiltinCall(
-        range,
-        *graph,
-        aten::len,
-        c10::nullopt,
-        {listArg},
-        {},
-        /*required=*/true);
-    const auto& ident_name = target.name();
-    auto assigner = [ident_name, range, listArg, this](
-                        Value* index, std::shared_ptr<Environment> env) {
-      auto cur_elm = emitBuiltinCall(
-          range,
-          *this->graph,
-          aten::select,
-          c10::nullopt,
-          {listArg, index},
-          {},
-          /*required=*/true);
-      env->setVar(range, ident_name, cur_elm);
-    };
-    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
-  }
-
-  void emitForInTensorLoop(const For& stmt, Value* tensorArg) {
-    auto targets = stmt.targets();
-    auto target = Var(targets[0]).name();
-    auto itrs = stmt.itrs();
-    auto body = stmt.body();
-    auto& range = stmt.range();
-
-    auto outermost_dim_index = graph->insertConstant(0, IntType::get(), range);
-    auto num_dim = graph->insert(aten::dim, {tensorArg});
-    Value* cond_value = emitBuiltinCall(
-        range,
-        *method.graph(),
-        aten::eq,
-        c10::nullopt,
-        {num_dim, outermost_dim_index},
-        {},
-        /*required=*/true);
-
-    Node* n = graph->insertNode(create(prim::If, range, 0));
-    n->addInput(cond_value);
-    auto true_block = n->addBlock();
-    n->addBlock();
-    {
-      WithInsertPoint guard(true_block);
-      graph->insert(
-          prim::RaiseException,
-          {std::string("iteration over a 0-d tensor")},
-          {},
-          range);
-    }
-
-    auto sizes_tuple = emitBuiltinCall(
-        range,
-        *graph,
-        aten::size,
-        c10::nullopt,
-        {tensorArg},
-        {},
-        /*required=*/true);
-
-    auto max_trip_count_val = emitBuiltinCall(
-        range,
-        *graph,
-        aten::select,
-        c10::nullopt,
-        {sizes_tuple, outermost_dim_index},
-        {},
-        /*required=*/true);
-
-    const auto& ident_name = target.name();
-    auto assigner = [outermost_dim_index, ident_name, range, tensorArg, this](
-                        Value* index, std::shared_ptr<Environment> env) {
-      auto cur_elm = emitBuiltinCall(
-          range,
-          *this->graph,
-          aten::select,
-          c10::nullopt,
-          {tensorArg, outermost_dim_index, index},
-          {},
-          /*required=*/true);
-      env->setVar(range, ident_name, cur_elm);
-    };
-
-    emitLoopCommon(range, body, assigner, {}, max_trip_count_val);
   }
 
   void emitFor(const For& stmt) {
-    // For now, we only support range loops. e.g. for i in range(3): ...
-
     auto targets = stmt.targets();
     auto itrs = stmt.itrs();
     auto body = stmt.body();
@@ -1495,49 +1337,56 @@ struct to_ir {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
     }
+
     if (targets.size() != 1) {
       throw ErrorReport(stmt)
           << "Iteration variable unpacking is not supported";
     }
 
+    // Emit loop information for builtinFunction values like range(), zip(), 
+    // enumerate() or SimpleValue like List, Tensor, Dict, etc.
+    auto sv = emitSugaredExpr(itrs[0], 1);
+
+    // We will get IterableTree for builtinFunctions zip() and enumerate(),
+    // RangeValue for range(), and SimpleValue for types like List, Tensor, Dict.
+    auto range_val = std::dynamic_pointer_cast<RangeValue>(sv);
+    auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
+    auto iterable_tree = std::dynamic_pointer_cast<IterableTree>(sv);
+
+    if ((siv && (siv->getValue()->type()->kind() == TypeKind::ListType
+        || siv->getValue()->type()->isSubtypeOf(TensorType::get()))
+        ) || range_val) {
+      emitLoopCommon(stmt.range(), body, sv, targets, {}, sv->len(stmt.range(), method)); 
+      return;
+    }
+    if (iterable_tree) {
+      // if it's a iterable tree, we get the base iterables that consists of SimpleValue or RangeValue,
+      // and then calculate the minimum length of all the base iterables to be max_trip_count_val
+      std::vector<SugaredValuePtr> base_iters = iterable_tree->get_base_iterables();
+      std::vector<Value*> lengths;
+      for (auto base_iter: base_iters) {
+        lengths.emplace_back(base_iter->len(stmt.range(), method));
+      }
+      Node* list_node = graph->insertNode(graph->create(prim::ListConstruct, 1)->setSourceRange(stmt.range()));
+      Value* list_lengths = list_node->output()->setType(ListType::ofInts());
+      for(auto length: lengths) {
+        list_node->addInput(length);
+      }
+      Value* max_trip_count_val = graph->insert(prim::min, {list_lengths}, {}, stmt.range());
+      emitLoopCommon(stmt.range(), body, iterable_tree, targets, {}, max_trip_count_val);
+      return;
+    }
+
+    // Emit or unroll the loop for Tuple or ModuleList, we choose to unroll or emit
+    // each subelemnt for each iteration separately. This is because for ModuleList,
+    // each module inside the list may be different types, so FOR .. in ModuleList
+    // essentially should emit different stmts for each iteration, which we shouldn't
+    // emit the prim::Loop node for it, the same rule applies for the Tuple case.
     if (targets[0].kind() != TK_VAR) {
       throw ErrorReport(targets[0])
           << "unexpected expression in variable initialization of for loop";
     }
     auto target = Var(targets[0]).name();
-
-    // match range(<expr>) style loops
-    // itrs must consist of a single Apply node
-    if (itrs[0].kind() == TK_APPLY) {
-      Apply range_iterator = Apply(itrs[0]);
-      if (range_iterator.callee().kind() == TK_VAR) {
-        Var var = Var(range_iterator.callee());
-        if (var.name().name() == "range") {
-          return emitForRange(
-              stmt.range(), target, range_iterator.inputs(), body);
-        }
-      }
-    }
-
-    // it isn't a range(<expr>) loop, treat it as a sugared value that maybe can
-    // be unrolled
-    auto sv = emitSugaredExpr(itrs[0], 1);
-
-    auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
-
-    // for-in lists
-    if (siv && siv->getValue()->type()->kind() == TypeKind::ListType) {
-      emitForInListLoop(stmt, siv);
-      return;
-    }
-
-    // for-in tensors
-    if (siv && siv->getValue()->type()->isSubclass(TypeKind::TensorType)) {
-      auto value = siv->asValue(stmt.range(), method);
-      emitForInTensorLoop(stmt, value);
-      return;
-    }
-
     auto instances = sv->asTuple(stmt.range(), method);
     const std::string& target_name = target.name();
     pushFrame(environment_stack->block());
@@ -1557,7 +1406,7 @@ struct to_ir {
 
   void emitWhile(const While& stmt) {
     auto cond = stmt.cond();
-    emitLoopCommon(stmt.range(), stmt.body(), nullptr, cond, nullptr);
+    emitLoopCommon(stmt.range(), stmt.body(), {}, {}, cond, nullptr);
   }
 
   // Currently we do not support assigning exceptions to variables,
@@ -2253,6 +2102,8 @@ struct to_ir {
       }
 
       return classNew->createObject(apply.range(), method);
+    } else if (auto iterable = std::dynamic_pointer_cast<IterableValue>(sv)) {
+      return emitIterableTree(loc, apply.inputs(), iterable);
     } else {
       auto inputs = getNamedValues(apply.inputs(), true);
       auto attributes = emitAttributes(apply.attributes());
@@ -2375,6 +2226,60 @@ struct to_ir {
     op(stack);
     AT_ASSERT(stack.size() == 1);
     return graph->insertConstant(stack[0], nullptr, tree->range());
+  }
+
+  // We construct the iterable tree here using the IterableTree SugaredValue,
+  // The tree consists of SimpleValue, RangeValue or IterableValue:
+  // For SimpleValues(List, Dict, etc) or RangeValue. We will make them as tree leaves
+  // since we could get the loop information from len() and get_item().
+  // For IterableValue like zip(), enumerate(), we can model them as a combination of
+  // leaves, and we emit a IterableTree value to record the tree information
+  SugaredValuePtr emitIterableTree(
+      SourceRange& loc,
+      const List<Expr>& inputs,
+      const std::shared_ptr<IterableValue>& iterable) {
+      std::shared_ptr<IterableTree> iterable_tree = nullptr;
+      size_t input_size = inputs.size();
+      if (iterable->symbol_ == prim::enumerate) {
+        // enumerate(x) can be rewrite as subtrees: (range(0, math.inf), x)
+        Value* start_index = nullptr;
+        if (input_size == 0) {
+          throw ErrorReport(loc) << "enumerate expected at least 1 arguments, got 0";
+        }
+
+        if (input_size == 2) {
+          start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
+        }
+        
+        if (input_size > 2) {
+          throw ErrorReport(loc)
+            << "enumerate expected at most 2 arguments, got " << input_size;
+        }
+        std::vector<Value*> range_inputs;
+        if (start_index != nullptr) {
+          range_inputs.emplace_back(start_index);
+        }
+        Value* end = materializeConstant(
+          std::numeric_limits<int64_t>::max(),
+          *graph,
+          loc,
+          integral_constants);
+        range_inputs.emplace_back(end);
+        SugaredValuePtr range_sv = std::make_shared<RangeValue>(loc, method, range_inputs);
+        SugaredValuePtr expr_sv = emitSugaredExpr(inputs[0], 1);
+        iterable_tree = std::make_shared<IterableTree>(std::vector<SugaredValuePtr>({range_sv, expr_sv}));
+      } else if (iterable->symbol_ == prim::zip) {
+        // zip(x, y) can be rewrite as subtrees: (x, y)
+        if (inputs.size() == 0) {
+          throw ErrorReport(loc) << "zip expected at least 1 arguments, got 0";
+        }
+        iterable_tree = std::make_shared<IterableTree>();
+        for(Expr expr: inputs) {
+          auto expr_sv = emitSugaredExpr(expr, 1);
+          iterable_tree->addChild(expr_sv);
+        }
+      }
+      return iterable_tree;
   }
 
   std::shared_ptr<SugaredValue> emitForkExpr(

@@ -2093,6 +2093,22 @@ RegisterOperators reg2({
     // the python builtin 'min' and 'torch.min'
     DEFINE_BINARY_OP(prim::min, a < b ? a : b),
     DEFINE_BINARY_OP(prim::max, a > b ? a : b),
+
+    Operator(
+        "prim::min(int[] x) -> int",
+        [](Stack& stack) {
+          c10::ListPtr<int64_t> int_list = pop(stack).toIntList();
+          int64_t min_element = std::numeric_limits<int64_t>::max(); 
+
+          for(size_t i = 0; i < int_list.size(); ++ i) {
+            if (int_list[i] < min_element) {
+              min_element = int_list[i];
+            }
+          }
+          push(stack, min_element);
+          return 0;
+        }),
+
     // Pass in two ops for handling int and float separately as % in C++ only
     // works for int The modulus calculation is different between C++ and Python
     // (on negative), we preserve the python behavior as it's more common and
