@@ -3616,7 +3616,7 @@ add_docstr(torch.ones,
 ones(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the shape defined
-by the variable argument :attr:`sizes`.
+by the variable argument :attr:`size`.
 
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
@@ -3876,15 +3876,15 @@ Example::
 
 add_docstr(torch.rand,
            r"""
-rand(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+rand(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random numbers from a uniform distribution
 on the interval :math:`[0, 1)`
 
-The shape of the tensor is defined by the variable argument :attr:`sizes`.
+The shape of the tensor is defined by the variable argument :attr:`size`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}
@@ -3985,7 +3985,7 @@ Args:
 
 add_docstr(torch.randn,
            r"""
-randn(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randn(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random numbers from a normal distribution
 with mean `0` and variance `1` (also called the standard normal
@@ -3994,10 +3994,10 @@ distribution).
 .. math::
     \text{{out}}_{{i}} \sim \mathcal{{N}}(0, 1)
 
-The shape of the tensor is defined by the variable argument :attr:`sizes`.
+The shape of the tensor is defined by the variable argument :attr:`size`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}
@@ -5677,7 +5677,7 @@ add_docstr(torch.zeros,
 zeros(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the shape defined
-by the variable argument :attr:`sizes`.
+by the variable argument :attr:`size`.
 
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
@@ -5728,13 +5728,13 @@ Example::
 
 add_docstr(torch.empty,
            r"""
-empty(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
+empty(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
 Returns a tensor filled with uninitialized data. The shape of the tensor is
-defined by the variable argument :attr:`sizes`.
+defined by the variable argument :attr:`size`.
 
 Args:
-    sizes (int...): a sequence of integers defining the shape of the output tensor.
+    size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
     {out}
     {dtype}

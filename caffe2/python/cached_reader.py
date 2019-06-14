@@ -96,7 +96,7 @@ class CachedReader(DBFileReader):
                     and build a new one overwritting the existing one anyway.
 
             Returns:
-                build_cache_step: ExcutionStep.
+                build_cache_step: ExecutionStep.
                     The step to be run for building a cache DB file.
         """
         if os.path.exists(self.db_path) and not overwrite:
