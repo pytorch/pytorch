@@ -19,6 +19,7 @@ struct Function;
 namespace c10 {
 struct IValue;
 struct ClassType;
+struct TupleType;
 
 template<class T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
@@ -101,34 +102,42 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
 
 struct Future;
 
-struct CAFFE2_API TuplePtr final {
-private:
-  c10::ListPtr<IValue> elements_;
+struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
+ private:
+   std::vector<IValue> elements_;
 
-  TuplePtr(c10::ListPtr<IValue> elements): elements_(std::move(elements)) {}
-
-public:
-  static TuplePtr create(c10::ListPtr<IValue> elements) {
-    return TuplePtr { std::move(elements) };
+ public:
+  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_, std::shared_ptr<TupleType> type_) {
+    return c10::make_intrusive<Tuple>(std::move(elements_), type_);
   }
-  static TuplePtr create(std::initializer_list<IValue> elements_) {
-    return create(c10::impl::make_generic_list(std::move(elements_)));
-  }
-  static TuplePtr create(std::vector<IValue> elements_) {
-    return create(c10::impl::make_generic_list(std::move(elements_)));
+  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
+    return c10::make_intrusive<Tuple>(std::move(elements_), nullptr);
   }
 
-  c10::ListPtr<IValue> elements() && {
+ const std::vector<IValue>& elements() const & {
+    return elements_;
+  }
+  operator const std::vector<IValue>&() const {
+    return elements();
+  }
+
+  std::vector<IValue>& elements() & {
+    return elements_;
+  }
+  operator std::vector<IValue>&() {
+    return elements();
+  }
+
+  std::vector<IValue>&& elements() && {
     return std::move(elements_);
   }
 
-  const c10::ListPtr<IValue>& elements() const & {
-    return elements_;
-  }
+  std::shared_ptr<TupleType> type;
+ private:
+  Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type)
+    : elements_(std::move(elements)), type(std::move(type)) {}
 
-  c10::ListPtr<IValue>& elements() & {
-    return elements_;
-  }
+  friend class c10::intrusive_ptr<Tuple>;
 };
 
 struct Object;
@@ -391,7 +400,7 @@ DEFINE_TO(c10::ListPtr<bool>, toBoolList)
 DEFINE_TO(c10::ListPtr<at::Tensor>, toTensorList)
 DEFINE_TO(c10::impl::GenericListPtr, toGenericList)
 DEFINE_TO(c10::impl::GenericDictPtr, toGenericDict)
-DEFINE_TO(c10::ivalue::TuplePtr, toTuple)
+DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(IValue, toIValue)
@@ -541,22 +550,18 @@ inline c10::DictPtr<IValue, IValue> IValue::toGenericDict() const & {
   AT_ASSERT(isGenericDict(), "Expected GenericDict but got ", tagKind());
   return c10::DictPtr<IValue, IValue>(toIntrusivePtr<c10::detail::DictImpl>());
 }
-inline ivalue::TuplePtr IValue::toTuple() && {
+inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() && {
   AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
-  return ivalue::TuplePtr::create(c10::ListPtr<IValue>(moveToIntrusivePtr<c10::detail::ListImpl<IValue>>()));
+  return moveToIntrusivePtr<ivalue::Tuple>();
 }
-inline ivalue::TuplePtr IValue::toTuple() const & {
+inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const & {
   AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
-  return ivalue::TuplePtr::create(c10::ListPtr<IValue>(toIntrusivePtr<c10::detail::ListImpl<IValue>>()));
-}
-inline c10::ArrayRef<IValue> IValue::toTupleRef() const {
-  AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
-  return static_cast<const c10::detail::ListImpl<IValue>*>(payload.as_intrusive_ptr)->list;
+  return toIntrusivePtr<ivalue::Tuple>();
 }
 
-inline IValue::IValue(ivalue::TuplePtr v)
+inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
 : tag(Tag::Tuple), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = std::move(v).elements().impl_.release();
+  payload.as_intrusive_ptr = v.release();
 }
 inline IValue::IValue(c10::ListPtr<int64_t> v)
 : tag(Tag::IntList), is_intrusive_ptr(true) {
