@@ -250,7 +250,7 @@ struct TORCH_API Variable : public at::Tensor {
 
   /// Sets the tensor data held by this `Variable` to be the same as `new_data`.
   /// It requires that `new_data` has the same derived type of TensorImpl as
-  /// this `Variable`, by checking `has_same_tensorimpl_type_as(new_data)`.
+  /// this `Variable`, by checking `_has_same_tensorimpl_type(this, new_data)`.
   void set_data(const at::Tensor &new_data);
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the

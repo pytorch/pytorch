@@ -183,15 +183,6 @@ PyObject *THPVariable_get_version(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_bump_version(THPVariable *self)
-{
-  HANDLE_TH_ERRORS
-  auto& var = self->cdata;
-  var.bump_version();
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject *THPVariable_get_grad_fn(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -472,7 +463,6 @@ static PyMappingMethods THPVariable_as_mapping = {
 
 static PyMethodDef extra_methods[] = {
   {"_make_subclass", (PyCFunction)THPVariable_make_subclass, METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"_bump_version", (PyCFunction)THPVariable_bump_version, METH_NOARGS, nullptr},
   {nullptr}
 };
 

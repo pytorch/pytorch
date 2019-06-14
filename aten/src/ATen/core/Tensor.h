@@ -555,7 +555,6 @@ class CAFFE2_API Tensor {
   Tensor trunc() const;
   Tensor & trunc_();
   Tensor type_as(const Tensor & other) const;
-  bool has_same_tensorimpl_type_as(const Tensor & other) const;
   Tensor unsqueeze(int64_t dim) const;
   Tensor & unsqueeze_(int64_t dim);
   Tensor var(bool unbiased=true) const;

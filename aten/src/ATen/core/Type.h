@@ -350,7 +350,6 @@ struct CAFFE2_API Type {
   virtual Tensor trunc(const Tensor & self) const = 0;
   virtual Tensor & trunc_(Tensor & self) const = 0;
   virtual Tensor type_as(const Tensor & self, const Tensor & other) const = 0;
-  virtual bool has_same_tensorimpl_type_as(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor unsqueeze(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor & unsqueeze_(Tensor & self, int64_t dim) const = 0;
   virtual Tensor var(const Tensor & self, bool unbiased) const = 0;

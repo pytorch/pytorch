@@ -194,11 +194,11 @@ class Module(object):
             module._apply(fn)
 
         def compute_should_use_data(tensor, tensor_applied):
-            if tensor.has_same_tensorimpl_type_as(tensor_applied):
+            if torch._has_same_tensorimpl_type(tensor, tensor_applied):
                 # If the new tensor has the same TensorImpl type as the existing tensor,
-                # then we take `torch.__future__.overwrite_module_params_on_conversion()`
+                # then we take `torch.__future__.get_overwrite_module_params_on_conversion()`
                 # into account.
-                return not torch.__future__.overwrite_module_params_on_conversion()
+                return not torch.__future__.get_overwrite_module_params_on_conversion()
             else:
                 # If the new tensor has a different TensorImpl type, we always overwrite
                 # the existing tensor.
@@ -206,23 +206,25 @@ class Module(object):
 
         for key, param in self._parameters.items():
             if param is not None:
-                if compute_should_use_data(param, fn(param)):
+                should_use_data = compute_should_use_data(param, fn(torch.empty(1, dtype=param.dtype, layout=param.layout, device=param.device)))
+                if should_use_data:
                     # Tensors stored in modules are graph leaves, and we don't
                     # want to create copy nodes, so we have to unpack the data.
                     param.data = fn(param.data)
                 else:
                     # Tensors stored in modules are graph leaves, and we don't want to
-                    # create copy nodes, so we have to use `with torch.no_grad():`
-                    # yf225 TODO: can we not use `with torch.no_grad():` here?
+                    # create copy nodes, so we have to use `with torch.no_grad():`  yf225 TODO: is this comment still relevant??
                     with torch.no_grad():
-                        self._parameters[key] = Parameter(param_applied, param.requires_grad)
+                        param_applied = fn(param)
+                    self._parameters[key] = Parameter(param_applied, param.requires_grad)
 
                 if param.grad is not None:
-                    if compute_should_use_data(param.grad, fn(param.grad)):
-                        param.grad.data = grad_applied
+                    if should_use_data:
+                        param.grad.data = fn(param.grad.data)
                     else:
                         with torch.no_grad():
-                            self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
+                            grad_applied = fn(param.grad)
+                        self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
             if buf is not None:
