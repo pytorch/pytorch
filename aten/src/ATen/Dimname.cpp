@@ -4,6 +4,15 @@
 
 namespace at {
 
+std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
+  if (dimname.type() == NameType::WILDCARD) {
+    out << "None";
+  } else {
+    out << "'" << dimname.name().toUnqualString() << "'";
+  }
+  return out;
+}
+
 bool is_valid_identifier(const std::string& name) {
   std::locale loc;
   if (name.length() == 0) {
