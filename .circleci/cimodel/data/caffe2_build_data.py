@@ -14,7 +14,7 @@ CONFIG_TREE_DATA = [
             # TODO make explicit that this is a "secret TensorRT build"
             #  (see https://github.com/pytorch/pytorch/pull/17323#discussion_r259446749)
             # TODO Uh oh, were we supposed to make this one important?!
-            X("py2"),
+            # X("py2"),
             XImportant("cmake"),
         ]),
         (Ver("cuda", "9.1"), [XImportant("py2")]),
