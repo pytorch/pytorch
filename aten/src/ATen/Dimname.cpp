@@ -21,7 +21,7 @@ bool is_valid_identifier(const std::string& name) {
 static void check_valid_identifier(const std::string& name) {
   TORCH_CHECK(
       is_valid_identifier(name),
-      "A valid identifier must contain alphabetical characters and/or underscore, got: '",
+      "Invalid name: a valid identifier must contain alphabetical characters and/or underscore, got: '",
       name, "'.");
 }
 

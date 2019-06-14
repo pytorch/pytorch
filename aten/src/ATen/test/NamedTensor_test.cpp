@@ -43,6 +43,20 @@ TEST(NamedTensorTest, isNamed) {
   ASSERT_TRUE(tensor.is_named());
 }
 
+static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
+  if (names.size() != other.size()) {
+    return false;
+  }
+  for (auto i = 0; i < names.size(); i++) {
+    const auto& name = names[i];
+    const auto& other_name = other[i];
+    if (name.type() != other_name.type() || name.name() != other_name.name()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 TEST(NamedTensorTest, attachMetadata) {
   auto tensor = at::zeros({3, 2, 5, 7});
   auto N = dimnameFromString("N");
@@ -55,13 +69,7 @@ TEST(NamedTensorTest, attachMetadata) {
       make_unique<NamedTensorMeta>(names));
   
   const auto retrieved_meta = tensor.get_named_tensor_meta();
-  for (int i = 0; i < tensor.dim(); ++i) {
-    const auto& retrieved_name = retrieved_meta->names()[i];
-    const auto& expected_name = names[i];
-
-    ASSERT_EQ(retrieved_name.type(), expected_name.type());
-    ASSERT_EQ(retrieved_name.name(), expected_name.name());
-  }
+  ASSERT_TRUE(dimnames_equal(retrieved_meta->names(), names));
 
   // Test dropping metadata
   tensor.unsafeGetTensorImpl()->set_named_tensor_meta(nullptr);
@@ -80,17 +88,30 @@ TEST(NamedTensorTest, internalSetNamesInplace) {
   // Set names
   at::internal_set_names_inplace(tensor, names);
   const auto retrieved_names = tensor.names().value();
-  for (int i = 0; i < tensor.dim(); ++i) {
-    const auto& retrieved_name = retrieved_names[i];
-    const auto& expected_name = names[i];
-
-    ASSERT_EQ(retrieved_name.type(), expected_name.type());
-    ASSERT_EQ(retrieved_name.name(), expected_name.name());
-  }
+  ASSERT_TRUE(dimnames_equal(retrieved_names, names));
 
   // Drop names
   at::internal_set_names_inplace(tensor, at::nullopt);
   ASSERT_TRUE(tensor.get_named_tensor_meta() == nullptr);
   ASSERT_TRUE(tensor.names() == at::nullopt);
+}
+
+TEST(NamedTensorTest, empty) {
+  auto N = Dimname::fromSymbol(Symbol::dimname("N"));
+  auto C = Dimname::fromSymbol(Symbol::dimname("C"));
+  auto H = Dimname::fromSymbol(Symbol::dimname("H"));
+  auto W = Dimname::fromSymbol(Symbol::dimname("W"));
+  std::vector<Dimname> names = { N, C, H, W };
+
+  auto tensor = at::empty({});
+  ASSERT_EQ(tensor.names(), at::nullopt);
+
+  tensor = at::empty({1, 2, 3});
+  ASSERT_EQ(tensor.names(), at::nullopt);
+
+  tensor = at::empty({1, 2, 3, 4}, names);
+  ASSERT_TRUE(dimnames_equal(tensor.names().value(), names));
+
+  ASSERT_THROW(at::empty({1, 2, 3}, names), c10::Error);
 }
 #endif
