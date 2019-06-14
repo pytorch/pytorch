@@ -4,6 +4,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
@@ -611,6 +612,7 @@ class CAFFE2_API Tensor {
   Scalar q_scale() const;
   Scalar q_zero_point() const;
   Tensor int_repr() const;
+  QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
