@@ -1258,7 +1258,7 @@ struct to_ir {
   void emitLoopCommon(
       SourceRange range,
       const List<Stmt>& body,
-      SugaredValuePtr iter_val,
+      const SugaredValuePtr& iter_val,
       c10::optional<List<Expr>> targets,
       c10::optional<Expr> cond,
       Value* max_trip_count_val = nullptr) {
@@ -1303,7 +1303,7 @@ struct to_ir {
   }
 
   // recursively assign the targets base on the iterable tree structure
-  void emitTargetAssign(Expr targets, SugaredValuePtr root, Value* trip_count) {
+  void emitTargetAssign(const Expr& targets, const SugaredValuePtr& root, Value* trip_count) {
     auto iterable_tree = std::dynamic_pointer_cast<IterableTree>(root); 
     if (iterable_tree) {
       if (targets.kind()!= TK_TUPLE_LITERAL) {
@@ -1364,7 +1364,8 @@ struct to_ir {
       // and then calculate the minimum length of all the base iterables to be max_trip_count_val
       std::vector<SugaredValuePtr> base_iters = iterable_tree->get_base_iterables();
       std::vector<Value*> lengths;
-      for (auto base_iter: base_iters) {
+      lengths.reserve(base_iters.size());
+      for (const SugaredValuePtr& base_iter: base_iters) {
         lengths.emplace_back(base_iter->len(stmt.range(), method));
       }
       Node* list_node = graph->insertNode(graph->create(prim::ListConstruct, 1)->setSourceRange(stmt.range()));

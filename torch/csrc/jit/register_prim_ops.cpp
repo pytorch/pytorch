@@ -2100,9 +2100,9 @@ RegisterOperators reg2({
           c10::ListPtr<int64_t> int_list = pop(stack).toIntList();
           int64_t min_element = std::numeric_limits<int64_t>::max(); 
 
-          for(size_t i = 0; i < int_list.size(); ++ i) {
-            if (int_list[i] < min_element) {
-              min_element = int_list[i];
+          for(int64_t ele: int_list) {
+            if(ele < min_element) {
+              min_element = ele;
             }
           }
           push(stack, min_element);

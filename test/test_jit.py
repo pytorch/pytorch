@@ -9816,7 +9816,7 @@ a")
                 sum += i * v
 
             return sum
-        
+
         self.checkScript(fn, ([1, 2, 3, 4, 5],))
 
         def fn_enumerate_start_index(x):
@@ -9826,7 +9826,7 @@ a")
                 sum += i * v
 
             return sum
-        
+
         self.checkScript(fn, ([1, 2, 3, 4, 5],))
 
         def fn_nested_enumerate(x):
@@ -9836,7 +9836,7 @@ a")
                 sum += i * j * v
 
             return sum
-        
+
         self.checkScript(fn, ([1, 2, 3, 4, 5],))
 
         with self.assertRaisesRegex(RuntimeError, r'enumerate expected at least 1 arguments, got 0'):
@@ -9902,7 +9902,7 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, r'unexpected expression'):
             @torch.jit.script
-            def fn_nested_zip(x, y, z):
+            def fn_nested_zip_wrong_target_assign(x, y, z):
                 # type: (List[int], List[int], List[int]) -> int
                 sum = 0
                 for (i, (j, k)) in zip(x, y, z):
