@@ -1303,11 +1303,30 @@
 
 - func: mul(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: mul
+    CUDA: mul
+    SparseCPU: mul
+    SparseCUDA: mul
+    MkldnnCPU: mkldnn_mul
+
 
 - func: mul_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: mul_
+    CUDA: mul_
+    SparseCPU: mul_
+    SparseCUDA: mul_
+    MkldnnCPU: mkldnn_mul_
 
 - func: mul(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: mul_out
+    CUDA: mul_out
+    SparseCPU: mul_out
+    SparseCUDA: mul_out
+    MkldnnCPU: mkldnn_mul_out
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul(Tensor self, Scalar other) -> Tensor
@@ -1987,6 +2006,10 @@
 - func: rot90(Tensor self, int k=1, int[] dims=[0,1]) -> Tensor
   variants: function, method
 
+- func: trapz(Tensor y, Tensor x, *, int dim=-1) -> Tensor
+
+- func: trapz(Tensor y, *, float dx=1, int dim=-1) -> Tensor
+
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
 
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor
@@ -2190,6 +2213,12 @@
   variants: function
 
 - func: nuclear_norm(Tensor self, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+
+- func: nuclear_norm(Tensor self, int[2] dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: nuclear_norm(Tensor self, int[2] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
 - func: clone(Tensor self) -> Tensor

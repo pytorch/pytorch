@@ -27,7 +27,6 @@ struct Graph;
 struct Node;
 using Stack = std::vector<c10::IValue>;
 using c10::ivalue::Future;
-using c10::ivalue::Tuple;
 
 struct TORCH_API Code {
   Code() : pImpl(nullptr) {}
@@ -91,6 +90,5 @@ struct InterpreterContinuation {
   bool grad_mode_enabled;
 };
 
-TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 } // namespace jit
 } // namespace torch

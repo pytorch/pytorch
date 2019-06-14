@@ -20,7 +20,6 @@
 #include <TH/THGenerateBFloat16Type.h>
 
 /* random numbers */
-#include <TH/THRandom.h>
 #include <TH/generic/THTensorRandom.h>
 #include <TH/THGenerateAllTypes.h>
 

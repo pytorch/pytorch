@@ -16,7 +16,7 @@ namespace {
       bytes |= fraction;
 
       float res;
-      std::memcpy(&res, &bytes, sizeof(float));
+      std::memcpy(&res, &bytes, sizeof(res));
       return res;
   }
 
