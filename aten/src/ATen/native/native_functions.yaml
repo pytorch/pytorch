@@ -1340,6 +1340,7 @@
   dispatch:
     CPU: legacy::cpu::_th_mv
     CUDA: legacy::cuda::_th_mv
+    SparseCPU: mv_sparse_cpu
 
 - func: mv(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
