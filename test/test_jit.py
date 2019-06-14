@@ -9121,7 +9121,7 @@ a")
                                example_outputs=outputs)
 
     def test_onnx_export_script_inline_trace(self):
-        class ModuleToInline(torch.jit.ScriptModule):
+        class ModuleToInline(torch.nn.Module):
             def __init__(self):
                 super(ModuleToInline, self).__init__()
 
