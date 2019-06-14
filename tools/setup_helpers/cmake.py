@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import multiprocessing
 import os
+import re
 from subprocess import check_call, check_output
 import sys
 import distutils
@@ -57,7 +58,7 @@ class CMake:
 
     def __init__(self, build_dir):
         self._cmake_command = CMake._get_cmake_command()
-        self._build_dir = build_dir
+        self.build_dir = build_dir
 
         if DEBUG:
             self._build_type = "Debug"
@@ -93,11 +94,11 @@ class CMake:
         raise RuntimeError('no version found')
 
     def run(self, args, env):
-        "Run cmake with arguments and an environment."
+        "Executes cmake with arguments and an environment."
 
         command = [self._cmake_command] + args
         print(' '.join(command))
-        check_call(command, cwd=self._build_dir, env=env)
+        check_call(command, cwd=self.build_dir, env=env)
 
     @staticmethod
     def defines(args, **kwargs):
@@ -106,15 +107,75 @@ class CMake:
             if value is not None:
                 args.append('-D{}={}'.format(key, value))
 
+    @staticmethod
+    def convert_cmake_value_to_python_value(cmake_value, cmake_type):
+        r"""Convert a CMake value in a string form to a Python value.
+
+        Arguments:
+          cmake_value (string): The CMake value in a string form (e.g., "ON", "OFF", "1").
+          cmake_type (string): The CMake type of :attr:`cmake_value`.
+
+        Returns:
+          A Python value corresponding to :attr:`cmake_value` with type :attr:`cmake_type`.
+        """
+
+        cmake_type = cmake_type.upper()
+        up_val = cmake_value.upper()
+        if cmake_type == 'BOOL':
+            # https://gitlab.kitware.com/cmake/community/wikis/doc/cmake/VariablesListsStrings#boolean-values-in-cmake
+            return not (up_val in ('FALSE', 'OFF', 'N', 'NO', '0', '', 'NOTFOUND') or up_val.endswith('-NOTFOUND'))
+        elif cmake_type == 'FILEPATH':
+            if up_val.endswith('-NOTFOUND'):
+                return None
+            else:
+                return cmake_value
+        else:  # Directly return the cmake_value.
+            return cmake_value
+
+    @staticmethod
+    def _get_cmake_cache_variables(cmake_cache_file):
+        r"""Gets values in CMakeCache.txt into a dictionary.
+
+        Arguments:
+          cmake_cache_file: A CMakeCache.txt file object.
+        Returns:
+          dict: A ``dict`` containing the value of cached CMake variables.
+        """
+
+        results = dict()
+        for line in cmake_cache_file:
+            line = line.strip()
+            if not line or line.startswith(('#', '//')):
+                # Blank or comment line, skip
+                continue
+
+            # Space can also be part of variable name and value
+            matched = re.match(r'(\S.*):\s*([a-zA-Z_-][a-zA-Z0-9_-]*)\s*=\s*(.*)', line)
+            if matched is None:  # Illegal line
+                raise ValueError('Unexpected line in {}: {}'.format(repr(cmake_cache_file), line))
+            variable, type_, value = matched.groups()
+            if type_.upper() in ('INTERNAL', 'STATIC'):
+                # CMake internal variable, do not touch
+                continue
+            results[variable] = CMake.convert_cmake_value_to_python_value(value, type_)
+
+        return results
+
+    def get_cmake_cache_variables(self):
+        r"""Gets values in CMakeCache.txt into a dictionary.
+        Returns:
+          dict: A ``dict`` containing the value of cached CMake variables.
+        """
+        with open(self._cmake_cache_file) as f:
+            return CMake._get_cmake_cache_variables(f)
+
     def generate(self, version, cmake_python_library, build_python, build_test, my_env, rerun):
         "Runs cmake to generate native build files."
 
-        cmake_cache_file = os.path.join(self._build_dir, 'CMakeCache.txt')
-
-        if rerun and os.path.isfile(cmake_cache_file):
-            os.remove(cmake_cache_file)
-        ninja_build_file = os.path.join(self._build_dir, 'build.ninja')
-        if os.path.exists(cmake_cache_file) and not (
+        if rerun and os.path.isfile(self._cmake_cache_file):
+            os.remove(self._cmake_cache_file)
+        ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
+        if os.path.exists(self._cmake_cache_file) and not (
                 USE_NINJA and not os.path.exists(ninja_build_file)):
             # Everything's in place. Do not rerun.
             return
@@ -160,7 +221,7 @@ class CMake:
         install_dir = os.path.join(base_dir, "torch")
 
         _mkdir_p(install_dir)
-        _mkdir_p(self._build_dir)
+        _mkdir_p(self.build_dir)
 
         CMake.defines(args,
                       PYTHON_EXECUTABLE=escape_path(sys.executable),
@@ -298,6 +359,13 @@ class CMake:
         # build detector.
         # This line works around that bug by manually updating the build.ninja timestamp
         # after the entire build is finished.
-        ninja_build_file = os.path.join(self._build_dir, 'build.ninja')
+        ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
         if os.path.exists(ninja_build_file):
             os.utime(ninja_build_file, None)
+
+    def __setattr__(self, name, value):
+        if name == 'build_dir':
+            self.__dict__['build_dir'] = value
+            self._cmake_cache_file = os.path.join(self.build_dir, 'CMakeCache.txt')
+        else:
+            self.__dict__[name] = value
