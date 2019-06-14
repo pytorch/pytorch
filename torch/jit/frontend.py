@@ -528,12 +528,7 @@ class ExprBuilder(Builder):
             if op_token is None:
                 err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
                 raise NotSupportedError(err_range, "unsupported comparison operator: " + op.__name__)
-            if op == ast.In:
-                # Reverse lhs and rhs so the object is on the left to keep things
-                # consistent with other ops
-                cmp_expr = BinOp(op_token, rhs, lhs)
-            else:
-                cmp_expr = BinOp(op_token, lhs, rhs)
+            cmp_expr = BinOp(op_token, lhs, rhs)
             if result is None:
                 result = cmp_expr
             else:
