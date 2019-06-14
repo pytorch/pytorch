@@ -5,33 +5,36 @@
 
 namespace at {
 
-static DimnameList::const_iterator find_untagged_name(
+// Two Dimnames cannot be in the same Tensor if one of them can refer to the other.
+// In practice, this constraint means that a Tensor cannot have duplicate names
+// unless they are tagged and the tags are different.
+static DimnameList::const_iterator find_incompatible_name(
     DimnameList::const_iterator begin,
     DimnameList::const_iterator end,
-    Symbol target) {
+    const Dimname& target) {
   return std::find_if(begin, end,
-      [&target](const Dimname& candidate) { return candidate.untagged_name() == target; });
+      [&target](const Dimname& candidate) {
+        return target.can_refer_to(candidate) || candidate.can_refer_to(target);
+      });
 }
 
 static void check_unique_names(DimnameList names) {
   // Strategy: Compare each element with the ones that come after it.
   // Although this is O(N^2), in practice N is small (no more than 25).
   for (auto it = names.begin(); it != names.end(); ++it) {
-    if (it->type() == NameType::WILDCARD) {
-      continue;
-    }
-    auto dup = find_untagged_name(it + 1, names.end(), it->untagged_name());
+    auto dup = find_incompatible_name(it + 1, names.end(), *it);
     while (dup != names.end()) {
-      TORCH_CHECK(it->full_name() != dup->full_name(),
+      // Simple error message if you're not using tags
+      TORCH_CHECK(it->type() == NameType::TAGGED || dup->type() == NameType::TAGGED,
           "Cannot construct a tensor with duplicate names. Got names: ",
           names, ".");
 
-      // "C.in" and "C" are not allowed, but "C.in" and "C.out" are.
-      TORCH_CHECK(it->type() == NameType::TAGGED && dup->type() == NameType::TAGGED,
+      // Complicated error message if you're using tags
+      TORCH_CHECK(false,
           "Cannot construct a tensor with duplicate names unless they are tagged ",
           "and have different tags. Got names: ", names, ", offending names: (",
           *it, " and ", *dup, ").");
-      dup = find_untagged_name(dup + 1, names.end(), it->untagged_name());
+      dup = find_incompatible_name(dup + 1, names.end(), *it);
     }
   }
 }
@@ -82,31 +85,22 @@ int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
   const auto names = *tensor.names();
 
-  // Lookup the name by full name (name + tag)
   const auto it = std::find_if(
       names.begin(), names.end(),
-      [&dim](const Dimname& candidate) { return candidate.full_name() == dim.full_name(); });
-  if (it != names.end()) {
-    return std::distance(names.begin(), it);
-  }
-
-  // Lookup the name by untagged_name.
-  if (dim.type() == NameType::NORMAL) {
-    const auto untagged_name = dim.untagged_name();
-    const auto it = find_untagged_name(names.begin(), names.end(), untagged_name);
-    if (it != names.end()) {
-      const auto dup = find_untagged_name(it + 1, names.end(), untagged_name);
-      TORCH_CHECK(
-          dup == names.end(),
-          "Name ", dim, " could refer to multiple dimensions in ",
-          toDimnameRepr(tensor), ". Please disambiguate by using a more ",
-          "specific name like ", *it, " or ", dup, ".");
-      return std::distance(names.begin(), it);
-    }
-  }
-
-  TORCH_CHECK(false,
+      [&dim](const Dimname& candidate) { return dim.can_refer_to(candidate); });
+  TORCH_CHECK(it != names.end(),
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
+
+  // Check that it can't refer to another dimension
+  const auto dup = std::find_if(
+      it + 1, names.end(),
+      [&dim](const Dimname& candidate) { return dim.can_refer_to(candidate); });
+  TORCH_CHECK(
+      dup == names.end(),
+      "Name ", dim, " could refer to multiple dimensions in ",
+      toDimnameRepr(tensor), ". Please disambiguate by using a more ",
+      "specific name like ", *it, " or ", dup, ".");
+  return std::distance(names.begin(), it);
 }
 
 namespace namedinference {
