@@ -93,7 +93,7 @@ def is_available():
     #
     # See https://github.com/pytorch/pytorch/issues/15734 for
     # more context.
-    _cuda_initialized = True
+    _poison_fork()
     return torch._C._cuda_getDeviceCount() > 0
 
 
@@ -191,6 +191,13 @@ def init():
     _lazy_init()
 
 
+def _poison_fork():
+    """Mark CUDA context as initialized, so we will complain if you try
+    to use CUDA from forked subprocesses"""
+    _original_pid = os.getpid()
+    _cuda_initialized = True
+
+
 def _lazy_init():
     global _initialized, _cudart, _original_pid, _queued_calls
     if _initialized:
@@ -210,8 +217,7 @@ def _lazy_init():
     _cudart = _load_cudart()
     _cudart.cudaGetErrorName.restype = ctypes.c_char_p
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
-    _original_pid = os.getpid()
-    _cuda_initialized = True
+    _poison_fork()
     _initialized = True
     # Important to do this after _initialized, since some queued calls
     # may themselves call _lazy_init()
