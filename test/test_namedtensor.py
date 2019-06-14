@@ -47,6 +47,21 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(TypeError, 'invalid combination of arguments'):
             x = factory(2, 1, names='N', device=device)
 
+        with self.assertRaisesRegex(RuntimeError, 'construct a tensor with duplicate names'):
+            x = factory(2, 1, 1, names=('N', 'C', 'N'), device=device)
+
+        # Tests for tagged names
+        x = factory(2, 3, 1, names=('C.in', 'H', 'C.out'), device=device)
+        self.assertEqual(x.names, ('C.in', 'H', 'C.out'))
+
+        with self.assertRaisesRegex(RuntimeError, 'construct a tensor with duplicate names'):
+            x = factory(2, 1, 1, names=('C.in', 'H', 'C.in'), device=device)
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'with duplicate names unless they are tagged and have different tags'):
+            x = factory(2, 1, 1, names=('C.in', 'H', 'C'), device=device)
+
 
     @skipIfNamedTensorDisabled
     def test_empty(self):
