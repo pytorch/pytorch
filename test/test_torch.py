@@ -2936,6 +2936,8 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
         self.assertFalse(r.is_quantized)
+        self.assertEqual(qr.qscheme(), torch.per_tensor_affine)
+        self.assertTrue(isinstance(qr.qscheme(), torch.qscheme))
         # slicing and int_repr
         int_repr = qr.int_repr()
         for num in int_repr:
