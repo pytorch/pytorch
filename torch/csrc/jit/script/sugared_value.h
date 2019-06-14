@@ -346,8 +346,8 @@ struct TORCH_API MagicMethod : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    if (inputs.size() > 0) {
-      Value* self = inputs[0].value(*m.graph());
+    if (inputs.size() > class_arg_position_) {
+      Value* self = inputs[class_arg_position_].value(*m.graph());
 
       if (auto class_ptr = self->type()->cast<ClassType>()) {
         if (!class_ptr->getMethod(desugared_name_)) {
@@ -355,8 +355,17 @@ struct TORCH_API MagicMethod : public SugaredValue {
               << class_ptr->python_str() << " does not define a "
               << desugared_name_ << " method";
         }
+
+        // Remove class argument from inputs list
+        std::vector<NamedValue> spliced_inputs;
+        for (size_t i = 0; i < inputs.size(); ++i) {
+          if (i == class_arg_position_) {
+            continue;
+          }
+          spliced_inputs.emplace_back(std::move(inputs.at(i)));
+        }
         return MethodValue(self, desugared_name_)
-            .call(loc, m, inputs.slice(1), attributes, n_binders);
+            .call(loc, m, spliced_inputs, attributes, n_binders);
       }
     }
     return base_value_->call(loc, m, inputs, attributes, n_binders);
