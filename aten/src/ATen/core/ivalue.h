@@ -49,14 +49,9 @@ struct Object;
   _(Object)
 
 struct CAFFE2_API IValue final {
-  IValue()
-  : payload{0}
-  , tag(Tag::None)
-  , is_intrusive_ptr(false) {}
+  IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
   IValue(const IValue& rhs)
-      : payload(rhs.payload),
-        tag(rhs.tag),
-        is_intrusive_ptr(rhs.is_intrusive_ptr) {
+      : IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr) {
     if (is_intrusive_ptr) {
       c10::raw::intrusive_ptr::incref(payload.as_intrusive_ptr);
     }
@@ -204,6 +199,9 @@ struct CAFFE2_API IValue final {
   // IntList
   IValue(c10::ListPtr<int64_t> v);
   IValue(c10::ArrayRef<int64_t> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::ListPtr<T> instead.")
+  /// \endcond
   IValue(std::vector<int64_t> v);
   bool isIntList() const { return Tag::IntList == tag; }
   c10::ListPtr<int64_t> toIntList() &&;
@@ -221,6 +219,9 @@ struct CAFFE2_API IValue final {
 
   // DoubleList
   IValue(c10::ListPtr<double> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::ListPtr<T> instead.")
+  /// \endcond
   IValue(std::vector<double> v);
   bool isDoubleList() const { return Tag::DoubleList == tag; }
   c10::ListPtr<double> toDoubleList() &&;
@@ -229,6 +230,9 @@ struct CAFFE2_API IValue final {
 
   // BoolList
   IValue(c10::ListPtr<bool> v);
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::ListPtr<T> instead.")
+  /// \endcond
   IValue(std::vector<bool> v);
   bool isBoolList() const { return Tag::BoolList == tag; }
   c10::ListPtr<bool> toBoolList() &&;
@@ -243,6 +247,9 @@ struct CAFFE2_API IValue final {
   c10::ArrayRef<at::Tensor> toTensorListRef() const;
 
   //GenericList
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::ListPtr<T> instead.")
+  /// \endcond
   IValue(std::vector<IValue> v);
   IValue(c10::ListPtr<IValue> v);
   bool isGenericList() const { return Tag::GenericList == tag; }
@@ -253,6 +260,9 @@ struct CAFFE2_API IValue final {
   template<class T>
   IValue(c10::ListPtr<T> v);
   template<class T>
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::ListPtr<T> instead.")
+  /// \endcond
   IValue(std::vector<T> v);
 
   // GenericDict
@@ -265,6 +275,9 @@ struct CAFFE2_API IValue final {
   IValue(c10::DictPtr<Key, Value> v);
 
   template<class Key, class Value>
+  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::DictPtr<K, V> instead.")
+  /// \endcond
   IValue(std::unordered_map<Key, Value> v);
 
   template<class T>
@@ -418,7 +431,8 @@ struct CAFFE2_API IValue final {
     tag = Tag::None;
     is_intrusive_ptr = false;
   }
-  union {
+private:
+  union Payload {
     int64_t as_int;
     double as_double;
     bool as_bool;
@@ -427,8 +441,105 @@ struct CAFFE2_API IValue final {
       DeviceType type;
       DeviceIndex index;
     } as_device;
-  } payload;
+  };
+
+  IValue(Payload p, Tag t, bool i)
+  : payload(p), tag(t), is_intrusive_ptr(i) {}
+
+  Payload payload;
   Tag tag;
+  bool is_intrusive_ptr;
+  friend struct WeakIValue;
+};
+
+struct CAFFE2_API WeakIValue final {
+  WeakIValue()
+  : payload{0}
+  , tag(IValue::Tag::None)
+  , is_intrusive_ptr(false) {}
+
+  WeakIValue(const WeakIValue& rhs)
+      : payload(rhs.payload),
+        tag(rhs.tag),
+        is_intrusive_ptr(rhs.is_intrusive_ptr) {
+    if (is_intrusive_ptr) {
+      c10::raw::weak_intrusive_ptr::incref(payload.as_intrusive_ptr);
+    }
+  }
+  WeakIValue(const IValue& rhs)
+      : payload(rhs.payload),
+        tag(rhs.tag),
+        is_intrusive_ptr(rhs.is_intrusive_ptr) {
+    if (is_intrusive_ptr) {
+      c10::raw::weak_intrusive_ptr::incref(payload.as_intrusive_ptr);
+    }
+  }
+  WeakIValue(WeakIValue&& rhs) noexcept : WeakIValue() {
+    swap(rhs);
+  }
+  ~WeakIValue() {
+    if (is_intrusive_ptr) {
+      c10::raw::weak_intrusive_ptr::decref(payload.as_intrusive_ptr);
+    }
+  }
+  WeakIValue & operator=(WeakIValue && rhs) & noexcept {
+    WeakIValue(std::move(rhs)).swap(*this); // this also sets rhs to None
+    return *this;
+  }
+  WeakIValue & operator=(WeakIValue const & rhs) & {
+    WeakIValue(rhs).swap(*this);
+    return *this;
+  }
+  void swap(WeakIValue & rhs) noexcept {
+    std::swap(payload, rhs.payload);
+    std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
+    std::swap(tag, rhs.tag);
+  }
+
+  IValue lock() const {
+    if (!is_intrusive_ptr) {
+      return IValue(payload, tag, false);
+    }
+    auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
+        payload.as_intrusive_ptr);
+    IValue::Payload pl;
+    pl.as_intrusive_ptr = temp.lock().release();
+    temp.release();
+    if (!pl.as_intrusive_ptr) {
+      return IValue();
+    } else {
+      return IValue(pl, tag, true);
+    }
+  }
+
+  size_t use_count() const noexcept {
+    if (!is_intrusive_ptr) {
+      return 1;
+    }
+    auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
+        payload.as_intrusive_ptr);
+    size_t result = temp.use_count();
+    temp.release();
+    return result;
+  }
+
+  size_t weak_use_count() const noexcept {
+    if (!is_intrusive_ptr) {
+      return 1;
+    }
+    auto temp = c10::weak_intrusive_ptr<c10::intrusive_ptr_target>::reclaim(
+        payload.as_intrusive_ptr);
+    size_t result = temp.weak_use_count();
+    temp.release();
+    return result;
+  }
+  size_t hash() const {
+    return payload.as_int;
+  }
+
+private:
+  IValue::Payload payload;
+  IValue::Tag tag;
   bool is_intrusive_ptr;
 };
 

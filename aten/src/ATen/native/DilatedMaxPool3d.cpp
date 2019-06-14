@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/DilatedMaxPool.h>
+#include <ATen/native/Pool.h>
 #include <tuple>
 
 
