@@ -11971,16 +11971,13 @@ a")
         s = u'\u00a3'.encode('utf8')[:1]
         self.checkScript(index_str_to_tensor, (s,))
 
-    @unittest.skipIf(not PY2, "We don't support returning wstring")
     def test_chr(self):
         def fn(x):
             # type: (int) -> str
             return chr(x)
 
         self.checkScript(fn, (1,))
-        self.checkScript(fn, (255,))
-
-        self.checkScriptRaisesRegex(fn, (256,), Exception, 'not in range(256)')
+        self.checkScript(fn, (97,))
 
     def test_round(self):
         def round_float(x):

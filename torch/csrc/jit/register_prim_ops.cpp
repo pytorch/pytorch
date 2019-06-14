@@ -2165,12 +2165,14 @@ RegisterOperators reg2({
         "aten::chr(int i) -> str",
         [](Stack& stack) {
           auto i = pop(stack).toInt();
+          std::stringstream ss;
           TORCH_CHECK(
               i >= 0 && i < 1114111,
-              "chr() arg not in range(256), found ",
+              "chr() arg not in range(0x110000), found ",
               i);
           char c = i;
-          push(stack, std::string(c, 1));
+          ss << c;
+          push(stack, ss.str());
           return 0;
         }),
 #define CREATE_COPY_OP(other_type, c_type)                                 \
