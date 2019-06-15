@@ -390,8 +390,11 @@ struct Environment {
 
     if (!retval) {
       if (auto type = resolver->resolveType(ident)) {
-        const auto class_type = type->expect<ClassType>();
-        retval = std::make_shared<script::ClassValue>(class_type);
+        if (auto class_type = type->cast<ClassType>()) {
+          retval = std::make_shared<script::ClassValue>(class_type);
+        } else if (auto tuple_type = type->cast<TupleType>()) {
+          retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
+        }
       }
     }
 
@@ -572,7 +575,7 @@ struct to_ir {
     cu.define({def}, {resolver}, nullptr);
     Stack stack;
     cu.get_function("defaults").run(stack);
-    return stack.at(0).toTupleRef().vec();
+    return stack.at(0).toTuple()->elements();
   }
 
   std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {

@@ -991,14 +991,14 @@ class _TestTorchMixin(object):
             ans = torch.norm(x, "nuc", dim=axes)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
-            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03))
+            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True))
 
             out = torch.zeros(expected.shape, dtype=x.dtype, device=x.device)
             ans = torch.norm(x, "nuc", dim=axes, out=out)
             self.assertIs(ans, out)
             self.assertTrue(ans.is_contiguous())
             self.assertEqual(ans.shape, expected.shape)
-            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03))
+            self.assertTrue(np.allclose(ans.cpu(), expected, rtol=1e-02, atol=1e-03, equal_nan=True))
 
         for n in range(1, 3):
             for m in range(1, 3):
@@ -1026,7 +1026,7 @@ class _TestTorchMixin(object):
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions Fortran
-                        y = torch.randn(o, n, m, device=device).transpose(-1, -2)
+                        x = torch.randn(o, m, n, device=device).transpose(-1, -2)
                         check_single_nuclear_norm(x, axes)
 
                         # 3d, inner dimensions non-contiguous
@@ -1255,6 +1255,10 @@ class _TestTorchMixin(object):
         shape = (2, 0, 4)
         for device in torch.testing.get_all_device_types():
             x = torch.randn(shape, device=device)
+
+            for fn in [torch.max, torch.min]:
+                ident_err = 'operation does not have an identity'
+                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x))
 
             for item in fns_to_test:
                 name, fn, identity = item
@@ -2932,6 +2936,8 @@ class _TestTorchMixin(object):
         self.assertEqual(qr.q_zero_point(), zero_point)
         self.assertTrue(qr.is_quantized)
         self.assertFalse(r.is_quantized)
+        self.assertEqual(qr.qscheme(), torch.per_tensor_affine)
+        self.assertTrue(isinstance(qr.qscheme(), torch.qscheme))
         # slicing and int_repr
         int_repr = qr.int_repr()
         for num in int_repr:
@@ -5354,6 +5360,25 @@ class _TestTorchMixin(object):
         self._test_solve_batched(self, lambda t: t)
 
     @staticmethod
+    def _test_solve_batched_many_batches(self, cast):
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        A = cast(random_fullrank_matrix_distinct_singular_value(5, 256, 256))
+        b = cast(torch.randn(5, 1))
+        x, _ = torch.solve(b, A)
+        self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 1)))
+
+        A = cast(random_fullrank_matrix_distinct_singular_value(3))
+        b = cast(torch.randn(512, 512, 3, 1))
+        x, _ = torch.solve(b, A)
+        self.assertEqual(torch.matmul(A, x), b)
+
+    @slowTest
+    @skipIfNoLapack
+    def test_solve_batched_many_batches(self):
+        self._test_solve_batched_many_batches(self, lambda t: t.cuda())
+
+    @staticmethod
     def _test_solve_batched_dims(self, cast):
         if not TEST_NUMPY:
             return
@@ -5610,7 +5635,37 @@ class _TestTorchMixin(object):
 
     @skipIfNoLapack
     def test_triangular_solve_batched(self):
-        _TestTorchMixin._test_triangular_solve_batched(self, lambda t: t)
+        self._test_triangular_solve_batched(self, lambda t: t)
+
+    @staticmethod
+    def _test_triangular_solve_batched_many_batches(self, cast):
+        def triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular):
+            A = cast(torch.randn(*A_dims))
+            A = A.triu() if upper else A.tril()
+            if unitriangular:
+                A.diagonal(dim1=-2, dim2=-1).fill_(1.)
+            b = cast(torch.randn(*b_dims))
+            return A, b
+
+        for upper, transpose, unitriangular in product([True, False], repeat=3):
+            A, b = triangular_solve_test_helper((256, 256, 5, 5), (5, 1), cast, upper, unitriangular)
+            x, _ = torch.triangular_solve(b, A,
+                                          upper=upper, transpose=transpose, unitriangular=unitriangular)
+            if transpose:
+                A = A.transpose(-2, -1)
+            self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 1)))
+
+            A, b = triangular_solve_test_helper((3, 3), (512, 512, 3, 1), cast, upper, unitriangular)
+            x, _ = torch.triangular_solve(b, A,
+                                          upper=upper, transpose=transpose, unitriangular=unitriangular)
+            if transpose:
+                A = A.transpose(-2, -1)
+            self.assertEqual(torch.matmul(A, x), b)
+
+    @slowTest
+    @skipIfNoLapack
+    def test_triangular_solve_batched_many_batches(self):
+        self._test_triangular_solve_batched_many_batches(self, lambda t: t)
 
     @staticmethod
     def _test_triangular_solve_batched_dims(self, cast):
@@ -6041,9 +6096,28 @@ class _TestTorchMixin(object):
         expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
         self.assertEqual(matrices_inverse, conv_fn(expected_inv))
 
+    @staticmethod
+    def _test_inverse_slow(self, conv_fn):
+        from common_utils import random_fullrank_matrix_distinct_singular_value
+
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 256, 256))
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(torch.matmul(matrices_inverse, matrices),
+                         conv_fn(torch.eye(5)).expand_as(matrices))
+
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(3, 512, 512))
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(torch.matmul(matrices, matrices_inverse),
+                         conv_fn(torch.eye(3)).expand_as(matrices))
+
     @skipIfNoLapack
     def test_inverse(self):
         self._test_inverse(self, lambda t: t)
+
+    @slowTest
+    @skipIfNoLapack
+    def test_inverse_many_batches(self):
+        self._test_inverse_slow(self, lambda t: t)
 
     @staticmethod
     def _test_pinverse(self, conv_fn):
@@ -6844,6 +6918,30 @@ class _TestTorchMixin(object):
     @skipIfNoLapack
     def test_cholesky_solve_batched(self):
         self._test_cholesky_solve_batched(self, lambda t: t)
+
+    @staticmethod
+    def _test_cholesky_solve_batched_many_batches(self, cast):
+        from common_utils import random_symmetric_pd_matrix
+
+        def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
+            A = cast(random_symmetric_pd_matrix(*A_dims))
+            L = torch.cholesky(A, upper)
+            b = cast(torch.randn(*b_dims))
+            return A, L, b
+
+        for upper in [True, False]:
+            A, L, b = cholesky_solve_test_helper((5, 256, 256), (5, 10), cast, upper)
+            x = torch.cholesky_solve(b, L, upper)
+            self.assertEqual(torch.matmul(A, x), b.expand(A.shape[:-2] + (5, 10)))
+
+            A, L, b = cholesky_solve_test_helper((5,), (512, 512, 5, 10), cast, upper)
+            x = torch.cholesky_solve(b, L, upper)
+            self.assertEqual(torch.matmul(A, x), b)
+
+    @skipIfNoLapack
+    @slowTest
+    def test_cholesky_solve_batched_many_batches(self):
+        self._test_cholesky_solve_batched_many_batches(self, lambda t: t)
 
     @staticmethod
     def _test_cholesky_solve_batched_dims(self, cast):
@@ -9083,9 +9181,9 @@ class _TestTorchMixin(object):
 
         # test for non-contiguous case
         expanded_data = torch.arange(1, 4, device=device).view(3, 1).expand(3, 2)
-        tranposed_data = torch.arange(1, 9, device=device).view(2, 2, 2).transpose(0, 1)
+        transposed_data = torch.arange(1, 9, device=device).view(2, 2, 2).transpose(0, 1)
         self.assertEqual(torch.tensor([3, 3, 2, 2, 1, 1]).view(3, 2), expanded_data.flip(0))
-        self.assertEqual(torch.tensor([8, 7, 4, 3, 6, 5, 2, 1]).view(2, 2, 2), tranposed_data.flip(0, 1, 2))
+        self.assertEqual(torch.tensor([8, 7, 4, 3, 6, 5, 2, 1]).view(2, 2, 2), transposed_data.flip(0, 1, 2))
 
         # test for shape
         data = torch.randn(2, 3, 4, device=device)
