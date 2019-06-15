@@ -122,7 +122,7 @@ view of a storage and defines numeric operations on it.
 
 .. warning::
    Current implementation of :class:`torch.Tensor` introduces memory overhead,
-   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors. 
+   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors.
    If this is your case, consider using one large structure.
 
 .. class:: Tensor()
@@ -366,6 +366,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: pstrf
    .. automethod:: put_
    .. automethod:: qr
+   .. automethod:: qscheme
    .. automethod:: q_scale
    .. automethod:: q_zero_point
    .. automethod:: random_

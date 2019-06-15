@@ -4937,28 +4937,38 @@ a")
 
     def test_profiling_graph_executor(self):
         @torch.jit.script
-        def basic(x, y):
-            a = x + y
-            b = x * y
-            c = x + 1
-            d = a - c
-            e = b - c
-            return d + e
+        def def_in_one_branch(x, z):
+            # type: (Tensor, bool) -> float
+            y = x
+            if z is False:
+                y = x + 1
+
+            return y.sum()
 
         a = torch.rand(2, 3)
-        b = torch.rand(2, 3)
 
         with enable_profiling_mode():
-            basic(a, b)
-            basic(a, b)
-            basic(a, b)
+            # the first calls are profiled
+            def_in_one_branch(a, False)
+            # check prim::profile are inserted
+            profiled_graph_str = str(def_in_one_branch.graph_for(a, True))
+            FileCheck().check_count("prim::profile", 4).run(profiled_graph_str)
+            def_in_one_branch(a, False)
+            def_in_one_branch(a, False)
+            # this call is optimized for
+            # the given shape of (2, 3)
+            def_in_one_branch(a, False)
+            # change shape to (3)
+            # so we go down a bailout path
+            a = torch.ones(3)
+            # check prim::BailOuts are inserted
+            bailout_graph_str = str(def_in_one_branch.graph_for(a, True))
+            FileCheck().check_count("prim::BailOut", 6).run(bailout_graph_str)
+            # this triggers all 3 bailouts
+            self.assertEqual(def_in_one_branch(a, False), 6.0)
+            # this triggers 2 bailouts
+            self.assertEqual(def_in_one_branch(a, True), 3.0)
 
-            # this tests that a profiling count is being decrement by
-            # a profile instruction.
-            # this is the easiest way to test that a graph was instrumented
-            # from python
-            with self.assertRaisesRegex(RuntimeError, "Not yet implemented"):
-                basic(a, b)
 
     def test_resize_input_ops(self):
         # resize_ and resize_as resize the input tensor. because our shape analysis
@@ -8617,7 +8627,7 @@ a")
     def test_non_tensor_tracing(self):
         def f(x):
             return x + param
-        with self.assertRaisesRegex(RuntimeError, "inputs or outputs of traced functions, but instead got value of type int."):
+        with self.assertRaisesRegex(RuntimeError, r"Type 'Tuple\[int\]' cannot be traced"):
             torch.jit.trace(f, (1,))
 
     def test_type_annotation_module(self):
@@ -13042,14 +13052,31 @@ a")
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
 
-    def test_named_tuple_error(self):
-        _GoogLeNetOutputs = namedtuple('GoogLeNetOuputs', ['logits', 'aux_logits2', 'aux_logits1'])
+    def test_named_tuple_py2(self):
+        _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
 
-        with self.assertRaisesRegex(RuntimeError, 'NamedTuple is currently not supported'):
-            @torch.jit.script
-            def foo(x):
-                return _GoogLeNetOutputs(x, x, x)
+        @torch.jit.script
+        def foo(x):
+            # type: (_GoogLeNetOutputs) -> _GoogLeNetOutputs
+            return x
 
+        vals = torch.rand(3), torch.rand(4), torch.rand(5)
+        out = foo(_GoogLeNetOutputs(logits=vals[0], aux_logits2=vals[1], aux_logits1=vals[2]))
+        self.assertEqual(out.logits, vals[0])
+        self.assertEqual(out.aux_logits2, vals[1])
+        self.assertEqual(out.aux_logits1, vals[2])
+
+    def test_named_tuple_good_error(self):
+        _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
+
+        @torch.jit.script
+        def foo(x):
+            # type: (_GoogLeNetOutputs) -> _GoogLeNetOutputs
+            return x
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'aka NamedTuple\(logits, aux_logits2, aux_logits1\)'):
+            out = foo(_GoogLeNetOutputs(logits=3, aux_logits2=4, aux_logits1=5))
 
     def _test_pickle_checkpoint(self, device):
         with TemporaryFileName() as fname:
