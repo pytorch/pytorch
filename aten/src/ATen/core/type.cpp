@@ -1,4 +1,5 @@
 #include <ATen/core/jit_type.h>
+#include <ATen/core/function_schema.h>
 #include <ATen/core/Dict.h>
 #include <iostream>
 
@@ -53,10 +54,16 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
+    if (tup->hasNames()) {
+      out << "NamedTuple";
+    }
     out << "(";
     for(size_t i = 0; i < tup->elements().size(); ++i) {
       if(i > 0)
         out << ", ";
+      if (tup->hasNames()) {
+        out << tup->names()[i] << " : ";
+      }
       out << *(tup->elements()[i]);
     }
     out << ")";
@@ -155,7 +162,7 @@ TypePtr incompleteInferTypeFrom(const IValue& value) {
   } else if (value.isDoubleList()) {
     return ListType::ofFloats();
   } else if (value.isTuple()) {
-    return TupleType::create(fmap(value.toTupleRef(), incompleteInferTypeFrom));
+    return TupleType::create(fmap(value.toTuple()->elements(), incompleteInferTypeFrom));
   } else if (value.isDevice()) {
     return DeviceObjType::get();
   } else if (value.isObject()) {
@@ -201,7 +208,7 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
   }
 
   if (ivalue.isTuple()) {
-    auto elems = ivalue.toTupleRef();
+    auto elems = ivalue.toTuple()->elements();
     auto tuple_type = type->cast<TupleType>();
     if (!tuple_type || tuple_type->elements().size() != elems.size()) {
       return false;
@@ -548,5 +555,21 @@ ClassType::ClassType(
     : Type(TypeKind::ClassType),
       name_(std::move(name)),
       compilation_unit_(std::move(cu)) {}
+
+void TupleType::createFunctionSchema() {
+  std::vector<Argument> arguments;
+  for (size_t i = 0; i < elements_.size(); ++i) {
+    arguments.emplace_back(
+        /*name=*/names()[i],
+        /*type=*/containedTypes()[i],
+        /*N=*/i);
+  }
+
+  schema_ = std::make_shared<FunctionSchema>(
+      /*name=*/unqualName().value(),
+      /*overload_name=*/std::string(""),
+      /*arguments=*/arguments,
+      /*returns=*/std::vector<Argument>{});
+}
 
 } // namespace c10

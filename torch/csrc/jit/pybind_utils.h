@@ -111,7 +111,7 @@ inline TypedIValue toTypedIValue(py::handle input) {
       s.push_back(info.first);
       t.push_back(info.second);
     }
-    return TypedIValue(c10::ivalue::TuplePtr::create(s), TupleType::create(t));
+    return TypedIValue(c10::ivalue::Tuple::create(s), TupleType::create(t));
   } else if (PyDict_Check(input.ptr())) {
     // Check to make sure we can generate useful input/output types
     auto dict = py::cast<py::dict>(input);
@@ -179,13 +179,13 @@ inline IValue toIValue(py::handle input) {
 }
 
 inline Stack toStack(const py::tuple& inputs) {
-  return toIValue(inputs).toTupleRef().vec();
+  return toIValue(inputs).toTuple()->elements();
 }
 
 inline TypedStack toTypedStack(const py::tuple& inputs) {
   auto info = toTypedIValue(inputs);
   return TypedStack(
-      info.ivalue().toTupleRef().vec(), info.type()->expect<TupleType>());
+      info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
 }
 
 inline IValue toIValue(
@@ -247,7 +247,8 @@ inline IValue toIValue(
                                 // because it attempts to iterate a non-tuple
       py::tuple tuple = py::cast<py::tuple>(obj);
       size_t tuple_size = tuple.size();
-      const auto& elem_types = type->cast<TupleType>()->elements();
+      auto tuple_type = type->cast<TupleType>();
+      const auto& elem_types = tuple_type->elements();
       if (elem_types.size() != tuple_size) {
         throw py::cast_error();
       }
@@ -256,7 +257,7 @@ inline IValue toIValue(
       for (size_t i = 0; i < tuple_size; ++i) {
         values.push_back(toIValue(tuple[i], elem_types[i]));
       }
-      return c10::ivalue::TuplePtr::create(std::move(values));
+      return c10::ivalue::Tuple::create(std::move(values), tuple_type);
     }
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
@@ -335,6 +336,30 @@ inline IValue toIValue(
       "! File a bug report.");
 }
 
+// Small wrapper around getting the type name string from Python to make
+// types easier to interpret, e.g. give the structural type for a NamedTuple
+inline std::string friendlyTypeName(py::handle obj) {
+  if (py::isinstance<py::tuple>(obj) && py::hasattr(obj, "_fields")) {
+    auto field_names =
+        py::cast<std::vector<std::string>>(py::getattr(obj, "_fields"));
+    std::stringstream ss;
+    ss << py::str(obj.get_type().attr("__name__"));
+    ss << " (aka NamedTuple(";
+    bool first = true;
+    for (auto& field_name : field_names) {
+      if (!first) {
+        ss << ", ";
+      }
+      ss << field_name;
+      first = false;
+    }
+    ss << "))";
+    return ss.str();
+  } else {
+    return py::str(obj.get_type().attr("__name__"));
+  }
+}
+
 inline IValue argumentToIValue(
     const FunctionSchema& schema,
     size_t argumentPosition,
@@ -345,7 +370,7 @@ inline IValue argumentToIValue(
   } catch (const py::cast_error& error) {
     throw std::runtime_error(schema.formatTypeMismatchMsg(
         argument,
-        py::str(object.get_type().attr("__name__")),
+        friendlyTypeName(object),
         argumentPosition,
         py::repr(object)));
   }
@@ -400,12 +425,18 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(t);
   } else if (ivalue.isTuple()) {
     auto tuple = std::move(ivalue).toTuple();
-    const auto& elements = tuple.elements();
+    const auto& elements = tuple->elements();
     py::tuple t{elements.size()};
     for (size_t i = 0; i < elements.size(); ++i) {
-      t[i] = toPyObject(IValue{elements.get(i)});
+      t[i] = toPyObject(IValue{elements.at(i)});
     }
-    return std::move(t);
+    if (tuple->type && tuple->type->hasNames() && tuple->type->unqualName()) {
+      return py::module::import("torch.jit")
+          .attr("_create_named_tuple")(
+              t, tuple->type->names(), tuple->type->unqualName().value());
+    } else {
+      return std::move(t);
+    }
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
   } else if (ivalue.isGenericDict()) {

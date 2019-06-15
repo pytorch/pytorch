@@ -22,10 +22,10 @@ Tensor quantize_linear_per_channel_cpu(
   TORCH_CHECK(scales.numel() == zero_points.numel(),
               "number of elements in scales and zero_points must match");
   TORCH_CHECK(axis.size() == 1, "only axis of size 1 is supported right now");
-  float* scales_data = scales.data<float>();
-  int32_t* zero_points_data = zero_points.data<int32_t>();
-  std::vector<float> scale_vals(scales_data, scales_data + scales.numel());
-  std::vector<int32_t> zero_point_vals(
+  double* scales_data = scales.data<double>();
+  int64_t* zero_points_data = zero_points.data<int64_t>();
+  std::vector<double> scale_vals(scales_data, scales_data + scales.numel());
+  std::vector<int64_t> zero_point_vals(
       zero_points_data, zero_points_data + zero_points.numel());
   auto quantizer = make_per_channel_affine_quantizer(
       scale_vals, zero_point_vals, axis, dtype);
@@ -103,6 +103,11 @@ Tensor& set_storage_cpu(Tensor& self, Storage storage, int64_t storage_offset, I
   self_->set_storage_offset(storage_offset);
   self_->set_sizes_and_strides(sizes, strides);
   return self;
+}
+
+QScheme qscheme_quant(const Tensor& self) {
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  return quantizer->qscheme();
 }
 
 } // namespace native
