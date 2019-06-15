@@ -1437,7 +1437,7 @@ class TestSparse(TestCase):
         x = self.sparse_tensor(i, v, torch.Size([2, 3]))
         y = torch.ones(3)
 
-        self.assertEqual(self.value_tensor([[3],[9]]), x.matmul(y))
+        self.assertEqual(self.value_tensor([[3], [9]]), x.matmul(y))
 
     def test_sparse_add_coalesce(self):
         i = self.index_tensor([[1, 2, 1]])
