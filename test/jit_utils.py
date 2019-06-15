@@ -258,7 +258,7 @@ class JitTestCase(TestCase):
         return graph
 
     def checkScript(self,
-                    script,
+                    func,
                     inputs,
                     optimize=True,
                     outputs=None,
@@ -266,42 +266,44 @@ class JitTestCase(TestCase):
                     capture_output=False,
                     frames_up=1,
                     check_expected=False):
-        if isinstance(script, str):
-            cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
-            ge = getattr(cu, name)
+        if isinstance(func, str):
+            cu = torch.jit.CompilationUnit(func, optimize, _frames_up=frames_up)
+            scripted_fn = getattr(cu, name)
         else:
             if capture_output:
                 with self.capture_stdout() as captured:
-                    outputs = script(*inputs)
+                    outputs = func(*inputs)
             else:
-                outputs = script(*inputs)
+                outputs = func(*inputs)
             # Check the string frontend first
-            source = textwrap.dedent(inspect.getsource(script))
+            source = textwrap.dedent(inspect.getsource(func))
             self.checkScript(
                 source,
                 inputs,
                 optimize,
                 outputs,
-                script.__name__,
+                func.__name__,
                 capture_output,
                 frames_up=2,
                 check_expected=check_expected)
             # Continue checking the Python frontend
-            ge = torch.jit.script(script, optimize, _frames_up=1)
+            scripted_fn = torch.jit.script(func, optimize, _frames_up=1)
 
         if capture_output:
-            with self.capture_stdout() as captured:
-                outputs_ge = ge(*inputs)
             if not IS_WINDOWS:
-                self.assertExpected(captured[0], subname='stdout')
+                with self.capture_stdout() as script_stdout:
+                    outputs_ge = scripted_fn(*inputs)
+                with self.capture_stdout() as python_stdout:
+                    outputs_ge = scripted_fn(*inputs)
+                self.assertEqual(script_stdout, python_stdout)
         else:
-            outputs_ge = ge(*inputs)
+            outputs_ge = scripted_fn(*inputs)
         self.assertEqual(outputs, outputs_ge)
 
         if check_expected:
-            self.assertExpectedGraph(ge.graph)
+            self.assertExpectedGraph(scripted_fn.graph)
 
-        return ge
+        return scripted_fn
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    optimize=True, drop=None, allow_unused=False, verbose=False,
