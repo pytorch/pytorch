@@ -44,10 +44,10 @@ void testIValue() {
   ASSERT_TRUE(dlist.isNone());
   dlist = IValue(c10::make_list<double>({3.4}));
   ASSERT_TRUE(dlist.toDoubleListRef().equals({3.4}));
-  IValue the_list(ivalue::TuplePtr::create({IValue(3.4), IValue(4), IValue(foo)}));
+  IValue the_list(ivalue::Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   ASSERT_EQ(foo.use_count(), 3);
   ASSERT_TRUE(the_list.isTuple());
-  auto first = the_list.toTupleRef()[1];
+  auto first = the_list.toTuple()->elements()[1];
   ASSERT_EQ(first.toInt(), 4);
   at::Tensor tv = at::rand({3, 4});
   IValue ten(tv);

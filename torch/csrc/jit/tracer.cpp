@@ -96,9 +96,9 @@ Value* TracingState::getValue(const IValue& var) {
   } else if (var.isTuple()) {
     return graph
         ->insertNode(graph->createTuple(fmap(
-            var.toTupleRef(),
+            var.toTuple()->elements(),
             [&](const IValue& val) { return getValue(val); })))
-        ->output(); 
+        ->output();
   } if (var.isTensor()) {
     auto ten = var.toTensor();
     if (!ten.defined()) {
@@ -198,11 +198,9 @@ Value* TracingState::getOutput(const IValue& iv) {
      }
      return it->second;
   } else if (iv.isTuple()) {
-    auto tuple = iv.toTupleRef();
-    auto tuple_node =
-        graph->createTuple(fmap(tuple, [&](const IValue& ival) {
-          return getOutput(ival);
-        }));
+    auto tuple = iv.toTuple()->elements();
+    auto tuple_node = graph->createTuple(
+        fmap(tuple, [&](const IValue& ival) { return getOutput(ival); }));
     graph->insertNode(tuple_node);
     return tuple_node->output();
   } else {
@@ -228,13 +226,13 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
         state->graph->insertNode(state->graph->createTupleUnpack(value));
     auto elem_values = unpack_node->outputs();
     auto elem_types = tuple_type->elements();
-    c10::ivalue::TuplePtr tuple = input.toTuple();
-    c10::ListPtr<IValue>& elems = tuple.elements();
+    auto tuple = input.toTuple();
+    auto elems = tuple->elements();
     size_t num_elems = elems.size();
     AT_ASSERT(
         elem_values.size() == num_elems && elem_types.size() == num_elems);
     for (size_t i = 0; i < num_elems; ++i) {
-      elems[i] = addInput(state, elems.get(i), elem_types[i], elem_values[i]);
+      elems[i] = addInput(state, elems.at(i), elem_types[i], elem_values[i]);
     }
     return std::move(tuple);
   } else if (auto dict_type = type->cast<DictType>()) {
@@ -364,7 +362,7 @@ void TracingState::setValue(const IValue& v, Value* value) {
       setValue(outputs.get(i), unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
-    auto outputs = v.toTupleRef();
+    auto outputs = v.toTuple()->elements();
     Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
     for (size_t i = 0; i < outputs.size(); ++i) {
       setValue(outputs[i], unpack_node->outputs()[i]);
