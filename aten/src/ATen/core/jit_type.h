@@ -1364,6 +1364,9 @@ CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
+  MatchTypeReturn(TypePtr type) : type(type) {}
+  MatchTypeReturn(std::string errMsg) : errMsg(std::move(errMsg)) {}
+
   c10::optional<TypePtr> type; // nullopt if there is no match
   std::string errMsg; // is there is no match, this contains the reason
 };
