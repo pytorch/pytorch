@@ -10,6 +10,7 @@
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCTensorRandom.h>
+#include <THC/THCGenerator.hpp>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
@@ -21,8 +22,6 @@
 #include <cmath>
 
 THCGenerator* THCRandom_getGenerator(THCState* state);
-// This is to keep thread safety in curand with curandStateMtgp32
-int const threadsPerBlock = 256;
 
 namespace at {
 namespace native {
@@ -504,6 +503,10 @@ Tensor reservoir_sampling_cuda(
     "Cannot take a larger sample than population when 'replace=False'"
   );
 
+  cudaDeviceProp* props = at::cuda::getCurrentDeviceProperties();
+  THAssert(props != NULL);
+  int threadsPerBlock = props->maxThreadsPerBlock;
+
   auto options = x.options().dtype(at::kLong);
   dim3 threads(threadsPerBlock);
 
@@ -644,6 +647,10 @@ Tensor sampling_with_replacement_cuda(
 	    weights.dim() == 1,
 	    "The weights must 1-dimensional."
 	  );
+
+    cudaDeviceProp* props = at::cuda::getCurrentDeviceProperties();
+    THAssert(props != NULL);
+    int threadsPerBlock = props->maxThreadsPerBlock;
 
     THCState *state = at::globalContext().getTHCState();
     THCGenerator* gen = THCRandom_getGenerator(state);
