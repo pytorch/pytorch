@@ -415,7 +415,7 @@ class DistributedDataParallel(Module):
 
             def sync_reduction_streams():
                 # We only have to sync with the first one, but it's safer to do it this way
-                # in case we change the way in which we paralellize work
+                # in case we change the way in which we parallelize work
                 r_streams = zip(*self._reduction_streams)
                 for dev_id, default_stream, dev_r_streams in zip(self.device_ids, self._default_streams, r_streams):
                     with torch.cuda.device(dev_id):

@@ -13,6 +13,9 @@ int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
   // 1 if the two tensors are equal at a position, otherwise 0. If the minimum value
   // in this buffer is 1, the two tensors are equal, otherwise they are not
 
+  // Both tensors are empty
+  if(THTensor_(nElement)(self_) == 0) return true;
+
   THCudaByteTensor *buf = THCudaByteTensor_newWithSize(state, self_->sizes(), {});
 
   if (!THC_pointwiseApply3<uint8_t, scalar_t, scalar_t>(state, buf, self_, src_, TensorEQOp<scalar_t, unsigned char>())) {

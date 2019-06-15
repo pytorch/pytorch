@@ -2692,10 +2692,12 @@ class TestCuda(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipCUDANonDefaultStreamIf(True)
     def test_nuclear_norm_axes_small_brute_force(self):
         _TestTorchMixin._test_nuclear_norm_axes(self, device='cuda')
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    @skipCUDANonDefaultStreamIf(True)
     def test_nuclear_norm_exceptions(self):
         _TestTorchMixin._test_nuclear_norm_exceptions(self, device='cuda')
 

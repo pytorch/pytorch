@@ -62,7 +62,7 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
   } catch (const c10::Error& error) {
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("nested_loop() expected a value of type 'List[List[Tensor]]'"
+            .find("nested_loop() Expected a value of type 'List[List[Tensor]]'"
                   " for argument 'a' but instead found type "
                   "'List[List[List[t]]]'") == 0);
   };
@@ -81,7 +81,7 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
     //so the error message is not helpful here.
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("nested_loop() expected a value of type "
+            .find("nested_loop() Expected a value of type "
                   "'List[List[Tensor]]' for argument 'a' but "
                   "instead found type 'List[List[Tensor]]'") == 0);
   };
@@ -106,7 +106,7 @@ TEST(TorchScriptTest, TestTupleArgMatching) {
     )JIT");
 
   std::vector<int64_t> int_list = {1};
-  auto tuple_generic_list = c10::ivalue::TuplePtr::create({ int_list });
+  auto tuple_generic_list = c10::ivalue::Tuple::create({ int_list });
 
   // doesn't fail on arg matching
   module->run_method("tuple_op", tuple_generic_list);
@@ -122,7 +122,7 @@ TEST(TorchScriptTest, TestOptionalArgMatching) {
           return a[0]
     )JIT");
 
-  auto optional_tuple = c10::ivalue::TuplePtr::create({2, std::string("hi")});
+  auto optional_tuple = c10::ivalue::Tuple::create({2, std::string("hi")});
 
   ASSERT_EQ(2, module->run_method("optional_tuple_op", optional_tuple).toInt());
   ASSERT_EQ(
