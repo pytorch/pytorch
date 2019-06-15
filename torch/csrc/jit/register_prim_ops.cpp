@@ -775,14 +775,17 @@ RegisterOperators reg(
            size_t num_elems = node->outputs().size();
            return [=](Stack& stack) {
              auto tuple = pop(stack).toTuple();
-             if (tuple.elements().size() != num_elems) {
+             if (tuple->elements().size() != num_elems) {
                AT_ERROR(
                    "Expected a tuple of ",
                    num_elems,
                    " elements, but got ",
-                   tuple.elements().size());
+                   tuple->elements().size());
              }
-             stack.insert(stack.end(), tuple.elements().begin(), tuple.elements().end());
+             stack.insert(
+                 stack.end(),
+                 tuple->elements().begin(),
+                 tuple->elements().end());
              return 0;
            };
          }),
@@ -793,11 +796,11 @@ RegisterOperators reg(
            int64_t end_ind = node->i(attr::end);
            return [=](Stack& stack) {
              auto tuple = pop(stack).toTuple();
-             c10::impl::GenericListPtr output_elems = c10::impl::make_generic_list();
+             std::vector<IValue> output_elems;
              for (int64_t i = beg_ind; i < end_ind; ++i) {
-               output_elems.emplace_back(tuple.elements()[i]);
+               output_elems.emplace_back(tuple->elements()[i]);
              }
-             push(stack, c10::ivalue::TuplePtr::create(std::move(output_elems)));
+             push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
              return 0;
            };
          }),
@@ -807,12 +810,12 @@ RegisterOperators reg(
            return [](Stack& stack) {
              int64_t index = pop(stack).toInt();
              auto tuple = pop(stack).toTuple();
-             auto norm_index = normalizeIndex(index, tuple.elements().size());
+             auto norm_index = normalizeIndex(index, tuple->elements().size());
              if (norm_index < 0 ||
-                 norm_index > static_cast<int64_t>(tuple.elements().size())) {
+                 norm_index > static_cast<int64_t>(tuple->elements().size())) {
                throw std::out_of_range("Tuple list index out of range");
              }
-             stack.emplace_back(tuple.elements()[norm_index]);
+             stack.emplace_back(tuple->elements()[norm_index]);
              return 0;
            };
          }),
@@ -820,12 +823,13 @@ RegisterOperators reg(
          prim::TupleConstruct,
          [](const Node* node) {
            size_t num_inputs = node->inputs().size();
+           auto type = node->output()->type()->expect<TupleType>();
            return [=](Stack& stack) {
              std::vector<IValue> elems{
                  std::make_move_iterator(stack.end() - num_inputs),
                  std::make_move_iterator(stack.end())};
              drop(stack, num_inputs);
-             push(stack, c10::ivalue::TuplePtr::create(c10::impl::toList(std::move(elems))));
+             push(stack, c10::ivalue::Tuple::create(std::move(elems), type));
              return 0;
            };
          }),
@@ -1200,6 +1204,30 @@ RegisterOperators logging_operators(
     push(stack, op);                                               \
     return 0;                                                      \
   })
+
+int stringSlice(Stack& stack) {
+  auto step = pop(stack).toInt();
+  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
+
+  auto end = pop(stack).toInt();
+  auto start = pop(stack).toInt();
+  auto string = pop(stack).toStringRef();
+  const int64_t size = string.size();
+
+  // Clamp start and end to the bounds of the list
+  start = std::max(int64_t(0), normalizeIndex(start, size));
+  end = std::min(size, normalizeIndex(end, size));
+
+  if (end <= start) {
+    // Slice is empty
+    push(stack, std::string(""));
+    return 0;
+  }
+
+  std::string result(string.begin() + start, string.begin() + end);
+  push(stack, std::move(result));
+  return 0;
+}
 
 // Equivalent to list.at(idx)
 template <typename T>
@@ -1948,6 +1976,72 @@ RegisterOperators reg2({
         "aten::ne(Tensor[] a, Tensor[] b) -> bool",
         listNe<at::Tensor>),
     Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<bool>),
+    Operator(
+        "aten::slice(str string, int start, int end=9223372036854775807, int step=1) -> str",
+        stringSlice),
+
+// python string is methods return false if empty
+#define DEFINE_STRING_IS_OP(op_name, char_op)                      \
+  Operator(#op_name "(str self) -> bool", [](Stack& stack) {       \
+    auto string = pop(stack).toStringRef();                        \
+    push(                                                          \
+        stack,                                                     \
+        string.size() != 0 &&                                      \
+            std::all_of(string.begin(), string.end(), [](char c) { \
+              return char_op(c);                                   \
+            }));                                                   \
+    return 0;                                                      \
+  })
+
+    // upper and lower require there to be at least one alpha character,
+    // and ignore all other characters
+    Operator(
+        "aten::isupper(str self) -> bool",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          bool found_alpha = false;
+          bool is_upper = true;
+          for (size_t i = 0; i < string.size() && is_upper; ++i) {
+            char c = string[i];
+            found_alpha |= std::isalpha(c);
+            is_upper &= (!std::isalpha(c) || std::isupper(c));
+          }
+          push(stack, found_alpha && is_upper);
+          return 0;
+        }),
+    Operator(
+        "aten::islower(str self) -> bool",
+        [](Stack& stack) {
+          auto string = pop(stack).toStringRef();
+          bool found_alpha = false;
+          bool is_lower = true;
+          for (size_t i = 0; i < string.size() && is_lower; ++i) {
+            char c = string[i];
+            found_alpha |= std::isalpha(c);
+            is_lower &= (!std::isalpha(c) || std::islower(c));
+          }
+          push(stack, found_alpha && is_lower);
+          return 0;
+        }),
+
+    DEFINE_STRING_IS_OP(aten::isdigit, std::isdigit),
+    DEFINE_STRING_IS_OP(aten::isspace, std::isspace),
+    DEFINE_STRING_IS_OP(aten::isalnum, std::isalnum),
+    DEFINE_STRING_IS_OP(aten::isalpha, std::isalpha),
+
+#define DEFINE_STRING_CHAR_MAP_OP(op_name, char_op)         \
+  Operator(#op_name "(str self) -> str", [](Stack& stack) { \
+    auto string = pop(stack).toStringRef();                 \
+    std::stringstream ss;                                   \
+    for (char c : string) {                                 \
+      ss << static_cast<char>(char_op(c));                  \
+    }                                                       \
+    push(stack, ss.str());                                  \
+    return 0;                                               \
+  })
+
+    DEFINE_STRING_CHAR_MAP_OP(aten::upper, std::toupper),
+    DEFINE_STRING_CHAR_MAP_OP(aten::lower, std::tolower),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
   Operator(#op_name "(int i) -> str", [](Stack& stack) { \

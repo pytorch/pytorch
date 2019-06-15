@@ -421,7 +421,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_quantized_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
@@ -1041,10 +1040,10 @@ if (BUILD_TEST)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
     if (INSTALL_TEST)
       install(TARGETS ${test_name} DESTINATION test)
-        # Install PDB files for MSVC builds
-        if (MSVC AND BUILD_SHARED_LIBS)
-          install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
-        endif()
+      # Install PDB files for MSVC builds
+      if (MSVC AND BUILD_SHARED_LIBS)
+        install(FILES $<TARGET_PDB_FILE:${test_name}> DESTINATION test OPTIONAL)
+      endif()
     endif()
   endforeach()
 
