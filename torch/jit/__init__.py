@@ -291,7 +291,11 @@ class LegacyTracedModule(Module):
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
-        trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        try:
+            trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        except Exception as e:
+            torch._C._tracer_abandon()
+            raise e
         ret_inputs = tuple(x.clone() for x in all_trace_inputs)
         torch._C._tracer_set_force_outplace(self._force_outplace)
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
