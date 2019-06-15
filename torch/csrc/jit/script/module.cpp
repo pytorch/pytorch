@@ -164,9 +164,12 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-Method::Method(const Module* owner, std::shared_ptr<Function> function)
-    : owner_(owner), function_(std::move(function)) {}
+Method::Method(ModulePtr owner, std::shared_ptr<Function> function)
+    : owner_(std::move(owner)), function_(std::move(function)) {}
 
+Module Method::owner() const {
+  return Module(owner_);
+}
 void Method::run(Stack& stack) {
   stack.insert(stack.begin(), owner().module_object());
   function_->run(stack);
@@ -205,22 +208,18 @@ void Module::copy_into(
     std::vector<std::string> names) const {
   auto curr = module_lookup(names);
   type_remap[module_object()->type()] = curr->module_object()->type();
-  for (auto& param : get_parameters()) {
-    curr->register_parameter(
-        param.name(),
-        param.value().toTensor(),
-        /*is_buffer=*/false);
-  }
-  for (auto& attr : get_attributes()) {
-    curr->register_attribute(attr.name(), attr.type(), attr.value());
-  }
 
-  for (auto& mod : get_modules()) {
-    names.push_back(mod->field_name());
-    // Submodules must be translated first, otherwise parameter_remap entries
-    // will not be filled in for methods of this module.
-    mod->copy_into(module_lookup, type_remap, names);
-    names.pop_back();
+  for (size_t i = 0; i < curr->num_slots(); ++i) {
+    Slot s = curr->get_slot(i);
+    if (s.is_module()) {
+      names.push_back(s.name());
+      // Submodules must be translated first, otherwise parameter_remap entries
+      // will not be filled in for methods of this module.
+      s.to_module().copy_into(module_lookup, type_remap, names);
+      names.pop_back();
+    } else {
+      curr->get_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
+    }
   }
 
   for (auto& fn : class_compilation_unit().get_functions()) {
@@ -258,16 +257,17 @@ void Module::clone_method(
 
 void Module::clone_method(const Module& orig, const std::string& name) {
   std::unordered_map<TypePtr, TypePtr> type_remap;
-  std::vector<std::pair<const Module*, const Module*>> to_scan = {
-      {&orig, this}};
+  std::vector<std::pair<Module, Module>> to_scan = {{orig, *this}};
   while (!to_scan.empty()) {
     auto entry = to_scan.back();
     to_scan.pop_back();
-    type_remap[entry.first->module_object()->type()] =
-        entry.second->module_object()->type();
-    for (const auto& sub : entry.first->get_modules()) {
-      to_scan.emplace_back(
-          sub.get(), entry.second->get_module(sub->field_name()).get());
+    type_remap[entry.first.module_object()->type()] =
+        entry.second.module_object()->type();
+    for (size_t i = 0; i < entry.first.num_slots(); ++i) {
+      Slot s = entry.first.get_slot(i);
+      if (s.is_module()) {
+        to_scan.emplace_back(s.to_module(), *entry.second.get_module(s.name()));
+      }
     }
   }
   return clone_method(orig, name, type_remap);

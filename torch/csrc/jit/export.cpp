@@ -923,9 +923,12 @@ void ScriptModuleSerializer::convertModule(
     record->set_key(filename.str());
   }
 
-  for (const auto& elem : module.get_modules()) {
-    torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(*elem, module_name.str(), elem->field_name(), sub_def);
+  for (size_t i = 0; i < module.num_slots(); ++i) {
+    script::Slot s = module.get_slot(i);
+    if (s.is_module()) {
+      torch::ModuleDef* sub_def = module_def->add_submodules();
+      convertModule(s.to_module(), module_name.str(), s.name(), sub_def);
+    }
   }
 }
 

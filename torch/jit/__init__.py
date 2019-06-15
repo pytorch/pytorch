@@ -721,7 +721,7 @@ def trace(func,
         example_weight = torch.rand(1, 1, 3, 3)
         example_forward_input = torch.rand(1, 1, 3, 3)
         n = Net()
-        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        inputsg = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
         module = torch.jit.trace_module(n, inputs)
 
     """

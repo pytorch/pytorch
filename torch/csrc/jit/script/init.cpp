@@ -339,7 +339,7 @@ void initJitScriptBindings(PyObject* module) {
           "_set_attribute",
           [](Module& self, const std::string& name, py::object value) {
             auto attr = self.find_attribute(name);
-            TORCH_CHECK(attr != nullptr, "Could not find attribute '", name, "'");
+            TORCH_CHECK(attr, "Could not find attribute '", name, "'");
             auto ivalue = toIValue(value, attr->type());
             attr->setValue(ivalue);
           })
@@ -350,14 +350,15 @@ void initJitScriptBindings(PyObject* module) {
       .def("_get_module", &Module::get_module)
       .def(
           "_get_modules",
-          [](Module& self) -> py::tuple {
-            auto modules = self.get_modules();
-            py::tuple result(modules.size());
-            for (size_t i = 0; i < modules.size(); ++i) {
-              auto& item = modules[i];
-              result[i] = std::make_pair(item->field_name(), item);
+          [](Module& self) {
+            std::vector<std::pair<std::string, Module>> modules;
+            for (size_t i = 0; i < self.num_slots(); ++i) {
+              Slot s = self.get_slot(i);
+              if (s.is_module()) {
+                modules.emplace_back(s.name(), s.to_module());
+              }
             }
-            return result;
+            return modules;
           })
       .def(
           "_get_parameters",
@@ -389,17 +390,17 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_has_attribute",
           [](Module& self, const std::string& name) -> bool {
-            return self.find_attribute(name);
+            return !!self.find_attribute(name);
           })
       .def(
           "_has_parameter",
           [](Module& self, const std::string& name) -> bool {
-            return self.find_parameter(name);
+            return !!self.find_parameter(name);
           })
       .def(
           "_has_buffer",
           [](Module& self, const std::string& name) -> bool {
-            return self.find_buffer(name);
+            return !!self.find_buffer(name);
           })
       .def(
           "_has_module",

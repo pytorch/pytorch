@@ -7,6 +7,10 @@ namespace torch {
 namespace jit {
 namespace script {
 
+struct Module;
+
+enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
+
 // a stable location that can hold an IValue.
 // inside a module.
 struct Slot {
@@ -26,9 +30,28 @@ struct Slot {
   void setValue(c10::IValue v) {
     container_->setSlot(offset_, std::move(v));
   }
+  EntityType entity_type() const {
+    const at::ClassTypePtr& type = container_->type();
+    if (type->is_parameter(offset_)) {
+      return EntityType::PARAMETER;
+    }
+    at::TypePtr t = type->getAttribute(offset_);
+    if (auto cls = t->cast<at::ClassType>()) {
+      if (cls->is_module()) {
+        return EntityType::MODULE;
+      }
+    }
+    return EntityType::ATTRIBUTE;
+  }
+  bool is_module() const {
+    return entity_type() == EntityType::MODULE;
+  }
+
+  Module to_module() const;
   bool operator==(const Slot& rhs) const {
     return container_ == rhs.container_ && offset_ ==  rhs.offset_;
   }
+
 private:
   c10::intrusive_ptr<c10::ivalue::Object> container_;
   size_t offset_;
