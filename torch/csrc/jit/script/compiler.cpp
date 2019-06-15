@@ -389,12 +389,17 @@ struct Environment {
     }
 
     if (!retval) {
-      if (auto type = resolver->resolveType(ident)) {
-        if (auto class_type = type->cast<ClassType>()) {
-          retval = std::make_shared<script::ClassValue>(class_type);
-        } else if (auto tuple_type = type->cast<TupleType>()) {
-          retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
+      try {
+        if (auto type = resolver->resolveType(ident)) {
+          if (auto class_type = type->cast<ClassType>()) {
+            retval = std::make_shared<script::ClassValue>(class_type);
+          } else if (auto tuple_type = type->cast<TupleType>()) {
+            retval =
+                std::make_shared<script::NamedTupleConstructor>(tuple_type);
+          }
         }
+      } catch (std::runtime_error e) {
+        throw ErrorReport(range) << e.what();
       }
     }
 

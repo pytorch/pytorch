@@ -1,13 +1,14 @@
 import sys
 import torch
 from torch.testing import FileCheck
-from common_utils import TestCase, run_tests
+from common_utils import run_tests
 from contextlib import contextmanager
+from jit_utils import JitTestCase
 from typing import NamedTuple, List
 
 WINDOWS = sys.platform == 'win32'
 
-class TestScriptPy3(TestCase):
+class TestScriptPy3(JitTestCase):
     @contextmanager
     def capture_stdout(self):
         # No idea how to capture stdout from C++ on Windows
@@ -108,9 +109,9 @@ class TestScriptPy3(TestCase):
 
     def test_named_tuple_slice_unpack(self):
         class MyCoolNamedTuple(NamedTuple):
-            a : int = 3
-            b : float = 4.5
-            c : List[int] = [3, 4, 5]
+            a : int
+            b : float
+            c : List[int]
 
         @torch.jit.script
         def foo(a : int, b : float, c : List[int]):
@@ -122,9 +123,9 @@ class TestScriptPy3(TestCase):
 
     def test_named_tuple_lower(self):
         class MyCoolNamedTuple(NamedTuple):
-            a : int = 3
-            b : float = 4.5
-            c : List[int] = [3, 4, 5]
+            a : int
+            b : float
+            c : List[int]
 
         @torch.jit.script
         def foo(a : int):
@@ -137,9 +138,9 @@ class TestScriptPy3(TestCase):
 
     def test_named_tuple_type_annotation(self):
         class MyCoolNamedTuple(NamedTuple):
-            a : int = 3
-            b : float = 4.5
-            c : List[int] = [3, 4, 5]
+            a : int
+            b : float
+            c : List[int]
 
         @torch.jit.script
         def foo(x : MyCoolNamedTuple) -> MyCoolNamedTuple:
@@ -150,11 +151,11 @@ class TestScriptPy3(TestCase):
 
     def test_named_tuple_wrong_types(self):
         class MyCoolNamedTuple(NamedTuple):
-            a : int = 3
-            b : float = 4.5
-            c : List[int] = [3, 4, 5]
+            a : int
+            b : float
+            c : List[int]
 
-        with self.assertRaisesRegex(RuntimeError, "expected a value of type 'int' for argument 'a'"
+        with self.assertRaisesRegex(RuntimeError, "Expected a value of type 'int' for argument 'a'"
                                                   " but instead found type 'str'"):
             @torch.jit.script
             def foo():
@@ -163,9 +164,9 @@ class TestScriptPy3(TestCase):
 
     def test_named_tuple_kwarg_construct(self):
         class MyCoolNamedTuple(NamedTuple):
-            a : int = 3
-            b : float = 4.5
-            c : List[int] = [3, 4, 5]
+            a : int
+            b : float
+            c : List[int]
 
         @torch.jit.script
         def foo():
@@ -176,6 +177,18 @@ class TestScriptPy3(TestCase):
         self.assertEqual(tup.a, 9)
         self.assertEqual(tup.b, 3.5)
         self.assertEqual(tup.c, [1, 2, 3])
+
+    def test_named_tuple_default_error(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int] = [3, 4, 5]
+
+        with self.assertRaisesRegex(RuntimeError, 'Default values are currently not supported'):
+            @torch.jit.script
+            def foo():
+                tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)  # noqa
+                return tup
 
 if __name__ == '__main__':
     run_tests()
