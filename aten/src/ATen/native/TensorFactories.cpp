@@ -18,6 +18,9 @@
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensor.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -116,6 +119,17 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   }
   return tensor;
 }
+
+#ifdef NAMEDTENSOR_ENABLED
+Tensor empty(
+    IntArrayRef size,
+    at::optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, options);
+  internal_set_names_inplace(result, names);
+  return result;
+}
+#endif
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
   check_size_nonnegative(size);
