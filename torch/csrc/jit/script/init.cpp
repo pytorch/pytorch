@@ -321,7 +321,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self, const std::string& name) -> Method {
             return self.get_method(name);
           },
-          py::return_value_policy::reference_internal)
+          py::keep_alive<0, 1>())
       .def("_register_parameter", &Module::register_parameter)
       .def(
           "_get_functions",
