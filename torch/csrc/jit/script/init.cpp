@@ -144,9 +144,12 @@ struct PythonResolver : public Resolver {
           std::tuple<std::string, decltype(fields), decltype(annotations)>>(
           props);
 
-      return TupleType::create(
+      auto tt = TupleType::create(
           annotations,
-          TupleType::NamedTupleSpec(annotations, fields, qualifiedName));
+          qualifiedName,
+          TupleType::NamedTupleSpec(annotations, fields));
+      CompilationUnit::_get_python_cu().register_class(tt);
+      return tt;
     }
 
     return CompilationUnit::_get_python_cu().get_class(qualifiedName);

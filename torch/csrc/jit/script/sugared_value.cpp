@@ -275,14 +275,16 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
 
   auto named_tuple_spec = type_->namedTupleSpec();
   TORCH_INTERNAL_ASSERT(named_tuple_spec);
+  auto qualname = type_->qualified_name_obj();
   auto schema = named_tuple_spec->schema;
   auto matched_schema = matchSchema(*schema, loc, g, inputs, attributes);
 
-  auto self =
-      g.insertNode(
-           g.createTuple(matched_schema.inputs, std::move(named_tuple_spec))
-               ->setSourceRange(loc))
-          ->output();
+  auto self = g.insertNode(g.createTuple(
+                                matched_schema.inputs,
+                                std::move(qualname),
+                                std::move(named_tuple_spec))
+                               ->setSourceRange(loc))
+                  ->output();
   self->setType(type_);
 
   return std::make_shared<SimpleValue>(self);

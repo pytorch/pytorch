@@ -441,7 +441,9 @@ static Value* packOutputs(
     named_tuple_spec = TupleType::NamedTupleSpec(
         fmap(values, [](Value* v) { return v->type(); }), field_names.value());
   }
-  return g.insertNode(g.createTuple(values, std::move(named_tuple_spec)))
+  return g
+      .insertNode(
+          g.createTuple(values, c10::nullopt, std::move(named_tuple_spec)))
       ->output();
 }
 

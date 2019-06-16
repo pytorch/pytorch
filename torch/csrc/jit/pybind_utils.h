@@ -544,9 +544,10 @@ inline py::object toPyObject(IValue&& ivalue) {
       t[i] = toPyObject(IValue{elements.at(i)});
     }
     if (tuple->type && tuple->type->namedTupleSpec() &&
-        tuple->type->namedTupleSpec()->qualName) {
+        tuple->type->qualified_name_obj()) {
       return py::module::import("torch.jit")
-          .attr("_create_named_tuple")(t, *tuple->type->namedTupleSpec());
+          .attr("_create_named_tuple")(
+              t, tuple->type->basename(), *tuple->type->namedTupleSpec());
     } else {
       return std::move(t);
     }

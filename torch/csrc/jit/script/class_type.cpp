@@ -23,4 +23,13 @@ std::vector<Function*> ClassType::methods() const {
   }
   return ret;
 }
+
+c10::optional<std::string> ClassType::base_class_name() const {
+  return c10::nullopt;
+}
+
+std::vector<std::tuple<std::string, TypePtr>> ClassType::attrs() const {
+  return {};
+}
+
 } // namespace c10
