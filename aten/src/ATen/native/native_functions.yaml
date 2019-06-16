@@ -2675,6 +2675,11 @@
   dispatch:
     CPU: per_tensor_affine_qtensor_cpu
 
+- func: qscheme(Tensor self) -> QScheme
+  variants: method
+  dispatch:
+    QuantizedCPU: qscheme_quant
+
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
