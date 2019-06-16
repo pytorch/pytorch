@@ -256,7 +256,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_grap
 }
 
 void Module::define(const std::string& src, const ResolverPtr& resolver) {
-  class_compilation_unit().define(
+  class_compilation_unit()->define(
       src,
       resolver ? resolver : script::nativeResolver(),
       simpleSelf(module_object()->type()));
@@ -288,7 +288,7 @@ void Module::copy_into(
     names.pop_back();
   }
 
-  for (auto& fn : class_compilation_unit().get_functions()) {
+  for (auto& fn : class_compilation_unit()->get_functions()) {
     curr->clone_method(*this, fn->name(), type_remap);
   }
 }
@@ -313,11 +313,11 @@ void Module::clone_method(
       return in;
     return it->second;
   };
-  const Function& fn = orig.class_compilation_unit().get_function(name);
+  const Function& fn = orig.class_compilation_unit()->get_function(name);
   auto graph = fn.graph()->copy();
   graph->remapTypes(type_remap_fn);
   auto schema = fn.getSchema().cloneWithRemappedTypes(type_remap_fn);
-  auto copied = class_compilation_unit().create_function(fn.name(), graph);
+  auto copied = class_compilation_unit()->create_function(fn.name(), graph);
   copied->setSchema(std::move(schema));
 }
 
@@ -352,7 +352,7 @@ void Module::train(bool on) {
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   // Look up the class
   const auto classType =
-      class_compilation_unit().get_class(c10::QualifiedName(name));
+      class_compilation_unit()->get_class(c10::QualifiedName(name));
   if (!classType) {
     AT_ERROR(
         "Could not find class with name: '",

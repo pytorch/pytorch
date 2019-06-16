@@ -1453,9 +1453,9 @@ struct CAFFE2_API ClassType : public Type {
   }
 
   std::shared_ptr<Function> getMethod(const std::string& name) const;
-  CompilationUnit& compilation_unit();
-  const CompilationUnit& compilation_unit() const;
   std::vector<Function*> methods() const;
+  std::shared_ptr<CompilationUnit> compilation_unit();
+  std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
 
   size_t numAttributes() const {

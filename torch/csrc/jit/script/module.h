@@ -99,7 +99,7 @@ struct TORCH_API Method {
     return *function_;
   }
 
-  // Used for ONNX export. Return a tuple (graph, parameters) where 
+  // Used for ONNX export. Return a tuple (graph, parameters) where
   // the last parameters.size() inputs to the graph are the trainable parameters
   // used in this method. The remaining inputs are the true inputs to the function.
   std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> _lowered_graph();
@@ -135,7 +135,7 @@ struct TORCH_API Module {
     // Function has a self argument which owns the ClassType, created a
     // reference cycle. By dropping all the methods of the module's class
     // here we break the cycle.
-    class_compilation_unit().drop_all_functions();
+    class_compilation_unit()->drop_all_functions();
   }
   const std::string& name() const {
     return name_;
@@ -144,11 +144,11 @@ struct TORCH_API Module {
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
   void set_optimized(bool o) {
-    class_compilation_unit().set_optimized(o);
+    class_compilation_unit()->set_optimized(o);
   }
 
   bool is_optimized() const {
-    return class_compilation_unit().is_optimized();
+    return class_compilation_unit()->is_optimized();
   }
 
   IValue forward(std::vector<IValue> inputs) {
@@ -253,7 +253,7 @@ struct TORCH_API Module {
   const std::vector<std::unique_ptr<Method>>& get_methods() const {
     // force methods_ to be up to date by querying all
     // methods.
-    for (const auto& m : class_compilation_unit().get_functions()) {
+    for (const auto& m : class_compilation_unit()->get_functions()) {
       get_method(m->name());
     }
     return methods_;
@@ -291,7 +291,7 @@ struct TORCH_API Module {
     }
 
     if (const std::shared_ptr<Function>& fn =
-            class_compilation_unit().find_function(name)) {
+            class_compilation_unit()->find_function(name)) {
       // lock because technically this is marked const,
       // but we have to update the internal Method cache.
       // This can be removed when class_compilation_unit() is the source of
@@ -402,7 +402,7 @@ struct TORCH_API Module {
     if (it == dict_.end()) {
       // methods are lazily created, see if this is, in face,
       // a method that has not been created yet.
-      if (auto fn = class_compilation_unit().find_function(name)) {
+      if (auto fn = class_compilation_unit()->find_function(name)) {
         return EntityType::METHOD;
       }
       return at::nullopt;
@@ -413,10 +413,10 @@ struct TORCH_API Module {
   ModulePtr module_object() const {
     return module_value_;
   }
-  CompilationUnit& class_compilation_unit() {
+  std::shared_ptr<CompilationUnit> class_compilation_unit() {
     return module_object()->type()->compilation_unit();
   }
-  const CompilationUnit& class_compilation_unit() const {
+  std::shared_ptr<const CompilationUnit> class_compilation_unit() const {
     return module_object()->type()->compilation_unit();
   }
 

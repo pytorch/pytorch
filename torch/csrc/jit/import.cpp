@@ -256,7 +256,7 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   auto src = std::make_shared<Source>(
       std::string(static_cast<const char*>(data.get()), size), path, 0);
   script::import_libs(
-      main_module_->class_compilation_unit(),
+      *main_module_->class_compilation_unit(),
       qualifier,
       src,
       tensor_table_,
@@ -266,7 +266,7 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
 void ScriptModuleDeserializer::moduleSetState(
     const std::shared_ptr<script::Module>& module,
     IValue state) {
-  auto setstate = module->class_compilation_unit().find_function("__setstate__");
+  auto setstate = module->class_compilation_unit()->find_function("__setstate__");
 
   TORCH_CHECK(
       setstate != nullptr,
@@ -330,7 +330,7 @@ void ScriptModuleDeserializer::convertModule(
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
     script::import_methods(
-        main_module_->class_compilation_unit(),
+        *main_module_->class_compilation_unit(),
         module,
         src,
         tensor_table_,
