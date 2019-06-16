@@ -775,14 +775,17 @@ RegisterOperators reg(
            size_t num_elems = node->outputs().size();
            return [=](Stack& stack) {
              auto tuple = pop(stack).toTuple();
-             if (tuple.elements().size() != num_elems) {
+             if (tuple->elements().size() != num_elems) {
                AT_ERROR(
                    "Expected a tuple of ",
                    num_elems,
                    " elements, but got ",
-                   tuple.elements().size());
+                   tuple->elements().size());
              }
-             stack.insert(stack.end(), tuple.elements().begin(), tuple.elements().end());
+             stack.insert(
+                 stack.end(),
+                 tuple->elements().begin(),
+                 tuple->elements().end());
              return 0;
            };
          }),
@@ -793,11 +796,11 @@ RegisterOperators reg(
            int64_t end_ind = node->i(attr::end);
            return [=](Stack& stack) {
              auto tuple = pop(stack).toTuple();
-             c10::impl::GenericListPtr output_elems = c10::impl::make_generic_list();
+             std::vector<IValue> output_elems;
              for (int64_t i = beg_ind; i < end_ind; ++i) {
-               output_elems.emplace_back(tuple.elements()[i]);
+               output_elems.emplace_back(tuple->elements()[i]);
              }
-             push(stack, c10::ivalue::TuplePtr::create(std::move(output_elems)));
+             push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
              return 0;
            };
          }),
@@ -807,12 +810,12 @@ RegisterOperators reg(
            return [](Stack& stack) {
              int64_t index = pop(stack).toInt();
              auto tuple = pop(stack).toTuple();
-             auto norm_index = normalizeIndex(index, tuple.elements().size());
+             auto norm_index = normalizeIndex(index, tuple->elements().size());
              if (norm_index < 0 ||
-                 norm_index > static_cast<int64_t>(tuple.elements().size())) {
+                 norm_index > static_cast<int64_t>(tuple->elements().size())) {
                throw std::out_of_range("Tuple list index out of range");
              }
-             stack.emplace_back(tuple.elements()[norm_index]);
+             stack.emplace_back(tuple->elements()[norm_index]);
              return 0;
            };
          }),
@@ -820,12 +823,13 @@ RegisterOperators reg(
          prim::TupleConstruct,
          [](const Node* node) {
            size_t num_inputs = node->inputs().size();
+           auto type = node->output()->type()->expect<TupleType>();
            return [=](Stack& stack) {
              std::vector<IValue> elems{
                  std::make_move_iterator(stack.end() - num_inputs),
                  std::make_move_iterator(stack.end())};
              drop(stack, num_inputs);
-             push(stack, c10::ivalue::TuplePtr::create(c10::impl::toList(std::move(elems))));
+             push(stack, c10::ivalue::Tuple::create(std::move(elems), type));
              return 0;
            };
          }),

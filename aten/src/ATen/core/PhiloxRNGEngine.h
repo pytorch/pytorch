@@ -28,7 +28,7 @@ typedef at::detail::Array<uint32_t, 2> UINT2;
 typedef at::detail::Array<double, 2> DOUBLE2;
 typedef at::detail::Array<float, 2> FLOAT2;
 
-} // anonymous namespace
+} // namespace detail
 
 /**
  * Note [Philox Engine implementation]

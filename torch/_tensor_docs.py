@@ -1781,6 +1781,13 @@ qr(some=True) -> (Tensor, Tensor)
 See :func:`torch.qr`
 """)
 
+add_docstr_all('qscheme',
+               r"""
+qscheme() -> torch.qscheme
+
+Returns the quantization scheme of a given QTensor.
+""")
+
 add_docstr_all('q_scale',
                r"""
 q_scale() -> float
