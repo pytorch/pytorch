@@ -30,4 +30,8 @@ extern "C" typedef struct THNVRTC {
 #undef CREATE_MEMBER
 } THNVRTC;
 
-extern "C" THNVRTC* torch_load_nvrtc();
+extern "C" 
+#ifdef _WIN32 
+__declspec(dllexport) 
+#endif
+    THNVRTC* torch_load_nvrtc();
