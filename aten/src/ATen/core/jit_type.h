@@ -25,6 +25,8 @@ struct CompilationUnit;
 
 namespace c10 {
 
+struct FunctionSchema;
+
 #define C10_FORALL_TYPES(_) \
 _(TensorType) \
 _(DimensionedTensorType) \
@@ -439,7 +441,7 @@ struct CAFFE2_API VaryingShape {
 
   bool operator ==(const VaryingShape &other) const
   {
-    return size_ != other.size_ && dims_ == dims_;
+    return size_ == other.size_ && dims_ == dims_;
   }
 
   const c10::optional<int64_t>& operator [] (int i) const
@@ -847,8 +849,8 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 using OptNameList = c10::optional<std::vector<std::string>>;
 // This type represents a Tuple
 struct CAFFE2_API TupleType : public Type {
-  static TupleTypePtr create(std::vector<TypePtr> types, OptNameList names=c10::nullopt) {
-    return TupleTypePtr(new TupleType(std::move(types), std::move(names))); // NOLINT(modernize-make-shared)
+  static TupleTypePtr create(std::vector<TypePtr> types, OptNameList names=c10::nullopt, c10::optional<std::string> unqualName=c10::nullopt) {
+    return TupleTypePtr(new TupleType(std::move(types), std::move(names), std::move(unqualName))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(TupleType);
   at::ArrayRef<TypePtr> elements() const {
@@ -909,6 +911,9 @@ struct CAFFE2_API TupleType : public Type {
   const std::vector<std::string> &names() const {
     return names_.value();
   }
+  const c10::optional<std::string> &unqualName() const {
+    return unqualName_;
+  }
 
   at::ArrayRef<TypePtr> containedTypes() const override {
     return elements_;
@@ -916,18 +921,26 @@ struct CAFFE2_API TupleType : public Type {
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     return create(std::move(contained_types));
   }
-
+  const std::shared_ptr<FunctionSchema>& schema() const {
+    return schema_;
+  }
   static const TypeKind Kind = TypeKind::TupleType;
 private:
-  TupleType(std::vector<TypePtr> elements_, OptNameList names)
+  TupleType(std::vector<TypePtr> elements_, OptNameList names, c10::optional<std::string> unqualName)
   : Type(TypeKind::TupleType)
   , elements_(std::move(elements_))
-  , names_(std::move(names)) {
+  , names_(std::move(names))
+  , unqualName_(std::move(unqualName)) {
     has_free_variables_ =
         std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
           return v->hasFreeVariables();
         });
+    if (names && unqualName) {
+      createFunctionSchema();
+    }
   }
+
+  void createFunctionSchema();
 
   bool compare(const Type& rhs, std::function<bool(const TypePtr, const TypePtr)> fn) const {
     if(rhs.kind() != kind())
@@ -949,6 +962,8 @@ private:
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
   OptNameList names_;
+  c10::optional<std::string> unqualName_;
+  std::shared_ptr<FunctionSchema> schema_;
 };
 
 struct NumberType;
@@ -1349,6 +1364,9 @@ CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
+  MatchTypeReturn(TypePtr type) : type(type) {}
+  MatchTypeReturn(std::string errMsg) : errMsg(std::move(errMsg)) {}
+
   c10::optional<TypePtr> type; // nullopt if there is no match
   std::string errMsg; // is there is no match, this contains the reason
 };
