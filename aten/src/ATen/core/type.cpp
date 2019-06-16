@@ -537,8 +537,7 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
 ClassType::ClassType(
     QualifiedName name,
     std::shared_ptr<CompilationUnit> cu)
-    : Type(TypeKind::ClassType),
-      name_(std::move(name)),
+    : SerializableType(TypeKind::ClassType, name),
       compilation_unit_(std::move(cu)) {}
 
 void TupleType::createFunctionSchema() {

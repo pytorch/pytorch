@@ -175,10 +175,10 @@ struct PythonPrintPass {
 
   // Any classes used are written to this table, to be later written out as
   // dependencies.
-  std::vector<ClassTypePtr>& class_table_;
-  std::vector<ClassTypePtr> class_deps_;
+  std::vector<c10::SerializableTypePtr>& class_table_;
+  std::vector<c10::SerializableTypePtr> class_deps_;
   // Helper to avoid duplicating class types
-  void addToClassTable(const ClassTypePtr& classType) {
+  void addToClassTable(const c10::SerializableTypePtr& classType) {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
     // to get imported twice.
@@ -1076,7 +1076,7 @@ struct PythonPrintPass {
 
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
-      std::vector<ClassTypePtr>& class_table,
+      std::vector<c10::SerializableTypePtr>& class_table,
       bool enforce_importable,
       bool is_method)
       : tensor_table_(tensor_table),
@@ -1101,10 +1101,11 @@ struct PythonPrintPass {
     }
   }
 
-  void printClass(const ClassTypePtr& classType) {
+  void printClass(const c10::SerializableTypePtr& classType) {
     body_ << "class " << classType->basename() << ":\n";
     {
       const auto guard = WithIndented();
+      // TODO fields
       for (auto& method : classType->methods()) {
         printFunction(*method);
       }
@@ -1125,7 +1126,7 @@ void PythonPrint(
     const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<ClassTypePtr>& class_table,
+    std::vector<c10::SerializableTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printFunction(func);
@@ -1137,7 +1138,7 @@ void PythonPrint(
     const script::CompilationUnit& cu,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<ClassTypePtr>& class_table,
+    std::vector<c10::SerializableTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printCompilationUnit(cu);
@@ -1146,9 +1147,9 @@ void PythonPrint(
 
 void PythonPrint(
     std::ostream& out,
-    const ClassTypePtr& classType,
+    const c10::SerializableTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<ClassTypePtr>& class_table,
+    std::vector<c10::SerializableTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, true);
   pp.printClass(classType);

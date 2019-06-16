@@ -1376,6 +1376,7 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
 CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
+
 /**
  * User Defined Types
  */
@@ -1384,31 +1385,15 @@ struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
 using ::torch::jit::Function;
+struct SerializableType;
+using SerializableTypePtr = std::shared_ptr<SerializableType>;
 
-// This represents a class in TorchScript.
-struct CAFFE2_API ClassType : public Type {
-  // Create a class type with name `name` and its methods stored in `cu`.
-  static ClassTypePtr create(
-      QualifiedName qualifiedName,
-      std::shared_ptr<CompilationUnit> cu);
+struct CAFFE2_API SerializableType : public Type {
+  SerializableType(TypeKind tk, c10::QualifiedName qualifiedName)
+    : Type(tk)
+    , name_(qualifiedName) {}
 
-  // Create a type representing a Module,
-  // These do not have methods, and are not globally registered
-  static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
-
-  DEFINE_IS_SUBCLASS(ClassType);
-  bool operator==(const Type& rhs) const override {
-    if (auto user_rhs = rhs.cast<ClassType>()) {
-      return name_ == user_rhs->name_;
-    }
-    return false;
-  }
-
-  std::string str() const override {
-    return std::string("ClassType<") + name_.name() + ">";
-  }
-
-  std::string python_str() const override {
+  std::string python_str() const {
     return name_.qualifiedName();
   }
 
@@ -1422,6 +1407,45 @@ struct CAFFE2_API ClassType : public Type {
 
   std::string basename() const {
     return name_.name();
+  }
+
+  virtual std::vector<Function*> methods() const = 0;
+
+ private:
+  // Fully qualified name of type (note that this has to be globally unique).
+  // Looks like: "foo.bar.Baz".
+  QualifiedName name_;
+
+  friend class ClassType;
+};
+
+
+
+// This represents a class in TorchScript.
+struct CAFFE2_API ClassType : public SerializableType {
+  // Create a class type with name `name` and its methods stored in `cu`.
+  static ClassTypePtr create(
+      QualifiedName qualifiedName,
+      std::shared_ptr<CompilationUnit> cu);
+
+  // Create a type representing a Module,
+  // These do not have methods, and are not globally registered
+  static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
+
+  DEFINE_IS_SUBCLASS(ClassType);
+  bool operator==(const Type& rhs) const override {
+    if (auto user_rhs = rhs.cast<ClassType>()) {
+      return qualname() == user_rhs->qualname();
+    }
+    return false;
+  }
+
+  std::string str() const override {
+    return std::string("ClassType<") + basename() + ">";
+  }
+
+  std::string python_str() const override {
+    return qualname();
   }
 
   TypePtr getAttribute(const std::string& name) const {
@@ -1455,7 +1479,7 @@ struct CAFFE2_API ClassType : public Type {
   std::shared_ptr<Function> getMethod(const std::string& name) const;
   CompilationUnit& compilation_unit();
   const CompilationUnit& compilation_unit() const;
-  std::vector<Function*> methods() const;
+  std::vector<Function*> methods() const override;
 
 
   size_t numAttributes() const {
@@ -1510,10 +1534,6 @@ struct CAFFE2_API ClassType : public Type {
 
  private:
   ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu);
-
-  // Fully qualified name of type (note that this has to be globally unique).
-  // Looks like: "foo.bar.Baz".
-  QualifiedName name_;
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
