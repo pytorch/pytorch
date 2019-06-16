@@ -1292,10 +1292,11 @@ class TestLRScheduler(TestCase):
     def _test_against_closed_form(self, scheduler, closed_form_scheduler, epochs=10):
         self.setUp()
         targets = []
-        for epoch in range(epochs):
-            closed_form_scheduler.last_epoch = epoch
-            closed_form_scheduler.get_lr_closed_form()
+        # NOTE Go backward to trigger closed form
+        for epoch in reversed(range(epochs)):
+            closed_form_scheduler.step(epoch)
             targets.append([group['lr'] for group in self.opt.param_groups])
+        targets = list(reversed(targets))
         self.setUp()
         for epoch in range(epochs):
             scheduler.step(epoch)
