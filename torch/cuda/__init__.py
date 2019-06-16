@@ -234,9 +234,8 @@ def _after_fork(arg):
     global _initialized, _in_bad_fork
     if _cuda_initialized and _original_pid != os.getpid():
         _in_bad_fork = True
-        if _initialized:
-            _initialized = False
-            _CudaBase.__new__ = _lazy_new
+        _initialized = False
+        _CudaBase.__new__ = _lazy_new
 
 
 _register_after_fork(_after_fork, _after_fork)
