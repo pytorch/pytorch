@@ -54,15 +54,15 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
-    if (tup->hasNames()) {
+    if (tup->namedTupleSpec()) {
       out << "NamedTuple";
     }
     out << "(";
     for(size_t i = 0; i < tup->elements().size(); ++i) {
       if(i > 0)
         out << ", ";
-      if (tup->hasNames()) {
-        out << tup->names()[i] << " : ";
+      if (tup->namedTupleSpec()) {
+        out << tup->namedTupleSpec()->names[i] << " : ";
       }
       out << *(tup->elements()[i]);
     }
@@ -540,17 +540,17 @@ ClassType::ClassType(
     : SerializableType(TypeKind::ClassType, name),
       compilation_unit_(std::move(cu)) {}
 
-void TupleType::createFunctionSchema() {
+void TupleType::NamedTupleSpec::createFunctionSchema() {
   std::vector<Argument> arguments;
-  for (size_t i = 0; i < elements_.size(); ++i) {
+  for (size_t i = 0; i < types.size(); ++i) {
     arguments.emplace_back(
-        /*name=*/names()[i],
-        /*type=*/containedTypes()[i],
+        /*name=*/names[i],
+        /*type=*/types[i],
         /*N=*/i);
   }
 
-  schema_ = std::make_shared<FunctionSchema>(
-      /*name=*/unqualName().value(),
+  schema = std::make_shared<FunctionSchema>(
+      /*name=*/qualName.has_value() ? qualName->name() : "",
       /*overload_name=*/std::string(""),
       /*arguments=*/arguments,
       /*returns=*/std::vector<Argument>{});

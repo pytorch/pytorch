@@ -436,8 +436,12 @@ static Value* packOutputs(
   if (values.size() == 1) {
     return values[0];
   }
-  return g
-      .insertNode(g.createTuple(values, std::move(field_names), c10::nullopt))
+  c10::optional<TupleType::NamedTupleSpec> named_tuple_spec;
+  if (field_names) {
+    named_tuple_spec = TupleType::NamedTupleSpec(
+        fmap(values, [](Value* v) { return v->type(); }), field_names.value());
+  }
+  return g.insertNode(g.createTuple(values, std::move(named_tuple_spec)))
       ->output();
 }
 

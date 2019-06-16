@@ -110,6 +110,9 @@ struct PythonResolver : public Resolver {
       return nullptr;
     }
 
+    auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
+        py::module::import("torch.jit").attr("_qualified_name")(obj)));
+
     if (isNamedTupleClass(obj)) {
       // Currently don't support default values
       if (py::hasattr(obj, "_field_defaults")) {
@@ -141,14 +144,12 @@ struct PythonResolver : public Resolver {
           std::tuple<std::string, decltype(fields), decltype(annotations)>>(
           props);
 
-      return TupleType::create(annotations, fields, unqualName);
+      return TupleType::create(
+          annotations,
+          TupleType::NamedTupleSpec(annotations, fields, qualifiedName));
     }
 
-    py::str qualifiedName =
-        py::module::import("torch.jit").attr("_qualified_name")(obj);
-
-    return CompilationUnit::_get_python_cu().get_class(
-        c10::QualifiedName(qualifiedName));
+    return CompilationUnit::_get_python_cu().get_class(qualifiedName);
   }
 
  private:
