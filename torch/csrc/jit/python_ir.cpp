@@ -679,11 +679,7 @@ void initPythonIRBindings(PyObject* module_) {
         return types;
       });
   py::class_<TupleType::NamedTupleSpec>(m, "_NamedTupleSpec")
-      .def("names", [](TupleType::NamedTupleSpec& spec) { return spec.names; })
-      .def("unqual_name", [](TupleType::NamedTupleSpec& spec) {
-        TORCH_INTERNAL_ASSERT(spec.qualName);
-        return spec.qualName->name();
-      });
+      .def("names", [](TupleType::NamedTupleSpec& spec) { return spec.names; });
   py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)

@@ -573,14 +573,37 @@ struct ParserImpl {
         paramlist.range(), List<Param>(paramlist), return_annotation);
   }
 
+  TreeRef parseNamedTuple(Ident name) {
+    auto range = name.range();
+    L.expect(')');
+    L.expect(':');
+    L.expect(TK_INDENT);
+    std::vector<Ident> fields;
+    std::vector<Maybe<Expr>> type_exprs;
+    while (L.cur().kind != TK_DEDENT) {
+      fields.push_back(parseIdent());
+      type_exprs.push_back(maybeParseTypeAnnotation());
+      L.expect(TK_NEWLINE);
+    }
+    L.expect(TK_DEDENT);
+    return NamedTupleDef::create(
+        range,
+        name,
+        List<Ident>::create(range, fields),
+        List<Maybe<Expr>>::create(range, type_exprs));
+  }
+
   TreeRef parseClass() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
     if (L.nextIf('(')) {
-      // The parser only supports py3 syntax, so classes are new-style when
-      // they don't inherit from anything.
-      L.reportError(
-          "Inheritance is not yet supported for TorchScript classes yet.");
+      // Only support inheriting from NamedTuple right now.
+      if (L.nextIf(TK_NAMED_TUPLE)) {
+        return parseNamedTuple(name);
+      } else {
+        L.reportError(
+            "Inheritance is not yet supported for TorchScript classes yet.");
+      }
     }
     L.expect(':');
 

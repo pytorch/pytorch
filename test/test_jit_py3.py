@@ -202,8 +202,9 @@ class TestScriptPy3(JitTestCase):
                 return MyCoolNamedTuple(3, 3.5, [3, 4, 5])
 
         mm = MyMod()
-        mm.save('test.zip')
-        loaded = torch.jit.load('test.zip')
+        mm.save('foo.zip')
+        torch._C._jit_clear_class_registry()
+        loaded = torch.jit.load('foo.zip')
 
         out = mm()
         out_loaded = loaded()

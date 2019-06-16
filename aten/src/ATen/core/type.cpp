@@ -535,7 +535,7 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
 }
 
 ClassType::ClassType(
-    QualifiedName name,
+    c10::optional<QualifiedName> name,
     std::shared_ptr<CompilationUnit> cu)
     : SerializableType(TypeKind::ClassType, name),
       compilation_unit_(std::move(cu)) {}
@@ -550,7 +550,7 @@ void TupleType::NamedTupleSpec::createFunctionSchema() {
   }
 
   schema = std::make_shared<FunctionSchema>(
-      /*name=*/qualName.has_value() ? qualName->name() : "",
+      /*name=*/"",
       /*overload_name=*/std::string(""),
       /*arguments=*/arguments,
       /*returns=*/std::vector<Argument>{});
