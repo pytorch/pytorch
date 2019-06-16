@@ -40,11 +40,11 @@ class Conv1dBenchmark(op_bench.TorchBenchmarkBase):
 class ConvTranspose1dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_c, out_c, kernel, stride, N, L):
         self.input = torch.rand(N, in_c, L) 
-        self.convtranpose1d = nn.ConvTranspose1d(in_c, out_c, kernel, stride=stride)
+        self.convtranspose1d = nn.ConvTranspose1d(in_c, out_c, kernel, stride=stride)
         self.set_module_name("ConvTranspose1d")
 
     def forward(self):
-        return self.convtranpose1d(self.input)
+        return self.convtranspose1d(self.input)
 
 
 op_bench.generate_pt_test(conv_1d_configs, Conv1dBenchmark)
@@ -82,11 +82,11 @@ class Conv2dBenchmark(op_bench.TorchBenchmarkBase):
 class ConvTranspose2dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_c, out_c, kernel, stride, N, H, W):
         self.input = torch.rand(N, in_c, H, W) 
-        self.convtranpose2d = nn.ConvTranspose2d(in_c, out_c, kernel, stride=stride)
+        self.convtranspose2d = nn.ConvTranspose2d(in_c, out_c, kernel, stride=stride)
         self.set_module_name("ConvTranspose2d")
 
     def forward(self):
-        return self.convtranpose2d(self.input)
+        return self.convtranspose2d(self.input)
 
 
 op_bench.generate_pt_test(conv_2d_configs, Conv2dBenchmark)
@@ -123,11 +123,11 @@ class Conv3dBenchmark(op_bench.TorchBenchmarkBase):
 class ConvTranspose3dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, in_c, out_c, kernel, stride, N, D, H, W):
         self.input = torch.rand(N, in_c, D, H, W) 
-        self.convtranpose3d = nn.ConvTranspose3d(in_c, out_c, kernel, stride=stride)
+        self.convtranspose3d = nn.ConvTranspose3d(in_c, out_c, kernel, stride=stride)
         self.set_module_name("ConvTranspose3d")
 
     def forward(self):
-        return self.convtranpose3d(self.input)
+        return self.convtranspose3d(self.input)
 
 
 op_bench.generate_pt_test(conv_3d_configs, Conv3dBenchmark)
