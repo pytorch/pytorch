@@ -166,6 +166,7 @@
 
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, find_packages
+from collections import defaultdict
 from distutils import core, dir_util
 from distutils.core import Distribution
 from distutils.errors import DistutilsArgError
@@ -185,14 +186,18 @@ import importlib
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
                                      check_env_flag,
-                                     DEBUG, REL_WITH_DEB_INFO, USE_MKLDNN)
-from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
-from tools.setup_helpers.cudnn import USE_CUDNN, CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
-from tools.setup_helpers.rocm import USE_ROCM
-from tools.setup_helpers.miopen import USE_MIOPEN, MIOPEN_LIBRARY, MIOPEN_INCLUDE_DIR
-from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_SYSTEM_LIB, NCCL_INCLUDE_DIR
-from tools.setup_helpers.numpy_ import USE_NUMPY
-from tools.setup_helpers.dist_check import USE_DISTRIBUTED
+                                     DEBUG, REL_WITH_DEB_INFO)
+from tools.setup_helpers.cmake import CMake
+from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
+from tools.setup_helpers.cudnn import CUDNN_LIBRARY, CUDNN_INCLUDE_DIR
+from tools.setup_helpers.miopen import MIOPEN_LIBRARY, MIOPEN_INCLUDE_DIR
+from tools.setup_helpers.nccl import NCCL_SYSTEM_LIB, NCCL_INCLUDE_DIR
+
+try:
+    FileNotFoundError
+except NameError:
+    FileNotFoundError = IOError  # Python 2.7 does not have FileNotFoundError
+
 ################################################################################
 # Parameters parsed from environment
 ################################################################################
@@ -277,6 +282,7 @@ elif sha != 'Unknown':
     version += '+' + sha[:7]
 report("Building wheel {}-{}".format(package_name, version))
 
+cmake = CMake('build')
 
 # all the work we need to do _before_ setup runs
 def build_deps():
@@ -318,7 +324,7 @@ def build_deps():
                  build_python=True,
                  rerun_cmake=RERUN_CMAKE,
                  cmake_only=CMAKE_ONLY,
-                 build_dir='build')
+                 cmake=cmake)
     if CMAKE_ONLY:
         report('Finished running cmake. Run "ccmake build" or '
                '"cmake-gui build" to adjust build options and '
@@ -362,33 +368,34 @@ def check_pydep(importname, module):
 class build_ext(setuptools.command.build_ext.build_ext):
     def run(self):
         # report build options
-        if USE_NUMPY:
+        cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
+        if cmake_cache_vars['USE_NUMPY']:
             report('-- Building with NumPy bindings')
         else:
             report('-- NumPy not found')
-        if USE_CUDNN:
+        if cmake_cache_vars['USE_CUDNN']:
             report('-- Detected cuDNN at ' + CUDNN_LIBRARY + ', ' + CUDNN_INCLUDE_DIR)
         else:
             report('-- Not using cuDNN')
-        if USE_MIOPEN:
+        if cmake_cache_vars['USE_MIOPEN']:
             report('-- Detected MIOpen at ' + MIOPEN_LIBRARY + ', ' + MIOPEN_INCLUDE_DIR)
         else:
             report('-- Not using MIOpen')
-        if USE_CUDA:
+        if cmake_cache_vars['USE_CUDA']:
             report('-- Detected CUDA at ' + CUDA_HOME)
         else:
             report('-- Not using CUDA')
-        if USE_MKLDNN:
+        if cmake_cache_vars['USE_MKLDNN']:
             report('-- Using MKLDNN')
         else:
             report('-- Not using MKLDNN')
-        if USE_NCCL and USE_SYSTEM_NCCL:
+        if cmake_cache_vars['USE_NCCL'] and cmake_cache_vars['USE_SYSTEM_NCCL']:
             report('-- Using system provided NCCL library at ' + NCCL_SYSTEM_LIB + ', ' + NCCL_INCLUDE_DIR)
-        elif USE_NCCL:
+        elif cmake_cache_vars['USE_NCCL']:
             report('-- Building NCCL library')
         else:
             report('-- Not using NCCL')
-        if USE_DISTRIBUTED:
+        if cmake_cache_vars['USE_DISTRIBUTED']:
             report('-- Building with THD distributed package ')
             if IS_LINUX:
                 report('-- Building with c10d distributed package ')
@@ -524,177 +531,189 @@ class clean(distutils.command.clean.clean):
         # It's an old-style class in Python 2.7...
         distutils.command.clean.clean.run(self)
 
+def configure_extension_build():
+    r"""Configures extension build options according to system environment and user's choice.
 
-################################################################################
-# Configure compile flags
-################################################################################
+    Returns:
+      The input to parameters ext_modules, cmdclass, packages, and entry_points as required in setuptools.setup.
+    """
 
-library_dirs = []
+    try:
+        cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
+    except FileNotFoundError:
+        # CMakeCache.txt does not exist. Probably running "python setup.py clean" over a clean directory.
+        cmake_cache_vars = defaultdict(lambda: False)
 
-if IS_WINDOWS:
-    # /NODEFAULTLIB makes sure we only link to DLL runtime
-    # and matches the flags set for protobuf and ONNX
-    extra_link_args = ['/NODEFAULTLIB:LIBCMT.LIB']
-    # /MD links against DLL runtime
-    # and matches the flags set for protobuf and ONNX
-    # /Z7 turns on symbolic debugging information in .obj files
-    # /EHa is about native C++ catch support for asynchronous
-    # structured exception handling (SEH)
-    # /DNOMINMAX removes builtin min/max functions
-    # /wdXXXX disables warning no. XXXX
-    extra_compile_args = ['/MD', '/Z7',
-                          '/EHa', '/DNOMINMAX',
-                          '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
-                          '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
-                          '/wd4275']
-    if sys.version_info[0] == 2:
-        if not check_env_flag('FORCE_PY27_BUILD'):
-            report('The support for PyTorch with Python 2.7 on Windows is very experimental.')
-            report('Please set the flag `FORCE_PY27_BUILD` to 1 to continue build.')
-            sys.exit(1)
-        # /bigobj increases number of sections in .obj file, which is needed to link
-        # against libaries in Python 2.7 under Windows
-        extra_compile_args.append('/bigobj')
-else:
-    extra_link_args = []
-    extra_compile_args = [
-        '-std=c++11',
-        '-Wall',
-        '-Wextra',
-        '-Wno-strict-overflow',
-        '-Wno-unused-parameter',
-        '-Wno-missing-field-initializers',
-        '-Wno-write-strings',
-        '-Wno-unknown-pragmas',
-        # This is required for Python 2 declarations that are deprecated in 3.
-        '-Wno-deprecated-declarations',
-        # Python 2.6 requires -fno-strict-aliasing, see
-        # http://legacy.python.org/dev/peps/pep-3123/
-        # We also depend on it in our code (even Python 3).
-        '-fno-strict-aliasing',
-        # Clang has an unfixed bug leading to spurious missing
-        # braces warnings, see
-        # https://bugs.llvm.org/show_bug.cgi?id=21629
-        '-Wno-missing-braces',
-    ]
-    if check_env_flag('WERROR'):
-        extra_compile_args.append('-Werror')
+    ################################################################################
+    # Configure compile flags
+    ################################################################################
 
-library_dirs.append(lib_path)
+    library_dirs = []
 
-# we specify exact lib names to avoid conflict with lua-torch installs
-CAFFE2_LIBS = []
-
-main_compile_args = []
-main_libraries = ['shm', 'torch_python']
-main_link_args = []
-main_sources = ["torch/csrc/stub.cpp"]
-
-# Before the introduction of stub.cpp, _C.so and libcaffe2.so defined
-# some of the same symbols, and it was important for _C.so to be
-# loaded before libcaffe2.so so that the versions in _C.so got
-# used. This happened automatically because we loaded _C.so directly,
-# and libcaffe2.so was brought in as a dependency (though I suspect it
-# may have been possible to break by importing caffe2 first in the
-# same process).
-#
-# Now, libtorch_python.so and libcaffe2.so define some of the same
-# symbols. We directly load the _C.so stub, which brings both of these
-# in as dependencies. We have to make sure that symbols continue to be
-# looked up in libtorch_python.so first, by making sure it comes
-# before libcaffe2.so in the linker command.
-main_link_args.extend(CAFFE2_LIBS)
-
-if USE_CUDA:
     if IS_WINDOWS:
-        cuda_lib_path = CUDA_HOME + '/lib/x64/'
+        # /NODEFAULTLIB makes sure we only link to DLL runtime
+        # and matches the flags set for protobuf and ONNX
+        extra_link_args = ['/NODEFAULTLIB:LIBCMT.LIB']
+        # /MD links against DLL runtime
+        # and matches the flags set for protobuf and ONNX
+        # /Z7 turns on symbolic debugging information in .obj files
+        # /EHa is about native C++ catch support for asynchronous
+        # structured exception handling (SEH)
+        # /DNOMINMAX removes builtin min/max functions
+        # /wdXXXX disables warning no. XXXX
+        extra_compile_args = ['/MD', '/Z7',
+                              '/EHa', '/DNOMINMAX',
+                              '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
+                              '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
+                              '/wd4275']
+        if sys.version_info[0] == 2:
+            if not check_env_flag('FORCE_PY27_BUILD'):
+                report('The support for PyTorch with Python 2.7 on Windows is very experimental.')
+                report('Please set the flag `FORCE_PY27_BUILD` to 1 to continue build.')
+                sys.exit(1)
+            # /bigobj increases number of sections in .obj file, which is needed to link
+            # against libaries in Python 2.7 under Windows
+            extra_compile_args.append('/bigobj')
     else:
-        cuda_lib_dirs = ['lib64', 'lib']
-        for lib_dir in cuda_lib_dirs:
-            cuda_lib_path = os.path.join(CUDA_HOME, lib_dir)
-            if os.path.exists(cuda_lib_path):
-                break
-    library_dirs.append(cuda_lib_path)
+        extra_link_args = []
+        extra_compile_args = [
+            '-std=c++11',
+            '-Wall',
+            '-Wextra',
+            '-Wno-strict-overflow',
+            '-Wno-unused-parameter',
+            '-Wno-missing-field-initializers',
+            '-Wno-write-strings',
+            '-Wno-unknown-pragmas',
+            # This is required for Python 2 declarations that are deprecated in 3.
+            '-Wno-deprecated-declarations',
+            # Python 2.6 requires -fno-strict-aliasing, see
+            # http://legacy.python.org/dev/peps/pep-3123/
+            # We also depend on it in our code (even Python 3).
+            '-fno-strict-aliasing',
+            # Clang has an unfixed bug leading to spurious missing
+            # braces warnings, see
+            # https://bugs.llvm.org/show_bug.cgi?id=21629
+            '-Wno-missing-braces',
+        ]
+        if check_env_flag('WERROR'):
+            extra_compile_args.append('-Werror')
 
-if DEBUG:
-    if IS_WINDOWS:
-        extra_link_args.append('/DEBUG:FULL')
-    else:
-        extra_compile_args += ['-O0', '-g']
-        extra_link_args += ['-O0', '-g']
+    library_dirs.append(lib_path)
 
-if REL_WITH_DEB_INFO:
-    if IS_WINDOWS:
-        extra_link_args.append('/DEBUG:FULL')
-    else:
-        extra_compile_args += ['-g']
-        extra_link_args += ['-g']
+    # we specify exact lib names to avoid conflict with lua-torch installs
+    CAFFE2_LIBS = []
+
+    main_compile_args = []
+    main_libraries = ['shm', 'torch_python']
+    main_link_args = []
+    main_sources = ["torch/csrc/stub.cpp"]
+
+    # Before the introduction of stub.cpp, _C.so and libcaffe2.so defined
+    # some of the same symbols, and it was important for _C.so to be
+    # loaded before libcaffe2.so so that the versions in _C.so got
+    # used. This happened automatically because we loaded _C.so directly,
+    # and libcaffe2.so was brought in as a dependency (though I suspect it
+    # may have been possible to break by importing caffe2 first in the
+    # same process).
+    #
+    # Now, libtorch_python.so and libcaffe2.so define some of the same
+    # symbols. We directly load the _C.so stub, which brings both of these
+    # in as dependencies. We have to make sure that symbols continue to be
+    # looked up in libtorch_python.so first, by making sure it comes
+    # before libcaffe2.so in the linker command.
+    main_link_args.extend(CAFFE2_LIBS)
+
+    if cmake_cache_vars['USE_CUDA']:
+        if IS_WINDOWS:
+            cuda_lib_path = CUDA_HOME + '/lib/x64/'
+        else:
+            cuda_lib_dirs = ['lib64', 'lib']
+            for lib_dir in cuda_lib_dirs:
+                cuda_lib_path = os.path.join(CUDA_HOME, lib_dir)
+                if os.path.exists(cuda_lib_path):
+                    break
+        library_dirs.append(cuda_lib_path)
+
+    if DEBUG:
+        if IS_WINDOWS:
+            extra_link_args.append('/DEBUG:FULL')
+        else:
+            extra_compile_args += ['-O0', '-g']
+            extra_link_args += ['-O0', '-g']
+
+    if REL_WITH_DEB_INFO:
+        if IS_WINDOWS:
+            extra_link_args.append('/DEBUG:FULL')
+        else:
+            extra_compile_args += ['-g']
+            extra_link_args += ['-g']
 
 
-def make_relative_rpath(path):
-    if IS_DARWIN:
-        return '-Wl,-rpath,@loader_path/' + path
-    elif IS_WINDOWS:
-        return ''
-    else:
-        return '-Wl,-rpath,$ORIGIN/' + path
+    def make_relative_rpath(path):
+        if IS_DARWIN:
+            return '-Wl,-rpath,@loader_path/' + path
+        elif IS_WINDOWS:
+            return ''
+        else:
+            return '-Wl,-rpath,$ORIGIN/' + path
 
-################################################################################
-# Declare extensions and package
-################################################################################
+    ################################################################################
+    # Declare extensions and package
+    ################################################################################
 
-extensions = []
-packages = find_packages(exclude=('tools', 'tools.*'))
-C = Extension("torch._C",
-              libraries=main_libraries,
-              sources=main_sources,
-              language='c++',
-              extra_compile_args=main_compile_args + extra_compile_args,
-              include_dirs=[],
-              library_dirs=library_dirs,
-              extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')],
-              )
-extensions.append(C)
+    extensions = []
+    packages = find_packages(exclude=('tools', 'tools.*'))
+    C = Extension("torch._C",
+                  libraries=main_libraries,
+                  sources=main_sources,
+                  language='c++',
+                  extra_compile_args=main_compile_args + extra_compile_args,
+                  include_dirs=[],
+                  library_dirs=library_dirs,
+                  extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')])
+    extensions.append(C)
 
-if not IS_WINDOWS:
-    DL = Extension("torch._dl",
-                   sources=["torch/csrc/dl.c"],
-                   language='c'
-                   )
-    extensions.append(DL)
+    if not IS_WINDOWS:
+        DL = Extension("torch._dl",
+                       sources=["torch/csrc/dl.c"],
+                       language='c')
+        extensions.append(DL)
 
-# These extensions are built by cmake and copied manually in build_extensions()
-# inside the build_ext implementaiton
-extensions.append(
-    Extension(
-        name=str('caffe2.python.caffe2_pybind11_state'),
-        sources=[]),
-)
-if USE_CUDA:
+    # These extensions are built by cmake and copied manually in build_extensions()
+    # inside the build_ext implementaiton
     extensions.append(
         Extension(
-            name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+            name=str('caffe2.python.caffe2_pybind11_state'),
             sources=[]),
     )
-if USE_ROCM:
-    extensions.append(
-        Extension(
-            name=str('caffe2.python.caffe2_pybind11_state_hip'),
-            sources=[]),
-    )
+    if cmake_cache_vars['USE_CUDA']:
+        extensions.append(
+            Extension(
+                name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+                sources=[]),
+        )
+    if cmake_cache_vars['USE_ROCM']:
+        extensions.append(
+            Extension(
+                name=str('caffe2.python.caffe2_pybind11_state_hip'),
+                sources=[]),
+        )
 
-cmdclass = {
-    'build_ext': build_ext,
-    'clean': clean,
-    'install': install,
-}
+    cmdclass = {
+        'build_ext': build_ext,
+        'clean': clean,
+        'install': install,
+    }
 
-entry_points = {
-    'console_scripts': [
-        'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
-        'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
-    ]
-}
+    entry_points = {
+        'console_scripts': [
+            'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
+            'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
+        ]
+    }
+
+    return extensions, cmdclass, packages, entry_points
 
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
@@ -732,6 +751,9 @@ if __name__ == '__main__':
 
     if RUN_BUILD_DEPS:
         build_deps()
+
+    extensions, cmdclass, packages, entry_points = configure_extension_build()
+
     setup(
         name=package_name,
         version=version,
