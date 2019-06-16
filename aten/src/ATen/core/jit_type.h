@@ -1390,11 +1390,7 @@ struct CAFFE2_API ClassType : public Type {
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       QualifiedName qualifiedName,
-      std::shared_ptr<CompilationUnit> cu);
-
-  // Create a type representing a Module,
-  // These do not have methods, and are not globally registered
-  static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
+      std::shared_ptr<CompilationUnit> cu, bool is_module = false);
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
@@ -1506,10 +1502,14 @@ struct CAFFE2_API ClassType : public Type {
   // that would invalidate the refinement.
   // These variants are not registered in the global class table.
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
+
+  bool is_module() const {
+    return is_module_;
+  }
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu);
+  ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu, bool is_module);
 
   // Fully qualified name of type (note that this has to be globally unique).
   // Looks like: "foo.bar.Baz".
@@ -1526,5 +1526,6 @@ struct CAFFE2_API ClassType : public Type {
   // Holds method attributes
   std::shared_ptr<CompilationUnit> compilation_unit_;
 
+  bool is_module_;
 };
 } // namespace c10

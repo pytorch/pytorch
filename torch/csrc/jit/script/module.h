@@ -57,7 +57,7 @@ using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(Module* owner, const std::shared_ptr<Function>& function);
+  Method(Module* owner, std::shared_ptr<Function> function);
 
   // the module that contains this method.
   Module& owner() const {
@@ -71,10 +71,6 @@ struct TORCH_API Method {
 
   IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs());
 
-  const std::vector<Slot>& initial_ivalues() const {
-    return initial_ivalues_;
-  }
-
   std::shared_ptr<Graph> graph() const {
     return function_->graph();
   }
@@ -84,11 +80,7 @@ struct TORCH_API Method {
   }
 
   size_t num_inputs() const {
-    return function_->num_inputs() - initial_ivalues_.size();
-  }
-
-  const FunctionSchema& getSchema() const {
-    return schema_;
+    return function_->num_inputs();
   }
 
   GraphExecutor& get_executor() {
@@ -113,23 +105,21 @@ struct TORCH_API Method {
   // This is the _lowered_ function and is different than the
   // first-class function in class_compilation_unit()
   std::shared_ptr<Function> function_;
-
-  // parameters and attributes loaded from the Module and appending
-  // before calling function_
-  std::vector<Slot> initial_ivalues_;
-  FunctionSchema schema_;
 };
 
 struct Module;
 
 struct TORCH_API Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
-  Module()
-      : name_("__main__"),
+  Module(std::string class_name)
+      : field_name_("__main__"),
         module_value_(c10::ivalue::Object::create(
-            ClassType::createModuleType(std::make_shared<CompilationUnit>()),
+            ClassType::create(
+                QualifiedName(std::move(class_name)),
+                std::make_shared<CompilationUnit>(),
+                /*is_module=*/true),
             0)) {}
-
+  Module() : Module("$Module") {}
   ~Module() {
     // ClassType own the compilation unit of their Functions, but each
     // Function has a self argument which owns the ClassType, created a
@@ -137,8 +127,8 @@ struct TORCH_API Module {
     // here we break the cycle.
     class_compilation_unit()->drop_all_functions();
   }
-  const std::string& name() const {
-    return name_;
+  const std::string& field_name() const {
+    return field_name_;
   }
 
   // note this doesn't change the flags of existing methods just ones
@@ -199,7 +189,7 @@ struct TORCH_API Module {
   void register_module(
       const std::string& name,
       std::shared_ptr<Module> module) {
-    module->name_ = name;
+    module->field_name_ = name;
     appendSlot(name, module->module_value_->type(), module->module_value_);
     insert(name, modules_, EntityType::MODULE, std::move(module));
   }
@@ -431,9 +421,6 @@ struct TORCH_API Module {
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
  private:
-  std::pair<std::shared_ptr<Function>, std::vector<Slot>>
-  lower_first_class_method(Function* fn);
-
   void to_impl(
       const c10::optional<at::Device>& device,
       const c10::optional<at::ScalarType>& dtype,
@@ -525,18 +512,17 @@ struct TORCH_API Module {
   // parameters, attributes, methods, and sub-modules
   // we store individual lists of each concept, and a single map to
   // unify the namespace and ensure fast lookup
-
-  // invariant: to ensure initial_ivalues of Methods stay valid,
-  // it is only legal to _add_ new modules and parameters.
-  // removing them will allow initial_ivalues to point to invalid parameters
-  // no such restriction exists for methods
   std::vector<std::shared_ptr<Module>> modules_;
   std::vector<Slot> parameters_;
   std::vector<Slot> attributes_;
   std::vector<std::unique_ptr<Method>> methods_;
 
   std::unordered_map<std::string, Entry> dict_;
-  std::string name_;
+
+  // The name of the module as it appears as a submodule
+  // parent.myself = this_module
+  // 'myself' is the field name:
+  std::string field_name_;
 
   ModulePtr module_value_;
 
@@ -554,7 +540,7 @@ struct TORCH_API Module {
   friend struct Method;
 };
 
-TORCH_API bool& getFirstClassMode();
+TORCH_API bool& getInlineEverythingMode();
 
 } // namespace script
 } // namespace jit
