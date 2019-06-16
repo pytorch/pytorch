@@ -70,7 +70,7 @@ class JitTestCase(TestCase):
 
     def emitFunctionHook(self, func):
         # func has invalid names for export, skip the jitter check
-        if func.name == "<lambda>" or "aten::" in func.name or _in_first_class_mode:
+        if func.name == "<lambda>" or "aten::" in func.name or not _inline_everything:
             return
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with self.disableEmitHook():
@@ -428,17 +428,16 @@ def enable_profiling_mode():
     yield
     torch._C._jit_set_profiling_mode(False)
 
-
-_in_first_class_mode = False
+_inline_everything = True
 @contextmanager
-def enable_first_class_mode():
-    global _in_first_class_mode
-    old = _in_first_class_mode
-    torch._C._jit_set_first_class_mode(True)
-    _in_first_class_mode = True
+def disable_inline_everything_mode():
+    global _inline_everything
+    old = _inline_everything
+    _inline_everything = False
+    torch._C._jit_set_inline_everything_mode(False)
     yield
-    torch._C._jit_set_first_class_mode(old)
-    _in_first_class_mode = old
+    _inline_everything = old
+    torch._C._jit_set_inline_everything_mode(old)
 
 
 # note: not re-entrant, use unnested only
