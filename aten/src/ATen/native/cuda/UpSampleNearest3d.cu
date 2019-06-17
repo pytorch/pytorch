@@ -157,7 +157,6 @@ static void upsample_nearest3d_out_cuda_template(
                   output_depth,
                   output_height,
                   output_width});
-  output.zero_();
 
   // upsample_3d_shape_check makes sure `nbatch != 0`
   unsigned int n = output.numel() / nbatch;
@@ -234,7 +233,6 @@ static void upsample_nearest3d_backward_out_cuda_template(
   Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_(
       {nbatch, channels, input_depth, input_height, input_width});
-  grad_input.zero_();
 
   // upsample_3d_shape_check makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;

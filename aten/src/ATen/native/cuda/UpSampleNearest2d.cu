@@ -138,13 +138,13 @@ static void upsample_nearest2d_out_cuda_template(
 
   Tensor input = input_.contiguous();
   output.resize_({nbatch, channels, output_height, output_width});
-  output.zero_();
 
   int nc = nbatch * channels;
 
   const int max_threads = std::min<int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS);
 
+  // upsample_2d_shape_check makes sure input/output tensor is not empty;
   int block_x = std::min<int>(lastPow2(output_width), max_threads);
   int block_y = std::min<int>(lastPow2(output_height), max_threads / block_x);
   int block_z = std::min<int>(nc, max_threads / block_x / block_y);
@@ -219,8 +219,7 @@ static void upsample_nearest2d_backward_out_cuda_template(
   Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_({nbatch, channels, input_height, input_width});
 
-  grad_input.zero_();
-
+  // upsample_2d_shape_check makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
