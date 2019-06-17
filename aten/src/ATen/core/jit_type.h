@@ -1467,11 +1467,7 @@ struct CAFFE2_API ClassType : public SerializableType {
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       QualifiedName qualifiedName,
-      std::shared_ptr<CompilationUnit> cu);
-
-  // Create a type representing a Module,
-  // These do not have methods, and are not globally registered
-  static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
+      std::shared_ptr<CompilationUnit> cu, bool is_module = false);
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
@@ -1518,9 +1514,11 @@ struct CAFFE2_API ClassType : public SerializableType {
   }
 
   std::shared_ptr<Function> getMethod(const std::string& name) const;
-  CompilationUnit& compilation_unit();
-  const CompilationUnit& compilation_unit() const;
   std::vector<Function*> methods() const override;
+
+  std::shared_ptr<CompilationUnit> compilation_unit();
+  std::shared_ptr<const CompilationUnit> compilation_unit() const;
+
   c10::optional<std::string> base_class_name() const override;
   std::vector<std::tuple<std::string, TypePtr>> attrs() const override;
 
@@ -1572,10 +1570,14 @@ struct CAFFE2_API ClassType : public SerializableType {
   // that would invalidate the refinement.
   // These variants are not registered in the global class table.
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
+
+  bool is_module() const {
+    return is_module_;
+  }
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(c10::optional<QualifiedName> name, std::shared_ptr<CompilationUnit> cu);
+  ClassType(c10::optional<QualifiedName> name, std::shared_ptr<CompilationUnit> cu, bool is_module);
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
@@ -1588,5 +1590,6 @@ struct CAFFE2_API ClassType : public SerializableType {
   // Holds method attributes
   std::shared_ptr<CompilationUnit> compilation_unit_;
 
+  bool is_module_;
 };
 } // namespace c10

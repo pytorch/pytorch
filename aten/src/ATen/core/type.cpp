@@ -515,9 +515,11 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
-    std::shared_ptr<CompilationUnit> cu)
+    std::shared_ptr<CompilationUnit> cu,
+    bool is_module)
     : SerializableType(TypeKind::ClassType, name),
-      compilation_unit_(std::move(cu)) {}
+      compilation_unit_(std::move(cu)),
+      is_module_(is_module) {}
 
 void TupleType::NamedTupleSpec::createFunctionSchema() {
   std::vector<Argument> arguments;
