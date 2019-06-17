@@ -1418,12 +1418,10 @@ struct CAFFE2_API SerializableType : public Type {
 
   virtual std::vector<Function*> methods() const = 0;
 
- private:
+ protected:
   // Fully qualified name of type (note that this has to be globally unique).
   // Looks like: "foo.bar.Baz".
   QualifiedName name_;
-
-  friend class ClassType;
 };
 
 
