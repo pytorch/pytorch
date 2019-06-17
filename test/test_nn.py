@@ -1559,6 +1559,15 @@ class TestNN(NNTestCase):
     def test_overwrite_module_params_on_conversion(self):
         torch.__future__.set_overwrite_module_params_on_conversion(False)
 
+        # yf225 TODO: add comment for this: changing impl to sparse will overwrite param regardless of overwrite_module_params_on_conversion settings
+        m = nn.Linear(20, 10)
+        m.weight.grad = torch.randn(10, 20)
+        weight_ref = m.weight
+        weight_grad_ref = m.weight.grad
+        m = m._apply(lambda t: torch.sparse_coo_tensor(torch.zeros([2, 1]), torch.ones([1]), torch.Size([10, 20])))
+        self.assertNotEqual(weight_ref.layout, m.weight.layout)
+        self.assertNotEqual(weight_grad_ref.layout, m.weight.grad.layout)
+
         # Test that the current default behavior of
         # yf225 TODO: add comment for this test! Saying that the current default behavior is just wrong
         m = nn.Linear(2,3).float()
@@ -1589,11 +1598,9 @@ class TestNN(NNTestCase):
         self.assertNotEqual(weight_grad_ref.dtype, m.weight.grad.dtype)
 
         def add_one_inplace(t):
-            with torch.no_grad():
-                return t.add_(1.0)
+            return t.add_(1.0)
 
-        # yf225 TODO: add in-place `fn` and make sure the version counter bumps
-        # yf225 TODO: fix this comment
+        # yf225 TODO: fix this comment: add in-place `fn` and make sure the version counter bumps
         # Test that when `torch.__future__.get_overwrite_module_params_on_conversion()`
         # is true, `cpu_module.to("cuda")` invalidates `cpu_module`'s original
         # parameters in any autograd graph they participate in.
@@ -1606,8 +1613,7 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pvm.backward(torch.randn(10, 20))
 
-        # yf225 TODO: add in-place `fn` and make sure the version counter bumps
-        # yf225 TODO: fix this comment
+        # yf225 TODO: fix this comment: add in-place `fn` and make sure the version counter bumps
         # Test that when `torch.__future__.get_overwrite_module_params_on_conversion()`
         # is true, `cpu_module.to("cuda")` invalidates `cpu_module`'s original
         # parameters' gradients in any autograd graph they participate in.
@@ -1621,16 +1627,14 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pgm.backward(torch.randn(10, 20))
 
-        # yf225 TODO: add out-of-place `fn` and make sure the version counter doesn't bump
-        # yf225 TODO: fix this comment
+        # yf225 TODO: fix this comment: add out-of-place `fn` and make sure the version counter doesn't bump
         m = nn.Linear(20, 10)
         weight_ref = m.weight
         m_weight_version_saved = weight_ref._version
         m = m._apply(lambda t: torch.randn(t.shape))
         self.assertEqual(weight_ref._version, m_weight_version_saved)
 
-        # yf225 TODO: add out-of-place `fn` and make sure the version counter doesn't bump
-        # yf225 TODO: fix this comment
+        # yf225 TODO: fix this comment: add out-of-place `fn` and make sure the version counter doesn't bump
         m = nn.Linear(20, 10)
         m.weight.grad = torch.randn(10, 20).requires_grad_()
         weight_grad_ref = m.weight.grad
@@ -1640,10 +1644,37 @@ class TestNN(NNTestCase):
 
         torch.__future__.set_overwrite_module_params_on_conversion(False)
 
-        # yf225 TODO: add _apply test for converting to sparse type, because it has to use a different TensorImpl type
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_overwrite_module_params_on_conversion_cpu_cuda(self):
+        torch.__future__.set_overwrite_module_params_on_conversion(False)
 
-    def test_overwrite_module_params_on_device_conversion(self):
-        # yf225 TODO: also test cpu-cuda conversion!
+        # yf225 TODO: add comment for this test! Saying that the current default behavior is just wrong
+        m = nn.Linear(2,3)
+        mw = m.weight[:]
+        m.to('cuda')
+        mw[0][0] = 5
+        with self.assertRaisesRegex(RuntimeError, "Expected object of backend CPU but got backend CUDA"):
+            self.assertTrue(mw[0][0] == mw._base[0][0])
+
+        torch.__future__.set_overwrite_module_params_on_conversion(True)
+
+        # yf225 TODO: add comment for this test! Saying that the future behavior (aka. not doing cpu-cuda inplace) is correct
+        m = nn.Linear(2,3)
+        mw = m.weight[:]
+        m.to('cuda')
+        mw[0][0] = 5   # yf225 TODO: fix comment: We have a view on the old thing, and that needs to be consistent
+        self.assertTrue(mw[0][0] == mw._base[0][0])
+
+        # Test that when `torch.__future__.get_overwrite_module_params_on_conversion()`
+        # is true, `cpu_module.to("cuda")` doesn't preserve previous references
+        # to `cpu_module`'s parameters or gradients.
+        m = nn.Linear(20, 10)
+        m.weight.grad = torch.randn(10, 20)
+        weight_ref = m.weight
+        weight_grad_ref = m.weight.grad
+        m.to('cuda')
+        self.assertNotEqual(weight_ref.device, m.weight.device)
+        self.assertNotEqual(weight_grad_ref.device, m.weight.grad.device)
 
     def test_type(self):
         l = nn.Linear(10, 20)
