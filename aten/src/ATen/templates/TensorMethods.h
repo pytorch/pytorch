@@ -2,6 +2,7 @@
 
 #include <c10/core/Scalar.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -93,7 +94,11 @@ inline bool Tensor::is_cuda() const {
 }
 
 #ifdef NAMEDTENSOR_ENABLED
-inline NamedTensorMeta* Tensor::get_named_tensor_meta() const {
+inline NamedTensorMeta* Tensor::get_named_tensor_meta() {
+  return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+}
+
+inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
 

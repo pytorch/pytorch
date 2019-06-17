@@ -407,8 +407,7 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
             flattened input is returned. default: ``None``
 
     Returns:
-        (Tensor, Tensor (optional) Tensor (optional))::
-        A tensor or a tuple of tensors containing
+        (Tensor, Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
 
             - **output** (*Tensor*): the output list of unique scalar elements.
             - **inverse_indices** (*Tensor*): (optional) if
@@ -696,9 +695,11 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
     elif p == "nuc":
         if dtype is not None:
             raise ValueError("dtype argument is not supported in nuclear norm")
-        if out is None:
-            torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
-        return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
+        if dim is None:
+            if out is None:
+                return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
+            return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
+        return torch._C._VariableFunctions.nuclear_norm(input, dim, keepdim=keepdim, out=out)
     else:
         if dim is None:
             dim = tuple(range(ndim))

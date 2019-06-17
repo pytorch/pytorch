@@ -6,7 +6,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/CPUGenerator.h>
-#include <ATen/CheckGenerator.h>
+#include <ATen/Utils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/LegacyTHDispatcher.h>
@@ -15,11 +15,12 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
 #include <c10/core/TensorOptions.h>
-#include <TH/THRandom.h>
-#include <TH/THGenerator.hpp>
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -118,6 +119,17 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
   }
   return tensor;
 }
+
+#ifdef NAMEDTENSOR_ENABLED
+Tensor empty(
+    IntArrayRef size,
+    at::optional<DimnameList> names,
+    const TensorOptions& options) {
+  auto result = at::empty(size, options);
+  internal_set_names_inplace(result, names);
+  return result;
+}
+#endif
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
   check_size_nonnegative(size);
@@ -426,8 +438,7 @@ Tensor randn_like(const Tensor& self, const TensorOptions& options) {
 
 namespace {
 template <typename scalar_t>
-void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
-  std::lock_guard<std::mutex> lock(generator->mutex);
+void randperm_cpu(Tensor& result, int64_t n, CPUGenerator* generator) {
   scalar_t *r__data = result.data<scalar_t>();
 
   result.resize_({n});
@@ -439,20 +450,13 @@ void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
 
   for(int64_t i = 0; i < n - 1; i++)
   {
-    int64_t z = THRandom_random(generator) % (n-i);
+    int64_t z = generator->random() % (n-i);
     scalar_t sav = r__data[i*r__stride_0];
     r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
     r__data[(z+i)*r__stride_0] = sav;
   }
 }
 } // namespace
-
-
-THGenerator* get_generator(at::Generator* gen) {
-  auto default_gen = &at::globalContext().defaultGenerator(at::kCPU);
-  auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
-  return gen_->generator;
-}
 
 Tensor randperm(int64_t n, const TensorOptions& options) {
   return native::randperm(n, nullptr, options);
@@ -470,7 +474,9 @@ Tensor& randperm_out(Tensor& result, int64_t n) {
 Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   result.resize_({n});
-  auto gen = get_generator(generator);
+  auto gen = get_generator_or_default<CPUGenerator>(generator, detail::getDefaultCPUGenerator());
+  // See Note [Acquire lock when using random generators]
+  std::lock_guard<std::mutex> lock(gen->mutex_);
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
   });

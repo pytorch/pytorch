@@ -8,7 +8,6 @@ import torch.jit.annotations
 import torch._jit_internal as _jit_internal
 from torch._six import PY2, PY37, with_metaclass, get_function_from_type, \
     string_classes, builtins
-from torch._jit_internal import ignore, export  # noqa: F401
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 import torch.testing
@@ -27,6 +26,11 @@ import copy
 import collections
 import inspect
 import pickle
+
+# These are imported so users can access them from the `torch.jit` module
+from torch._jit_internal import Final  # noqa: F401
+from torch._jit_internal import ignore, export  # noqa: F401
+
 if sys.version_info[0] > 2:
     import pathlib
 
@@ -287,7 +291,11 @@ class LegacyTracedModule(Module):
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
-        trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        try:
+            trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        except Exception as e:
+            torch._C._tracer_abandon()
+            raise e
         ret_inputs = tuple(x.clone() for x in all_trace_inputs)
         torch._C._tracer_set_force_outplace(self._force_outplace)
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
@@ -469,7 +477,8 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, executor_options, traced_func, check_tolerance, force_outplace, is_trace_module):
+def _check_trace(check_inputs, func, executor_options, traced_func, check_tolerance,
+                 force_outplace, is_trace_module, _module_class):
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
     for inputs in check_inputs:
@@ -486,6 +495,7 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
                 copied_dict,
                 check_trace=False,
                 _force_outplace=force_outplace,
+                _module_class=_module_class,
                 **executor_options)
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
@@ -497,6 +507,7 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
                 _clone_inputs(inputs),
                 check_trace=False,
                 _force_outplace=force_outplace,
+                _module_class=_module_class,
                 **executor_options)
             check_mod_func = check_mod
 
@@ -724,6 +735,12 @@ def trace(func,
     if not _enabled:
         return func
 
+    if isinstance(func, torch.jit.ScriptModule):
+        # it is hard to trace it because the forward method on ScriptModule is already defined, so it
+        # would result in an error.
+        warnings.warn('The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.')
+        return func
+
     if isinstance(func, torch.nn.Module):
         return trace_module(func, {'forward': example_inputs}, optimize,
                             check_trace, wrap_check_inputs(check_inputs),
@@ -760,9 +777,9 @@ def trace(func,
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, traced, check_tolerance, _force_outplace, False)
+            _check_trace(check_inputs, func, executor_options, traced, check_tolerance, _force_outplace, False, _module_class)
         else:
-            _check_trace([example_inputs], func, executor_options, traced, check_tolerance, _force_outplace, False)
+            _check_trace([example_inputs], func, executor_options, traced, check_tolerance, _force_outplace, False, _module_class)
 
     return traced
 
@@ -853,10 +870,10 @@ def trace_module(mod,
         if check_trace:
             if check_inputs is not None:
                 _check_trace(check_inputs, func, executor_options, check_trace_method,
-                             check_tolerance, _force_outplace, True)
+                             check_tolerance, _force_outplace, True, _module_class)
             else:
                 _check_trace([inputs], func, executor_options, check_trace_method,
-                             check_tolerance, _force_outplace, True)
+                             check_tolerance, _force_outplace, True, _module_class)
 
         return module
 
@@ -1146,6 +1163,9 @@ class OrderedDictWrapper(object):
 
     def values(self):
         return [v for k, v in self.items()]
+
+    def __len__(self):
+        return len(self.values())
 
     def __delitem__(self, k):
         raise RuntimeError("cannot delete methods or parameters of a script module")
@@ -1443,7 +1463,7 @@ if _enabled:
                       return input
         """
         def __init__(self, optimize=True):
-            self.__dict__['_c'] = torch._C.ScriptModule()
+            self.__dict__['_c'] = torch._C.ScriptModule(type(self).__name__)
             Module.__init__(self)
             self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)
@@ -1618,6 +1638,11 @@ if _enabled:
                     object.__setattr__(self, name, None)
                 else:
                     self.register_buffer(name, original._buffers[name])
+
+            # Constants annotated via `Final[T]` rather than being added to `__constants__`
+            for name, ann in getattr(original, '__annotations__', {}).items():
+                if torch._jit_internal.is_final(ann):
+                    constants_set.add(name)
 
             # Copy constants
             self.__dict__["_constants_set"] = constants_set
@@ -1800,8 +1825,8 @@ class TracedModule(ScriptModule):
             raise ValueError("Modules that have hooks assigned can't be compiled")
 
         for name, submodule in orig._modules.items():
-            if isinstance(submodule, ScriptModule) and not isinstance(submodule, TracedModule):
-                self._modules[name] = submodule.copy()
+            if isinstance(submodule, ScriptModule):
+                self._modules[name] = submodule
             else:
                 self._modules[name] = TracedModule(submodule, id_set, optimize=optimize)
 
@@ -2013,6 +2038,21 @@ def _get_script_class(name):
 # torch.jit.Error
 Error = torch._C.JITException
 
+def _get_named_tuple_properties(obj):
+    assert issubclass(obj, tuple) and hasattr(obj, '_fields')
+    fields = list(obj._fields)
+    annotations = []
+    has_annotations = hasattr(obj, '__annotations__')
+    for field in fields:
+        if has_annotations and field in obj.__annotations__:
+            annotations.append(torch.jit.annotations.ann_to_type(obj.__annotations__[field]))
+        else:
+            annotations.append(torch._C.TensorType.get())
+    return type(obj).__name__, fields, annotations
+
+def _create_named_tuple(t, names, unqual_name):
+    TupleType = collections.namedtuple(unqual_name, names)
+    return TupleType(*t)
 
 class _disable_tracing(object):
     def __enter__(self):
