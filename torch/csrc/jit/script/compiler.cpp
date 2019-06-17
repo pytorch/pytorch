@@ -154,9 +154,8 @@ static Value* asSimple(const SugaredValuePtr& value) {
 
 static std::shared_ptr<MagicMethod> makeMagic(
     const std::string& name,
-    SugaredValuePtr base,
-    size_t class_arg_position = 0) {
-  return std::make_shared<MagicMethod>(name, base, class_arg_position);
+    SugaredValuePtr base) {
+  return std::make_shared<MagicMethod>(name, base);
 }
 
 // Auxiliary data structure for desugaring variable binding into our always
@@ -2460,17 +2459,17 @@ struct to_ir {
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto overload = getOperatorOverload(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-        auto class_arg_position = 0;
 
         if (tree->kind() == TK_IN) {
-          class_arg_position = 1;
+          // For `in` the arguments are in reverse order (the object being
+          // checked is second)
+          std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
         }
 
         return asSimple(
             makeMagic(
                 overload,
-                std::make_shared<BuiltinFunction>(kind, at::nullopt),
-                class_arg_position)
+                std::make_shared<BuiltinFunction>(kind, at::nullopt))
                 ->call(tree->range(), method, named_values, {}, 0));
       }
       case TK_NOT: {
