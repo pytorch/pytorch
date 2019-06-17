@@ -290,12 +290,11 @@ class JitTestCase(TestCase):
             scripted_fn = torch.jit.script(func, optimize, _frames_up=1)
 
         if capture_output:
-            if not IS_WINDOWS:
-                with self.capture_stdout() as script_stdout:
-                    outputs_ge = scripted_fn(*inputs)
-                with self.capture_stdout() as python_stdout:
-                    outputs_ge = scripted_fn(*inputs)
-                self.assertEqual(script_stdout, python_stdout)
+            with self.capture_stdout() as script_stdout:
+                outputs_ge = scripted_fn(*inputs)
+            with self.capture_stdout() as python_stdout:
+                outputs_ge = func(*inputs)
+            self.assertEqual(script_stdout, python_stdout)
         else:
             outputs_ge = scripted_fn(*inputs)
         self.assertEqual(outputs, outputs_ge)
