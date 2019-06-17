@@ -164,7 +164,7 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
     }
 
     // Extract columns:
-    THNN_(im2col)(
+    at::native::im2col<scalar_t>(
       input_n->data<scalar_t>(),
       nInputPlane, inputHeight, inputWidth,
       outputHeight, outputWidth,
@@ -280,7 +280,7 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
     );
 
     // Unpack columns back into input:
-    THNN_(col2im)(
+    at::native::col2im<scalar_t>(
       gradColumns->data<scalar_t>(),
       nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
@@ -373,7 +373,7 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
       THTensor_(select)(input_n, input, 0, elt);
 
       // Extract columns:
-      THNN_(im2col)(
+      at::native::im2col<scalar_t>(
         input_n->data<scalar_t>(),
         nInputPlane, inputHeight, inputWidth,
         outputHeight, outputWidth,
