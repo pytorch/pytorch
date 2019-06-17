@@ -206,6 +206,19 @@ class TestONNXOpset(TestCase):
         ops = {9 : ops, 10 : ops}
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=False)
 
+    def test_full(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return torch.full((3, 4), x)
+
+        ops = [{"op_name" : "Constant"},
+               {"op_name" : "ConstantOfShape"},
+               {"op_name" : "Add"},]
+        ops = {9 : ops, 10 : ops}
+        import numpy
+        x = torch.tensor(12)
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
+
 
 if __name__ == '__main__':
     run_tests()
