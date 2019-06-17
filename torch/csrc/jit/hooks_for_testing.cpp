@@ -16,9 +16,7 @@ void didFinishEmitFunction(std::shared_ptr<Function> fn) {
     emit_function_callback(fn);
   }
 }
-void setEmitHooks(
-    ModuleHook for_mod,
-    FunctionHook for_fn) {
+void setEmitHooks(ModuleHook for_mod, FunctionHook for_fn) {
   emit_module_callback = std::move(for_mod);
   emit_function_callback = std::move(for_fn);
 }

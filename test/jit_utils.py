@@ -53,12 +53,6 @@ class JitTestCase(TestCase):
         self.clearHooks()
         torch._C._jit_clear_class_registry()
 
-    @contextmanager
-    def disableEmitHook(self):
-        self.clearHooks()
-        yield None
-        self.setHooks()
-
     def _isHookExceptionOk(self, e):
         se = str(e)
         allowed = ("Could not export Python function",
