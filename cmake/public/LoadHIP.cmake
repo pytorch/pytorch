@@ -94,6 +94,27 @@ ELSE()
   SET(MIOPEN_PATH $ENV{MIOPEN_PATH})
 ENDIF()
 
+# ROCPRIM_PATH
+IF(NOT DEFINED ENV{ROCPRIM_PATH})
+  SET(ROCPRIM_PATH ${ROCM_PATH}/rocprim)
+ELSE()
+  SET(ROCPRIM_PATH $ENV{ROCPRIM_PATH})
+ENDIF()
+
+# HIPCUB_PATH
+IF(NOT DEFINED ENV{HIPCUB_PATH})
+  SET(HIPCUB_PATH ${ROCM_PATH}/hipcub)
+ELSE()
+  SET(HIPCUB_PATH $ENV{HIPCUB_PATH})
+ENDIF()
+
+# ROCTHRUST_PATH
+IF(NOT DEFINED ENV{ROCTHRUST_PATH})
+  SET(ROCTHRUST_PATH ${ROCM_PATH}/rocthrust)
+ELSE()
+  SET(ROCTHRUST_PATH $ENV{ROCTHRUST_PATH})
+ENDIF()
+
 IF(NOT DEFINED ENV{PYTORCH_ROCM_ARCH})
   SET(PYTORCH_ROCM_ARCH gfx803;gfx900;gfx906)
 ELSE()
@@ -140,6 +161,9 @@ IF(HIP_FOUND)
   set(rocfft_DIR ${ROCFFT_PATH}/lib/cmake/rocfft)
   set(hipsparse_DIR ${HIPSPARSE_PATH}/lib/cmake/hipsparse)
   set(rocsparse_DIR ${ROCSPARSE_PATH}/lib/cmake/rocsparse)
+  set(rocprim_DIR ${ROCPRIM_PATH}/lib/cmake/rocprim)
+  set(hipcub_DIR ${HIPCUB_PATH}/lib/cmake/hipcub)
+  set(rocthrust_DIR ${ROCTHRUST_PATH}/lib/cmake/rocthrust)
 
   find_package_and_print_version(rocrand REQUIRED)
   find_package_and_print_version(hiprand REQUIRED)
@@ -149,10 +173,9 @@ IF(HIP_FOUND)
   find_package_and_print_version(rocfft REQUIRED)
   #find_package_and_print_version(hipsparse REQUIRED)
   find_package_and_print_version(rocsparse REQUIRED)
-
-  find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
-  find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/hipcub")
-  find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
+  find_package_and_print_version(rocprim REQUIRED)
+  find_package_and_print_version(hipcub REQUIRED)
+  find_package_and_print_version(rocthrust REQUIRED)
   
   # TODO: hip_hcc has an interface include flag "-hc" which is only
   # recognizable by hcc, but not gcc and clang. Right now in our
