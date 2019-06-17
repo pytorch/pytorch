@@ -41,6 +41,14 @@ std::vector<Function*> ClassType::methods() const {
   return ret;
 }
 
+ClassType::ClassType(
+    c10::optional<QualifiedName> name,
+    std::shared_ptr<CompilationUnit> cu,
+    bool is_module)
+    : SerializableType(TypeKind::ClassType, name),
+      compilation_unit_(std::move(cu)),
+      is_module_(is_module) {}
+
 c10::optional<std::string> ClassType::base_class_name() const {
   return c10::nullopt;
 }
