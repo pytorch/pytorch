@@ -275,7 +275,7 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
   } else {
     AT_ERROR(
         "Only tensors or (possibly nested) dict or tuples of tensors can be "
-        "inputs to traced functions. Got ", type);
+        "inputs to traced functions. Got ", type->python_str());
   }
 }
 
@@ -296,7 +296,8 @@ static void gatherParametersAndBuffers(
     }
   }
   for (const auto& sub : self.get_modules()) {
-    gatherParametersAndBuffers(state, g.insertGetAttr(self_value, sub->name()),  *sub);
+    gatherParametersAndBuffers(
+        state, g.insertGetAttr(self_value, sub->field_name()), *sub);
   }
 }
 

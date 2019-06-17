@@ -363,7 +363,8 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   for (py::handle py_submodule : py_module_) {
     py::object obj = py::reinterpret_borrow<py::object>(py_submodule);
     if (auto sub_module = as_module(obj)) {
-      Value* module_v = m.graph()->insertGetAttr(self_, sub_module->name());
+      Value* module_v =
+          m.graph()->insertGetAttr(self_, sub_module->field_name());
       result.emplace_back(
           std::make_shared<ModuleValue>(module_v, sub_module, obj));
     } else {

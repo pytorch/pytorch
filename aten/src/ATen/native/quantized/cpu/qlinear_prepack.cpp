@@ -75,7 +75,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
             /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
             /*groups=*/1),
         col_offsets,
-        static_cast<float>(weight.q_scale()),
+        weight.q_scale(),
         weight_zero_point_int32});
 
     // TODO: we will need to replace this with torchscript classes at a later
