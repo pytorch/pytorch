@@ -34,6 +34,5 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
   std::vector<Dimname> names_;
 };
 
-CAFFE2_API void internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
 }
 #endif
