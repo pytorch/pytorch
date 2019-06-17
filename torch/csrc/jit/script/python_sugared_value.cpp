@@ -363,7 +363,8 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   for (py::handle py_submodule : py_module_) {
     py::object obj = py::reinterpret_borrow<py::object>(py_submodule);
     if (auto sub_module = as_module(obj)) {
-      Value* module_v = m.graph()->insertGetAttr(self_, sub_module->name());
+      Value* module_v =
+          m.graph()->insertGetAttr(self_, sub_module->field_name());
       result.emplace_back(
           std::make_shared<ModuleValue>(module_v, sub_module, obj));
     } else {
@@ -515,15 +516,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto& pyCu = CompilationUnit::_get_python_cu();
     if (auto classType = pyCu.get_class(c10::QualifiedName(qualifiedName))) {
       return std::make_shared<ClassValue>(classType);
-    }
-    // Use a heuristic here to identify NamedTuple instances:
-    // 1) must be a subclass of tuple
-    // 2) Has an attribute "_fields"
-    auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
-    if (PyObject_IsSubclass(obj.ptr(), tuple_type) &&
-        py::hasattr(obj, "_fields")) {
-      throw ErrorReport(loc)
-          << "NamedTuple is currently not supported in TorchScript";
     }
   }
 
