@@ -288,11 +288,20 @@ struct MethodValue : public SugaredValue {
       size_t n_binders) override {
     std::vector<NamedValue> inputsWithSelf = {self_};
     inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
-    auto method = self_->type()->expect<ClassType>()->getMethod(method_name_);
-    TORCH_INTERNAL_ASSERT(method);
-    method->ensure_defined();
-    MatchedSchema match = matchSchema(
-        method->getSchema(), loc, *f.graph(), inputsWithSelf, attributes);
+    const FunctionSchema* schema = nullptr;
+    if (auto class_type = self_->type()->cast<ClassType>()) {
+      auto method = class_type->getMethod(method_name_);
+      TORCH_INTERNAL_ASSERT(method);
+      method->ensure_defined();
+      schema = &method->getSchema();
+    } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
+      schema = interface_type->getMethod(method_name_);
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "method constructed that is not a class or interface");
+    }
+    MatchedSchema match =
+        matchSchema(*schema, loc, *f.graph(), inputsWithSelf, attributes);
     Value* output = f.graph()->insertMethodCall(method_name_, match);
     output->node()->setSourceRange(loc);
     return std::make_shared<SimpleValue>(output);

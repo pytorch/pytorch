@@ -581,4 +581,41 @@ void TupleType::createFunctionSchema() {
       /*returns=*/std::vector<Argument>{});
 }
 
+InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName) {
+  return InterfaceTypePtr(
+      new InterfaceType(std::move(qualifiedName)));
+}
+
+bool InterfaceType::isSubtypeOf(const TypePtr rhs) const {
+  // to improve performance this check can be cached
+  if (auto iface = rhs->cast<InterfaceType>()) {
+    for (const FunctionSchema& schema : *iface->methods_) {
+      auto self_schema = getMethod(schema.name());
+      if (!self_schema || !self_schema->isSubtypeOf(schema, /*is_method=*/true)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return Type::isSubtypeOf(rhs);
+}
+
+const FunctionSchema* InterfaceType::getMethod(const std::string& name) const {
+  for (const FunctionSchema& method : *methods_) {
+    if (method.name() == name) {
+      return &method;
+    }
+  }
+  return nullptr;
+}
+void InterfaceType::addMethod(FunctionSchema schema) {
+  methods_->emplace_back(std::move(schema));
+}
+InterfaceType::InterfaceType(QualifiedName name)
+    : Type(InterfaceType::Kind),
+      name_(std::move(name)),
+      methods_(std::make_shared<std::vector<FunctionSchema>>()) {}
+
+InterfaceType::~InterfaceType() = default;
+
 } // namespace c10

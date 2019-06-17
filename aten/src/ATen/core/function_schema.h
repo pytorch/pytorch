@@ -223,6 +223,12 @@ public:
       const std::unordered_map<std::string, IValue>& kwargs) const;
 
   void findErrorInKwargs(const std::vector<std::string>& kwargs) const;
+
+  // can a function with this schema be substituted for a function of rhs's 
+  // schema and have the program typecheck?
+  // as_method - if true, treat this schema as a method and ignore 
+  // the first argument, which will be the object in both cases
+  bool isSubtypeOf(const FunctionSchema& rhs, bool as_method) const;
 };
 
 inline bool operator==(const FunctionSchema& lhs, const FunctionSchema& rhs) {

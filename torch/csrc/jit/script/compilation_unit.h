@@ -26,6 +26,7 @@ namespace jit {
 namespace script {
 
 struct Def;
+struct ClassDef;
 struct SugaredValue;
 struct Resolver;
 
@@ -80,6 +81,11 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self& self);
 
+  void define_interface(
+      const std::string& qualifiedName,
+      const ClassDef& classDef,
+      ResolverPtr rcb);
+
   std::shared_ptr<Function> create_function(
       std::string name,
       std::shared_ptr<Graph> graph) {
@@ -122,7 +128,6 @@ struct TORCH_API CompilationUnit {
   void register_class(ClassTypePtr classType) {
     classes_.push_back(std::move(classType));
   };
-
   ClassTypePtr get_class(const c10::QualifiedName& name) const {
     for (const auto& cls : classes_) {
       if (cls->qualname() == name.qualifiedName()) {
@@ -130,6 +135,22 @@ struct TORCH_API CompilationUnit {
       }
     }
     return nullptr;
+  }
+
+  InterfaceTypePtr get_interface(const c10::QualifiedName& name) const {
+    for (const auto& iface : interfaces_) {
+      if (iface->qualname() == name.qualifiedName()) {
+        return iface;
+      }
+    }
+    return nullptr;
+  }
+
+  TypePtr get_named_type(const c10::QualifiedName& name) const {
+    if (auto cls = get_class(name)) {
+      return cls;
+    }
+    return get_interface(name);
   }
 
   /**
@@ -173,6 +194,7 @@ struct TORCH_API CompilationUnit {
   // 2. On load, the TypePtrs of any imported classes are owned by the main
   // module's compilation unit.
   std::vector<ClassTypePtr> classes_;
+  std::vector<InterfaceTypePtr> interfaces_;
 };
 
 } // namespace script
