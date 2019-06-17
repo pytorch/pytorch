@@ -40,8 +40,9 @@ CUDAGenerator* getDefaultCUDAGenerator(DeviceIndex device_index) {
   DeviceIndex idx = device_index;
   if (idx == -1) {
     idx = c10::cuda::current_device();
+  } else {
+    TORCH_CHECK(idx >= 0 && idx < num_gpus);
   }
-  TORCH_CHECK(idx >= 0 && idx < num_gpus);
   std::call_once(cuda_gens_init_flag[idx], [&] {
     default_gens_cuda[idx] = std::make_shared<CUDAGenerator>(idx);
     default_gens_cuda[idx]->seed();

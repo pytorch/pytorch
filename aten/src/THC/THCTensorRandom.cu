@@ -23,7 +23,7 @@ THC_API __host__ void THCRandom_getRNGState(at::Generator *gen_, THByteTensor *r
   // because this is just host side code and we don't want to worry about linking with cuda
   static const size_t states_size = 200 * sizeof(4120);
   static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(std::atomic<int64_t>);
+  static const size_t offset_size = sizeof(int64_t);
   static const size_t total_size = states_size + seed_size + offset_size;
   THByteTensor_resize1d(rng_state, total_size);
   THArgCheck(THByteTensor_nElement(rng_state) == total_size, 1, "RNG state is wrong size");
@@ -32,7 +32,7 @@ THC_API __host__ void THCRandom_getRNGState(at::Generator *gen_, THByteTensor *r
   // gen_states in THCGenerator struct was an array of curandStateMtgp32s.
   memset(THByteTensor_data(rng_state), -1, states_size);
   auto current_seed = gen->current_seed();
-  std::atomic<int64_t> offset{static_cast<int64_t>(gen->philox_offset_per_thread())}; // Note that old THCGeneratorState had offset as std::atomic<int64_t>
+  auto offset = static_cast<int64_t>(gen->philox_offset_per_thread()); // Note that old THCGeneratorState had offset as std::atomic<int64_t>
   memcpy(THByteTensor_data(rng_state) + states_size, &current_seed, seed_size);
   memcpy(THByteTensor_data(rng_state) + states_size + seed_size, &offset, offset_size);
 }
@@ -43,7 +43,7 @@ THC_API __host__ void THCRandom_setRNGState(at::Generator *gen_, THByteTensor *r
   std::lock_guard<std::mutex> lock(gen->mutex_);
   static const size_t states_size = 200 * sizeof(4120); // this line is just here for BC reason
   static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(std::atomic<int64_t>);
+  static const size_t offset_size = sizeof(int64_t);
   static const size_t total_size = states_size + seed_size + offset_size;
   bool no_philox_seed = false;
   if (THByteTensor_nElement(rng_state) == total_size - offset_size) {
@@ -53,11 +53,12 @@ THC_API __host__ void THCRandom_setRNGState(at::Generator *gen_, THByteTensor *r
     THArgCheck(THByteTensor_nElement(rng_state) == total_size, 1, "RNG state is wrong size");
   }
   THArgCheck(THByteTensor_isContiguous(rng_state), 1, "RNG state must be contiguous");
-  uint64_t input_seed = *((uint64_t*)(THByteTensor_data(rng_state) + states_size));
+  uint64_t input_seed;
+  memcpy(&input_seed, THByteTensor_data(rng_state) + states_size, seed_size);
   gen->set_current_seed(input_seed);
   int64_t philox_offset = 0;
   if (!no_philox_seed) {
-    philox_offset = ((std::atomic<int64_t>*)(THByteTensor_data(rng_state) + states_size + seed_size))->load();
+    memcpy(&philox_offset, THByteTensor_data(rng_state) + states_size + seed_size, offset_size);
   }
   gen->set_philox_offset_per_thread(static_cast<uint64_t>(philox_offset));
 }

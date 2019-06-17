@@ -10,12 +10,12 @@ def set_rng_state(new_state):
     Args:
         new_state (torch.ByteTensor): The desired state
     """
-    default_generator[0].set_state(new_state)
+    default_generator.set_state(new_state)
 
 
 def get_rng_state():
     r"""Returns the random number generator state as a `torch.ByteTensor`."""
-    return default_generator[0].get_state()
+    return default_generator.get_state()
 
 
 def manual_seed(seed):
@@ -31,14 +31,14 @@ def manual_seed(seed):
     if not torch.cuda._in_bad_fork:
         torch.cuda.manual_seed_all(seed)
 
-    return default_generator[0].manual_seed(seed)
+    return default_generator.manual_seed(seed)
 
 
 def seed():
     r"""Sets the seed for generating random numbers to a non-deterministic
     random number. Returns a 64 bit number used to seed the RNG.
     """
-    seed = default_generator[0].seed()
+    seed = default_generator.seed()
     import torch.cuda
 
     if not torch.cuda._in_bad_fork:
@@ -51,7 +51,7 @@ def initial_seed():
     r"""Returns the initial seed for generating random numbers as a
     Python `long`.
     """
-    return default_generator[0].initial_seed()
+    return default_generator.initial_seed()
 
 
 _fork_rng_warned_already = False

@@ -79,15 +79,16 @@ static PyObject * THPGenerator_getState(THPGenerator *self)
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
   Variable var = torch::empty({0}, at::device(at::kCPU).dtype(at::kByte));
-#ifdef USE_CUDA
   if (self->cdata->device().type() == at::kCPU) {
     THByteTensor_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
   } else {
+#ifdef USE_CUDA
+    TORCH_INTERNAL_ASSERT(self->cdata->device().type() == at::kCUDA);
     THCRandom_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
+#else 
+    TORCH_INTERNAL_ASSERT(false, "PyTorch not compiled with CUDA");
+#endif 
   }
-#else
-  THByteTensor_getRNGState(self->cdata, (THByteTensor*)(var.unsafeGetTensorImpl()));
-#endif
   return THPVariable_Wrap(std::move(var));
   END_HANDLE_TH_ERRORS
 }
@@ -104,15 +105,16 @@ static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state
     auto type_name = torch::utils::type_to_string(tensor.dispatch_type(), tensor.scalar_type());
     throw TypeError("expected a torch.ByteTensor, but got %s", type_name.c_str());
   }
-#ifdef USE_CUDA
   if (self->cdata->device().type() == at::kCPU) {
     THByteTensor_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
   } else {
+#ifdef USE_CUDA
+    TORCH_INTERNAL_ASSERT(self->cdata->device().type() == at::kCUDA);
     THCRandom_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
+#else 
+    TORCH_INTERNAL_ASSERT(false, "PyTorch not compiled with CUDA");
+#endif 
   }
-#else
-  THByteTensor_setRNGState(self->cdata, (THByteTensor*)tensor.unsafeGetTensorImpl());
-#endif
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
