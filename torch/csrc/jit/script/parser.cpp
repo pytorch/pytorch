@@ -368,7 +368,11 @@ struct ParserImpl {
 
   Maybe<Expr> maybeParseTypeAnnotation() {
     if (L.nextIf(':')) {
-      return Maybe<Expr>::create(L.cur().range, parseExp());
+      // NB: parseExp must not be called inline, since argument evaluation order
+      // changes when L.cur().range is mutated with respect to the parseExp()
+      // call.
+      auto expr = parseExp();
+      return Maybe<Expr>::create(expr.range(), expr);
     } else {
       return Maybe<Expr>::create(L.cur().range);
     }
@@ -379,7 +383,11 @@ struct ParserImpl {
     TreeRef type = maybeParseTypeAnnotation();
     TreeRef def;
     if (L.nextIf('=')) {
-      def = Maybe<Expr>::create(L.cur().range, parseExp());
+      // NB: parseExp must not be called inline, since argument evaluation order
+      // changes when L.cur().range is mutated with respect to the parseExp()
+      // call.
+      auto expr = parseExp();
+      def = Maybe<Expr>::create(expr.range(), expr);
     } else {
       def = Maybe<Expr>::create(L.cur().range);
     }
