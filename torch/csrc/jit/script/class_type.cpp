@@ -9,11 +9,11 @@ std::shared_ptr<Function> ClassType::getMethod(const std::string& name) const {
   return compilation_unit_->find_function(name);
 }
 
-CompilationUnit& ClassType::compilation_unit() {
-  return *compilation_unit_;
+std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
+  return compilation_unit_;
 }
-const CompilationUnit& ClassType::compilation_unit() const {
-  return *compilation_unit_;
+std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
+  return compilation_unit_;
 }
 
 ClassTypePtr ClassType::create(
@@ -39,7 +39,7 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
 
 std::vector<Function*> ClassType::methods() const {
   std::vector<Function*> ret;
-  for (const auto& pr : compilation_unit().get_functions()) {
+  for (const auto& pr : compilation_unit()->get_functions()) {
     ret.push_back(pr.get());
   }
   return ret;

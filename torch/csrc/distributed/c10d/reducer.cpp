@@ -105,14 +105,17 @@ Reducer::Reducer(
         auto grad_accumulator = variable.grad_accumulator();
 
         // Hook to execute after the gradient accumulator has executed.
-        hooks_[grad_accumulator->add_post_hook(
-            torch::make_unique<LambdaPostHook>([=] {
-                std::lock_guard<std::mutex> lock(this->mutex_);
-                this->mark_variable_ready(
-                    replica_index,
-                    variable_index,
-                    /* called_from_autograd= */ true);
-            }))] = grad_accumulator;
+        hooks_.emplace_back(
+            grad_accumulator->add_post_hook(
+                torch::make_unique<LambdaPostHook>([=] {
+                    std::lock_guard<std::mutex> lock(this->mutex_);
+                    this->mark_variable_ready(
+                        replica_index,
+                        variable_index,
+                        /* called_from_autograd= */ true);
+                })),
+            grad_accumulator
+        );
 
         // Map raw function pointer to replica index and parameter index.
         // This is used later on when the autograd graph is traversed

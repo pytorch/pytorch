@@ -182,7 +182,7 @@ struct PythonPrintPass {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
     // to get imported twice.
-    if (classType->qualname() == "__torch__.$Module") {
+    if (classType->is_module()) {
       return;
     }
     if (std::find(class_table_.cbegin(), class_table_.cend(), classType) ==

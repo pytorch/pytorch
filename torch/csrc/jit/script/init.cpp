@@ -321,7 +321,7 @@ void addFunctionToModule(
   auto graph = func->graph()->copy();
   auto v = graph->insertInput(0, "self");
   v->setType(module.module_object()->type());
-  module.module_object()->type()->compilation_unit().create_function(
+  module.module_object()->type()->compilation_unit()->create_function(
       "forward", graph);
 }
 
@@ -336,7 +336,7 @@ void initJitScriptBindings(PyObject* module) {
   // Methods here are prefixed with _ since they should not be
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
-      .def(py::init<>())
+      .def(py::init<std::string>())
       .def(
           "save",
           [](std::shared_ptr<Module> m,
@@ -363,7 +363,7 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb) {
             c10::optional<Self> self;
-            m->class_compilation_unit().define(
+            m->class_compilation_unit()->define(
                 script, pythonResolver(rcb), moduleSelf(m, py_m));
             didFinishEmitModule(m);
           })
@@ -379,13 +379,13 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
-            m->class_compilation_unit().define(
+            m->class_compilation_unit()->define(
                 defs, resolvers, moduleSelf(m, py_m));
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
             auto defs_it = defs.begin();
             while (defs_it != defs.end()) {
-              auto& method = m->class_compilation_unit().get_function(
+              auto& method = m->class_compilation_unit()->get_function(
                   (*defs_it).name().name());
               method.setSchema(getSchemaWithNameAndDefaults(
                   defs_it->range(),
@@ -407,7 +407,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_get_functions",
           [](Module& self) {
-            return self.class_compilation_unit().get_functions();
+            return self.class_compilation_unit()->get_functions();
           })
       .def(
           "_register_attribute",
@@ -436,7 +436,7 @@ void initJitScriptBindings(PyObject* module) {
             py::tuple result(modules.size());
             for (size_t i = 0; i < modules.size(); ++i) {
               auto& item = modules[i];
-              result[i] = std::make_pair(item->name(), item);
+              result[i] = std::make_pair(item->field_name(), item);
             }
             return result;
           })
@@ -513,7 +513,7 @@ void initJitScriptBindings(PyObject* module) {
             auto typed_inputs = toTypedStack(input_tuple);
             auto graph = tracer::createGraphByTracing(
                 func, typed_inputs, var_lookup_fn, force_outplace, self);
-            self->module_object()->type()->compilation_unit().create_function(
+            self->module_object()->type()->compilation_unit()->create_function(
                 name, graph);
             didFinishEmitModule(self);
           })
@@ -535,7 +535,7 @@ void initJitScriptBindings(PyObject* module) {
             std::vector<c10::SerializableTypePtr> classes;
             PythonPrint(
                 ss,
-                self.class_compilation_unit(),
+                *self.class_compilation_unit(),
                 true,
                 tensors,
                 classes,
@@ -574,7 +574,7 @@ void initJitScriptBindings(PyObject* module) {
             if (tracing) {
               tracer::getTracingState()->graph->push_scope(callee.name());
             }
-            py::object result = invokeScriptMethodFromPython(
+            py::object result = invokeScriptFunctionFromPython(
                 callee, tuple_slice(std::move(args), 1), std::move(kwargs));
             if (tracing) {
               tracer::getTracingState()->graph->pop_scope();
@@ -628,17 +628,9 @@ void initJitScriptBindings(PyObject* module) {
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
           })
       .def_property_readonly("graph", &Method::graph)
-      .def(
-          "initial_ivalues",
-          [](Method& m) {
-            std::vector<at::Tensor> tensors;
-            for (auto& t : m.initial_ivalues()) {
-              tensors.push_back(t.value().toTensor());
-            }
-            return tensors;
-          })
       .def("_lowered_graph", &Method::_lowered_graph)
-      .def_property_readonly("schema", &Method::getSchema)
+      .def_property_readonly(
+          "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
@@ -771,7 +763,7 @@ void initJitScriptBindings(PyObject* module) {
     std::vector<c10::SerializableTypePtr> classes;
     if (auto self = as_module(obj)) {
       PythonPrint(
-          ss, self->class_compilation_unit(), true, constants, classes, true);
+          ss, *self->class_compilation_unit(), true, constants, classes, true);
     } else if (auto self = as_function(obj)) {
       PythonPrint(ss, *self, false, constants, classes, true);
     } else {

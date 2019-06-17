@@ -67,6 +67,15 @@ class CMake:
         else:
             self._build_type = "Release"
 
+    @property
+    def _cmake_cache_file(self):
+        r"""Returns the path to CMakeCache.txt.
+
+        Returns:
+          string: The path to CMakeCache.txt.
+        """
+        return os.path.join(self.build_dir, 'CMakeCache.txt')
+
     @staticmethod
     def _get_cmake_command():
         "Returns cmake command."
@@ -362,10 +371,3 @@ class CMake:
         ninja_build_file = os.path.join(self.build_dir, 'build.ninja')
         if os.path.exists(ninja_build_file):
             os.utime(ninja_build_file, None)
-
-    def __setattr__(self, name, value):
-        if name == 'build_dir':
-            self.__dict__['build_dir'] = value
-            self._cmake_cache_file = os.path.join(self.build_dir, 'CMakeCache.txt')
-        else:
-            self.__dict__[name] = value
