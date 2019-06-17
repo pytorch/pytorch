@@ -6392,6 +6392,7 @@ class _TestTorchMixin(object):
         test(u.mm(s.diag()).mm(v))
 
     @skipIfNoLapack
+    @skipIfRocm
     def test_det_logdet_slogdet(self):
         self._test_det_logdet_slogdet(self, 'cpu')
 
@@ -8213,6 +8214,7 @@ class _TestTorchMixin(object):
         self.assertEqual(tensor.std(), tensor.std(unbiased=True))
         self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False))
 
+    @skipIfRocm
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
         expected = """
