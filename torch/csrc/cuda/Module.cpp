@@ -7,6 +7,8 @@
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #ifdef USE_NCCL
 #include <nccl.h>
@@ -19,6 +21,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/Generator.h>
 
 using namespace torch;
 
@@ -329,6 +332,16 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   auto _state_cdata = THPObjectPtr(PyLong_FromVoidPtr(state));
   if (!_state_cdata) throw python_error();
   set_module_attr("_state_cdata", _state_cdata.get());
+
+  auto num_gpus = c10::cuda::device_count();
+  auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
+  for(int i = 0; i < num_gpus; i++) {
+    auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(i);
+    auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
+    // This reference is meant to be given away, so no need to incref here.
+    PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
+  }
+  set_module_attr("default_generators", default_cuda_generators);
 
   bindCudaDeviceProperties(m);
 
