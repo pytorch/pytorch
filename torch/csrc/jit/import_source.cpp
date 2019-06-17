@@ -290,7 +290,7 @@ void import_methods(
   };
   import_functions(
       lib_cu,
-      mod->module_object()->type()->compilation_unit(),
+      *mod->module_object()->type()->compilation_unit(),
       src,
       constant_table,
       self,

@@ -8153,6 +8153,11 @@ class TestNN(NNTestCase):
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
         self.assertEqual(F.softmin(x, 0), F.softmax(-x, 0))
 
+    def test_log_softmax(self):
+        x_small = torch.ones(1, 2, dtype=torch.float32)
+        x_big = x_small + 1e16
+        self.assertEqual(F.log_softmax(x_small, -1), F.log_softmax(x_big, -1))
+
     def test_adaptive_log_softmax(self):
         # args validation
         with self.assertRaises(ValueError):

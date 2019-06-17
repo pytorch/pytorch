@@ -52,25 +52,21 @@ struct ParamValue {
   Value* definition;
   IValue value;
 };
-static void gatherParamsFirstClass(script::Module& module, Value* module_value, std::vector<ParamValue>& params) {
-  for(const Use& u : module_value->uses()) {
+
+static void gatherParams(
+    script::Module& module,
+    Value* module_value,
+    std::vector<ParamValue>& params) {
+  for (const Use& u : module_value->uses()) {
     if (u.user->kind() != prim::GetAttr) {
       continue;
     }
     const std::string& field = u.user->s(attr::name);
-    if(const auto& sub = module.find_module(field)) {
-      gatherParamsFirstClass(*sub, u.user->output(), params);
-    } else if(script::Slot* slot = module.find_parameter(field)) {
+    if (const auto& sub = module.find_module(field)) {
+      gatherParams(*sub, u.user->output(), params);
+    } else if (script::Slot* slot = module.find_parameter(field)) {
       params.emplace_back(ParamValue{u.user->output(), slot->value()});
     }
-  }
-}
-
-static void gatherParamsLowered(script::Method& method, std::vector<ParamValue>& params) {
-  auto slot_it = method.initial_ivalues().begin();
-  for(Value* param : method.graph()->inputs().slice(method.num_inputs())) {
-    params.emplace_back(ParamValue{param, slot_it->value()});
-    ++slot_it;
   }
 }
 
@@ -78,11 +74,7 @@ std::vector<ParamInfo> getQuantizableParamsofName(
     script::Method& method,
     const std::string& param_name) {
   std::vector<ParamValue> params;
-  if (script::getFirstClassMode()) {
-    gatherParamsFirstClass(method.owner(), method.graph()->inputs().at(0), params);
-  } else {
-    gatherParamsLowered(method, params);
-  }
+  gatherParams(method.owner(), method.graph()->inputs().at(0), params);
   std::vector<ParamInfo> params_to_insert_qdq;
   for(const ParamValue& pv : params) {
     if (!pv.definition->type()->isSubtypeOf(TensorType::get())) {
