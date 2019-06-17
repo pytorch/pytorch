@@ -217,8 +217,8 @@ class Module(object):
                     # `with torch.no_grad():`
                     with torch.no_grad():
                         param_applied = fn(param)
-                    self._parameters[key] = Parameter(param_applied, param.requires_grad)
                     assert isinstance(self._parameters[key], Parameter)
+                    self._parameters[key] = Parameter(param_applied, param.requires_grad)
 
                 if param.grad is not None:
                     if should_use_data:
