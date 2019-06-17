@@ -16267,15 +16267,30 @@ class TestClassType(JitTestCase):
                 return other
 
     def test_optional_type_promotion(self):
+        @torch.jit.script
+        class Leaf(object):
+            def __init__(self):
+                self.x = 1
+
         # should not throw
         @torch.jit.script  # noqa: B903
         class Tree(object):
             def __init__(self):
-                self.parent = torch.jit.annotate(Optional[Tree], None)
+                self.child = torch.jit.annotate(Optional[Leaf], None)
 
             def add_child(self, child):
-                # type: (Tree) -> None
-                child.parent = torch.jit.annotate(Optional[Tree], self)
+                # type: (Leaf) -> None
+                self.child = child
+
+    def test_recursive_class(self):
+        """
+        Recursive class types not yet supported. We should give a good error message.
+        """
+        with self.assertRaises(RuntimeError):
+            @torch.jit.script  # noqa: B903
+            class Tree(object):
+                def __init__(self):
+                    self.parent = torch.jit.annotate(Optional[Tree], None)
 
 
 class TestLogging(JitTestCase):
