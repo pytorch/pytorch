@@ -102,7 +102,7 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Cast"
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
-        
+
     def test_constant_fold_unsqueeze(self):
         class UnsqueezeModule(torch.nn.Module):
             def forward(self, x):
