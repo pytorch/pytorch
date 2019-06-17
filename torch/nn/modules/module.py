@@ -206,26 +206,24 @@ class Module(object):
 
         for key, param in self._parameters.items():
             if param is not None:
-                should_use_data = compute_should_use_data(param, fn(torch.empty(1, dtype=param.dtype, layout=param.layout, device=param.device)))
+                # Tensors stored in modules are graph leaves, and we don't want to
+                # track autograd history of `param_applied`, so we have to use
+                # `with torch.no_grad():`
+                with torch.no_grad():
+                    param_applied = fn(param)
+                should_use_data = compute_should_use_data(param, param_applied)
                 if should_use_data:
-                    # Tensors stored in modules are graph leaves, and we don't
-                    # want to create copy nodes, so we have to unpack the data.
-                    param.data = fn(param.data)
+                    param.data = param_applied
                 else:
-                    # Tensors stored in modules are graph leaves, and we don't want to
-                    # track autograd history of `param_applied`, so we have to use
-                    # `with torch.no_grad():`
-                    with torch.no_grad():
-                        param_applied = fn(param)
                     assert isinstance(self._parameters[key], Parameter)
                     self._parameters[key] = Parameter(param_applied, param.requires_grad)
 
                 if param.grad is not None:
+                    with torch.no_grad():
+                        grad_applied = fn(param.grad)
                     if should_use_data:
-                        param.grad.data = fn(param.grad.data)
+                        param.grad.data = grad_applied
                     else:
-                        with torch.no_grad():
-                            grad_applied = fn(param.grad)
                         self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
