@@ -128,6 +128,7 @@ def type_to_python(typename, size=None):
         'std::string': 'str',
         'Dimname': 'Union[str, None]',
         'DimnameList': 'List[Union[str, None]]',
+        'QScheme': '_qscheme',
     }[typename]
 
     return typename
@@ -158,6 +159,8 @@ def arg_to_type_hint(arg):
                 default = '(' + default[1:-1] + ')'
             else:
                 raise Exception("Unexpected default constructor argument of type {}".format(arg['dynamic_type']))
+        elif default == 'QScheme::PER_TENSOR_AFFINE':
+            default = 'per_tensor_affine'
         default = '={}'.format(default)
     else:
         default = ''
@@ -501,7 +504,7 @@ def gen_pyi(declarations_path, out):
                          for n in
                          ['float32', 'float', 'float64', 'double', 'float16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
-                          'complex32', 'complex64', 'complex128']]
+                          'complex32', 'complex64', 'complex128', 'quint8', 'qint8', 'qint32']]
 
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~

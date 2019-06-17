@@ -151,6 +151,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
+    'QScheme',
 }
 
 TENSOR_OPTIONS = CodeTemplate("""\

@@ -1,6 +1,6 @@
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
-#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <memory>
 #include <unordered_set>
@@ -164,6 +164,7 @@ struct BailOutInserter {
       // but it makes debugging much easier
       ConstantPooling(e.second->g(attr::Subgraph));
     }
+    removeGuards(graph_->block());
   }
 
   void insertBailOuts(Block* b) {

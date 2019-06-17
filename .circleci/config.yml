@@ -1320,6 +1320,19 @@ jobs:
       BUILD_ONLY: "1"
     <<: *caffe2_linux_build_defaults
 
+  caffe2_onnx_py3_6_clang7_ubuntu16_04_build:
+    environment:
+      BUILD_ENVIRONMENT: "caffe2-onnx-py3.6-clang7-ubuntu16.04-build"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:287"
+    <<: *caffe2_linux_build_defaults
+
+  caffe2_onnx_py3_6_clang7_ubuntu16_04_test:
+    environment:
+      BUILD_ENVIRONMENT: "caffe2-onnx-py3.6-clang7-ubuntu16.04-test"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:287"
+    resource_class: large
+    <<: *caffe2_linux_test_defaults
+
   caffe2_py2_android_ubuntu16_04_build:
     environment:
       BUILD_ENVIRONMENT: "caffe2-py2-android-ubuntu16.04-build"
@@ -2602,6 +2615,13 @@ workflows:
       - caffe2_py2_clang7_ubuntu16_04_build:
           requires:
             - setup
+      - caffe2_onnx_py3_6_clang7_ubuntu16_04_build:
+          requires:
+            - setup
+      - caffe2_onnx_py3_6_clang7_ubuntu16_04_test:
+          requires:
+            - setup
+            - caffe2_onnx_py3_6_clang7_ubuntu16_04_build
       - caffe2_py2_android_ubuntu16_04_build:
           requires:
             - setup

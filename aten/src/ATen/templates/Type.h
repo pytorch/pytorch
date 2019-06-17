@@ -6,6 +6,7 @@
 #include <ATen/core/Generator.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
