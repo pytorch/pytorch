@@ -145,7 +145,7 @@ struct SourceResolver : public Resolver {
     return nullptr;
   }
 
-  TypePtr resolveType(const std::string& name) const override {
+  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
     return lib_cu_.get_serializable_type(c10::QualifiedName(name));
   }
 
