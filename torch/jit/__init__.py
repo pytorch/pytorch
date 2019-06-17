@@ -1016,7 +1016,7 @@ def _create_method_from_fn(module, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = script_method(fn, createResolutionCallbackFromClosure(fn))
-    _create_methods_from_stubs(module, (stub,))
+    _create_methods_from_stubs(self, (stub,))
 
 
 # ScriptClasses must be new-style classes because we construct them using their
