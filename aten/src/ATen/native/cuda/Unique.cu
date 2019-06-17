@@ -39,7 +39,7 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
   if (!return_inverse) {
     inverse_indices = at::empty({0}, options);
   } else {
-    AT_CHECK(sorted_indices.defined(),
+    TORCH_CHECK(sorted_indices.defined(),
       "return_inverse is set to true, but sorted_indices is undefined. Send a bug report!");
     const int64_t *sorted_indices_ptr = sorted_indices.data<int64_t>();
     Tensor inv_loc = at::empty({num_inp}, options);
@@ -139,6 +139,26 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
+  
+  auto sizes = self.sizes().vec();
+  // check how many zero dimensions exist
+  auto num_zero_dims = std::count(sizes.begin(), sizes.end(), 0);
+  
+  // tensor is not well formed as it has 0 sized dimensions
+  if (self.size(dim) == 0){
+    TORCH_CHECK(
+        num_zero_dims == 1,
+        "Number of zero sized dimensions is more than one, so unique cannot be applied ")
+    Tensor output = at::empty({0}, self.options());
+    Tensor inverse_indices =
+        at::empty({0}, self.options().dtype(kLong));
+    Tensor counts = at::empty({0}, self.options().dtype(kLong));
+
+    return std::make_tuple(output, inverse_indices, counts);
+  }
+
+  TORCH_CHECK(num_zero_dims == 0,
+    "There are 0 sized dimensions, and they aren't selected, so unique cannot be applied");
 
   int64_t num_inp = self.size(dim);
   auto options = self.options().dtype(kLong);

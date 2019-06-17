@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/script/tree_views.h>
 
 namespace torch {
@@ -24,21 +24,8 @@ std::shared_ptr<SugaredValue> PrintValue::call(
   if (!attributes.empty())
     throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
 
-  // temporary hack to allow print statements to work in python 2, where
-  // print(a, b) is treated as a (a, b) tuple input.
-
   std::vector<Value*> lowered_inputs = toValues(*m.graph(), inputs);
-  if (lowered_inputs.size() == 1 &&
-      lowered_inputs.at(0)->node()->kind() == prim::TupleConstruct) {
-    auto input = lowered_inputs[0];
-    for (size_t j = 0; j < input->node()->inputs().size(); ++j) {
-      lowered_inputs.insert(
-          lowered_inputs.begin() + 1 + j, input->node()->inputs().at(j));
-    }
-    lowered_inputs.erase(lowered_inputs.begin());
-  }
-  g.insertNode(g.create(prim::Print, lowered_inputs, 0)
-                   ->setSourceLocation(std::make_shared<SourceRange>(loc)));
+  g.insertNode(g.create(prim::Print, lowered_inputs, 0)->setSourceRange(loc));
   return std::make_shared<NoneValue>();
 }
 
@@ -104,9 +91,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     auto names = tuple_type->names();
     for (size_t i = 0; i < names.size(); i++) {
       if (names[i] == field) {
-        auto r = m.graph()
-                     ->insertNode(m.graph()->createTupleIndex(value_, i))
-                     ->output();
+        auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
+        auto out_type = tuple_type->elements().at(i);
+        auto r =
+            m.graph()
+                ->insertNode(m.graph()->createTupleIndex(value_, idx, out_type))
+                ->output();
         return std::make_shared<SimpleValue>(r);
       }
     }
@@ -116,7 +106,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
     if (auto method = classType->getMethod(field)) {
-      return std::make_shared<MethodValue>(getValue(), method);
+      return std::make_shared<MethodValue>(getValue(), field);
     }
     if (!classType->hasAttribute(field)) {
       throw ErrorReport(loc)
@@ -154,7 +144,7 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
         graph->insertNode(graph->createListUnpack(value_, *size_hint));
     return fmap(unpack->outputs(), make_simple_value);
   }
-  throw ErrorReport(loc) << value_->type()->str()
+  throw ErrorReport(loc) << value_->type()->python_str()
                          << " cannot be used as a tuple";
 }
 
@@ -166,7 +156,8 @@ void SimpleValue::setAttr(
   const auto classType = value_->type()->cast<ClassType>();
   if (!classType) {
     throw ErrorReport(loc) << "Tried to set an attribute: " << field
-                           << " on a non-class: " << value_->type()->str();
+                           << " on a non-class: "
+                           << value_->type()->python_str();
   }
   auto expectedType = classType->getAttribute(field);
   if (!expectedType) {
@@ -206,8 +197,8 @@ void SimpleValue::setAttr(
   const auto newType = newValue->type();
   if (!newType->isSubtypeOf(expectedType)) {
     throw ErrorReport(loc) << "Wrong type for attribute assignment. Expected "
-                           << expectedType->str() << " but got "
-                           << newType->str();
+                           << expectedType->python_str() << " but got "
+                           << newType->python_str();
   }
 
   auto& g = *m.graph();
@@ -225,7 +216,8 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
   Node* self = getValue()->node();
   if (self->kind() == prim::TupleConstruct && self->inputs().size() == 2 &&
       self->inputs().at(0)->node()->kind() == prim::Function) {
-    std::shared_ptr<Graph> graph = self->inputs().at(0)->node()->g(attr::Subgraph);
+    std::shared_ptr<Graph> graph =
+        self->inputs().at(0)->node()->g(attr::Subgraph);
     Value* context = self->inputs().at(1);
     AT_ASSERT(context->node()->kind() == prim::TupleConstruct);
 
@@ -237,11 +229,12 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
             ->insertNode(m.graph()->createTuple(context->node()->inputs()))
             ->output();
     auto fn = CompilationUnit().create_function("anon", graph);
-    return MethodValue(close_context, fn).call(loc, m, inputs, attributes, n_binders);
+    std::vector<NamedValue> ctx_inputs = {close_context};
+    ctx_inputs.insert(ctx_inputs.end(), inputs.begin(), inputs.end());
+    return FunctionValue(fn).call(loc, m, ctx_inputs, attributes, n_binders);
   }
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }
-
 
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
@@ -256,11 +249,8 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
 
-  auto initMethod = type_->getMethod("__init__");
-  AT_ASSERT(initMethod);
-
   // Call the init function
-  MethodValue(self, initMethod).call(loc, m, inputs, attributes, n_binders);
+  MethodValue(self, "__init__").call(loc, m, inputs, attributes, n_binders);
 
   return std::make_shared<SimpleValue>(self);
 }
@@ -274,6 +264,34 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
   }
   return std::make_shared<ClassNewMethod>(type_);
 }
+
+std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
+    const SourceRange& loc,
+    Function& m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  auto nargs = type_->containedTypes().size();
+  if (inputs.size() != nargs) {
+    throw ErrorReport(loc) << "Constructor expected " << nargs << "arguments "
+                           << "but got " << inputs.size();
+  }
+
+  auto& g = *m.graph();
+
+  auto schema = type_->schema();
+  TORCH_INTERNAL_ASSERT(schema);
+  auto matched_schema = matchSchema(*schema, loc, g, inputs, attributes);
+
+  auto self = g.insertNode(g.createTuple(
+                                matched_schema.inputs, type_->names(), type_->unqualName())
+                               ->setSourceRange(loc))
+                  ->output();
+  self->setType(type_);
+
+  return std::make_shared<SimpleValue>(self);
+}
+
 } // namespace script
 } // namespace jit
 } // namespace torch

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
-from cimodel.lib.conf_tree import ConfigNode, X
+from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 from cimodel.lib.conf_tree import Ver
-import cimodel.data.dimensions as dimensions
 
 
 CONFIG_TREE_DATA = [
@@ -11,20 +10,20 @@ CONFIG_TREE_DATA = [
         (Ver("gcc", "4.9"), [X("py2")]),
     ]),
     (Ver("ubuntu", "16.04"), [
-        (Ver("cuda", "8.0"), [X("py2")]),
         (Ver("cuda", "9.0"), [
             # TODO make explicit that this is a "secret TensorRT build"
             #  (see https://github.com/pytorch/pytorch/pull/17323#discussion_r259446749)
+            # TODO Uh oh, were we supposed to make this one important?!
             X("py2"),
-            X("cmake"),
+            XImportant("cmake"),
         ]),
-        (Ver("cuda", "9.1"), [X("py2")]),
-        (Ver("mkl"), [X("py2")]),
-        (Ver("gcc", "5"), [X("onnx_py2")]),
+        (Ver("cuda", "9.1"), [XImportant("py2")]),
+        (Ver("mkl"), [XImportant("py2")]),
+        (Ver("gcc", "5"), [XImportant("onnx_py2")]),
         (Ver("clang", "3.8"), [X("py2")]),
         (Ver("clang", "3.9"), [X("py2")]),
-        (Ver("clang", "7"), [X("py2")]),
-        (Ver("android"), [X("py2")]),
+        (Ver("clang", "7"), [XImportant("py2"), XImportant("onnx_py3.6")]),
+        (Ver("android"), [XImportant("py2")]),
     ]),
     (Ver("centos", "7"), [
         (Ver("cuda", "9.0"), [X("py2")]),
@@ -33,7 +32,7 @@ CONFIG_TREE_DATA = [
         # TODO ios and system aren't related. system qualifies where the python comes
         #  from (use the system python instead of homebrew or anaconda)
         (Ver("ios"), [X("py2")]),
-        (Ver("system"), [X("py2")]),
+        (Ver("system"), [XImportant("py2")]),
     ]),
 ]
 
@@ -55,6 +54,8 @@ class TreeConfigNode(ConfigNode):
         return [self.child_constructor()(self, k, v) for (k, v) in self.subtree]
 
     def is_build_only(self):
+        if str(self.find_prop("language_version")) == "onnx_py3.6":
+            return False
         return str(self.find_prop("compiler_version")) in [
             "gcc4.9",
             "clang3.8",
@@ -96,16 +97,13 @@ class LanguageConfigNode(TreeConfigNode):
         self.props["language_version"] = node_name
         self.props["build_only"] = self.is_build_only()
 
-    def get_children(self):
-
-        children = []
-        for phase in dimensions.PHASES:
-            if phase == "build" or not self.props["build_only"]:
-                children.append(PhaseConfigNode(self, phase, []))
-
-        return children
+    def child_constructor(self):
+        return ImportantConfigNode
 
 
-class PhaseConfigNode(TreeConfigNode):
+class ImportantConfigNode(TreeConfigNode):
     def init2(self, node_name):
-        self.props["phase_name"] = node_name
+        self.props["important"] = True
+
+    def get_children(self):
+        return []

@@ -3,9 +3,10 @@
 #include <ATen/core/Type.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/TensorAccessor.h>
 #include <c10/core/TensorImpl.h>
@@ -14,6 +15,9 @@
 #include <c10/util/Optional.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensor.h>
+#endif
 
 namespace caffe2 {
 class Tensor;
@@ -154,7 +158,7 @@ class CAFFE2_API Tensor {
     return impl_.weak_use_count();
   }
 
-  const char * toString() const;
+  std::string toString() const;
 
   IntArrayRef sizes() const {
     return impl_->sizes();
@@ -162,11 +166,21 @@ class CAFFE2_API Tensor {
   IntArrayRef strides() const {
     return impl_->strides();
   }
+#ifdef NAMEDTENSOR_ENABLED
+  optional<DimnameList> names() const {
+    const auto* meta = get_named_tensor_meta();
+    if (meta == nullptr) {
+      return nullopt;
+    } else {
+      return meta->names();
+    }
+  }
+#endif
   int64_t ndimension() const {
     return dim();
   }
-  bool is_contiguous() const {
-    return impl_->is_contiguous();
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const {
+    return impl_->is_contiguous(memory_format);
   }
 
   // Total bytes consumed by the "view" of elements of the array.  Does not
@@ -193,7 +207,7 @@ class CAFFE2_API Tensor {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         tensorTypeIdToBackend(type_id()),
         scalar_type(),
-        is_variable() && !at::NonVariableTypeMode::is_enabled());
+        is_variable());
   }
   Type & dispatch_type() const {
     return legacyTensorType(*impl_);
@@ -248,9 +262,22 @@ class CAFFE2_API Tensor {
   /// Returns if a `Tensor` has quantized backend.
   bool is_quantized() const;
 
+#ifdef NAMEDTENSOR_ENABLED
+  /// Returns if a `Tensor` has any dimension names
+  bool is_named() const;
+
+  /// Returns a `Tensor`'s dimension names data structure
+  const NamedTensorMeta* get_named_tensor_meta() const;
+  NamedTensorMeta* get_named_tensor_meta();
+#endif
+
   /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
   /// TensorOptions.h.
   TensorOptions options() const;
+
+  void* data_ptr() const {
+    return this->unsafeGetTensorImpl()->data();
+  }
 
   template<typename T>
   T * data() const;
@@ -266,7 +293,7 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
-    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
   template<typename T, size_t N>
@@ -280,7 +307,7 @@ class CAFFE2_API Tensor {
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
   PackedTensorAccessor<T,N,PtrTraits,index_t> packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
-    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    TORCH_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return PackedTensorAccessor<T,N,PtrTraits,index_t>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
   }
   template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
@@ -373,7 +400,7 @@ class CAFFE2_API Tensor {
   Tensor & clamp_max_(Scalar max);
   Tensor clamp_min(Scalar min) const;
   Tensor & clamp_min_(Scalar min);
-  Tensor contiguous() const;
+  Tensor contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor cos() const;
   Tensor & cos_();
@@ -465,6 +492,7 @@ class CAFFE2_API Tensor {
   Tensor narrow_copy(int64_t dim, int64_t start, int64_t length) const;
   Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
   Tensor permute(IntArrayRef dims) const;
+  Tensor numpy_T() const;
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
   Tensor reciprocal() const;
@@ -561,7 +589,7 @@ class CAFFE2_API Tensor {
   Tensor & addmm_(const Tensor & mat1, const Tensor & mat2, Scalar beta=1, Scalar alpha=1);
   Tensor & sparse_resize_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim);
   Tensor & sparse_resize_and_clear_(IntArrayRef size, int64_t sparse_dim, int64_t dense_dim);
-  Tensor sparse_mask(SparseTensorRef mask) const;
+  Tensor sparse_mask(const Tensor & mask) const;
   Tensor to_dense() const;
   int64_t sparse_dim() const;
   int64_t _dimI() const;
@@ -580,17 +608,16 @@ class CAFFE2_API Tensor {
   Tensor to_sparse(int64_t sparse_dim) const;
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
-  Tensor quantize_linear(double scale, int64_t zero_point) const;
   Tensor dequantize() const;
   Scalar q_scale() const;
   Scalar q_zero_point() const;
   Tensor int_repr() const;
+  QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar item() const;
-  void* data_ptr() const;
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride={});
   Tensor & set_(const Tensor & source);
@@ -699,6 +726,7 @@ class CAFFE2_API Tensor {
   Tensor index_select(int64_t dim, const Tensor & index) const;
   Tensor masked_select(const Tensor & mask) const;
   Tensor nonzero() const;
+  std::vector<Tensor> nonzero_numpy() const;
   Tensor gather(int64_t dim, const Tensor & index, bool sparse_grad=false) const;
   Tensor addcmul(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
   Tensor addcdiv(const Tensor & tensor1, const Tensor & tensor2, Scalar value=1) const;
@@ -712,7 +740,7 @@ class CAFFE2_API Tensor {
   std::tuple<Tensor,Tensor> solve(const Tensor & A) const;
   Tensor cholesky_inverse(bool upper=false) const;
   std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
-  std::tuple<Tensor,Tensor> qr() const;
+  std::tuple<Tensor,Tensor> qr(bool some=true) const;
   std::tuple<Tensor,Tensor> geqrf() const;
   Tensor orgqr(const Tensor & input2) const;
   Tensor ormqr(const Tensor & input2, const Tensor & input3, bool left=true, bool transpose=false) const;
@@ -765,41 +793,11 @@ class CAFFE2_API Tensor {
     return func(*this, std::forward<Args>(params)...);
   }
 
-  friend struct WeakTensor;
-
 protected:
   friend class ::caffe2::Tensor;
 
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
-};
-
-struct CAFFE2_API WeakTensor {
-  WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
-
-  // XXX: this can return undefined tensors
-  // Ideally it would be c10::optional<Tensor>, but MSVC is too cool for that
-  Tensor lock() const {
-    return Tensor(weak_impl_.lock());
-  }
-
-  bool is_same(const WeakTensor& other) const noexcept {
-    return weak_impl_ == other.weak_impl_;
-  }
-
-  size_t use_count() const noexcept {
-    return weak_impl_.use_count();
-  }
-  size_t weak_use_count() const noexcept {
-    return weak_impl_.weak_use_count();
-  }
-
-  TensorImpl* unsafeGetTensorImpl() const {
-    return weak_impl_._unsafe_get_target();
-  }
-
-private:
-  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_impl_;
 };
 
 namespace detail {

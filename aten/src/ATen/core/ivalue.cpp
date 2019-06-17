@@ -1,7 +1,9 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Formatting.h>
+#include <c10/util/StringUtil.h>
 #include <cmath>
+#include <ATen/core/Dict.h>
 
 namespace c10 {
 namespace ivalue {
@@ -15,15 +17,29 @@ CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
 
 namespace {
 
-template<typename List>
-std::ostream& printList(std::ostream & out, const List &v,
+template<class T>
+std::ostream& printList(std::ostream & out, const c10::ListPtr<T> &v,
   const std::string start, const std::string finish) {
   out << start;
-  for(size_t i = 0; i < v->elements().size(); ++i) {
+  for(size_t i = 0; i < v.size(); ++i) {
     if(i > 0)
       out << ", ";
     // make sure we use ivalue printing, and not default printing for the element type
-    out << IValue(v->elements()[i]);
+    out << IValue(v.get(i));
+  }
+  out << finish;
+  return out;
+}
+
+template<class T>
+std::ostream& printList(std::ostream & out, const std::vector<T> &v,
+  const std::string start, const std::string finish) {
+  out << start;
+  for(size_t i = 0; i < v.size(); ++i) {
+    if(i > 0)
+      out << ", ";
+    // make sure we use ivalue printing, and not default printing for the element type
+    out << IValue(v[i]);
   }
   out << finish;
   return out;
@@ -34,11 +50,11 @@ std::ostream& printDict(std::ostream& out, const Dict& v) {
   out << "{";
 
   bool first = true;
-  for (const auto& pair : v->elements()) {
+  for (const auto& pair : v) {
     if (!first) {
       out << ", ";
     }
-    out << pair.first << ": " << pair.second;
+    out << pair.key() << ": " << pair.value();
     first = false;
   }
 
@@ -73,7 +89,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple:
-      return printList(out, v.toTuple(), "(", ")");
+      return printList(out, v.toTuple()->elements(), "(", ")");
     case IValue::Tag::IntList:
       return printList(out, v.toIntList(), "[", "]");
     case IValue::Tag::DoubleList:
@@ -90,14 +106,17 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printList(out, v.toGenericList(), "[", "]");
     case IValue::Tag::Future:
       return out << "Future";
+    case IValue::Tag::Uninitialized:
+      return out << "Uninitialized";
     case IValue::Tag::Device:
       return out << v.toDevice();
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict());
     case IValue::Tag::Object:
-      // TODO we should print the object contents
-      return out << "Object<" << v.toObject()->name()
-                 << ">";
+      // TODO we should attempt to call __str__ if the object defines it.
+      auto obj = v.toObject();
+      // print this out the way python would do it
+      return out << "<" << obj->name() << " object at " << obj.get() << ">";
   }
   AT_ERROR("Tag not found\n");
 }
@@ -111,6 +130,16 @@ void IValue::dump() const {
 
 std::string ivalue::Object::name() const {
   return this->type_->qualname();
+}
+
+IValue ivalue::Object::getAttr(const std::string& name) const {
+  const size_t slot = type_->getAttributeSlot(name);
+  return getSlot(slot);
+}
+
+void ivalue::Object::setAttr(const std::string& name, IValue v) {
+  const size_t slot = type_->getAttributeSlot(name);
+  setSlot(slot, std::move(v));
 }
 
 void ivalue::Object::resizeObject(size_t slot) {
@@ -132,8 +161,11 @@ static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
   AT_ERROR("Illegal dict key");
 }
 
-const ivalue::GenericDict::IterationOrder ivalue::GenericDict::iterationOrder() const {
-  IterationOrder ordered(elements().begin(), elements().end());
+std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::DictPtr<IValue, IValue>& dict) {
+  std::vector<std::pair<IValue, IValue>> ordered;
+  for (auto& element : dict) {
+    ordered.emplace_back(element.key(), element.value());
+  }
   std::sort(ordered.begin(), ordered.end(), CompareIValue);
   return ordered;
 }

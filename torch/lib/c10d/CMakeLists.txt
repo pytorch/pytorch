@@ -16,6 +16,13 @@ if(USE_CUDA)
     set(C10D_USE_CUDA false)
     message(STATUS "CUDA not found, building C10D without CUDA support")
   endif()
+elseif(USE_ROCM)
+  add_definitions(-DUSE_ROCM=1)
+  add_definitions(-D__HIP_PLATFORM_HCC__=1)
+  add_definitions(-DHIP_VERSION=${HIP_VERSION_MAJOR})
+
+  set(C10D_USE_CUDA false)
+  set(C10D_USE_ROCM true)
 else()
   set(C10D_USE_CUDA false)
   message(STATUS "Building C10D without CUDA support")
@@ -51,16 +58,7 @@ set(C10D_SRCS
   Utils.cpp
   )
 
-if(C10D_USE_CUDA)
-  set(C10D_LIBS
-    caffe2_gpu
-    )
-else()
-  set(C10D_LIBS
-    caffe2
-    )
-endif()
-
+set(C10D_LIBS torch)
 
 if(USE_C10D_NCCL)
   list(APPEND C10D_SRCS ProcessGroupNCCL.cpp)
@@ -89,7 +87,7 @@ target_compile_options(c10d PUBLIC
   )
 
 
-add_dependencies(c10d caffe2)
+add_dependencies(c10d torch)
 
 if (USE_GLOO)
   add_dependencies(c10d gloo)

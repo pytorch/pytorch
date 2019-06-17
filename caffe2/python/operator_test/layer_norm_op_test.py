@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import brew, core, workspace
 from caffe2.python.model_helper import ModelHelper
+from functools import partial
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
@@ -13,9 +14,9 @@ import hypothesis.strategies as st
 
 import numpy as np
 import os
-import unittest
-from functools import partial
 import torch
+
+import unittest
 
 
 def _layer_norm_ref(axis, epsilon, X):
@@ -103,7 +104,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
         op = core.CreateOperator(
             "LayerNorm",
             ["X", "gamma", "beta"] if elementwise_affine else ["X"],
-            ["output", "mean", "stdev"],
+            ["Y", "mean", "std"],
             axis=axis,
             epsilon=eps,
             elementwise_affine=elementwise_affine,
@@ -133,6 +134,36 @@ class TestLayerNormOp(serial.SerializedTestCase):
             inputs=inputs,
             outputs_to_check=[0, 1, 2],
         )
+
+    @given(M=st.integers(1, 10),
+           N=st.integers(10, 20),
+           axis=st.integers(0, 1),
+           eps=st.floats(1e-5, 1e-3),
+           elementwise_affine=st.booleans(),
+           **hu.gcs)
+    def test_layer_norm_grad(
+            self, M, N, axis, eps, elementwise_affine, gc, dc):
+        op = core.CreateOperator(
+            "LayerNorm",
+            ["X", "gamma", "beta"] if elementwise_affine else ["X"],
+            ["Y", "mean", "std"],
+            axis=axis,
+            epsilon=eps,
+            elementwise_affine=elementwise_affine,
+        )
+
+        X = np.arange(M * N).astype(np.float32)
+        np.random.shuffle(X)
+        X = X.reshape((M, N))
+        if elementwise_affine:
+            gamma = np.random.randn(*X.shape[axis:]).astype(np.float32)
+            beta = np.random.randn(*X.shape[axis:]).astype(np.float32)
+            inputs = [X, gamma, beta]
+        else:
+            inputs = [X]
+
+        for i in range(len(inputs)):
+            self.assertGradientChecks(gc, op, inputs, i, [0])
 
     @unittest.skipIf(workspace.has_hip_support,
                      "Operator cross-calling doesn't work with hip yet")
@@ -330,10 +361,14 @@ class TestLayerNormOp(serial.SerializedTestCase):
             model,
             'input',
             'output',
-            dim_in=X.shape[axis],
+            dim_in=X.shape[axis:],
             axis=axis,
             epsilon=1e-4,
         )
 
         self.ws.create_net(model.param_init_net).run()
         self.ws.create_net(model.net).run()
+
+
+if __name__ == "__main__":
+    unittest.main()

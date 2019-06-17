@@ -59,31 +59,27 @@ PyObject *returned_structseq_repr(PyStructSequence *obj) {
 
     std::stringstream ss;
     ss << typ->tp_name << "(\n";
-    size_t num_elements = Py_SIZE(obj);
+    Py_ssize_t num_elements = Py_SIZE(obj);
 
-    for (int i=0; i < num_elements; i++) {
-        PyObject *val, *repr;
-        const char *cname, *crepr;
-
-        cname = typ->tp_members[i].name;
+    for (Py_ssize_t i = 0; i < num_elements; i++) {
+        const char *cname = typ->tp_members[i].name;
         if (cname == nullptr) {
-            PyErr_Format(PyExc_SystemError, "In structseq_repr(), member %d name is nullptr"
+            PyErr_Format(PyExc_SystemError, "In structseq_repr(), member %zd name is nullptr"
                          " for type %.500s", i, typ->tp_name);
             return nullptr;
         }
 
-        val = PyTuple_GetItem(tup.get(), i);
+        PyObject* val = PyTuple_GetItem(tup.get(), i);
         if (val == nullptr) {
             return nullptr;
         }
 
-        repr = PyObject_Repr(val);
+        auto repr = THPObjectPtr(PyObject_Repr(val));
         if (repr == nullptr) {
             return nullptr;
         }
 
-        crepr = PyUnicode_AsUTF8(repr);
-        Py_DECREF(repr);
+        const char* crepr = PyUnicode_AsUTF8(repr);
         if (crepr == nullptr) {
             return nullptr;
         }

@@ -3,7 +3,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/Exception.h>
 #include <ATen/native/cpu/TensorCompareKernel.h>
@@ -119,7 +118,7 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
                                        const Tensor& self, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "mode only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
@@ -127,7 +126,7 @@ std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
     indices.resize_({}).fill_(0);
     return std::forward_as_tuple(values, indices);
   } else {
-    return at::legacy::th::_th_mode_out(values, indices, self, dim, keepdim);
+    return at::_mode_out(values, indices, self, dim, keepdim);
   }
 }
 
@@ -143,7 +142,7 @@ std::tuple<Tensor &,Tensor &> _max_out_cpu(Tensor& max, Tensor& max_indices,
     }
     return std::tuple<Tensor &,Tensor &>{max, max_indices};
   }
-  return at::legacy::th::_th_max_out(max, max_indices, self, dim, keepdim);
+  return at::_max_out(max, max_indices, self, dim, keepdim);
 }
 
 std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
@@ -154,7 +153,7 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
                                       const Tensor& self, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "max only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
@@ -163,7 +162,7 @@ std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
     return std::forward_as_tuple(max, max_indices);
   } else {
     if (self.is_cuda()) {
-      return at::legacy::th::_th_max_out(max, max_indices, self, dim, keepdim);
+      return at::_max_out(max, max_indices, self, dim, keepdim);
     } else {
       return _max_out_cpu(max, max_indices, self, dim, keepdim);
     }
@@ -182,7 +181,7 @@ std::tuple<Tensor &,Tensor &> _min_out_cpu(Tensor& min, Tensor& min_indices,
     }
     return std::tuple<Tensor &,Tensor &>{min, min_indices};
   }
-  return at::legacy::th::_th_min_out(min, min_indices, self, dim, keepdim);
+  return at::_min_out(min, min_indices, self, dim, keepdim);
 }
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
@@ -193,7 +192,7 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
                                       const Tensor& self, int64_t dim, bool keepdim) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+  TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "min only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {
@@ -202,7 +201,7 @@ std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
     return std::forward_as_tuple(min, min_indices);
   } else {
     if (self.is_cuda()) {
-      return at::legacy::th::_th_min_out(min, min_indices, self, dim, keepdim);
+      return at::_min_out(min, min_indices, self, dim, keepdim);
     } else {
       return _min_out_cpu(min, min_indices, self, dim, keepdim);
     }

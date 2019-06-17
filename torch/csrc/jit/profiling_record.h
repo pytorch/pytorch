@@ -28,9 +28,14 @@ struct ProfilingRecord {
   std::shared_ptr<Graph> profiled_graph_;
   std::mutex mutex_;
   size_t profiling_count_;
-
+  bool ready() const {
+    return profiling_count_ == 0;
+  }
+  std::shared_ptr<Graph> graph() const {
+    return profiled_graph_;
+  }
  private:
-  Node* createProfileNode(
+  ProfileOp* createProfileNode(
       const std::function<void(Stack&)>& fp,
       at::ArrayRef<Value*> inputs);
   void instrumentBlock(Block* block);

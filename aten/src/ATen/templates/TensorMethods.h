@@ -1,10 +1,15 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
+#include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensor.h>
+#endif
+
 
 namespace at {
 
@@ -88,6 +93,21 @@ inline bool Tensor::is_cuda() const {
   return impl_->is_cuda();
 }
 
+#ifdef NAMEDTENSOR_ENABLED
+inline NamedTensorMeta* Tensor::get_named_tensor_meta() {
+  return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+}
+
+inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
+  return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+}
+
+inline bool Tensor::is_named() const {
+  auto* named_tensor_meta = get_named_tensor_meta();
+  return named_tensor_meta != nullptr && named_tensor_meta->has_names();
+}
+#endif
+
 inline bool is_cuda(Tensor self) {
   return self.is_cuda();
 }
@@ -131,7 +151,7 @@ inline bool is_quantized(Tensor self) {
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \
-    AT_CHECK(                                    \
+    TORCH_CHECK(                                    \
         scalar_type() == ScalarType::name,       \
         "expected scalar type ",                 \
         #name,                                   \

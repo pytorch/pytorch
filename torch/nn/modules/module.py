@@ -41,8 +41,8 @@ class Module(object):
                 self.conv2 = nn.Conv2d(20, 20, 5)
 
             def forward(self, x):
-               x = F.relu(self.conv1(x))
-               return F.relu(self.conv2(x))
+                x = F.relu(self.conv1(x))
+                return F.relu(self.conv2(x))
 
     Submodules assigned in this way will be registered, and will have their
     parameters converted too when you call :meth:`to`, etc.
@@ -63,6 +63,7 @@ class Module(object):
     _version = 1
 
     def __init__(self):
+        torch._C._log_api_usage_once("python.nn_module")
         self._backend = thnn_backend
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
@@ -761,6 +762,7 @@ class Module(object):
                     load(child, prefix + name + '.')
 
         load(self)
+        load = None  # break load->load reference cycle
 
         if strict:
             if len(unexpected_keys) > 0:

@@ -43,7 +43,7 @@ TORCH_API void InsertObserverNodes(
  * will be cloned into all the places where we need to add instrumentation.
  */
 TORCH_API void InsertObserverNodes(
-    std::shared_ptr<script::Function>& function_var,
+    std::shared_ptr<Function>& function_var,
     Node* observer_node);
 
 /** \brief Inserts quant-dequant nodes.
@@ -53,12 +53,14 @@ TORCH_API void InsertObserverNodes(
  * performs quantization of the model by inserting quant-dequant node pairs for
  * quantizatable tensors - later passes only cleanup the IR and
  * make sure the model runs faster/consumes less memory.
- * \param graph which is instrumented for quant-dequant nodes.
+ * \moduleObj is the module object whose containing methods are modified.
+ * \param method_name whose graph is instrumented for quant-dequant nodes.
  * \param qparam_dict dictionary of tensor unique names to qparams.
  *
  */
 TORCH_API void InsertQuantDequantNodes(
-    std::shared_ptr<Graph>& graph,
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& methodName,
     const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
         qparam_dict);
 
@@ -81,5 +83,24 @@ TORCH_API void QuantLinting(std::shared_ptr<Graph>& graph);
  */
 TORCH_API void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph);
 
+/** \brief Inserts quant-dequant nodes for attributes.
+ *
+ * This is similar to Quant-Dequant pass but it inserts quant-dequant nodes
+ * for module parameters. It changes the numerical semantics of the original
+ * model and thus we only run it when user explicitly wants that. Later passes
+ * only cleanup the IR and make sure the model runs faster/consumes less memory
+ * \moduleObj is the module object whose containing methods are modified.
+ * \param method_name whose graph is instrumented for quant-dequant nodes.
+ * \param param_name parameter for which the nodes are inserted.
+ * \param getQParamFunc function to compute qparams.
+ * \at::ScalarType t Datatype for param
+ */
+template <typename Fn>
+TORCH_API void InsertQuantDequantNodesForParam(
+    std::shared_ptr<script::Module>& moduleObj,
+    const std::string& method_name,
+    const std::string& param_name,
+    const Fn& getQParamFunc,
+    at::ScalarType t);
 } // namespace jit
 } // namespace torch

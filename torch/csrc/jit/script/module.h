@@ -57,38 +57,19 @@ using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(Module* owner, Function* function);
+  Method(Module* owner, std::shared_ptr<Function> function);
 
   // the module that contains this method.
   Module& owner() const {
     return *owner_;
   }
 
-  void run(Stack& stack) {
-    for (auto input : initial_ivalues_) {
-      push(stack, input.value());
-    }
-    function_->run(stack);
-  }
+  void run(Stack& stack);
   void run(Stack&& stack) {
     run(stack);
   }
 
-  IValue operator()(
-      std::vector<IValue> stack,
-      const Kwargs& kwargs = Kwargs()) {
-    getSchema().checkAndNormalizeInputs(stack, kwargs);
-    for (auto input : initial_ivalues_) {
-      push(stack, input.value());
-    }
-    // use run rather than operator() to skip the second schema check.
-    function_->run(std::move(stack));
-    return stack.front();
-  }
-
-  const std::vector<Slot>& initial_ivalues() const {
-    return initial_ivalues_;
-  }
+  IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs());
 
   std::shared_ptr<Graph> graph() const {
     return function_->graph();
@@ -99,11 +80,7 @@ struct TORCH_API Method {
   }
 
   size_t num_inputs() const {
-    return function_->num_inputs() - initial_ivalues_.size();
-  }
-
-  const FunctionSchema& getSchema() const {
-    return schema_;
+    return function_->num_inputs();
   }
 
   GraphExecutor& get_executor() {
@@ -114,6 +91,11 @@ struct TORCH_API Method {
     return *function_;
   }
 
+  // Used for ONNX export. Return a tuple (graph, parameters) where
+  // the last parameters.size() inputs to the graph are the trainable parameters
+  // used in this method. The remaining inputs are the true inputs to the function.
+  std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> _lowered_graph();
+
  private:
   // Methods are uniqued onwed by a single module. This raw pointer allows
   // looking up the module.
@@ -123,42 +105,40 @@ struct TORCH_API Method {
   // This is the _lowered_ function and is different than the
   // first-class function in class_compilation_unit()
   std::shared_ptr<Function> function_;
-
-  // parameters and attributes loaded from the Module and appending
-  // before calling function_
-  std::vector<Slot> initial_ivalues_;
-  FunctionSchema schema_;
 };
 
 struct Module;
 
 struct TORCH_API Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
-  Module()
-      : name_("__main__"),
+  Module(std::string class_name)
+      : field_name_("__main__"),
         module_value_(c10::ivalue::Object::create(
-            ClassType::createModuleType(std::make_shared<CompilationUnit>()),
+            ClassType::create(
+                QualifiedName(std::move(class_name)),
+                std::make_shared<CompilationUnit>(),
+                /*is_module=*/true),
             0)) {}
-
+  Module() : Module("$Module") {}
   ~Module() {
     // ClassType own the compilation unit of their Functions, but each
     // Function has a self argument which owns the ClassType, created a
-    // referernce cycle. By dropping all the methods of the module's class
+    // reference cycle. By dropping all the methods of the module's class
     // here we break the cycle.
-    class_compilation_unit().drop_all_functions();
+    class_compilation_unit()->drop_all_functions();
   }
-  const std::string& name() const {
-    return name_;
+  const std::string& field_name() const {
+    return field_name_;
   }
 
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
   void set_optimized(bool o) {
-    class_compilation_unit().set_optimized(o);
+    class_compilation_unit()->set_optimized(o);
   }
 
   bool is_optimized() const {
-    return class_compilation_unit().is_optimized();
+    return class_compilation_unit()->is_optimized();
   }
 
   IValue forward(std::vector<IValue> inputs) {
@@ -209,22 +189,7 @@ struct TORCH_API Module {
   void register_module(
       const std::string& name,
       std::shared_ptr<Module> module) {
-    // We would like to enable more stringent error checking at this point,
-    // but because script functions are considered modules, it is possible
-    // to hit this situation without knowing it. For now this is disabled
-    // until a later PR that distinguishes script functions from script modules.
-    // See TestScript.test_submodule_twice for example failure
-    // if (module->parent_) {
-    //   AT_WARN(
-    //       "Attempting to assign submodule '",
-    //       name,
-    //       "' but it is already a submodule of another ScriptModule '",
-    //       module->parent_->name(), "'", " Modules of this form do not import
-    //       and export correctly. This use is deprecated and may be" " removed
-    //       in a future version.");
-    // }
-    module->parent_ = this;
-    module->name_ = name;
+    module->field_name_ = name;
     appendSlot(name, module->module_value_->type(), module->module_value_);
     insert(name, modules_, EntityType::MODULE, std::move(module));
   }
@@ -278,7 +243,7 @@ struct TORCH_API Module {
   const std::vector<std::unique_ptr<Method>>& get_methods() const {
     // force methods_ to be up to date by querying all
     // methods.
-    for (const auto& m : class_compilation_unit().get_functions()) {
+    for (const auto& m : class_compilation_unit()->get_functions()) {
       get_method(m->name());
     }
     return methods_;
@@ -304,17 +269,23 @@ struct TORCH_API Module {
     return offset ? modules_[*offset] : nullptr;
   }
   Method* find_method(const std::string& name) const {
+    // find_offset() method reads "dict_" object.
+    // Lock because another thread can modify "dict_" object at the same time
+    // calling insert() method.
+    // Ideally recursive_mutex should be replaced with shared_mutex (C++ 17)
+    // for the performance reasons.
+    std::unique_lock<std::recursive_mutex> keeper(create_method_guard_);
     auto offset = find_offset(name, EntityType::METHOD);
     if (offset) {
       return methods_[*offset].get();
     }
 
-    if (Function* fn = class_compilation_unit().find_function(name).get()) {
+    if (const std::shared_ptr<Function>& fn =
+            class_compilation_unit()->find_function(name)) {
       // lock because technically this is marked const,
       // but we have to update the internal Method cache.
       // This can be removed when class_compilation_unit() is the source of
       // truth for methods.
-      std::lock_guard<std::recursive_mutex> guard(create_method_guard_);
       Module* mutable_this = const_cast<Module*>(this);
       std::unique_ptr<Method> m(new Method(mutable_this, fn));
       return mutable_this
@@ -343,8 +314,8 @@ struct TORCH_API Module {
   }
   /// True if the module is in training mode.
   bool is_training() {
-    if (auto p = find_buffer("training")) {
-      return p->value().toTensor().item<int64_t>() == 1;
+    if (auto p = find_attribute("training")) {
+      return p->value().toBool();
     }
     // We are in training mode by default
     return true;
@@ -421,7 +392,7 @@ struct TORCH_API Module {
     if (it == dict_.end()) {
       // methods are lazily created, see if this is, in face,
       // a method that has not been created yet.
-      if (auto fn = class_compilation_unit().find_function(name)) {
+      if (auto fn = class_compilation_unit()->find_function(name)) {
         return EntityType::METHOD;
       }
       return at::nullopt;
@@ -432,20 +403,24 @@ struct TORCH_API Module {
   ModulePtr module_object() const {
     return module_value_;
   }
-  CompilationUnit& class_compilation_unit() {
+  std::shared_ptr<CompilationUnit> class_compilation_unit() {
     return module_object()->type()->compilation_unit();
   }
-  const CompilationUnit& class_compilation_unit() const {
+  std::shared_ptr<const CompilationUnit> class_compilation_unit() const {
     return module_object()->type()->compilation_unit();
   }
 
   // so that C++ users can easily add methods
   void define(const std::string& src, const ResolverPtr& resolver = nullptr);
 
- private:
-  std::pair<std::shared_ptr<Function>, std::vector<Slot>>
-  lower_first_class_method(Function* fn);
+  template <typename... Types>
+  IValue create_class(const c10::QualifiedName& name, Types&&... args) const {
+    return create_class(name, {IValue(std::forward<Types>(args))...});
+  }
 
+  IValue create_class(const c10::QualifiedName& name, Stack stack) const;
+
+ private:
   void to_impl(
       const c10::optional<at::Device>& device,
       const c10::optional<at::ScalarType>& dtype,
@@ -537,23 +512,19 @@ struct TORCH_API Module {
   // parameters, attributes, methods, and sub-modules
   // we store individual lists of each concept, and a single map to
   // unify the namespace and ensure fast lookup
-
-  // invariant: to ensure initial_ivalues of Methods stay valid,
-  // it is only legal to _add_ new modules and parameters.
-  // removing them will allow initial_ivalues to point to invalid parameters
-  // no such restriction exists for methods
   std::vector<std::shared_ptr<Module>> modules_;
   std::vector<Slot> parameters_;
   std::vector<Slot> attributes_;
   std::vector<std::unique_ptr<Method>> methods_;
 
   std::unordered_map<std::string, Entry> dict_;
-  std::string name_;
+
+  // The name of the module as it appears as a submodule
+  // parent.myself = this_module
+  // 'myself' is the field name:
+  std::string field_name_;
 
   ModulePtr module_value_;
-
-  // back reference to parent of this Module if present
-  Module* parent_ = nullptr;
 
   // Currently we are in a transitionary state
   // where we construct such first class functions but we lower them
@@ -567,11 +538,9 @@ struct TORCH_API Module {
 
   mutable std::recursive_mutex create_method_guard_;
   friend struct Method;
-
-  // TEMPRORARY: this should only be non-empty on the root module. Represents
-  // all class types used by this module hierarchy.
-  std::unordered_map<QualifiedName, ClassTypePtr> classes_;
 };
+
+TORCH_API bool& getInlineEverythingMode();
 
 } // namespace script
 } // namespace jit

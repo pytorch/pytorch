@@ -26,12 +26,12 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
 }
 
 Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
-  AT_CHECK(options.requires_grad_opt() == c10::nullopt,
+  TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
            "to(options) expects unset requires_grad flag, but got "
            "options.requires_grad set as ", options.requires_grad());
 
   const auto & layout_opt = options.layout_opt();
-  AT_CHECK(!layout_opt || self.layout() == layout_opt.value(),
+  TORCH_CHECK(!layout_opt || self.layout() == layout_opt.value(),
            "to(options) doesn't support converting to a different layout, "
            "but got self.layout being ", self.layout(),
            " and options.layout set as ", options.layout());
@@ -85,7 +85,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() != c10::kStrided);
   if (input_.layout() == c10::kSparse) {
     auto input = input_.coalesce();
-    return grad.sparse_mask(at::SparseTensorRef(input));
+    return grad.sparse_mask(input);
   } else if (input_.layout() == c10::kMkldnn) {
     return grad.to_mkldnn();
   } else {

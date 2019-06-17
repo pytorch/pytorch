@@ -2,6 +2,7 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
 
@@ -28,8 +29,34 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"PyObject*", ParameterType::PYOBJECT},
   {"ScalarType", ParameterType::SCALARTYPE},
   {"Layout", ParameterType::LAYOUT},
+  {"MemoryFormat", ParameterType::MEMORY_FORMAT},
+  {"QScheme", ParameterType::QSCHEME},
   {"Device", ParameterType::DEVICE},
   {"std::string", ParameterType::STRING},
+  {"Dimname", ParameterType::DIMNAME},
+  {"DimnameList", ParameterType::DIMNAME_LIST},
+};
+
+// Default arg name translations for compatibility with NumPy.
+//
+// Example:
+// ```python
+// t = torch.randn(10,10)
+// torch.sum(a=t, axis=0, keepdim=True)
+// ```
+//
+// A vector is necessary, because we might need to try multiple values.
+// In particular, NumPy sometimes uses "x" and sometimes "a" for the main input tensor.
+// Rather than annotate each function separately with whether it should take "x" or "a",
+// just try both.
+//
+// TODO: Allow individual functions to specify non-default translations:
+// For example, `torch.pow` should translate "exponent" to "x2".
+static const std::unordered_map<std::string, std::vector<std::string>> numpy_compatibility_arg_names = {
+  {"dim", {"axis"}},
+  {"keepdim", {"keepdims"}},
+  {"input", {"x", "a", "x1"}},
+  {"other", {"x2"}},
 };
 
 // TODO: remove this. This is a temporary list of functions that allow Python
@@ -94,11 +121,13 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   } else {
     name = name_str;
   }
-#if PY_MAJOR_VERSION == 2
-  python_name = PyString_InternFromString(name.c_str());
-#else
-  python_name = PyUnicode_InternFromString(name.c_str());
-#endif
+  python_name = THPUtils_internString(name);
+  auto np_compat_it = numpy_compatibility_arg_names.find(name);
+  if (np_compat_it != numpy_compatibility_arg_names.end()) {
+    for (const auto& str: np_compat_it->second) {
+      numpy_python_names.push_back(THPUtils_internString(str));
+    }
+  }
 }
 
 bool FunctionParameter::check(PyObject* obj) {
@@ -131,6 +160,7 @@ bool FunctionParameter::check(PyObject* obj) {
       }
       return false;
     }
+    case ParameterType::DIMNAME_LIST:
     case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -143,8 +173,10 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
-    case ParameterType::SCALARTYPE: return THPDtype_Check(obj);
+    case ParameterType::SCALARTYPE: return THPDtype_Check(obj) || THPPythonScalarType_Check(obj);
     case ParameterType::LAYOUT: return THPLayout_Check(obj);
+    case ParameterType::MEMORY_FORMAT: return THPMemoryFormat_Check(obj);
+    case ParameterType::QSCHEME: return THPQScheme_Check(obj);
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
@@ -166,8 +198,13 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::PYOBJECT: return "object";
     case ParameterType::SCALARTYPE: return "torch.dtype";
     case ParameterType::LAYOUT: return "torch.layout";
+    case ParameterType::MEMORY_FORMAT: return "torch.memory_format";
+    case ParameterType::QSCHEME: return "torch.qscheme";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
+#ifdef NAMEDTENSOR_ENABLED
+    case ParameterType::DIMNAME_LIST: return "tuple of names";
+#endif
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -201,7 +238,7 @@ static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int6
   // case 2. s is a list of dims (e.g., s={1,2})
 
   // since already checked left brace '{' above, here only checks right brace '}'
-  AT_CHECK(s[n - 1] == '}', "Default value of IntArrayRef is missing right brace '}', found ", s[n - 1]);
+  TORCH_CHECK(s[n - 1] == '}', "Default value of IntArrayRef is missing right brace '}', found ", s[n - 1]);
 
   auto args = std::vector<int64_t>();
   std::istringstream ss(s.substr(1, s.length() - 2)); // exclude '{' and '}'
@@ -461,6 +498,12 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       obj = PyTuple_GET_ITEM(args, arg_pos);
     } else if (kwargs) {
       obj = PyDict_GetItem(kwargs, param.python_name);
+      for (PyObject *numpy_name: param.numpy_python_names) {
+        if (obj) {
+          break;
+        }
+        obj = PyDict_GetItem(kwargs, numpy_name);
+      }
       is_kwd = true;
     }
 

@@ -42,7 +42,7 @@ LINUX_PACKAGE_VARIANTS = OrderedDict(
         "3.6m",
         "3.7m",
     ],
-    conda=dimensions.STANDARD_PYTHON_VERSIONS,
+    conda=dimensions.CONDA_PYTHON_VERSIONS,
     libtorch=[
         "2.7m",
     ],
@@ -52,7 +52,7 @@ CONFIG_TREE_DATA = OrderedDict(
     linux=(dimensions.CUDA_VERSIONS, LINUX_PACKAGE_VARIANTS),
     macos=([None], OrderedDict(
         wheel=dimensions.STANDARD_PYTHON_VERSIONS,
-        conda=dimensions.STANDARD_PYTHON_VERSIONS,
+        conda=dimensions.CONDA_PYTHON_VERSIONS,
         libtorch=[
             "2.7",
         ],
@@ -60,7 +60,9 @@ CONFIG_TREE_DATA = OrderedDict(
 )
 
 
-DEVTOOLSET_VERSIONS = [3, 7]
+DEVTOOLSET_VERSIONS = [
+    3,
+]
 
 
 class TopLevelNode(ConfigNode):
@@ -83,7 +85,13 @@ class OSConfigNode(ConfigNode):
         self.props["cuda_versions"] = cuda_versions
 
     def get_children(self):
-        return [PackageFormatConfigNode(self, k, v) for k, v in self.py_tree.items()]
+        packaging_variants = [PackageFormatConfigNode(self, k, v) for k, v in self.py_tree.items()]
+
+        if self.find_prop("smoke"):
+            filtered_packaging_variants = list(filter(lambda x: x.get_label() != "libtorch", packaging_variants))
+            return filtered_packaging_variants
+        else:
+            return packaging_variants
 
 
 class PackageFormatConfigNode(ConfigNode):
@@ -107,7 +115,14 @@ class LinuxGccConfigNode(ConfigNode):
         self.props["devtoolset_version"] = devtoolset_version
 
     def get_children(self):
-        return [ArchConfigNode(self, v) for v in self.find_prop("cuda_versions")]
+        cuda_versions = self.find_prop("cuda_versions")
+
+        # XXX devtoolset7 on CUDA 9.0 is temporarily disabled
+        # see https://github.com/pytorch/pytorch/issues/20066
+        if self.find_prop("devtoolset_version") == 7:
+            cuda_versions = filter(lambda x: x != "90", cuda_versions)
+
+        return [ArchConfigNode(self, v) for v in cuda_versions]
 
 
 class ArchConfigNode(ConfigNode):

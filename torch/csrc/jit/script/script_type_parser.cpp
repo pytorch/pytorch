@@ -1,5 +1,6 @@
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/parser.h>
 
 namespace torch {
 namespace jit {
@@ -185,7 +186,8 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
         return typePtr;
       }
     }
-    throw ErrorReport(expr) << "Unknown type name " << *name;
+
+    throw ErrorReport(expr) << "Unknown type name '" << *name << "'";
   }
   throw ErrorReport(expr.range())
       << "Expression of type " << kindToString(expr.kind())
@@ -193,7 +195,7 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
 }
 
 TypePtr ScriptTypeParser::parseType(const std::string& str) {
-  Parser p(str);
+  Parser p(std::make_shared<Source>(str));
   return parseTypeFromExpr(p.parseExp());
 }
 } // namespace script

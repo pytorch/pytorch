@@ -4,7 +4,7 @@
 
 #include <ATen/CPUTypeDefault.h>
 #include <ATen/Context.h>
-#include <ATen/CheckGenerator.h>
+#include <ATen/Utils.h>
 
 $extra_cuda_headers
 
@@ -31,7 +31,7 @@ struct ${Type} final : public ${DeviceType}TypeDefault {
     return t.scalar_type();
   }
   ScalarType infer_scalar_type(const TensorList & tl) const {
-    AT_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+    TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
     return tl[0].scalar_type();
   }
 };
