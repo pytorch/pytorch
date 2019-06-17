@@ -13299,6 +13299,16 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(M(), (torch.randn(2, 2),))
 
+    def test_method_call(self):
+        class M(nn.Module):
+            def test(self, x):
+                return x
+
+            def forward(self, z):
+                y = self.test(z)
+                return z + 20 + y
+
+        self.checkModule(M(), (torch.randn(2, 2),))
 
     def test_script_basic(self):
         def a_python_fn(a, b, c):
