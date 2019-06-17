@@ -29,7 +29,7 @@ TEST(DimnameTest, isValidIdentifier) {
 TEST(DimnameTest, wildcardName) {
   Dimname wildcard = Dimname::wildcard();
   ASSERT_EQ(wildcard.type(), NameType::WILDCARD);
-  ASSERT_EQ(wildcard.name(), Symbol::dimname("*"));
+  ASSERT_EQ(wildcard.full_name(), Symbol::dimname("*"));
   ASSERT_EQ(wildcard.untagged_name(), Symbol::dimname("*"));
 }
 
@@ -37,7 +37,7 @@ TEST(DimnameTest, createNormalName) {
   auto foo = Symbol::dimname("foo");
   auto dimname = Dimname::fromSymbol(foo);
   ASSERT_EQ(dimname.type(), NameType::NORMAL);
-  ASSERT_EQ(dimname.name(), foo);
+  ASSERT_EQ(dimname.full_name(), foo);
   ASSERT_EQ(dimname.untagged_name(), foo);
 
   ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("invalid1")), c10::Error);
@@ -48,7 +48,7 @@ TEST(DimnameTest, createTaggedName) {
   auto foo = Symbol::dimname("foo");
   auto dimname = Dimname::fromSymbol(foo_bar);
   ASSERT_EQ(dimname.type(), NameType::TAGGED);
-  ASSERT_EQ(dimname.name(), foo_bar);
+  ASSERT_EQ(dimname.full_name(), foo_bar);
   ASSERT_EQ(dimname.untagged_name(), foo);
 
   ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname(".bar")), c10::Error);
@@ -65,7 +65,7 @@ static void check_unify_and_match(
   auto result = at::unify(dimname1, dimname2);
   if (expected) {
     auto expected_result = Dimname::fromSymbol(Symbol::dimname(*expected));
-    ASSERT_EQ(result->name(), expected_result.name());
+    ASSERT_EQ(result->full_name(), expected_result.full_name());
     ASSERT_EQ(result->type(), expected_result.type());
     ASSERT_EQ(result->untagged_name(), expected_result.untagged_name());
     ASSERT_TRUE(match(dimname1, dimname2));

@@ -70,7 +70,7 @@ class JitTestCase(TestCase):
 
     def emitFunctionHook(self, func):
         # func has invalid names for export, skip the jitter check
-        if func.name == "<lambda>" or "aten::" in func.name or _in_first_class_mode:
+        if func.name == "<lambda>" or "aten::" in func.name or not _inline_everything:
             return
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with self.disableEmitHook():
@@ -258,7 +258,7 @@ class JitTestCase(TestCase):
         return graph
 
     def checkScript(self,
-                    func,
+                    script,
                     inputs,
                     optimize=True,
                     outputs=None,
@@ -266,44 +266,42 @@ class JitTestCase(TestCase):
                     capture_output=False,
                     frames_up=1,
                     check_expected=False):
-        if isinstance(func, str):
-            cu = torch.jit.CompilationUnit(func, optimize, _frames_up=frames_up)
-            scripted_fn = getattr(cu, name)
+        if isinstance(script, str):
+            cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
+            ge = getattr(cu, name)
         else:
             if capture_output:
                 with self.capture_stdout() as captured:
-                    outputs = func(*inputs)
+                    outputs = script(*inputs)
             else:
-                outputs = func(*inputs)
+                outputs = script(*inputs)
             # Check the string frontend first
-            source = textwrap.dedent(inspect.getsource(func))
+            source = textwrap.dedent(inspect.getsource(script))
             self.checkScript(
                 source,
                 inputs,
                 optimize,
                 outputs,
-                func.__name__,
+                script.__name__,
                 capture_output,
                 frames_up=2,
                 check_expected=check_expected)
             # Continue checking the Python frontend
-            scripted_fn = torch.jit.script(func, optimize, _frames_up=1)
+            ge = torch.jit.script(script, optimize, _frames_up=1)
 
         if capture_output:
+            with self.capture_stdout() as captured:
+                outputs_ge = ge(*inputs)
             if not IS_WINDOWS:
-                with self.capture_stdout() as script_stdout:
-                    outputs_ge = scripted_fn(*inputs)
-                with self.capture_stdout() as python_stdout:
-                    outputs_ge = scripted_fn(*inputs)
-                self.assertEqual(script_stdout, python_stdout)
+                self.assertExpected(captured[0], subname='stdout')
         else:
-            outputs_ge = scripted_fn(*inputs)
+            outputs_ge = ge(*inputs)
         self.assertEqual(outputs, outputs_ge)
 
         if check_expected:
-            self.assertExpectedGraph(scripted_fn.graph)
+            self.assertExpectedGraph(ge.graph)
 
-        return scripted_fn
+        return ge
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    optimize=True, drop=None, allow_unused=False, verbose=False,
@@ -430,17 +428,16 @@ def enable_profiling_mode():
     yield
     torch._C._jit_set_profiling_mode(False)
 
-
-_in_first_class_mode = False
+_inline_everything = True
 @contextmanager
-def enable_first_class_mode():
-    global _in_first_class_mode
-    old = _in_first_class_mode
-    torch._C._jit_set_first_class_mode(True)
-    _in_first_class_mode = True
+def disable_inline_everything_mode():
+    global _inline_everything
+    old = _inline_everything
+    _inline_everything = False
+    torch._C._jit_set_inline_everything_mode(False)
     yield
-    torch._C._jit_set_first_class_mode(old)
-    _in_first_class_mode = old
+    _inline_everything = old
+    torch._C._jit_set_inline_everything_mode(old)
 
 
 # note: not re-entrant, use unnested only
