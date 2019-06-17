@@ -1466,7 +1466,7 @@ using ::torch::jit::script::CompilationUnit;
 struct CAFFE2_API ClassType : public SerializableType {
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
-      QualifiedName qualifiedName,
+      c10::optional<QualifiedName> qualifiedName,
       std::shared_ptr<CompilationUnit> cu, bool is_module = false);
 
   DEFINE_IS_SUBCLASS(ClassType);

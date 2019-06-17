@@ -17,20 +17,16 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
 }
 
 ClassTypePtr ClassType::create(
-    QualifiedName qualifiedName,
-    std::shared_ptr<CompilationUnit> cu) {
-  return ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
-}
-
-ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
-  return ClassTypePtr(new ClassType(
-      QualifiedName(QualifiedName("__torch__"), "$Module"), std::move(cu)));
+    c10::optional<QualifiedName> qualifiedName,
+    std::shared_ptr<CompilationUnit> cu,
+    bool is_module) {
+  return ClassTypePtr(new ClassType(std::move(qualifiedName), std::move(cu), is_module));
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassTypePtr(new ClassType(name_, compilation_unit_));
+  auto ptr = ClassType::create(name_, compilation_unit_);
   AT_ASSERT(numAttributes() == refined_slots.size());
-  for (size_t i = 0; i < attributeNames_.size(); ++i) {
+  for(size_t i = 0; i < attributeNames_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
     ptr->addAttribute(attributeNames_[i], refined_slots[i]);
   }
