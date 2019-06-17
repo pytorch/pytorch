@@ -11,9 +11,10 @@ namespace {
 
 template <typename self_T>
 void copy_kernel_cast(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND3(
       ScalarType::Half,
       ScalarType::Bool,
+      ScalarType::BFloat16,
       iter.dtype(1),
       "copy_kernel_cast",
       [&] {

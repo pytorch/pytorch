@@ -32,7 +32,7 @@ namespace c10 {
   _(c10::qint8, QInt8, i) /* 12 */                   \
   _(c10::quint8, QUInt8, i) /* 13 */                 \
   _(c10::qint32, QInt32, i) /* 14 */                 \
-  _(c10::BFloat16, BFloat16, d) /* 15 */
+  _(at::BFloat16, BFloat16, d) /* 15 */
 
 // If you want to support ComplexHalf for real, replace occurrences
 // of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But
@@ -51,7 +51,8 @@ namespace c10 {
   _(bool, Bool, i)                                                 \
   _(c10::qint8, QInt8, i)                                          \
   _(c10::quint8, QUInt8, i)                                        \
-  _(c10::qint32, QInt32, i)
+  _(c10::qint32, QInt32, i)                                        \
+  _(at::BFloat16, BFloat16, d)
 
 #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_AND_QINT(_) \
   _(uint8_t, Byte, i)                                                       \
@@ -64,7 +65,8 @@ namespace c10 {
   _(double, Double, d)                                                      \
   _(std::complex<float>, ComplexFloat, z)                                   \
   _(std::complex<double>, ComplexDouble, z)                                 \
-  _(bool, Bool, i)
+  _(bool, Bool, i)                                                          \
+  _(at::BFloat16, BFloat16, d)
 
 #define AT_FORALL_SCALAR_TYPES(_) \
   _(uint8_t, Byte, i)             \
@@ -77,7 +79,8 @@ namespace c10 {
   _(double, Double, d)            \
   _(c10::qint8, QInt8, i)         \
   _(c10::quint8, QUInt8, i)       \
-  _(c10::qint32, QInt32, i)
+  _(c10::qint32, QInt32, i)       \
+  _(at::BFloat16, BFloat16, d)
 
 #define AT_FORALL_SCALAR_TYPES_EXCEPT_QINT(_) \
   _(uint8_t, Byte, i)                         \
@@ -87,7 +90,8 @@ namespace c10 {
   _(int64_t, Long, i)                         \
   _(at::Half, Half, d)                        \
   _(float, Float, d)                          \
-  _(double, Double, d)
+  _(double, Double, d)                        \
+  _(at::BFloat16, BFloat16, d)
 
 #define AT_FORALL_SCALAR_TYPES_AND_BOOL_EXCEPT_QINT(_) \
   _(uint8_t, Byte, i)                                  \

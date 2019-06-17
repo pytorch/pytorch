@@ -2608,6 +2608,10 @@ class _TestTorchMixin(object):
         expected = torch.tensor([[0.]], dtype=torch.float16)
         self.assertEqual(halfTensor, expected)
 
+        bfloat16Tensor = torch.zeros(1, 1, dtype=torch.bfloat16)
+        expected = torch.tensor([[0.]], dtype=torch.bfloat16)
+        self.assertEqual(bfloat16Tensor, expected)
+
     def test_std_mean(self):
         for device in torch.testing.get_all_device_types():
             x = torch.rand(100, 50, 20, device=device)

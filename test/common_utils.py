@@ -506,7 +506,8 @@ class TestCase(expecttest.TestCase):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
-                    if a.device.type == 'cpu' and a.dtype == torch.float16:
+                    if ((a.device.type == 'cpu' and a.dtype == torch.float16) or
+                        (a.device.type == 'cpu' and a.dtype == torch.bfloat16)):
                         # CPU half tensors don't have the methods we need below
                         a = a.to(torch.float32)
                     b = b.to(a)
