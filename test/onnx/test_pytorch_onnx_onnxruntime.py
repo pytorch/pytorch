@@ -5,10 +5,8 @@ from __future__ import unicode_literals
 
 import unittest
 import sys
-import os
 import onnxruntime  # noqa
 import torch
-import test_onnx_common
 import numpy as np
 import io
 
@@ -27,17 +25,15 @@ class TestONNXRuntime(unittest.TestCase):
         class MyModel(torch.nn.Module):
             def forward(self, x):
                 return torch.index_select(x, 1, torch.tensor(2))
-                
-        x = torch.randn(3,4)
+
+        x = torch.randn(3, 4)
         model = MyModel()
         o = model(x)
-
         f = io.BytesIO()
         torch.onnx._export(model, (x,), f)
-
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_outs = ort_sess.run(None, {ort_sess.get_inputs()[0].name: x.numpy()})
-        np.allclose(ort_outs[0], x.numpy()[:,[2]])
+        np.allclose(ort_outs[0], x.numpy()[:, [2]])
 
 if __name__ == '__main__':
     unittest.main()
