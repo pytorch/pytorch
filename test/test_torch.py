@@ -5877,13 +5877,11 @@ class _TestTorchMixin(object):
         resv = conv_fn(torch.zeros(3, 3))
 
         # First call to symeig
-        self.assertTrue(resv.is_contiguous(), 'resv is not contiguous')
         torch.symeig(cov.clone(), True, out=(rese, resv))
         ahat = torch.mm(torch.mm(resv, torch.diag(rese)), resv.t())
         self.assertEqual(cov, ahat, 1e-8, 'VeV\' wrong')
 
         # Second call to symeig
-        self.assertFalse(resv.is_contiguous(), 'resv is contiguous')
         torch.symeig(cov.clone(), True, out=(rese, resv))
         ahat = torch.mm(torch.mm(resv, torch.diag(rese)), resv.t())
         self.assertEqual(cov, ahat, 1e-8, 'VeV\' wrong')
