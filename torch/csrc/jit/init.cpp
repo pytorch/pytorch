@@ -336,8 +336,8 @@ void initJITBindings(PyObject* module) {
           "_jit_set_profiling_mode",
           [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
       .def(
-          "_jit_set_first_class_mode",
-          [](bool enabled) { script::getFirstClassMode() = enabled; })
+          "_jit_set_inline_everything_mode",
+          [](bool enabled) { script::getInlineEverythingMode() = enabled; })
       .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {

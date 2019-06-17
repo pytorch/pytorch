@@ -477,7 +477,8 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, executor_options, traced_func, check_tolerance, force_outplace, is_trace_module):
+def _check_trace(check_inputs, func, executor_options, traced_func, check_tolerance,
+                 force_outplace, is_trace_module, _module_class):
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
     for inputs in check_inputs:
@@ -494,6 +495,7 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
                 copied_dict,
                 check_trace=False,
                 _force_outplace=force_outplace,
+                _module_class=_module_class,
                 **executor_options)
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
@@ -505,6 +507,7 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
                 _clone_inputs(inputs),
                 check_trace=False,
                 _force_outplace=force_outplace,
+                _module_class=_module_class,
                 **executor_options)
             check_mod_func = check_mod
 
@@ -732,6 +735,12 @@ def trace(func,
     if not _enabled:
         return func
 
+    if isinstance(func, torch.jit.ScriptModule):
+        # it is hard to trace it because the forward method on ScriptModule is already defined, so it
+        # would result in an error.
+        warnings.warn('The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.')
+        return func
+
     if isinstance(func, torch.nn.Module):
         return trace_module(func, {'forward': example_inputs}, optimize,
                             check_trace, wrap_check_inputs(check_inputs),
@@ -768,9 +777,9 @@ def trace(func,
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, traced, check_tolerance, _force_outplace, False)
+            _check_trace(check_inputs, func, executor_options, traced, check_tolerance, _force_outplace, False, _module_class)
         else:
-            _check_trace([example_inputs], func, executor_options, traced, check_tolerance, _force_outplace, False)
+            _check_trace([example_inputs], func, executor_options, traced, check_tolerance, _force_outplace, False, _module_class)
 
     return traced
 
@@ -861,10 +870,10 @@ def trace_module(mod,
         if check_trace:
             if check_inputs is not None:
                 _check_trace(check_inputs, func, executor_options, check_trace_method,
-                             check_tolerance, _force_outplace, True)
+                             check_tolerance, _force_outplace, True, _module_class)
             else:
                 _check_trace([inputs], func, executor_options, check_trace_method,
-                             check_tolerance, _force_outplace, True)
+                             check_tolerance, _force_outplace, True, _module_class)
 
         return module
 
@@ -986,10 +995,10 @@ def _try_compile_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
 
-    if not inspect.isfunction(fn):
+    if not inspect.isfunction(fn) and not inspect.ismethod(fn):
         raise RuntimeError("`{}` is not a function. Recursive scripting only supports "
                            "Python functions or methods currently.\n"
-                           "Consider manually annotating `{}` with @torch.jit.script.".format(fn.__name__))
+                           "Consider manually annotating `{}` with @torch.jit.script.".format(fn))
 
     if isinstance(fn, torch.nn.Module):
         # Since modules are callable pybind recognizes them as functions, but
@@ -1007,7 +1016,7 @@ def _create_method_from_fn(module, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = script_method(fn, createResolutionCallbackFromClosure(fn))
-    _create_methods_from_stubs(self, (stub,))
+    _create_methods_from_stubs(module, (stub,))
 
 
 # ScriptClasses must be new-style classes because we construct them using their
@@ -1459,7 +1468,7 @@ if _enabled:
                       return input
         """
         def __init__(self, optimize=True):
-            self.__dict__['_c'] = torch._C.ScriptModule()
+            self.__dict__['_c'] = torch._C.ScriptModule(type(self).__name__)
             Module.__init__(self)
             self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)
