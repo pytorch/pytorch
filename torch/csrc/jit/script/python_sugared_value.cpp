@@ -364,11 +364,8 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   // and script Modules. If we need to load a Module, we need its field
   // name so we can emit 'self.field_name'.
   std::unordered_map<at::ivalue::Object*, std::string> obj_to_field;
-  for (size_t i = 0; i < module_->num_slots(); ++i) {
-    Slot s = module_->get_slot(i);
-    if (s.is_module()) {
-      obj_to_field[s.value().toObject().get()] = s.name();
-    }
+  for (Slot s : module_->get_module_slots()) {
+    obj_to_field[s.value().toObject().get()] = s.name();
   }
 
   std::vector<std::shared_ptr<SugaredValue>> result;

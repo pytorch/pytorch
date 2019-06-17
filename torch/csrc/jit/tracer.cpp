@@ -287,8 +287,7 @@ static void gatherParametersAndBuffers(
   
   state->setValue(self.module_object(), self_value);
 
-  for (size_t i = 0; i < self.num_slots(); ++i) {
-    script::Slot s = self.get_slot(i);
+  for (script::Slot s : self.get_slots()) {
     if (s.type()->isSubtypeOf(TensorType::get())) {
       addInput(
           state, s.value(), s.type(), g.insertGetAttr(self_value, s.name()));

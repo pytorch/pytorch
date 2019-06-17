@@ -16064,7 +16064,7 @@ class TestClassType(JitTestCase):
             @torch.jit.script
             class Foo(object):
                 def __init__(self):
-                    pas
+                    pass
 
                 def one(self, x, y):
                     return x + y

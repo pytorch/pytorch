@@ -52,6 +52,7 @@ using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
 // classes use python method naming conventions
 
 struct Module;
+struct slot_list;
 
 using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
@@ -187,36 +188,12 @@ struct TORCH_API Module {
     return std::make_shared<Module>(obj);
   }
 
-  std::vector<std::shared_ptr<Module>> get_modules() const {
-    std::vector<std::shared_ptr<Module>> result;
-    for (size_t i = 0; i < num_slots(); ++i) {
-      Slot s = get_slot(i);
-      if (s.is_module()) {
-        result.push_back(std::make_shared<Module>(s.to_module()));
-      }
-    }
-    return result;
-  }
-  std::vector<Slot> get_parameters() const {
-    std::vector<Slot> result;
-    for (size_t i = 0; i < num_slots(); ++i) {
-      Slot s = get_slot(i);
-      if (s.entity_type() == EntityType::PARAMETER) {
-        result.push_back(s);
-      }
-    }
-    return result;
-  }
-  std::vector<Slot> get_attributes() const {
-    std::vector<Slot> result;
-    for (size_t i = 0; i < num_slots(); ++i) {
-      Slot s = get_slot(i);
-      if (s.entity_type() == EntityType::ATTRIBUTE) {
-        result.push_back(s);
-      }
-    }
-    return result;
-  }
+  std::vector<std::shared_ptr<Module>> get_modules() const;
+  slot_list get_slots() const;
+  slot_list get_parameters() const;
+  slot_list get_attributes() const;
+  slot_list get_module_slots() const;
+
   const std::vector<Method> get_methods() const {
     return fmap(
         class_compilation_unit()->get_functions(),
@@ -342,7 +319,7 @@ struct TORCH_API Module {
       return EntityType::METHOD;
     }
     if (auto offset = type()->findAttributeSlot(name)) {
-      return get_slot(*offset).entity_type();
+      return _get_slot(*offset).entity_type();
     }
     return c10::nullopt;
   }
@@ -370,7 +347,7 @@ struct TORCH_API Module {
 
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
-  Slot get_slot(size_t slot) const {
+  Slot _get_slot(size_t slot) const {
     TORCH_CHECK(
         slot < module_object()->slots().size(), "not a valid slot offset");
     return Slot(module_object(), slot);
@@ -395,7 +372,7 @@ struct TORCH_API Module {
     return nullptr;
   }
   void check_entity(EntityType expected, size_t slot) const {
-    EntityType actual = get_slot(slot).entity_type();
+    EntityType actual = _get_slot(slot).entity_type();
     TORCH_CHECK(
         expected == actual,
         "The field '",
@@ -427,7 +404,7 @@ struct TORCH_API Module {
   Slot get_slot(const std::string& name, EntityType etype) const {
     size_t slot = type()->getAttributeSlot(name);
     check_entity(etype, slot);
-    return get_slot(slot);
+    return _get_slot(slot);
   }
   c10::optional<Slot> find_slot(const std::string& name, EntityType etype)
       const {
@@ -435,7 +412,7 @@ struct TORCH_API Module {
     if (!slot) {
       return c10::nullopt;
     }
-    Slot r = get_slot(*slot);
+    Slot r = _get_slot(*slot);
     if (r.entity_type() != etype) {
       return c10::nullopt;
     }
@@ -448,6 +425,81 @@ struct TORCH_API Module {
       bool non_blocking);
 
   ModulePtr module_value_;
+};
+
+struct slot_iterator {
+  slot_iterator(Module module, c10::optional<EntityType> type, size_t i)
+      : module_(module), type_(type), i_(i) {
+    advance_to_valid();
+  }
+  Slot operator*() const {
+    return module_._get_slot(i_);
+  }
+  Slot operator->() const {
+    return module_._get_slot(i_);
+  }
+  slot_iterator& operator++() {
+    ++i_;
+    advance_to_valid();
+    return *this;
+  }
+  slot_iterator operator++(int) {
+    slot_iterator old = *this;
+    ++(*this);
+    return old;
+  }
+
+ private:
+  void advance_to_valid() {
+    while (i_ < module_.num_slots() &&
+           (type_ && module_._get_slot(i_).entity_type() != *type_)) {
+      ++i_;
+    }
+  }
+  Module module_;
+  c10::optional<EntityType> type_;
+  size_t i_;
+
+  friend inline bool operator!=(const slot_iterator& a, const slot_iterator& b);
+};
+
+inline bool operator!=(const slot_iterator& a, const slot_iterator& b) {
+  return a.i_ != b.i_;
+}
+
+struct slot_list {
+  using iterator = slot_iterator;
+  using const_iterator = slot_iterator;
+  slot_iterator begin() const {
+    return slot_iterator(module_, type_, 0);
+  }
+  slot_iterator end() const {
+    return slot_iterator(module_, type_, module_.num_slots());
+  }
+  size_t size() const {
+    if (!size_) {
+      size_ = size_t(0);
+      for (Slot s : *(this)) {
+        ++*size_;
+      }
+    }
+    return *size_;
+  }
+
+ private:
+  slot_list(Module module, c10::optional<EntityType> type)
+      : module_(std::move(module)), type_(type) {
+    if (!type_) {
+      size_ = module_.num_slots();
+    }
+  }
+  Module module_;
+  // only include Slots of the following type
+  c10::optional<EntityType> type_;
+  // size of this list, cached on first request
+  // when we need to filter the slot list
+  mutable c10::optional<size_t> size_;
+  friend struct Module;
 };
 
 inline Module Slot::to_module() const {
