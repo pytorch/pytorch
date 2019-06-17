@@ -85,12 +85,12 @@ RegisterOperators reg_str_ops({
     return 0;                                                      \
   })
 
-    DEFINE_STRING_IS_OP(aten::isdigit, std::isdigit),
-    DEFINE_STRING_IS_OP(aten::isspace, std::isspace),
-    DEFINE_STRING_IS_OP(aten::isalnum, std::isalnum),
-    DEFINE_STRING_IS_OP(aten::isalpha, std::isalpha),
-    DEFINE_STRING_IS_OP(aten::isdecimal, std::isdigit),
-    DEFINE_STRING_IS_OP(aten::isnumeric, std::isdigit),
+    DEFINE_STRING_IS_OP(aten::isdigit, ::isdigit),
+    DEFINE_STRING_IS_OP(aten::isspace, ::isspace),
+    DEFINE_STRING_IS_OP(aten::isalnum, ::isalnum),
+    DEFINE_STRING_IS_OP(aten::isalpha, ::isalpha),
+    DEFINE_STRING_IS_OP(aten::isdecimal, ::isdigit),
+    DEFINE_STRING_IS_OP(aten::isnumeric, ::isdigit),
 
 #define DEFINE_STRING_CHAR_MAP_OP(op_name, char_op)         \
   Operator(#op_name "(str self) -> str", [](Stack& stack) { \
@@ -103,13 +103,13 @@ RegisterOperators reg_str_ops({
     return 0;                                               \
   })
 
-    DEFINE_STRING_CHAR_MAP_OP(aten::upper, std::toupper),
-    DEFINE_STRING_CHAR_MAP_OP(aten::lower, std::tolower),
+    DEFINE_STRING_CHAR_MAP_OP(aten::upper, ::toupper),
+    DEFINE_STRING_CHAR_MAP_OP(aten::lower, ::tolower),
     DEFINE_STRING_CHAR_MAP_OP(aten::swapcase, ([](char c) {
-                                if (c == static_cast<char>(std::toupper(c))) {
-                                  return static_cast<char>(std::tolower(c));
+                                if (c == static_cast<char>(::toupper(c))) {
+                                  return static_cast<char>(::tolower(c));
                                 } else {
-                                  return static_cast<char>(std::toupper(c));
+                                  return static_cast<char>(::toupper(c));
                                 }
                               }))
 
@@ -151,8 +151,8 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           bool is_upper = true;
           for (size_t i = 0; i < string.size() && is_upper; ++i) {
             char c = string[i];
-            found_alpha |= std::isalpha(c);
-            is_upper &= (!std::isalpha(c) || std::isupper(c));
+            found_alpha |= ::isalpha(c);
+            is_upper &= (!::isalpha(c) || ::isupper(c));
           }
           return found_alpha && is_upper;
         })
@@ -162,8 +162,8 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           bool is_lower = true;
           for (size_t i = 0; i < string.size() && is_lower; ++i) {
             char c = string[i];
-            found_alpha |= std::isalpha(c);
-            is_lower &= (!std::isalpha(c) || std::islower(c));
+            found_alpha |= ::isalpha(c);
+            is_lower &= (!::isalpha(c) || ::islower(c));
           }
           return found_alpha && is_lower;
         })
@@ -174,10 +174,10 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           auto first_char = true;
           for (char c : string) {
             if (first_char) {
-              ss << static_cast<char>(std::toupper(c));
+              ss << static_cast<char>(::toupper(c));
               first_char = false;
             } else {
-              ss << static_cast<char>(std::tolower(c));
+              ss << static_cast<char>(::tolower(c));
             }
           }
           return ss.str();
@@ -189,11 +189,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           bool prev_is_nonalpha = true;
           for (char c : string) {
             if (prev_is_nonalpha) {
-              ss << static_cast<char>(std::toupper(c));
+              ss << static_cast<char>(::toupper(c));
             } else {
-              ss << static_cast<char>(std::tolower(c));
+              ss << static_cast<char>(::tolower(c));
             }
-            if (std::isalpha(c)) {
+            if (::isalpha(c)) {
               prev_is_nonalpha = false;
             } else {
               prev_is_nonalpha = true;
@@ -356,11 +356,11 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           if (string.size() < 1) {
             return false;
           }
-          if (std::isdigit(string[0])) {
+          if (::isdigit(string[0])) {
             return false;
           }
           auto result = std::all_of(string.begin(), string.end(), [](char c) {
-            return std::isalnum(c);
+            return ::isalnum(c);
           });
           return result;
         })
@@ -372,21 +372,21 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
           bool prev_is_alpha = false;
           for (char c : string) {
             if (prev_is_alpha) {
-              if (c != static_cast<char>(std::tolower(c))) {
+              if (c != static_cast<char>(::tolower(c))) {
                 result = false;
                 break;
               }
             } else {
-              if (c != static_cast<char>(std::toupper(c))) {
+              if (c != static_cast<char>(::toupper(c))) {
                 result = false;
                 break;
               }
               // Only true if there exists at least one alpha
-              if (std::isalpha(c)) {
+              if (::isalpha(c)) {
                 result = true;
               }
             }
-            if (std::isalpha(c)) {
+            if (::isalpha(c)) {
               prev_is_alpha = true;
             } else {
               prev_is_alpha = false;
@@ -399,7 +399,7 @@ auto reg_str_ops_2 = torch::jit::RegisterOperators()
     .op("aten::isprintable(str self) -> bool",
         [](std::string string) {
           auto result = std::all_of(string.begin(), string.end(), [](char c) {
-            return std::isalnum(c) || std::ispunct(c) || c == ' ';
+            return ::isalnum(c) || ::ispunct(c) || c == ' ';
           });
           return result;
         })
