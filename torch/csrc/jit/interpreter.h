@@ -38,6 +38,8 @@ struct TORCH_API Code {
   explicit operator bool() const {
     return pImpl != nullptr;
   }
+  size_t num_inputs() const;
+  size_t num_outputs() const;
 
  private:
   std::shared_ptr<CodeImpl> pImpl;

@@ -31,6 +31,10 @@ class layout: ...
 
 strided : layout = ...
 
+class qscheme: ...
+
+per_tensor_affine: qscheme = ...
+
 # See https://github.com/python/mypy/issues/4146 for why these workarounds
 # is necessary
 _int = builtins.int
@@ -54,6 +58,7 @@ class Storage: ...
 # is necessary
 _dtype = dtype
 _device = device
+_qscheme = qscheme
 _size = Union[Size, List[_int], Tuple[_int, ...]]
 
 # Meta-type for "numeric" things; matches our docs
