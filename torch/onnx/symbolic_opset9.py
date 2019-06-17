@@ -931,6 +931,12 @@ def selu(g, input):
 
 @parse_args('v', 'i', 'v')
 def index_select(g, self, dim, index):
+    if index.type().kind() == "CompleteTensorType" or index.type().kind() == "DimensionedTensorType":
+        if index.type().dim() == 0:
+            # In case of a scaler index, index_select returns a tensor with the same rank as the input.
+            # To match this bahavior in ONNX, we make index a 1D tensor so that the following gather
+            # also produces a tensor with the same rank as the input. 
+            index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([-1])))
     return g.op("Gather", self, index, axis_i=dim)
 
 
