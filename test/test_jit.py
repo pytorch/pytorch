@@ -25,7 +25,7 @@ from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, enable_profiling_mode, enable_first_class_mode
+    _trace, enable_cpu_fuser_if, enable_profiling_mode, disable_inline_everything_mode
 from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -2961,23 +2961,22 @@ def foo(x):
         self.assertEqual(D()(v), v + v)
 
     def test_first_class_module(self):
-        with enable_first_class_mode():
-            class Foo(torch.jit.ScriptModule):
-                def __init__(self):
-                    super(Foo, self).__init__()
-                    self.foo = nn.Parameter(torch.rand(3, 4))
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.foo = nn.Parameter(torch.rand(3, 4))
 
-                @torch.jit.script_method
-                def forward(self, input):
-                    self.foo = input
-                    return self.foo
-            foo = Foo()
-            input = torch.rand(3, 4)
-            foo.forward(input)
-            self.assertEqual(input, foo.foo)
+            @torch.jit.script_method
+            def forward(self, input):
+                self.foo = input
+                return self.foo
+        foo = Foo()
+        input = torch.rand(3, 4)
+        foo.forward(input)
+        self.assertEqual(input, foo.foo)
 
     def test_first_class_calls(self):
-        with enable_first_class_mode():
+        with disable_inline_everything_mode():
             @torch.jit.script
             class Foo(object):
                 def __init__(self, x):
@@ -9132,7 +9131,7 @@ a")
                                example_outputs=outputs)
 
     def test_onnx_export_script_inline_trace(self):
-        class ModuleToInline(torch.jit.ScriptModule):
+        class ModuleToInline(torch.nn.Module):
             def __init__(self):
                 super(ModuleToInline, self).__init__()
 

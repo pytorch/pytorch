@@ -194,7 +194,8 @@ void SimpleValue::setAttr(
             << "Assignment to attribute '" << field
             << "' cannot be of a type that contains class "
             << "'" << classType->python_str() << "'.\n"
-            << "Recursive class attributes not yet supported";
+            << "Classes that recursively contain instances of themselves"
+            << " are not yet supported";
       }
       classType->addAttribute(field, newValue->type());
       expectedType = newValue->type();

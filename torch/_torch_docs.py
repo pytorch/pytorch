@@ -455,7 +455,7 @@ Args:
     other (Tensor): second tensor to compare
     atol (float, optional): absolute tolerance. Default: 1e-08
     rtol (float, optional): relative tolerance. Default: 1e-05
-    equal_nan (float, optional): if ``True``, then two ``NaN`` s will be compared as equal. Default: ``False``
+    equal_nan (bool, optional): if ``True``, then two ``NaN`` s will be compared as equal. Default: ``False``
 
 Example::
 
@@ -670,9 +670,9 @@ bincount(self, weights=None, minlength=0) -> Tensor
 Count the frequency of each value in an array of non-negative ints.
 
 The number of bins (size 1) is one larger than the largest value in
-:attr:`input` unless :attr:`input` is empty, in which case the result is a
+:attr:`self` unless :attr:`self` is empty, in which case the result is a
 tensor of size 0. If :attr:`minlength` is specified, the number of bins is at least
-:attr:`minlength` and if :attr:`input` is empty, then the result is tensor of size
+:attr:`minlength` and if :attr:`self` is empty, then the result is tensor of size
 :attr:`minlength` filled with zeros. If ``n`` is the value at position ``i``,
 ``out[n] += weights[i]`` if :attr:`weights` is specified else
 ``out[n] += 1``.
@@ -680,14 +680,14 @@ tensor of size 0. If :attr:`minlength` is specified, the number of bins is at le
 .. include:: cuda_deterministic.rst
 
 Arguments:
-    input (Tensor): 1-d int tensor
+    self (Tensor): 1-d int tensor
     weights (Tensor): optional, weight for each value in the input tensor.
         Should be of same size as input tensor.
     minlength (int): optional, minimum number of bins. Should be non-negative.
 
 Returns:
-    output (Tensor): a tensor of shape ``Size([max(input) + 1])`` if
-    :attr:`input` is non-empty, else ``Size(0)``
+    output (Tensor): a tensor of shape ``Size([max(self) + 1])`` if
+    :attr:`self` is non-empty, else ``Size(0)``
 
 Example::
 
@@ -1365,7 +1365,7 @@ Example::
 
 add_docstr(torch.diagflat,
            r"""
-diagflat(input, diagonal=0) -> Tensor
+diagflat(input, offset=0) -> Tensor
 
 - If :attr:`input` is a vector (1-D tensor), then returns a 2-D square tensor
   with the elements of :attr:`input` as the diagonal.
@@ -6397,6 +6397,8 @@ Arguments:
     window_length (int): the size of returned window
     periodic (bool, optional): If True, returns a window to be used as periodic
         function. If False, return a symmetric window.
+    alpha (float, optional): The coefficient :math:`\alpha` in the equation above
+    beta (float, optional): The coefficient :math:`\beta` in the equation above
     {dtype} Only floating point types are supported.
     layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
           ``torch.strided`` (dense layout) is supported.

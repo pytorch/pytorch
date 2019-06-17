@@ -470,17 +470,13 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
 
 ClassTypePtr ClassType::create(
     QualifiedName qualifiedName,
-    std::shared_ptr<CompilationUnit> cu) {
-  return ClassTypePtr(new ClassType(qualifiedName, std::move(cu)));
-}
-
-ClassTypePtr ClassType::createModuleType(std::shared_ptr<CompilationUnit> cu) {
-  return ClassTypePtr(new ClassType(
-      QualifiedName(QualifiedName("__torch__"), "$Module"), std::move(cu)));
+    std::shared_ptr<CompilationUnit> cu,
+    bool is_module) {
+  return ClassTypePtr(new ClassType(std::move(qualifiedName), std::move(cu), is_module));
 }
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassTypePtr(new ClassType(name_, compilation_unit_));
+  auto ptr = ClassType::create(name_, compilation_unit_);
   AT_ASSERT(numAttributes() == refined_slots.size());
   for(size_t i = 0; i < attributeNames_.size(); ++i) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
@@ -536,10 +532,12 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
 
 ClassType::ClassType(
     QualifiedName name,
-    std::shared_ptr<CompilationUnit> cu)
+    std::shared_ptr<CompilationUnit> cu,
+    bool is_module)
     : Type(TypeKind::ClassType),
       name_(std::move(name)),
-      compilation_unit_(std::move(cu)) {}
+      compilation_unit_(std::move(cu)),
+      is_module_(is_module) {}
 
 void TupleType::createFunctionSchema() {
   std::vector<Argument> arguments;
