@@ -212,22 +212,9 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
 Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::native::sum(self, {}, false, dtype);
 }
-
-Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim, c10::optional<ScalarType> dtype) {
-  return at::native::sum_out(result, self, dim, false, dtype);
-}
-
 Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
   Tensor result;
   return at::native::sum_out(result, self, dim, keepdim, dtype);
-}
-
-Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  return at::native::sum(self, dim, keepdim, c10::nullopt);
-}
-
-Tensor sum(const Tensor& self, IntArrayRef dim, c10::optional<ScalarType> dtype) {
-  return at::native::sum(self, dim, false, dtype);
 }
 
 static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,

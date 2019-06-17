@@ -1159,11 +1159,9 @@
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mean(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  matches_jit_signature: True
   variants: function, method
 
 - func: mean(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
