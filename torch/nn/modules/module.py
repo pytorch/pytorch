@@ -189,25 +189,13 @@ class Module(object):
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
-    def _apply(self, fn):
+    def _apply(self, fn, use_data=False):
         for module in self.children():
             module._apply(fn)
 
-        def compute_should_use_data(tensor, tensor_applied):
-            if torch._has_same_tensorimpl_type(tensor, tensor_applied):
-                # If the new tensor has the same TensorImpl type as the existing tensor,
-                # then we take `torch.__future__.get_overwrite_module_params_on_conversion()`
-                # into account.
-                return not torch.__future__.get_overwrite_module_params_on_conversion()
-            else:
-                # If the new tensor has a different TensorImpl type, we always overwrite
-                # the existing tensor.
-                return False
-
         for key, param in self._parameters.items():
             if param is not None:
-                should_use_data = compute_should_use_data(param, fn(torch.empty(1, dtype=param.dtype, layout=param.layout, device=param.device)))
-                if should_use_data:
+                if use_data:
                     # Tensors stored in modules are graph leaves, and we don't
                     # want to create copy nodes, so we have to unpack the data.
                     param.data = fn(param.data)
@@ -221,7 +209,7 @@ class Module(object):
                     self._parameters[key] = Parameter(param_applied, param.requires_grad)
 
                 if param.grad is not None:
-                    if should_use_data:
+                    if use_data:
                         param.grad.data = fn(param.grad.data)
                     else:
                         with torch.no_grad():
@@ -290,7 +278,9 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.cuda(device))
+        return self._apply(
+            lambda t: t.cuda(device),
+            use_data=not torch.__future__.get_overwrite_module_params_on_conversion())
 
     def cpu(self):
         r"""Moves all model parameters and buffers to the CPU.
@@ -298,7 +288,9 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.cpu())
+        return self._apply(
+            lambda t: t.cpu(),
+            use_data=not torch.__future__.get_overwrite_module_params_on_conversion())
 
     def type(self, dst_type):
         r"""Casts all parameters and buffers to :attr:`dst_type`.
@@ -309,7 +301,9 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.type(dst_type))
+        return self._apply(
+            lambda t: t.type(dst_type),
+            use_data=not torch.__future__.get_overwrite_module_params_on_conversion())
 
     def float(self):
         r"""Casts all floating point parameters and buffers to float datatype.
@@ -317,7 +311,9 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.float() if t.is_floating_point() else t)
+        return self._apply(
+            lambda t: t.float() if t.is_floating_point() else t,
+            use_data=not torch.__future__.get_overwrite_module_params_on_conversion())
 
     def double(self):
         r"""Casts all floating point parameters and buffers to ``double`` datatype.
@@ -325,7 +321,9 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.double() if t.is_floating_point() else t)
+        return self._apply(
+            lambda t: t.double() if t.is_floating_point() else t,
+            use_data=not torch.__future__.get_overwrite_module_params_on_conversion())
 
     def half(self):
         r"""Casts all floating point parameters and buffers to ``half`` datatype.
@@ -333,7 +331,9 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.half() if t.is_floating_point() else t)
+        return self._apply(
+            lambda t: t.half() if t.is_floating_point() else t,
+            use_data=not torch.__future__.get_overwrite_module_params_on_conversion())
 
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
@@ -411,7 +411,17 @@ class Module(object):
         def convert(t):
             return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
-        return self._apply(convert)
+        # yf225 TODO: simplify this with our new approach?
+        if torch.__future__.get_overwrite_module_params_on_conversion():
+            use_data = False
+        else:
+            param = list(parameters())[0]
+            if not torch._has_same_tensorimpl_type(param, convert(param)):
+                use_data = False
+            else:
+                use_data = True
+
+        return self._apply(convert, use_data=use_data)
 
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.
@@ -1045,7 +1055,7 @@ class Module(object):
                 p.grad.zero_()
 
     def share_memory(self):
-        return self._apply(lambda t: t.share_memory_())
+        return self._apply(lambda t: t.share_memory_(), use_data=True)
 
     def _get_name(self):
         return self.__class__.__name__
