@@ -4,6 +4,7 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <iostream>
 
 namespace at {
 
@@ -16,6 +17,8 @@ struct CAFFE2_API Dimname {
   NameType type() const { return type_; }
   Symbol full_name() const { return full_name_; }
   Symbol untagged_name() const { return untagged_name_; }
+
+  bool can_refer_to(const Dimname& other) const;
 
  private:
   Dimname(Symbol name)
@@ -42,6 +45,8 @@ bool CAFFE2_API is_valid_identifier(const std::string& name);
 
 CAFFE2_API c10::optional<Dimname> unify(Dimname dimname, Dimname other);
 CAFFE2_API bool match(Dimname dimname, Dimname other);
+
+std::ostream& operator<<(std::ostream& out, const Dimname& dimname);
 
 } // namespace at
 #endif

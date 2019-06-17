@@ -4,6 +4,15 @@
 
 namespace at {
 
+std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
+  if (dimname.type() == NameType::WILDCARD) {
+    out << "None";
+  } else {
+    out << "'" << dimname.full_name().toUnqualString() << "'";
+  }
+  return out;
+}
+
 bool is_valid_identifier(const std::string& name) {
   std::locale loc;
   if (name.length() == 0) {
@@ -16,6 +25,20 @@ bool is_valid_identifier(const std::string& name) {
     return false;
   }
   return true;
+}
+
+bool Dimname::can_refer_to(const Dimname& other) const {
+  switch (type()) {
+    case NameType::WILDCARD:
+      return false;
+
+    // "C" can be used to refer to "C" or "C.in".
+    case NameType::NORMAL:
+      return untagged_name() == other.untagged_name();
+
+    default:
+      return full_name() == other.full_name();
+  }
 }
 
 static void check_valid_identifier(const std::string& name) {
