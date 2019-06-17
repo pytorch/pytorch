@@ -148,6 +148,21 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
                          << " cannot be used as a tuple";
 }
 
+static bool isRecursive(const TypePtr& classType, const TypePtr& attrType) {
+  if (attrType->isSubtypeOf(classType)) {
+    return true;
+  }
+
+  // Recursively check contained types. We need to do this because a user may do
+  // A -> B -> A.
+  for (const auto& type : attrType->containedTypes()) {
+    if (isRecursive(classType, type)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void SimpleValue::setAttr(
     const SourceRange& loc,
     Function& m,
@@ -174,6 +189,14 @@ void SimpleValue::setAttr(
         m.graph()->inputs().at(0)->type() == classType;
 
     if (isInitializing) {
+      if (isRecursive(classType, newValue->type())) {
+        throw ErrorReport(loc)
+            << "Assignment to attribute '" << field
+            << "' cannot be of a type that contains class "
+            << "'" << classType->python_str() << "'.\n"
+            << "Classes that recursively contain instances of themselves"
+            << " are not yet supported";
+      }
       classType->addAttribute(field, newValue->type());
       expectedType = newValue->type();
 
