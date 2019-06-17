@@ -6,7 +6,7 @@
 #include <THC/THCTensor.hpp>
 
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 
 #include <THCUNN/generic/SpatialFullDilatedConvolution.cu>
 #include <THC/THCGenerateFloatTypes.h>

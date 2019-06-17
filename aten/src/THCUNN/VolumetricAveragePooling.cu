@@ -5,7 +5,7 @@
 #include <THC/THCDeviceTensorUtils.cuh>
 #include <THC/THCDeviceUtils.cuh>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCAtomics.cuh>
 
 template <typename Dtype, typename Acctype>
