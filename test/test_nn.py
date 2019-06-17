@@ -1559,7 +1559,10 @@ class TestNN(NNTestCase):
     def test_overwrite_module_params_on_conversion(self):
         torch.__future__.set_overwrite_module_params_on_conversion(False)
 
-        # yf225 TODO: add comment for this: changing impl to sparse will overwrite param regardless of overwrite_module_params_on_conversion settings
+        # Test that if the conversion function passed to `module._apply()`
+        # changes the TensorImpl type of `module`'s parameters, the `module`'s
+        # parameters are always overwritten, regardless of the value of
+        # `torch.__future__.get_overwrite_module_params_on_conversion()`.
         m = nn.Linear(20, 10)
         m.weight.grad = torch.randn(10, 20)
         weight_ref = m.weight
@@ -1568,8 +1571,10 @@ class TestNN(NNTestCase):
         self.assertNotEqual(weight_ref.layout, m.weight.layout)
         self.assertNotEqual(weight_grad_ref.layout, m.weight.grad.layout)
 
-        # Test that the current default behavior of
-        # yf225 TODO: add comment for this test! Saying that the current default behavior is just wrong
+        # Test that under the current default settings
+        # (`torch.__future__.get_overwrite_module_params_on_conversion() == False`),
+        # a view to a module's parameters is not pointing to the same storage as
+        # its base variable after converting the module to a different dtype.
         m = nn.Linear(2,3).float()
         mw = m.weight[:]
         m.double()
@@ -1579,11 +1584,13 @@ class TestNN(NNTestCase):
 
         torch.__future__.set_overwrite_module_params_on_conversion(True)
 
-        # yf225 TODO: add comment for this test! Saying that the future behavior (aka. not doing cpu-cuda inplace) is correct
+        # Test that if we set `torch.__future__.set_overwrite_module_params_on_conversion(True)`,
+        # a view to a module's parameters is still pointing to the same storage as
+        # its base variable after converting the module to a different dtype.
         m = nn.Linear(2,3).float()
         mw = m.weight[:]
         m.double()
-        mw[0][0] = 5   # yf225 TODO: fix comment: We have a view on the old thing, and that needs to be consistent
+        mw[0][0] = 5
         self.assertTrue(mw[0][0] == mw._base[0][0])
 
         # Test that when `torch.__future__.get_overwrite_module_params_on_conversion()`
@@ -1600,7 +1607,7 @@ class TestNN(NNTestCase):
         def add_one_inplace(t):
             return t.add_(1.0)
 
-        # yf225 TODO: fix this comment: add in-place `fn` and make sure the version counter bumps
+        # yf225 TODO: fix this comment:
         # Test that when `torch.__future__.get_overwrite_module_params_on_conversion()`
         # is true, `cpu_module.to("cuda")` invalidates `cpu_module`'s original
         # parameters in any autograd graph they participate in.
@@ -1609,6 +1616,7 @@ class TestNN(NNTestCase):
         weight_ref = m.weight
         m_weight_version_saved = weight_ref._version
         m = m._apply(add_one_inplace)
+        # Test that the in-place operation bumps the original parameter's version counter
         self.assertGreater(weight_ref._version, m_weight_version_saved)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pvm.backward(torch.randn(10, 20))
