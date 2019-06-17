@@ -513,14 +513,6 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     return out;
 }
 
-ClassType::ClassType(
-    QualifiedName name,
-    std::shared_ptr<CompilationUnit> cu,
-    bool is_module)
-    : SerializableType(TypeKind::ClassType, name),
-      compilation_unit_(std::move(cu)),
-      is_module_(is_module) {}
-
 void TupleType::NamedTupleSpec::createFunctionSchema() {
   std::vector<Argument> arguments;
   for (size_t i = 0; i < types.size(); ++i) {

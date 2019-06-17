@@ -850,7 +850,7 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
 struct CAFFE2_API TupleType : public Type {
-  struct NamedTupleSpec {
+  struct CAFFE2_API NamedTupleSpec {
     // Storing types here too is redundant but it makes encapsulating NamedTuple functionality
     // easier.
     NamedTupleSpec(std::vector<TypePtr> types, NameList names, c10::optional<c10::QualifiedName> qualName=c10::nullopt)
