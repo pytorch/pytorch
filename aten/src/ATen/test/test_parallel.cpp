@@ -61,11 +61,11 @@ TEST(TestParallel, IntraOpLaunchFuture) {
   });
 
   auto fut2 = at::intraop_launch_future([&v2](){
-    v2 = 1;
+    v2 = 2;
   });
 
   fut1.wait();
   fut2.wait();
 
-  ASSERT_TRUE(v1 == 1 && v2 == 1);
+  ASSERT_TRUE(v1 == 1 && v2 == 2);
 }
