@@ -103,9 +103,9 @@ class ScriptModuleOp final : public Operator<Context> {
     IValue output = method(inputs);
     if (output.isTuple()) {
       auto elems = std::move(output).toTuple();
-      CAFFE_ENFORCE_EQ(elems.elements().size(), OutputSize());
-      for (int i = 0; i < elems.elements().size(); ++i) {
-        this->SetOutputTensor(i, castIValueToTensor(elems.elements()[i]));
+      CAFFE_ENFORCE_EQ(elems->elements().size(), OutputSize());
+      for (int i = 0; i < elems->elements().size(); ++i) {
+        this->SetOutputTensor(i, castIValueToTensor(elems->elements()[i]));
       }
     } else if (output.isTensor()) {
       CAFFE_ENFORCE_EQ(1, OutputSize());
