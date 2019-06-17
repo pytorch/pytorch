@@ -273,6 +273,7 @@ class TestSparse(TestCase):
         else:
             return tensor.to_dense()
 
+    @skipIfRocm
     def test_to_sparse(self):
         shape = [10, 5, 19, 8]
         max_nnz = 1
