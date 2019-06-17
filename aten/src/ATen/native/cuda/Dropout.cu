@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/CUDAGenerator.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <c10/macros/Macros.h>
@@ -87,7 +88,7 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor
 
 std::tuple<Tensor,Tensor>
 fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, detail::getCUDAHooks().getDefaultCUDAGenerator());
+  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   Tensor ret = at::empty_like(self);
   Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte));
   const int64_t nelem = self.numel();

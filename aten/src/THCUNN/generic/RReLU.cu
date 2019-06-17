@@ -3,6 +3,7 @@
 #else
 
 #include <THCUNN/common.h>
+#include <ATen/CUDAGenerator.h>
 
 void THNN_(RReLU_updateOutput)(
            THCState *state,
@@ -16,7 +17,7 @@ void THNN_(RReLU_updateOutput)(
            void *generator)
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
-  auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator();
+  auto gen = at::cuda::detail::getDefaultCUDAGenerator();
   if (train)
   {
     input = THCTensor_(newContiguous)(state, input);

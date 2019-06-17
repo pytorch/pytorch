@@ -1,5 +1,6 @@
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/CUDAGenerator.h>
+
+#include <ATen/Generator.h>
 
 // TODO: No need to have this whole header, we can just put it all in
 // the cpp file
@@ -10,8 +11,7 @@ namespace at { namespace cuda { namespace detail {
 struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
   std::unique_ptr<THCState, void(*)(THCState*)> initCUDA() const override;
-  CUDAGenerator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
-  std::shared_ptr<CUDAGenerator> createCUDAGenerator(DeviceIndex device_index = -1) const override;
+  Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;

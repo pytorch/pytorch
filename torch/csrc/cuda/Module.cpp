@@ -7,7 +7,7 @@
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/CUDAGenerator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #ifdef USE_NCCL
@@ -336,7 +336,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for(int i = 0; i < num_gpus; i++) {
-    auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(i);
+    auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
     auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
     // This reference is meant to be given away, so no need to incref here.
     PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);

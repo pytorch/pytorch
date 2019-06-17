@@ -25,4 +25,13 @@ private:
   uint64_t philox_offset_per_thread_ = 0;
 };
 
-}
+namespace cuda {
+namespace detail {
+
+  CAFFE2_API CUDAGenerator* getDefaultCUDAGenerator(DeviceIndex device_index = -1);
+  CAFFE2_API std::shared_ptr<CUDAGenerator> createCUDAGenerator(DeviceIndex device_index = -1);
+
+} // namespace detail
+} // namespace cuda
+} // namespace at
+

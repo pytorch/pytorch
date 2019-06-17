@@ -2,7 +2,7 @@
 #include <torch/csrc/jit/fuser/compiler.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/CUDAGenerator.h>
 #include <THC/THC.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
@@ -222,7 +222,7 @@ void FusedKernelCUDA::launch_raw(
   if (has_random_) {
     const auto rand_offset =
         4 * (std::ceil(numel / (4.0 * kBlockSize * nBlocks)) + 1);
-    auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator();
+    auto gen = at::cuda::detail::getDefaultCUDAGenerator();
     auto philox_engine_inputs = gen->philox_engine_inputs(rand_offset);
     arguments.push_back(&philox_engine_inputs.first);
     arguments.push_back(&philox_engine_inputs.second);

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/core/Generator.h>
 #include <c10/util/Exception.h>
 
 #include <c10/util/Registry.h>
@@ -58,12 +58,8 @@ struct CAFFE2_API CUDAHooksInterface {
     AT_ERROR("Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual CUDAGenerator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
+  virtual Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
     AT_ERROR("Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
-  }
-
-  virtual std::shared_ptr<CUDAGenerator> createCUDAGenerator(DeviceIndex device_index = -1) const {
-    AT_ERROR("Cannot create CUDA generator without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual bool hasCUDA() const {

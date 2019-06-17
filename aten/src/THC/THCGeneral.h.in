@@ -20,18 +20,9 @@
 
 # define THC_EXTERNC extern "C"
 
-#ifdef _WIN32
-# if defined(ATen_cuda_EXPORTS) || defined(caffe2_gpu_EXPORTS) || defined(CAFFE2_CUDA_BUILD_MAIN_LIB)
-#  define THC_API THC_EXTERNC __declspec(dllexport)
-#  define THC_CLASS __declspec(dllexport)
-# else
-#  define THC_API THC_EXTERNC __declspec(dllimport)
-#  define THC_CLASS __declspec(dllimport)
-# endif
-#else
-# define THC_API THC_EXTERNC
-# define THC_CLASS
-#endif
+// TH & THC are now part of the same library as ATen and Caffe2
+#define THC_API THC_EXTERNC CAFFE2_API
+#define THC_CLASS CAFFE2_API
 
 #ifndef THAssert
 #define THAssert(exp)                                                   \

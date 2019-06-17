@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/CUDAGenerator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <cuda.h>
@@ -160,7 +160,7 @@ TEST(CUDAGenerator, TestPhiloxEngineIndex) {
 TEST(CUDAGenerator, TestGeneratorDynamicCast) {
   //  Test Description: Check dynamic cast for CUDA
   if (!at::cuda::is_available()) return;
-  std::shared_ptr<Generator> foo = at::detail::getCUDAHooks().createCUDAGenerator();
+  std::shared_ptr<Generator> foo = at::cuda::detail::createCUDAGenerator();
   auto result = dynamic_cast<at::CUDAGenerator*>(foo.get());
   ASSERT_EQ(typeid(at::CUDAGenerator*).hash_code(), typeid(result).hash_code());
 }
@@ -170,17 +170,17 @@ TEST(CUDAGenerator, TestDefaultGenerator) {
   // Check if default generator state is created only once
   // address of generator should be same in all calls
   if (!at::cuda::is_available()) return;
-  auto foo = at::detail::getCUDAHooks().getDefaultCUDAGenerator();
-  auto bar = at::detail::getCUDAHooks().getDefaultCUDAGenerator();
+  auto foo = at::cuda::detail::getDefaultCUDAGenerator();
+  auto bar = at::cuda::detail::getDefaultCUDAGenerator();
   ASSERT_EQ(foo, bar);
 
   if (c10::cuda::device_count() >= 2) {
-    foo = at::detail::getCUDAHooks().getDefaultCUDAGenerator(1);
-    bar = at::detail::getCUDAHooks().getDefaultCUDAGenerator(1);
+    foo = at::cuda::detail::getDefaultCUDAGenerator(1);
+    bar = at::cuda::detail::getDefaultCUDAGenerator(1);
     ASSERT_EQ(foo, bar);
 
-    foo = at::detail::getCUDAHooks().getDefaultCUDAGenerator(0);
-    bar = at::detail::getCUDAHooks().getDefaultCUDAGenerator(1);
+    foo = at::cuda::detail::getDefaultCUDAGenerator(0);
+    bar = at::cuda::detail::getDefaultCUDAGenerator(1);
     ASSERT_NE(foo, bar);
   }
 }
@@ -191,10 +191,10 @@ TEST(CUDAGenerator, TestCloning) {
   // Note that we don't allow cloning of other
   // generator states into default generators.
   if (!at::cuda::is_available()) return;
-  auto gen1 = at::detail::getCUDAHooks().createCUDAGenerator();
+  auto gen1 = at::cuda::detail::createCUDAGenerator();
   gen1->set_current_seed(123); // modify gen1 state
   gen1->set_philox_offset_per_thread(4);
-  auto gen2 = at::detail::getCUDAHooks().createCUDAGenerator();
+  auto gen2 = at::cuda::detail::createCUDAGenerator();
   gen2 = gen1->clone();
   ASSERT_EQ(gen1->current_seed(), gen2->current_seed());
   ASSERT_EQ(gen1->philox_offset_per_thread(), gen2->philox_offset_per_thread());
@@ -212,7 +212,7 @@ TEST(CUDAGenerator, TestMultithreadingGetSetCurrentSeed) {
   // Test current seed getter and setter are thread safe
   // See Note [Acquire lock when using random generators]
   if (!at::cuda::is_available()) return;
-  auto gen1 = at::detail::getCUDAHooks().getDefaultCUDAGenerator();
+  auto gen1 = at::cuda::detail::getDefaultCUDAGenerator();
   auto initial_seed = gen1->current_seed();
   std::thread t0{thread_func_get_set_current_seed, gen1};
   std::thread t1{thread_func_get_set_current_seed, gen1};
@@ -229,8 +229,8 @@ TEST(CUDAGenerator, TestRNGForking) {
   // restored
   // See Note [Acquire lock when using random generators]
   if (!at::cuda::is_available()) return;
-  auto default_gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator();
-  auto current_gen = at::detail::getCUDAHooks().createCUDAGenerator();
+  auto default_gen = at::cuda::detail::getDefaultCUDAGenerator();
+  auto current_gen = at::cuda::detail::createCUDAGenerator();
   {
     std::lock_guard<std::mutex> lock(default_gen->mutex_);
     current_gen = default_gen->clone(); // capture the current state of default generator

@@ -1132,8 +1132,8 @@ def ones_like(g, input, dtype, layout, device, pin_memory=False):
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     const_value = sym_help._maybe_get_const(value, 't')
     if sym_help._is_value(const_value):
-        tmp = zeros(sizes, dtype, layout, device)
-        return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
+        tmp = zeros(g, sizes, dtype, layout, device)
+        return add(g, tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = sym_help._get_const(dtype, 'i', 'dtype')
         return g.op("ConstantOfShape", sizes,
@@ -1248,8 +1248,8 @@ def pixel_shuffle(g, self, upscale_factor):
     if len(dims) != 4:
         return _unimplemented("pixel_shuffle", "only support 4d input")
     output_channel = dims[1] // upscale_factor // upscale_factor
-    after_view = view(g, self, [-1, upscale_factor, upscale_factor,
-                                output_channel, dims[2], dims[3]])
+    after_view = view(g, self, [-1, output_channel, upscale_factor, upscale_factor,
+                                dims[2], dims[3]])
     after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
     return view(g, after_transpose,
                 [-1, output_channel, dims[2] * upscale_factor, dims[3] *

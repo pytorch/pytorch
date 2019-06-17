@@ -38,7 +38,7 @@ void THCTensor_(multinomial)(struct THCState *state,
                               int with_replacement)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, prob_dist));
-  auto gen = at::get_generator_or_default<at::CUDAGenerator>(gen_, at::detail::getCUDAHooks().getDefaultCUDAGenerator());
+  auto gen = at::get_generator_or_default<at::CUDAGenerator>(gen_, at::cuda::detail::getDefaultCUDAGenerator());
   int inputSize = THCTensor_(nDimensionLegacyAll)(state, prob_dist);
   THArgCheck(inputSize > 0 && inputSize <= 2, 2,
              "prob_dist must be 1 or 2 dim");
@@ -283,7 +283,7 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, a
   THArgCheck(n_sample > 0, 3, "cannot sample <= 0 samples");
   THAssert(THCTensor_(isContiguous)(state, _q));
   THAssert(THCudaLongTensor_isContiguous(state, _J));
-  auto gen = at::get_generator_or_default<at::CUDAGenerator>(gen_, at::detail::getCUDAHooks().getDefaultCUDAGenerator());
+  auto gen = at::get_generator_or_default<at::CUDAGenerator>(gen_, at::cuda::detail::getDefaultCUDAGenerator());
   int64_t K = THCudaLongTensor_nElement(state, _J);
   THCudaLongTensor_resize1d(state, self, n_sample);
   ptrdiff_t size = THCudaLongTensor_nElement(state, self);

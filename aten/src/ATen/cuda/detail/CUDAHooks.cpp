@@ -1,6 +1,6 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
 
-#include <c10/cuda/CUDAFunctions.h>
+#include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
 #include <ATen/RegisterCUDA.h>
 #include <ATen/cuda/CUDAConfig.h>
@@ -53,64 +53,8 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
       });
 }
 
-// Ensures we only call cudaGetDeviceCount only once.
-static std::once_flag num_gpu_init_flag;
-
-// Total number of gpus in the system.
-static int64_t num_gpus;
-
-// Ensures default_gens_cuda is initialized once.
-static std::deque<std::once_flag> cuda_gens_init_flag;
-
-// Default, global CUDA generators, one per GPU.
-static std::vector<std::shared_ptr<CUDAGenerator>> default_gens_cuda;
-
-/* 
-* Populates the global variables related to CUDA generators
-* Warning: this function must only be called once!
-*/
-static void initCUDAGenVector(){
-  num_gpus = c10::cuda::device_count();
-  cuda_gens_init_flag.resize(num_gpus);
-  default_gens_cuda.resize(num_gpus);
-}
-
-/**
- * PyTorch maintains a collection of default generators that get
- * initialized once. The purpose of these default generators is to
- * maintain a global running state of the pseudo random number generation,
- * when a user does not explicitly mention any generator.
- * getDefaultCUDAGenerator gets the default generator for a particular
- * cuda device.
- */
-CUDAGenerator* CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
-  std::call_once(num_gpu_init_flag, initCUDAGenVector);
-  DeviceIndex idx = device_index;
-  if (idx == -1) {
-    idx = c10::cuda::current_device();
-  }
-  TORCH_CHECK(idx >= 0 && idx < num_gpus);
-  std::call_once(cuda_gens_init_flag[idx], [&] {
-    default_gens_cuda[idx] = std::make_shared<CUDAGenerator>(idx);
-    default_gens_cuda[idx]->seed();
-  });
-  return default_gens_cuda[idx].get();
-}
-
-/**
- * Utility to create a CUDAGenerator. Returns a shared_ptr
- */
-std::shared_ptr<CUDAGenerator> CUDAHooks::createCUDAGenerator(DeviceIndex device_index) const {
-  std::call_once(num_gpu_init_flag, initCUDAGenVector);
-  DeviceIndex idx = device_index;
-  if (idx == -1) {
-    idx = c10::cuda::current_device();
-  }
-  TORCH_CHECK(idx >= 0 && idx < num_gpus, "The device_index is invalid.");
-  auto gen = std::make_shared<CUDAGenerator>(idx);
-  gen->set_current_seed(default_rng_seed_val);
-  gen->set_philox_offset_per_thread(0);
-  return gen;
+Generator* CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
+  return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 
 bool CUDAHooks::hasCUDA() const {

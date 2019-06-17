@@ -27,6 +27,44 @@ inline c10::ListPtr<at::Tensor> _call_caffe2_op(
   return std::move(op).move_newstyle_outputs();
 }
 
+inline at::Tensor unwrap_tensor(at::Tensor&& tensor) {
+  if (tensor.is_variable()) {
+    auto tensor_impl = tensor.unsafeGetTensorImpl();
+    auto tensor_impl_copy = tensor_impl->shallow_copy_and_detach(
+    /*version_counter=*/tensor_impl->version_counter(),
+    /*allow_tensor_metadata_change=*/tensor_impl->allow_tensor_metadata_change());
+    return at::Tensor(tensor_impl_copy);
+  } else {
+    return std::move(tensor);
+  }
+}
+
+inline IValue unwrap(IValue&& ivalue) {
+  // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
+  if (ivalue.isTensor() && ivalue.toTensor().defined()) {
+    return unwrap_tensor(std::move(ivalue).toTensor());
+  } else if (ivalue.isTensorList()) {
+    c10::ListPtr<at::Tensor> list = std::move(ivalue).toTensorList();
+    for (size_t i = 0; i < list.size(); ++i) {
+      list[i] = unwrap_tensor(list.extract(i));
+    }
+    return std::move(list);
+  } else if (ivalue.isGenericList()) {
+    c10::impl::GenericListPtr list = std::move(ivalue).toGenericList();
+    for (size_t i = 0; i < list.size(); ++i) {
+      list[i] = unwrap(list.extract(i));
+    }
+    return std::move(list);
+  } else if (ivalue.isGenericDict()) {
+    for (auto& item : ivalue.toGenericDict()) {
+      item.setValue(unwrap(item.value()));
+    }
+    return std::move(ivalue);
+  } else {
+    return std::move(ivalue);
+  }
+}
+
 // This function is inline in the hope that compilers optimizing for speed will
 // inline it into call_caffe2_op_from_c10, allowing call_op to be inlined and
 // avoiding the function pointer indirection, while compilers optimizing for
@@ -63,6 +101,11 @@ inline void _call_caffe2_op_from_c10(
   } else {
     AT_ASSERT(preallocated_outputs.isTensorList());
     outputs = std::move(preallocated_outputs).toTensorList();
+  }
+
+  // unwrap tensor inputs from variable
+  for (auto iter = stack->end() - num_inputs; iter != stack->end(); ++iter) {
+    *iter = unwrap(std::move(*iter));
   }
 
   // TODO Avoid vector allocation. One idea would be to keep the std::vector

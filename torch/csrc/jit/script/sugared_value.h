@@ -215,6 +215,23 @@ struct TORCH_API ClassValue : public SugaredValue {
   ClassTypePtr type_;
 };
 
+struct TORCH_API NamedTupleConstructor : public SugaredValue {
+  explicit NamedTupleConstructor(TupleTypePtr type) : type_(std::move(type)) {}
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+  std::string kind() const override {
+    return type_->str();
+  }
+
+  TupleTypePtr type_;
+};
+
 struct FunctionValue : public SugaredValue {
   FunctionValue(std::shared_ptr<Function> callee)
       : callee_(std::move(callee)) {}

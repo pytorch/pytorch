@@ -597,7 +597,9 @@ class optional : private OptionalBase<T> {
     return contained_val();
   }
 
-  constexpr T const& value() const {
+  // This might be constexpr, but MSVC+cuda don't like combination of constexpr
+  // and throw.
+  T const& value() const {
     return initialized()
         ? contained_val()
         : (throw bad_optional_access("bad optional access"), contained_val());
