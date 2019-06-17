@@ -16286,7 +16286,7 @@ class TestClassType(JitTestCase):
         """
         Recursive class types not yet supported. We should give a good error message.
         """
-        with self.assertRaisesRegex(RuntimeError, "Recursive class attributes not yet supported"):
+        with self.assertRaises(RuntimeError):
             @torch.jit.script  # noqa: B903
             class Tree(object):
                 def __init__(self):
