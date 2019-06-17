@@ -178,20 +178,22 @@ struct PythonPrintPass {
   std::vector<c10::SerializableTypePtr>& class_table_;
   std::vector<c10::SerializableTypePtr> class_deps_;
   // Helper to avoid duplicating class types
-  void addToClassTable(const c10::SerializableTypePtr& classType) {
+  void addToClassTable(const c10::SerializableTypePtr& type) {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
     // to get imported twice.
-    if (classType->is_module()) {
-      return;
+    if (auto classType = type->cast<ClassType>()) {
+      if (classType->is_module()) {
+        return;
+      }
     }
-    if (std::find(class_table_.cbegin(), class_table_.cend(), classType) ==
+    if (std::find(class_table_.cbegin(), class_table_.cend(), type) ==
         class_table_.cend()) {
-      class_table_.push_back(classType);
+      class_table_.push_back(type);
     }
-    if (std::find(class_deps_.cbegin(), class_deps_.cend(), classType) ==
+    if (std::find(class_deps_.cbegin(), class_deps_.cend(), type) ==
         class_deps_.cend()) {
-      class_deps_.push_back(classType);
+      class_deps_.push_back(type);
     }
   }
 
