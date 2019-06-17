@@ -64,7 +64,7 @@ inline void parallel_for(
     // using shared_ptr to share ownership of the future with the lambda,
     // to ensure we don't destroy future while lambda is still
     // running in markCompleted
-    std::vector<std::promise<void>> promises(num_tasks);
+    std::vector<std::promise<bool>> promises(num_tasks);
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       int64_t local_start = begin + task_id * chunk_size;
       if (local_start < end) {
@@ -73,11 +73,11 @@ inline void parallel_for(
           // copy task_id, local_start, local_end
           [&task, &promises, task_id, local_start, local_end]() {
             task(task_id, local_start, local_end);
-            promises[task_id].set_value();
+            promises[task_id].set_value(true);
           }
         );
       } else {
-        promises[task_id].set_value();
+        promises[task_id].set_value(true);
       }
     }
 
@@ -132,7 +132,7 @@ inline scalar_t parallel_reduce(
       internal::_unset_thread_num();
     };
 
-    std::vector<std::promise<void>> promises(num_tasks);
+    std::vector<std::promise<bool>> promises(num_tasks);
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       int64_t local_start = begin + task_id * chunk_size;
       if (local_start < end) {
@@ -141,11 +141,11 @@ inline scalar_t parallel_reduce(
           // copy task_id, local_start, local_end
           [&task, &promises, task_id, local_start, local_end]() {
             task(task_id, local_start, local_end);
-            promises[task_id].set_value();
+            promises[task_id].set_value(true);
           }
         );
       } else {
-        promises[task_id].set_value();
+        promises[task_id].set_value(true);
       }
     }
 
