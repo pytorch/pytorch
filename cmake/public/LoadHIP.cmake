@@ -152,7 +152,7 @@ IF(HIP_FOUND)
 
   find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
   find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/hipcub")
-  #find_package(rocthrust REQUIRED)
+  find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
   
   # TODO: hip_hcc has an interface include flag "-hc" which is only
   # recognizable by hcc, but not gcc and clang. Right now in our
@@ -170,7 +170,5 @@ IF(HIP_FOUND)
   # Necessary includes for building PyTorch since we include HIP headers that depend on hcc/hsa headers.
   set(hcc_INCLUDE_DIRS ${HCC_PATH}/include)
   set(hsa_INCLUDE_DIRS ${HSA_PATH}/include)
-
-  #set(thrust_INCLUDE_DIRS ${THRUST_PATH} ${THRUST_PATH}/thrust/system/cuda/detail/cub-hip)
 
 ENDIF()
