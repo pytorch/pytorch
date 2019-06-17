@@ -6,21 +6,13 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
+#include <ATen/native/cuda/LaunchUtils.h>
 
 namespace at {
 namespace native {
 namespace {
 
 #define MAX_THREADS 512
-
-static int lastPow2(unsigned int n) {
-  n |= (n >> 1);
-  n |= (n >> 2);
-  n |= (n >> 4);
-  n |= (n >> 8);
-  n |= (n >> 16);
-  return n - (n >> 1);
-}
 
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
@@ -76,11 +68,6 @@ __global__ void upsample_nearest2d_backward_out_frame(
     size_t dst_dim_h,
     size_t dst_dim_w,
     scalar_t* grad_i) {
-  assert(gridDim.y == 1);
-  assert(gridDim.z == 1);
-  assert(blockDim.y == 1);
-  assert(blockDim.z == 1);
-
   size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_h * dst_dim_w)
     return;
@@ -90,15 +77,15 @@ __global__ void upsample_nearest2d_backward_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (float)src_dim_h / dst_dim_h;
+  float scale_factor = (float)src_dim_h / (float)dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
-  int src_y = (int)ceilf(dst_y * scale_factor);
-  int src_y_up = min((int)ceilf((dst_y + 1) * scale_factor), (int)src_dim_h);
+  int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
+  int src_y_up = nearest_neighbor_compute_source_index(scale_factor, dst_y+1, src_dim_h+1);
 
-  scale_factor = (float)src_dim_w / dst_dim_w;
+  scale_factor = (float)src_dim_w / (float)dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
-  int src_x = (int)ceilf(dst_x * scale_factor);
-  int src_x_up = min((int)ceilf((dst_x + 1) * scale_factor), (int)src_dim_w);
+  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
@@ -233,8 +220,6 @@ static void upsample_nearest2d_backward_out_cuda_template(
   grad_input.resize_({nbatch, channels, input_height, input_width});
 
   grad_input.zero_();
-
-  int nc = nbatch * channels;
 
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(

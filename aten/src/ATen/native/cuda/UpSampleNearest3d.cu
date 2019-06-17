@@ -27,10 +27,6 @@ __global__ void upsample_nearest3d_out_frame(
     size_t dst_dim_h,
     size_t dst_dim_w,
     scalar_t* output) {
-  assert(gridDim.y == 1);
-  assert(gridDim.z == 1);
-  assert(blockDim.y == 1);
-  assert(blockDim.z == 1);
 
   size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
@@ -41,17 +37,17 @@ __global__ void upsample_nearest3d_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (float)src_dim_d / dst_dim_d;
+  float scale_factor = (float)src_dim_d / (float)dst_dim_d;
   int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
-  int src_z = min((int)(dst_z * scale_factor), (int)src_dim_d - 1);
+  int src_z = nearest_neighbor_compute_source_index(scale_factor, dst_z, src_dim_d);
 
-  scale_factor = (float)src_dim_h / dst_dim_h;
+  scale_factor = (float)src_dim_h / (float)dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
-  int src_y = min((int)(dst_y * scale_factor), (int)src_dim_h - 1);
+  int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
 
-  scale_factor = (float)src_dim_w / dst_dim_w;
+  scale_factor = (float)src_dim_w / (float)dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
-  int src_x = min((int)(dst_x * scale_factor), (int)src_dim_w - 1);
+  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
 
   size_t src_idx = c * src_c_stride + src_z * src_dim_h * src_dim_w +
       src_y * src_dim_w + src_x;
@@ -76,10 +72,6 @@ __global__ void upsample_nearest3d_backward_out_frame(
     size_t dst_dim_h,
     size_t dst_dim_w,
     scalar_t* grad_i) {
-  assert(gridDim.y == 1);
-  assert(gridDim.z == 1);
-  assert(blockDim.y == 1);
-  assert(blockDim.z == 1);
 
   size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
@@ -90,20 +82,20 @@ __global__ void upsample_nearest3d_backward_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (float)src_dim_d / dst_dim_d;
+  float scale_factor = (float)src_dim_d / (float)dst_dim_d;
   int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
-  int src_z = min((int)ceilf(dst_z * scale_factor), (int)src_dim_d - 1);
-  int src_z_up = min((int)ceilf((dst_z + 1) * scale_factor), (int)src_dim_d);
+  int src_z = nearest_neighbor_compute_source_index(scale_factor, dst_z, src_dim_d);
+  int src_z_up = nearest_neighbor_compute_source_index(scale_factor, dst_z+1, src_dim_d+1);
 
-  scale_factor = (float)src_dim_h / dst_dim_h;
+  scale_factor = (float)src_dim_h / (float)dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
-  int src_y = min((int)ceilf(dst_y * scale_factor), (int)src_dim_h - 1);
-  int src_y_up = min((int)ceilf((dst_y + 1) * scale_factor), (int)src_dim_h);
+  int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
+  int src_y_up = nearest_neighbor_compute_source_index(scale_factor, dst_y+1, src_dim_h+1);
 
-  scale_factor = (float)src_dim_w / dst_dim_w;
+  scale_factor = (float)src_dim_w / (float)dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
-  int src_x = min((int)ceilf(dst_x * scale_factor), (int)src_dim_w - 1);
-  int src_x_up = min((int)ceilf((dst_x + 1) * scale_factor), (int)src_dim_w);
+  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
@@ -167,6 +159,7 @@ static void upsample_nearest3d_out_cuda_template(
                   output_width});
   output.zero_();
 
+  // upsample_3d_shape_check makes sure `nbatch != 0`
   unsigned int n = output.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
@@ -243,6 +236,7 @@ static void upsample_nearest3d_backward_out_cuda_template(
       {nbatch, channels, input_depth, input_height, input_width});
   grad_input.zero_();
 
+  // upsample_3d_shape_check makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};

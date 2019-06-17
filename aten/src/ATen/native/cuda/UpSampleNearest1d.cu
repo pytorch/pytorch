@@ -26,12 +26,12 @@ __global__ void upsample_nearest1d_out_frame(
   if (dst_idx >= dim_c * dst_dim_w)
     return;
 
-  float scale_factor = (float)dst_dim_w / src_dim_w;
+  float scale_factor = (float)src_dim_w / (float)dst_dim_w;
 
   int c = (dst_idx / dst_dim_w) % dim_c;
 
   int dst_x = dst_idx % dst_dim_w;
-  int src_x = min((int)(dst_x / scale_factor), (int)src_dim_w - 1);
+  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
 
   size_t src_idx = c * src_dim_w + src_x;
   int src_stride = dim_c * src_dim_w;
@@ -54,22 +54,18 @@ __global__ void upsample_nearest1d_backward_out_frame(
     size_t src_dim_w,
     size_t dst_dim_w,
     scalar_t* grad_i) {
-  assert(gridDim.y == 1);
-  assert(gridDim.z == 1);
-  assert(blockDim.y == 1);
-  assert(blockDim.z == 1);
 
   size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_w)
     return;
 
-  float scale_factor = (float)src_dim_w / dst_dim_w;
+  float scale_factor = (float)src_dim_w / (float)dst_dim_w;
 
   int c = (dst_idx / (dst_dim_w)) % dim_c;
 
   int dst_x = dst_idx % dst_dim_w;
-  int src_x = (int)ceilf(dst_x * scale_factor);
-  int src_x_up = min((int)ceilf((dst_x + 1) * scale_factor), (int)src_dim_w);
+  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
@@ -109,6 +105,7 @@ static void upsample_nearest1d_out_cuda_template(
   output.resize_({input.size(0), input.size(1), output_width});
   output.zero_();
 
+  // upsample_1d_shape_check makes sure `nbatch != 0`
   unsigned int n = output.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
@@ -162,6 +159,7 @@ static void upsample_nearest1d_backward_out_cuda_template(
   grad_input.resize_({nbatch, channels, input_width});
   grad_input.zero_();
 
+  // upsample_1d_shape_check makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
