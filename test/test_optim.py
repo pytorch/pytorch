@@ -653,7 +653,7 @@ class TestLRScheduler(TestCase):
         for _ in range(10):
             scheduler.step(2)
             l.append(self.opt.param_groups[0]['lr'])
-        self.assertAlmostEqual(min(l), max(l))
+        self.assertEqual(min(l), max(l))
 
     def test_step_lr_is_constant_for_constant_epoch(self):
         scheduler = StepLR(self.opt, 2)

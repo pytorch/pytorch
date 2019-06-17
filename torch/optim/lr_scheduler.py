@@ -63,6 +63,10 @@ class _LRScheduler(object):
     def get_lr(self):
         raise NotImplementedError
 
+    def get_lr_closed_form(self):
+        # NOTE [LR Closed Form] Compute the learning rate with the closed form of the scheduler
+        raise NotImplementedError
+
     def step(self, epoch=None):
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
@@ -86,16 +90,21 @@ class _LRScheduler(object):
         get_lr = self.get_lr
         if epoch is None:
             epoch = self.last_epoch + 1
-        elif ((self.last_epoch > 0 or epoch != 0)
-                and epoch != self.last_epoch + 1
-                and hasattr(self, 'get_lr_closed_form')):
-            get_lr = self.get_lr_closed_form
-            warnings.warn(
-                "If an epoch parameter different from the current epoch is passed, "
-                "the recursive form of the scheduler is overridden by its closed form "
-                "whenver available, and will be deprecated.",
-                DeprecationWarning
-            )
+        elif (
+            (self.last_epoch > 0 or epoch != 0)
+            and epoch != self.last_epoch + 1
+            and hasattr(self, "get_lr_closed_form")
+        ):
+            try:
+                get_lr = self.get_lr_closed_form
+                warnings.warn(
+                    "If an epoch parameter different from the current epoch is passed, "
+                    "the recursive form of the scheduler is overridden by its closed form "
+                    "whenver available, and will be deprecated.",
+                    DeprecationWarning,
+                )
+            except NotImplementedError:
+                pass
 
         self.last_epoch = epoch
         for param_group, lr in zip(self.optimizer.param_groups, get_lr()):
