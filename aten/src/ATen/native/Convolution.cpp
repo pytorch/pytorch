@@ -518,7 +518,7 @@ at::Tensor _convolution_nogroup(
   } else {  /* Not transposed */
     if (dim == 4) {
       if (dilated) {
-        return at::thnn_conv_dilated2d(
+        return at::conv_dilated2d(
             input, weight, kernel_size, bias,
             stride, padding, dilation);
       } else {  /* dim == 4, non-dilated */
@@ -536,7 +536,7 @@ at::Tensor _convolution_nogroup(
         }
       }
     } else if (dim == 5 && (input.is_cuda() || dilated)) {
-      return at::thnn_conv_dilated3d(
+      return at::conv_dilated3d(
           input, weight, kernel_size, bias,
           stride, padding, dilation);
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
