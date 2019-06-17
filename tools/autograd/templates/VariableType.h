@@ -25,6 +25,7 @@ using at::DimnameList;
 using at::Generator;
 using at::IntArrayRef;
 using at::MemoryFormat;
+using at::QScheme;
 using at::Scalar;
 using at::ScalarType;
 using at::Storage;

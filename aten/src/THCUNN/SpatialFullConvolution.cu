@@ -1,5 +1,7 @@
 #include <THCUNN/THCUNN.h>
-#include <THCUNN/im2col.h>
+#include <THC/THCTensor.hpp>
+#include <THCUNN/common.h>
+#include <ATen/native/cuda/im2col.cuh>
 
 #include <TH/THHalf.h>
 #include <THCUNN/THCHalfAutoNumerics.cuh>
