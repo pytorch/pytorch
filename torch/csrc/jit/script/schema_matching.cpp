@@ -436,7 +436,9 @@ static Value* packOutputs(
   if (values.size() == 1) {
     return values[0];
   }
-  return g.insertNode(g.createTuple(values, std::move(field_names)))->output();
+  return g
+      .insertNode(g.createTuple(values, std::move(field_names), c10::nullopt))
+      ->output();
 }
 
 // Given a successful match between operator schema and symbol, emit a node

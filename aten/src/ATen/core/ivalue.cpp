@@ -31,6 +31,20 @@ std::ostream& printList(std::ostream & out, const c10::ListPtr<T> &v,
   return out;
 }
 
+template<class T>
+std::ostream& printList(std::ostream & out, const std::vector<T> &v,
+  const std::string start, const std::string finish) {
+  out << start;
+  for(size_t i = 0; i < v.size(); ++i) {
+    if(i > 0)
+      out << ", ";
+    // make sure we use ivalue printing, and not default printing for the element type
+    out << IValue(v[i]);
+  }
+  out << finish;
+  return out;
+}
+
 template<typename Dict>
 std::ostream& printDict(std::ostream& out, const Dict& v) {
   out << "{";
@@ -75,7 +89,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple:
-      return printList(out, v.toTuple().elements(), "(", ")");
+      return printList(out, v.toTuple()->elements(), "(", ")");
     case IValue::Tag::IntList:
       return printList(out, v.toIntList(), "[", "]");
     case IValue::Tag::DoubleList:
@@ -99,9 +113,10 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict());
     case IValue::Tag::Object:
-      // TODO we should print the object contents
-      return out << "Object<" << v.toObject()->name()
-                 << ">";
+      // TODO we should attempt to call __str__ if the object defines it.
+      auto obj = v.toObject();
+      // print this out the way python would do it
+      return out << "<" << obj->name() << " object at " << obj.get() << ">";
   }
   AT_ERROR("Tag not found\n");
 }
