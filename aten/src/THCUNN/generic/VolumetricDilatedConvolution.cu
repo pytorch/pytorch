@@ -186,7 +186,7 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
     }
 
     // Extract columns:
-    vol2col(
+    at::native::vol2col<scalar_t>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, input_n),
       nInputPlane, inputDepth, inputHeight, inputWidth,
@@ -322,7 +322,7 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
     );
 
     // Unpack columns back into input:
-    col2vol<scalar_t, accreal>(
+    at::native::col2vol<scalar_t, accreal>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, gradColumns),
       nInputPlane, inputDepth, inputHeight, inputWidth,
@@ -417,7 +417,7 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
       THCTensor_(select)(state, input_n, input, 0, elt);
 
       // Extract columns:
-      vol2col(
+      at::native::vol2col<scalar_t>(
         THCState_getCurrentStream(state),
         THCTensor_(data)(state, input_n),
         nInputPlane, inputDepth, inputHeight, inputWidth,
