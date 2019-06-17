@@ -886,12 +886,10 @@ struct CAFFE2_API SerializableType : public Type {
   virtual std::vector<Function*> methods() const = 0;
   virtual std::vector<std::tuple<std::string, TypePtr>> attrs() const = 0;
 
- private:
+ protected:
   // Fully qualified name of type (note that this has to be globally unique).
   // Looks like: "foo.bar.Baz".
   c10::optional<QualifiedName> name_;
-
-  friend class ClassType;
 };
 
 struct TupleType;
