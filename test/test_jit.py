@@ -6524,7 +6524,7 @@ a")
         self.checkScript(int1, ())
         self.checkScript(int2, ())
 
-def test_number_sum(self):
+    def test_number_sum(self):
         def int1():
             return sum(x)
         
