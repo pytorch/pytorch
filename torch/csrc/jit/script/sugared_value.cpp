@@ -264,6 +264,34 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
   }
   return std::make_shared<ClassNewMethod>(type_);
 }
+
+std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
+    const SourceRange& loc,
+    Function& m,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  auto nargs = type_->containedTypes().size();
+  if (inputs.size() != nargs) {
+    throw ErrorReport(loc) << "Constructor expected " << nargs << "arguments "
+                           << "but got " << inputs.size();
+  }
+
+  auto& g = *m.graph();
+
+  auto schema = type_->schema();
+  TORCH_INTERNAL_ASSERT(schema);
+  auto matched_schema = matchSchema(*schema, loc, g, inputs, attributes);
+
+  auto self = g.insertNode(g.createTuple(
+                                matched_schema.inputs, type_->names(), type_->unqualName())
+                               ->setSourceRange(loc))
+                  ->output();
+  self->setType(type_);
+
+  return std::make_shared<SimpleValue>(self);
+}
+
 } // namespace script
 } // namespace jit
 } // namespace torch
