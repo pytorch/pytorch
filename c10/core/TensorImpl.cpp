@@ -162,6 +162,12 @@ AutogradMetaInterface::~AutogradMetaInterface() {}
 
 #ifdef NAMEDTENSOR_ENABLED
 NamedTensorMetaInterface::~NamedTensorMetaInterface() {}
+
+std::unique_ptr<NamedTensorMetaInterface> NamedTensorMetaInterface::clone() const {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "Attempting to clone a NamedTensorMetaInterface instance.");
+}
 #endif
 
 /// NOTE [ Treating Variables as non-Variables in type dispatch ]

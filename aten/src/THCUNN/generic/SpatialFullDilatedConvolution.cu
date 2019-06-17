@@ -166,7 +166,7 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
     );
 
     // Unpack columns back into input:
-    col2im<scalar_t, accreal>(
+    at::native::col2im<scalar_t, accreal>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, columns),
       nOutputPlane, outputHeight, outputWidth, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
@@ -273,7 +273,7 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
 
     // Extract columns:
-    im2col(
+    at::native::im2col<scalar_t>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, gradOutput_n),
       nOutputPlane, outputHeight, outputWidth,
@@ -408,7 +408,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
       THCTensor_(select)(state, input_n, input, 0, elt);
 
       // Extract columns:
-      im2col(
+      at::native::im2col<scalar_t>(
         THCState_getCurrentStream(state),
         THCTensor_(data)(state, gradOutput_n),
         nOutputPlane, outputHeight, outputWidth,
