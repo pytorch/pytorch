@@ -170,17 +170,3 @@
 - name: _thnn_conv_dilated3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0, IntArrayRef[3] dilation=1)
   cname: VolumetricDilatedConvolution
   buffers: [columns, ones]
-
-# Fold and Unfold
-
-- name: _thnn_col2im(Tensor self, IntArrayRef[2] output_size, IntArrayRef[2] kernel_size, IntArrayRef[2] dilation, IntArrayRef[2] padding, IntArrayRef[2] stride)
-  cname: Col2Im
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
-- name: _thnn_im2col(Tensor self, IntArrayRef[2] kernel_size, IntArrayRef[2] dilation, IntArrayRef[2] padding, IntArrayRef[2] stride)
-  cname: Im2Col
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
