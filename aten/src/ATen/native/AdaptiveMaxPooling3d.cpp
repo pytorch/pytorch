@@ -1,5 +1,6 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
+#include <ATen/Parallel.h>
 #include <tuple>
 
 
@@ -22,7 +23,7 @@ inline int end_index(int a, int b, int c) {
 // 5d tensor B x D x T x H x W
 
 template <typename scalar_t>
-static void adaptive_max_pool3d_out_frame(
+static void adaptive_max_pool3d_single_out_frame(
           scalar_t *input_p,
           scalar_t *output_p,
           int64_t *ind_p,
@@ -38,65 +39,98 @@ static void adaptive_max_pool3d_out_frame(
           int64_t istrideH,
           int64_t istrideW)
 {
-  int64_t d;
-#pragma omp parallel for private(d)
-  for (d = 0; d < sizeD; d++)
-  {
-    /* loop over output */
-    int64_t ot, oh, ow;
-    for(ot = 0; ot < osizeT; ot++)
+  at::parallel_for(0, sizeD, 0, [&](int64_t start, int64_t end) {
+    for (auto d = start; d < end; d++)
     {
-      int64_t istartT = start_index(ot, osizeT, isizeT);
-      int64_t iendT   = end_index(ot, osizeT, isizeT);
-      int64_t kT = iendT - istartT;
-
-      for(oh = 0; oh < osizeH; oh++)
+      /* loop over output */
+      int64_t ot, oh, ow;
+      for(ot = 0; ot < osizeT; ot++)
       {
-        int64_t istartH = start_index(oh, osizeH, isizeH);
-        int64_t iendH   = end_index(oh, osizeH, isizeH);
-        int64_t kH = iendH - istartH;
+        int64_t istartT = start_index(ot, osizeT, isizeT);
+        int64_t iendT   = end_index(ot, osizeT, isizeT);
+        int64_t kT = iendT - istartT;
 
-        for(ow = 0; ow < osizeW; ow++)
+        for(oh = 0; oh < osizeH; oh++)
         {
+          int64_t istartH = start_index(oh, osizeH, isizeH);
+          int64_t iendH   = end_index(oh, osizeH, isizeH);
+          int64_t kH = iendH - istartH;
 
-          int64_t istartW = start_index(ow, osizeW, isizeW);
-          int64_t iendW   = end_index(ow, osizeW, isizeW);
-          int64_t kW = iendW - istartW;
-
-          /* local pointers */
-          scalar_t *ip = input_p   + d*istrideD + istartT *istrideT + istartH*istrideH + istartW*istrideW;
-          scalar_t *op = output_p  + d*osizeT*osizeH*osizeW + ot*osizeH*osizeW + oh*osizeW + ow;
-          int64_t *indp = ind_p   + d*osizeT*osizeH*osizeW + ot*osizeH*osizeW + oh*osizeW + ow;
-
-          /* compute local max: */
-          int64_t maxindex = -1;
-          scalar_t maxval = -std::numeric_limits<float>::max();
-          int64_t it, ih, iw;
-          for(it = 0; it < kT; it++)
+          for(ow = 0; ow < osizeW; ow++)
           {
-            for(ih = 0; ih < kH; ih++)
+
+            int64_t istartW = start_index(ow, osizeW, isizeW);
+            int64_t iendW   = end_index(ow, osizeW, isizeW);
+            int64_t kW = iendW - istartW;
+
+            /* local pointers */
+            scalar_t *ip = input_p   + d*istrideD + istartT *istrideT + istartH*istrideH + istartW*istrideW;
+            scalar_t *op = output_p  + d*osizeT*osizeH*osizeW + ot*osizeH*osizeW + oh*osizeW + ow;
+            int64_t *indp = ind_p   + d*osizeT*osizeH*osizeW + ot*osizeH*osizeW + oh*osizeW + ow;
+
+            /* compute local max: */
+            int64_t maxindex = -1;
+            scalar_t maxval = -std::numeric_limits<float>::max();
+            int64_t it, ih, iw;
+            for(it = 0; it < kT; it++)
             {
-              for(iw = 0; iw < kW; iw++)
+              for(ih = 0; ih < kH; ih++)
               {
-                scalar_t val = *(ip + it*istrideT + ih*istrideH + iw*istrideW);
-                if ((val > maxval) || std::isnan(val))
+                for(iw = 0; iw < kW; iw++)
                 {
-                  maxval = val;
-                  maxindex = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + (iw+istartW);
+                  scalar_t val = *(ip + it*istrideT + ih*istrideH + iw*istrideW);
+                  if ((val > maxval) || std::isnan(val))
+                  {
+                    maxval = val;
+                    maxindex = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + (iw+istartW);
+                  }
                 }
               }
             }
+
+            /* set output to local max */
+            *op = maxval;
+
+            /* store location of max */
+            *indp = maxindex;
           }
-
-          /* set output to local max */
-          *op = maxval;
-
-          /* store location of max */
-          *indp = maxindex;
         }
       }
     }
-  }
+  });
+}
+
+template <typename scalar_t>
+static void adaptive_max_pool3d_out_frame(
+          scalar_t *input_data,
+          scalar_t *output_data,
+          int64_t *indices_data,
+          int64_t sizeB,
+          int64_t sizeD,
+          int64_t isizeT,
+          int64_t isizeH,
+          int64_t isizeW,
+          int64_t osizeT,
+          int64_t osizeH,
+          int64_t osizeW,
+          int64_t istrideB,
+          int64_t istrideD,
+          int64_t istrideT,
+          int64_t istrideH,
+          int64_t istrideW)
+{
+  at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
+    for (auto b = start; b < end; b++)
+    {
+      adaptive_max_pool3d_single_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeT*osizeH*osizeW,
+                                                     indices_data+b*sizeD*osizeT*osizeH*osizeW,
+                                                     sizeD,
+                                                     isizeT, isizeH, isizeW,
+                                                     osizeT, osizeH, osizeW,
+                                                     istrideD, istrideT,
+                                                     istrideH, istrideW);
+    }
+  });
 }
 
 void adaptive_max_pool3d_out_cpu_template(
@@ -122,18 +156,17 @@ void adaptive_max_pool3d_out_cpu_template(
   int64_t istrideW = 0;
 
   for (int64_t i = 0; i < input.ndimension(); i++) {
-    AT_CHECK(input.size(i) > 0,
+    TORCH_CHECK(input.size(i) > 0,
       "adaptive_max_pool3d: expected input to have non-empty spatial dimensions, "
       "but input has sizes ", input.sizes(), " with dimension ", i, " being "
       "empty");
   }
 
-  AT_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
+  TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
 
-  // the jit sometimes passes output_size.size() == 1
-  AT_CHECK(output_size.size() == 1 || output_size.size() == 3,
-    "adaptive_max_pool3d: internal error: output_size.size() must be 1 or 3");
+  TORCH_CHECK(output_size.size() == 3,
+    "adaptive_max_pool3d: internal error: output_size.size() must be 3");
 
   if (input.ndimension() == 5)
   {
@@ -157,8 +190,8 @@ void adaptive_max_pool3d_out_cpu_template(
   istrideW = input.stride(dimW);
 
   int64_t osizeT = output_size[0];
-  int64_t osizeH = output_size.size() == 1 ? output_size[0] : output_size[1];
-  int64_t osizeW = output_size.size() == 1 ? output_size[0] : output_size[2];
+  int64_t osizeH = output_size[1];
+  int64_t osizeW = output_size[2];
 
   /* resize output */
   if (input.ndimension() == 4)
@@ -172,47 +205,43 @@ void adaptive_max_pool3d_out_cpu_template(
       auto output_data = output.data<scalar_t>();
       auto indices_data = indices.data<int64_t>();
 
-      adaptive_max_pool3d_out_frame<scalar_t>(input_data, output_data,
-                                              indices_data,
-                                              sizeD,
-                                              isizeT, isizeH, isizeW,
-                                              osizeT, osizeH, osizeW,
-                                              istrideD, istrideT,
-                                              istrideH, istrideW);
+      adaptive_max_pool3d_single_out_frame<scalar_t>(input_data, output_data,
+                                                     indices_data,
+                                                     sizeD,
+                                                     isizeT, isizeH, isizeW,
+                                                     osizeT, osizeH, osizeW,
+                                                     istrideD, istrideT,
+                                                     istrideH, istrideW);
       }
     );
   }
   else
   {
-    int64_t b;
-
     output.resize_({sizeB, sizeD, osizeT, osizeH, osizeW});
     /* indices will contain max input locations for each output point */
     indices.resize_({sizeB, sizeD, osizeT, osizeH, osizeW});
 
-#pragma omp parallel for private(b)
-    for (b = 0; b < sizeB; b++)
-    {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool3d_cpu", [&] {
-        auto input_data = input.data<scalar_t>();
-        auto output_data = output.data<scalar_t>();
-        auto indices_data = indices.data<int64_t>();
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "adaptive_max_pool3d_cpu", [&] {
+      auto input_data = input.data<scalar_t>();
+      auto output_data = output.data<scalar_t>();
+      auto indices_data = indices.data<int64_t>();
 
-        adaptive_max_pool3d_out_frame<scalar_t>(input_data+b*istrideB, output_data+b*sizeD*osizeT*osizeH*osizeW,
-                                                indices_data+b*sizeD*osizeT*osizeH*osizeW,
-                                                sizeD,
-                                                isizeT, isizeH, isizeW,
-                                                osizeT, osizeH, osizeW,
-                                                istrideD, istrideT,
-                                                istrideH, istrideW);
-        }
-      );
-    }
+      adaptive_max_pool3d_out_frame<scalar_t>(input_data, output_data,
+                                              indices_data,
+                                              sizeB,
+                                              sizeD,
+                                              isizeT, isizeH, isizeW,
+                                              osizeT, osizeH, osizeW,
+                                              istrideB,
+                                              istrideD, istrideT,
+                                              istrideH, istrideW);
+      }
+    );
   }
 }
 
 template <typename scalar_t>
-static void adaptive_max_pool3d_backward_out_frame(
+static void adaptive_max_pool3d_backward_single_out_frame(
           scalar_t *gradInput_p,
           scalar_t *gradOutput_p,
           int64_t *ind_p,
@@ -224,31 +253,57 @@ static void adaptive_max_pool3d_backward_out_frame(
           int64_t osizeH,
           int64_t osizeW)
 {
-  int64_t d;
-#pragma omp parallel for private(d)
-  for (d = 0; d < sizeD; d++)
-  {
-    scalar_t *gradInput_p_d = gradInput_p + d*isizeT*isizeH*isizeW;
-    scalar_t *gradOutput_p_d = gradOutput_p + d*osizeT*osizeH*osizeW;
-    int64_t *ind_p_d = ind_p + d*osizeT*osizeH*osizeW;
-
-    /* calculate max points */
-    int64_t ot, oh, ow;
-    for(ot = 0; ot < osizeT; ot++)
+  at::parallel_for(0, sizeD, 0, [&](int64_t start, int64_t end) {
+    for (auto d = start; d < end; d++)
     {
-      for(oh = 0; oh < osizeH; oh++)
-      {
-        for(ow = 0; ow < osizeW; ow++)
-        {
-          /* retrieve position of max */
-          int64_t maxp = ind_p_d[ot*osizeH*osizeW + oh*osizeW + ow];
+      scalar_t *gradInput_p_d = gradInput_p + d*isizeT*isizeH*isizeW;
+      scalar_t *gradOutput_p_d = gradOutput_p + d*osizeT*osizeH*osizeW;
+      int64_t *ind_p_d = ind_p + d*osizeT*osizeH*osizeW;
 
-          /* update gradient */
-          gradInput_p_d[maxp] += gradOutput_p_d[ot*osizeH*osizeW + oh*osizeW + ow];
+      /* calculate max points */
+      int64_t ot, oh, ow;
+      for(ot = 0; ot < osizeT; ot++)
+      {
+        for(oh = 0; oh < osizeH; oh++)
+        {
+          for(ow = 0; ow < osizeW; ow++)
+          {
+            /* retrieve position of max */
+            int64_t maxp = ind_p_d[ot*osizeH*osizeW + oh*osizeW + ow];
+
+            /* update gradient */
+            gradInput_p_d[maxp] += gradOutput_p_d[ot*osizeH*osizeW + oh*osizeW + ow];
+          }
         }
       }
     }
-  }
+  });
+}
+
+template <typename scalar_t>
+static void adaptive_max_pool3d_backward_out_frame(
+          scalar_t *gradInput_data,
+          scalar_t *gradOutput_data,
+          int64_t *indices_data,
+          int64_t sizeB,
+          int64_t sizeD,
+          int64_t isizeT,
+          int64_t isizeH,
+          int64_t isizeW,
+          int64_t osizeT,
+          int64_t osizeH,
+          int64_t osizeW)
+{
+  at::parallel_for(0, sizeB, 0, [&](int64_t start, int64_t end) {
+    for (auto b = start; b < end; b++)
+    {
+      adaptive_max_pool3d_backward_single_out_frame<scalar_t>(gradInput_data+b*sizeD*isizeT*isizeH*isizeW, gradOutput_data+b*sizeD*osizeT*osizeH*osizeW,
+                                                              indices_data+b*sizeD*osizeT*osizeH*osizeW,
+                                                              sizeD,
+                                                              isizeT, isizeH, isizeW,
+                                                              osizeT, osizeH, osizeW);
+    }
+  });
 }
 
 Tensor& adaptive_max_pool3d_backward_out_cpu_template(
@@ -305,36 +360,32 @@ Tensor& adaptive_max_pool3d_backward_out_cpu_template(
         scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
         int64_t *indices_data = indices.data<int64_t>();
 
-        adaptive_max_pool3d_backward_out_frame<scalar_t>(gradInput_data, gradOutput_data,
-                                                         indices_data,
-                                                         sizeD,
-                                                         isizeT, isizeH, isizeW,
-                                                         osizeT, osizeH, osizeW);
+        adaptive_max_pool3d_backward_single_out_frame<scalar_t>(gradInput_data, gradOutput_data,
+                                                                indices_data,
+                                                                sizeD,
+                                                                isizeT, isizeH, isizeW,
+                                                                osizeT, osizeH, osizeW);
       }
     );
   }
   else
   {
-    int64_t b;
-#pragma omp parallel for private(b)
-    for (b = 0; b < sizeB; b++)
-    {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-        "adaptive_max_pool3d_backward",
-        [&] {
-          /* get raw pointers */
-          scalar_t *gradInput_data = gradInput.data<scalar_t>();
-          scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-          int64_t *indices_data = indices.data<int64_t>();
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
+      "adaptive_max_pool3d_backward",
+      [&] {
+        /* get raw pointers */
+        scalar_t *gradInput_data = gradInput.data<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
+        int64_t *indices_data = indices.data<int64_t>();
 
-          adaptive_max_pool3d_backward_out_frame<scalar_t>(gradInput_data+b*sizeD*isizeT*isizeH*isizeW, gradOutput_data+b*sizeD*osizeT*osizeH*osizeW,
-                                                           indices_data+b*sizeD*osizeT*osizeH*osizeW,
-                                                           sizeD,
-                                                           isizeT, isizeH, isizeW,
-                                                           osizeT, osizeH, osizeW);
-        }
-      );
-    }
+        adaptive_max_pool3d_backward_out_frame<scalar_t>(gradInput_data, gradOutput_data,
+                                                         indices_data,
+                                                         sizeB,
+                                                         sizeD,
+                                                         isizeT, isizeH, isizeW,
+                                                         osizeT, osizeH, osizeW);
+      }
+    );
   }
 
   return gradInput;

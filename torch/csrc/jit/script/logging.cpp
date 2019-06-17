@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/script/logging.h"
+#include <torch/csrc/jit/script/logging.h>
 
 #include <atomic>
 #include <mutex>
@@ -17,7 +17,7 @@ void LockingLogger::addStatValue(const std::string& stat_name, int64_t val) {
   raw_counter.count++;
 }
 
-TORCH_API int64_t LockingLogger::getCounterValue(const std::string& name) const {
+int64_t LockingLogger::getCounterValue(const std::string& name) const {
   std::unique_lock<std::mutex> lk(m);
   if (!raw_counters.count(name)) {
     return 0;

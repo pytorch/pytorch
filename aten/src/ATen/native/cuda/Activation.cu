@@ -1,10 +1,16 @@
+#define _USE_MATH_DEFINES
+
+#include <ATen/native/Activation.h>
+
+#include <math.h>
+
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/native/Activation.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <c10/cuda/CUDAMathCompat.h>
 
 
 namespace at { namespace native {
@@ -47,14 +53,14 @@ __global__ void prelu_cuda_kernel_multi_weights(
 }
 
 Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
-  AT_CHECK(self.is_cuda());
-  AT_CHECK(weight_.is_cuda());
+  TORCH_CHECK(self.is_cuda());
+  TORCH_CHECK(weight_.is_cuda());
 
   auto input = self.contiguous();
   auto weight = weight_.contiguous();
 
-  AT_CHECK(input.is_contiguous());
-  AT_CHECK(weight.is_contiguous());
+  TORCH_CHECK(input.is_contiguous());
+  TORCH_CHECK(weight.is_contiguous());
 
   int64_t weight_num = weight.numel();
   Tensor result = at::empty_like(input);
@@ -71,7 +77,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
   }
   else { // case2: multiple weights, one for each channel
     int64_t input_ndim = input.dim();
-    AT_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
+    TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
 
     int64_t channel_size = 1; // channel_size default to 1
     int64_t input_stride0 = 1, input_stride1 = 1;
@@ -81,7 +87,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
       input_stride0 = strides[0];
       input_stride1 = strides[1];
     }
-    AT_CHECK(channel_size == weight_num,
+    TORCH_CHECK(channel_size == weight_num,
       "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
       " and channel size = ", channel_size, ".");
 
@@ -92,7 +98,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
     int curDevice = -1;
     cudaGetDevice(&curDevice);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
-    AT_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu: input too large or too many dimensions");
+    TORCH_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu: input too large or too many dimensions");
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "prelu_cuda", [&] {
       prelu_cuda_kernel_multi_weights<scalar_t>
@@ -155,17 +161,17 @@ __global__ void prelu_cuda_backward_kernel_multi_weights(
 }
 
 std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Tensor& self, const Tensor& weight_) {
-  AT_CHECK(grad_out_.is_cuda());
-  AT_CHECK(self.is_cuda());
-  AT_CHECK(weight_.is_cuda());
+  TORCH_CHECK(grad_out_.is_cuda());
+  TORCH_CHECK(self.is_cuda());
+  TORCH_CHECK(weight_.is_cuda());
 
   auto input = self.contiguous();
   auto grad_out = grad_out_.contiguous();
   auto weight = weight_.contiguous();
 
-  AT_CHECK(input.is_contiguous());
-  AT_CHECK(weight.is_contiguous());
-  AT_CHECK(grad_out.is_contiguous());
+  TORCH_CHECK(input.is_contiguous());
+  TORCH_CHECK(weight.is_contiguous());
+  TORCH_CHECK(grad_out.is_contiguous());
 
   int64_t weight_num = weight.numel();
   auto strides = input.strides();
@@ -187,7 +193,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
   }
   else { // case2: multiple parameters, one for each channel
     int64_t input_ndim = input.dim();
-    AT_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
+    TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
 
     int64_t channel_size = 1; // channel_size default to 1
     int64_t input_stride0 = 1, input_stride1 = 1;
@@ -197,7 +203,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
       input_stride0 = strides[0];
       input_stride1 = strides[1];
     }
-    AT_CHECK(channel_size == weight_num,
+    TORCH_CHECK(channel_size == weight_num,
       "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
       " and channel size = ", channel_size, ".");
 
@@ -208,7 +214,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
     int curDevice = -1;
     cudaGetDevice(&curDevice);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
-    AT_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu_backward_cuda: input too large or too many dimensions");
+    TORCH_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu_backward_cuda: input too large or too many dimensions");
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "prelu_backward_cuda", [&] {
       prelu_cuda_backward_kernel_multi_weights<scalar_t>
@@ -291,6 +297,49 @@ static void threshold_kernel(TensorIterator& iter, Scalar threshold, Scalar valu
   });
 }
 
+namespace {
+
+template <typename T>
+void GeluCUDAKernelImplInternal(const Tensor& X, Tensor* Y) {
+  at::cuda::CUDA_tensor_apply2<T, T>(X, *Y, [] __device__(const T& x, T& y) {
+    y = x * c10::cuda::compat::normcdf(x);
+  });
+}
+
+void GeluCUDAKernelImpl(const Tensor& X, Tensor* Y) {
+  AT_DISPATCH_FLOATING_TYPES(X.scalar_type(), "GeluCUDAKernelImpl", [&]() {
+    GeluCUDAKernelImplInternal<scalar_t>(X, Y);
+  });
+}
+
+template <typename T>
+void GeluBackwardCUDAKernelImplInternal(
+    const Tensor& dY,
+    const Tensor& X,
+    Tensor* dX) {
+  constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2 * T(0.5);
+  at::cuda::CUDA_tensor_apply3<T, T, T>(
+      dY, X, *dX, [] __device__(const T& dy, const T& x, T& dx) {
+        dx = dy *
+            (c10::cuda::compat::normcdf(x) +
+             x * kAlpha * c10::cuda::compat::exp(-T(0.5) * x * x));
+      });
+}
+
+void GeluBackwardCUDAKernelImpl(
+    const Tensor& dY,
+    const Tensor& X,
+    Tensor* dX) {
+  AT_DISPATCH_FLOATING_TYPES(
+      X.scalar_type(), "GeluBackwardCUDAKernelImpl", [&]() {
+        GeluBackwardCUDAKernelImplInternal<scalar_t>(dY, X, dX);
+      });
+}
+
+} // namespace
+
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
+REGISTER_DISPATCH(GeluKernel, &GeluCUDAKernelImpl);
+REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardCUDAKernelImpl);
 
 }}  // namespace at::native

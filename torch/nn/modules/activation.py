@@ -53,14 +53,14 @@ class Threshold(Module):
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'threshold={}, value={}{}'.format(
             self.threshold, self.value, inplace_str
         )
 
 
 @weak_module
-class ReLU(Threshold):
+class ReLU(Module):
     r"""Applies the rectified linear unit function element-wise:
 
     :math:`\text{ReLU}(x)= \max(0, x)`
@@ -88,12 +88,18 @@ class ReLU(Threshold):
         >>> input = torch.randn(2).unsqueeze(0)
         >>> output = torch.cat((m(input),m(-input)))
     """
+    __constants__ = ['inplace']
 
     def __init__(self, inplace=False):
-        super(ReLU, self).__init__(0., 0., inplace)
+        super(ReLU, self).__init__()
+        self.inplace = inplace
+
+    @weak_script_method
+    def forward(self, input):
+        return F.relu(input, inplace=self.inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -150,7 +156,7 @@ class RReLU(Module):
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
 
 
@@ -212,7 +218,7 @@ class Hardtanh(Module):
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'min_val={}, max_val={}{}'.format(
             self.min_val, self.max_val, inplace_str
         )
@@ -246,7 +252,7 @@ class ReLU6(Hardtanh):
         super(ReLU6, self).__init__(0., 6., inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -339,7 +345,7 @@ class ELU(Module):
         return F.elu(input, self.alpha, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
@@ -384,7 +390,7 @@ class CELU(Module):
         return F.celu(input, self.alpha, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
@@ -429,7 +435,7 @@ class SELU(Module):
         return F.selu(input, self.inplace)
 
     def extra_repr(self):
-        inplace_str = 'inplace' if self.inplace else ''
+        inplace_str = 'inplace=True' if self.inplace else ''
         return inplace_str
 
 
@@ -555,7 +561,7 @@ class LeakyReLU(Module):
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
     def extra_repr(self):
-        inplace_str = ', inplace' if self.inplace else ''
+        inplace_str = ', inplace=True' if self.inplace else ''
         return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
 
 
@@ -683,8 +689,13 @@ class MultiheadAttention(Module):
         \text{where} head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)
 
     Args:
-        embed_dim: total dimension of the model
-        num_heads: parallel attention layers, or heads
+        embed_dim: total dimension of the model.
+        num_heads: parallel attention heads.
+        dropout: a Dropout layer on attn_output_weights. Default: 0.0.
+        bias: add bias as module parameter. Default: True.
+        add_bias_kv: add bias to the key and value sequences at dim=0.
+        add_zero_attn: add a new batch of zeros to the key and
+                       value sequences at dim=1.
 
     Examples::
 
@@ -699,7 +710,6 @@ class MultiheadAttention(Module):
         self.dropout = dropout
         self.head_dim = embed_dim // num_heads
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
-        self.scaling = self.head_dim ** -0.5
 
         self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
         if bias:
@@ -733,165 +743,40 @@ class MultiheadAttention(Module):
             xavier_normal_(self.bias_v)
 
     @weak_script_method
-    def forward(self, query, key, value, key_padding_mask=None, incremental_state=None,
-                need_weights=True, static_kv=False, attn_mask=None):
+    def forward(self, query, key, value, key_padding_mask=None,
+                need_weights=True, attn_mask=None):
+        r"""
+    Args:
+        query, key, value: map a query and a set of key-value pairs to an output.
+            See "Attention Is All You Need" for more details.
+        key_padding_mask: if provided, specified padding elements in the key will
+            be ignored by the attention.
+        need_weights: output attn_output_weights.
+        attn_mask: mask that prevents attention to certain positions.
+
+
+    Shape:
+        - Inputs:
+        - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
+          the embedding dimension.
+        - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
+        - attn_mask: :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+
+        - Outputs:
+        - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
+          E is the embedding dimension.
+        - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
+          L is the target sequence length, S is the source sequence length.
         """
-        Inputs of forward function
-            query: [target length, batch size, embed dim]
-            key: [sequence length, batch size, embed dim]
-            value: [sequence length, batch size, embed dim]
-            key_padding_mask: if True, mask padding based on batch size
-            incremental_state: if provided, previous time steps are cashed
-            need_weights: output attn_output_weights
-            static_kv: key and value are static
-
-        Outputs of forward function
-            attn_output: [target length, batch size, embed dim]
-            attn_output_weights: [batch size, target length, sequence length]
-        """
-        qkv_same = query.data_ptr() == key.data_ptr() == value.data_ptr()
-        kv_same = key.data_ptr() == value.data_ptr()
-
-        tgt_len, bsz, embed_dim = query.size()
-        assert embed_dim == self.embed_dim
-        assert list(query.size()) == [tgt_len, bsz, embed_dim]
-        assert key.size() == value.size()
-
-        if incremental_state is not None:
-            saved_state = self._get_input_buffer(incremental_state)
-            if 'prev_key' in saved_state:
-                # previous time steps are cached - no need to recompute
-                # key and value if they are static
-                if static_kv:
-                    assert kv_same and not qkv_same
-                    key = value = None
-        else:
-            saved_state = None
-
-        if qkv_same:
-            # self-attention
-            q, k, v = self._in_proj_qkv(query)
-        elif kv_same:
-            # encoder-decoder attention
-            q = self._in_proj_q(query)
-            if key is None:
-                assert value is None
-                k = v = None
-            else:
-                k, v = self._in_proj_kv(key)
-        else:
-            q = self._in_proj_q(query)
-            k = self._in_proj_k(key)
-            v = self._in_proj_v(value)
-        q *= self.scaling
-
-        if self.bias_k is not None:
-            assert self.bias_v is not None
-            k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
-            v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
-            if attn_mask is not None:
-                attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
-            if key_padding_mask is not None:
-                key_padding_mask = torch.cat(
-                    [key_padding_mask, key_padding_mask.new_zeros(key_padding_mask.size(0), 1)], dim=1)
-
-        q = q.contiguous().view(tgt_len, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-        if k is not None:
-            k = k.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-        if v is not None:
-            v = v.contiguous().view(-1, bsz * self.num_heads, self.head_dim).transpose(0, 1)
-
-        if saved_state is not None:
-            # saved states are stored with shape (bsz, num_heads, seq_len, head_dim)
-            if 'prev_key' in saved_state:
-                prev_key = saved_state['prev_key'].view(bsz * self.num_heads, -1, self.head_dim)
-                if static_kv:
-                    k = prev_key
-                else:
-                    k = torch.cat((prev_key, k), dim=1)
-            if 'prev_value' in saved_state:
-                prev_value = saved_state['prev_value'].view(bsz * self.num_heads, -1, self.head_dim)
-                if static_kv:
-                    v = prev_value
-                else:
-                    v = torch.cat((prev_value, v), dim=1)
-            saved_state['prev_key'] = k.view(bsz, self.num_heads, -1, self.head_dim)
-            saved_state['prev_value'] = v.view(bsz, self.num_heads, -1, self.head_dim)
-
-            self._set_input_buffer(incremental_state, saved_state)
-
-        src_len = k.size(1)
-
-        if key_padding_mask is not None:
-            assert key_padding_mask.size(0) == bsz
-            assert key_padding_mask.size(1) == src_len
-
-        if self.add_zero_attn:
-            src_len += 1
-            k = torch.cat([k, k.new_zeros((k.size(0), 1) + k.size()[2:])], dim=1)
-            v = torch.cat([v, v.new_zeros((v.size(0), 1) + v.size()[2:])], dim=1)
-            if attn_mask is not None:
-                attn_mask = torch.cat([attn_mask, attn_mask.new_zeros(attn_mask.size(0), 1)], dim=1)
-            if key_padding_mask is not None:
-                key_padding_mask = torch.cat(
-                    [key_padding_mask, torch.zeros(key_padding_mask.size(0), 1).type_as(key_padding_mask)], dim=1)
-
-        attn_output_weights = torch.bmm(q, k.transpose(1, 2))
-        assert list(attn_output_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
-
-        if attn_mask is not None:
-            attn_mask = attn_mask.unsqueeze(0)
-            attn_output_weights += attn_mask
-
-        if key_padding_mask is not None:
-            attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            attn_output_weights = attn_output_weights.masked_fill(
-                key_padding_mask.unsqueeze(1).unsqueeze(2),
-                float('-inf'),
-            )
-            attn_output_weights = attn_output_weights.view(bsz * self.num_heads, tgt_len, src_len)
-
-        attn_output_weights = F.softmax(
-            attn_output_weights.float(), dim=-1,
-            dtype=torch.float32 if attn_output_weights.dtype == torch.float16 else attn_output_weights.dtype)
-        attn_output_weights = F.dropout(attn_output_weights, p=self.dropout, training=self.training)
-
-        attn_output = torch.bmm(attn_output_weights, v)
-        assert list(attn_output.size()) == [bsz * self.num_heads, tgt_len, self.head_dim]
-        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
-        attn_output = self.out_proj(attn_output)
-
-        if need_weights:
-            # average attention weights over heads
-            attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            attn_output_weights = attn_output_weights.sum(dim=1) / self.num_heads
-        else:
-            attn_output_weights = None
-
-        return attn_output, attn_output_weights
-
-    def _in_proj_qkv(self, query):
-        return self._in_proj(query).chunk(3, dim=-1)
-
-    def _in_proj_kv(self, key):
-        return self._in_proj(key, start=self.embed_dim).chunk(2, dim=-1)
-
-    def _in_proj_q(self, query):
-        return self._in_proj(query, end=self.embed_dim)
-
-    def _in_proj_k(self, key):
-        return self._in_proj(key, start=self.embed_dim, end=2 * self.embed_dim)
-
-    def _in_proj_v(self, value):
-        return self._in_proj(value, start=2 * self.embed_dim)
-
-    def _in_proj(self, input, start=0, end=None):
-        weight = self.in_proj_weight
-        bias = self.in_proj_bias
-        weight = weight[start:end, :]
-        if bias is not None:
-            bias = bias[start:end]
-        return F.linear(input, weight, bias)
+        return F.multi_head_attention_forward(
+            query, key, value, self.embed_dim, self.num_heads,
+            self.in_proj_weight, self.in_proj_bias, self.bias_k, self.bias_v, self.add_zero_attn,
+            self.dropout, self.out_proj.weight, self.out_proj.bias, training=self.training,
+            key_padding_mask=key_padding_mask, need_weights=need_weights, attn_mask=attn_mask)
 
 
 @weak_module
@@ -944,6 +829,7 @@ class PReLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['num_parameters']
 
     def __init__(self, num_parameters=1, init=0.25):
         self.num_parameters = num_parameters
@@ -1082,7 +968,7 @@ class Softmax(Module):
 
     Examples::
 
-        >>> m = nn.Softmax()
+        >>> m = nn.Softmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -1100,6 +986,9 @@ class Softmax(Module):
     @weak_script_method
     def forward(self, input):
         return F.softmax(input, self.dim, _stacklevel=5)
+
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
 
 
 @weak_module

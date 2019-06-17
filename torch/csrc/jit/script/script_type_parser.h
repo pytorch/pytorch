@@ -1,7 +1,6 @@
 #pragma once
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/resolver.h>
 #include <torch/csrc/jit/script/tree_views.h>
 

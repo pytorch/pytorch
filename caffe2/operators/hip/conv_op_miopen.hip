@@ -572,7 +572,6 @@ bool MIOPENConvGradientOp::DoRunWithType() {
         bwdWeightWsSize_));
   });
 
-
   ////////////////////////////////////// BIAS ///////////////////////////
   if (!no_bias_) {
     auto* dbias = Output(BIAS_OR_INPUT_GRAD);

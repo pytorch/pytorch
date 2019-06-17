@@ -1,3 +1,4 @@
+#pragma once
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/script/module.h>

@@ -40,7 +40,7 @@ struct ComplexCPUType : public at::CPUTypeDefault {
     AT_ASSERT(options.device().is_cpu());
 
     for (auto x: size) {
-      AT_CHECK(x >= 0, "Trying to create tensor using size with negative dimension: ", size);
+      TORCH_CHECK(x >= 0, "Trying to create tensor using size with negative dimension: ", size);
     }
     auto* allocator = at::getCPUAllocator();
     int64_t nelements = at::prod_intlist(size);
@@ -77,7 +77,7 @@ const char* ComplexCPUType::toString() const {
 }
 
 TypeID ComplexCPUType::ID() const {
-  return TypeID::CPUComplexFloat;
+  return TypeID::ComplexCPU;
 }
 
 REGISTER_COMPLEX_HOOKS(ComplexHooks);

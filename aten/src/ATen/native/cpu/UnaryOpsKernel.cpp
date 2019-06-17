@@ -3,7 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/CPUGenerator.h>
-#include <ATen/CheckGenerator.h>
+#include <ATen/Utils.h>
 #include <ATen/Generator.h>
 #include <ATen/Parallel.h>
 
@@ -21,9 +21,6 @@
 #if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
-
-#include <TH/THGenerator.hpp>
-#include <TH/THRandom.h>
 
 namespace at { namespace native {
 namespace {
@@ -54,6 +51,25 @@ static void abs_kernel(TensorIterator& iter) {
   });
 }
 
+static void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
+  if( iter.dtype() == ScalarType::Half ) {
+    auto value = value_scalar.to<at::Half>().x;
+    using H = decltype(value);
+    nullary_kernel_vec(
+        iter,
+        [=]() -> H { return value; },
+        [=]() { return Vec256<H>(value); });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "fill_cpu", [&]() {
+      scalar_t value = value_scalar.to<scalar_t>();
+      nullary_kernel_vec(
+          iter,
+          [=]() -> scalar_t { return value; },
+          [=]() { return Vec256<scalar_t>(value); });
+    });
+  }
+}
+
 static void frac_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "frac_cpu", [&]() {
     unary_kernel_vec(
@@ -81,6 +97,22 @@ static void neg_kernel(TensorIterator& iter) {
   });
 }
 
+static void sinh_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinh_cpu", [&]() {
+    unary_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::sinh(a); });
+  });
+}
+
+static void cosh_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cosh_cpu", [&]() {
+    unary_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t { return std::cosh(a); });
+  });
+}
+
 #if !AT_MKL_ENABLED()
 void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
   // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
@@ -89,11 +121,12 @@ void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
 }
 #else
 void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
-  THGenerator* generator = get_generator(gen);
+  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
   int64_t seed;
   {
-    std::lock_guard<std::mutex> lock(generator->mutex);
-    seed = THRandom_random(generator);
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    seed = generator->random();
   }
   int64_t n = self.numel();
   bool contig = self.is_contiguous();
@@ -192,6 +225,9 @@ REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
+REGISTER_DISPATCH(fill_stub, &fill_kernel);
+REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
+REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)

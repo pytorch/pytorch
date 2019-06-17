@@ -579,6 +579,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         opts.threads = threads
         return opts
 
+    def test_empty_tensors(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        xs = [torch.FloatTensor([])]
+        pg.broadcast(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
     def test_broadcast_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
@@ -1344,6 +1352,30 @@ class ProcessGroupNCCLTest(TestCase):
     def tearDown(self):
         pass
 
+    def test_empty_tensors(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        xs = [torch.cuda.FloatTensor([])]
+        pg.broadcast(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
+        pg.allreduce(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
+        pg.reduce(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
+        ys = [[torch.cuda.FloatTensor([]) for _ in range(self.world_size)]]
+        pg.allgather(ys, xs).wait()
+        for y in ys[0]:
+            self.assertEqual(0, y.numel())
+
+        ys = [torch.cuda.FloatTensor([])]
+        xs = [[torch.cuda.FloatTensor([]) for _ in range(self.world_size)]]
+        pg.reduce_scatter(ys, xs).wait()
+        self.assertEqual(0, ys[0].numel())
+
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -1468,6 +1500,81 @@ class ProcessGroupNCCLTest(TestCase):
             for s_idx, t in enumerate(device_ts):
                 self.assertEqual(torch.Tensor([s_idx]), t)
 
+    def test_reduce_scatter_ops(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def reduce_scatter(outputs, input_lists, op):
+            opts = c10d.ReduceScatterOptions()
+            opts.reduceOp = op
+            work = pg.reduce_scatter(outputs, input_lists, opts)
+            work.wait()
+
+        virtual_rank = self.rank * self.world_size
+        virtual_world_size = self.num_gpus * self.world_size
+
+        output = [
+            torch.Tensor([0]).cuda(i)
+            for i in range(self.num_gpus)
+        ]
+
+        #           0                   1                   2
+        #   0   [0..11]             [1..12]
+        #   1   [3..14]
+        #   2
+        #   3
+
+        # Sum
+        tensor_lists = [
+            [
+                torch.Tensor([self.rank * self.num_gpus + i + j]).cuda(i)
+                for j in range(virtual_world_size)
+            ]
+            for i in range(self.num_gpus)
+        ]
+
+        reduce_scatter(output, tensor_lists, c10d.ReduceOp.SUM)
+
+        for i in range(self.num_gpus):
+            expected = torch.Tensor([
+                float(self.num_gpus * (self.num_gpus - 1) / 2) +
+                (virtual_rank + i) * virtual_world_size
+            ])
+            self.assertEqual(expected, output[i])
+
+        # Min
+        reduce_scatter(output, tensor_lists, c10d.ReduceOp.MIN)
+
+        for i in range(self.num_gpus):
+            expected = torch.Tensor([self.rank * self.world_size + i])
+            self.assertEqual(expected, output[i])
+
+        # Max
+        reduce_scatter(output, tensor_lists, c10d.ReduceOp.MAX)
+
+        for i in range(self.num_gpus):
+            expected = torch.Tensor(
+                [self.rank * self.world_size + i + virtual_world_size - 1]
+            )
+            self.assertEqual(expected, output[i])
+
+        # Product
+        tensor_lists = [
+            [
+                torch.Tensor([
+                    (self.rank * self.num_gpus + i + j) % virtual_world_size + 1
+                ]).cuda(i)
+                for j in range(virtual_world_size)
+            ]
+            for i in range(self.num_gpus)
+        ]
+
+        reduce_scatter(output, tensor_lists, c10d.ReduceOp.PRODUCT)
+
+        for i in range(self.num_gpus):
+            expected = torch.Tensor([float(math.factorial(virtual_world_size))])
+            self.assertEqual(expected, output[i])
+
     def test_barrier(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -1571,52 +1678,60 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def world_size(self):
         return 2
 
-    def _prepare_single_device_module(self, process_group, gpus, global_batch_size):
+    def _prepare_single_device_module(self, process_group, devices, device_ids, global_batch_size):
         model = Net()
         ddp_model = DistributedDataParallel(
-            copy.deepcopy(model).cuda(gpus[0]),
-            device_ids=gpus,
+            copy.deepcopy(model).to(devices[0]),
+            device_ids=device_ids,
             process_group=process_group,
             bucket_cap_mb=0.001)
 
-        model.cuda(gpus[0])
+        model.to(devices[0])
 
-        input = torch.randn(global_batch_size, 2).cuda(gpus[0])
-        target = torch.randn(global_batch_size, 4).cuda(gpus[0])
+        input = torch.randn(global_batch_size, 2).to(devices[0])
+        target = torch.randn(global_batch_size, 4).to(devices[0])
 
         return model, ddp_model, input, target
 
-    def _prepare_multi_device_module(self, process_group, gpus, global_batch_size):
+    def _prepare_multi_device_module(self, process_group, devices, device_ids, global_batch_size):
         self.assertTrue(
-            len(gpus) == 2 or len(gpus) == 4,
-            "unexpected devices for ddp tests {}".format(gpus))
-        if len(gpus) == 2:
-            model = DoubleGpuNet(gpus)
-        elif len(gpus) == 4:
-            model = QuadraGpuNet(gpus)
+            len(devices) == 2 or len(devices) == 4,
+            "unexpected devices for ddp tests {}".format(devices))
+        if len(devices) == 2:
+            model = DoubleGpuNet(devices)
+        elif len(devices) == 4:
+            model = QuadraGpuNet(devices)
 
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model),
+            device_ids=device_ids,
             process_group=process_group,
             bucket_cap_mb=0.001)
 
-        input = torch.randn(global_batch_size, 2).to(gpus[0])
+        input = torch.randn(global_batch_size, 2).cuda(devices[0])
         target = torch.randn(global_batch_size, 4)
 
         return model, ddp_model, input, target
 
-    def _test_ddp_with_process_group(self, process_group, gpus, multi_gpu=False):
-        local_batch_size = len(gpus)
+    def _test_ddp_with_process_group(self, process_group, devices, device_ids, multi_device=False):
+        """
+        Note: we pass down `device_ids` all the way to DistributedDataParallel
+        as part of the test. Below you find tests that either use a list of
+        integers, a list of `torch.Device` instances, or an empty list.
+        The `devices` argument is used to control placement of the model and
+        must always be specified as list of `torch.Device` instances.
+        """
+        local_batch_size = len(devices)
         global_batch_size = self.world_size * local_batch_size
 
-        if multi_gpu:
+        if multi_device:
             model, ddp_model, input, target = \
                 self._prepare_multi_device_module(
-                    process_group, gpus, global_batch_size)
+                    process_group, devices, device_ids, global_batch_size)
         else:
             model, ddp_model, input, target = \
                 self._prepare_single_device_module(
-                    process_group, gpus, global_batch_size)
+                    process_group, devices, device_ids, global_batch_size)
 
         def step_model(model, input, target):
             model.train()
@@ -1650,87 +1765,72 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
 
-    def _test_gloo_backend(self, gpus, multi_gpu=False, use_str=False):
-        if use_str:
-            gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+    def _test_gloo_backend(self, devices, device_ids, multi_device=False):
         store = c10d.FileStore(self.file.name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-        self._test_ddp_with_process_group(process_group, gpus, multi_gpu)
+        self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device)
+
+    def test_gloo_backend_cpu_module(self):
+        self._test_gloo_backend([torch.device('cpu')], [])
 
     @skip_if_not_multigpu
-    def test_gloo_backend(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_gloo_backend(gpus)
+    def test_gloo_backend_1gpu_module_device_ids_integer_list(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        self._test_gloo_backend(devices, int_devices)
 
     @skip_if_not_multigpu
-    def test_gloo_backend_str(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_gloo_backend(gpus, use_str=True)
+    def test_gloo_backend_1gpu_module_device_ids_torch_device_list(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        self._test_gloo_backend(devices, devices)
 
     @skip_if_lt_x_gpu(4)
     def test_gloo_backend_2gpu_module(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_gloo_backend(gpus[:2], multi_gpu=True)
-
-    @skip_if_lt_x_gpu(4)
-    def test_gloo_backend_2gpu_module_str(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_gloo_backend(gpus[:2], multi_gpu=True, use_str=True)
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        self._test_gloo_backend(devices, [], multi_device=True)
 
     @skip_if_lt_x_gpu(8)
     def test_gloo_backend_4gpu_module(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_gloo_backend(gpus[:4], multi_gpu=True)
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        self._test_gloo_backend(devices, [], multi_device=True)
 
-    @skip_if_lt_x_gpu(8)
-    def test_gloo_backend_4gpu_module_str(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_gloo_backend(gpus[:4], multi_gpu=True, use_str=True)
-
-    def _test_nccl_backend(self, gpus, multi_gpu=False, use_str=False):
-        if use_str:
-            gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+    def _test_nccl_backend(self, devices, device_ids, multi_device=False):
         store = c10d.FileStore(self.file.name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        self._test_ddp_with_process_group(process_group, gpus, multi_gpu)
+        self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device)
 
     @skip_if_not_multigpu
     @skip_if_not_nccl
-    def test_nccl_backend(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_nccl_backend(gpus)
+    def test_nccl_backend_1gpu_module_device_ids_integer_list(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        self._test_nccl_backend(devices, int_devices)
 
     @skip_if_not_multigpu
     @skip_if_not_nccl
-    def test_nccl_backend_str(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_nccl_backend(gpus, use_str=True)
+    def test_nccl_backend_1gpu_module_device_ids_torch_device_list(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        self._test_nccl_backend(devices, devices)
 
     @skip_if_lt_x_gpu(4)
     @skip_if_not_nccl
     def test_nccl_backend_2gpu_module(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_nccl_backend(gpus[:2], multi_gpu=True)
-
-    @skip_if_lt_x_gpu(4)
-    @skip_if_not_nccl
-    def test_nccl_backend_2gpu_module_str(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_nccl_backend(gpus[:2], multi_gpu=True, use_str=True)
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        self._test_nccl_backend(devices, [], multi_device=True)
 
     @skip_if_lt_x_gpu(8)
     @skip_if_not_nccl
     def test_nccl_backend_4gpu_module(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_nccl_backend(gpus[:4], multi_gpu=True)
-
-    @skip_if_lt_x_gpu(8)
-    @skip_if_not_nccl
-    def test_nccl_backend_4gpu_module_str(self):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
-        self._test_nccl_backend(gpus[:4], multi_gpu=True, use_str=True)
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        self._test_nccl_backend(devices, [], multi_device=True)
 
     @skip_if_lt_x_gpu(4)
     @skip_if_not_nccl
@@ -2101,20 +2201,27 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         input = torch.rand([batch_size, 2], dtype=torch.float)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
 
-        def test_find_unused_parameters(find_unused_parameters):
-            model = DistributedDataParallel(
-                FindUnusedParametersModule().float().to(device_id),
-                device_ids=[device_id],
-                process_group=process_group,
-                find_unused_parameters=find_unused_parameters,
-            )
+        def test_find_unused_parameters(find_unused_parameters, test_default=False):
+            if test_default:
+                model = DistributedDataParallel(
+                    FindUnusedParametersModule().float().to(device_id),
+                    device_ids=[device_id],
+                    process_group=process_group,
+                )
+            else:
+                model = DistributedDataParallel(
+                    FindUnusedParametersModule().float().to(device_id),
+                    device_ids=[device_id],
+                    process_group=process_group,
+                    find_unused_parameters=find_unused_parameters,
+                )
 
             output, fc3 = model(input)
             output = fc3(output)
             loss = criterion(output, target)
             loss.backward()
 
-        # First test that the default behavior under these conditions is to
+        # First test that finding unused params under these conditions is to
         # trigger an error when `backward` is called (because fc3 is an unused
         # parameter and will therefore be marked ready twice).
         try:
@@ -2131,6 +2238,322 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             test_find_unused_parameters(False)
         except Exception as ex:
             self.fail("Unexpected exception: %s" % ex)
+
+        # Test find_unused_parameters defaults to False
+        try:
+            test_find_unused_parameters(True, test_default=True)
+        except Exception as ex:
+            self.fail("Unexpected exception: %s" % ex)
+
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_multiple_outputs_multiple_backward(self):
+        """
+        Note: this test can be sped up by only running it on a CPU module
+        once DistributedDataParallel supports them.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class MultipleOutputModule(nn.Module):
+            def __init__(self):
+                super(MultipleOutputModule, self).__init__()
+
+                def define_module():
+                    return nn.Sequential(
+                        nn.Linear(2, 10, bias=False),
+                        nn.ReLU(),
+                        nn.Linear(10, 4, bias=False),
+                        nn.ReLU(),
+                    )
+
+                self.module0 = define_module()
+                self.module1 = define_module()
+
+            def forward(self, x):
+                return (
+                    F.softmax(self.module0(x), dim=1),
+                    F.softmax(self.module1(x), dim=1),
+                )
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = DistributedDataParallel(
+            MultipleOutputModule().float().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+
+        # Compute loss and gradients for both outputs
+        output1, output2 = model(input)
+        loss1 = criterion(output1, target)
+        loss1.backward()
+        loss2 = criterion(output2, target)
+        loss2.backward()
+
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_no_used_parameters(self):
+        """
+        Note: this test can be sped up by only running it on a CPU module
+        once DistributedDataParallel supports them.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class NoUsedParameters(nn.Module):
+            def __init__(self):
+                super(NoUsedParameters, self).__init__()
+
+                # Make sure this module has some parameters, only to then decide
+                # to never use them from the `forward` function.
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.fc3 = nn.Linear(4, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                return x * 0.0
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = DistributedDataParallel(
+            NoUsedParameters().float().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+            find_unused_parameters=True,
+        )
+
+        batch_size = 4
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+
+        # After initialization, no parameter has their gradient set.
+        for p in model.parameters():
+            self.assertTrue(p.requires_grad)
+            self.assertIsNone(p.grad)
+
+        # Run `forward` function.
+        model(input)
+
+        # Because none of the parameters were used, we expect reduction for
+        # all parameters will be executed right when initializing the reducer.
+        # Once `forward` returns, all the parameter's gradients must be set.
+        for p in model.parameters():
+            self.assertTrue(p.requires_grad)
+            self.assertIsNotNone(p.grad)
+            self.assertTrue(torch.is_tensor(p.grad))
+            self.assertEqual(p.size(), p.grad.size())
+
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_no_grad(self):
+        """
+        Note: this test can be sped up by only running it on a CPU module
+        once DistributedDataParallel supports them.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class NoGradModule(nn.Module):
+            def __init__(self):
+                super(NoGradModule, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = DistributedDataParallel(
+            NoGradModule().float().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+
+        def check_no_grads():
+            for p in model.parameters():
+                self.assertTrue(p.requires_grad)
+                self.assertIsNone(p.grad)
+
+        # After initialization, no parameter has their gradient set.
+        check_no_grads()
+
+        # Run `forward` function with torch.no_grad()
+        with torch.no_grad():
+            output = model(input)
+            self.assertTrue(torch.is_tensor(output))
+
+        # No parameter should have their gradient set.
+        check_no_grads()
+
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_accumulate_gradients(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        global_batch_size = self.world_size
+
+        model, ddp_model, input, target = \
+            self._prepare_single_device_module(
+                process_group, devices, devices, global_batch_size)
+
+        def step_model(model, input, target):
+            model.train()
+            output = model(input)
+            loss = F.mse_loss(output, target.to(output.device))
+            loss.backward()
+
+        # ensure accumulate grads works with no_grad
+        with torch.no_grad():
+            ddp_model.train()
+            ddp_model.module(input)
+
+        # Check two model parameters over 4 iterations.
+        # Use 4 iterations because we alternate between reducing and
+        # not reducing and want to make sure we switch both ways.
+        for iteration in range(4):
+            step_model(model, input, target)
+
+            if iteration % 2 == 0:
+                # Skip gradients sync without calling prepare_for_backward
+                step_model(
+                    ddp_model.module,
+                    input[self.rank : (self.rank + 1)],
+                    target[self.rank : (self.rank + 1)])
+                for i, j in zip(model.parameters(), ddp_model.parameters()):
+                    self.assertNotEqual(i.grad, j.grad)
+            else:
+                step_model(
+                    ddp_model,
+                    input[self.rank : (self.rank + 1)],
+                    target[self.rank : (self.rank + 1)])
+                for i, j in zip(model.parameters(), ddp_model.parameters()):
+                    self.assertEqual(i.grad, j.grad)
+
+            # Shuffle the input so that DDP input is different
+            torch.manual_seed(1337 + iteration)
+            input = input[torch.randperm(global_batch_size)]
+
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_ignored_output(self):
+        """
+        Note: this test can be sped up by only running it on a CPU module
+        once DistributedDataParallel supports them.
+        """
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class IgnoredOutput(nn.Module):
+            def __init__(self):
+                super(IgnoredOutput, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = DistributedDataParallel(
+            IgnoredOutput().float().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+
+        # Run a few iterations where we ignore the output.
+        for _ in range(4):
+            output = model(input)
+            del output
+
+        # Run a few iterations where we use the output.
+        for _ in range(4):
+            output = model(input)
+            loss = criterion(output, target)
+            loss.backward()
+
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_failure_recovery(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # need to create a separate file for the recovered FileStore, because
+        # the original one will be deleted when destructing the first FileStore.
+        recovery_filename = self.file.name + "_recovery"
+
+        if self.rank == 0:
+            # the file will be deleted by the recovered FileStore
+            open(recovery_filename, "w").close()
+
+        # not necessary to run barrier here, as DDP will synchronize
+
+        class TestModel(nn.Module):
+            def __init__(self):
+                super(TestModel, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = TestModel().float().to(device_id)
+        ddp = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+
+        for _ in range(6):
+            output = ddp(input)
+            loss = criterion(output, target)
+            loss.backward()
+
+        del ddp
+        del process_group
+        del store  # this will delete self.file
+
+        store = c10d.FileStore(recovery_filename, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        ddp = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+        for _ in range(6):
+            output = ddp(input)
+            loss = criterion(output, target)
+            loss.backward()
 
 
 class ReducerModule(nn.Module):
@@ -2310,6 +2733,72 @@ class ComputeBucketAssignmentTest(TestCase):
         ]
         result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
+
+
+class CommTest(MultiProcessTestCase):
+    def tearDown(self):
+        super(CommTest, self).tearDown()
+        try:
+            os.remove(self.file.name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self):
+        return 2
+
+    def _test_broadcast_coalesced(self, process_group, device):
+        half = torch.float16
+
+        # No support for float16 for CPU tensors
+        if device == torch.device('cpu'):
+            half = torch.float32
+
+        target = torch.arange(60, dtype=half, device=device).chunk(5)
+        target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
+        target += torch.arange(60, dtype=half, device=device).chunk(5)
+        target += torch.arange(60, dtype=torch.float64, device=device).chunk(5)
+        target += torch.arange(60, dtype=half, device=device).chunk(5)
+        target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
+
+        # The tensors to pass to broadcast are idential to the target
+        # only on the process that is the root of the broadcast.
+        if self.rank == 0:
+            tensors = list(tensor.clone() for tensor in target)
+        else:
+            tensors = list(torch.empty_like(tensor) for tensor in target)
+
+        c10d._broadcast_coalesced(
+            process_group,
+            tensors,
+            buffer_size=256)
+
+        self.assertEqual(tensors, target)
+
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_broadcast_coalesced_nccl(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        device = torch.device('cuda:%d' % self.rank)
+        self._test_broadcast_coalesced(process_group, device)
+
+    @skip_if_not_multigpu
+    def test_broadcast_coalesced_gloo_cuda(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+        device = torch.device('cuda:%d' % self.rank)
+        self._test_broadcast_coalesced(process_group, device)
+
+    def test_broadcast_coalesced_gloo_cpu(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+        device = torch.device('cpu')
+        self._test_broadcast_coalesced(process_group, device)
 
 
 if __name__ == '__main__':

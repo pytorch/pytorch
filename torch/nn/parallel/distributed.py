@@ -3,7 +3,7 @@ import itertools
 
 import torch
 
-from torch.cuda.comm import broadcast_coalesced
+import torch.cuda.comm
 import torch.distributed as dist
 
 if dist.is_available():
@@ -197,8 +197,16 @@ class DistributedDataParallel(Module):
                                        module's ``forward`` function.
                                        Parameters that don't receive gradients as
                                        part of this graph are preemptively marked
-                                       as being ready to be reduced.
-                                       (default: ``True``)
+                                       as being ready to be reduced. Note that all
+                                       ``forward`` outputs that are derived from
+                                       module parameters must participate in
+                                       calculating loss and later the gradient
+                                       computation. If they don't, this wrapper will
+                                       hang waiting for autograd to produce gradients
+                                       for those parameters. Any outputs derived from
+                                       module parameters that are otherwise unused can
+                                       be detached from the autograd graph using
+                                       ``torch.Tensor.detach``. (default: ``False``)
         check_reduction: when setting to ``True``, it enables DistributedDataParallel
                          to automatically check if the previous iteration's
                          backward reductions were successfully issued at the
@@ -220,7 +228,7 @@ class DistributedDataParallel(Module):
     def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
                  process_group=None, bucket_cap_mb=25,
-                 find_unused_parameters=True,
+                 find_unused_parameters=False,
                  check_reduction=False):
 
         super(DistributedDataParallel, self).__init__()
@@ -282,8 +290,9 @@ class DistributedDataParallel(Module):
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
         if len(module_states) > 0:
-            self._dist_broadcast_coalesced(module_states,
-                                           self.broadcast_bucket_size)
+            self._distributed_broadcast_coalesced(
+                module_states,
+                self.broadcast_bucket_size)
 
         self._ddp_init_helper()
 
@@ -380,14 +389,16 @@ class DistributedDataParallel(Module):
         else:
             output = self.module(*inputs, **kwargs)
 
-        # We'll return the output object verbatim since it is a freeform object.
-        # We need to find any tensors in this object, though, because we need to
-        # figure out which parameters were used during this forward pass,
-        # to ensure we short circuit reduction for any unused parameters.
-        if self.find_unused_parameters:
-            self.reducer.prepare_for_backward(list(_find_tensors(output)))
-        else:
-            self.reducer.prepare_for_backward([])
+        if torch.is_grad_enabled():
+            # We'll return the output object verbatim since it is a freeform
+            # object. We need to find any tensors in this object, though,
+            # because we need to figure out which parameters were used during
+            # this forward pass, to ensure we short circuit reduction for any
+            # unused parameters. Only if `find_unused_parameters` is set.
+            if self.find_unused_parameters:
+                self.reducer.prepare_for_backward(list(_find_tensors(output)))
+            else:
+                self.reducer.prepare_for_backward([])
         return output
 
     def scatter(self, inputs, kwargs, device_ids):
@@ -404,8 +415,8 @@ class DistributedDataParallel(Module):
         for module in self._module_copies[1:]:
             module.train(mode)
 
-    def _dist_broadcast_coalesced(self, tensors, buffer_size):
-        dist._dist_broadcast_coalesced(self.process_group, tensors, buffer_size, False)
+    def _distributed_broadcast_coalesced(self, tensors, buffer_size):
+        dist._broadcast_coalesced(self.process_group, tensors, buffer_size)
 
     def _sync_params(self):
         with torch.no_grad():
@@ -413,9 +424,10 @@ class DistributedDataParallel(Module):
             # CUDA modules
             if self.device_ids and len(self.device_ids) > 1:
                 # intra-node parameter sync
-                result = broadcast_coalesced(self.modules_params[0],
-                                             self.device_ids,
-                                             self.broadcast_bucket_size)
+                result = torch.cuda.comm.broadcast_coalesced(
+                    self.modules_params[0],
+                    self.device_ids,
+                    self.broadcast_bucket_size)
                 for tensors, module_params in zip(result[1:],
                                                   self.modules_params[1:]):
                     for tensor, param in zip(tensors, module_params):
@@ -430,16 +442,19 @@ class DistributedDataParallel(Module):
 
             # module buffer sync
             if self.broadcast_buffers and len(self.modules_buffers[0]) > 0:
-                # cross-node buffer sync
-                self._dist_broadcast_coalesced(self.modules_buffers[0],
-                                               self.broadcast_bucket_size)
+                # Synchronize buffers across processes.
+                # The process with rank 0 is considered the authoritative copy.
+                self._distributed_broadcast_coalesced(
+                    self.modules_buffers[0],
+                    self.broadcast_bucket_size)
                 # only do intra-node buffer sync for replicated single-device
                 # CUDA modules
                 if self.device_ids and len(self.device_ids) > 1:
                     # intra-node buffer sync
-                    result = broadcast_coalesced(self.modules_buffers[0],
-                                                 self.device_ids,
-                                                 self.broadcast_bucket_size)
+                    result = torch.cuda.comm.broadcast_coalesced(
+                        self.modules_buffers[0],
+                        self.device_ids,
+                        self.broadcast_bucket_size)
                     for tensors, module_buffers in zip(result[1:],
                                                        self.modules_buffers[1:]):
                         for tensor, buffer in zip(tensors, module_buffers):

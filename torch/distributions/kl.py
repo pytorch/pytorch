@@ -116,7 +116,7 @@ def _infinite_like(tensor):
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
-    return tensor.new_tensor(inf).expand_as(tensor)
+    return torch.full_like(tensor, inf)
 
 
 def _x_log_x(tensor):
