@@ -533,8 +533,12 @@ class ShapePropagator {
       case prim::TupleConstruct: {
         // We refresh the tuple type, because the input types could have been
         // refined.
+        auto orig_type = node->output()->type()->expect<TupleType>();
         node->output()->setType(TupleType::create(
-            fmap(node->inputs(), [](Value* v) { return v->type(); })));
+            fmap(node->inputs(), [](Value* v) { return v->type(); }),
+            orig_type->hasNames() ? c10::make_optional(orig_type->names())
+                                  : c10::nullopt,
+            orig_type->unqualName()));
         return;
       }
       case prim::TupleUnpack: {

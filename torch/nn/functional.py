@@ -3028,8 +3028,8 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        ret = torch._C._nn.thnn_im2col(input, _pair(kernel_size),
-                                       _pair(dilation), _pair(padding), _pair(stride))
+        ret = torch._C._nn.im2col(input, _pair(kernel_size),
+                                  _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
         ret = input  # TODO: remove when jit supports exception control flow
@@ -3056,8 +3056,8 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        ret = torch._C._nn.thnn_col2im(input, _pair(output_size), _pair(kernel_size),
-                                       _pair(dilation), _pair(padding), _pair(stride))
+        ret = torch._C._nn.col2im(input, _pair(output_size), _pair(kernel_size),
+                                  _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
         ret = input  # TODO: remove when jit supports exception control flow

@@ -194,8 +194,7 @@ namespace std {
   template <>
   struct hash<::c10::OperatorName> {
     size_t operator()(const ::c10::OperatorName& x) const {
-      const std::hash<std::string> string_hash;
-       return string_hash(x.name) ^ (~ string_hash(x.overload_name));
+      return std::hash<std::string>()(x.name) ^ (~ std::hash<std::string>()(x.overload_name));
     }
   };
 }
