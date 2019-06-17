@@ -1652,9 +1652,12 @@ class TestNN(NNTestCase):
         m = nn.Linear(2,3)
         mw = m.weight[:]
         m.to('cuda')
-        mw[0][0] = 5
+        with torch.no_grad():
+            # Without using `torch.no_grad()`, this will leak CUDA memory.
+            # (Issue is filed at https://github.com/pytorch/pytorch/issues/21875)
+            mw[0][0] = 5
         with self.assertRaisesRegex(RuntimeError, "Expected object of backend CPU but got backend CUDA"):
-            self.assertTrue(mw[0][0] == mw._base[0][0])
+            mw[0][0] == mw._base[0][0]
 
         torch.__future__.set_overwrite_module_params_on_conversion(True)
 
