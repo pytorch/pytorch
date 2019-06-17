@@ -235,6 +235,7 @@
     CUDA: as_strided_tensorimpl
     QuantizedCPU: as_strided_qtensorimpl
   device_guard: False
+  named_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
   variants: function, method
@@ -1675,6 +1676,7 @@
 - func: select(Tensor(a) self, int dim, int index) -> Tensor(a)
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: selu(Tensor self) -> Tensor
 
@@ -1740,6 +1742,7 @@
 - func: size(Tensor self, int dim) -> int
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   variants: function, method
