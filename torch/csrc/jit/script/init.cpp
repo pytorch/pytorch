@@ -96,7 +96,7 @@ struct PythonResolver : public Resolver {
         py::hasattr(obj, "_fields");
   }
 
-  TypePtr resolveType(const std::string& name) const override {
+  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
     if (classType_ && name == classname_) {
       return classType_;
     }
@@ -128,7 +128,7 @@ struct PythonResolver : public Resolver {
             error_msg += kv.first;
           }
           error_msg += "]";
-          throw std::runtime_error(error_msg);
+          throw ErrorReport(loc) << error_msg;
         }
       }
 
