@@ -684,6 +684,8 @@
     CPU: _embedding_bag_per_sample_weights_backward_cpu
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
+- func: empty(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
 - func: empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: empty_cpu
@@ -1303,11 +1305,30 @@
 
 - func: mul(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  dispatch:
+    CPU: mul
+    CUDA: mul
+    SparseCPU: mul
+    SparseCUDA: mul
+    MkldnnCPU: mkldnn_mul
+
 
 - func: mul_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  dispatch:
+    CPU: mul_
+    CUDA: mul_
+    SparseCPU: mul_
+    SparseCUDA: mul_
+    MkldnnCPU: mkldnn_mul_
 
 - func: mul(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: mul_out
+    CUDA: mul_out
+    SparseCPU: mul_out
+    SparseCUDA: mul_out
+    MkldnnCPU: mkldnn_mul_out
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul(Tensor self, Scalar other) -> Tensor
@@ -2241,6 +2262,7 @@
     CUDA: legacy::cuda::_th_zero_
     SparseCPU: zero_sparse_
     SparseCUDA: zero_sparse_
+    MkldnnCPU: mkldnn_zero_
 
 - func: sub(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
 
@@ -2652,6 +2674,11 @@
 - func: _per_tensor_affine_qtensor(Tensor self, float scale, int zero_point) -> Tensor
   dispatch:
     CPU: per_tensor_affine_qtensor_cpu
+
+- func: qscheme(Tensor self) -> QScheme
+  variants: method
+  dispatch:
+    QuantizedCPU: qscheme_quant
 
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
@@ -4681,28 +4708,28 @@
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool2d_forward_out
-    CUDA: legacy::cuda::_thnn_avg_pool2d_forward_out
+    CPU: avg_pool2d_out_cpu
+    CUDA: avg_pool2d_out_cuda
     MkldnnCPU: mkldnn_avg_pool2d_out
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool2d_forward
-    CUDA: legacy::cuda::_thnn_avg_pool2d_forward
+    CPU: avg_pool2d_cpu
+    CUDA: avg_pool2d_cuda
     MkldnnCPU: mkldnn_avg_pool2d
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool2d_backward_out
-    CUDA: legacy::cuda::_thnn_avg_pool2d_backward_out
+    CPU: avg_pool2d_backward_out_cpu
+    CUDA: avg_pool2d_backward_out_cuda
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool2d_backward
-    CUDA: legacy::cuda::_thnn_avg_pool2d_backward
+    CPU: avg_pool2d_backward_cpu
+    CUDA: avg_pool2d_backward_cuda
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

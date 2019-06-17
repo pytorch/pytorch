@@ -4,7 +4,7 @@
 if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
   project(torch CXX C)
-  find_package(Caffe2 REQUIRED)
+  find_package(torch REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
@@ -51,6 +51,8 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/Generator.cpp
     ${TORCH_SRC_DIR}/csrc/Layout.cpp
     ${TORCH_SRC_DIR}/csrc/MemoryFormat.cpp
+    ${TORCH_SRC_DIR}/csrc/python_dimname.cpp
+    ${TORCH_SRC_DIR}/csrc/QScheme.cpp
     ${TORCH_SRC_DIR}/csrc/Module.cpp
     ${TORCH_SRC_DIR}/csrc/PtrWrapper.cpp
     ${TORCH_SRC_DIR}/csrc/Size.cpp
@@ -95,6 +97,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/utils/tensor_layouts.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_list.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_memoryformats.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/tensor_qschemes.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_new.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_numpy.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_types.cpp
@@ -128,7 +131,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
-    caffe2_library
+    torch_library
     shm)
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
@@ -175,7 +178,6 @@ if (USE_CUDA)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${LIBNVTOOLSEXT})
     endif()
 
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES caffe2_gpu_library)
 endif()
 
 if (USE_CUDNN)
@@ -211,7 +213,7 @@ if (USE_ROCM)
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
       ${GENERATED_THNN_CXX_CUDA}
       )
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES caffe2_hip_library)
+
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS
       USE_ROCM
       __HIP_PLATFORM_HCC__
