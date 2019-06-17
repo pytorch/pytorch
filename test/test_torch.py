@@ -3079,6 +3079,32 @@ class _TestTorchMixin(object):
                 self.assertEqual(qr.q_scale(), qr2.q_scale())
                 self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
 
+    def test_qtensor_copy(self):
+        scale = 0.5
+        zero_point = 10
+        val = 100
+        numel = 10
+        # copy from same scale and zero_point
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        q2 = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        q.copy_(q2)
+        self.assertEqual(q.int_repr(), q2.int_repr())
+        self.assertEqual(q.q_scale(), q2.q_scale())
+        self.assertEqual(q.q_zero_point(), q2.q_zero_point())
+        # copying from different scale and zero_point
+        scale = 3.2
+        zero_point = 5
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        # check original scale and zero_points are set correctly
+        self.assertEqual(q.q_scale(), scale)
+        self.assertEqual(q.q_zero_point(), zero_point)
+        q.copy_(q2)
+        # check scale and zero_points has been copied
+        self.assertEqual(q.int_repr(), q2.int_repr())
+        self.assertEqual(q.q_scale(), q2.q_scale())
+        self.assertEqual(q.q_zero_point(), q2.q_zero_point())
+
+
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
         # verify that all operators with `device_guard: False` behave properly with multiple devices.
