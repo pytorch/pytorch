@@ -30,7 +30,7 @@ install_ubuntu() {
                    rocsparse \
                    hipsparse \
                    rocrand \
-		   hipcub \
+                   hipcub \
                    rocthrust \
                    rccl
 
@@ -78,7 +78,7 @@ install_centos() {
                    hipsparse \
                    rocrand \
                    rccl \
-		   hipcub \
+                   hipcub \
                    rocthrust
 }
  
