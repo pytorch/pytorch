@@ -704,7 +704,7 @@ See :func:`torch.diag_embed`
 
 add_docstr_all('diagflat',
                r"""
-diagflat(diagonal=0) -> Tensor
+diagflat(offset=0) -> Tensor
 
 See :func:`torch.diagflat`
 """)
@@ -2958,9 +2958,9 @@ sum_to_size(*size) -> Tensor
 
 Sum ``this`` tensor to :attr:`size`.
 :attr:`size` must be broadcastable to ``this`` tensor size.
+
 Args:
-    other (:class:`torch.Tensor`): The result tensor has the same size
-        as :attr:`other`.
+    size (int...): a sequence of integers defining the shape of the output tensor.
 """)
 
 
