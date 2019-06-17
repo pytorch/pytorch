@@ -26,6 +26,7 @@
 #include <c10/util/SmallVector.h>
 
 #include <algorithm>
+#include <bitset>
 #include <cctype>
 #include <cmath>
 #include <exception>
@@ -631,8 +632,7 @@ RegisterOperators reg(
                drop(stack, 1);
                c10::SourceLocation location{
                    "", range->filename()->c_str(), uint32_t(line)};
-               c10::Warning::warn(location,
-                   pop(stack).toStringRef());
+               c10::Warning::warn(location, pop(stack).toStringRef());
                return 0;
              };
            }
@@ -2043,6 +2043,41 @@ RegisterOperators reg2({
     DEFINE_STRING_CHAR_MAP_OP(aten::upper, std::toupper),
     DEFINE_STRING_CHAR_MAP_OP(aten::lower, std::tolower),
 
+#define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
+  Operator(#op_name "(int i) -> str", [](Stack& stack) { \
+    auto i = pop(stack).toInt();                         \
+    std::stringstream ss;                                \
+    if (i < 0) {                                         \
+      ss << "-";                                         \
+      i = -i;                                            \
+    }                                                    \
+    ss << "0" << prefix << char_op << i;                 \
+    push(stack, ss.str());                               \
+    return 0;                                            \
+  })
+
+    DEFINE_CONVERT_BASE_OP(aten::hex, "x", std::hex),
+    DEFINE_CONVERT_BASE_OP(aten::oct, "o", std::oct),
+
+    Operator(
+        "aten::bin(int i) -> str",
+        [](Stack& stack) {
+          auto i = pop(stack).toInt();
+          std::stringstream ss;
+          if (i == 0) {
+            push(stack, "0b0");
+          } else {
+            if (i < 0) {
+              ss << "-";
+              i = -i;
+            }
+            std::string str = std::bitset<8 * sizeof(i)>(i).to_string();
+            str.erase(0, std::min(str.find_first_not_of('0'), str.size() - 1));
+            ss << "0b" << str;
+            push(stack, ss.str());
+          }
+          return 0;
+        }),
     Operator(
         "prim::StringIndex(str string, int index) -> str",
         [](Stack& stack) {
@@ -2066,10 +2101,24 @@ RegisterOperators reg2({
           auto string = pop(stack).toStringRef();
           TORCH_CHECK(
               string.size() == 1,
-              "String for ord() must be 1 character, found",
+              "String for ord() must be 1 character, found ",
               string.size());
           uint8_t ord = string.at(0);
           push(stack, int64_t(ord));
+          return 0;
+        }),
+    Operator(
+        "aten::chr(int i) -> str",
+        [](Stack& stack) {
+          auto i = pop(stack).toInt();
+          std::stringstream ss;
+          TORCH_CHECK(
+              i >= 0 && i < 1114111,
+              "chr() arg not in range(0x110000), found ",
+              i);
+          char c = i;
+          ss << c;
+          push(stack, ss.str());
           return 0;
         }),
 #define CREATE_COPY_OP(other_type, c_type)                                 \
@@ -2157,6 +2206,7 @@ RegisterOperators reg2({
 
     DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
     DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
+    DEFINE_UNARY_OP(aten::round, std::round(a), float, float),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::log, std::log(a) / std::log(b)),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),

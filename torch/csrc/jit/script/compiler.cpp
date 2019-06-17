@@ -371,6 +371,18 @@ struct Environment {
            makeMagic(
                "__len__",
                std::make_shared<BuiltinFunction>(aten::len, at::nullopt))},
+          {"hex",
+           makeMagic(
+               "__hex__",
+               std::make_shared<BuiltinFunction>(aten::hex, at::nullopt))},
+          {"oct",
+           makeMagic(
+               "__oct__",
+               std::make_shared<BuiltinFunction>(aten::oct, at::nullopt))},
+          {"round",
+           makeMagic(
+               "__round__",
+               std::make_shared<BuiltinFunction>(aten::round, at::nullopt))},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
@@ -379,6 +391,8 @@ struct Environment {
           {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
+          {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
+          {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
           {"rangelist",
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
       };

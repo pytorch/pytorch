@@ -91,7 +91,7 @@ struct TORCH_API Method {
     return *function_;
   }
 
-  // Used for ONNX export. Return a tuple (graph, parameters) where 
+  // Used for ONNX export. Return a tuple (graph, parameters) where
   // the last parameters.size() inputs to the graph are the trainable parameters
   // used in this method. The remaining inputs are the true inputs to the function.
   std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> _lowered_graph();
@@ -123,7 +123,7 @@ struct TORCH_API Module {
     // Function has a self argument which owns the ClassType, created a
     // reference cycle. By dropping all the methods of the module's class
     // here we break the cycle.
-    class_compilation_unit().drop_all_functions();
+    class_compilation_unit()->drop_all_functions();
   }
   const std::string& field_name() const {
     return field_name_;
@@ -132,11 +132,11 @@ struct TORCH_API Module {
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
   void set_optimized(bool o) {
-    class_compilation_unit().set_optimized(o);
+    class_compilation_unit()->set_optimized(o);
   }
 
   bool is_optimized() const {
-    return class_compilation_unit().is_optimized();
+    return class_compilation_unit()->is_optimized();
   }
 
   IValue forward(std::vector<IValue> inputs) {
@@ -236,7 +236,7 @@ struct TORCH_API Module {
   }
   const std::vector<Method> get_methods() const {
     return fmap(
-        class_compilation_unit().get_functions(),
+        class_compilation_unit()->get_functions(),
         [&](const std::shared_ptr<Function>& func) {
           return Method(this, func);
         });
@@ -267,7 +267,7 @@ struct TORCH_API Module {
   }
   c10::optional<Method> find_method(const std::string& name) const {
     if (const std::shared_ptr<Function>& fn =
-            class_compilation_unit().find_function(name)) {
+            class_compilation_unit()->find_function(name)) {
       return Method(const_cast<Module*>(this), fn);
     }
     return c10::nullopt;
@@ -363,7 +363,7 @@ struct TORCH_API Module {
   at::optional<EntityType> kind_of(const std::string& name) const {
     auto it = dict_.find(name);
     if (it == dict_.end()) {
-      if (auto fn = class_compilation_unit().find_function(name)) {
+      if (auto fn = class_compilation_unit()->find_function(name)) {
         return EntityType::METHOD;
       }
       return at::nullopt;
@@ -374,10 +374,10 @@ struct TORCH_API Module {
   ModulePtr module_object() const {
     return module_value_;
   }
-  CompilationUnit& class_compilation_unit() {
+  std::shared_ptr<CompilationUnit> class_compilation_unit() {
     return module_object()->type()->compilation_unit();
   }
-  const CompilationUnit& class_compilation_unit() const {
+  std::shared_ptr<const CompilationUnit> class_compilation_unit() const {
     return module_object()->type()->compilation_unit();
   }
 
