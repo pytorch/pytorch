@@ -1,15 +1,15 @@
 """
 This global flag controls whether to change the existing parameters
 in-place instead of assigning new tensors to the parameters when
-converting a module using `module._apply(fn)`.
+converting a module using such as `module._apply(fn)`.
 
 Default: False
 """
-TORCH_FLAG_overwrite_module_params_on_conversion_ = False
+_overwrite_module_params_on_conversion = False
 
 def set_overwrite_module_params_on_conversion(value):
-	global TORCH_FLAG_overwrite_module_params_on_conversion_
-	TORCH_FLAG_overwrite_module_params_on_conversion_ = value
+	global _overwrite_module_params_on_conversion
+	_overwrite_module_params_on_conversion = value
 
 def get_overwrite_module_params_on_conversion():
-	return TORCH_FLAG_overwrite_module_params_on_conversion_
+	return _overwrite_module_params_on_conversion
