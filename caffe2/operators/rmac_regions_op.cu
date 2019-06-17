@@ -3,6 +3,10 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/rmac_regions_op.h"
 
+#ifdef __HIP_PLATFORM_HCC__
+#include <cfloat>
+#endif
+
 namespace cub {
 
 template <typename KeyT, typename ValueT>
