@@ -1,3 +1,5 @@
+#include <ATen/native/im2col.h>
+
 #ifndef TH_GENERIC_FILE
 #define TH_GENERIC_FILE "THNN/generic/SpatialFullDilatedConvolution.c"
 #else
@@ -161,7 +163,7 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
     );
 
     // Unpack columns back into input:
-    THNN_(col2im)(
+    at::native::col2im<scalar_t>(
       columns->data<scalar_t>(),
       nOutputPlane, outputHeight, outputWidth, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
@@ -264,7 +266,7 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
     THTensor_(select)(gradOutput_n, gradOutput, 0, elt);
 
     // Extract columns:
-    THNN_(im2col)(
+    at::native::im2col<scalar_t>(
       gradOutput_n->data<scalar_t>(),
       nOutputPlane, outputHeight, outputWidth,
       inputHeight, inputWidth,
@@ -390,7 +392,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
       THTensor_(select)(input_n, input, 0, elt);
 
       // Extract columns:
-      THNN_(im2col)(
+      at::native::im2col<scalar_t>(
         gradOutput_n->data<scalar_t>(),
         nOutputPlane, outputHeight, outputWidth,
         inputHeight, inputWidth,

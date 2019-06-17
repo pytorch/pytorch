@@ -5421,26 +5421,50 @@
     CPU: legacy::cpu::_thnn_conv_dilated3d_backward
     CUDA: legacy::cuda::_thnn_conv_dilated3d_backward
 
-- func: thnn_col2im(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+- func: col2im(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_col2im_forward
-    CUDA: legacy::cuda::_thnn_col2im_forward
+    CPU: col2im_out_cpu
+    CUDA: col2im_out_cuda
 
-- func: thnn_col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+- func: col2im(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_col2im_backward
-    CUDA: legacy::cuda::_thnn_col2im_backward
+    CPU: col2im_cpu
+    CUDA: col2im_cuda
 
-- func: thnn_im2col(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+- func: col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_im2col_forward
-    CUDA: legacy::cuda::_thnn_im2col_forward
+    CPU: col2im_backward_out_cpu
+    CUDA: col2im_backward_out_cuda
 
-- func: thnn_im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+- func: col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_im2col_backward
-    CUDA: legacy::cuda::_thnn_im2col_backward
+    CPU: col2im_backward_cpu
+    CUDA: col2im_backward_cuda
+
+- func: im2col(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU: im2col_out_cpu
+    CUDA: im2col_out_cuda
+
+- func: im2col(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: im2col_cpu
+    CUDA: im2col_cuda
+
+- func: im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) grad_input) -> Tensor(a!)
+  python_module: nn
+  dispatch:
+    CPU: im2col_backward_out_cpu
+    CUDA: im2col_backward_out_cuda
+
+- func: im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+  python_module: nn
+  dispatch:
+    CPU: im2col_backward_cpu
+    CUDA: im2col_backward_cuda
