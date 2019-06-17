@@ -4,8 +4,7 @@
 
 #include <TH/THBlasUtils.h>
 
-#include <ATen/native/Col2Im.h>
-#include <ATen/native/Im2Col.h>
+#include <ATen/native/im2col.h>
 
 namespace at {
 namespace native {

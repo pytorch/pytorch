@@ -8,7 +8,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-#include <ATen/native/cuda/im_col.cuh>
+#include <ATen/native/cuda/im2col.cuh>
 
 namespace at {
 namespace native {
