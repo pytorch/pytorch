@@ -12,10 +12,6 @@ sudo: false
 matrix:
     fast_finish: true
     include:
-      - name: "Ensure consistent CircleCI YAML"
-        python: "3.7"
-        dist: xenial
-        script: cd .circleci && ./ensure-consistency.py
       - name: "Shellcheck Jenkins scripts"
         dist: xenial
         install: sudo apt-get install -y shellcheck
