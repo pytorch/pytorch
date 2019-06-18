@@ -116,16 +116,6 @@
     output: 'false'
     grad_input: 'false'
 
-# Pooling
-
-- name: _thnn_avg_pool3d(Tensor self, IntArrayRef[3] kernel_size, IntArrayRef[3] stride={}, IntArrayRef[3] padding=0, bool ceil_mode=false, bool count_include_pad=true)
-  cname: VolumetricAveragePooling
-  default_init:
-    stride: kernel_size
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 # Private functions. These also exist in TH, but we want the backwards functions
 # to implement derivatives.
 
