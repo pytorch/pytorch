@@ -24,6 +24,15 @@ std::vector<Function*> ClassType::methods() const {
   return ret;
 }
 
+namespace ivalue {
+Object::~Object() {
+  if (type_->is_module()) {
+    type_->compilation_unit()->drop_all_functions();
+  }
+}
+} // namespace ivalue
+
+
 bool ClassType::isSubtypeOf(const TypePtr rhs) const {
   // to improve performance, this check can be cached
   if (auto iface = rhs->cast<InterfaceType>()) {
