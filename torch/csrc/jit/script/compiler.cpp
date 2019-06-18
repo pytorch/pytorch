@@ -1460,7 +1460,7 @@ struct to_ir {
   // Get the appropriate builtin op for this augmented assignment
   // If the RHS is a tensor, return the corresponding ATen in-place op
   // If it's a list of scalars, then return the corresponding list augment op
-  Symbol getAugOp(const AugAssign& stmt, TypePtr type) {
+  Symbol getAugOp(const AugAssign& stmt, const TypePtr& type) {
     if (type->cast<ListType>()) { // Lists also have in-place ops.
       std::cout<<"generating list op"<<std::endl;
       switch (stmt.aug_op()) {
