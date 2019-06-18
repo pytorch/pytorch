@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <c10/util/C++17.h>
 #include <memory>
+#include <mutex>
 
 // This dispatch class serves as a replacement for our previous dispatch
 // mechanism, in which all functions were members of a Type class. A derived
@@ -19,7 +20,7 @@ namespace at {
 class CAFFE2_API ATenOpTable {
  public:
   ATenOpTable(std::string schema)
-    : schema_(schema) {}
+    : schema_(std::move(schema)) {}
 
   template<class FuncType>
   FuncType* getOp(Backend backend, bool is_variable) const {
@@ -70,15 +71,17 @@ class CAFFE2_API ATenDispatch {
  public:
   template<class FuncType>
   ATenDispatch& registerOp(Backend backend, const char* schema, FuncType* fn) {
-   if (op_tables_.find(schema) == op_tables_.end()) {
-     op_tables_.insert(std::make_pair(schema, ATenOpTable(schema)));
-   }
-   op_tables_.at(schema).registerOp(backend, reinterpret_cast<void*>(fn));
-   return *this;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (op_tables_.find(schema) == op_tables_.end()) {
+      op_tables_.insert(std::make_pair(schema, ATenOpTable(schema)));
+    }
+    op_tables_.at(schema).registerOp(backend, reinterpret_cast<void*>(fn));
+    return *this;
   }
 
   template <class FuncType>
   ATenDispatch& registerVariableOp(const char* schema, FuncType* fn) {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (op_tables_.find(schema) == op_tables_.end()) {
       op_tables_.insert(std::make_pair(schema, ATenOpTable(schema)));
     }
@@ -95,6 +98,7 @@ class CAFFE2_API ATenDispatch {
 
  private:
   std::unordered_map<std::string, ATenOpTable> op_tables_;
+  std::mutex mutex_;
 };
 
 CAFFE2_API ATenDispatch& globalATenDispatch();
