@@ -217,19 +217,6 @@ void conv_dilated_all_cuda_template(
       input.scalar_type(), "conv_dilated<>", [&] {
         // For each elt in batch, do:
         for (int elt = 0; elt < batchSize; elt++) {
-          if (elt == 0) { // TEMPORARY, for debugging rocm
-            std::cout << "conv_dilated_all_cuda_template<"<<dim<<">, input: "<<input.scalar_type() << input.numel() << "@" <<input.data<scalar_t>();
-            if (output.defined()) {
-              std::cout << ", output: "<<output.scalar_type() << output.numel() << "@" <<output.data<scalar_t>();
-            }
-            if (bias.defined()) {
-              std::cout << ", bias: "<<bias.scalar_type() << bias.numel() << "@" <<bias.data<scalar_t>();
-            }
-            if (grad_output.defined()) {
-              std::cout << ", grad output: "<<grad_output.scalar_type() << grad_output.numel() << "@" <<grad_output.data<scalar_t>();
-            }
-            std::cout << std::endl;
-          }
 
           // Matrix multiply per output:
           Tensor input_n = input.select(0, elt);
@@ -267,12 +254,12 @@ void conv_dilated_all_cuda_template(
                 /*     m=*/columns.size(1),
                 /*     n=*/nOutputPlane,
                 /*     k=*/columns.size(0),
-                /* alpha=*/1,
+                /* alpha=*/ScalarConvert<int, scalar_t>::to(1),
                 /*     A=*/columns.data<scalar_t>(),
                 /*   lda=*/columns.size(1),
                 /*     B=*/weight.data<scalar_t>(),
                 /*   ldb=*/columns.size(0),
-                /*  beta=*/1,
+                /*  beta=*/ScalarConvert<int, scalar_t>::to(1),
                 /*     C=*/output_n.data<scalar_t>(),
                 /*   ldc=*/columns.size(1));
 
@@ -293,12 +280,12 @@ void conv_dilated_all_cuda_template(
                 /*     m=*/columns.size(1),
                 /*     n=*/columns.size(0),
                 /*     k=*/nOutputPlane,
-                /* alpha=*/1,
+                /* alpha=*/ScalarConvert<int, scalar_t>::to(1),
                 /*     A=*/grad_output_n.data<scalar_t>(),
                 /*   lda=*/columns.size(1),
                 /*     B=*/weight.data<scalar_t>(),
                 /*   ldb=*/columns.size(0),
-                /*  beta=*/0,
+                /*  beta=*/ScalarConvert<int, scalar_t>::to(0),
                 /*     C=*/columns.data<scalar_t>(),
                 /*   ldc=*/columns.size(1));
             // Unpack columns back into input:
@@ -331,7 +318,7 @@ void conv_dilated_all_cuda_template(
                 pad_size,
                 dilation_size,
                 columns.data<scalar_t>());
-            scalar_t scale = 1; // TODO: expose as argument?
+            scalar_t scale = ScalarConvert<int, scalar_t>::to(1); // TODO: expose as argument?
             /* For gemm argument derivation, see
                conv_dilated_all_cuda_template in
                ATen/native/DilatedConvolution.cpp */
@@ -347,7 +334,7 @@ void conv_dilated_all_cuda_template(
                 /*   lda=*/columns.size(1),
                 /*     B=*/grad_output_n.data<scalar_t>(),
                 /*   ldb=*/columns.size(1),
-                /*  beta=*/1,
+                /*  beta=*/ScalarConvert<int, scalar_t>::to(1),
                 /*     C=*/grad_weight.data<scalar_t>(),
                 /*   ldc=*/columns.size(0));
           }
