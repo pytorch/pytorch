@@ -189,14 +189,20 @@ void conv_dilated_all_cuda_template(
   int64_t batchSize = input.size(0);
   int64_t nInputPlane = weight.size(1);
   int64_t nOutputPlane = weight.size(0);
-  // Temporary buffer:
+  // Temporary buffers:
+  int64_t m = std::accumulate(
+      kernel_size.begin(), kernel_size.end(), 1, std::multiplies<int64_t>());
+  int64_t n = std::accumulate(
+      output_size.begin(), output_size.end(), 1, std::multiplies<int64_t>());
   Tensor columns = at::empty({0}, options);
-  if (output.defined() || grad_weight.defined() || grad_input.defined()) {
-    int64_t m = std::accumulate(
-        kernel_size.begin(), kernel_size.end(), 1, std::multiplies<int64_t>());
-    int64_t n = std::accumulate(
-        output_size.begin(), output_size.end(), 1, std::multiplies<int64_t>());
+  Tensor grad_columns = at::empty({0}, options);
+  if (output.defined() || grad_weight.defined()) {
     columns.resize_({nInputPlane * m, n});
+    grad_columns.zero_();  // should not be necessary
+  }
+  if (grad_input.defined()) {
+    grad_columns.resize_({nInputPlane * m, n});
+    grad_columns.zero_();  // should not be necessary
   }
   // Initialize
   if (grad_weight.defined()) {
@@ -277,23 +283,23 @@ void conv_dilated_all_cuda_template(
                 stream,
                 /*transa=*/'n',
                 /*transb=*/'t',
-                /*     m=*/columns.size(1),
-                /*     n=*/columns.size(0),
+                /*     m=*/grad_columns.size(1),
+                /*     n=*/grad_columns.size(0),
                 /*     k=*/nOutputPlane,
                 /* alpha=*/ScalarConvert<int, scalar_t>::to(1),
                 /*     A=*/grad_output_n.data<scalar_t>(),
-                /*   lda=*/columns.size(1),
+                /*   lda=*/grad_columns.size(1),
                 /*     B=*/weight.data<scalar_t>(),
-                /*   ldb=*/columns.size(0),
+                /*   ldb=*/grad_columns.size(0),
                 /*  beta=*/ScalarConvert<int, scalar_t>::to(0),
-                /*     C=*/columns.data<scalar_t>(),
-                /*   ldc=*/columns.size(1));
+                /*     C=*/grad_columns.data<scalar_t>(),
+                /*   ldc=*/grad_columns.size(1));
             // Unpack columns back into input:
             Tensor grad_input_n = grad_input.select(0, elt);
 
             col2hvol<scalar_t, dim>(
                 stream,
-                columns.data<scalar_t>(),
+                grad_columns.data<scalar_t>(),
                 nInputPlane,
                 input_size,
                 output_size,
