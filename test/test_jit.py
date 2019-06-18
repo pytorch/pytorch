@@ -2537,7 +2537,7 @@ graph(%Ra, %Rb):
 
     def test_export_tensoroption_to(self):
         def foo(x):
-            return x.new_tensor(x[0]).cpu() + x
+            return x[0].clone().detach().cpu() + x
 
         traced = torch.jit.trace(foo, (torch.rand([2])))
         example_outputs = traced(torch.rand([2]))
@@ -2829,6 +2829,13 @@ graph(%Ra, %Rb):
         except subprocess.CalledProcessError as e:
             raise RuntimeError("Could not 'import torch' with PYTORCH_JIT=0")
 
+    def test_print_op_module(self):
+        # Issue #19351: python2 and python3 go through different paths.
+        # python2 returns '<module 'torch.ops' (built-in)>'
+        # python3 uses __file__ and return
+        # '<module 'torch.ops' from '/scratch/ailzhang/pytorch/torch/_ops.py'>'
+        s = str(torch.ops)
+        self.assertRegex(s, r'ops')
 
 def execWrapper(code, glob, loc):
     if PY2:
@@ -12135,30 +12142,6 @@ a")
 
         self.checkScript(fn, ("abcde",))
 
-    def test_str_ops(self):
-        def test_str_is(s):
-            # type: (str) -> Tuple[bool, bool, bool, bool, bool, bool]
-            return s.isupper(), s.islower(), s.isdigit(), s.isspace(), \
-                s.isalnum(), s.isalpha()
-
-        def test_str_to(s):
-            # type: (str) -> Tuple[str, str]
-            return s.upper(), s.lower()
-
-        inputs = ["", "12a", "!B", "12", "a", "B", "aB", "$12", "B12", "AB ",
-                  "  \t", "  \n", "\na", "abc"]
-
-        for input in inputs:
-            self.checkScript(test_str_is, (input,))
-            self.checkScript(test_str_to, (input,))
-
-        def test_str_cmp(a, b):
-            # type: (str, str) -> Tuple[bool, bool, bool, bool, bool, bool]
-            return a != b, a == b, a < b, a > b, a <= b, a >= b
-
-        for i in range(len(inputs) - 1):
-            self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
-
     def test_ord(self):
         def fn(x):
             # type: (str) -> int
@@ -15725,7 +15708,7 @@ class TestClassType(JitTestCase):
                     self.foo = 10  # should error since int != Tensor
 
     def test_get_attr_not_initialized(self):
-        with self.assertRaisesRegex(RuntimeError, "Tried to access to nonexistent attribute"):
+        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute"):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
@@ -16267,15 +16250,30 @@ class TestClassType(JitTestCase):
                 return other
 
     def test_optional_type_promotion(self):
+        @torch.jit.script
+        class Leaf(object):
+            def __init__(self):
+                self.x = 1
+
         # should not throw
         @torch.jit.script  # noqa: B903
         class Tree(object):
             def __init__(self):
-                self.parent = torch.jit.annotate(Optional[Tree], None)
+                self.child = torch.jit.annotate(Optional[Leaf], None)
 
             def add_child(self, child):
-                # type: (Tree) -> None
-                child.parent = torch.jit.annotate(Optional[Tree], self)
+                # type: (Leaf) -> None
+                self.child = child
+
+    def test_recursive_class(self):
+        """
+        Recursive class types not yet supported. We should give a good error message.
+        """
+        with self.assertRaises(RuntimeError):
+            @torch.jit.script  # noqa: B903
+            class Tree(object):
+                def __init__(self):
+                    self.parent = torch.jit.annotate(Optional[Tree], None)
 
 
 class TestLogging(JitTestCase):

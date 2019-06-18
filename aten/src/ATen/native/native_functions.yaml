@@ -235,6 +235,7 @@
     CUDA: as_strided_tensorimpl
     QuantizedCPU: as_strided_qtensorimpl
   device_guard: False
+  named_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
   variants: function, method
@@ -1675,6 +1676,7 @@
 - func: select(Tensor(a) self, int dim, int index) -> Tensor(a)
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: selu(Tensor self) -> Tensor
 
@@ -1740,6 +1742,7 @@
 - func: size(Tensor self, int dim) -> int
   variants: function, method
   device_guard: False
+  named_guard: False
 
 - func: slice(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   variants: function, method
@@ -4734,26 +4737,26 @@
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool3d_forward_out
-    CUDA: legacy::cuda::_thnn_avg_pool3d_forward_out
+    CPU: avg_pool3d_out_cpu
+    CUDA: avg_pool3d_out_cuda
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool3d_forward
-    CUDA: legacy::cuda::_thnn_avg_pool3d_forward
+    CPU: avg_pool3d_cpu
+    CUDA: avg_pool3d_cuda
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool3d_backward_out
-    CUDA: legacy::cuda::_thnn_avg_pool3d_backward_out
+    CPU: avg_pool3d_backward_out_cpu
+    CUDA: avg_pool3d_backward_out_cuda
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool3d_backward
-    CUDA: legacy::cuda::_thnn_avg_pool3d_backward
+    CPU: avg_pool3d_backward_cpu
+    CUDA: avg_pool3d_backward_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
