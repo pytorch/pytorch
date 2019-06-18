@@ -495,6 +495,11 @@ struct CAFFE2_API WeakIValue final {
     std::swap(tag, rhs.tag);
   }
 
+  bool isSameIdentity(const WeakIValue& rhs) const {
+    return payload.as_int == rhs.payload.as_int && tag == rhs.tag &&
+        is_intrusive_ptr == rhs.is_intrusive_ptr;
+  }
+
   IValue lock() const {
     if (!is_intrusive_ptr) {
       return IValue(payload, tag, false);
