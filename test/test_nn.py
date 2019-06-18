@@ -1584,7 +1584,7 @@ class TestNN(NNTestCase):
 
         torch.__future__.set_overwrite_module_params_on_conversion(True)
 
-        # Test that if we set `torch.__future__.set_overwrite_module_params_on_conversion(True)`,
+        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
         # a view to a module's parameters is still pointing to the same storage as
         # its base variable after converting the module to a different dtype.
         m = nn.Linear(2,3).float()
@@ -1593,9 +1593,9 @@ class TestNN(NNTestCase):
         mw[0][0] = 5
         self.assertTrue(mw[0][0] == mw._base[0][0])
 
-        # Test that when `torch.__future__.get_overwrite_module_params_on_conversion()`
-        # is true, `float_module.double()` doesn't preserve previous references
-        # to `float_module`'s parameters or gradients.
+        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+        # `float_module.double()` doesn't preserve previous references to
+        # `float_module`'s parameters or gradients.
         m = nn.Linear(20, 10).float()
         m.weight.grad = torch.randn(10, 20).float()
         weight_ref = m.weight
@@ -1607,10 +1607,9 @@ class TestNN(NNTestCase):
         def add_one_inplace(t):
             return t.add_(1.0)
 
-        # yf225 TODO: fix this comment:
-        # Test that when `torch.__future__.get_overwrite_module_params_on_conversion()`
-        # is true, `cpu_module.to("cuda")` invalidates `cpu_module`'s original
-        # parameters in any autograd graph they participate in.
+        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+        # applying an in-place operation to a module would bump the module's
+        # original parameters' version counter.
         m = nn.Linear(20, 10)
         pvm = m.weight.mul(m.weight)
         weight_ref = m.weight
@@ -1621,10 +1620,9 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pvm.backward(torch.randn(10, 20))
 
-        # yf225 TODO: fix this comment: add in-place `fn` and make sure the version counter bumps
-        # Test that when `torch.__future__.get_overwrite_module_params_on_conversion()`
-        # is true, `cpu_module.to("cuda")` invalidates `cpu_module`'s original
-        # parameters' gradients in any autograd graph they participate in.
+        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+        # applying an in-place operation to a module would bump the module's
+        # original parameters' gradients' version counter.
         m = nn.Linear(20, 10)
         m.weight.grad = torch.randn(10, 20).requires_grad_()
         pgm = m.weight.grad.mul(m.weight.grad)
@@ -1635,14 +1633,18 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pgm.backward(torch.randn(10, 20))
 
-        # yf225 TODO: fix this comment: add out-of-place `fn` and make sure the version counter doesn't bump
+        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+        # applying an out-of-place operation to a module doesn't bump
+        # the module's original parameters' version counter.
         m = nn.Linear(20, 10)
         weight_ref = m.weight
         m_weight_version_saved = weight_ref._version
         m = m._apply(lambda t: torch.randn(t.shape))
         self.assertEqual(weight_ref._version, m_weight_version_saved)
 
-        # yf225 TODO: fix this comment: add out-of-place `fn` and make sure the version counter doesn't bump
+        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+        # applying an out-of-place operation to a module doesn't bump
+        # the module's original parameters' gradients' version counter.
         m = nn.Linear(20, 10)
         m.weight.grad = torch.randn(10, 20).requires_grad_()
         weight_grad_ref = m.weight.grad
@@ -1656,7 +1658,10 @@ class TestNN(NNTestCase):
     def test_overwrite_module_params_on_conversion_cpu_cuda(self):
         torch.__future__.set_overwrite_module_params_on_conversion(False)
 
-        # yf225 TODO: add comment for this test! Saying that the current default behavior is just wrong
+        # Test that under the current default settings
+        # (`torch.__future__.get_overwrite_module_params_on_conversion() == False`),
+        # a view to a module's parameters is not pointing to the same storage as
+        # its base variable after converting the module to a different device.
         m = nn.Linear(2,3)
         mw = m.weight[:]
         m.to('cuda')
@@ -1669,16 +1674,18 @@ class TestNN(NNTestCase):
 
         torch.__future__.set_overwrite_module_params_on_conversion(True)
 
-        # yf225 TODO: add comment for this test! Saying that the future behavior (aka. not doing cpu-cuda inplace) is correct
+        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+        # a view to a module's parameters is still pointing to the same storage as
+        # its base variable after converting the module to a different device.
         m = nn.Linear(2,3)
         mw = m.weight[:]
         m.to('cuda')
-        mw[0][0] = 5   # yf225 TODO: fix comment: We have a view on the old thing, and that needs to be consistent
+        mw[0][0] = 5
         self.assertTrue(mw[0][0] == mw._base[0][0])
 
-        # Test that when `torch.__future__.get_overwrite_module_params_on_conversion()`
-        # is true, `cpu_module.to("cuda")` doesn't preserve previous references
-        # to `cpu_module`'s parameters or gradients.
+        # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
+        # `cpu_module.to("cuda")` doesn't preserve previous references to
+        # `cpu_module`'s parameters or gradients.
         m = nn.Linear(20, 10)
         m.weight.grad = torch.randn(10, 20)
         weight_ref = m.weight
