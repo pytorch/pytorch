@@ -107,6 +107,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/print_handler.cpp",
     "torch/csrc/jit/register_prim_ops.cpp",
+    "torch/csrc/jit/register_string_ops.cpp",
     "torch/csrc/jit/register_special_ops.cpp",
     "torch/csrc/jit/register_quantized_ops.cpp",
     "torch/csrc/jit/scope.cpp",
@@ -298,19 +299,20 @@ def add_torch_libs():
             ]
         },
         "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h"]),
-        "preprocessor_flags": [
-            "-Icaffe2",
-            "-Icaffe2/torch/csrc/api/include",
-            "-Icaffe2/torch/csrc",
-            "-Icaffe2/torch/csrc/nn",
-            "-Icaffe2/torch/lib",
-        ],
     }
+    propagated_pp_flags = [
+        "-Icaffe2",
+        "-Icaffe2/torch/csrc/api/include",
+        "-Icaffe2/torch/csrc",
+        "-Icaffe2/torch/csrc/nn",
+        "-Icaffe2/torch/lib",
+    ]
 
     cpp_library(
         name="libtorch",
         srcs=libtorch_sources,
         link_whole=True,
+        propagated_pp_flags=propagated_pp_flags,
         deps=[
             ":generated-autograd-headers",
             ":generated-autograd-headers-bare",
@@ -332,7 +334,7 @@ def add_torch_libs():
         name="libtorch_cuda",
         srcs=libtorch_cuda_sources,
         link_whole=True,
-        propagated_pp_flags=[
+        propagated_pp_flags=propagated_pp_flags + [
             "-DUSE_CUDA",
             "-DUSE_DIRECT_NVRTC",
         ],
@@ -373,6 +375,7 @@ def add_torch_libs():
         deps=[
             ":libtorch",
             ":thnn",
+            "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/THD:THD_cpu",
             "//caffe2/torch/lib/c10d:c10d_cpu",
             "//caffe2/torch/lib/libshm:libshm",
@@ -393,6 +396,7 @@ def add_torch_libs():
         deps=[
             ":libtorch_cuda",
             ":thnn",
+            "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/THD:THD",
             "//caffe2/torch/lib/c10d:c10d",
             "//caffe2/torch/lib/libshm:libshm",

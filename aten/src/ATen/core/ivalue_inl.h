@@ -172,27 +172,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   * Wait on the future until it completes.
   */
   void wait() {
-    if (completed()) {
+    if (completed_) {
       return;
     }
-    std::condition_variable finished;
-    bool fired = false;
 
-    // Add a callback to notify the current thread
-    // when the current future completes.
-    addCallback([&] {
-      std::unique_lock<std::mutex> lock(mutex_);
-      finished.notify_all();
-      fired = true;
-    });
-
-    // The current thread will be blocked unless the above callback is fired.
     std::unique_lock<std::mutex> lock(mutex_);
-    while (!fired) {
-      finished.wait(lock);
+    while (!completed_) {
+      finished_cv_.wait(lock);
     }
-
-    AT_ASSERT(completed());
   }
 
   /**
@@ -209,6 +196,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     }
 
     fireCallbacks();
+    finished_cv_.notify_all();
+  }
+
+  void markCompleted() {
+    markCompleted(IValue {});
   }
 
   void markCompleted(FutureError&& error_) {
@@ -223,6 +215,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     }
 
     fireCallbacks();
+    finished_cv_.notify_all();
   }
 
   // Get the result of the current future.
@@ -272,8 +265,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   std::mutex mutex_;
-  IValue value_; // when finished the value
   std::atomic_bool completed_ = {false}; // is this future complete
+  std::condition_variable finished_cv_;
+
+  IValue value_; // when finished the value
   std::vector<std::function<void(void)>> callbacks;
   bool has_error = false;
   FutureError error;
