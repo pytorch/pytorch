@@ -123,23 +123,21 @@ void intraop_launch(std::function<void()> func) {
   }
 }
 
-std::future<bool> intraop_launch_future(std::function<void()> func) {
+std::shared_ptr<ivalue::Future> intraop_launch_future(
+    std::function<void()> func) {
+  auto future = std::make_shared<ivalue::Future>();
   if (!in_parallel_region() && get_num_threads() > 1) {
-    auto func_promise = std::make_shared<std::promise<bool>>();
-    auto future = func_promise->get_future();
     internal::_get_intraop_pool().run(
-      [func, func_promise]() {
+      [func, future]() {
         func();
-        func_promise->set_value(true);
+        future->markCompleted();
       }
     );
-    return future;
   } else {
     func();
-    std::promise<bool> func_promise;
-    func_promise.set_value(true);
-    return func_promise.get_future();
+    future->markCompleted();
   }
+  return future;
 }
 
 } // namespace at

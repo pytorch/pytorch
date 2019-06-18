@@ -81,11 +81,12 @@ void intraop_launch(std::function<void()> func) {
   func();
 }
 
-std::future<bool> intraop_launch_future(std::function<void()> func) {
+std::shared_ptr<ivalue::Future> intraop_launch_future(
+    std::function<void()> func) {
   func();
-  std::promise<bool> func_promise;
-  func_promise.set_value(true);
-  return func_promise.get_future();
+  auto future = std::make_shared<ivalue::Future>();
+  future->markCompleted();
+  return future;
 }
 
 } // namespace at
