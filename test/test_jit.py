@@ -2537,7 +2537,7 @@ graph(%Ra, %Rb):
 
     def test_export_tensoroption_to(self):
         def foo(x):
-            return x.new_tensor(x[0]).cpu() + x
+            return x[0].clone().detach().cpu() + x
 
         traced = torch.jit.trace(foo, (torch.rand([2])))
         example_outputs = traced(torch.rand([2]))
