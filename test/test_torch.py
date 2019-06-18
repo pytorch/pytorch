@@ -7810,6 +7810,11 @@ class _TestTorchMixin(object):
             dest.index_copy_(0, index, src)
             self.assertEqual(dest, torch.tensor([[True, True], [True, True]], device=device))
 
+            # Error cases
+            a = torch.randn(3, 5)
+            c = torch.zeros(3)
+            self.assertRaises(IndexError, lambda: a.index_copy_(dim=1, index=torch.tensor([3]), source=c))
+
     def test_index_add(self):
         num_copy, num_dest = 3, 3
         dest = torch.randn(num_dest, 4, 5)
