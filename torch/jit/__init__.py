@@ -1645,7 +1645,7 @@ def _copy_module_to_script_module(module):
             if (name in module._parameters or name in module._buffers) and value is not None:
                 # for 'None' parameters/buffers, don't actually add their values if it exists
                 continue
-            ScriptModule.__setattr__(script_module, name, getattr(module, name))
+            setattr(script_module, name, getattr(module, name))
 
     # Copy overloads
     script_module.__dict__["_overloads"] = dict(getattr(module, "__overloads__", {}))
@@ -1653,7 +1653,8 @@ def _copy_module_to_script_module(module):
     # Copy python ops
     for name in dir(module):
         if hasattr(script_module, name):
-            # Skip Python class stuff and don't re-assign anything
+            # Skip Python class stuff and don't re-assign anything, but keep
+            # functions around so they can be called
             continue
         value = getattr(module, name)
         setattr(script_module, name, value)
