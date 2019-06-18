@@ -4,6 +4,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Storage.h>
@@ -611,6 +612,9 @@ class CAFFE2_API Tensor {
   Scalar q_scale() const;
   Scalar q_zero_point() const;
   Tensor int_repr() const;
+  QScheme qscheme() const;
+  Tensor fake_quantize_per_tensor_affine(double scale, int64_t zero_point, int64_t quant_min, int64_t quant_max, int64_t quant_delay, int64_t iter) const;
+  Tensor fake_quantize_per_tensor_affine_backward(const Tensor & grad, double scale, int64_t zero_point, int64_t quant_min, int64_t quant_max, int64_t quant_delay, int64_t iter) const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;
   Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
   Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;

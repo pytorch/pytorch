@@ -2,6 +2,7 @@
 
 #include <c10/core/Scalar.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -815,6 +816,15 @@ inline Scalar Tensor::q_zero_point() const {
 }
 inline Tensor Tensor::int_repr() const {
     return dispatch_type().int_repr(*this);
+}
+inline QScheme Tensor::qscheme() const {
+    return dispatch_type().qscheme(*this);
+}
+inline Tensor Tensor::fake_quantize_per_tensor_affine(double scale, int64_t zero_point, int64_t quant_min, int64_t quant_max, int64_t quant_delay, int64_t iter) const {
+    return dispatch_type().fake_quantize_per_tensor_affine(*this, scale, zero_point, quant_min, quant_max, quant_delay, iter);
+}
+inline Tensor Tensor::fake_quantize_per_tensor_affine_backward(const Tensor & grad, double scale, int64_t zero_point, int64_t quant_min, int64_t quant_max, int64_t quant_delay, int64_t iter) const {
+    return dispatch_type().fake_quantize_per_tensor_affine_backward(grad, *this, scale, zero_point, quant_min, quant_max, quant_delay, iter);
 }
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     return dispatch_type().to(*this, options, non_blocking, copy);

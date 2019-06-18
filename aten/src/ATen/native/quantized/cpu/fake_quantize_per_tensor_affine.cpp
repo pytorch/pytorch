@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <ATen/NativeFunctions.h>
 
 /* FakeQuantize Op for PerTensorAffine quantization scheme */
-namespace at { namespace native {
-namespace {
+namespace at {
+namespace native {
+
 /* Fake-quantizes the 'inputs' tensor.
 Args:
   X: Forward input tensor.
@@ -21,21 +22,19 @@ Returns:
 Notes:
   - quant_delay might be set to non-zero to help weights stabilize in the
     beginning of the training.
-  - quantization range [0, 2^bits - 1]
+  - quantization range [quant_min, quant_max]
 */
-
-class FakeQuantizePerTensorAffineOp_forward : public c10::OperatorKernel {
- public:
-  at::Tensor operator()(
-      at::Tensor X,
+at::Tensor fake_quantize_per_tensor_affine_cpu(
+      const at::Tensor& self,
       double scale,
       int64_t zero_point,
-      int64_t quant_min = 0,
-      int64_t quant_max = 255,
-      int64_t quant_delay = 0,
-      int64_t iter = 0
+      int64_t quant_min,
+      int64_t quant_max,
+      int64_t quant_delay,
+      int64_t iter
     ) {
     // Sanity checks.
+    TORCH_CHECK(self.scalar_type() == ScalarType::Float);
     if (quant_min > quant_max) {
       throw std::invalid_argument("`quant_min` should be less than or equal to `quant_max`.");
     }
@@ -51,19 +50,18 @@ class FakeQuantizePerTensorAffineOp_forward : public c10::OperatorKernel {
         "`iter` must be >=0 for non-zero `quant_delay`");
     }
 
-    auto Y = at::empty_like(X);
+    auto Y = at::empty_like(self);
 
     if (quant_delay > 0 && iter <= quant_delay) {
-      Y.copy_(X);  // We might want to just return the input here.
+      Y.copy_(self);  // We might want to just return the input here.
       return Y;
     }
 
     double inv_scale = 1.0f / scale;
-    Y = (((X * inv_scale + 0.5f).floor() + zero_point)
+    Y = (((self * inv_scale + 0.5f).floor() + zero_point)
       .clamp_min(quant_min).clamp_max(quant_max) - zero_point) * scale;
     return Y;
-  }
-};
+}
 
 /* Backward path to fake-quantize the 'inputs' tensor.
 
@@ -85,17 +83,15 @@ Notes:
     beginning of the training.
   - quantization range [0, 2^bits - 1]
 */
-class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
- public:
-  at::Tensor operator()(
-      at::Tensor X,
-      at::Tensor dY,
+at::Tensor fake_quantize_per_tensor_affine_backward_cpu(
+      const at::Tensor& dY,
+      const at::Tensor& X,
       double scale,
       int64_t zero_point,
-      int64_t quant_min = 0,
-      int64_t quant_max = 255,
-      int64_t quant_delay = 0,
-      int64_t iter = 0) {
+      int64_t quant_min,
+      int64_t quant_max,
+      int64_t quant_delay,
+      int64_t iter) {
     // Sanity checks.
     if (quant_min > quant_max) {
       throw std::invalid_argument("`quant_min` should be less than or equal to `quant_max`.");
@@ -131,16 +127,5 @@ class FakeQuantizePerTensorAffineOp_backward : public c10::OperatorKernel {
     at::Tensor mask = mask_min * mask_max;
     dX = mask.type_as(dY) * dY;
     return dX;
-  }
-};
-
-static auto registry = c10::RegisterOperators()
-.op("quantized::fake_quantize_per_tensor_affine_forward(Tensor X, float scale, int zero_point, int quant_min = 0, int quant_max = 255, int quant_delay = 0, int iter = 0) -> Tensor",
-    c10::RegisterOperators::options()
-      .kernel<FakeQuantizePerTensorAffineOp_forward>(CPUTensorId()))
-.op("quantized::fake_quantize_per_tensor_affine_backward(Tensor X, Tensor dY, float scale, int zero_point, int quant_min = 0, int quant_max = 255, int quant_delay=0, int iter = 0) -> Tensor",
-    c10::RegisterOperators::options()
-      .kernel<FakeQuantizePerTensorAffineOp_backward>(CPUTensorId()));
-
-}  // namespace
+}
 }}  // namespace at::native

@@ -1,5 +1,1 @@
-from torch._ops import ops
 from .fake_quantize import FakeQuantize
-
-fq_per_tensor_affine_forward = ops.quantized.fake_quantize_per_tensor_affine_forward
-fq_per_tensor_affine_backward = ops.quantized.fake_quantize_per_tensor_affine_backward

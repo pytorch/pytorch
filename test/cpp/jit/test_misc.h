@@ -918,7 +918,8 @@ std::vector<std::size_t> values_to_value_ids(
   return result;
 };
 
-void testInsertAndEliminateGuards() {
+void testInsertAndEliminateRedundantGuards() {
+
   static const auto basic_example = R"JIT(
   def basic(x, y):
     a = x + y
@@ -954,7 +955,7 @@ void testInsertAndEliminateGuards() {
   ASSERT_EQ(num_guards, 11);
   // now eliminate as many guards as possible
   // we should be left with two guards on x and y's defs
-  EliminateGuards(copy);
+  EliminateRedundantGuards(copy);
   num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
   ASSERT_EQ(num_guards, 2);
 }
@@ -991,7 +992,7 @@ void testInsertBailOuts() {
   is.run(stack);
   auto copy = pr->profiled_graph_->copy();
   InsertGuards(copy);
-  EliminateGuards(copy);
+  EliminateRedundantGuards(copy);
   auto nodes = copy->block()->nodes();
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   auto num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
