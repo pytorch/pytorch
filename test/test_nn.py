@@ -1575,7 +1575,7 @@ class TestNN(NNTestCase):
         # (`torch.__future__.get_overwrite_module_params_on_conversion() == False`),
         # a view to a module's parameters is not pointing to the same storage as
         # its base variable after converting the module to a different dtype.
-        m = nn.Linear(2,3).float()
+        m = nn.Linear(20, 10).float()
         mw = m.weight[:]
         m.double()
         mw[0][0] = 5
@@ -1587,7 +1587,7 @@ class TestNN(NNTestCase):
         # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
         # a view to a module's parameters is still pointing to the same storage as
         # its base variable after converting the module to a different dtype.
-        m = nn.Linear(2,3).float()
+        m = nn.Linear(20, 10).float()
         mw = m.weight[:]
         m.double()
         mw[0][0] = 5
@@ -1662,7 +1662,7 @@ class TestNN(NNTestCase):
         # (`torch.__future__.get_overwrite_module_params_on_conversion() == False`),
         # a view to a module's parameters is not pointing to the same storage as
         # its base variable after converting the module to a different device.
-        m = nn.Linear(2,3)
+        m = nn.Linear(20, 10)
         mw = m.weight[:]
         m.to('cuda')
         with torch.no_grad():
@@ -1677,7 +1677,7 @@ class TestNN(NNTestCase):
         # Test that if `torch.__future__.get_overwrite_module_params_on_conversion() == True`,
         # a view to a module's parameters is still pointing to the same storage as
         # its base variable after converting the module to a different device.
-        m = nn.Linear(2,3)
+        m = nn.Linear(20, 10)
         mw = m.weight[:]
         m.to('cuda')
         mw[0][0] = 5
