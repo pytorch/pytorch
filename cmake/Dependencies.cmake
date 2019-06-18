@@ -805,7 +805,7 @@ if(USE_CUDA)
   include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
   if(CAFFE2_USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
-    # caffe2::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
+    # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
     set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::curand)
     if(CAFFE2_USE_NVRTC)
