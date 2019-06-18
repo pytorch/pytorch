@@ -12,7 +12,7 @@ namespace at { namespace native {
 template <typename scalar_t>
 void fill_kernel_impl(TensorIterator& iter, Scalar value_scalar) {
   auto value = value_scalar.to<scalar_t>();
-  gpu_nullary_kernel(iter, [value]GPU_LAMBDA() -> scalar_t {
+  gpu_kernel(iter, [value]GPU_LAMBDA() -> scalar_t {
     return value;
   });
 }
