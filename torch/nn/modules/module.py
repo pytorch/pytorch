@@ -219,6 +219,7 @@ class Module(object):
                     param.data = param_applied
                 else:
                     assert isinstance(self._parameters[key], Parameter)
+                    assert self._parameters[key].is_leaf
                     self._parameters[key] = Parameter(param_applied, param.requires_grad)
 
                 if param.grad is not None:
@@ -228,6 +229,7 @@ class Module(object):
                     if should_use_set_data:
                         param.grad.data = grad_applied
                     else:
+                        assert self._parameters[key].grad.is_leaf
                         self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
