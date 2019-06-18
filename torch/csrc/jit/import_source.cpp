@@ -234,7 +234,7 @@ struct SourceImporter {
         auto tt = TupleType::create(
             field_types,
             qualified_name,
-            TupleType::NamedTupleSpec(field_types, field_names));
+            TupleType::namedTupleSchemaFromNamesAndTypes(qualified_name, field_names, field_types));
         owner.register_class(tt);
       } else {
         TORCH_INTERNAL_ASSERT(false);

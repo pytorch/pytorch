@@ -147,7 +147,7 @@ struct PythonResolver : public Resolver {
       auto tt = TupleType::create(
           annotations,
           qualifiedName,
-          TupleType::NamedTupleSpec(annotations, fields));
+          TupleType::namedTupleSchemaFromNamesAndTypes(qualifiedName, fields, annotations));
       CompilationUnit::_get_python_cu().register_class(tt);
       return tt;
     }

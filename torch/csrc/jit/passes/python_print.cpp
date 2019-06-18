@@ -1124,18 +1124,15 @@ struct PythonPrintPass {
         }
       }
     } else if (auto tupleType = type->cast<TupleType>()) {
+      TORCH_INTERNAL_ASSERT(tupleType->schema());
       body_ << "class " << tupleType->basename();
-      auto base_class_name = tupleType->base_class_name();
-      TORCH_INTERNAL_ASSERT(base_class_name);
-      body_ << "(" << *base_class_name << "):\n";
+      body_ << "(NamedTuple):\n";
       {
         const auto guard = WithIndented();
-        for (auto& attr : tupleType->attrs()) {
-          std::string name;
-          TypePtr attr_type;
-          std::tie(name, attr_type) = attr;
+        for (const auto& attr : tupleType->schema()->arguments()) {
+          TORCH_INTERNAL_ASSERT(attr.type());
           indent();
-          body_ << name << " : " << attr_type->python_str() << "\n";
+          body_ << attr.name() << " : " << attr.type()->python_str() << "\n";
         }
       }
     } else {
