@@ -30,6 +30,9 @@ class StatefulDataset
  public:
   /// Resets internal state of the dataset.
   virtual void reset() = 0;
+
+  /// Saves the dataset's state to file.
+  virtual void save(const std::string& save_file_name) = 0;
 };
 } // namespace datasets
 } // namespace data

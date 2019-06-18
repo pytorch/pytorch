@@ -8,6 +8,7 @@
 #include <test/cpp/api/support.h>
 
 #include <c10/util/ArrayRef.h>
+#include <c10/util/tempfile.h>
 
 #include <algorithm>
 #include <chrono>
@@ -98,7 +99,10 @@ TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
   samplers::SequentialSampler sampler(0);
 
   auto initialization_function =
-      [&](size_t preloader_count, size_t batch_size, size_t cache_size) {
+      [&](size_t preloader_count,
+          size_t batch_size,
+          size_t cache_size,
+          std::string checkpoint_file_name = "") {
         datasets::SharedBatchDataset<datasets::ChunkDataset<
             DummyChunkDataReader,
             samplers::SequentialSampler,
@@ -111,7 +115,10 @@ TEST(DataTest, ChunkDataSetWithInvalidInitParameter) {
                 sampler,
                 sampler,
                 datasets::ChunkDatasetOptions(
-                    preloader_count, batch_size, cache_size));
+                    preloader_count,
+                    batch_size,
+                    cache_size,
+                    checkpoint_file_name));
       };
 
   ASSERT_THROWS_WITH(
@@ -1465,6 +1472,7 @@ TEST(DataLoaderTest, StatefulDatasetWithNoWorkers) {
     void reset() override {
       counter = 0;
     }
+    void save(const std::string& save_file_name) override{};
     int counter = 0;
   };
 
@@ -1501,6 +1509,8 @@ TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
     void reset() override {
       counter = 0;
     }
+    void save(const std::string& save_file_name) override{};
+
     int counter = 0;
     std::mutex mutex;
   };
@@ -1538,6 +1548,7 @@ TEST(DataLoaderTest, StatefulDatasetWithMap) {
     void reset() override {
       counter = 0;
     }
+    void save(const std::string& save_file_name) override{};
     int counter = 0;
   };
 
@@ -1585,6 +1596,7 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
     void reset() override {
       counter = 0;
     }
+    void save(const std::string& save_file_name) override{};
     int counter = 0;
   };
 
@@ -1880,4 +1892,190 @@ TEST(DataLoaderTest, ChunkDatasetDoesNotHang) {
   // to fill the batch buffer but it is not draining. Still we need to exit
   // cleanly.
   auto iterator = data_loader->begin();
+}
+
+TEST(DataLoaderTest, ChunkDatasetSave) {
+  const size_t chunk_count_ = 6;
+  const size_t chunk_size = 10;
+
+  struct DummyTestChunkDataReader : datasets::ChunkDataReader<int> {
+   public:
+    using BatchType = datasets::ChunkDataReader<int>::ChunkType;
+
+    BatchType read_chunk(size_t chunk_index) override {
+      return batch_data_;
+    }
+
+    size_t chunk_count() override {
+      return chunk_count_;
+    };
+
+    void reset() override{};
+    BatchType batch_data_ = BatchType(chunk_size, 0);
+  };
+
+  const size_t prefetch_count = 1;
+  const size_t batch_size = chunk_size;
+  const size_t dataloader_worker_count = 0;
+  samplers::SequentialSampler sampler(0);
+  const int epoch_count = 2;
+
+  DummyTestChunkDataReader data_reader;
+
+  // tested save_intervals
+  const size_t save_intervals[] = {1, 2};
+
+  using datasets::ChunkDatasetOptions;
+
+  for (auto save_interval : save_intervals) {
+    auto tempfile = c10::make_tempfile();
+
+    datasets::SharedBatchDataset<datasets::ChunkDataset<
+        DummyTestChunkDataReader,
+        samplers::SequentialSampler,
+        samplers::SequentialSampler>>
+        dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
+            DummyTestChunkDataReader,
+            samplers::SequentialSampler,
+            samplers::SequentialSampler>>(
+            data_reader,
+            sampler,
+            sampler,
+            ChunkDatasetOptions(
+                prefetch_count,
+                batch_size,
+                chunk_size /*cache size*/));
+
+    auto data_loader = torch::data::make_data_loader(
+        dataset,
+        DataLoaderOptions(batch_size).workers(dataloader_worker_count));
+
+    for (int epoch_index = 0; epoch_index < epoch_count; ++epoch_index) {
+      int iteration_count = 0;
+      for (auto iterator = data_loader->begin(); iterator != data_loader->end();
+           ++iterator, ++iteration_count) {
+             
+        if ((iteration_count + 1) % save_interval == 0) {
+          dataset->save(tempfile.name);
+
+          samplers::SequentialSampler new_sampler(0);
+          torch::load(new_sampler, tempfile.name);
+
+          // Verify save logic. For ChunkDataset, the chunk data is stored in a
+          // cache inside the dataset. One pool of threads are constantly
+          // writing to the cache, and a different pool of thread are constantly
+          // reading from the cache. Due to the nature of asynchronization, at
+          // the time of get_batch(), which chunk is written to the cache is not
+          // fully deterministic.
+          // But we can still calculate a restricted window on the expected
+          // output, hence verify the logic. In this test, the cache size is
+          // configured to be the same as chunk size and batch size. So the
+          // chunk data is written to the cache one by one. Only the current
+          // batch is retrieved, the next chunk is writen. Now after the first
+          // batch is retrieved, when we tries to retrive the second batch,
+          // there are three possible scenarios for the writer thread:
+          // 1. it hasn't started loading the next chunk data yet, so the
+          // sequential sampler index is still 0;
+          // 2. it started to load the second chunk, so the sequencial sampler
+          // index is at 1;
+          // 3. it finished loading the second chunk, and start to load the
+          // third chunk, because the cache is still fully occupied by the data
+          // from the second chunk, it is waiting to write to the cache. At this
+          // point, the sampler index is at 2.
+          // So now we have a window of [0, 2], which is what we expected the
+          // sampler to save the index from. Now noted for sequential sampler,
+          // it advances to the next index automatically in the call next(). So
+          // when save the index, it saves the next index in stead of the
+          // current one. In other word, after getting the first index from
+          // sequential sampler, it already moves to the second index. So when
+          // we save it, it is the second index we save. As a result,
+          // we need to advance the window by one. Now we have the expected
+          // window of [0, 3].
+          // This analysis applies to all scenarios. So extend it to a more
+          // general case: the expected saved index should falling into the
+          // range of [iteration - 1, iteration + 2], which is the validation
+          // below.
+          ASSERT_TRUE(
+              new_sampler.index() >= std::max(0, iteration_count - 1) &&
+              new_sampler.index() <= iteration_count + 2);
+        }
+      }
+    }
+  }
+}
+
+TEST(DataLoaderTest, ChunkDatasetResume) {
+  auto tempfile = c10::make_tempfile();
+
+  const size_t prefetch_count = 1;
+  const size_t batch_size = 10;
+  const size_t dataloader_worker_count = 0;
+  const size_t save_interval = 2;
+
+  DummyChunkDataReader data_reader;
+  samplers::SequentialSampler sampler(0);
+
+  const size_t skipped_chunk = 2;
+
+  // Configure sampler to skip 2 chunks
+  {
+    sampler.reset(data_reader.chunk_count());
+    sampler.next(skipped_chunk);
+    torch::save(sampler, tempfile.name);
+  }
+
+  // test functionality across epoch boundary. The first epoch should be
+  // affected by the checkpoint, but the second should start normally.
+  const int epoch_count = 2;
+
+  datasets::SharedBatchDataset<datasets::ChunkDataset<
+      DummyChunkDataReader,
+      samplers::SequentialSampler,
+      samplers::SequentialSampler>>
+      dataset = datasets::make_shared_dataset<datasets::ChunkDataset<
+          DummyChunkDataReader,
+          samplers::SequentialSampler,
+          samplers::SequentialSampler>>(
+          data_reader,
+          sampler,
+          sampler,
+          datasets::ChunkDatasetOptions(
+              prefetch_count,
+              batch_size,
+              20 /*cache size*/,
+
+              tempfile.name));
+
+  auto data_loader = torch::data::make_data_loader(
+      dataset, DataLoaderOptions(batch_size).workers(dataloader_worker_count));
+
+  for (int epoch_index = 0; epoch_index < epoch_count; ++epoch_index) {
+    int iteration_count = 0;
+
+    // For the first epoch, the returned batch should be returned from the
+    // third chunk, because the check point skipped the first two chunks. But
+    // for the next epoch, it should start from the first batch.
+    int initial_value = epoch_index == 0 ? 15 : 0;
+
+    for (auto iterator = data_loader->begin(); iterator != data_loader->end();
+         ++iterator, ++iteration_count) {
+      DummyChunkDataReader::BatchType batch = *iterator;
+
+      std::vector<int> expected_result;
+      size_t expected_size = (epoch_index > 0 && iteration_count == 3) ? 5 : 10;
+      expected_result.resize(expected_size);
+      std::iota(expected_result.begin(), expected_result.end(), initial_value);
+
+      ASSERT_EQ(batch.size(), expected_result.size());
+      ASSERT_TRUE(
+          std::equal(batch.begin(), batch.end(), expected_result.begin()));
+
+      initial_value += batch_size;
+    }
+  }
+
+  samplers::SequentialSampler new_sampler(0);
+  torch::load(new_sampler, tempfile.name);
+
+  ASSERT_EQ(new_sampler.index(), skipped_chunk);
 }

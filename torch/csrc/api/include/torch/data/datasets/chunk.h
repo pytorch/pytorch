@@ -7,6 +7,8 @@
 #include <queue>
 #include <thread>
 
+#include <torch/serialize.h>
+
 namespace torch {
 namespace data {
 namespace datasets {
@@ -245,10 +247,12 @@ struct ChunkDatasetOptions {
   ChunkDatasetOptions(
       size_t preloader_count,
       size_t batch_size,
-      size_t cache_size = 2048)
+      size_t cache_size = 2048,
+      std::string resume_from_file = "")
       : preloader_count_(preloader_count),
         batch_size_(batch_size),
-        cache_size_(cache_size) {
+        cache_size_(cache_size),
+        resume_from_file_(std::move(resume_from_file)) {
     TORCH_CHECK(
         preloader_count_ > 0,
         "Preloader count is 0. At least one preloader needs to be specified.");
@@ -270,8 +274,14 @@ struct ChunkDatasetOptions {
   /// The size of each batch.
   TORCH_ARG(size_t, batch_size);
 
-  // the capacity of the queue for batch caching.
+  /// The capacity of the queue for batch caching.
   TORCH_ARG(size_t, cache_size) = 2048;
+
+  /// The file name from where to load ChunkDatset's state. Default to empty
+  /// string meaning start ChunkDataset from fresh begining; when specified with
+  /// a file name, ChunkDataset::reset() will try to load the sampler state from
+  /// that file.
+  TORCH_ARG(std::string, resume_from_file) = "";
 };
 
 /// A stateful dataset that support hierarchical sampling and prefetching of
@@ -308,7 +318,8 @@ class ChunkDataset final
         example_sampler_(std::move(example_sampler)),
         options_(std::move(options)),
         quit_worker_(false),
-        running_preloaders_(0) {}
+        running_preloaders_(0),
+        load_checkpoint_(!options_.resume_from_file_.empty()) {}
 
   virtual ~ChunkDataset() {
     // stop batch buffer first.
@@ -332,8 +343,12 @@ class ChunkDataset final
       "The requested batch size does not match with the initialized batch size.\n"
       " The requested batch size is ", batch_size,
       ", while the dataset is created with batch size equal to ", options_.batch_size_);
-
     return batch_buffer_->get_batch();
+  }
+
+  void save(const std::string& save_file_name) override {
+    std::lock_guard<std::mutex> lock(chunk_index_guard_);
+    torch::save(this->chunk_sampler(), save_file_name);
   }
 
   /// This will clear any internal state and starts the internal prefetching
@@ -347,9 +362,17 @@ class ChunkDataset final
     free_workers();
     preload_threads_.clear();
 
-    chunk_reader_.reset();
+    if (!load_checkpoint_){
+      chunk_reader_.reset();
+      chunk_sampler_.reset(chunk_reader_.chunk_count());
+    }
+    else {
+      torch::load(chunk_sampler_, options_.resume_from_file_);
+      
+      // After the checkpoint is loaded, mark the boolean to false to prevent future loading.
+      load_checkpoint_ = false;
+    }
 
-    chunk_sampler_.reset(chunk_reader_.chunk_count());
 
     // Throw out any existing cached batch in the buffer and re-creates a new
     // chunk buffer.
@@ -451,6 +474,9 @@ class ChunkDataset final
 
   // mutex to synchronize chunk sampler next() call.
   std::mutex chunk_index_guard_;
+
+  // boolean value to indicate whether we need to load the checkpoint for chunk_sampler_.
+  bool load_checkpoint_;
 };
 } // namespace datasets
 } // namespace data
