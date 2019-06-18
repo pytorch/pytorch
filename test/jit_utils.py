@@ -271,7 +271,7 @@ class JitTestCase(TestCase):
             scripted_fn = getattr(cu, name)
         else:
             if capture_output:
-                with self.capture_stdout() as captured:
+                with self.capture_stdout() as python_stdout:
                     outputs = func(*inputs)
             else:
                 outputs = func(*inputs)
@@ -289,15 +289,13 @@ class JitTestCase(TestCase):
             # Continue checking the Python frontend
             scripted_fn = torch.jit.script(func, optimize, _frames_up=1)
 
-        if capture_output:
-            with self.capture_stdout() as script_stdout:
-                outputs_ge = scripted_fn(*inputs)
-            with self.capture_stdout() as python_stdout:
-                outputs_ge = func(*inputs)
-            self.assertEqual(script_stdout, python_stdout)
-        else:
-            outputs_ge = scripted_fn(*inputs)
-        self.assertEqual(outputs, outputs_ge)
+            if capture_output:
+                with self.capture_stdout() as script_stdout:
+                    script_outputs = scripted_fn(*inputs)
+                self.assertEqual(script_stdout, python_stdout)
+        with self.capture_stdout() as script_stdout:
+            script_outputs = scripted_fn(*inputs)
+        self.assertEqual(outputs, script_outputs)
 
         if check_expected:
             self.assertExpectedGraph(scripted_fn.graph)
