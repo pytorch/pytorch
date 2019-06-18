@@ -844,6 +844,37 @@ private:
   FutureType(TypePtr elem) : SingleElementType(elem) {}
 };
 
+using ::torch::jit::Function;
+struct NamedType;
+using NamedTypePtr = std::shared_ptr<NamedType>;
+
+struct CAFFE2_API NamedType : public Type {
+  NamedType(TypeKind tk, c10::QualifiedName qualifiedName)
+    : Type(tk)
+    , name_(qualifiedName) {}
+
+  std::string python_str() const {
+    return name_.qualifiedName();
+  }
+
+  std::string qualname() const {
+    return name_.qualifiedName();
+  }
+
+  std::string qualifier() const {
+    return name_.prefix();
+  }
+
+  std::string basename() const {
+    return name_.name();
+  }
+
+ protected:
+  // Fully qualified name of type (note that this has to be globally unique).
+  // Looks like: "foo.bar.Baz".
+  QualifiedName name_;
+};
+
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
 using OptNameList = c10::optional<std::vector<std::string>>;
@@ -1384,43 +1415,9 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
-using ::torch::jit::Function;
-struct SerializableType;
-using SerializableTypePtr = std::shared_ptr<SerializableType>;
-
-struct CAFFE2_API SerializableType : public Type {
-  SerializableType(TypeKind tk, c10::QualifiedName qualifiedName)
-    : Type(tk)
-    , name_(qualifiedName) {}
-
-  std::string python_str() const {
-    return name_.qualifiedName();
-  }
-
-  std::string qualname() const {
-    return name_.qualifiedName();
-  }
-
-  std::string qualifier() const {
-    return name_.prefix();
-  }
-
-  std::string basename() const {
-    return name_.name();
-  }
-
-  virtual std::vector<Function*> methods() const = 0;
-
- protected:
-  // Fully qualified name of type (note that this has to be globally unique).
-  // Looks like: "foo.bar.Baz".
-  QualifiedName name_;
-};
-
-
 
 // This represents a class in TorchScript.
-struct CAFFE2_API ClassType : public SerializableType {
+struct CAFFE2_API ClassType : public NamedType {
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       QualifiedName qualifiedName,
@@ -1471,7 +1468,7 @@ struct CAFFE2_API ClassType : public SerializableType {
   }
 
   std::shared_ptr<Function> getMethod(const std::string& name) const;
-  std::vector<Function*> methods() const override;
+  std::vector<Function*> methods() const;
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
