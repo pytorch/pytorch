@@ -13171,7 +13171,9 @@ a")
 
         with self.capture_stdout() as captured:
             self.assertTrue(fn())
-        self.assertEqual(captured[0], "a\nb\n")
+        if not IS_WINDOWS:
+            # no stdout capturing on windows
+            self.assertEqual(captured[0], "a\nb\n")
 
     def test_in_for_and_comp_expr(self):
         def fn(d):
