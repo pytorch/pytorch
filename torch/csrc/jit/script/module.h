@@ -52,18 +52,16 @@ using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
 // classes use python method naming conventions
 
 struct Module;
+struct slot_list;
 
 using ModuleLookup =
     std::function<std::shared_ptr<Module>(const std::vector<std::string>&)>;
 
 struct TORCH_API Method {
-  Method(const Module* owner, std::shared_ptr<Function> function);
+  Method(ModulePtr owner, std::shared_ptr<Function> function);
 
   // the module that contains this method.
-  const Module& owner() const {
-    return *owner_;
-  }
-
+  Module owner() const;
   void run(Stack& stack);
   void run(Stack&& stack) {
     run(stack);
@@ -99,7 +97,7 @@ struct TORCH_API Method {
  private:
   // Methods are uniqued onwed by a single module. This raw pointer allows
   // looking up the module.
-  const Module* owner_;
+  ModulePtr owner_;
 
   // Underlying unbound function
   // This is the _lowered_ function and is different than the
@@ -108,26 +106,16 @@ struct TORCH_API Method {
 };
 
 struct TORCH_API Module {
-  TH_DISALLOW_COPY_AND_ASSIGN(Module);
   Module(std::string class_name)
-      : field_name_("__main__"),
-        module_value_(c10::ivalue::Object::create(
+      : module_value_(c10::ivalue::Object::create(
             ClassType::create(
                 QualifiedName(std::move(class_name)),
                 std::make_shared<CompilationUnit>(),
                 /*is_module=*/true),
             0)) {}
   Module() : Module("$Module") {}
-  ~Module() {
-    // ClassType own the compilation unit of their Functions, but each
-    // Function has a self argument which owns the ClassType, created a
-    // reference cycle. By dropping all the methods of the module's class
-    // here we break the cycle.
-    class_compilation_unit()->drop_all_functions();
-  }
-  const std::string& field_name() const {
-    return field_name_;
-  }
+  Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
+  ~Module() {}
 
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
@@ -143,69 +131,48 @@ struct TORCH_API Module {
     return get_method("forward")(std::move(inputs));
   }
 
+  // In script modules, buffers are Tensors attribute that are _not_ registered
+  // as parameters. This is different than in nn.Module where there is a special
+  // register_buffer method. With this simplification, we only need to track
+  // whether a slot is a parameter to be able to classify it.
   void register_buffer(const std::string& name, autograd::Variable v) {
-    if (auto b = find_attribute(name)) {
-      AT_ASSERT(b->type()->isSubtypeOf(TensorType::get()));
-      b->setValue(v);
-      return;
-    }
-    insert(
-        name,
-        attributes_,
-        EntityType::ATTRIBUTE,
-        appendSlot(name, TensorType::get(), std::move(v)));
+    set_or_add_slot(name, TensorType::get(), v, EntityType::ATTRIBUTE);
   }
 
   void register_parameter(
       const std::string& name,
       autograd::Variable v,
       bool is_buffer) {
-    if (is_buffer) {
-      register_buffer(name, std::move(v));
-      return;
-    }
-    if (auto p = find_parameter(name)) {
-      p->setValue(v);
-      return;
-    }
-    insert(
+    set_or_add_slot(
         name,
-        parameters_,
-        EntityType::PARAMETER,
-        appendSlot(name, TensorType::get(), std::move(v)));
+        TensorType::get(),
+        v,
+        is_buffer ? EntityType::ATTRIBUTE : EntityType::PARAMETER);
   }
   void register_attribute(
       const std::string& name,
       const TypePtr type,
       IValue ivalue) {
-    insert(
-        name,
-        attributes_,
-        EntityType::ATTRIBUTE,
-        appendSlot(name, type, ivalue));
+    set_or_add_slot(name, type, ivalue, EntityType::ATTRIBUTE);
   }
   void register_module(
       const std::string& name,
       std::shared_ptr<Module> module) {
-    module->field_name_ = name;
-    appendSlot(name, module->module_value_->type(), module->module_value_);
-    insert(name, modules_, EntityType::MODULE, std::move(module));
-  }
-
-  Slot parameter_slot(const std::string& name) const {
-    return parameters_[get_offset(name, EntityType::PARAMETER)];
+    set_or_add_slot(
+        name, module->type(), module->module_object(), EntityType::MODULE);
   }
 
   void set_parameter(const std::string& name, at::Tensor v) {
-    parameter_slot(name).setValue(std::move(v));
+    get_slot(name, EntityType::PARAMETER).setValue(v);
   }
 
   autograd::Variable get_parameter(const std::string& name) const {
-    return autograd::as_variable_ref(parameter_slot(name).value().toTensor());
+    return autograd::as_variable_ref(
+        get_slot(name, EntityType::PARAMETER).value().toTensor());
   }
 
   IValue get_attribute(const std::string& name) const {
-    return attributes_[get_offset(name, EntityType::ATTRIBUTE)].value();
+    return get_slot(name, EntityType::ATTRIBUTE).value();
   }
 
   autograd::Variable get_buffer(const std::string& name) const {
@@ -222,53 +189,47 @@ struct TORCH_API Module {
   }
 
   std::shared_ptr<Module> get_module(const std::string& name) const {
-    return modules_[get_offset(name, EntityType::MODULE)];
+    auto obj = get_slot(name, EntityType::MODULE).value().toObject();
+    return std::make_shared<Module>(obj);
   }
 
-  c10::ArrayRef<std::shared_ptr<Module>> get_modules() const {
-    return modules_;
-  }
-  c10::ArrayRef<Slot> get_parameters() const {
-    return parameters_;
-  }
-  c10::ArrayRef<Slot> get_attributes() const {
-    return attributes_;
-  }
+  std::vector<std::shared_ptr<Module>> get_modules() const;
+  slot_list get_slots() const;
+  slot_list get_parameters() const;
+  slot_list get_attributes() const;
+  slot_list get_module_slots() const;
+
   const std::vector<Method> get_methods() const {
     return fmap(
         class_compilation_unit()->get_functions(),
         [&](const std::shared_ptr<Function>& func) {
-          return Method(this, func);
+          return Method(module_object(), func);
         });
   }
 
-  const Slot* find_parameter(const std::string& name) const {
-    auto offset = find_offset(name, EntityType::PARAMETER);
-    return offset ? &parameters_[*offset] : nullptr;
+  c10::optional<Slot> find_parameter(const std::string& name) const {
+    return find_slot(name, EntityType::PARAMETER);
   }
-  Slot* find_parameter(const std::string& name) {
-    auto offset = find_offset(name, EntityType::PARAMETER);
-    return offset ? &parameters_[*offset] : nullptr;
+  c10::optional<Slot> find_attribute(const std::string& name) {
+    return find_slot(name, EntityType::ATTRIBUTE);
   }
-  Slot* find_attribute(const std::string& name) {
-    auto offset = find_offset(name, EntityType::ATTRIBUTE);
-    return offset ? &attributes_[*offset] : nullptr;
-  }
-  Slot* find_buffer(const std::string& name) {
+  c10::optional<Slot> find_buffer(const std::string& name) {
     auto iv = find_attribute(name);
     if (iv && iv->type()->isSubtypeOf(TensorType::get())) {
       return iv;
     }
-    return nullptr;
+    return c10::nullopt;
   }
   std::shared_ptr<Module> find_module(const std::string& name) const {
-    auto offset = find_offset(name, EntityType::MODULE);
-    return offset ? modules_[*offset] : nullptr;
+    if (auto slot = find_slot(name, EntityType::MODULE)) {
+      return std::make_shared<Module>(slot->value().toObject());
+    }
+    return nullptr;
   }
   c10::optional<Method> find_method(const std::string& name) const {
     if (const std::shared_ptr<Function>& fn =
             class_compilation_unit()->find_function(name)) {
-      return Method(const_cast<Module*>(this), fn);
+      return Method(module_object(), fn);
     }
     return c10::nullopt;
   }
@@ -358,21 +319,21 @@ struct TORCH_API Module {
 
   void clone_method(const Module& orig, const std::string& name);
 
-  enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
-
   at::optional<EntityType> kind_of(const std::string& name) const {
-    auto it = dict_.find(name);
-    if (it == dict_.end()) {
-      if (auto fn = class_compilation_unit()->find_function(name)) {
-        return EntityType::METHOD;
-      }
-      return at::nullopt;
+    if (auto fn = class_compilation_unit()->find_function(name)) {
+      return EntityType::METHOD;
     }
-    return it->second.type;
+    if (auto offset = type()->findAttributeSlot(name)) {
+      return get_slot(*offset).entity_type();
+    }
+    return c10::nullopt;
   }
 
   ModulePtr module_object() const {
     return module_value_;
+  }
+  ClassTypePtr type() const {
+    return module_object()->type();
   }
   std::shared_ptr<CompilationUnit> class_compilation_unit() {
     return module_object()->type()->compilation_unit();
@@ -391,12 +352,17 @@ struct TORCH_API Module {
 
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
- private:
-  void to_impl(
-      const c10::optional<at::Device>& device,
-      const c10::optional<at::ScalarType>& dtype,
-      bool non_blocking);
+  Slot get_slot(size_t slot) const {
+    TORCH_CHECK(
+        slot < module_object()->slots().size(), "not a valid slot offset");
+    return Slot(module_object(), slot);
+  }
 
+  size_t num_slots() const {
+    return module_object()->slots().size();
+  }
+
+ private:
   static const char* toString(EntityType t) {
     switch (t) {
       case EntityType::MODULE:
@@ -410,94 +376,144 @@ struct TORCH_API Module {
     }
     return nullptr;
   }
-
-  struct Entry {
-    EntityType type;
-    size_t offset;
-  };
-
-  size_t get_offset(const std::string& name, EntityType expected_type) const {
-    auto it = dict_.find(name);
-    if (it == dict_.end()) {
-      TORCH_CHECK(
-          false, toString(expected_type), " '", name, "' is not defined.");
-    }
-    if (it->second.type != expected_type) {
-      TORCH_CHECK(
-          false,
-          "The field '",
-          name,
-          "' is a ",
-          toString(it->second.type),
-          " but this call is"
-          " trying to use it as a ",
-          toString(expected_type));
-    }
-    return it->second.offset;
+  void check_entity(EntityType expected, size_t slot) const {
+    EntityType actual = get_slot(slot).entity_type();
+    TORCH_CHECK(
+        expected == actual,
+        "The field '",
+        type()->getAttributeName(slot),
+        "' is a ",
+        toString(actual),
+        " but this call is"
+        " trying to use it as a ",
+        toString(expected));
   }
-  at::optional<size_t> find_offset(
+
+  void set_or_add_slot(
       const std::string& name,
-      EntityType expected_type) const {
-    auto it = dict_.find(name);
-    if (it == dict_.end() || it->second.type != expected_type) {
-      return at::nullopt;
+      const TypePtr& slot_type,
+      IValue v,
+      EntityType etype) {
+    auto slot = type()->findAttributeSlot(name);
+    if (!slot) {
+      slot =
+          type()->addAttribute(name, slot_type, etype == EntityType::PARAMETER);
+    } else {
+      check_entity(etype, *slot);
     }
-    return it->second.offset;
+    TypePtr atype = type()->getAttribute(*slot);
+    TORCH_CHECK(slot_type->isSubtypeOf(atype));
+    module_object()->setSlot(*slot, std::move(v));
   }
 
-  template <typename T>
-  T& insert(
-      const std::string& name,
-      std::vector<T>& list,
-      EntityType type,
-      T value) {
-    auto it = dict_.find(name);
-    if (it != dict_.end()) {
-      if (type != it->second.type) {
-        AT_ERROR(
-            "attempting to add ",
-            toString(type),
-            " '",
-            name,
-            "' but it already exists as a ",
-            toString(it->second.type));
-      } else {
-        AT_ERROR(toString(type), " '", name, "' already defined.");
-      }
+  Slot get_slot(const std::string& name, EntityType etype) const {
+    size_t slot = type()->getAttributeSlot(name);
+    check_entity(etype, slot);
+    return get_slot(slot);
+  }
+  c10::optional<Slot> find_slot(const std::string& name, EntityType etype)
+      const {
+    auto slot = type()->findAttributeSlot(name);
+    if (!slot) {
+      return c10::nullopt;
     }
-    dict_[name] = Entry{type, list.size()};
-    list.emplace_back(std::move(value));
-    return list.back();
+    Slot r = get_slot(*slot);
+    if (r.entity_type() != etype) {
+      return c10::nullopt;
+    }
+    return r;
   }
 
-  // add a new entry to the singleton object that represents this
-  // Module as a first-class value in code, and update the corresponding
-  // ClassType to match.
-  Slot appendSlot(const std::string& name, TypePtr typ, IValue value) {
-    const ClassTypePtr& type = module_value_->type();
-    type->addAttribute(name, std::move(typ));
-    auto slot_index = type->getAttributeSlot(name);
-    module_value_->setSlot(slot_index, std::move(value));
-    return Slot(module_value_, slot_index);
-  }
-
-  // modules have a single namespace, but spread over 4 different concepts:
-  // parameters, attributes, methods, and sub-modules
-  // we store individual lists of each concept, and a single map to
-  // unify the namespace and ensure fast lookup
-  std::vector<std::shared_ptr<Module>> modules_;
-  std::vector<Slot> parameters_;
-  std::vector<Slot> attributes_;
-  std::vector<std::unique_ptr<Method>> methods_;
-
-  std::unordered_map<std::string, Entry> dict_;
-
-  // The name of the module as it appears as a submodule
-  // parent.myself = this_module
-  // 'myself' is the field name:
-  std::string field_name_;
+  void to_impl(
+      const c10::optional<at::Device>& device,
+      const c10::optional<at::ScalarType>& dtype,
+      bool non_blocking);
 
   ModulePtr module_value_;
+};
+
+// this iterator for the slot list defined below has a position in the list i_
+// and an optional field type_ that if present
+// restricts iteration to only the slots of module_ that
+// have EntityType *type_. This allows it to return, e.g.
+// only the parameter slots.
+struct TORCH_API slot_iterator {
+  slot_iterator(Module module, c10::optional<EntityType> type, size_t i)
+      : module_(module), type_(type), i_(i) {
+    advance_to_valid();
+  }
+  Slot operator*() const {
+    return module_.get_slot(i_);
+  }
+  Slot operator->() const {
+    return module_.get_slot(i_);
+  }
+  slot_iterator& operator++() {
+    ++i_;
+    advance_to_valid();
+    return *this;
+  }
+  slot_iterator operator++(int) {
+    slot_iterator old = *this;
+    ++(*this);
+    return old;
+  }
+
+ private:
+  void advance_to_valid() {
+    while (i_ < module_.num_slots() &&
+           (type_ && module_.get_slot(i_).entity_type() != *type_)) {
+      ++i_;
+    }
+  }
+  Module module_;
+  c10::optional<EntityType> type_;
+  size_t i_;
+
+  friend inline bool operator!=(const slot_iterator& a, const slot_iterator& b);
+};
+
+inline bool operator!=(const slot_iterator& a, const slot_iterator& b) {
+  return a.i_ != b.i_;
+}
+
+// This type represents lists of parameters, attributes, and
+// submodules contained in the module. It is abstract because
+// they are not stored directly in std::vectors but inside the
+// module's IValue object itself.
+struct TORCH_API slot_list {
+  using iterator = slot_iterator;
+  using const_iterator = slot_iterator;
+  slot_iterator begin() const {
+    return slot_iterator(module_, type_, 0);
+  }
+  slot_iterator end() const {
+    return slot_iterator(module_, type_, module_.num_slots());
+  }
+  size_t size() const {
+    if (!size_) {
+      size_ = size_t(0);
+      for (Slot s : *(this)) {
+        ++*size_;
+      }
+    }
+    return *size_;
+  }
+
+ private:
+  slot_list(Module module, c10::optional<EntityType> type)
+      : module_(std::move(module)), type_(type) {
+    if (!type_) {
+      size_ = module_.num_slots();
+    }
+  }
+  Module module_;
+  // only include Slots of the following type
+  c10::optional<EntityType> type_;
+  // size of this list, cached on first request
+  // when we need to filter the slot list
+  mutable c10::optional<size_t> size_;
+  friend struct Module;
 };
 
 TORCH_API bool& getInlineEverythingMode();
