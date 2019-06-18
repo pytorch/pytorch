@@ -1539,7 +1539,7 @@ int listInplaceAdd(Stack& stack) {
   c10::ListPtr<T> a = c10::make_list<T>();
   c10::ListPtr<T> b = c10::make_list<T>();
   pop(stack, a, b);
-  a.append(b);
+  a.append(std::move(b));
   push(stack, std::move(a));
   return 0;
 }

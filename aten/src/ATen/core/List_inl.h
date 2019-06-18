@@ -183,16 +183,10 @@ void List<T>::push_back(T&& value) const {
 
 template<class T>
 void ListPtr<T>::append(ListPtr<T> b) const {
-  size_type neededSize = this->size() + b.size();
-  if (impl_->list.capacity() < neededSize) {
-    this->reserve(std::max(impl_->list.capacity() * 2, neededSize));
-  }
   if (b.use_count() == 1) {
-    std::move(b.begin(), b.end(), this->begin());
+    impl_->list.insert(impl_->list.end(), make_move_iterator(b.impl_->list.begin()), make_move_iterator(b.impl_->list.end()));
   } else {
-    for (const auto& el: b) {
-      this->push_back(el);
-    }
+    impl_->list.insert(impl_->list.end(), b.impl_->list.begin(), b.impl_->list.end());
   }
 }
 

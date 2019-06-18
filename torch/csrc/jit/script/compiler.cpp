@@ -1462,7 +1462,6 @@ struct to_ir {
   // If it's a list of scalars, then return the corresponding list augment op
   Symbol getAugOp(const AugAssign& stmt, const TypePtr& type) {
     if (type->cast<ListType>()) { // Lists also have in-place ops.
-      std::cout<<"generating list op"<<std::endl;
       switch (stmt.aug_op()) {
         case '+':
           return aten::add_;
