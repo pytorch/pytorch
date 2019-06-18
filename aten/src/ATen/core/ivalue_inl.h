@@ -19,6 +19,7 @@ struct Function;
 namespace c10 {
 struct IValue;
 struct ClassType;
+struct TupleType;
 
 template<class T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
@@ -101,34 +102,42 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
 
 struct Future;
 
-struct CAFFE2_API TuplePtr final {
-private:
-  c10::ListPtr<IValue> elements_;
+struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
+ private:
+   std::vector<IValue> elements_;
 
-  TuplePtr(c10::ListPtr<IValue> elements): elements_(std::move(elements)) {}
-
-public:
-  static TuplePtr create(c10::ListPtr<IValue> elements) {
-    return TuplePtr { std::move(elements) };
+ public:
+  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_, std::shared_ptr<TupleType> type_) {
+    return c10::make_intrusive<Tuple>(std::move(elements_), type_);
   }
-  static TuplePtr create(std::initializer_list<IValue> elements_) {
-    return create(c10::impl::make_generic_list(std::move(elements_)));
-  }
-  static TuplePtr create(std::vector<IValue> elements_) {
-    return create(c10::impl::make_generic_list(std::move(elements_)));
+  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
+    return c10::make_intrusive<Tuple>(std::move(elements_), nullptr);
   }
 
-  c10::ListPtr<IValue> elements() && {
+ const std::vector<IValue>& elements() const & {
+    return elements_;
+  }
+  operator const std::vector<IValue>&() const {
+    return elements();
+  }
+
+  std::vector<IValue>& elements() & {
+    return elements_;
+  }
+  operator std::vector<IValue>&() {
+    return elements();
+  }
+
+  std::vector<IValue>&& elements() && {
     return std::move(elements_);
   }
 
-  const c10::ListPtr<IValue>& elements() const & {
-    return elements_;
-  }
+  std::shared_ptr<TupleType> type;
+ private:
+  Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type)
+    : elements_(std::move(elements)), type(std::move(type)) {}
 
-  c10::ListPtr<IValue>& elements() & {
-    return elements_;
-  }
+  friend class c10::intrusive_ptr<Tuple>;
 };
 
 struct Object;
@@ -163,27 +172,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   * Wait on the future until it completes.
   */
   void wait() {
-    if (completed()) {
+    if (completed_) {
       return;
     }
-    std::condition_variable finished;
-    bool fired = false;
 
-    // Add a callback to notify the current thread
-    // when the current future completes.
-    addCallback([&] {
-      std::unique_lock<std::mutex> lock(mutex_);
-      finished.notify_all();
-      fired = true;
-    });
-
-    // The current thread will be blocked unless the above callback is fired.
     std::unique_lock<std::mutex> lock(mutex_);
-    while (!fired) {
-      finished.wait(lock);
+    while (!completed_) {
+      finished_cv_.wait(lock);
     }
-
-    AT_ASSERT(completed());
   }
 
   /**
@@ -200,6 +196,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     }
 
     fireCallbacks();
+    finished_cv_.notify_all();
+  }
+
+  void markCompleted() {
+    markCompleted(IValue {});
   }
 
   void markCompleted(FutureError&& error_) {
@@ -214,6 +215,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     }
 
     fireCallbacks();
+    finished_cv_.notify_all();
   }
 
   // Get the result of the current future.
@@ -263,8 +265,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   std::mutex mutex_;
-  IValue value_; // when finished the value
   std::atomic_bool completed_ = {false}; // is this future complete
+  std::condition_variable finished_cv_;
+
+  IValue value_; // when finished the value
   std::vector<std::function<void(void)>> callbacks;
   bool has_error = false;
   FutureError error;
@@ -391,7 +395,7 @@ DEFINE_TO(c10::ListPtr<bool>, toBoolList)
 DEFINE_TO(c10::ListPtr<at::Tensor>, toTensorList)
 DEFINE_TO(c10::impl::GenericListPtr, toGenericList)
 DEFINE_TO(c10::impl::GenericDictPtr, toGenericDict)
-DEFINE_TO(c10::ivalue::TuplePtr, toTuple)
+DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(IValue, toIValue)
@@ -399,6 +403,7 @@ DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
 DEFINE_TO(at::Layout, toLayout)
 DEFINE_TO(at::MemoryFormat, toMemoryFormat)
+DEFINE_TO(at::QScheme, toQScheme)
 
 template <class T>
 struct _fake_type {};
@@ -412,6 +417,7 @@ struct _fake_type {};
 // The _fake_type<T> parameter allows us to overload
 // based on the return type.
 template <class Elem>
+C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::ListPtr<T> instead.")
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {
@@ -442,6 +448,7 @@ c10::DictPtr<Key, Value> generic_to(
 }
 
 template <typename K, typename V>
+C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map are slow and deprecated. Please use c10::DictPtr<K, V> instead.")
 std::unordered_map<K, V> generic_to(
     IValue ivalue,
     _fake_type<std::unordered_map<K, V>>) {
@@ -538,22 +545,18 @@ inline c10::DictPtr<IValue, IValue> IValue::toGenericDict() const & {
   AT_ASSERT(isGenericDict(), "Expected GenericDict but got ", tagKind());
   return c10::DictPtr<IValue, IValue>(toIntrusivePtr<c10::detail::DictImpl>());
 }
-inline ivalue::TuplePtr IValue::toTuple() && {
+inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() && {
   AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
-  return ivalue::TuplePtr::create(c10::ListPtr<IValue>(moveToIntrusivePtr<c10::detail::ListImpl<IValue>>()));
+  return moveToIntrusivePtr<ivalue::Tuple>();
 }
-inline ivalue::TuplePtr IValue::toTuple() const & {
+inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const & {
   AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
-  return ivalue::TuplePtr::create(c10::ListPtr<IValue>(toIntrusivePtr<c10::detail::ListImpl<IValue>>()));
-}
-inline c10::ArrayRef<IValue> IValue::toTupleRef() const {
-  AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
-  return static_cast<const c10::detail::ListImpl<IValue>*>(payload.as_intrusive_ptr)->list;
+  return toIntrusivePtr<ivalue::Tuple>();
 }
 
-inline IValue::IValue(ivalue::TuplePtr v)
+inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
 : tag(Tag::Tuple), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = std::move(v).elements().impl_.release();
+  payload.as_intrusive_ptr = v.release();
 }
 inline IValue::IValue(c10::ListPtr<int64_t> v)
 : tag(Tag::IntList), is_intrusive_ptr(true) {

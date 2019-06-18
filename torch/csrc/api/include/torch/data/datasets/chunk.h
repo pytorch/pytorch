@@ -350,6 +350,11 @@ class ChunkDataset final
     std::lock_guard<std::mutex> lock(chunk_index_guard_);
     torch::save(this->chunk_sampler(), save_file_name);
   }
+            
+  /// Helper method around get_batch as `batch_size` is not strictly necessary
+  BatchType get_batch() {
+    return get_batch(options_.batch_size_);
+  }
 
   /// This will clear any internal state and starts the internal prefetching
   /// mechanism for the chunk dataset.

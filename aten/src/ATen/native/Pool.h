@@ -33,8 +33,9 @@ static inline T pooling_output_shape(
     return outputSize;
 }
 
+// AveragePool2d/DilatedMaxPool2d (forward)
 static inline void
-max_pool2d_with_indices_shape_check(
+pool2d_shape_check(
   const Tensor& input,
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
   int64_t nInputPlane,
@@ -68,8 +69,9 @@ max_pool2d_with_indices_shape_check(
               "Output size is too small");
 }
 
+// DilatedMaxPool2d (backward)
 static inline void
-max_pool2d_with_indices_shape_check(
+max_pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
   const Tensor& indices,
@@ -80,7 +82,7 @@ max_pool2d_with_indices_shape_check(
   int64_t outputHeight, int64_t outputWidth,
   bool cuda=false)
 {
-  max_pool2d_with_indices_shape_check(
+  pool2d_shape_check(
     input,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth);
@@ -92,6 +94,7 @@ max_pool2d_with_indices_shape_check(
   check_dim_size(gradOutput, ndim, ndim-2, outputHeight);
   check_dim_size(gradOutput, ndim, ndim-1, outputWidth);
 
+  // different CUDA/CPU behavior from TH
   if (cuda) {
     check_dim_size(indices, 4, 0, nbatch);
     check_dim_size(indices, 4, 1, nOutputPlane);
@@ -105,8 +108,33 @@ max_pool2d_with_indices_shape_check(
   }
 }
 
+// AveragePool2d (backward)
 static inline void
-max_pool3d_with_indices_shape_check(
+avg_pool2d_backward_shape_check(
+  const Tensor& input,
+  const Tensor& gradOutput,
+  int64_t nbatch,
+  int kH, int kW, int dH, int dW, int padH, int padW,
+  int64_t nInputPlane,
+  int64_t inputHeight, int64_t inputWidth,
+  int64_t outputHeight, int64_t outputWidth)
+{
+  pool2d_shape_check(
+    input,
+    kH, kW, dH, dW, padH, padW, 1, 1,
+    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth);
+
+  const int64_t ndim = input.ndimension();
+  const int64_t nOutputPlane = nInputPlane;
+
+  check_dim_size(gradOutput, ndim, ndim-3, nOutputPlane);
+  check_dim_size(gradOutput, ndim, ndim-2, outputHeight);
+  check_dim_size(gradOutput, ndim, ndim-1, outputWidth);
+}
+
+// AveragePool3d/DilatedMaxPool3d (forward)
+static inline void
+pool3d_shape_check(
   const Tensor& input,
   int64_t nslices,
   int kT, int kH, int kW,
@@ -114,7 +142,8 @@ max_pool3d_with_indices_shape_check(
   int pT, int pH, int pW,
   int dilationT, int dilationH, int dilationW,
   int64_t itime, int64_t iheight, int64_t iwidth,
-  int64_t otime, int64_t oheight, int64_t owidth)
+  int64_t otime, int64_t oheight, int64_t owidth,
+  bool check_input_size=false)
 {
   const int64_t ndim = input.ndimension();
 
@@ -131,6 +160,12 @@ max_pool3d_with_indices_shape_check(
   TORCH_CHECK(input.numel() > 0 && (ndim == 4 || ndim == 5),
               "non-empty 4D or 5D (batch mode) tensor expected for input, but got ndim: ", ndim);
 
+  if (check_input_size) { // AveragePool3d
+    TORCH_CHECK(itime >= kT && iheight >= kH && iwidth >= kW,
+                "input image ", "(T: ", itime, " H: ", iheight, " W: ", iwidth, ") smaller than ",
+                "kernel size ", "(kT: ", kT, " kH: ", kH, " kW: ", kW, ")");
+  }
+
   TORCH_CHECK(kT/2 >= pT && kW/2 >= pW && kH/2 >= pH,
               "pad should be smaller than half of kernel size, but got "
               "kT: ", kT, " kW: ", kW, " kH: ", kH, " padT: ", pT, " padW: ", pW, " padH: ", pH);
@@ -144,7 +179,7 @@ max_pool3d_with_indices_shape_check(
 }
 
 static inline void
-max_pool3d_with_indices_shape_check(
+max_pool3d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
   const Tensor& indices,
@@ -158,7 +193,7 @@ max_pool3d_with_indices_shape_check(
 {
   const int64_t ndim = input.ndimension();
 
-  max_pool3d_with_indices_shape_check(
+  pool3d_shape_check(
     input,
     nslices,
     kT, kH, kW,
@@ -177,6 +212,36 @@ max_pool3d_with_indices_shape_check(
   check_dim_size(indices, ndim, ndim-3, otime);
   check_dim_size(indices, ndim, ndim-2, oheight);
   check_dim_size(indices, ndim, ndim-1, owidth);
+}
+
+static inline void
+avg_pool3d_backward_shape_check(
+  const Tensor& input,
+  const Tensor& gradOutput,
+  int64_t nslices,
+  int kT, int kH, int kW,
+  int dT, int dH, int dW,
+  int pT, int pH, int pW,
+  int64_t itime, int64_t iheight, int64_t iwidth,
+  int64_t otime, int64_t oheight, int64_t owidth)
+{
+  const int64_t ndim = input.ndimension();
+
+  pool3d_shape_check(
+    input,
+    nslices,
+    kT, kH, kW,
+    dT, dH, dW,
+    pT, pH, pW,
+    1, 1, 1,
+    itime, iheight, iwidth,
+    otime, oheight, owidth,
+    true);
+
+  check_dim_size(gradOutput, ndim, ndim-4, nslices);
+  check_dim_size(gradOutput, ndim, ndim-3, otime);
+  check_dim_size(gradOutput, ndim, ndim-2, oheight);
+  check_dim_size(gradOutput, ndim, ndim-1, owidth);
 }
 
 } // namespace
