@@ -148,6 +148,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
       }
       // the likelihood is the the sum of the last two alphas, eq (8), the loss is the negative log likelihood
       if (target_length == 0) {
+        // if the target is empty then there is no preceding BLANK state and hence there is no path to merge
         neg_log_likelihood_a[b] = -log_alpha_a[input_length-1][0];
       } else {
         scalar_t l1 = log_alpha_a[input_length-1][target_length*2];
