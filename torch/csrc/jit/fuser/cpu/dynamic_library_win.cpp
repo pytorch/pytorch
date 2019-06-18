@@ -12,23 +12,26 @@ namespace cpu {
 DynamicLibrary::DynamicLibrary(const char* name) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
   HMODULE theModule = LoadLibraryA(name);
-  if (theModule)
+  if (theModule) {
     handle = theModule;
-  else
+  } else {
     AT_ERROR("error in LoadLibraryA");
+  }
 }
 
 void* DynamicLibrary::sym(const char* name) {
   AT_ASSERT(handle);
   FARPROC procAddress = GetProcAddress((HMODULE)handle, name);
-  if (!procAddress)
+  if (!procAddress) {
     AT_ERROR("error in GetProcAddress");
+  }
   return (void*)procAddress;
 }
 
 DynamicLibrary::~DynamicLibrary() {
-  if (!handle)
+  if (!handle) {
     return;
+  }
   FreeLibrary((HMODULE)handle);
 }
 
