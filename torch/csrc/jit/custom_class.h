@@ -135,7 +135,7 @@ struct class_ {
     pyClass->def(name.c_str(), f);
     auto qualFuncName = className + "::" + name;
     auto func = [f](CurClass* cur, Types... args) {
-      return std::invoke(f, *cur, args...);
+      return guts::invoke(f, *cur, args...);
     };
     static auto classRegistry =
         c10::RegisterOperators().op(qualFuncName, std::move(func));

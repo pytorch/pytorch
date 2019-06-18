@@ -229,21 +229,6 @@ constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
 #endif
 #endif
 
-
-
-
-// GCC 4.8 doesn't define std::to_string, even though that's in C++11. Let's define it.
-namespace detail {
-class DummyClassForToString final {};
-}}}
-namespace std {
-// We use SFINAE to detect if std::to_string exists for a type, but that only works
-// if the function name is defined. So let's define a std::to_string for a dummy type.
-// If you're getting an error here saying that this overload doesn't match your
-// std::to_string() call, then you're calling std::to_string() but should be calling
-// c10::guts::to_string().
-inline std::string to_string(c10::guts::detail::DummyClassForToString) { return ""; }
-
 template <typename Functor, typename... Args>
 typename std::enable_if<
     std::is_member_pointer<typename std::decay<Functor>::type>::value,
@@ -259,6 +244,21 @@ typename std::enable_if<
 invoke(Functor&& f, Args&&... args) {
   return std::forward<Functor>(f)(std::forward<Args>(args)...);
 }
+
+
+
+// GCC 4.8 doesn't define std::to_string, even though that's in C++11. Let's define it.
+namespace detail {
+class DummyClassForToString final {};
+}}}
+namespace std {
+// We use SFINAE to detect if std::to_string exists for a type, but that only works
+// if the function name is defined. So let's define a std::to_string for a dummy type.
+// If you're getting an error here saying that this overload doesn't match your
+// std::to_string() call, then you're calling std::to_string() but should be calling
+// c10::guts::to_string().
+inline std::string to_string(c10::guts::detail::DummyClassForToString) { return ""; }
+
 }
 namespace c10 { namespace guts { namespace detail {
 
