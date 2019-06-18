@@ -28,6 +28,11 @@ namespace detail {
 struct alignas(2) BFloat16 {
   uint16_t val_;
 
+  struct from_bits_t {};
+  static constexpr from_bits_t from_bits() {
+    return from_bits_t();
+  }
+
   // HIP wants __host__ __device__ tag, CUDA does not
 #ifdef __HIP_PLATFORM_HCC__
   C10_HIP_HOST_DEVICE BFloat16() = default;
@@ -35,6 +40,7 @@ struct alignas(2) BFloat16 {
   BFloat16() = default;
 #endif
 
+  constexpr C10_HOST_DEVICE BFloat16(uint16_t bits, from_bits_t) : val_(bits){};
   inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
 };

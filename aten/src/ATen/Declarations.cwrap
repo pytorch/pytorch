@@ -2809,6 +2809,7 @@
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
+  cpu_bfloat16: True
   return: self
   arguments:
     - arg: THTensor* self

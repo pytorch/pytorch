@@ -10472,6 +10472,10 @@ class _TestTorchMixin(object):
                 continue
             if t.is_cuda and not torch.cuda.is_available():
                 continue
+            if t == torch.cuda.BFloat16Tensor:
+                continue # TODO: remove once bfloat16 is available on cuda
+            if t == torch.BFloat16Tensor:
+                continue # TODO: Fix in the future PRs regarding bfloat16
             obj = t(100, 100).fill_(1)
             obj.__repr__()
             str(obj)
