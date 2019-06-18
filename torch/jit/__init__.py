@@ -1108,7 +1108,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 
-def script_method(fn, _rcb=None):
+def script_method(fn):
     if not _enabled:
         return fn
     # NOTE: we need to traverse two frames here because the meta-class frame
@@ -1123,10 +1123,9 @@ def script_method(fn, _rcb=None):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    if _rcb is None:
-        _rcb = _jit_internal.createResolutionCallback(frames_up=2)
+    rcb = _jit_internal.createResolutionCallback(frames_up=2)
     ast = get_jit_def(fn, self_name="ScriptModule")
-    return ScriptMethodStub(_rcb, ast, fn)
+    return ScriptMethodStub(rcb, ast, fn)
 
 
 def _try_get_weak_module(mod):
@@ -1281,9 +1280,15 @@ def _get_valid_constant(attr, v):
 
 def _create_methods_from_stubs(self, stubs):
     defs = [m.def_ for m in stubs]
-    rcbs = [m.resolution_callback for m in stubs]
+    # for all class methods, the closure environment is identical. So just use
+    # the first one here.
+    if len(stubs):
+        rcb = stubs[0].resolution_callback
+    else:
+        rcb = None
+
     defaults = [get_default_args(m.original_method) for m in stubs]
-    self._c._create_methods(self, defs, rcbs, defaults)
+    self._c._create_methods(self, defs, rcb, defaults)
 
 # For each user-defined class that subclasses ScriptModule this meta-class,
 # (1) finds all the methods annotated with @script_method

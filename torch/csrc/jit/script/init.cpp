@@ -351,15 +351,13 @@ void initJitScriptBindings(PyObject* module) {
           [](std::shared_ptr<Module> m,
              py::object py_m,
              const std::vector<Def>& defs,
-             const std::vector<ResolutionCallback>& rcbs,
+             const ResolutionCallback& callback,
              const std::vector<FunctionDefaults>& defaults) {
-            std::vector<ResolverPtr> resolvers;
-            resolvers.reserve(rcbs.size());
-            for (auto& callback : rcbs) {
-              resolvers.push_back(pythonResolver(callback));
+            if (defs.size() == 0) {
+              return;
             }
             m->class_compilation_unit()->define(
-                defs, resolvers, moduleSelf(m, py_m));
+                defs, pythonResolver(callback), moduleSelf(m, py_m));
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
             auto defs_it = defs.begin();
@@ -662,14 +660,13 @@ void initJitScriptBindings(PyObject* module) {
         auto classType =
             ClassType::create(c10::QualifiedName(qualifiedName), cu);
         CompilationUnit::_get_python_cu().register_class(classType);
-        std::vector<ResolverPtr> rcbs;
         std::vector<Def> methodDefs;
         for (const auto& def : classDef.defs()) {
           methodDefs.push_back(def);
-          rcbs.push_back(
-              pythonResolver(rcb, classDef.name().name(), classType));
         }
-        cu->define(methodDefs, rcbs, simpleSelf(classType));
+        auto resolver =
+            pythonResolver(std::move(rcb), classDef.name().name(), classType);
+        cu->define(methodDefs, std::move(resolver), simpleSelf(classType));
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {

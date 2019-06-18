@@ -68,9 +68,8 @@ struct TORCH_API CompilationUnit {
   // for historic reasons, these are defined in compiler.cpp
   void define(
       const std::vector<Def>& definitions,
-      const std::vector<ResolverPtr>&
-          resolvers, /* determines how we handle free
-                     variables in each definition*/
+      // determines how we handle free variables in each definition
+      const ResolverPtr& resolver,
       // if non-null, the first argument to each def, is bound to this value
       const Self& self);
 

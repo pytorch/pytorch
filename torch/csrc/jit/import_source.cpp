@@ -183,11 +183,9 @@ struct SourceImporter {
       parseImportsAndDoCallback();
 
       std::vector<Def> definitions;
-      std::vector<ResolverPtr> resolvers;
       auto class_def = ClassDef(p_.parseClass());
       for (const auto& method_def : class_def.defs()) {
         definitions.emplace_back(method_def);
-        resolvers.emplace_back(resolver_);
       }
 
       auto cu = std::make_shared<CompilationUnit>();
@@ -200,7 +198,7 @@ struct SourceImporter {
         v->setType(class_type);
         return std::make_shared<SimpleValue>(v);
       };
-      cu->define(definitions, resolvers, self);
+      cu->define(definitions, resolver_, self);
     }
   }
 
@@ -209,13 +207,11 @@ struct SourceImporter {
     parseImportsAndDoCallback();
 
     std::vector<Def> definitions;
-    std::vector<ResolverPtr> resolvers;
     while (p_.lexer().cur().kind != TK_EOF) {
       auto def = Def(p_.parseFunction(/*is_method=*/bool(self)));
       definitions.emplace_back(def);
-      resolvers.emplace_back(resolver_);
     }
-    cu.define(definitions, resolvers, self);
+    cu.define(definitions, resolver_, self);
   }
 
   size_t parseVersionNumber() {
