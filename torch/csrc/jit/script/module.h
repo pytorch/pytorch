@@ -130,15 +130,20 @@ struct TORCH_API Module {
   IValue forward(std::vector<IValue> inputs) {
     return get_method("forward")(std::move(inputs));
   }
+
+  // In script modules, buffers are Tensors attribute that are _not_ registered
+  // as parameters. This is different than in nn.Module where there is a special
+  // register_buffer method. With this simplification, we only need to track
+  // whether a slot is a parameter to be able to classify it.
   void register_buffer(const std::string& name, autograd::Variable v) {
-    get_or_add_slot(name, TensorType::get(), v, EntityType::ATTRIBUTE);
+    set_or_add_slot(name, TensorType::get(), v, EntityType::ATTRIBUTE);
   }
 
   void register_parameter(
       const std::string& name,
       autograd::Variable v,
       bool is_buffer) {
-    get_or_add_slot(
+    set_or_add_slot(
         name,
         TensorType::get(),
         v,
@@ -148,12 +153,12 @@ struct TORCH_API Module {
       const std::string& name,
       const TypePtr type,
       IValue ivalue) {
-    get_or_add_slot(name, type, ivalue, EntityType::ATTRIBUTE);
+    set_or_add_slot(name, type, ivalue, EntityType::ATTRIBUTE);
   }
   void register_module(
       const std::string& name,
       std::shared_ptr<Module> module) {
-    get_or_add_slot(
+    set_or_add_slot(
         name, module->type(), module->module_object(), EntityType::MODULE);
   }
 
@@ -319,7 +324,7 @@ struct TORCH_API Module {
       return EntityType::METHOD;
     }
     if (auto offset = type()->findAttributeSlot(name)) {
-      return _get_slot(*offset).entity_type();
+      return get_slot(*offset).entity_type();
     }
     return c10::nullopt;
   }
@@ -347,7 +352,7 @@ struct TORCH_API Module {
 
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
-  Slot _get_slot(size_t slot) const {
+  Slot get_slot(size_t slot) const {
     TORCH_CHECK(
         slot < module_object()->slots().size(), "not a valid slot offset");
     return Slot(module_object(), slot);
@@ -372,7 +377,7 @@ struct TORCH_API Module {
     return nullptr;
   }
   void check_entity(EntityType expected, size_t slot) const {
-    EntityType actual = _get_slot(slot).entity_type();
+    EntityType actual = get_slot(slot).entity_type();
     TORCH_CHECK(
         expected == actual,
         "The field '",
@@ -384,7 +389,7 @@ struct TORCH_API Module {
         toString(expected));
   }
 
-  void get_or_add_slot(
+  void set_or_add_slot(
       const std::string& name,
       const TypePtr& slot_type,
       IValue v,
@@ -404,7 +409,7 @@ struct TORCH_API Module {
   Slot get_slot(const std::string& name, EntityType etype) const {
     size_t slot = type()->getAttributeSlot(name);
     check_entity(etype, slot);
-    return _get_slot(slot);
+    return get_slot(slot);
   }
   c10::optional<Slot> find_slot(const std::string& name, EntityType etype)
       const {
@@ -412,7 +417,7 @@ struct TORCH_API Module {
     if (!slot) {
       return c10::nullopt;
     }
-    Slot r = _get_slot(*slot);
+    Slot r = get_slot(*slot);
     if (r.entity_type() != etype) {
       return c10::nullopt;
     }
@@ -427,16 +432,21 @@ struct TORCH_API Module {
   ModulePtr module_value_;
 };
 
-struct slot_iterator {
+// this iterator for the slot list defined below has a position in the list i_
+// and an optional field type_ that if present
+// restricts iteration to only the slots of module_ that
+// have EntityType *type_. This allows it to return, e.g.
+// only the parameter slots.
+struct TORCH_API slot_iterator {
   slot_iterator(Module module, c10::optional<EntityType> type, size_t i)
       : module_(module), type_(type), i_(i) {
     advance_to_valid();
   }
   Slot operator*() const {
-    return module_._get_slot(i_);
+    return module_.get_slot(i_);
   }
   Slot operator->() const {
-    return module_._get_slot(i_);
+    return module_.get_slot(i_);
   }
   slot_iterator& operator++() {
     ++i_;
@@ -452,7 +462,7 @@ struct slot_iterator {
  private:
   void advance_to_valid() {
     while (i_ < module_.num_slots() &&
-           (type_ && module_._get_slot(i_).entity_type() != *type_)) {
+           (type_ && module_.get_slot(i_).entity_type() != *type_)) {
       ++i_;
     }
   }
@@ -467,7 +477,11 @@ inline bool operator!=(const slot_iterator& a, const slot_iterator& b) {
   return a.i_ != b.i_;
 }
 
-struct slot_list {
+// This type represents lists of parameters, attributes, and
+// submodules contained in the module. It is abstract because
+// they are not stored directly in std::vectors but inside the
+// module's IValue object itself.
+struct TORCH_API slot_list {
   using iterator = slot_iterator;
   using const_iterator = slot_iterator;
   slot_iterator begin() const {
@@ -502,9 +516,6 @@ struct slot_list {
   friend struct Module;
 };
 
-inline Module Slot::to_module() const {
-  return Module(value().toObject());
-}
 TORCH_API bool& getInlineEverythingMode();
 
 } // namespace script

@@ -447,17 +447,17 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_has_attribute",
           [](Module& self, const std::string& name) -> bool {
-            return !!self.find_attribute(name);
+            return self.find_attribute(name).has_value();
           })
       .def(
           "_has_parameter",
           [](Module& self, const std::string& name) -> bool {
-            return !!self.find_parameter(name);
+            return self.find_parameter(name).has_value();
           })
       .def(
           "_has_buffer",
           [](Module& self, const std::string& name) -> bool {
-            return !!self.find_buffer(name);
+            return self.find_buffer(name).has_value();
           })
       .def(
           "_has_module",
