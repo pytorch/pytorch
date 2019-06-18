@@ -8,71 +8,11 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
+#include <ATen/native/cuda/KernelUtils.cuh>
 
 namespace at {
 namespace native {
 namespace {
-
-template <
-    typename scalar_t,
-    typename std::enable_if<std::is_same<c10::Half, scalar_t>::value>::type* =
-        nullptr>
-__device__ __forceinline__ void fastSpecializedAtomicAdd(
-    scalar_t* tensor,
-    size_t index,
-    const size_t numel,
-    scalar_t value) {
-#if (                         \
-    (CUDA_VERSION < 10000) || \
-    (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
-  atomicAdd(
-      reinterpret_cast<at::Half*>(tensor) + index,
-      static_cast<at::Half>(value));
-#else
-  if (index % 2 == 0 && index < (numel - 1)) {
-    __half2 value2;
-    value2.x = value;
-    value2.y = __int2half_rz(0);
-    atomicAdd(reinterpret_cast<__half2*>(tensor) + index / 2, value2);
-
-  } else if (index % 2 == 1) {
-    __half2 value2;
-    value2.x = __int2half_rz(0);
-    value2.y = value;
-    atomicAdd(reinterpret_cast<__half2*>(tensor) + index / 2, value2);
-
-  } else {
-    atomicAdd(
-        reinterpret_cast<__half*>(tensor) + index, static_cast<__half>(value));
-  }
-#endif
-}
-
-template <
-    typename scalar_t,
-    typename std::enable_if<!std::is_same<c10::Half, scalar_t>::value>::type* =
-        nullptr>
-__device__ __forceinline__ void fastSpecializedAtomicAdd(
-    scalar_t* tensor,
-    size_t index,
-    const size_t numel,
-    scalar_t value) {
-  atomicAdd(tensor + index, value);
-}
-
-template <class scalar_t>
-__device__ __forceinline__ void fastAtomicAdd(
-    scalar_t* tensor,
-    size_t index,
-    const size_t numel,
-    scalar_t value,
-    bool fast_atomics) {
-  if (fast_atomics) {
-    fastSpecializedAtomicAdd(tensor, index, numel, value);
-  } else {
-    atomicAdd(tensor + index, value);
-  }
-}
 
 __device__ __forceinline__ size_t
 idx(const size_t nc,
@@ -158,8 +98,7 @@ __global__ void upsample_bilinear2d_backward_out_frame(
     const accscalar_t rwidth,
     const bool align_corners,
     scalar_t* __restrict__ idata,
-    const scalar_t* __restrict__ odata,
-    const bool fast_atomics) {
+    const scalar_t* __restrict__ odata) {
   const size_t o_numel = nc * width2 * height2;
   const size_t i_numel = nc * width1 * height1;
   for (size_t index = blockDim.x * blockIdx.x + threadIdx.x; index < o_numel;
@@ -190,25 +129,25 @@ __global__ void upsample_bilinear2d_backward_out_frame(
         idx(nc, height1, width1, h1, w1),
         i_numel,
         static_cast<scalar_t>(h0lambda * w0lambda * d2val),
-        fast_atomics);
+        true);
     fastAtomicAdd(
         idata,
         idx(nc, height1, width1, h1, w1 + w1p),
         i_numel,
         static_cast<scalar_t>(h0lambda * w1lambda * d2val),
-        fast_atomics);
+        true);
     fastAtomicAdd(
         idata,
         idx(nc, height1, width1, h1 + h1p, w1),
         i_numel,
         static_cast<scalar_t>(h1lambda * w0lambda * d2val),
-        fast_atomics);
+        true);
     fastAtomicAdd(
         idata,
         idx(nc, height1, width1, h1 + h1p, w1 + w1p),
         i_numel,
         static_cast<scalar_t>(h1lambda * w1lambda * d2val),
-        fast_atomics);
+        true);
   }
 }
 
@@ -319,6 +258,9 @@ static void upsample_bilinear2d_backward_out_cuda_template(
 
   Tensor grad_output = grad_output_.contiguous();
 
+  // resize_ ensures we have contiguous tensor, which is required for the kernel
+  // launch config `upsample_bilinear2d_backward_out_frame` as well as
+  // `fastAtomicAdd` used inside the kernel
   grad_input.resize_({nbatch, channels, input_height, input_width});
   // initialization to zero is required here. As we launch one thread per output
   // element, and atomicAdd to input gradient. Given a sparse sampling case, our
@@ -342,8 +284,7 @@ static void upsample_bilinear2d_backward_out_cuda_template(
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners);
 
-        const bool fast_atomics = grad_input.is_contiguous();
-
+        // idata is ensured to be contiguous by `resize_` call earlier
         upsample_bilinear2d_backward_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, static_cast<size_t>(num_threads)),
                num_threads,
@@ -358,8 +299,7 @@ static void upsample_bilinear2d_backward_out_cuda_template(
                 rwidth,
                 align_corners,
                 idata,
-                odata,
-                fast_atomics);
+                odata);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
