@@ -4,6 +4,46 @@ from ...modules.module import Module
 from ...._jit_internal import weak_module
 
 @weak_module
+class Quantize(Module):
+    r"""Quantizes an incoming tensor
+    Args:
+
+
+    Shape:
+
+    Attributes:
+
+    Examples::
+
+
+        >>>
+    """
+
+    # TODO: Need to implement getstate and setstate functions, will be done in a later PR
+    def __init__(self, output_scale, output_zero_point, output_dtype):
+        super(Quantize, self).__init__()
+
+        self.register_buffer('output_scale', torch.Tensor([output_scale]))
+        self.register_buffer('output_zero_point', torch.Tensor([output_zero_point]).long())
+        self.output_dtype = output_dtype
+
+    def forward(self, X):
+        Xq = torch.quantize_linear(X, self.output_scale.item(), self.output_zero_point.item(), self.output_dtype)
+        return Xq
+
+@weak_module
+class DeQuantize(Module):
+    r"""Dequantizes an incoming tensor"""
+
+    # TODO: Need to implement getstate and setstate functions, will be done in a later PR
+    def __init__(self):
+        super(DeQuantize, self).__init__()
+
+    def forward(self, Xq):
+        X = Xq.dequantize()
+        return X
+
+@weak_module
 class Linear(Module):
     r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
 

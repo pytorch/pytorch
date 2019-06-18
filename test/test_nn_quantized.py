@@ -65,6 +65,24 @@ class ModuleAPITest(TestCase):
         self.assertEqual(qLinear.output_scale, loaded.output_scale)
         self.assertEqual(qLinear.output_zero_point, loaded.output_zero_point)
 
+    def test_quant_dequant_api(self):
+        num_elements = 10
+        r = torch.ones(num_elements, dtype=torch.float)
+        scale = 1.0
+        zero_point = 2
+        dtype = torch.quint8
+        # testing Quantize API
+        qr = torch.quantize_linear(r, scale, zero_point, dtype)
+        quant_m = nnq.Quantize(scale, zero_point, dtype)
+        qr2 = quant_m(r)
+        self.assertEqual(qr, qr2)
+        # testing Dequantize API
+        rqr = qr.dequantize()
+        dequant_m = nnq.DeQuantize()
+        rqr2 = dequant_m(qr2)
+        self.assertEqual(rqr, rqr2)
+
+
 
 if __name__ == '__main__':
     run_tests()
