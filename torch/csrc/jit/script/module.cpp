@@ -68,11 +68,11 @@ void Module::to_impl(
     child->to_impl(device, dtype, non_blocking);
   }
   // Then convert every of our parameters.
-  for (auto& parameter : get_parameters()) {
+  for (Slot parameter : get_parameters()) {
     module_state_to(parameter, device, dtype, non_blocking);
   }
   // Then convert every tensor attributes (buffers).
-  for (auto& attr : get_attributes()) {
+  for (Slot attr : get_attributes()) {
     if (attr.type()->isSubtypeOf(TensorType::get())) {
       module_state_to(attr, device, dtype, non_blocking);
     }
@@ -209,8 +209,7 @@ void Module::copy_into(
   auto curr = module_lookup(names);
   type_remap[module_object()->type()] = curr->module_object()->type();
 
-  for (size_t i = 0; i < curr->num_slots(); ++i) {
-    Slot s = curr->get_slot(i);
+  for (Slot s : curr->get_slots()) {
     if (s.is_module()) {
       names.push_back(s.name());
       // Submodules must be translated first, otherwise parameter_remap entries
@@ -218,7 +217,7 @@ void Module::copy_into(
       s.to_module().copy_into(module_lookup, type_remap, names);
       names.pop_back();
     } else {
-      curr->get_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
+      curr->set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
     }
   }
 
@@ -263,11 +262,8 @@ void Module::clone_method(const Module& orig, const std::string& name) {
     to_scan.pop_back();
     type_remap[entry.first.module_object()->type()] =
         entry.second.module_object()->type();
-    for (size_t i = 0; i < entry.first.num_slots(); ++i) {
-      Slot s = entry.first.get_slot(i);
-      if (s.is_module()) {
-        to_scan.emplace_back(s.to_module(), *entry.second.get_module(s.name()));
-      }
+    for (Slot s : entry.first.get_module_slots()) {
+      to_scan.emplace_back(s.to_module(), *entry.second.get_module(s.name()));
     }
   }
   return clone_method(orig, name, type_remap);
@@ -309,6 +305,36 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
 
   return obj;
+}
+
+slot_list Module::get_parameters() const {
+  return slot_list(*this, EntityType::PARAMETER);
+}
+
+slot_list Module::get_attributes() const {
+  return slot_list(*this, EntityType::ATTRIBUTE);
+}
+
+slot_list Module::get_module_slots() const {
+  return slot_list(*this, EntityType::MODULE);
+}
+
+slot_list Module::get_slots() const {
+  return slot_list(*this, c10::nullopt);
+}
+
+Module Slot::to_module() const {
+  return Module(value().toObject());
+}
+
+std::vector<std::shared_ptr<Module>> Module::get_modules() const {
+  std::vector<std::shared_ptr<Module>> result;
+  for (Slot s : get_slots()) {
+    if (s.is_module()) {
+      result.push_back(std::make_shared<Module>(s.to_module()));
+    }
+  }
+  return result;
 }
 
 } // namespace script

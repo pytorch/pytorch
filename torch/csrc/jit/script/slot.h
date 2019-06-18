@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/hash.h>
 
 namespace torch {
@@ -13,7 +14,7 @@ enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
 
 // a stable location that can hold an IValue.
 // inside a module.
-struct Slot {
+struct TORCH_API Slot {
   Slot() {}
   Slot(c10::intrusive_ptr<c10::ivalue::Object> container, size_t offset)
   : container_(std::move(container)), offset_(offset) {}
@@ -58,7 +59,6 @@ private:
   friend struct std::hash<Slot>;
   friend struct Module;
 };
-
 }}}
 
 // slots are hashable, because they are often used as keys in maps

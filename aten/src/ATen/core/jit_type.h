@@ -1507,7 +1507,7 @@ struct CAFFE2_API ClassType : public Type {
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
 
   bool is_module() const {
-    return parameterSlots_.has_value();
+    return bool(parameterSlots_);
   }
   bool is_parameter(size_t slot) const {
     TORCH_INTERNAL_ASSERT(is_module(), "asking for parameterSlots of non-Module");
@@ -1536,6 +1536,6 @@ struct CAFFE2_API ClassType : public Type {
 
   // if present, this class inherits from torch.nn.Module
   // and these are the indices of the attributes which are parameters
-  c10::optional<std::vector<bool>> parameterSlots_;
+  std::shared_ptr<std::vector<bool>> parameterSlots_;
 };
 } // namespace c10

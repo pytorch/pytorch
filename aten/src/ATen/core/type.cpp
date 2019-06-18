@@ -561,7 +561,7 @@ ClassType::ClassType(
       name_(std::move(name)),
       compilation_unit_(std::move(cu)) {
         if (is_module) {
-          parameterSlots_ = std::vector<bool>();
+          parameterSlots_ = std::make_shared<std::vector<bool>>();
         }
       }
 
