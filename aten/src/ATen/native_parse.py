@@ -11,8 +11,6 @@ try:
 except ImportError:
     from yaml import Loader
 
-from env import NAMEDTENSOR_ENABLED
-
 # [temp translations]
 # We're currently incrementally moving from the custom func schema to the
 # JIT signature schema incrementally. This will reduce overall complexity

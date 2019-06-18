@@ -529,7 +529,7 @@ def generate_outputs():
     # need to be consistent whether or not NAMEDTENSOR_ENABLED is on/off.
     if not NAMEDTENSOR_ENABLED:
         declarations = [decl for decl in declarations
-                        if not 'Dimname' in decl['schema_string']]
+                        if 'Dimname' not in decl['schema_string']]
 
     for backend, density in iterate_types():
         generate_storage_type_and_tensor(backend, density, declarations)
