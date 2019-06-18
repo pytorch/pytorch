@@ -175,10 +175,10 @@ struct PythonPrintPass {
 
   // Any classes used are written to this table, to be later written out as
   // dependencies.
-  std::vector<c10::SerializableTypePtr>& class_table_;
-  std::vector<c10::SerializableTypePtr> class_deps_;
+  std::vector<c10::NamedTypePtr>& class_table_;
+  std::vector<c10::NamedTypePtr> class_deps_;
   // Helper to avoid duplicating class types
-  void addToClassTable(const c10::SerializableTypePtr& type) {
+  void addToClassTable(const c10::NamedTypePtr& type) {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
     // to get imported twice.
@@ -1088,7 +1088,7 @@ struct PythonPrintPass {
 
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
-      std::vector<c10::SerializableTypePtr>& class_table,
+      std::vector<c10::NamedTypePtr>& class_table,
       bool enforce_importable,
       bool is_method)
       : tensor_table_(tensor_table),
@@ -1113,28 +1113,37 @@ struct PythonPrintPass {
     }
   }
 
-  void printClass(const c10::SerializableTypePtr& classType) {
-    body_ << "class " << classType->basename();
-    if (auto base_class_name = classType->base_class_name()) {
-      body_ << "(" << *base_class_name << ")";
-    }
-    body_ << ":\n";
-    {
-      const auto guard = WithIndented();
-      for (auto& attr : classType->attrs()) {
-        std::string name;
-        TypePtr type;
-        std::tie(name, type) = attr;
-        indent();
-        body_ << name << " : " << type->python_str() << "\n";
+  void printClass(const c10::NamedTypePtr& type) {
+    if (auto classType = type->cast<ClassType>()) {
+      body_ << "class " << classType->basename() << ":\n";
+      {
+        const auto guard = WithIndented();
+        // TODO fields
+        for (auto& method : classType->methods()) {
+          printFunction(*method);
+        }
       }
-      for (auto& method : classType->methods()) {
-        printFunction(*method);
+    } else if (auto tupleType = type->cast<TupleType>()) {
+      body_ << "class " << tupleType->basename();
+      auto base_class_name = tupleType->base_class_name();
+      TORCH_INTERNAL_ASSERT(base_class_name);
+      body_ << "(" << *base_class_name << "):\n";
+      {
+        const auto guard = WithIndented();
+        for (auto& attr : tupleType->attrs()) {
+          std::string name;
+          TypePtr attr_type;
+          std::tie(name, attr_type) = attr;
+          indent();
+          body_ << name << " : " << attr_type->python_str() << "\n";
+        }
       }
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
     }
     // remove `classType` from the list of deps
     class_deps_.erase(
-        std::remove(class_deps_.begin(), class_deps_.end(), classType),
+        std::remove(class_deps_.begin(), class_deps_.end(), type),
         class_deps_.end());
   }
 
@@ -1148,7 +1157,7 @@ void PythonPrint(
     const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::SerializableTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printFunction(func);
@@ -1160,7 +1169,7 @@ void PythonPrint(
     const script::CompilationUnit& cu,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::SerializableTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printCompilationUnit(cu);
@@ -1169,9 +1178,9 @@ void PythonPrint(
 
 void PythonPrint(
     std::ostream& out,
-    const c10::SerializableTypePtr& classType,
+    const c10::NamedTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::SerializableTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, true);
   pp.printClass(classType);

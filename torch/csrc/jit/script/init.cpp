@@ -536,7 +536,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<c10::SerializableTypePtr> classes;
+            std::vector<c10::NamedTypePtr> classes;
             PythonPrint(
                 ss,
                 *self.class_compilation_unit(),
@@ -613,7 +613,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Function& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<c10::SerializableTypePtr> classes;
+            std::vector<c10::NamedTypePtr> classes;
             PythonPrint(ss, self, false, tensors, classes, false);
             return ss.str();
           })
@@ -639,7 +639,7 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
-        std::vector<c10::SerializableTypePtr> classes;
+        std::vector<c10::NamedTypePtr> classes;
         PythonPrint(ss, self.function(), true, tensors, classes, false);
         return ss.str();
       });
@@ -764,7 +764,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_python_print", [](py::object obj) {
     std::ostringstream ss;
     std::vector<at::Tensor> constants;
-    std::vector<c10::SerializableTypePtr> classes;
+    std::vector<c10::NamedTypePtr> classes;
     if (auto self = as_module(obj)) {
       PythonPrint(
           ss, *self->class_compilation_unit(), true, constants, classes, true);

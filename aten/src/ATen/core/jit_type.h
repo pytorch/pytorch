@@ -846,13 +846,13 @@ private:
 };
 
 using ::torch::jit::Function;
-struct SerializableType;
-using SerializableTypePtr = std::shared_ptr<SerializableType>;
+struct NamedType;
+using NamedTypePtr = std::shared_ptr<NamedType>;
 
-struct CAFFE2_API SerializableType : public Type {
-  SerializableType(TypeKind tk, c10::optional<c10::QualifiedName> qualifiedName)
+struct CAFFE2_API NamedType : public Type {
+  NamedType(TypeKind tk, c10::optional<c10::QualifiedName> qualifiedName)
     : Type(tk)
-    , name_(qualifiedName) {}
+    , name_(std::move(qualifiedName)) {}
 
   std::string python_str() const {
     TORCH_INTERNAL_ASSERT(name_);
@@ -874,17 +874,9 @@ struct CAFFE2_API SerializableType : public Type {
     return name_->name();
   }
 
-  const c10::optional<c10::QualifiedName> &qualified_name_obj() const {
+  const c10::optional<QualifiedName>& qualified_name_obj() const {
     return name_;
   }
-
-  bool serializable() const {
-    return name_.has_value();
-  }
-
-  virtual c10::optional<std::string> base_class_name() const = 0;
-  virtual std::vector<Function*> methods() const = 0;
-  virtual std::vector<std::tuple<std::string, TypePtr>> attrs() const = 0;
 
  protected:
   // Fully qualified name of type (note that this has to be globally unique).
@@ -896,7 +888,7 @@ struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
-struct CAFFE2_API TupleType : public SerializableType {
+struct CAFFE2_API TupleType : public NamedType {
   struct CAFFE2_API NamedTupleSpec {
     // Storing types here too is redundant but it makes encapsulating NamedTuple functionality
     // easier.
@@ -998,13 +990,11 @@ struct CAFFE2_API TupleType : public SerializableType {
   const c10::optional<NamedTupleSpec> &namedTupleSpec() const {
     return namedTupleSpec_;
   }
-  std::vector<Function*> methods() const override {
-    return {};
-  }
-  c10::optional<std::string> base_class_name() const override {
+
+  c10::optional<std::string> base_class_name() const {
     return "NamedTuple";
   }
-  std::vector<std::tuple<std::string, TypePtr>> attrs() const override {
+  std::vector<std::tuple<std::string, TypePtr>> attrs() const {
     TORCH_INTERNAL_ASSERT(namedTupleSpec_);
     return namedTupleSpec_->attrs();
   }
@@ -1012,7 +1002,7 @@ struct CAFFE2_API TupleType : public SerializableType {
   static const TypeKind Kind = TypeKind::TupleType;
 private:
   TupleType(std::vector<TypePtr> elements_, c10::optional<c10::QualifiedName> qualName, c10::optional<NamedTupleSpec> namedTupleSpec)
-  : SerializableType(TypeKind::TupleType, qualName)
+  : NamedType(TypeKind::TupleType, qualName)
   , elements_(std::move(elements_))
   , namedTupleSpec_(std::move(namedTupleSpec)) {
     has_free_variables_ =
@@ -1463,7 +1453,7 @@ using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
 
 // This represents a class in TorchScript.
-struct CAFFE2_API ClassType : public SerializableType {
+struct CAFFE2_API ClassType : public NamedType {
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       c10::optional<QualifiedName> qualifiedName,
@@ -1514,13 +1504,10 @@ struct CAFFE2_API ClassType : public SerializableType {
   }
 
   std::shared_ptr<Function> getMethod(const std::string& name) const;
-  std::vector<Function*> methods() const override;
+  std::vector<Function*> methods() const;
 
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
-
-  c10::optional<std::string> base_class_name() const override;
-  std::vector<std::tuple<std::string, TypePtr>> attrs() const override;
 
   size_t numAttributes() const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
