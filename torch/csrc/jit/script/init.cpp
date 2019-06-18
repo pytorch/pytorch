@@ -399,7 +399,7 @@ void initJitScriptBindings(PyObject* module) {
           "_set_attribute",
           [](Module& self, const std::string& name, py::object value) {
             auto attr = self.find_attribute(name);
-            TORCH_CHECK(attr != nullptr, "Could not find attribute '", name, "'");
+            TORCH_CHECK(attr, "Could not find attribute '", name, "'");
             auto ivalue = toIValue(value, attr->type());
             attr->setValue(ivalue);
           })
@@ -410,24 +410,22 @@ void initJitScriptBindings(PyObject* module) {
       .def("_get_module", &Module::get_module)
       .def(
           "_get_modules",
-          [](Module& self) -> py::tuple {
-            auto modules = self.get_modules();
-            py::tuple result(modules.size());
-            for (size_t i = 0; i < modules.size(); ++i) {
-              auto& item = modules[i];
-              result[i] = std::make_pair(item->field_name(), item);
+          [](Module& self) {
+            std::vector<std::pair<std::string, Module>> modules;
+            for (Slot s : self.get_module_slots()) {
+              modules.emplace_back(s.name(), s.to_module());
             }
-            return result;
+            return modules;
           })
       .def(
           "_get_parameters",
           [](Module& self) -> py::tuple {
             auto parameters = self.get_parameters();
             py::tuple result(parameters.size());
-            for (size_t i = 0; i < parameters.size(); ++i) {
-              auto& p = parameters[i];
+            auto i = 0;
+            for (Slot p : parameters) {
               py::tuple r(2);
-              result[i] = std::make_tuple(
+              result[i++] = std::make_tuple(
                   p.name(), autograd::as_variable_ref(p.value().toTensor()));
             }
             return result;
@@ -437,11 +435,11 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) -> py::tuple {
             auto attributes = self.get_attributes();
             py::tuple result(attributes.size());
-            for (size_t i = 0; i < attributes.size(); ++i) {
-              auto& buffer = attributes[i];
+            size_t i = 0;
+            for (Slot buffer : attributes) {
               py::tuple r(3);
               IValue v = buffer.value();
-              result[i] = std::make_tuple(
+              result[i++] = std::make_tuple(
                   buffer.name(), buffer.type(), toPyObject(std::move(v)));
             }
             return result;
@@ -449,17 +447,17 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_has_attribute",
           [](Module& self, const std::string& name) -> bool {
-            return self.find_attribute(name);
+            return self.find_attribute(name).has_value();
           })
       .def(
           "_has_parameter",
           [](Module& self, const std::string& name) -> bool {
-            return self.find_parameter(name);
+            return self.find_parameter(name).has_value();
           })
       .def(
           "_has_buffer",
           [](Module& self, const std::string& name) -> bool {
-            return self.find_buffer(name);
+            return self.find_buffer(name).has_value();
           })
       .def(
           "_has_module",
