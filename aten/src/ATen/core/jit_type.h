@@ -881,59 +881,16 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
 struct CAFFE2_API TupleType : public Type {
-  struct CAFFE2_API NamedTupleSpec {
-    // Storing types here too is redundant but it makes encapsulating NamedTuple functionality
-    // easier.
-    NamedTupleSpec(std::vector<TypePtr> types, NameList names, c10::optional<c10::QualifiedName> qualName=c10::nullopt)
-      : types(std::move(types)), names(std::move(names)), qualName(std::move(qualName)) {
-      createFunctionSchema();
-    }
-
-    std::vector<TypePtr> types;
-    NameList names;
-    // empty qualName indicates an anonymous named tuple, used for example in
-    // the returns of certain operators. If qualName is populated, this
-    // Tuple type is eligible for serialization
-    c10::optional<c10::QualifiedName> qualName;
-    std::shared_ptr<FunctionSchema> schema;
-
-    bool operator==(const NamedTupleSpec& rhs) const {
-      return names == rhs.names;
-    }
-   private:
-    void createFunctionSchema();
-  };
-
-  static TupleTypePtr create(std::vector<TypePtr> types, c10::optional<NamedTupleSpec> namedTupleSpec=c10::nullopt) {
-    return TupleTypePtr(new TupleType(std::move(types), std::move(namedTupleSpec))); // NOLINT(modernize-make-shared)
+  static std::shared_ptr<FunctionSchema> namedTupleSchemaFromNamesAndTypes(c10::QualifiedName, std::vector<std::string>, std::vector<TypePtr>);
+  static TupleTypePtr create(std::vector<TypePtr> types, std::shared_ptr<FunctionSchema> schema=nullptr) {
+    return TupleTypePtr(new TupleType(std::move(types), std::move(schema))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(TupleType);
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
   }
-  bool operator==(const Type& rhs) const override {
-    return compare(rhs, [](const TypePtr a, const TypePtr b) {
-      return *a == *b;
-    }) && namedTupleSpec_ == rhs.expect<TupleType>()->namedTupleSpec_;
-    // `compare` guarantees that rhs is always a TupleType, so the
-    // dynamic_cast above always success.
-  }
-  bool isSubtypeOf(const TypePtr rhs_) const override {
-    if (Type::isSubtypeOf(rhs_))
-      return true;
-    auto rhs = rhs_->cast<TupleType>();
-    if (!rhs)
-      return false;
-    // unnamed tuple is not a subtype of nametuple
-    if (!namedTupleSpec() && rhs->namedTupleSpec())
-      return false;
-    // namedtuple may be a subtype of unnamed tuple
-    bool names_match = !rhs->namedTupleSpec() || namedTupleSpec() == rhs->namedTupleSpec();
-    // co-variant rules for tuples
-    return names_match && compare(*rhs, [](const TypePtr a, const TypePtr b) {
-      return a->isSubtypeOf(b);
-    });
-  }
+  bool operator==(const Type& rhs) const override;
+  bool isSubtypeOf(const TypePtr rhs_) const override;
 
   std::string str() const override {
     std::stringstream ss;
@@ -966,16 +923,16 @@ struct CAFFE2_API TupleType : public Type {
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     return create(std::move(contained_types));
   }
-  const c10::optional<NamedTupleSpec> &namedTupleSpec() const {
-    return namedTupleSpec_;
+  const std::shared_ptr<FunctionSchema> &schema() const {
+    return schema_;
   }
 
   static const TypeKind Kind = TypeKind::TupleType;
 private:
-  TupleType(std::vector<TypePtr> elements_, c10::optional<NamedTupleSpec> namedTupleSpec)
+  TupleType(std::vector<TypePtr> elements_, std::shared_ptr<FunctionSchema> schema)
   : Type(TypeKind::TupleType)
   , elements_(std::move(elements_))
-  , namedTupleSpec_(std::move(namedTupleSpec)) {
+  , schema_(std::move(schema)) {
     has_free_variables_ =
         std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
           return v->hasFreeVariables();
@@ -1001,7 +958,7 @@ private:
 
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
-  c10::optional<NamedTupleSpec> namedTupleSpec_;
+  std::shared_ptr<FunctionSchema> schema_;
 };
 
 struct NumberType;

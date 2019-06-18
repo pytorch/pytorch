@@ -54,15 +54,15 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
-    if (tup->namedTupleSpec()) {
+    if (tup->schema()) {
       out << "NamedTuple";
     }
     out << "(";
     for(size_t i = 0; i < tup->elements().size(); ++i) {
       if(i > 0)
         out << ", ";
-      if (tup->namedTupleSpec()) {
-        out << tup->namedTupleSpec()->names[i] << " : ";
+      if (tup->schema()) {
+        out << tup->schema()->arguments()[i].name() << " : ";
       }
       out << *(tup->elements()[i]);
     }
@@ -513,20 +513,61 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     return out;
 }
 
-void TupleType::NamedTupleSpec::createFunctionSchema() {
+std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(c10::QualifiedName qualName, std::vector<std::string> field_names, std::vector<TypePtr> field_types) {
+  TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
   std::vector<Argument> arguments;
-  for (size_t i = 0; i < types.size(); ++i) {
+  for (size_t i = 0; i < field_names.size(); ++i) {
     arguments.emplace_back(
-        /*name=*/names[i],
-        /*type=*/types[i],
+        /*name=*/field_names[i],
+        /*type=*/field_types[i],
         /*N=*/i);
   }
 
-  schema = std::make_shared<FunctionSchema>(
-      /*name=*/qualName.has_value() ? qualName->name() : "",
+  auto schema = std::make_shared<FunctionSchema>(
+      /*name=*/qualName.name(),
       /*overload_name=*/std::string(""),
       /*arguments=*/arguments,
       /*returns=*/std::vector<Argument>{});
+  return schema;
+}
+
+bool TupleType::isSubtypeOf(const TypePtr rhs_) const {
+  if (Type::isSubtypeOf(rhs_))
+    return true;
+  auto rhs = rhs_->cast<TupleType>();
+  if (!rhs)
+    return false;
+  // unnamed tuple is not a subtype of nametuple
+  if (!schema() && rhs->schema())
+    return false;
+  // namedtuple may be a subtype of unnamed tuple
+  auto test_names_match = [](const std::shared_ptr<FunctionSchema>& lhs, const std::shared_ptr<FunctionSchema>& rhs) {
+    const auto& args_lhs = lhs->arguments();
+    const auto& args_rhs = rhs->arguments();
+    if (args_lhs.size() != args_rhs.size()) {
+      return false;
+    }
+
+    for (size_t i = 0; i < args_lhs.size(); ++i) {
+      if (args_lhs[i].name() != args_rhs[i].name()) {
+        return false;
+      }
+    }
+    return true;
+  };
+  bool names_match = !rhs->schema() || test_names_match(schema(), rhs->schema());
+  // co-variant rules for tuples
+  return names_match && compare(*rhs, [](const TypePtr a, const TypePtr b) {
+    return a->isSubtypeOf(b);
+  });
+}
+
+bool TupleType::operator==(const Type& rhs) const {
+  return compare(rhs, [](const TypePtr a, const TypePtr b) {
+    return *a == *b;
+  }) && schema_ == rhs.expect<TupleType>()->schema_;
+  // `compare` guarantees that rhs is always a TupleType, so the
+  // dynamic_cast above always success.
 }
 
 } // namespace c10
