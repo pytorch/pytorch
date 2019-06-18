@@ -52,25 +52,21 @@ struct ParamValue {
   Value* definition;
   IValue value;
 };
-static void gatherParamsFirstClass(script::Module& module, Value* module_value, std::vector<ParamValue>& params) {
-  for(const Use& u : module_value->uses()) {
+
+static void gatherParams(
+    const script::Module& module,
+    Value* module_value,
+    std::vector<ParamValue>& params) {
+  for (const Use& u : module_value->uses()) {
     if (u.user->kind() != prim::GetAttr) {
       continue;
     }
     const std::string& field = u.user->s(attr::name);
-    if(const auto& sub = module.find_module(field)) {
-      gatherParamsFirstClass(*sub, u.user->output(), params);
-    } else if(script::Slot* slot = module.find_parameter(field)) {
+    if (const auto& sub = module.find_module(field)) {
+      gatherParams(*sub, u.user->output(), params);
+    } else if (const script::Slot* slot = module.find_parameter(field)) {
       params.emplace_back(ParamValue{u.user->output(), slot->value()});
     }
-  }
-}
-
-static void gatherParamsLowered(script::Method& method, std::vector<ParamValue>& params) {
-  auto slot_it = method.initial_ivalues().begin();
-  for(Value* param : method.graph()->inputs().slice(method.num_inputs())) {
-    params.emplace_back(ParamValue{param, slot_it->value()});
-    ++slot_it;
   }
 }
 
@@ -78,11 +74,7 @@ std::vector<ParamInfo> getQuantizableParamsofName(
     script::Method& method,
     const std::string& param_name) {
   std::vector<ParamValue> params;
-  if (script::getFirstClassMode()) {
-    gatherParamsFirstClass(method.owner(), method.graph()->inputs().at(0), params);
-  } else {
-    gatherParamsLowered(method, params);
-  }
+  gatherParams(method.owner(), method.graph()->inputs().at(0), params);
   std::vector<ParamInfo> params_to_insert_qdq;
   for(const ParamValue& pv : params) {
     if (!pv.definition->type()->isSubtypeOf(TensorType::get())) {
@@ -325,7 +317,7 @@ void InsertObserverNodes(
     std::shared_ptr<script::Module>& moduleObj,
     const std::string& method_name,
     Node* observer_node) {
-  const auto& method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj->get_method(method_name);
   InsertObserverNodes(method.graph(), observer_node, method.num_inputs());
 }
 
@@ -472,7 +464,7 @@ void InsertQuantDequantNodes(
     const std::string& method_name,
     const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
         qparam_dict) {
-  const auto& method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj->get_method(method_name);
   InsertQuantDequantNodes(method.graph(), qparam_dict);
 }
 
@@ -559,7 +551,7 @@ void InsertQuantDequantNodesForParam(
     const std::string& param_name,
     const Fn& getQParamFunc,
     at::ScalarType t) {
-  auto& method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj->get_method(method_name);
   InsertQuantDequantNodesForParam(method, param_name, getQParamFunc, t);
 }
 

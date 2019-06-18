@@ -2,6 +2,7 @@ import torch
 import torch.utils.hooks
 import os
 import threading
+import errno
 import multiprocessing
 from multiprocessing.reduction import ForkingPickler
 import sys
@@ -271,7 +272,14 @@ def storage_from_cache(cls, key):
 
 def rebuild_storage_fd(cls, df, size):
     if sys.version_info[0] == 2:
-        fd = multiprocessing.reduction.rebuild_handle(df)
+        while True:
+            try:
+                fd = multiprocessing.reduction.rebuild_handle(df)
+                break
+            except OSError as e:
+                # Retry on EINTR for platforms that support it
+                if e.errno != getattr(errno, 'EINTR', None):
+                    raise
     else:
         fd = df.detach()
     try:

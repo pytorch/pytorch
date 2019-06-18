@@ -108,8 +108,6 @@ ignores = [
     "torch/include/*",
 ]
 
-json_settings = os.path.join(amd_build_dir, "disabled_features.json")
-
 if not args.out_of_place_only:
     # Apply patch files in place (PyTorch only)
     patch_folder = os.path.join(amd_build_dir, "patches")
@@ -149,5 +147,4 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    json_settings=json_settings,
     hip_clang_launch=args.hip_clang_launch)

@@ -2,9 +2,7 @@
 
 #include <c10/core/TensorTypeId.h>
 #include <c10/core/DeviceType.h>
-// For kCPU
-// TODO: Why are these defined in Backend.h?
-#include <c10/core/Backend.h>
+#include <c10/util/Exception.h>
 
 namespace c10 {
 
@@ -40,7 +38,7 @@ inline std::string toString(QScheme qscheme) {
     case kPerChannelSymmetric:
       return "PerChannelSymmetric";
     default:
-      AT_ERROR("Unrecognized qscheme: ", static_cast<int>(qscheme));
+      TORCH_CHECK(false, "Unrecognized qscheme: ", static_cast<int>(qscheme));
   }
 }
 

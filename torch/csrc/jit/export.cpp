@@ -130,7 +130,7 @@ class EncoderBase {
       const std::shared_ptr<Graph>& graph,
       const std::map<std::string, at::Tensor>& initializers =
         std::map<std::string, at::Tensor>(),
-      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes = 
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes =
         std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   void EncodeBlock(
@@ -138,7 +138,7 @@ class EncoderBase {
       const Block* block,
       const std::map<std::string, at::Tensor>& initializers =
         std::map<std::string, at::Tensor>(),
-      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes = 
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes =
         std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   virtual void EncodeTensor(
@@ -154,7 +154,7 @@ class EncoderBase {
       onnx::GraphProto* graph_proto,
       onnx::ValueInfoProto* v,
       const Value* n,
-      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes = 
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes =
         std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   void AddAttribute(
@@ -740,7 +740,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
   // TODO: use getMethod("__getstate__") once methods are not lowered
-  auto setstate = module.class_compilation_unit().find_function("__setstate__");
+  auto setstate = module.class_compilation_unit()->find_function("__setstate__");
   if (setstate == nullptr) {
     return false;
   }
@@ -780,15 +780,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
 
 /// Run module.__getstate__() and return the result
 IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
-  auto getstate = module.find_method("__getstate__");
-  TORCH_CHECK(
-      getstate != nullptr,
-      "Cannot call '__getstate__' method because"
-      " it does not exist");
-
-  Stack stack;
-  getstate->run(stack);
-  return stack.at(0);
+  return module.get_method("__getstate__")({});
 }
 
 size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
@@ -911,12 +903,12 @@ void ScriptModuleSerializer::convertModule(
     module_name << prefix << "_";
   module_name << name;
 
-  if (module.class_compilation_unit().get_functions().size() > 0) {
+  if (module.class_compilation_unit()->get_functions().size() > 0) {
     std::ostringstream methods;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
-        module.class_compilation_unit(),
+        *module.class_compilation_unit(),
         /*is_method=*/true,
         tensor_table_,
         class_table_,
@@ -933,7 +925,7 @@ void ScriptModuleSerializer::convertModule(
 
   for (const auto& elem : module.get_modules()) {
     torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(*elem, module_name.str(), elem->name(), sub_def);
+    convertModule(*elem, module_name.str(), elem->field_name(), sub_def);
   }
 }
 

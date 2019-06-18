@@ -891,6 +891,13 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(*shape)
         self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_cosine_similarity(self):
+        shape = (100, 128)
+        x = torch.randn(*shape)
+        y = torch.randn(*shape)
+        self.run_model_test(torch.nn.CosineSimilarity(dim=1, eps=1e-6), train=False,
+                            input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_lstm_constant_folding(self):
         class LstmNet(nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -1112,7 +1119,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_pixel_shuffle(self):
         underlying = nn.PixelShuffle(4)
-        shape = (1, 64, 5, 5)
+        shape = (1, 32, 5, 5)
         input = Variable(torch.randn(*shape),
                          requires_grad=True)
         self.run_model_test(underlying, train=False, input=(input),
@@ -1249,6 +1256,16 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
                             use_gpu=False, example_outputs=(torch.ones(x.size()),))
+
+    def test_full_script(self):
+        class FullClass(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.full((4, 5), x, dtype=torch.long)
+
+        x = torch.tensor(12)
+        self.run_model_test(FullClass(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=FullClass()(x))
 
     def test_where_functional(self):
         class WhereFunctional(torch.nn.Module):
@@ -1751,6 +1768,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_prim_shape(self):
         x = torch.randn(4, 5, requires_grad=True)
+
         @torch.jit.script
         def view_by_prim_shape(x):
             return x.view(x.shape)
