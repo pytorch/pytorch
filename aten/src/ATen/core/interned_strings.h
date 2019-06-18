@@ -145,6 +145,7 @@ namespace c10 {
   _(aten, oct)                     \
   _(aten, bin)                     \
   _(prim, unchecked_unwrap_optional)\
+  _(aten, __contains__)            \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \

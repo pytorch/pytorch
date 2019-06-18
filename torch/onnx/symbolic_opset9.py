@@ -958,6 +958,11 @@ def layer_norm(g, self, normalized_shape, weight, bias, eps, cudnn_enable):
                 eps_f=eps, cudnn_enable_i=cudnn_enable, operator_s="layer_norm")
 
 
+@parse_args('v', 'v', 'i', 'f')
+def cosine_similarity(g, x1, x2, dim, eps):
+    return g.op("ATen", x1, x2, dim_i=dim, eps_f=eps, operator_s="cosine_similarity")
+
+
 # ignore clone operators that are inserted by PyTorch autograd
 def clone(g, input):
     return input
