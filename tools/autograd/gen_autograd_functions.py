@@ -149,6 +149,8 @@ def process_function(func):
         elif arg['type'] == 'TensorList':
             saved_variables.append('std::vector<SavedVariable> {}_;'.format(name))
             saved_variables.append('bool {}_released_ = false;'.format(name))
+            # Just clear() is sufficient, we don't need to loop and clear each variable.
+            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
             release_variables.append('{}_.clear();'.format(name))
             release_variables.append('{}_released_ = true;'.format(name))
             unpack.append('auto {} = unpack_list({}_);'.format(name, name))
