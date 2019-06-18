@@ -217,6 +217,20 @@ void conv_dilated_all_cuda_template(
       input.scalar_type(), "conv_dilated<>", [&] {
         // For each elt in batch, do:
         for (int elt = 0; elt < batchSize; elt++) {
+          if (elt == 0) { // TEMPORARY, for debugging rocm
+            std::cout << "conv_dilated_all_cuda_template<"<<dim<<">, input: "<<input.scalar_type() << input.numel() << "@" <<input.data<scalar_t>();
+            if (output.defined()) {
+              std::cout << ", output: "<<output.scalar_type() << output.numel() << "@" <<output.data<scalar_t>();
+            }
+            if (bias.defined()) {
+              std::cout << ", bias: "<<bias.scalar_type() << bias.numel() << "@" <<bias.data<scalar_t>();
+            }
+            if (grad_output.defined()) {
+              std::cout << ", grad output: "<<grad_output.scalar_type() << grad_output.numel() << "@" <<grad_output.data<scalar_t>();
+            }
+            std::cout << std::endl;
+          }
+
           // Matrix multiply per output:
           Tensor input_n = input.select(0, elt);
 
