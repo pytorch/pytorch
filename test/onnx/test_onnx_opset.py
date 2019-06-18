@@ -213,9 +213,8 @@ class TestONNXOpset(TestCase):
 
         ops = [{"op_name" : "Constant"},
                {"op_name" : "ConstantOfShape"},
-               {"op_name" : "Add"},]
+               {"op_name" : "Add"}]
         ops = {9 : ops, 10 : ops}
-        import numpy
         x = torch.tensor(12)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
