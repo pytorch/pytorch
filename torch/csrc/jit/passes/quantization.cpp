@@ -54,7 +54,7 @@ struct ParamValue {
 };
 
 static void gatherParams(
-    script::Module& module,
+    const script::Module& module,
     Value* module_value,
     std::vector<ParamValue>& params) {
   for (const Use& u : module_value->uses()) {
@@ -64,7 +64,7 @@ static void gatherParams(
     const std::string& field = u.user->s(attr::name);
     if (const auto& sub = module.find_module(field)) {
       gatherParams(*sub, u.user->output(), params);
-    } else if (script::Slot* slot = module.find_parameter(field)) {
+    } else if (const script::Slot* slot = module.find_parameter(field)) {
       params.emplace_back(ParamValue{u.user->output(), slot->value()});
     }
   }
@@ -317,7 +317,7 @@ void InsertObserverNodes(
     std::shared_ptr<script::Module>& moduleObj,
     const std::string& method_name,
     Node* observer_node) {
-  const auto& method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj->get_method(method_name);
   InsertObserverNodes(method.graph(), observer_node, method.num_inputs());
 }
 
@@ -464,7 +464,7 @@ void InsertQuantDequantNodes(
     const std::string& method_name,
     const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
         qparam_dict) {
-  const auto& method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj->get_method(method_name);
   InsertQuantDequantNodes(method.graph(), qparam_dict);
 }
 
@@ -551,7 +551,7 @@ void InsertQuantDequantNodesForParam(
     const std::string& param_name,
     const Fn& getQParamFunc,
     at::ScalarType t) {
-  auto& method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj->get_method(method_name);
   InsertQuantDequantNodesForParam(method, param_name, getQParamFunc, t);
 }
 
