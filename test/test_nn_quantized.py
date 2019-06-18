@@ -3,7 +3,7 @@ import torch
 import torch.nn.quantized.functional as F
 import torch.nn.quantized as nnq
 import numpy as np
-from common_utils import TestCase, run_tests
+from common_utils import TestCase, run_tests, TemporaryFileName
 
 class FunctionalAPITest(TestCase):
     def test_relu_api(self):
@@ -43,6 +43,27 @@ class ModuleAPITest(TestCase):
         W_pack = torch.ops.quantized.fbgemm_linear_prepack(W_q)
         Z_ref = torch.ops.quantized.fbgemm_linear(X_q, W_pack, B_q, out_scale, out_zero_point)
         self.assertEqual(Z_ref, Z_q)
+
+        # Test serialization of quantized Linear Module using state_dict
+        model_dict = qLinear.state_dict()
+        self.assertEqual(model_dict['weight'].int_repr(), W_q.int_repr())
+        with TemporaryFileName() as fname:
+            torch.save(model_dict, fname)
+            loaded_dict = torch.load(fname)
+        qLinear2 = nnq.Linear(output_channels, input_channels)
+        qLinear2.load_state_dict(loaded_dict)
+        Z_q2 = qLinear(X_q)
+        self.assertEqual(Z_q2, Z_q)
+        # test serialization of module directly- broken now
+        with TemporaryFileName() as fname:
+            torch.save(qLinear, fname)
+            loaded = torch.load(fname)
+        loaded_weight = torch.ops.quantized.fbgemm_linear_unpack(loaded._packed_weight)
+        # _packed_weight is not Quantized Tensor, we need to figure out how to compare them
+        # self.assertEqual(qLinear._packed_weight, loaded._packed_weight)
+        self.assertEqual(qLinear.bias, loaded.bias)
+        self.assertEqual(qLinear.output_scale, loaded.output_scale)
+        self.assertEqual(qLinear.output_zero_point, loaded.output_zero_point)
 
 
 if __name__ == '__main__':

@@ -294,8 +294,8 @@ def _save(obj, f, pickle_module, pickle_protocol):
     pickler = pickle_module.Pickler(f, protocol=pickle_protocol)
     pickler.persistent_id = persistent_id
     pickler.dump(obj)
-
     serialized_storage_keys = sorted(serialized_storages.keys())
+
     pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
     f.flush()
     for key in serialized_storage_keys:
@@ -571,9 +571,7 @@ def _load(f, map_location, pickle_module, **pickle_load_args):
     unpickler = pickle_module.Unpickler(f, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
-
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
-
     offset = f.tell() if f_should_read_directly else None
     for key in deserialized_storage_keys:
         assert key in deserialized_objects
