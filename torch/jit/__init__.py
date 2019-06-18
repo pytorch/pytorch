@@ -1012,11 +1012,23 @@ def _try_compile_fn(fn):
     return torch.jit.script(fn, _rcb=rcb)
 
 
+@contextlib.contextmanager
+def _disable_emit_hooks():
+    hooks = torch._C._jit_get_emit_hooks()
+    torch._C._jit_set_emit_hooks(None, None)
+    yield
+    torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+
+
 def _create_method_from_fn(module, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = script_method(fn, createResolutionCallbackFromClosure(fn))
-    _create_methods_from_stubs(self, (stub,))
+    with _disable_emit_hooks():
+        # We don't want to call the hooks here since the graph that is calling
+        # this function is not yet complete
+        _create_methods_from_stubs(module, (stub,))
+    return stub
 
 
 # ScriptClasses must be new-style classes because we construct them using their
