@@ -88,7 +88,7 @@ class ScriptModuleOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     const auto& module = OperatorBase::Input<std::shared_ptr<Module>>(0);
-    Method& method = module->get_method(method_name_);
+    Method method = module->get_method(method_name_);
     // Assume all inputs are tensor for now
     std::vector<IValue> inputs;
     const int num_inputs = InputSize();
