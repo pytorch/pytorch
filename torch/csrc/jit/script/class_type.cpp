@@ -23,4 +23,13 @@ std::vector<Function*> ClassType::methods() const {
   }
   return ret;
 }
+
+namespace ivalue {
+Object::~Object() {
+  if (type_->is_module()) {
+    type_->compilation_unit()->drop_all_functions();
+  }
+}
+} // namespace ivalue
+
 } // namespace c10
