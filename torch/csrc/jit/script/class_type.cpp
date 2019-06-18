@@ -45,7 +45,7 @@ ClassType::ClassType(
     QualifiedName name,
     std::shared_ptr<CompilationUnit> cu,
     bool is_module)
-    : SerializableType(TypeKind::ClassType, std::move(name)),
+    : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)),
       is_module_(is_module) {}
 
