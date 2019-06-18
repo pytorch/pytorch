@@ -78,9 +78,9 @@ void intraop_launch(std::function<void()> func) {
   }
 }
 
-std::shared_ptr<ivalue::Future> intraop_launch_future(
+std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
-  auto future = std::make_shared<ivalue::Future>();
+  auto future = std::make_shared<c10::ivalue::Future>();
   if (get_num_threads() > 1) {
     tg_.run(
       [func, future]() {
