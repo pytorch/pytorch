@@ -30,7 +30,7 @@ struct alignas(2) BFloat16 {
 
   // HIP wants __host__ __device__ tag, CUDA does not
 #ifdef __HIP_PLATFORM_HCC__
-  C10_HIP_HOST_DEVICE BFloat16() = default;
+  C10_HOST_DEVICE BFloat16() = default;
 #else
   BFloat16() = default;
 #endif
