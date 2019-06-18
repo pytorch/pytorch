@@ -78,7 +78,7 @@ inline constexpr TensorTypeId TensorTypeIds::undefined() noexcept {
 
 class C10_API TensorTypeIdRegistrar final {
  public:
-  TensorTypeIdRegistrar(std::string name);
+  explicit TensorTypeIdRegistrar(std::string name);
   ~TensorTypeIdRegistrar();
 
   TensorTypeId id() const noexcept;
