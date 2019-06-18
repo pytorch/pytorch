@@ -1971,9 +1971,9 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
           // output, hence verify the logic. In this test, the cache size is
           // configured to be the same as chunk size and batch size. So the
           // chunk data is written to the cache one by one. Only the current
-          // batch is retrieved, the next chunk is writen. Now after the first
-          // batch is retrieved, when we tries to retrive the second batch,
-          // there are three possible scenarios for the writer thread:
+          // batch is retrieved, the next chunk is writen. Now in iteration 0,
+          // after the first batch is retrieved, when we save the dataset
+          // statues, there are three possible scenarios for the writer thread:
           // 1. it hasn't started loading the next chunk data yet, so the
           // sequential sampler index is still 0;
           // 2. it started to load the second chunk, so the sequencial sampler
@@ -1990,14 +1990,14 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
           // sequential sampler, it already moves to the second index. So when
           // we save it, it is the second index we save. As a result,
           // we need to advance the window by one. Now we have the expected
-          // window of [0, 3].
+          // window of [1, 3].
           // This analysis applies to all scenarios. So extend it to a more
           // general case: the expected saved index should falling into the
-          // range of [iteration - 1, iteration + 2], which is the validation
+          // range of [iteration, iteration + 3], which is the validation
           // below.
           ASSERT_TRUE(
-              new_sampler.index() >= std::max(0, iteration_count - 1) &&
-              new_sampler.index() <= iteration_count + 2);
+              new_sampler.index() >= iteration_count + 1 &&
+              new_sampler.index() <= iteration_count + 3);
         }
       }
     }
