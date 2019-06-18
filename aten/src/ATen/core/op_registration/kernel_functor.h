@@ -38,25 +38,8 @@ namespace detail {
     at::Scalar
   >;
 
-  // // ivalue_to_arg_type<T>: Take an IValue that is an argument to a kernel and
-  // // cast it to the type that should be passed to the kernel function.
-  // // Examples: If the IValue contains a plain type like an int, return that.
-  // //           If the IValue contains an IntList, return it as ArrayRef<int>.
-  // template<class T, class Enable = void> struct ivalue_to_arg_type {
-  //   // This base case is hit whenever a type does not have a specialisation below.
-  //   static T call(IValue&& v) {
-  //     auto obj = v.toObject();
-  //     auto capsule = obj->getAttr("capsule");
-  //     auto &capsulePtr = capsule.toCapsule()->ptr;
-  //     if (capsulePtr == nullptr) {
-  //       capsulePtr = malloc(sizeof(typename std::remove_pointer<T>::type));
-  //     }
-  //     return reinterpret_cast<T>(capsule.toCapsule()->ptr);
-  //   }
-  //   // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
-  // }
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported input type.");
+    // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported input type.");
   };
 
   template<class T, bool AllowDeprecatedTypes>
@@ -116,29 +99,8 @@ namespace detail {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral input type. Please use int64_t instead.");
   };
 
-  // // TODO Make nesting types work with new style API, e.g. Dicts of lists, lists of lists, and so on
-
-  // template<class T, class Enable = void>
-  // struct return_type_to_ivalue {
-  //   // This base case is hit whenever a type does not have a specialisation below.
-  //   template<class T_>
-  //   static IValue call(T_&& v) {
-  //     v->display();
-  //     auto res = tmap.find<T_>();
-  //     if (res == tmap.end()) {
-  //       throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
-  //     }
-  //     auto retObject = ivalue::Object(res->second, 1);
-  //     auto capsule = Capsule();
-  //     capsule.ptr = (void*)v;
-  //     retObject.setAttr("capsule", IValue(c10::make_intrusive<Capsule>(std::move(capsule))));
-  //     auto resIVal = IValue(c10::make_intrusive<ivalue::Object>(std::move(retObject)));
-  //     return resIVal;
-  //   }
-  // }
-    // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_output_type {
-    static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported output type.");
+    // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported output type.");
   };
 
   template<class T, bool AllowDeprecatedTypes>
@@ -210,7 +172,7 @@ namespace detail {
   template<class T, bool AllowDeprecatedTypes>
   IValue return_to_ivalue(T&& v) {
     assert_is_valid_output_type<T, AllowDeprecatedTypes>();
-    return IValue(std::move(v));
+    return c10::ivalue::from(v);
   }
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>

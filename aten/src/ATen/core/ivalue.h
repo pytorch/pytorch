@@ -46,9 +46,9 @@ struct Object;
   _(GenericDict) \
   _(Future) \
   _(Device) \
-  _(Uninitialized) \
   _(Object) \
-  _(Capsule)
+  _(Uninitialized) \
+  _(Capsule) \
 
 struct CAFFE2_API IValue final {
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}

@@ -1,8 +1,6 @@
 #pragma once
 
 #include <ATen/core/jit_type.h>
-
-#include <ATen/core/type_conversion.h>
 #include <unordered_map>
 #include <atomic>
 
@@ -156,5 +154,64 @@ inline TypePtr getTypePtr() {
   // TODO: static_assert that a templated function exists, and throw a friendy
   // error message if not
   return detail::getTypePtr_<T>::call();
+}
+namespace ivalue {
+  #define CREATE_FACTORY_INIT(type) inline IValue from(type v) { return IValue(v); }
+  #define CONVERSION_TYPES(_) \
+  _(at::Tensor)\
+  _(intrusive_ptr<caffe2::Blob>)\
+  _(intrusive_ptr<Capsule>)\
+  _(ivalue::TuplePtr)\
+  _(double)\
+  _(c10::intrusive_ptr<ivalue::Future>)\
+  _(int64_t)\
+  _(int32_t)\
+  _(bool)\
+  _(c10::ListPtr<int64_t>)\
+  _(c10::ArrayRef<int64_t>)\
+  _(std::vector<int64_t>)\
+  _(c10::intrusive_ptr<ivalue::ConstantString>)\
+  _(std::basic_string<char>)\
+  _(c10::ListPtr<double>)\
+  _(std::vector<double>)\
+  _(c10::ListPtr<bool>)\
+  _(std::vector<bool>)\
+  _(c10::ListPtr<at::Tensor>)\
+  _(std::vector<at::Tensor>)\
+  _(std::vector<IValue>)\
+  _(c10::ListPtr<IValue>)\
+  _(c10::intrusive_ptr<ivalue::Object>)\
+  _(at::Scalar)\
+  _(c10::Device)\
+  _(c10::nullopt_t)\
+
+  CONVERSION_TYPES(CREATE_FACTORY_INIT)
+
+  template<class T>
+  IValue from(c10::ListPtr<T> v) { return IValue(v); }
+  template<class T>
+  IValue from(std::vector<T> v) { return IValue(v); }
+  inline IValue from(c10::DictPtr<IValue, IValue> v) { return IValue(v); }
+  template<class Key, class Value>
+  IValue from(c10::DictPtr<Key, Value> v) { return IValue(v); }
+  template<class Key, class Value>
+  IValue from(std::unordered_map<Key, Value> v) { return IValue(v); }
+  template<class T>
+  IValue from(c10::optional<T> v) { return IValue(v); }
+  template <typename T>
+  IValue from(T x) {
+    auto res = tmap.find<T>();
+    if (res == tmap.end()) {
+      throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
+    }
+    auto retObject = ivalue::Object(res->second, 1);
+    auto capsule = Capsule();
+    capsule.ptr = (void*)x;
+    retObject.setAttr("capsule", IValue(c10::make_intrusive<Capsule>(std::move(capsule))));
+    auto resIVal = IValue(c10::make_intrusive<ivalue::Object>(std::move(retObject)));
+    return resIVal;
+      // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported argument type.");
+
+  }
 }
 } // namespace c10

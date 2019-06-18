@@ -156,5 +156,4 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::DictPtr<IValue,
   std::sort(ordered.begin(), ordered.end(), CompareIValue);
   return ordered;
 }
-
 } // namespace c10

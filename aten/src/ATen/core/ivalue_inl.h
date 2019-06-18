@@ -437,6 +437,18 @@ std::vector<Elem> generic_to(
   }
   return result;
 }
+template <typename T>
+T generic_to(
+    IValue ivalue,
+    _fake_type<T>) {
+    auto obj = ivalue.toObject();
+    auto capsule = obj->getAttr("capsule");
+    auto &capsulePtr = capsule.toCapsule()->ptr;
+    if (capsulePtr == nullptr) {
+      capsulePtr = malloc(sizeof(typename std::remove_pointer<T>::type));
+    }
+    return reinterpret_cast<T>(capsule.toCapsule()->ptr);
+}
 
 template <typename Elem>
 c10::ListPtr<Elem> generic_to(
