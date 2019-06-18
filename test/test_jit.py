@@ -15701,7 +15701,7 @@ class TestClassType(JitTestCase):
                     self.foo = 10  # should error since int != Tensor
 
     def test_get_attr_not_initialized(self):
-        with self.assertRaisesRegex(RuntimeError, "Tried to access to nonexistent attribute"):
+        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute"):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
