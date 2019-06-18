@@ -3183,7 +3183,7 @@ def foo(x):
         mod.ninf = float("-inf")
         mod.nan = float("nan")
 
-        with self.disableEmitHook():
+        with torch.jit._disable_emit_hooks():
             @torch.jit.script
             def foo():
                 return math.pi, 0.1, mod.inf, mod.ninf, 2.225073858507201e-308, mod.nan
@@ -11973,7 +11973,7 @@ a")
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
 
     def test_bool_dispatch(self):
-        with self.disableEmitHook():  # TODO: Python print broadcasting list
+        with torch.jit._disable_emit_hooks():  # TODO: Python print broadcasting list
             def kwarg_false(x):
                 # type: (Tensor) -> Tensor
                 return F.max_pool1d(x, 1, 1, return_indices=False)
@@ -12826,7 +12826,7 @@ a")
                 # type: (str) -> Tensor
                 return self.table[key] + self.x
 
-        with self.disableEmitHook():
+        with torch.jit._disable_emit_hooks():
             # TODO: re-enable module hook when Python printing of attributes is
             # supported
             m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
@@ -13323,6 +13323,16 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(M(), (torch.randn(2, 2),))
 
+    def test_method_call(self):
+        class M(nn.Module):
+            def test(self, x):
+                return x
+
+            def forward(self, z):
+                y = self.test(z)
+                return z + 20 + y
+
+        self.checkModule(M(), (torch.randn(2, 2),))
 
     def test_script_basic(self):
         def a_python_fn(a, b, c):
@@ -13946,7 +13956,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return self.seq.forward(input)
 
         # disabled due to a jitter issues that will be fixed by using load/store in the compiler
-        with self.disableEmitHook():
+        with torch.jit._disable_emit_hooks():
             # TODO: toggle export_import once above issues are fixed
             self.checkTrace(Traced(), (torch.rand(3, 4),),
                             export_import=False)
@@ -15077,7 +15087,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                     self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
             if test_name in EXCLUDE_PYTHON_PRINT:
-                with self.disableEmitHook():
+                with torch.jit._disable_emit_hooks():
                     run_test()
             else:
                 run_test()
@@ -15158,7 +15168,7 @@ def add_nn_module_test(*args, **kwargs):
 
             # module cannot be imported / exported
             if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
-                with self.disableEmitHook():
+                with torch.jit._disable_emit_hooks():
                     module = make_module(script)
                     create_script_module.last_graph = module.graph
                     mod = module(*args)
