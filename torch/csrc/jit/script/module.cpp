@@ -217,7 +217,7 @@ void Module::copy_into(
       s.to_module().copy_into(module_lookup, type_remap, names);
       names.pop_back();
     } else {
-      curr->get_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
+      curr->set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
     }
   }
 
@@ -321,6 +321,10 @@ slot_list Module::get_module_slots() const {
 
 slot_list Module::get_slots() const {
   return slot_list(*this, c10::nullopt);
+}
+
+Module Slot::to_module() const {
+  return Module(value().toObject());
 }
 
 std::vector<std::shared_ptr<Module>> Module::get_modules() const {
