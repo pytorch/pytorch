@@ -5,6 +5,15 @@ namespace c10 {
 
 // This file exists because we need to reference module.h, which we can't from
 // c10. Sigh...
+
+namespace ivalue {
+Object::~Object() {
+  if (type_->is_module()) {
+    type_->compilation_unit()->drop_all_functions();
+  }
+}
+} // namespace ivalue
+
 std::shared_ptr<Function> ClassType::getMethod(const std::string& name) const {
   return compilation_unit_->find_function(name);
 }
@@ -23,15 +32,6 @@ std::vector<Function*> ClassType::methods() const {
   }
   return ret;
 }
-
-namespace ivalue {
-Object::~Object() {
-  if (type_->is_module()) {
-    type_->compilation_unit()->drop_all_functions();
-  }
-}
-} // namespace ivalue
-
 
 bool ClassType::isSubtypeOf(const TypePtr rhs) const {
   // to improve performance, this check can be cached
