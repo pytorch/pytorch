@@ -64,8 +64,8 @@ TEST(TestParallel, IntraOpLaunchFuture) {
     v2 = 2;
   });
 
-  fut1.wait();
-  fut2.wait();
+  fut1->wait();
+  fut2->wait();
 
   ASSERT_TRUE(v1 == 1 && v2 == 2);
 }
