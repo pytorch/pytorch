@@ -406,8 +406,6 @@ def run(paths):
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')
-                if not NAMEDTENSOR_ENABLED and is_named_tensor_only(declaration):
-                    continue
                 declarations.append(declaration)
             except Exception as e:
                 msg = '''Exception raised in processing function:

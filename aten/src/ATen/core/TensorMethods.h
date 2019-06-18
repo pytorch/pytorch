@@ -523,9 +523,11 @@ inline Tensor Tensor::rsqrt() const {
 inline Tensor & Tensor::rsqrt_() {
     return dispatch_type().rsqrt_(*this);
 }
+#ifdef NAMEDTENSOR_ENABLED
 inline Tensor Tensor::select(Dimname dim, int64_t index) const {
     return dispatch_type().select(*this, dim, index);
 }
+#endif
 inline Tensor Tensor::select(int64_t dim, int64_t index) const {
     return dispatch_type().select(*this, dim, index);
 }

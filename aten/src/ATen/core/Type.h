@@ -301,7 +301,9 @@ struct CAFFE2_API Type {
   virtual Tensor hardshrink_backward(const Tensor & grad_out, const Tensor & self, Scalar lambd) const = 0;
   virtual Tensor rsqrt(const Tensor & self) const = 0;
   virtual Tensor & rsqrt_(Tensor & self) const = 0;
+  #ifdef NAMEDTENSOR_ENABLED
   virtual Tensor select(const Tensor & self, Dimname dim, int64_t index) const = 0;
+  #endif
   virtual Tensor select(const Tensor & self, int64_t dim, int64_t index) const = 0;
   virtual Tensor sigmoid(const Tensor & self) const = 0;
   virtual Tensor & sigmoid_(Tensor & self) const = 0;
