@@ -40,7 +40,6 @@ void inlineCalls(Block* block) {
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
-        std::cout<<"Inlining: "<<name<<std::endl;
         auto function =
             cur->inputs().at(0)->type()->expect<ClassType>()->getMethod(name);
         replace(cur, function, cur->inputs());

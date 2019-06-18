@@ -557,7 +557,6 @@ RegisterOperators reg(
              std::stringstream ss;
              bool first = true;
              for (const IValue& i : last(stack, num_inputs)) {
-               std::cout<<"printing: "<<&i<<std::endl;
                if (!first)
                  ss << " ";
                first = false;
@@ -1041,7 +1040,6 @@ RegisterOperators reg(
            const size_t numAttrs = type->numAttributes();
            return [type, numAttrs](Stack& stack) {
              auto userObj = c10::ivalue::Object::create(type, numAttrs);
-             std::cout<<"create object object id: "<<userObj->id<<std::endl;
              push(stack, std::move(userObj));
              return 0;
            };
@@ -1076,7 +1074,6 @@ RegisterOperators reg(
          auto v = pop(stack);
          auto iv = pop(stack);
          auto userObj = iv.toObject();
-         std::cout<<"object id set attr: "<<userObj->id<<std::endl;
          userObj->setSlot(slot, std::move(v));
          return 0;
        };

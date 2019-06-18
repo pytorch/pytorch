@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 #include <iostream>
+#include <sstream>
 
 namespace py = pybind11;
 using namespace std;
@@ -80,6 +81,7 @@ struct class_ {
       return graph->addInput()->setType(IntType::get());
     }
   };
+  // Need to add specializations for all the other supported types...
   template <class Func, size_t... arg_indices>
   std::vector<Value*> addInputs_(
       Func f,
@@ -102,11 +104,20 @@ struct class_ {
   void addType(Value* v) {
     v->setType(getTypePtr<T>());
   }
-  template <class... Types>
+  template <typename Last>
+  std::string type_name () {
+      return std::string(typeid(Last).name());
+  }
+  template <typename First, typename Second, typename ...Rest>
+  std::string type_name () {
+      return type_name<First>() + "_" + type_name<Second, Rest...>();
+  }
+  template <typename... Types>
   class_& def(types<void, Types...>) {  // Used in combination with torch::jit::init<...>()
     pyClass->def(py::init<Types...>());
     auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::__init__";
+    // auto qualFuncName = className + "::__init__." + type_name<int64_t, Types...>();
     auto func = [](CurClass* cur, Types... args) { *cur = CurClass(args...); };
   //  auto func = [](CurClass* cur, Types... args) {
   //     auto res = new Capsule();
@@ -115,7 +126,7 @@ struct class_ {
   //   };
     std::vector<Value*> inputs = addInputs(func, graph);
     static auto classRegistry =
-        c10::RegisterOperators().op(qualFuncName, std::move(func));
+        torch::RegisterOperators().op(qualFuncName, std::move(func));
     auto capsuleNode =
         graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))
             ->output()
@@ -138,7 +149,7 @@ struct class_ {
       return guts::invoke(f, *cur, args...);
     };
     static auto classRegistry =
-        c10::RegisterOperators().op(qualFuncName, std::move(func));
+        torch::RegisterOperators().op(qualFuncName, std::move(func));
 
     auto graph = std::make_shared<Graph>();
     std::vector<Value*> inputs = addInputs(func, graph);

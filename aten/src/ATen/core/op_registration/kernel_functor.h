@@ -39,7 +39,9 @@ namespace detail {
   >;
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_input_type {
-    // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported input type.");
+    assert_is_valid_input_type() {
+      TORCH_CHECK(tmap.find<T>() != tmap.end(), "Tried to use undefined class as input argument");
+    }
   };
 
   template<class T, bool AllowDeprecatedTypes>
@@ -100,7 +102,9 @@ namespace detail {
   };
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void> struct assert_is_valid_output_type {
-    // static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported output type.");
+    assert_is_valid_output_type() {
+      TORCH_CHECK(tmap.find<T>() != tmap.end(), "Tried to use undefined class as output");
+    }
   };
 
   template<class T, bool AllowDeprecatedTypes>

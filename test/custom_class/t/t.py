@@ -8,25 +8,30 @@ class Bar:
         self.x = 1
         self.y = 2
 
-    def __init__(self, x_, y_):
-        # type: (int, int) -> None
-        self.x = x_
-        self.y = y_
+    # def __init__(self, x_, y_):
+    #     # type: (int, int) -> None
+    #     self.x = x_
+    #     self.y = y_
 
     def display(self):
         print(self.x, self.y)
 
+    def display(self, z):
+        print(self.x, self.y, z)
+
 @torch.jit.script
 def f(x):
-    val = torch._C.Foo(5, 3)
-    # val = Bar(5, 3)
+    foo = Bar()
+    foo.display()
+    # val = torch._C.Foo(5, 3)
+    # # val = Bar(5, 3)
+    # # val.display()
+    # # val2 = Bar(100, 0)
+    # val2 = torch._C.Foo(100, 0)
+    # print("Initialization done")
     # val.display()
-    # val2 = Bar(100, 0)
-    val2 = torch._C.Foo(100, 0)
-    print("Initialization done")
-    val.display()
-    val3 = val.combine(val2)
-    val3.display()
+    # val3 = val.combine(val2)
+    # val3.display()
     # print(val, val2)
 
 print(f.graph)
