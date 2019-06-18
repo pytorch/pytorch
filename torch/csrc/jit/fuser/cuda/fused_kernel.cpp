@@ -217,13 +217,17 @@ void FusedKernelCUDA::launch_raw(
   const auto nBlocks = std::min(maxBlocks_, ceilDiv(numel, kBlockSize));
 
   // Adds random state to arguments if necessary
-  // Note: offset defined here so its lifetime extends to the launch
-  uint64_t offset;
+  // Note: philox_engine_inputs defined here so its lifetime extends to the launch
+  std::pair<uint64_t, uint64_t> philox_engine_inputs;
   if (has_random_) {
     const auto rand_offset =
         4 * (std::ceil(numel / (4.0 * kBlockSize * nBlocks)) + 1);
     auto gen = at::cuda::detail::getDefaultCUDAGenerator();
-    auto philox_engine_inputs = gen->philox_engine_inputs(rand_offset);
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen->mutex_);
+      philox_engine_inputs = gen->philox_engine_inputs(rand_offset);
+    }
     arguments.push_back(&philox_engine_inputs.first);
     arguments.push_back(&philox_engine_inputs.second);
   }
