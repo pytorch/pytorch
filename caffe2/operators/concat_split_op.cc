@@ -202,7 +202,7 @@ OpSchema::Cost CostInferenceForConcat(
   if (add_axis) {
     out_shape.insert(out_shape.begin() + canonical_axis, in.size());
   } else {
-    for (int i = 1; i < in.size(); ++i) {
+    for (size_t i = 1; i < in.size(); ++i) {
       out_shape[canonical_axis] += in[i].dims(canonical_axis);
     }
   }

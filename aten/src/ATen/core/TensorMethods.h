@@ -2,6 +2,7 @@
 
 #include <c10/core/Scalar.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -1068,6 +1069,10 @@ inline Tensor Tensor::int_repr() const {
     static auto table = globalATenDispatch().getOpTable("aten::int_repr(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
+inline QScheme Tensor::qscheme() const {
+    static auto table = globalATenDispatch().getOpTable("aten::qscheme(Tensor self) -> QScheme");
+    return table->getOp<QScheme (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+}
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     static auto table = globalATenDispatch().getOpTable("aten::to(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False) -> Tensor");
     return table->getOp<Tensor (const Tensor &, const TensorOptions &, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, options, non_blocking, copy);
@@ -1748,7 +1753,11 @@ inline bool Tensor::is_cuda() const {
 }
 
 #ifdef NAMEDTENSOR_ENABLED
-inline NamedTensorMeta* Tensor::get_named_tensor_meta() const {
+inline NamedTensorMeta* Tensor::get_named_tensor_meta() {
+  return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+}
+
+inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
 

@@ -26,6 +26,7 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/guard_elimination.h"
 #include "torch/csrc/jit/passes/insert_guards.h"
+#include "torch/csrc/jit/passes/liveness.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
@@ -908,7 +909,17 @@ static void checkShape(
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
-void testInsertAndEliminateGuards() {
+std::vector<std::size_t> values_to_value_ids(
+    const std::vector<Value*>& values) {
+  std::vector<std::size_t> result;
+  for (auto v : values) {
+    result.push_back(v->unique());
+  }
+  return result;
+};
+
+void testInsertAndEliminateRedundantGuards() {
+
   static const auto basic_example = R"JIT(
   def basic(x, y):
     a = x + y
@@ -944,7 +955,7 @@ void testInsertAndEliminateGuards() {
   ASSERT_EQ(num_guards, 11);
   // now eliminate as many guards as possible
   // we should be left with two guards on x and y's defs
-  EliminateGuards(copy);
+  EliminateRedundantGuards(copy);
   num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
   ASSERT_EQ(num_guards, 2);
 }
@@ -981,7 +992,7 @@ void testInsertBailOuts() {
   is.run(stack);
   auto copy = pr->profiled_graph_->copy();
   InsertGuards(copy);
-  EliminateGuards(copy);
+  EliminateRedundantGuards(copy);
   auto nodes = copy->block()->nodes();
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   auto num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);

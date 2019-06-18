@@ -371,6 +371,18 @@ struct Environment {
            makeMagic(
                "__len__",
                std::make_shared<BuiltinFunction>(aten::len, at::nullopt))},
+          {"hex",
+           makeMagic(
+               "__hex__",
+               std::make_shared<BuiltinFunction>(aten::hex, at::nullopt))},
+          {"oct",
+           makeMagic(
+               "__oct__",
+               std::make_shared<BuiltinFunction>(aten::oct, at::nullopt))},
+          {"round",
+           makeMagic(
+               "__round__",
+               std::make_shared<BuiltinFunction>(aten::round, at::nullopt))},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
@@ -379,6 +391,8 @@ struct Environment {
           {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
+          {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
+          {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
           {"rangelist",
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
       };
@@ -390,8 +404,11 @@ struct Environment {
 
     if (!retval) {
       if (auto type = resolver->resolveType(ident)) {
-        const auto class_type = type->expect<ClassType>();
-        retval = std::make_shared<script::ClassValue>(class_type);
+        if (auto class_type = type->cast<ClassType>()) {
+          retval = std::make_shared<script::ClassValue>(class_type);
+        } else if (auto tuple_type = type->cast<TupleType>()) {
+          retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
+        }
       }
     }
 
@@ -565,7 +582,7 @@ struct to_ir {
         Ident::create(r, "defaults"),
         blank_decl,
         List<Stmt>::create(r, {ret}));
-    auto m = std::make_shared<Module>();
+
     CompilationUnit cu;
     // set optimize to false since we don't need to run it in optimize mode
     cu.set_optimized(false);
@@ -931,7 +948,7 @@ struct to_ir {
     const auto expr_stmt = ExprStmt::create(lc.range(), apply_append);
     const auto stmt_list = List<Stmt>::create(lc.range(), {expr_stmt});
     const auto iters_list = List<Expr>::create(lc.range(), {lc.iter()});
-    const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
+    const auto targets_list = List<Ident>::create(lc.range(), {lc.target()});
     const auto for_loop =
         For::create(lc.range(), targets_list, iters_list, stmt_list);
     emitFor(for_loop);
@@ -1334,7 +1351,7 @@ struct to_ir {
     TORCH_CHECK(
         end_val != nullptr && start_val != nullptr && step_val != nullptr,
         "Expected non-null pointers for range() arguments");
-    auto addOp = [end_val, range](
+    auto addOp = [range](
                      Graph* g, NodeKind kind, ArrayRef<Value*> inputs) {
       return g->insertNode(g->create(kind, inputs, 1))
           ->setSourceRange(range)
@@ -1392,7 +1409,7 @@ struct to_ir {
     auto itrs = stmt.itrs();
     auto body = stmt.body();
     auto& range = stmt.range();
-    auto target = Var(targets[0]).name();
+    auto target = targets[0];
 
     auto listArg = siv->asValue(range, method);
     auto max_trip_count_val = emitBuiltinCall(
@@ -1421,7 +1438,7 @@ struct to_ir {
 
   void emitForInTensorLoop(const For& stmt, Value* tensorArg) {
     auto targets = stmt.targets();
-    auto target = Var(targets[0]).name();
+    auto target = targets[0];
     auto itrs = stmt.itrs();
     auto body = stmt.body();
     auto& range = stmt.range();
@@ -1500,11 +1517,10 @@ struct to_ir {
           << "Iteration variable unpacking is not supported";
     }
 
-    if (targets[0].kind() != TK_VAR) {
+    if (targets[0].kind() != TK_IDENT) {
       throw ErrorReport(targets[0])
           << "unexpected expression in variable initialization of for loop";
     }
-    auto target = Var(targets[0]).name();
 
     // match range(<expr>) style loops
     // itrs must consist of a single Apply node
@@ -1514,7 +1530,7 @@ struct to_ir {
         Var var = Var(range_iterator.callee());
         if (var.name().name() == "range") {
           return emitForRange(
-              stmt.range(), target, range_iterator.inputs(), body);
+              stmt.range(), targets[0], range_iterator.inputs(), body);
         }
       }
     }
@@ -1539,7 +1555,7 @@ struct to_ir {
     }
 
     auto instances = sv->asTuple(stmt.range(), method);
-    const std::string& target_name = target.name();
+    const std::string& target_name = targets[0].name();
     pushFrame(environment_stack->block());
     for (const auto& inst : instances) {
       environment_stack->setSugaredVar(itrs[0].range(), target_name, inst);
@@ -1951,8 +1967,12 @@ struct to_ir {
     switch (stmt.lhs().kind()) {
       case TK_VAR: {
         auto v = Var(stmt.lhs());
+        TypePtr type = nullptr;
+        if (stmt.type().present()) {
+          type = typeParser_.parseTypeFromExpr(stmt.type().get());
+        }
         environment_stack->setSugaredVar(
-            v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1));
+            v.range(), v.name().name(), emitSugaredExpr(stmt.rhs(), 1, type));
       } break;
       case TK_TUPLE_LITERAL:
         emitTupleAssign(TupleLiteral(stmt.lhs()), stmt.rhs());
@@ -2028,6 +2048,8 @@ struct to_ir {
         return aten::__or__;
       case '^':
         return aten::__xor__;
+      case TK_IN:
+        return aten::__contains__;
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -2067,6 +2089,8 @@ struct to_ir {
         return "__or__";
       case '^':
         return "__xor__";
+      case TK_IN:
+        return "__contains__";
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -2432,6 +2456,7 @@ struct to_ir {
             {},
             /*required=*/true);
       }
+      case TK_IN:
       case TK_POW:
       case TK_NE:
       case TK_EQ:
@@ -2451,9 +2476,17 @@ struct to_ir {
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto overload = getOperatorOverload(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+
+        if (tree->kind() == TK_IN) {
+          // For `in` the arguments are in reverse order (the object being
+          // checked is second)
+          std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
+        }
+
         return asSimple(
             makeMagic(
-                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+                overload,
+                std::make_shared<BuiltinFunction>(kind, at::nullopt))
                 ->call(tree->range(), method, named_values, {}, 0));
       }
       case TK_NOT: {
@@ -3083,7 +3116,7 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
   // be inlined into forked closures
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
-  if (!script::getFirstClassMode()) {
+  if (script::getInlineEverythingMode()) {
     Inline(*to_clean);
   }
   // remove any uses of tuples that we inserted that are not needed

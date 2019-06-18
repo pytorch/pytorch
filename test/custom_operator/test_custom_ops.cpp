@@ -71,8 +71,8 @@ void test_argument_checking_for_serialized_modules(
   } catch (const c10::Error& error) {
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("Expected at most 1 argument(s) for operator 'forward', "
-                  "but received 2 argument(s)") == 0);
+            .find("Expected at most 2 argument(s) for operator 'forward', "
+                  "but received 3 argument(s)") == 0);
   }
 
   try {
@@ -81,7 +81,7 @@ void test_argument_checking_for_serialized_modules(
   } catch (const c10::Error& error) {
     AT_ASSERT(
         std::string(error.what_without_backtrace())
-            .find("forward() expected a value of type 'Tensor' "
+            .find("forward() Expected a value of type 'Tensor' "
                   "for argument 'input' but instead found type 'int'") == 0);
   }
 
