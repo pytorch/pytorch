@@ -196,12 +196,15 @@ class Module(object):
         def compute_should_use_set_data(tensor, tensor_applied):
             if torch._has_same_tensorimpl_type(tensor, tensor_applied):
                 # If the new tensor has the same TensorImpl type as the existing tensor,
-                # then we take `torch.__future__.get_overwrite_module_params_on_conversion()`
-                # into account.
+                # the current (incorrect) behavior is to change the tensor in-place using `.data =`,
+                # and the future (correct) behavior is to overwrite the existing tensor.
+                # However, changing the current behavior is a BC-breaking change, and we
+                # want it to happen in future releases. So for now we introduce the
+                # `torch.__future__.get_overwrite_module_params_on_conversion()`
+                # global flag to let the user control whether they want the future (correct)
+                # behavior of overwriting the existing tensor or not.
                 return not torch.__future__.get_overwrite_module_params_on_conversion()
             else:
-                # If the new tensor has a different TensorImpl type, we always overwrite
-                # the existing tensor.
                 return False
 
         for key, param in self._parameters.items():
