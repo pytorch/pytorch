@@ -187,52 +187,23 @@ Tensor norm_sparse(const SparseTensor& self, Scalar value) {
 // mv(SparseTensor, Tensor)
 // --------------------------------------------------------------------
 
-Tensor mv_sparse_cpu(const SparseTensor& self, const Tensor& vec_)
+Tensor mv_sparse_cpu(const SparseTensor& self, const Tensor& vec)
 {
   AT_ASSERT(self.is_sparse());
   TORCH_CHECK(!self.is_cuda(), "mv: expected 'self' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!vec_.is_cuda(), "mv: expected 'vec' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(!vec.is_cuda(), "mv: expected 'vec' to be a CPU tensor, but got a CUDA tensor");
 
   TORCH_CHECK(self.ndimension() == 2 && 
-              vec_.ndimension() == 1,
+              vec.ndimension() == 1,
               "mv: two tensor dim should be 2 and 1, but got ",
-              "SparseTensor Dim: ", self.ndimension(), "Tensor Dim: ", vec_.ndimension());
+              "SparseTensor Dim: ", self.ndimension(), "Tensor Dim: ", vec.ndimension());
 
-  TORCH_CHECK(vec_.size(-1) == self.size(-1), 
+  TORCH_CHECK(vec.size(-1) == self.size(-1),
               "tow tensor's last size should be equal");
 
-  int64_t self_nnz = self._nnz();
-  LongTensor self_indices = self._indices();
-  Tensor self_values = self._values();
+  auto result = self.matmul(vec.unsqueeze(-1));
 
-  const int64_t height = self.size(0);
-  const int64_t width = self.size(1);
-
-  Tensor output = at::empty({height, 1}, vec_.options());
-  output.zero_();
-
-  const Tensor vec = vec_.contiguous();
-
-  auto self_indices_accessor = self_indices.accessor<int64_t, 2>();
-  int64_t self_i = 0;
-
-  AT_DISPATCH_ALL_TYPES(
-        self_values.scalar_type(), "mv_sparse", [&] {
-          scalar_t* self_values_ptr = self_values.data<scalar_t>();
-          scalar_t* output_ptr = output.data<scalar_t>();
-          scalar_t* vec_ptr = vec.data<scalar_t>();
-          while(self_i < self_nnz) {
-            auto indice_height = self_indices_accessor[0][self_i];
-            auto indice_width = self_indices_accessor[1][self_i];
-
-            output_ptr[indice_height] += vec_ptr[indice_width] * self_values_ptr[self_i];
-            
-            self_i++;
-          } 
-        }
-  );
-
-  return output;
+  return result;
 }
 
 // --------------------------------------------------------------------
