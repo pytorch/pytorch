@@ -2,9 +2,7 @@
 #define THC_GENERIC_FILE "THCUNN/generic/LookupTable.cu"
 #else
 
-#ifdef __HIP_PLATFORM_HCC__
 #include <thrust/iterator/constant_iterator.h>
-#endif
 
 void THNN_(LookupTable_accGradParameters)(
            THCState *state,
