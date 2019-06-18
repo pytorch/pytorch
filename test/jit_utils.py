@@ -67,7 +67,7 @@ class JitTestCase(TestCase):
         if func.name == "<lambda>" or "aten::" in func.name or not _inline_everything:
             return
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with self.disableEmitHook():
+        with torch.jit._disable_emit_hook():
             try:
                 src, constants = _jit_python_print(func)
                 cu = torch.jit.CompilationUnit()._import(src, constants)
@@ -92,7 +92,7 @@ class JitTestCase(TestCase):
             return c
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with self.disableEmitHook():
+        with torch.jit._disable_emit_hook():
             try:
                 if len(module.code) == 0:
                     # short-circuit if this is an empty module
