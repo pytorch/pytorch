@@ -249,6 +249,18 @@ Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& opt
   return native::full(self.sizes(), fill_value, options);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor fill_diagonal(const Tensor& self, Scalar value, int64_t offset, int64_t dim1_, int64_t dim2_) {
+  int64_t nDims = self.dim();
+  int64_t dim1 = maybe_wrap_dim(dim1_, nDims);
+  int64_t dim2 = maybe_wrap_dim(dim2_, nDims);
+  TORCH_CHECK(dim1 != dim2, "diagonal dimensions cannot be identical ", dim1_, ", ", dim2_);
+  auto diag = self.diagonal(offset, dim1, dim2);
+  diag.fill_(value);
+  return self;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor linspace(

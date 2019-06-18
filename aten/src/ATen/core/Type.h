@@ -196,6 +196,7 @@ struct CAFFE2_API Type {
   virtual Tensor diag_embed(const Tensor & self, int64_t offset, int64_t dim1, int64_t dim2) const = 0;
   virtual Tensor diagflat(const Tensor & self, int64_t offset) const = 0;
   virtual Tensor diagonal(const Tensor & self, int64_t offset, int64_t dim1, int64_t dim2) const = 0;
+  virtual Tensor fill_diagonal(const Tensor & self, Scalar value, int64_t offset, int64_t dim1, int64_t dim2) const = 0;
   virtual Tensor div(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor & div_(Tensor & self, const Tensor & other) const = 0;
   virtual Tensor div(const Tensor & self, Scalar other) const = 0;
