@@ -350,6 +350,12 @@ public:
   void push_back(T&& value) const;
 
   /**
+   * Appends the given list to the end of the container. Uses at most one memory allocation.
+   * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
+   */
+  void append(ListPtr<T> lst) const;
+
+  /**
    * Appends the given element value to the end of the container.
    * The new element is constructed with the given arguments.
    * May invalidate any references, pointers, or iterators referring to contained elements. Any past-the-end iterators may also be invalidated.
