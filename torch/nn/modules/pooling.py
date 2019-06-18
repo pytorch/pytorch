@@ -526,7 +526,6 @@ class AvgPool2d(_AvgPoolNd):
         padding: implicit zero padding to be added on both sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
         count_include_pad: when True, will include the zero-padding in the averaging calculation
-        divisor_override: if specified, it will be used as divisor, otherwise kernel_size will be used
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
@@ -550,19 +549,18 @@ class AvgPool2d(_AvgPoolNd):
         >>> output = m(input)
     """
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True, divisor_override=None):
+                 count_include_pad=True):
         super(AvgPool2d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
         self.padding = padding
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
-        self.divisor_override = divisor_override
 
     @weak_script_method
     def forward(self, input):
         return F.avg_pool2d(input, self.kernel_size, self.stride,
-                            self.padding, self.ceil_mode, self.count_include_pad, self.divisor_override)
+                            self.padding, self.ceil_mode, self.count_include_pad)
 
 
 @weak_module
@@ -597,7 +595,6 @@ class AvgPool3d(_AvgPoolNd):
         padding: implicit zero padding to be added on all three sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
         count_include_pad: when True, will include the zero-padding in the averaging calculation
-        divisor_override: if specified, it will be used as divisor, otherwise kernel_size will be used
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
@@ -625,19 +622,18 @@ class AvgPool3d(_AvgPoolNd):
         >>> output = m(input)
     """
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True, divisor_override=None):
+                 count_include_pad=True):
         super(AvgPool3d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
         self.padding = padding
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
-        slef.divisor_override = divisor_override
 
     @weak_script_method
     def forward(self, input):
         return F.avg_pool3d(input, self.kernel_size, self.stride,
-                            self.padding, self.ceil_mode, self.count_include_pad, self.divisor_override)
+                            self.padding, self.ceil_mode, self.count_include_pad)
 
     def __setstate__(self, d):
         super(AvgPool3d, self).__setstate__(d)
