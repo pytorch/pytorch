@@ -370,34 +370,39 @@ struct FullBidirectionalLayer : Layer<Tensor, pair_of<dir_hidden_type>, pair_of<
 
     using unstacked_output_type = typename FullLayer<dir_hidden_type, cell_params>::unstacked_output_type;
 
-#if AT_PARALLEL_NATIVE_TBB
     unstacked_output_type fw_result;
     at::Tensor fw_output;
 
     unstacked_output_type rev_result;
     at::Tensor rev_output;
 
-    at::intraop_invoke([&]() {
-      fw_result = layer_(step_inputs, input_hidden.first, params.first);
-      fw_output = at::stack(fw_result.outputs, 0);
-    }, [&]() {
+    if (at::get_num_threads() > 1) {
+#if AT_PARALLEL_NATIVE_TBB
+      at::intraop_invoke([&]() {
+        fw_result = layer_(step_inputs, input_hidden.first, params.first);
+        fw_output = at::stack(fw_result.outputs, 0);
+      }, [&]() {
+        rev_result = layer_(step_inputs, input_hidden.second, params.second, /* reverse */ true);
+        rev_output = at::stack(rev_result.outputs, 0);
+      });
+#else
+      auto fut = at::intraop_launch_future([&]() {
+        fw_result = layer_(step_inputs, input_hidden.first, params.first);
+        fw_output = at::stack(fw_result.outputs, 0);
+      });
+
       rev_result = layer_(step_inputs, input_hidden.second, params.second, /* reverse */ true);
       rev_output = at::stack(rev_result.outputs, 0);
-    });
-#else
-    unstacked_output_type fw_result;
-    at::Tensor fw_output;
-    auto fut = at::intraop_launch_future([&]() {
+
+      // wait for the forward pass
+      fut->wait();
+#endif
+    } else {
       fw_result = layer_(step_inputs, input_hidden.first, params.first);
       fw_output = at::stack(fw_result.outputs, 0);
-    });
-
-    auto rev_result = layer_(step_inputs, input_hidden.second, params.second, /* reverse */ true);
-    auto rev_output = at::stack(rev_result.outputs, 0);
-
-    // wait for the forward pass
-    fut->wait();
-#endif
+      rev_result = layer_(step_inputs, input_hidden.second, params.second, /* reverse */ true);
+      rev_output = at::stack(rev_result.outputs, 0);
+    }
 
     return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
             std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
@@ -501,25 +506,29 @@ struct PackedBidirectionalLayer : Layer<PackedSequence, pair_of<dir_hidden_type>
     : layer_(cell), rev_layer_(cell) {};
 
   output_type operator()(const PackedSequence& input, const hidden_type& input_hidden, const param_type& params) const override {
-#if AT_PARALLEL_NATIVE_TBB
+
     typename PackedLayer<dir_hidden_type, cell_params>::output_type fw_result;
     typename ReversedPackedLayer<dir_hidden_type, cell_params>::output_type rev_result;
 
-    at::intraop_invoke([&]() {
-      fw_result = layer_(input, input_hidden.first, params.first);
-    }, [&]() {
-      rev_result = rev_layer_(input, input_hidden.second, params.second);
-    });
+    if (at::get_num_threads() > 1) {
+#if AT_PARALLEL_NATIVE_TBB
+      at::intraop_invoke([&]() {
+        fw_result = layer_(input, input_hidden.first, params.first);
+      }, [&]() {
+        rev_result = rev_layer_(input, input_hidden.second, params.second);
+      });
 #else
-    typename PackedLayer<dir_hidden_type, cell_params>::output_type fw_result;
-    auto fut = at::intraop_launch_future([&]() {
-      fw_result = layer_(input, input_hidden.first, params.first);
-    });
+      auto fut = at::intraop_launch_future([&]() {
+        fw_result = layer_(input, input_hidden.first, params.first);
+      });
+      rev_result = rev_layer_(input, input_hidden.second, params.second);
 
-    auto rev_result = rev_layer_(input, input_hidden.second, params.second);
-
-    fut->wait();
+      fut->wait();
 #endif
+    } else {
+      fw_result = layer_(input, input_hidden.first, params.first);
+      rev_result = rev_layer_(input, input_hidden.second, params.second);
+    }
 
     PackedSequence output { at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1), input.batch_sizes };
     return { output, std::make_pair(fw_result.final_hidden, rev_result.final_hidden) };
