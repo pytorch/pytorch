@@ -1,1 +1,1 @@
-forward((Tensor, Tensor) x, Tensor y) -> (Tensor, Tensor, Tensor)
+forward(ClassType<SM> self, (Tensor, Tensor) x, Tensor y) -> (Tensor, Tensor, Tensor)

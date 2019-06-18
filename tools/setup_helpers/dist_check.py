@@ -16,12 +16,12 @@ def get_command_path(command):
     Helper function that checks if the command exists in the path and gets the
     full path of a given linux command if it exists.
     """
-    def excutable(command_path):
+    def executable(command_path):
         return os.path.isfile(command_path) and os.access(command_path, os.X_OK)
 
     for path in os.environ["PATH"].split(os.pathsep):
         command_path = os.path.join(path, command)
-        if excutable(command_path):
+        if executable(command_path):
             return command_path
 
     return None

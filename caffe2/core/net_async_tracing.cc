@@ -145,6 +145,10 @@ std::string Tracer::serializeEvent(const TracerEvent& event) {
       int_args["task_id"] = event.task_id_;
     }
 
+    if (event.iter_ >= 0) {
+      int_args["iter_id"] = event.iter_;
+    }
+
     if (event.stream_id_ >= 0) {
       int_args["stream_id"] = event.stream_id_;
     }
@@ -258,6 +262,10 @@ int Tracer::bumpIter() {
   return iter_++;
 }
 
+int Tracer::getIter() {
+  return iter_;
+}
+
 int Tracer::bumpDumpingIter() {
   return dumping_iter_++;
 }
@@ -332,6 +340,10 @@ void TracerGuard::addArgument(TracingField field, int value) {
     }
     case TRACE_THREAD: {
       event_.thread_label_ = value;
+      break;
+    }
+    case TRACE_ITER: {
+      event_.iter_ = value;
       break;
     }
     default: {
