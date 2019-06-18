@@ -335,11 +335,9 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::shared_ptr<ClassType> type() const {
     return type_;
   }
-
-  // temporarily defined in class_type.cpp to clean up
-  // std::shared_ptr<Functions> that leak inside of Modules
+  // temporarily defined in class_type.cpp to 
+  // ensure Modules do not leak memory
   ~Object();
-
  private:
   void resizeObject(size_t slot);
   std::shared_ptr<ClassType> type_;
