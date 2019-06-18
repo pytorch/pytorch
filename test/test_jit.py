@@ -10058,7 +10058,7 @@ a")
             SomeModule()
 
     def test_single_starred_expr_for_loop(self):
-        with self.assertRaisesRegex(RuntimeError, 'unexpected expression'):
+        with self.assertRaisesRegex(RuntimeError, 'expected ident but found'):
             cu = torch.jit.CompilationUnit('''
             def test():
                 x = 0
@@ -13194,6 +13194,47 @@ a")
 
         self.checkScript(fn, ("abcdefgh",))
 
+    def test_dict_in(self):
+        def fn(x):
+            # type: (Dict[str, int]) -> bool
+            return 'hi' in x
+
+        self.checkScript(fn, ({'hi': 2, 'bye': 3},))
+        self.checkScript(fn, ({'bye': 3},))
+
+
+        # Check evaluation order
+        @torch.jit.script
+        def a():
+            print("a")
+            return 3
+
+        @torch.jit.script
+        def b():
+            print("b")
+            return {3: 2, 4: 1}
+
+        @torch.jit.script
+        def fn():
+            return a() in b()
+
+        with self.capture_stdout() as captured:
+            self.assertTrue(fn())
+        if not IS_WINDOWS:
+            # no stdout capturing on windows
+            self.assertEqual(captured[0], "a\nb\n")
+
+    def test_in_for_and_comp_expr(self):
+        def fn(d):
+            # type: (Dict[str, int]) -> List[int]
+            out = [1]
+            for i in range(d["hi"] if "hi" in d else 6):
+                out.append(i)
+            return out
+
+        self.checkScript(fn, ({'hi': 2, 'bye': 3},))
+        self.checkScript(fn, ({'bye': 3},))
+
     def test_split(self):
         def split_two(tensor):
             a, b, c = torch.split(tensor, 2, dim=1)
@@ -15743,6 +15784,23 @@ class TestClassType(JitTestCase):
 
         input = torch.ones(2, 3)
         self.assertEqual(fn(input), input)
+
+    def test_in(self):
+        @torch.jit.script  # noqa: B903
+        class FooTest(object):
+            def __init__(self):
+                pass
+
+            def __contains__(self, key):
+                # type: (str) -> bool
+                return key == 'hi'
+
+        @torch.jit.script
+        def fn():
+            foo = FooTest()
+            return 'hi' in foo, 'no' in foo
+
+        self.assertEqual(fn(), (True, False))
 
     def test_set_attr_in_method(self):
         @torch.jit.script
