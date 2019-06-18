@@ -396,7 +396,7 @@ struct FullBidirectionalLayer : Layer<Tensor, pair_of<dir_hidden_type>, pair_of<
     auto rev_output = at::stack(rev_result.outputs, 0);
 
     // wait for the forward pass
-    fut.wait();
+    fut->wait();
 #endif
 
     return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
@@ -518,7 +518,7 @@ struct PackedBidirectionalLayer : Layer<PackedSequence, pair_of<dir_hidden_type>
 
     auto rev_result = rev_layer_(input, input_hidden.second, params.second);
 
-    fut.wait();
+    fut->wait();
 #endif
 
     PackedSequence output { at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1), input.batch_sizes };
