@@ -891,6 +891,13 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(*shape)
         self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_cosine_similarity(self):
+        shape = (100, 128)
+        x = torch.randn(*shape)
+        y = torch.randn(*shape)
+        self.run_model_test(torch.nn.CosineSimilarity(dim=1, eps=1e-6), train=False,
+                            input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_lstm_constant_folding(self):
         class LstmNet(nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):

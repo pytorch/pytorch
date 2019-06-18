@@ -5,13 +5,19 @@ import torch.nn.quantized as nnq
 import numpy as np
 from common_utils import TestCase, run_tests
 
+'''
+Note that tests in this file are just API test, to make sure we wrapped the
+quantized operator implementations correctly in the user facing APIs, these are
+not correctness test for the underlying quantized operators. For correctness
+test please see `caffe2/test/test_quantized.py`.
+'''
+
 class FunctionalAPITest(TestCase):
     def test_relu_api(self):
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
         zero_point = 1
         qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
-        # check it is the same as calling torch.ops.quantized.relu directly
         qY = torch.ops.quantized.relu(qX)
         qY_hat = F.relu(qX)
         self.assertEqual(qY, qY_hat)
