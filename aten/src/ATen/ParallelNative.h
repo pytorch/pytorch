@@ -1,6 +1,5 @@
 #pragma once
 #include <ATen/ATen.h>
-#include <ATen/core/ivalue.h>
 
 #include <c10/core/thread_pool.h>
 
@@ -64,7 +63,7 @@ inline void parallel_for(
     // using shared_ptr to share ownership of the future with the lambda,
     // to ensure we don't destroy future while lambda is still
     // running in markCompleted
-    std::vector<ivalue::Future> futures(num_tasks);
+    std::vector<c10::ivalue::Future> futures(num_tasks);
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       int64_t local_start = begin + task_id * chunk_size;
       if (local_start < end) {
@@ -132,7 +131,7 @@ inline scalar_t parallel_reduce(
       internal::_unset_thread_num();
     };
 
-    std::vector<ivalue::Future> futures(num_tasks);
+    std::vector<c10::ivalue::Future> futures(num_tasks);
     for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
       int64_t local_start = begin + task_id * chunk_size;
       if (local_start < end) {
