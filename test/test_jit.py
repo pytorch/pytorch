@@ -12135,30 +12135,6 @@ a")
 
         self.checkScript(fn, ("abcde",))
 
-    def test_str_ops(self):
-        def test_str_is(s):
-            # type: (str) -> Tuple[bool, bool, bool, bool, bool, bool]
-            return s.isupper(), s.islower(), s.isdigit(), s.isspace(), \
-                s.isalnum(), s.isalpha()
-
-        def test_str_to(s):
-            # type: (str) -> Tuple[str, str]
-            return s.upper(), s.lower()
-
-        inputs = ["", "12a", "!B", "12", "a", "B", "aB", "$12", "B12", "AB ",
-                  "  \t", "  \n", "\na", "abc"]
-
-        for input in inputs:
-            self.checkScript(test_str_is, (input,))
-            self.checkScript(test_str_to, (input,))
-
-        def test_str_cmp(a, b):
-            # type: (str, str) -> Tuple[bool, bool, bool, bool, bool, bool]
-            return a != b, a == b, a < b, a > b, a <= b, a >= b
-
-        for i in range(len(inputs) - 1):
-            self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
-
     def test_ord(self):
         def fn(x):
             # type: (str) -> int
@@ -16267,15 +16243,30 @@ class TestClassType(JitTestCase):
                 return other
 
     def test_optional_type_promotion(self):
+        @torch.jit.script
+        class Leaf(object):
+            def __init__(self):
+                self.x = 1
+
         # should not throw
         @torch.jit.script  # noqa: B903
         class Tree(object):
             def __init__(self):
-                self.parent = torch.jit.annotate(Optional[Tree], None)
+                self.child = torch.jit.annotate(Optional[Leaf], None)
 
             def add_child(self, child):
-                # type: (Tree) -> None
-                child.parent = torch.jit.annotate(Optional[Tree], self)
+                # type: (Leaf) -> None
+                self.child = child
+
+    def test_recursive_class(self):
+        """
+        Recursive class types not yet supported. We should give a good error message.
+        """
+        with self.assertRaises(RuntimeError):
+            @torch.jit.script  # noqa: B903
+            class Tree(object):
+                def __init__(self):
+                    self.parent = torch.jit.annotate(Optional[Tree], None)
 
 
 class TestLogging(JitTestCase):
