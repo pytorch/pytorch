@@ -147,12 +147,16 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
         }
       }
       // the likelihood is the the sum of the last two alphas, eq (8), the loss is the negative log likelihood
-      scalar_t l1 = log_alpha_a[input_length-1][target_length*2];
-      scalar_t l2 = log_alpha_a[input_length-1][target_length*2-1];
-      scalar_t m = std::max(l1, l2);
-      m = ((m == neginf) ? 0 : m);
-      scalar_t log_likelihood = std::log(std::exp(l1-m)+std::exp(l2-m))+m;
-      neg_log_likelihood_a[b] = -log_likelihood;
+      if (target_length == 0) {
+        neg_log_likelihood_a[b] = -log_alpha_a[input_length-1][0];
+      } else {
+        scalar_t l1 = log_alpha_a[input_length-1][target_length*2];
+        scalar_t l2 = log_alpha_a[input_length-1][target_length*2-1];
+        scalar_t m = std::max(l1, l2);
+        m = ((m == neginf) ? 0 : m);
+        scalar_t log_likelihood = std::log(std::exp(l1-m)+std::exp(l2-m))+m;
+        neg_log_likelihood_a[b] = -log_likelihood;
+      }
     }
   });
 
