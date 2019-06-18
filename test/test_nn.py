@@ -1585,10 +1585,9 @@ class TestNN(NNTestCase):
         # the module's parameters' version counter.
         m = nn.Linear(20, 10)
         pvm = m.weight.mul(m.weight)
-        weight_ref = m.weight
-        m_weight_version_saved = weight_ref._version
+        m_weight_version_saved = m.weight._version
         m = m._apply(add_one_inplace)
-        self.assertGreater(weight_ref._version, m_weight_version_saved)
+        self.assertGreater(m.weight._version, m_weight_version_saved)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pvm.backward(torch.randn(10, 20))
 
@@ -1597,10 +1596,9 @@ class TestNN(NNTestCase):
         m = nn.Linear(20, 10)
         m.weight.grad = torch.randn(10, 20).requires_grad_()
         pgm = m.weight.grad.mul(m.weight.grad)
-        weight_grad_ref = m.weight.grad
-        m_weight_grad_version_saved = weight_grad_ref._version
+        m_weight_grad_version_saved = m.weight.grad._version
         m = m._apply(add_one_inplace)
-        self.assertGreater(weight_grad_ref._version, m_weight_grad_version_saved)
+        self.assertGreater(m.weight.grad._version, m_weight_grad_version_saved)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             pgm.backward(torch.randn(10, 20))
 
