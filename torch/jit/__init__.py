@@ -1715,7 +1715,7 @@ def _get_weak_stubs(cls):
         func = get_function_from_type(cls, name)
         if func in _jit_internal.weak_script_methods:
             entry = _jit_internal.weak_script_methods[func]
-            stub = script_method(entry["original_method"], entry["rcb"])
+            stub = script_method(entry["original_method"])
             stubs.append(stub)
     return stubs
 
