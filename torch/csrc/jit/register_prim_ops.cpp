@@ -1735,6 +1735,13 @@ int dictGetDefault(Stack& stack) {
   return 0;
 }
 
+int dictContains(Stack& stack) {
+  auto key = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  push(stack, dict.contains(key));
+  return 0;
+}
+
 template <typename T>
 int hashValue(Stack& stack) {
   auto value = pop(stack);
@@ -2293,6 +2300,10 @@ RegisterOperators reg2({
           "aten::get(Dict(" key_type ", t) self, " key_type                   \
           " key, t default_value) -> t(*)",                                   \
           dictGetDefault),                                                    \
+      Operator(                                                               \
+          "aten::__contains__(Dict(" key_type ", t) dict, " key_type         \
+          " key) -> bool",                                                    \
+          dictContains),                                                      \
       Operator(                                                               \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
           " idx, t(b -> *) v) -> ()",                                         \
