@@ -704,7 +704,7 @@ See :func:`torch.diag_embed`
 
 add_docstr_all('diagflat',
                r"""
-diagflat(diagonal=0) -> Tensor
+diagflat(offset=0) -> Tensor
 
 See :func:`torch.diagflat`
 """)
@@ -1779,6 +1779,13 @@ add_docstr_all('qr',
 qr(some=True) -> (Tensor, Tensor)
 
 See :func:`torch.qr`
+""")
+
+add_docstr_all('qscheme',
+               r"""
+qscheme() -> torch.qscheme
+
+Returns the quantization scheme of a given QTensor.
 """)
 
 add_docstr_all('q_scale',
@@ -2951,9 +2958,9 @@ sum_to_size(*size) -> Tensor
 
 Sum ``this`` tensor to :attr:`size`.
 :attr:`size` must be broadcastable to ``this`` tensor size.
+
 Args:
-    other (:class:`torch.Tensor`): The result tensor has the same size
-        as :attr:`other`.
+    size (int...): a sequence of integers defining the shape of the output tensor.
 """)
 
 

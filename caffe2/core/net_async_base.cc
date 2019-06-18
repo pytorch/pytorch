@@ -399,6 +399,10 @@ bool AsyncNetBase::run(int task_id, int stream_id) noexcept {
     if (!options_.finish_chain_) {
       asyncWait(task_id, stream_id, parents(task_id));
     }
+    int iter_id = -1;
+    if (tracer_) {
+      iter_id = tracer_->getIter();
+    }
     for (auto& op_id : chains_[task_id]) {
       op = operators_[op_id];
       bool success = false;
@@ -409,7 +413,9 @@ bool AsyncNetBase::run(int task_id, int stream_id) noexcept {
             tracing::TRACE_TASK,
             task_id,
             tracing::TRACE_STREAM,
-            stream_id);
+            stream_id,
+            tracing::TRACE_ITER,
+            iter_id);
         success = op->RunAsync(stream_id);
       } else {
         counters_.AddPerOpStartTime(op_id);
