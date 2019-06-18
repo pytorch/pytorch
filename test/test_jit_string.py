@@ -231,7 +231,10 @@ class TestScript(JitTestCase):
         self.checkScript(test_replace, ())
 
         def test_partition():
-            # type: () -> Tuple[Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str]]
+            """
+             type: () -> Tuple[Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str],
+                              Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str]]
+            """
             return (
                 "hello123abc".partition("llo"),
                 "ff".partition("f"),
@@ -244,7 +247,10 @@ class TestScript(JitTestCase):
         self.checkScript(test_partition, ())
 
         def test_rpartition():
-            # type: () -> Tuple[Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str]]
+            """
+             type: () -> Tuple[Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str],
+                               Tuple[str,str,str], Tuple[str,str,str], Tuple[str,str,str]]
+            """
             return (
                 "hello123abc".rpartition("llo"),
                 "ff".rpartition("f"),
