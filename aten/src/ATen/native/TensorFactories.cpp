@@ -19,7 +19,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #ifdef NAMEDTENSOR_ENABLED
-#include <ATen/NamedTensor.h>
+#include <ATen/NamedTensorUtils.h>
 #endif
 
 #include <algorithm>

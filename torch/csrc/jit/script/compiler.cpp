@@ -1351,7 +1351,7 @@ struct to_ir {
     TORCH_CHECK(
         end_val != nullptr && start_val != nullptr && step_val != nullptr,
         "Expected non-null pointers for range() arguments");
-    auto addOp = [end_val, range](
+    auto addOp = [range](
                      Graph* g, NodeKind kind, ArrayRef<Value*> inputs) {
       return g->insertNode(g->create(kind, inputs, 1))
           ->setSourceRange(range)
