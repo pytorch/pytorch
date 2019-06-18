@@ -193,7 +193,7 @@ class Module(object):
         for module in self.children():
             module._apply(fn)
 
-        def compute_should_use_data(tensor, tensor_applied):
+        def compute_should_use_set_data(tensor, tensor_applied):
             if torch._has_same_tensorimpl_type(tensor, tensor_applied):
                 # If the new tensor has the same TensorImpl type as the existing tensor,
                 # then we take `torch.__future__.get_overwrite_module_params_on_conversion()`
@@ -211,8 +211,8 @@ class Module(object):
                 # `with torch.no_grad():`
                 with torch.no_grad():
                     param_applied = fn(param)
-                should_use_data = compute_should_use_data(param, param_applied)
-                if should_use_data:
+                should_use_set_data = compute_should_use_set_data(param, param_applied)
+                if should_use_set_data:
                     param.data = param_applied
                 else:
                     assert isinstance(self._parameters[key], Parameter)
@@ -221,7 +221,8 @@ class Module(object):
                 if param.grad is not None:
                     with torch.no_grad():
                         grad_applied = fn(param.grad)
-                    if should_use_data:
+                    should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
+                    if should_use_set_data:
                         param.grad.data = grad_applied
                     else:
                         self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
