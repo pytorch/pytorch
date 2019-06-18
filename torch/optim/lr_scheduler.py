@@ -100,7 +100,7 @@ class _LRScheduler(object):
                 warnings.warn(
                     "If an epoch parameter different from the current epoch is passed, "
                     "the recursive form of the scheduler is overridden by its closed form "
-                    "whenver available, and will be deprecated.",
+                    "whenever available, and will be deprecated.",
                     DeprecationWarning,
                 )
             except NotImplementedError:
