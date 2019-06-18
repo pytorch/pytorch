@@ -23,11 +23,11 @@ class QAddInt8 final : public c10::OperatorKernel {
     auto iter = TensorIterator::binary_op(c, a, b);
 
     if (ReLUFused) {
-      binary_kernel(*iter, [&](float a_val, float b_val) -> float {
+      cpu_kernel(*iter, [&](float a_val, float b_val) -> float {
         return std::max<float>(a_val + b_val, 0);
       });
     } else {
-      binary_kernel(*iter, [&](float a_val, float b_val) -> float {
+      cpu_kernel(*iter, [&](float a_val, float b_val) -> float {
         return a_val + b_val;
       });
     }

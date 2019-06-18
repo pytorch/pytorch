@@ -61,7 +61,8 @@ template <typename scalar_t, typename func_t>
 void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride,
                       const func_t& f, bool serial_execution=false)
 {
-  auto loop = [&](int ntensor, char** data, const int64_t* strides, int64_t n) {
+  int ntensor = iter.ntensors();
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto indexer = Indexer(ntensor - 2, &data[2], &strides[2], index_size, index_stride);
     char* dst = data[0];
     char* src = data[1];
