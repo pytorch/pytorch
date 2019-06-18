@@ -549,18 +549,19 @@ class AvgPool2d(_AvgPoolNd):
         >>> output = m(input)
     """
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True):
+                 count_include_pad=True, divisor_override=0):
         super(AvgPool2d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
         self.padding = padding
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
+        self.divisor_override = divisor_override
 
     @weak_script_method
     def forward(self, input):
         return F.avg_pool2d(input, self.kernel_size, self.stride,
-                            self.padding, self.ceil_mode, self.count_include_pad)
+                            self.padding, self.ceil_mode, self.count_include_pad, self.divisor_override)
 
 
 @weak_module
