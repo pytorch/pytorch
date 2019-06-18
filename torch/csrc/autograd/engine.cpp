@@ -243,6 +243,10 @@ Engine::~Engine() {
 }
 
 auto Engine::thread_init(int device) -> void {
+  thread_init_full(device, nullptr);
+}
+
+auto Engine::thread_init_full(int device, GraphTask *graph_task) -> void {
   at::init_num_threads();
   // Note [Allocating GPUs to autograd threads]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -286,7 +290,7 @@ auto Engine::thread_init(int device) -> void {
     }
   }
   worker_device = device;
-  thread_main(nullptr);
+  thread_main(graph_task);
 }
 
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
@@ -645,9 +649,12 @@ auto Engine::execute(const edge_list& roots,
     // Get back to work while we wait for our new graph_task to
     // complete!
     // See Note [Reentrant backwards]
-    graph_task.owner_ = worker_device;
+    // graph_task.owner_ = worker_device;
+    // lock.unlock();
+    // thread_main(&graph_task);
     lock.unlock();
-    thread_main(&graph_task);
+    std::thread t(&Engine::thread_init_full, this, worker_device, &graph_task);
+    t.join();
   }
 
   // Check for an exception while running backwards
