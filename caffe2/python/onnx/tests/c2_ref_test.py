@@ -67,7 +67,7 @@ class TestCaffe2Basic(TestCase):
         end = [-1, 4]
         prepared = c2.prepare(model_def)
         output = prepared.run(inputs=[np.array(x), np.array(start), np.array(end)])
-        assert output[0].shape == (1,4)
+        self.assertSameOutputs(output[0], np.array(x)[0:-1, 0:4])
 
     def test_dynamicslice_4inputs_graph(self):
         node_def = make_node(
@@ -86,8 +86,8 @@ class TestCaffe2Basic(TestCase):
         end = [4, 5]
         axes = [1, 0]
         prepared = c2.prepare(model_def)
-        caffe2_out = prepared.run(inputs=[np.array(x), np.array(start), np.array(end), np.array(axes)])
-        assert caffe2_out[0].shape == (1,4)
+        output = prepared.run(inputs=[np.array(x), np.array(start), np.array(end), np.array(axes)])
+        self.assertSameOutputs(output[0], np.array(x)[1:5, 0:4])
 
     def test_relu_graph(self):
         X = np.random.randn(3, 2).astype(np.float32)
