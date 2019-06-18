@@ -1658,6 +1658,25 @@ if _enabled:
                         continue
                     ScriptModule.__setattr__(self, name, getattr(original, name))
 
+            # Copy annotations, pull types from `__annotations__` or try to infer
+            # the type if possible
+            class_annotations = getattr(original, '__annotations__', {})
+            for name in dir(original):
+                if name in ("training", "__dict__"):
+                    # TODO: removing this skip should let us remove the code to add training as an
+                    # attribute in python_sugared_value.cpp
+                    continue
+                if hasattr(self, name):
+                    # Don't re-copy properties
+                    continue
+                item = getattr(original, name)
+                if name in class_annotations:
+                    the_type = torch.jit.annotations.ann_to_type(class_annotations[name])
+                else:
+                    the_type = torch._C._jit_try_infer_type(item)
+                if the_type is not None:
+                    self._c._register_attribute(name, the_type, item)
+
             # Copy overloads
             self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
 
