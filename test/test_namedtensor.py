@@ -2,7 +2,10 @@ import unittest
 from common_utils import TestCase, run_tests
 from common_cuda import TEST_CUDA
 import torch
+import torch.testing
 import sys
+from collections import namedtuple
+import itertools
 
 
 def namedtensor_enabled():
@@ -20,7 +23,7 @@ class TestNamedTensor(TestCase):
     def test_trivial(self):
         pass
 
-    def _test_factory(self, factory, device):
+    def _test_create_tensor_with_names(self, factory, device):
         x = factory([], device=device)
         self.assertEqual(x.names, ())
 
@@ -62,8 +65,27 @@ class TestNamedTensor(TestCase):
             x = factory(2, 1, 1, names=('C.in', 'H', 'C'), device=device)
 
 
-    def test_empty(self):
-        self._test_factory(torch.empty, 'cpu')
+    def test_create_tensor_with_names(self):
+        # All the creation methods go through the same codepath,
+        # so let's just test one for all edge cases.
+        for device in torch.testing.get_all_device_types():
+            self._test_create_tensor_with_names(torch.empty, device)
+
+    def test_creation_functions_use_names(self):
+        Test = namedtuple('Test', ['expected_names', 'func'])
+        names = ('N', 'D')
+        tests = [
+            Test(names, lambda dev: torch.empty(1, 1, names=names, device=dev)),
+            Test(names, lambda dev: torch.ones(1, 1, names=names, device=dev)),
+            Test(names, lambda dev: torch.zeros(1, 1, names=names, device=dev)),
+            Test(names, lambda dev: torch.rand(1, 1, names=names, device=dev)),
+            Test(names, lambda dev: torch.rand(1, 1, generator=torch.default_generator, names=names, device=dev)),
+            Test(names, lambda dev: torch.randn(1, 1, names=names, device=dev)),
+            Test(names, lambda dev: torch.randn(1, 1, generator=torch.default_generator, names=names, device=dev)),
+        ]
+
+        for test, device in itertools.product(tests, torch.testing.get_all_device_types()):
+            self.assertEqual(test.func(device).names, test.expected_names)
 
     @unittest.skipIf(not TEST_CUDA, 'no CUDA')
     def test_empty_cuda(self):
