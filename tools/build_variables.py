@@ -155,6 +155,43 @@ libtorch_cuda_sources = [
 
 def add_torch_libs():
     r = {}
+
+    torch_cpp_headers = {
+        header[len("torch/csrc/api/include/torch/"):]: header
+        for header in glob(["torch/csrc/api/include/**/*.h"])
+    }
+
+    torch_cpp_headers["script.h"] = "torch/script.h"
+
+    torch_cpp_srcs = [
+        "torch/csrc/api/src/cuda.cpp", # this just forwards stuff, no real CUDA
+        "torch/csrc/api/src/data/datasets/mnist.cpp",
+        "torch/csrc/api/src/data/samplers/distributed.cpp",
+        "torch/csrc/api/src/data/samplers/random.cpp",
+        "torch/csrc/api/src/data/samplers/sequential.cpp",
+        "torch/csrc/api/src/data/samplers/stream.cpp",
+        "torch/csrc/api/src/jit.cpp",
+        "torch/csrc/api/src/nn/init.cpp",
+        "torch/csrc/api/src/nn/module.cpp",
+        "torch/csrc/api/src/nn/modules/batchnorm.cpp",
+        "torch/csrc/api/src/nn/modules/conv.cpp",
+        "torch/csrc/api/src/nn/modules/dropout.cpp",
+        "torch/csrc/api/src/nn/modules/embedding.cpp",
+        "torch/csrc/api/src/nn/modules/functional.cpp",
+        "torch/csrc/api/src/nn/modules/linear.cpp",
+        "torch/csrc/api/src/nn/modules/named_any.cpp",
+        "torch/csrc/api/src/nn/modules/rnn.cpp",
+        "torch/csrc/api/src/optim/adagrad.cpp",
+        "torch/csrc/api/src/optim/adam.cpp",
+        "torch/csrc/api/src/optim/lbfgs.cpp",
+        "torch/csrc/api/src/optim/optimizer.cpp",
+        "torch/csrc/api/src/optim/rmsprop.cpp",
+        "torch/csrc/api/src/optim/serialize.cpp",
+        "torch/csrc/api/src/optim/sgd.cpp",
+        "torch/csrc/api/src/serialize/input-archive.cpp",
+        "torch/csrc/api/src/serialize/output-archive.cpp",
+    ]
+
     libtorch_python_sources = [
         ":generate-code=THNN.cpp",
         ":generate-code=python_functions.cpp",
@@ -176,32 +213,7 @@ def add_torch_libs():
         "torch/csrc/Size.cpp",
         "torch/csrc/Storage.cpp",
         "torch/csrc/TypeInfo.cpp",
-        "torch/csrc/api/src/cuda.cpp",
-        "torch/csrc/api/src/data/datasets/mnist.cpp",
-        "torch/csrc/api/src/data/samplers/distributed.cpp",
-        "torch/csrc/api/src/data/samplers/random.cpp",
-        "torch/csrc/api/src/data/samplers/sequential.cpp",
-        "torch/csrc/api/src/data/samplers/stream.cpp",
-        "torch/csrc/api/src/nn/init.cpp",
-        "torch/csrc/api/src/nn/module.cpp",
-        "torch/csrc/api/src/nn/modules/batchnorm.cpp",
-        "torch/csrc/api/src/nn/modules/conv.cpp",
-        "torch/csrc/api/src/nn/modules/dropout.cpp",
-        "torch/csrc/api/src/nn/modules/embedding.cpp",
-        "torch/csrc/api/src/nn/modules/functional.cpp",
-        "torch/csrc/api/src/nn/modules/linear.cpp",
-        "torch/csrc/api/src/nn/modules/named_any.cpp",
-        "torch/csrc/api/src/nn/modules/rnn.cpp",
-        "torch/csrc/api/src/optim/adagrad.cpp",
-        "torch/csrc/api/src/optim/adam.cpp",
-        "torch/csrc/api/src/optim/lbfgs.cpp",
-        "torch/csrc/api/src/optim/optimizer.cpp",
-        "torch/csrc/api/src/optim/rmsprop.cpp",
-        "torch/csrc/api/src/optim/serialize.cpp",
-        "torch/csrc/api/src/optim/sgd.cpp",
         "torch/csrc/api/src/python/init.cpp",
-        "torch/csrc/api/src/serialize/input-archive.cpp",
-        "torch/csrc/api/src/serialize/output-archive.cpp",
         "torch/csrc/autograd/functions/init.cpp",
         "torch/csrc/autograd/init.cpp",
         "torch/csrc/autograd/python_anomaly_mode.cpp",
@@ -334,6 +346,7 @@ def add_torch_libs():
         name="libtorch_cuda",
         srcs=libtorch_cuda_sources,
         link_whole=True,
+        # TODO: putting USE_CUDA in propagated_pp_flags is error-prone
         propagated_pp_flags=propagated_pp_flags + [
             "-DUSE_CUDA",
             "-DUSE_DIRECT_NVRTC",
@@ -360,6 +373,45 @@ def add_torch_libs():
         **common_flags
     )
 
+    # torch-cpp is still conditionally compiled based on USE_CUDA. Ideally we'd
+    # separate it out as an additive library instead.
+    gpu_library_selector(
+        name = "torch-cpp",
+        deps_cpu = [":torch-cpp-cpu"],
+        deps_cuda = [":torch-cpp-cuda"],
+        merge_cpu_deps = False,
+    )
+
+    # USE_CUDA flag is propagated through propagated_pp_flags on libtorch
+    cpp_library(
+        name = "torch-cpp-cuda",
+        srcs = torch_cpp_srcs,
+        headers = torch_cpp_headers,
+        header_namespace = "torch",
+        deps = [
+            ":libtorch_cuda",
+            "//caffe2/torch/fb/init:init",
+        ],
+        external_deps = [
+            ("cuda", None, "cuda-lazy"),
+            ("cudnn", None, "cudnn-lazy"),
+        ],
+    )
+
+    cpp_library(
+        name = "torch-cpp-cpu",
+        srcs = torch_cpp_srcs,
+        headers = torch_cpp_headers,
+        header_namespace = "torch",
+        deps = [
+            ":libtorch",
+            "//caffe2/torch/fb/init:init",
+        ],
+    )
+
+
+    # _C_impl is still conditionally compiled based on USE_CUDA. Ideally we'd
+    # separate it out as an additive library instead.
     # TODO: split it into cpp and cuda parts similarly to libtorch
     gpu_library_selector(
         name="_C_impl",
@@ -373,7 +425,7 @@ def add_torch_libs():
         srcs=libtorch_python_sources,
         link_whole=True,
         deps=[
-            ":libtorch",
+            ":torch-cpp-cpu",
             ":thnn",
             "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/THD:THD_cpu",
@@ -394,7 +446,7 @@ def add_torch_libs():
         srcs=libtorch_python_sources + libtorch_python_cuda_sources,
         link_whole=True,
         deps=[
-            ":libtorch_cuda",
+            ":torch-cpp-cuda",
             ":thnn",
             "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/THD:THD",
