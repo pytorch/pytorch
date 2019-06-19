@@ -270,7 +270,7 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
     return g.insert(aten::len, {val}, {}, loc);
   } else {
     throw ErrorReport(loc)
-      << "Value type " << val_type->python_str() << " does not length information";
+      << "cannot get length of the value type " << val_type->python_str();
   }
 }
 
@@ -287,7 +287,7 @@ Value* SimpleValue::getelem(const SourceRange&loc, Function& m, Value* i) {
     cur_elem = g.insert(aten::select, {val, 0, i}, {}, loc);
   } else {
     throw ErrorReport(loc)
-      << "Could not get element of the value type " << val_type->str();
+      << "cannot get element of the value type " << val_type->python_str();
   }
   return cur_elem;
 }

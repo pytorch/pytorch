@@ -1314,6 +1314,7 @@ struct to_ir {
         Value* cur_elem = iter_val->getelem(range, method, trip_count);
         SugaredValuePtr sv = std::make_shared<SimpleValue>(cur_elem);
         List<Expr> target_exprs = targets.value();
+        validateAssignLhsExpr(target_exprs, range);
 
         // if target exprs are more than 1, it means iteration unpacking on LHS
         // we create Tuple literal to wrap those target exprs for assignments
@@ -1348,10 +1349,9 @@ struct to_ir {
     auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
     auto iterable_tree = std::dynamic_pointer_cast<IterableTree>(sv);
 
-    if ((siv && (siv->getValue()->type()->kind() == TypeKind::ListType
-        || siv->getValue()->type()->isSubtypeOf(TensorType::get())
-        || siv->getValue()->type()->isSubtypeOf(StringType::get()))
-        ) || range_val || iterable_tree) {
+    // For SimpleValue(except Tuple) or RanveValue/IterableTree, emit common loop
+    if ((siv && !siv->getValue()->type()->cast<TupleType>())
+        || range_val || iterable_tree) {
       emitLoopCommon(stmt.range(), body, sv, targets, {}); 
       return;
     }
@@ -1364,7 +1364,7 @@ struct to_ir {
     auto instances = sv->asTuple(stmt.range(), method);
     pushFrame(environment_stack->block());
     for (const auto& inst : instances) {
-      emitExprsAssign(targets, {inst}, itrs[0].range(), 1);
+      emitExprsAssign(targets, {inst}, itrs[0].range(), /*n_binders=*/1);
       emitStatements(body);
     }
 
@@ -1423,7 +1423,7 @@ struct to_ir {
   // 3) A Starred node can only appear when there is another non-Starred lhs
   //    Expr. Concretely this means that `*abc = func()` is illegal. Unpacking
   //    all outputs into a tuple is covered by `abc = func()`.
-  bool calcNumStarredUnpack(const List<Expr>& lhs, const SourceRange& r) {
+  bool validateAssignLhsExpr(const List<Expr>& lhs, const SourceRange& r) {
     size_t num_normal_assign = 0;
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
@@ -1713,7 +1713,7 @@ struct to_ir {
 
   void emitTupleAssign(const TupleLiteral& tl, const Expr& rhs) {
     size_t n_binders = tl.inputs().size();
-    bool starred_unpack = calcNumStarredUnpack(tl.inputs(), tl.range());
+    bool starred_unpack = validateAssignLhsExpr(tl.inputs(), tl.range());
     if (starred_unpack)
       n_binders--;
     auto output = emitSugaredExpr(rhs, n_binders);
@@ -1778,7 +1778,7 @@ struct to_ir {
           // recursively emit tuple assignments on tuple literal input
           TupleLiteral sub_tl = TupleLiteral(assignee);
           size_t sub_n_binders = sub_tl.inputs().size();
-          bool sub_starred_unpack = calcNumStarredUnpack(sub_tl.inputs(), sub_tl.range());
+          bool sub_starred_unpack = validateAssignLhsExpr(sub_tl.inputs(), sub_tl.range());
           if (sub_starred_unpack)
             sub_n_binders--;
           emitTupleAssign(sub_tl, outputs.at(i), rhs_loc, sub_n_binders, sub_starred_unpack);
