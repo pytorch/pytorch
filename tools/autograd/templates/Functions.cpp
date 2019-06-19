@@ -1727,7 +1727,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
     }
 
     if (glambda.defined()) {
-        result.add_(at::matmul(v * glambda, vt));
+        result.add_(at::matmul(at::matmul(v, at::diag_embed(glambda, /*offset=*/0, /*dim1=*/-2, /*dim2=*/-1)), vt));
     }
     if (upper) {
         result = at::triu(result) + at::triu(result.transpose(-2, -1), 1);
