@@ -9950,6 +9950,36 @@ a")
             return b + 1
         self.checkScript(foo, (torch.rand(3),))
 
+    def test_tuple_assignments(self):
+        def var_tuple_assign(x, y):
+            # type: (Tuple[Tensor, Tensor], Tensor) -> Tensor
+            (a, b), c = x, y
+            return a + b + c
+
+        tuple_inputs = (torch.randn(1, 4), torch.randn(3, 4))
+        self.checkScript(var_tuple_assign, (tuple_inputs, torch.randn(3, 4)))
+
+        def nested_tuple_assign(x, y, z):
+            # type: (int, Tuple[int, Tuple[int, int]], Tuple[int, int]) -> int
+            a, (b, (c, d)), (e, f) = x, y, z
+            return a + b + c + d + e + f
+
+        self.checkScript(nested_tuple_assign, ((1, (2, (3, 4)), (5, 6))))
+
+        def star_tuple_assign():
+            # type: () -> Tuple[int, int, Tuple[int, int], Tuple[int, int]]
+            a, (b, *c), *d = 1, (2, 3, 4), 5, 6
+            return a, b, c, d
+
+        self.checkScript(star_tuple_assign, ())
+
+        def subscript_tuple_assign(a, x, i):
+            # type: (List[int], Tensor, int) -> Tuple[int, Tensor, int]
+            a[i], (x[i], b) = 1, (2, 3)
+            return a[i] + 1, x + 5, b
+
+        self.checkScript(subscript_tuple_assign, ([12, 7, 9, 11], torch.tensor((3, 13, 17)), 0))
+
     def test_multi_reduction(self):
         with self.assertRaisesRegex(
                 RuntimeError,
