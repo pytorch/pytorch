@@ -166,8 +166,8 @@ class TestQuantizedOps(TestCase):
         qY_hat = relu(qX)
 
         Y[Y < 0] = 0
-        qY = _quantize(Y, scale, zero_point, dtype=np_type)
-        np.testing.assert_equal(qY, qY_hat.int_repr())
+        qY = torch.quantize_linear(Y, scale=scale, zero_point=zero_point, dtype=torch_type)
+        np.testing.assert_equal(qY.int_repr(), qY_hat.int_repr())
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):
