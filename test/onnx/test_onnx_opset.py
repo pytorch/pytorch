@@ -29,6 +29,7 @@ def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_versi
     # At least the op_name should be specified,
     # but the op's attributes can optionally be
     # specified as well
+
     assert len(ops) == len(graph.node)
     for i in range(0, len(ops)):
         assert graph.node[i].op_type == ops[i]['op_name']
@@ -205,6 +206,21 @@ class TestONNXOpset(TestCase):
         ops = []
         ops = {9 : ops, 10 : ops}
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10], training=False)
+
+    def test_gather_from_index_select(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return torch.index_select(x, dim=1, index=torch.tensor(2))
+
+        x = torch.randn(3, 4)
+
+        ops = [
+            {"op_name" : "Constant"},
+            {"op_name" : "Constant"},
+            {"op_name" : "Reshape"},
+            {"op_name" : "Gather", "attributes" : [{"name" : "axis", "i" : 1, "type" : 2}]}]
+        ops = {9 : ops}
+        check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9])
 
 
 if __name__ == '__main__':
