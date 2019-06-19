@@ -521,6 +521,26 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     return out;
 }
 
+std::string NamedType::python_str() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->qualifiedName();
+}
+
+std::string NamedType::qualname() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->qualifiedName();
+}
+
+std::string NamedType::qualifier() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->prefix();
+}
+
+std::string NamedType::basename() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->name();
+}
+
 std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(c10::QualifiedName qualName, std::vector<std::string> field_names, std::vector<TypePtr> field_types) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
   std::vector<Argument> arguments;
