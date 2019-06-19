@@ -1,9 +1,12 @@
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/ATen.h>
+#include <ATen/quantized/Quantizer.h>
+#include <c10/core/Allocator.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Type.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <ATen/core/Tensor.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>

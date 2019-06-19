@@ -1,9 +1,11 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/intrusive_ptr.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
 
 #include <cmath>
 #include <memory>
@@ -13,8 +15,10 @@
 
 namespace at {
 
+class Tensor;
 struct QTensorImpl;
 struct Quantizer;
+using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 
 /**
