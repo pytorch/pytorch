@@ -332,6 +332,8 @@ struct ParserImpl {
     });
   }
 
+  // parse LHS acceptable exprs, which only includes subset of Exprs that prec is
+  // greater than 4 according to the python grammer
   Expr parseLhsExp() {
     return parseExp(4);
   }
