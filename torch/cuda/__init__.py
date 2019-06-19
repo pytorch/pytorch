@@ -363,9 +363,9 @@ def device_count():
 
 
 def current_device():
-    r"""Returns the index of a currently selected device."""
+    r"""Returns the currently selected device."""
     _lazy_init()
-    return torch._C._cuda_getDevice()
+    return torch.device(torch._C._cuda_getDevice())
 
 
 def synchronize(device=None):
