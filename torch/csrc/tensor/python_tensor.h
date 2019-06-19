@@ -9,7 +9,6 @@ class TensorOptions;
 }
 
 namespace at {
-struct Type;
 class Tensor;
 } // namespace at
 

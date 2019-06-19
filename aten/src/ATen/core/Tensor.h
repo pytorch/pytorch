@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/Type.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -215,9 +214,6 @@ class CAFFE2_API Tensor {
         tensorTypeIdToBackend(type_id()),
         scalar_type(),
         is_variable());
-  }
-  Type & dispatch_type() const {
-    return legacyTensorType(*impl_);
   }
   TensorTypeId type_id() const {
     return impl_->type_id();

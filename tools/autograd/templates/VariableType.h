@@ -4,8 +4,6 @@
 
 #include <ATen/ATen.h>
 
-#include <ATen/TypeDefault.h>
-
 #include <c10/util/intrusive_ptr.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -38,20 +36,18 @@ using at::Storage;
 using at::Tensor;
 using at::TensorList;
 using at::TensorOptions;
+<<<<<<< HEAD
 using at::Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
 // we'll remove them when we are actually exposing Quantizer class
 // to frontend
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 using at::Type;
+=======
+>>>>>>> Remove Type dispatch
 using c10::optional;
 
-struct TORCH_API VariableType final : public at::TypeDefault {
-  VariableType(Context* context, at::TypeExtendedInterface* baseType);
-  const char * toString() const override;
-  at::TypeID ID() const override;
-
-  static at::TypeExtendedInterface* getVariableTypeFromBaseType(const at::Type& baseType);
+struct TORCH_API VariableType final {
   static std::vector<at::DeprecatedTypeProperties*> allCUDATypes();
   static std::vector<at::DeprecatedTypeProperties*> allCPUTypes();
 
@@ -65,10 +61,6 @@ private:
   static const at::Tensor & unpack(const Tensor & t, const char * name, int pos);
   static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
   static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
-
-  at::TypeExtendedInterface* baseType;
-  std::string str;
-  size_t id_;
 };
 
 }} // namespace torch::autograd

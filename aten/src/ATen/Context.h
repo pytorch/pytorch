@@ -2,18 +2,13 @@
 
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/Tensor.h>
-#include <ATen/TypeExtendedInterface.h>
 #include <ATen/Utils.h>
-#include <ATen/LegacyTHDispatch.h>
-#include <ATen/LegacyTHDispatcher.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
 #include <ATen/CPUGenerator.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/VariableHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
-#include <ATen/detail/ComplexHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
@@ -28,35 +23,6 @@ class Tensor;
 class CAFFE2_API Context {
  public:
   Context();
-  TypeExtendedInterface* getNonVariableTypeRaw(Backend p, ScalarType s) {
-    return static_cast<TypeExtendedInterface*>(globalLegacyTypeDispatch().getNonVariableTypeRaw(p, s));
-  }
-  TypeExtendedInterface * getNonVariableTypeOpt(Backend p, ScalarType s) {
-    return static_cast<TypeExtendedInterface*>(globalLegacyTypeDispatch().getNonVariableTypeOpt(p, s));
-  }
-  TypeExtendedInterface & getNonVariableType(Backend p, ScalarType s) {
-    return static_cast<TypeExtendedInterface&>(globalLegacyTypeDispatch().getNonVariableType(p, s));
-  }
-  TypeExtendedInterface & getVariableType(Backend p, ScalarType s) {
-    return static_cast<TypeExtendedInterface&>(globalLegacyTypeDispatch().getVariableType(p, s));
-  }
-  TypeExtendedInterface & getType(Backend p, ScalarType s, bool is_variable) {
-    return static_cast<TypeExtendedInterface&>(globalLegacyTypeDispatch().getType(p, s, is_variable));
-  }
-  LegacyTHDispatcher& getLegacyTHDispatcher(Backend p, ScalarType s) {
-    return globalLegacyTHDispatch().getLegacyTHDispatcher(p, s);
-  }
-  // The passed in Type must be delete'able
-  // TODO: Just make it take a unique_ptr
-  void registerType(Backend b, Type* t) {
-    globalLegacyTypeDispatch().registerType(b,
-      LegacyTypeDispatch::TypeUniquePtr{t, LegacyTypeDeleter([](Type* p) { delete p; }) });
-  }
-
-  void registerLegacyTHDispatcher(Backend b, ScalarType s, LegacyTHDispatcher* t) {
-    globalLegacyTHDispatch().registerDispatcher(b, s,
-      LegacyTHDispatch::LegacyTHDispatcherUniquePtr{t, LegacyTHDispatcherDeleter([](LegacyTHDispatcher* p) { delete p; }) });
-  }
 
   Generator & defaultGenerator(Device device) {
     DeviceType device_type = device.type();
@@ -71,7 +37,7 @@ class CAFFE2_API Context {
       return *generator;
     } else {
       AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
-    }  
+    }
   }
   bool hasOpenMP() const;
   bool hasMKL() const;
@@ -96,7 +62,6 @@ class CAFFE2_API Context {
       thc_state = detail::getCUDAHooks().initCUDA();
       generator_registry[static_cast<int>(DeviceType::CUDA)] =
         detail::getCUDAHooks().initCUDAGenerator(this);
-      detail::getCUDAHooks().registerCUDATypes(this);
     });
     return thc_state.get();
   }
@@ -109,11 +74,6 @@ class CAFFE2_API Context {
     });
     return thh_state.get();
   }
-  void lazyInitComplex() {
-    std::call_once(complex_init_, [&] {
-      detail::getComplexHooks().registerComplexTypes(this);
-    });
-  }
 
   THCState* getTHCState() {
     // AT_ASSERT(thc_state);
@@ -123,9 +83,6 @@ class CAFFE2_API Context {
     return thh_state.get();
   }
 
-  size_t freshTypeID() {
-    return next_id++;
-  }
   bool setFlushDenormal(bool on);
 
   // NB: This method is *purely* whether or not a user requested
@@ -151,21 +108,13 @@ private:
       lazyInitHIP();
     }
   }
-  void initComplexIfNeeded(ScalarType s) {
-    if (isComplexType(s)) {
-      lazyInitComplex();
-    }
-  }
   std::once_flag thc_init;
   std::once_flag thh_init;
-  std::once_flag complex_init_;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
-  std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
-  friend struct Type;
 };
 
 CAFFE2_API Context& globalContext();
@@ -173,14 +122,6 @@ CAFFE2_API Context& globalContext();
 static inline void init() {
   globalContext();
 }
-
-static inline TypeExtendedInterface& getNonVariableType(Backend p, ScalarType s) {
-  return globalContext().getNonVariableType(p, s);
-}
-
-CAFFE2_API TypeExtendedInterface& getType(TensorOptions options);
-CAFFE2_API TypeExtendedInterface& getType(const TensorImpl*);
-CAFFE2_API TypeExtendedInterface& getType(const Tensor&);
 
 CAFFE2_API Allocator* getCPUAllocator();
 
@@ -203,9 +144,6 @@ static inline DeprecatedTypeProperties& HIP(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
       Backend::HIP, s, /*is_variable*/false);
 }
-
-CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(TensorOptions options);
-CAFFE2_API LegacyTHDispatcher& getLegacyTHDispatcher(const Tensor&);
 
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();

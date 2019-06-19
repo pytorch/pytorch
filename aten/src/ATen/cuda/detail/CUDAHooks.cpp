@@ -2,7 +2,6 @@
 
 #include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
-#include <ATen/RegisterCUDA.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -85,10 +84,6 @@ int64_t CUDAHooks::current_device() const {
 
 Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
   return at::cuda::getPinnedMemoryAllocator();
-}
-
-void CUDAHooks::registerCUDATypes(Context* context) const {
-  register_cuda_types(context);
 }
 
 bool CUDAHooks::compiledWithCuDNN() const {
