@@ -3,6 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDADevice.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/cuda/Resize.cuh>
 #include <c10/util/Exception.h>

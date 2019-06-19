@@ -341,7 +341,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   OptionalDeviceGuard device_guard(device_of(self_));
   Variable value;
   if (isQIntType(self_.scalar_type())) {
-    value = valueToTensor(at::TensorOptions(kFloat).layout(kStrided).device(kCPU), py_value);
+    value = valueToTensor(at::TensorOptions(kFloat).layout(kStrided).device(kCPU).is_variable(true), py_value);
   } else {
     value = valueToTensor(self_.options(), py_value);
   }

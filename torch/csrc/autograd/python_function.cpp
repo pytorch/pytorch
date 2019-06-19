@@ -56,7 +56,7 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   // NB: This will NOT work if we ever get mixed device gradients
   device_guard.reset_device(device);
   return at::zeros(size,
-    at::TensorOptions(scalar_type).device(backendToDeviceType(backend)).layout(layout_from_backend(backend)));
+    at::TensorOptions(scalar_type).device(backendToDeviceType(backend)).layout(layout_from_backend(backend)).is_variable(true));
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {

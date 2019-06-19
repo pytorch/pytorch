@@ -6,6 +6,8 @@
 
 #include <ATen/TypeDefault.h>
 
+#include <c10/util/intrusive_ptr.h>
+
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstdint> // for size_t
@@ -13,6 +15,10 @@
 #include <memory> // for unique_ptr
 #include <string>
 #include <vector>
+
+namespace at {
+  struct Quantizer;
+};
 
 namespace torch { namespace autograd {
 
@@ -32,6 +38,11 @@ using at::Storage;
 using at::Tensor;
 using at::TensorList;
 using at::TensorOptions;
+using at::Quantizer;
+// This is temporary typedef to enable Quantizer in aten native function API
+// we'll remove them when we are actually exposing Quantizer class
+// to frontend
+using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 using at::Type;
 using c10::optional;
 
