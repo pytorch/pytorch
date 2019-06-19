@@ -158,7 +158,6 @@ static std::shared_ptr<MagicMethod> makeMagic(
   return std::make_shared<MagicMethod>(name, base);
 }
 
-
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down nested control structures in
 // the frontend (which themselves don't introduce scopes)
@@ -1338,7 +1337,6 @@ struct to_ir {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
     }
-
     if (targets.size() != 1) {
       throw ErrorReport(stmt)
           << "Iteration variable unpacking is not supported";
@@ -1749,10 +1747,10 @@ struct to_ir {
     emitExprsAssign(tl.inputs(), outputs, rhs_loc, n_binders);
   }
 
-  void emitExprsAssign(const List<Expr>& tl_inputs, const at::ArrayRef<SugaredValuePtr> outputs,
+  void emitExprsAssign(const List<Expr>& lhs_exprs, const at::ArrayRef<SugaredValuePtr> outputs,
                        const SourceRange& rhs_loc, size_t n_binders) {
     int i = 0;
-    for (auto assignee : tl_inputs) {
+    for (auto assignee : lhs_exprs) {
       switch (assignee.kind()) {
         case TK_SUBSCRIPT:
           emitSubscriptAssign(
@@ -1785,7 +1783,7 @@ struct to_ir {
           i += n_matched;
         } break;
         case TK_TUPLE_LITERAL: {
-          // recursively emit tuple assignments
+          // recursively emit tuple assignments on tuple literal input
           TupleLiteral sub_tl = TupleLiteral(assignee);
           size_t sub_n_binders = sub_tl.inputs().size();
           bool sub_starred_unpack = calcNumStarredUnpack(sub_tl.inputs(), sub_tl.range());

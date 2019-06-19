@@ -282,7 +282,7 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
           {std::string("iteration over a 0-d tensor!")}, {}, loc);
     }
 
-    // fill in max_trip_count_val
+    // calculate the outermost dim as the length of the tensor iterator
     Value* sizes_tuple = g.insert(aten::size, {val}, {}, loc);
     return g.insert(aten::select, {sizes_tuple, outermost_dim_index}, {}, loc);
   } else {
@@ -315,6 +315,7 @@ RangeValue::RangeValue(const SourceRange& loc, Function& m, std::vector<Value*> 
       end_ = inputs[0];
       start_ = g.insertConstant(0, nullptr, loc);
       step_ = g.insertConstant(1, nullptr, loc);
+      // range() call only contains end, easier to calculate len() and getitem()
       is_simple_ = true;
     } else if (inputs.size() <= 3) {
       start_ = inputs[0];
@@ -368,10 +369,10 @@ std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
       base_iters.insert(base_iters.end(), std::make_move_iterator(child_iters.begin()), std::make_move_iterator(child_iters.end()));
 
     } else {
+      // IterableTree leaves, either SimpleValue or RangeValue
       base_iters.emplace_back(sv);
     }
   }
-
   return base_iters;
 }
 
@@ -382,6 +383,7 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
   std::vector<SugaredValuePtr> base_iters = get_base_iterables();
   std::vector<Value*> lengths;
   lengths.reserve(base_iters.size());
+
   for (const SugaredValuePtr& base_iter: base_iters) {
     lengths.emplace_back(base_iter->len(loc, m));
   }
@@ -398,7 +400,8 @@ Value* IterableTree::getelem(const SourceRange&loc, Function& m, Value* i)  {
   for(const SugaredValuePtr& child: children_) {
     child_items.emplace_back(child->getelem(loc, m, i));
   }
-  // create Tuple from the children items
+  // If you call getelem() on a IterableTree sugared value, we will create Tuple
+  // from the children items, and make the Tuple value as the element
   Graph& g = *m.graph();
   return g.insertNode(g.createTuple(child_items))->output();
 }

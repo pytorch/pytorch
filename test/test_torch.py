@@ -2656,6 +2656,38 @@ class _TestTorchMixin(object):
                 self.assertEqual(var1, var2)
                 self.assertEqual(mean1, mean2)
 
+    def test_std_mean_some_dims(self):
+        sizes = (4, 6, 7, 5, 3)
+        dims = len(sizes)
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(sizes, device=device)
+            for num_of_dims in range(2, dims):
+                dim_list = list(combinations(list(range(dims)), r=num_of_dims))
+                for dim in dim_list:
+                    for unbiased in [False, True]:
+                        for keepdim in [False, True]:
+                            std1, mean1 = torch.std_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            std2 = x.std(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            mean2 = x.mean(dim=dim, keepdim=keepdim)
+                            self.assertEqual(std1, std2)
+                            self.assertEqual(mean1, mean2)
+
+    def test_var_mean_some_dims(self):
+        sizes = (4, 6, 7, 5, 3)
+        dims = len(sizes)
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(sizes, device=device)
+            for num_of_dims in range(2, dims):
+                dim_list = list(combinations(list(range(dims)), r=num_of_dims))
+                for dim in dim_list:
+                    for unbiased in [False, True]:
+                        for keepdim in [False, True]:
+                            var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            mean2 = x.mean(dim=dim, keepdim=keepdim)
+                            self.assertEqual(var1, var2)
+                            self.assertEqual(mean1, mean2)
+
     def test_zeros_like(self):
         expected = torch.zeros(100, 100)
 
