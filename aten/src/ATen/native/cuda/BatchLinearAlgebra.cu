@@ -1150,7 +1150,7 @@ std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
+static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("symeig: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1181,8 +1181,10 @@ AT_ERROR("symeig: MAGMA library not found in "
   
   scalar_t* work;
   magma_int_t* iwork;
-  ALLOCATE_ARRAY(work, scalar_t, magma_int_cast(lwork, "work_size"), self);
-  ALLOCATE_ARRAY(iwork, magma_int_t, magma_int_cast(liwork, "iwork_size"), self);
+  lwork = magma_int_cast(wkopt, "work_size");
+  liwork = magma_int_cast(iwkopt, "iwork_size");
+  ALLOCATE_ARRAY(work, scalar_t, lwork, self);
+  ALLOCATE_ARRAY(iwork, magma_int_t, liwork, self);
 
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];

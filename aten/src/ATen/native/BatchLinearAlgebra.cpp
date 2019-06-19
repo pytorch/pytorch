@@ -853,7 +853,7 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
+static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("symeig: LAPACK library not found in compilation");
 #else
@@ -882,7 +882,7 @@ void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, 
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     scalar_t* eigvals_working_ptr = &eigvals_data[i * eigvals_stride];
 
-    // now compute the actual Q
+    // now compute the eigenvalues and the eigenvectors (optionally)
     lapackSymeig<scalar_t>(jobz, uplo, n, self_working_ptr, n, eigvals_working_ptr, work.data<scalar_t>(), lwork, &info);
     infos[i] = info;
     if (info != 0) {
