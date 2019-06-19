@@ -425,18 +425,6 @@ class Tensor(torch._C._TensorBase):
     __ge__ = _C._TensorBase.ge
     __abs__ = _C._TensorBase.abs
 
-    def __std_mean__(self, dim=None, unbiased=True, keepdim=False):
-        if dim is None:
-            return _C._VariableFunctions.std_mean(self, unbiased)
-        else:
-            return _C._VariableFunctions.std_mean(self, dim, unbiased, keepdim)
-
-    def __var_mean__(self, dim=None, unbiased=True, keepdim=False):
-        if dim is None:
-            return _C._VariableFunctions.var_mean(self, unbiased)
-        else:
-            return _C._VariableFunctions.var_mean(self, dim, unbiased, keepdim)
-
     def __len__(self):
         if self.dim() == 0:
             raise TypeError("len() of a 0-d tensor")

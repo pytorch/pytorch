@@ -107,7 +107,7 @@ public:
    * and returns it if it is registered.
    * Returns nullopt otherwise.
    */
-  c10::optional<OperatorHandle> findSchema(const char* operator_name, const char* overload_name);
+  c10::optional<OperatorHandle> findSchema(const OperatorName& operator_name);
 
   /**
    * Register a kernel to the dispatch table for an operator.
@@ -146,9 +146,10 @@ private:
 
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
 
-  void deregisterSchema_(const OperatorHandle& op);
+  void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
 
   std::list<OperatorDef> operators_;
+  LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
