@@ -11,9 +11,6 @@ namespace c10 {
 std::ostream& operator<<(std::ostream & out, Backend b) {
   return out << toString(b);
 }
-std::ostream& operator<<(std::ostream & out, Layout l) {
-  return out << toString(l);
-}
 }
 namespace at {
 
