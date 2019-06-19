@@ -53,7 +53,7 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
       Function& m,
       const std::string& name) override {
     auto fullName = c10::QualifiedName(basename_, name);
-    if (auto serializable_type = cu_.get_serializable_type(fullName)) {
+    if (auto serializable_type = cu_.get_type(fullName)) {
       if (auto classType = serializable_type->cast<ClassType>()) {
         return std::make_shared<ClassValue>(classType);
       } else if (auto tupleType = serializable_type->cast<TupleType>()) {
@@ -146,7 +146,7 @@ struct SourceResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
-    return lib_cu_.get_serializable_type(c10::QualifiedName(name));
+    return lib_cu_.get_type(c10::QualifiedName(name));
   }
 
  private:

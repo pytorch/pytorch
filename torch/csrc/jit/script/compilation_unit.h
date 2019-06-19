@@ -141,8 +141,7 @@ struct TORCH_API CompilationUnit {
     return nullptr;
   }
 
-  c10::NamedTypePtr get_serializable_type(
-      const c10::QualifiedName& name) const {
+  c10::NamedTypePtr get_type(const c10::QualifiedName& name) const {
     for (const auto& cls : classes_) {
       if (cls->qualname() == name.qualifiedName()) {
         return cls;
