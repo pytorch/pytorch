@@ -7,16 +7,21 @@ from ...._jit_internal import weak_module
 class Quantize(Module):
     r"""Quantizes an incoming tensor
     Args:
-
-
-    Shape:
+     `output_scale`: scale of the output Quantized Tensor
+     `output_zero_point`: zero_point of output Quantized Tensor
+     `output_dtype`: data type of output Quantized Tensor
 
     Attributes:
+      `output_scale`, `output_zero_point`, `output_dtype`
 
     Examples::
-
-
-        >>>
+        >>> t = torch.tensor([[1., -1.], [1., -1.]])
+        >>> scale, zero_point, dtype = 1.0, 2, torch.qint8
+        >>> qm = Quantize(scale, zero_point, dtype)
+        >>> qt = qm(t)
+        >>> print(qt)
+        >>> tensor([[ 1., -1.],
+>         [ 1., -1.]], size=(2, 2), dtype=torch.qint8, scale=1.0, zero_point=2)
     """
 
     # TODO: Need to implement getstate and setstate functions, will be done in a later PR
@@ -33,9 +38,19 @@ class Quantize(Module):
 
 @weak_module
 class DeQuantize(Module):
-    r"""Dequantizes an incoming tensor"""
+    r"""Dequantizes an incoming tensor
+    Examples::
+        >>> t = torch.tensor([[1., -1.], [1., -1.]])
+        >>> scale, zero_point, dtype = 1.0, 2, torch.qint8
+        >>> qm = Quantize(scale, zero_point, dtype)
+        >>> qt = qm(t)
+        >>> deqm = DeQuantize()
+        >>> t2 = deqm(qt)
+        >>> print(t2)
+        >>> tensor([[ 1., -1.],
+            [ 1., -1.]], dtype=torch.float32)
+    """
 
-    # TODO: Need to implement getstate and setstate functions, will be done in a later PR
     def __init__(self):
         super(DeQuantize, self).__init__()
 

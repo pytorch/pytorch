@@ -9,37 +9,18 @@ from ...._jit_internal import weak_module, weak_script_method
 
 @weak_module
 class ReLU(Module):
-    r"""Applies the rectified linear unit function element-wise:
+    r"""
+    We used same interface as `torch.nn.ReLU` please see
+    https://pytorch.org/docs/stable/nn.html#torch.nn.ReLU for documentation
 
-    :math:`\text{ReLU}(x)= \max(0, x)`
-
-    Args:
-        inplace: can optionally do the operation in-place. Default: ``False``
-
-    Shape:
-        - Input: :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Output: :math:`(N, *)`, same shape as the input
-
-    .. image:: scripts/activation_images/ReLU.png
-
-    Examples::
-
-        >>> m = nn.ReLU()
-        >>> input = torch.randn(2)
-        >>> output = m(input)
-
-
-      An implementation of CReLU - https://arxiv.org/abs/1603.05201
-
-        >>> m = nn.ReLU()
-        >>> input = torch.randn(2).unsqueeze(0)
-        >>> output = torch.cat((m(input),m(-input)))
+    Only difference is we are calling quantized ReLU implementation and right
+    now we do not support inplace.
     """
 
 
-    def __init__(self):
-        super(ReLU, self).__init__()
+    def __init__(self, inplace=False):
+        super(ReLU, self).__init__(inplace)
+        assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
 
 
     @weak_script_method
