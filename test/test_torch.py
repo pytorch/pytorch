@@ -3029,6 +3029,16 @@ class _TestTorchMixin(object):
         self.assertEqual(scale, q.q_scale())
         self.assertEqual(zero_point, q.q_zero_point())
 
+        # create via empty_like
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        q_el = torch.empty_like(q)
+        self.assertEqual(q.q_scale(), q_el.q_scale())
+        self.assertEqual(q.q_zero_point(), q_el.q_zero_point())
+        self.assertEqual(q.dtype, q_el.dtype)
+
+        # create via empty_like but change the dtype (currently not supported)
+        self.assertRaises(RuntimeError, lambda: torch.empty_like(q, dtype=torch.qint8))
+
     def test_qtensor_dtypes(self):
         r = np.random.rand(3, 2) * 2 - 4
         r = torch.from_numpy(r).float()

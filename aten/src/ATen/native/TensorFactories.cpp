@@ -175,11 +175,17 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
     return res;
   }
   if (self.is_quantized()) {
+    // We could check if dtype is still quantized?  But then should we shift/scale
+    // the q_zero_point / q_scale or not?
+    TORCH_CHECK(!options.has_dtype() || options.dtype() == self.dtype(),
+                "It is currently not supported to specify a dtype that doesn't match "
+                "the input tensor's dtype via empty_like.  Specified: ", options.dtype(),
+                " Input tensor's dtype: ", self.dtype());
     // TODO: uncomment when qscheme diff is landed
     // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
     //                       "empty_like for quantized Tensor only works for
     //                        PerTensorAffine scheme right now");
-    return at::_empty_affine_quantized(self.sizes(), self.options(),
+    return at::_empty_affine_quantized(self.sizes(), options,
                                        self.q_scale().toDouble(),
                                        self.q_zero_point().toLong());
   }
