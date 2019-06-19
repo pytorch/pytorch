@@ -121,8 +121,10 @@ std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::
   std::vector<DeprecatedTypeProperties*> res;
   res.reserve(backends.size());
   for (auto p : backends) {
-    auto& type = getNonVariableDeprecatedTypeProperties(static_cast<Backend>(p), ScalarType::Undefined);
-    res.emplace_back(&type);
+    for (int64_t s = 0; s < static_cast<int64_t>(ScalarType::NumOptions); s++) {
+      auto& type = getNonVariableDeprecatedTypeProperties(static_cast<Backend>(p), static_cast<ScalarType>(s));
+      res.emplace_back(&type);
+    }
   }
   return res;
 }

@@ -45,11 +45,11 @@ struct PyTensorType {
         .is_variable(true);
   }
 
-  Backend get_backend() {
+  Backend get_backend() const {
     return static_cast<Backend>(backend);
   }
 
-  ScalarType get_scalar_type() {
+  ScalarType get_scalar_type() const {
     return static_cast<ScalarType>(scalar_type);
   }
 };
@@ -356,9 +356,15 @@ void py_set_default_tensor_type(PyObject* obj) {
 
 void py_set_default_dtype(PyObject* obj) {
   if (THPDtype_Check(obj)) {
-    set_default_tensor_type(default_tensor_type);
+    auto scalar_type = ((THPDtype*)obj)->scalar_type;
+    auto backend = default_tensor_type->get_backend();
+    auto it = std::find_if(tensor_types.begin(), tensor_types.end(),
+      [backend, scalar_type](const PyTensorType& x) {
+        return x.get_backend() == backend && x.get_scalar_type() == scalar_type;
+      });
+    set_default_tensor_type(&*it);
   } else {
-    throw TypeError("invalid type object");
+    throw TypeError("invalid dtype object");
   }
 }
 
