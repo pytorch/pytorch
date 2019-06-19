@@ -55,27 +55,9 @@ namespace nn {
 ///
 /// Note that `Functional` overloads the call operator (`operator()`) such that
 /// you can invoke it with `my_func(...)`.
-class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
+class FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
  public:
-  using Function = std::function<Tensor(Tensor)>;
-
-  /// Constructs a `Functional` from a function object.
-  explicit FunctionalImpl(Function function);
-
-  template <
-      typename SomeFunction,
-      typename... Args,
-      typename = torch::enable_if_t<(sizeof...(Args) > 0)>>
-  explicit FunctionalImpl(SomeFunction original_function, Args&&... args)
-      : function_(std::bind(
-            original_function,
-            /*input=*/std::placeholders::_1,
-            std::forward<Args>(args)...)) {
-    // std::bind is normally evil, but (1) gcc is broken w.r.t. handling
-    // parameter pack expansion in lambdas and (2) moving parameter packs into
-    // a lambda only works with C++14, so std::bind is the more move-aware
-    // solution here.
-  }
+  explicit FunctionalImpl(std::function<Tensor(Tensor)> function);
 
   void reset() override;
 
@@ -91,7 +73,7 @@ class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
   bool is_serializable() const override;
 
  private:
-  Function function_;
+  std::function<Tensor(Tensor)> function_;
 };
 
 /// A `ModuleHolder` subclass for `FunctionalImpl`.
