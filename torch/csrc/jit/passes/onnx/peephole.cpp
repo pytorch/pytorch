@@ -373,21 +373,13 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
   shape_of_input->insertBefore(n);
   shape_of_input->addInput(n->inputs()[0]);
 
-  Node* gather_indices = graph->create(onnx::Constant, 1);
-  gather_indices->insertBefore(n);
-  gather_indices->t_(
-      attr::value,
-      autograd::make_variable(at::scalar_to_tensor(at::Scalar(1))));
 
-  Node* batch_size = graph->create(onnx::Gather, 1);
+  Node* batch_size = graph->create(onnx::Slice, 1);
   batch_size->insertBefore(n);
   batch_size->addInput(shape_of_input->outputs()[0]);
-  batch_size->addInput(gather_indices->outputs()[0]);
-
-  Node* unsqueezed_batch_size = graph->create(onnx::Unsqueeze, 1);
-  unsqueezed_batch_size->insertBefore(n);
-  unsqueezed_batch_size->addInput(batch_size->outputs()[0]);
-  unsqueezed_batch_size->is_(attr::axes, {0});
+  batch_size->is_(attr::axes, {0});
+  batch_size->is_(attr::starts, {1L});
+  batch_size->is_(attr::ends, {2L});
 
   Node* hidden_size = graph->create(onnx::Constant, 1);
   hidden_size->insertBefore(n);
@@ -417,7 +409,7 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index) {
   concated_dims->insertBefore(n);
   concated_dims->i_(attr::axis, 0);
   concated_dims->addInput(unsqueezed_num_directions->outputs()[0]);
-  concated_dims->addInput(unsqueezed_batch_size->outputs()[0]);
+  concated_dims->addInput(batch_size->outputs()[0]);
   concated_dims->addInput(hidden_size->outputs()[0]);
 
   Node* constant_of_shape = graph->create(onnx::ConstantOfShape, 1);

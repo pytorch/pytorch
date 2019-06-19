@@ -1,7 +1,7 @@
-#include <torch/csrc/jit/passes/onnx/constant_fold.h>
+#include <ATen/native/TensorFactories.h>
 #include <c10/util/Exception.h>
-
 #include <c10/util/Optional.h>
+#include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <algorithm>
 
 namespace torch {
@@ -200,12 +200,172 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
   return parentNodes;
 }
 
+bool isRNN(const Node* node) {
+  auto k = node->kind();
+  return k == onnx::RNN || k == onnx::LSTM || k == onnx::GRU;
+}
+
+// Recursive tracker on input node dependency
+bool isDynamic(const Node* node, const Graph* graph) {
+  if (node == nullptr) {
+    return false;
+  }
+  for (auto inp : node->inputs()) {
+    auto ginps = graph->inputs();
+    for (auto ginp : ginps) {
+      if (inp == ginp) {
+        return true;
+      }
+    }
+    if (inp->type()->cast<DimensionedTensorType>()) {
+      return false;
+    }
+    if (isDynamic(inp->node(), graph)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Recursive collector of a tree having Concat as a root and Constants as leaves.
+// With Unsqueeze, Gather and Shape only in between.
+// Returns non-empty array if succeeded.
+std::vector<int64_t> collectFoldables(int& axis, int level, Node* node,
+    std::vector<std::vector<Node*>>& removeNodes) {
+  std::vector<int64_t> ret;
+  if (level > 4) {
+    return ret; // not deeper
+  }
+  if (removeNodes.size() <= level) {
+    removeNodes.emplace_back(std::vector<Node*>());
+  }
+  removeNodes[level].emplace_back(node);
+
+  if (node->kind() == onnx::Constant) {
+    if (node->hasAttribute(attr::value) &&
+        node->kindOf(attr::value) == AttributeKind::t) {
+      at::Tensor val = node->t(attr::value);
+      if (val.numel() == 1) {
+        ret.emplace_back(val.item().toLong());
+      }
+    }
+  } else if (node->kind() == onnx::Shape && node->inputs().size() == 1) {
+    if (isDynamic(node, node->owningGraph())) {
+      return ret;
+    }
+    if (auto value = node->inputs()[0]->type()->cast<CompleteTensorType>()) {
+      ret = value->sizes();
+    }
+  } else if (node->kind() == onnx::Unsqueeze && node->inputs().size() == 1) {
+    auto inp = node->inputs()[0];
+    return collectFoldables(axis, level + 1, inp->node(), removeNodes);
+  } else if (node->kind() == onnx::Gather && node->inputs().size() == 2) {
+    axis = 0LL;
+    if (node->hasAttribute(attr::axis) && node->kindOf(attr::axis) == AttributeKind::i) {
+      axis = node->i(attr::axis);
+    }
+    auto data = node->inputs()[0];
+    auto indx = node->inputs()[1];
+    auto dval = collectFoldables(axis, level + 1, data->node(), removeNodes);
+    auto ival = collectFoldables(axis, level + 1, indx->node(), removeNodes);
+    if(ival.size() == 1 && ival[axis] < dval.size()) {
+      ret.emplace_back(dval[ival[axis]]);
+    }
+  } else if (node->kind() == onnx::Slice && node->inputs().size() == 1) {
+    axis = 0LL;
+    if (node->hasAttribute(attr::axes) && node->kindOf(attr::axes) == AttributeKind::is) {
+      axis = node->is(attr::axes)[0];
+    }
+    if (axis == 0L) {
+      auto data = node->inputs()[0];
+      auto dval = collectFoldables(axis, level + 1, data->node(), removeNodes);
+      if (!dval.empty() &&
+          node->hasAttribute(attr::ends) && node->kindOf(attr::ends) == AttributeKind::is &&
+          node->is(attr::ends).size() == 1) {
+        int64_t end = node->is(attr::ends)[0];
+        if (end <= 0L) {
+          end += dval.size();
+        }
+        int64_t start = 0L;
+        if (node->hasAttribute(attr::starts) && node->kindOf(attr::starts) == AttributeKind::is &&
+            node->is(attr::starts).size() == 1) {
+          start = node->is(attr::starts)[0];
+          if (start < 0L) {
+            start += dval.size();
+          }
+        }
+        for (int64_t i = start; i < end; ++i) {
+          ret.emplace_back(dval[i]);
+        }
+      }
+    }
+  } else if (node->kind() == onnx::Concat && !node->inputs().empty()) {
+    for (auto inp : node->inputs()) {
+      auto inpVal = collectFoldables(axis, level + 1, inp->node(), removeNodes);
+      if (inpVal.size() == 1) {
+        ret.emplace_back(inpVal[0]);
+      } else {
+        break;
+      }
+    }
+    if (ret.size() < 2) {
+      ret.clear();
+    }
+  }
+  return ret;
+}
+
 } // Anonymous namespace
 
 // This method updates the block in-place to fold all the one-time
 // constant-based computations/ops into an initializer node.
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
   AT_ASSERT(b->param_node());
+  /*
+   * We can do better for *static* cases like this:
+   *
+%30 : Float(2, 256, 6, 6) = onnx::AveragePool[kernel_shape=[1, 1],strides=[1, 1]](%29), scope:
+%31 : Long() = onnx::Constant[value={2}](), scope:
+%32 : Long() = onnx::Constant[value={9216}](), scope:
+%33 : Tensor = onnx::Unsqueeze[axes=[0]](%31)
+%34 : Tensor = onnx::Unsqueeze[axes=[0]](%32)
+%35 : Tensor = onnx::Concat[axis=0](%33, %34)
+%36 : Float(2, 9216) = onnx::Reshape(%30, %35), scope:
+  */
+
+  int axis = 0;
+  std::vector<long int> values;
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    std::vector<std::vector<Node*>> removeNodes;
+    auto node = *it;
+    if (isRNN(node)) {
+      return;
+    }
+    if (node->kind() == onnx::Concat && node->hasUses()) {
+      values = collectFoldables(axis, 0, node, removeNodes);
+      if (!values.empty()) {
+        at::Tensor updatedVal = at::native::tensor(values,
+            at::TensorOptions().dtype(at::kLong).is_variable(true).layout(at::kStrided)
+            .device(at::kCPU));
+        Node* new_shape = b->owningGraph()->create(onnx::Constant, 1);
+        new_shape->t_(attr::value, updatedVal);
+        auto newSourceNodeOutput = new_shape->insertAfter(node)->output();
+        newSourceNodeOutput->inferTypeFrom(updatedVal);
+        node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
+        node->removeAllInputs();
+        for (auto itn = removeNodes.begin(); itn != removeNodes.end(); ++itn) {
+          for (auto n : *itn) {
+            if (node != n) {
+              n->destroy();
+            }
+          }
+        }
+        it.destroyCurrent();
+      }
+    }
+  }
+
+  // Default implementation
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   // Only the root block is constant-folded. Folding nested blocks is
   // not supported for now.
@@ -259,7 +419,6 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
   eraseUnusedValuesFromMap(valsToParamsMap);
   eraseUnusedBlockInputs(b);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
-  return;
 }
 
 } // namespace jit

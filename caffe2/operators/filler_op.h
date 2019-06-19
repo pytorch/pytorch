@@ -59,9 +59,10 @@ class FillerOp : public Operator<Context> {
         if (this->InputIsTensorType(0, CPU)) {
           // originally, shape input must be in CPU context
           auto& input = this->template Input<Tensor>(0, CPU);
-          CAFFE_ENFORCE_EQ(
-              input.dim(),
-              1,
+          CAFFE_ENFORCE_EQ(input.dim(), 1,
+              "When input_as_shape is true, the input must be a 1D tensor of "
+              "data type int64_t");
+          CAFFE_ENFORCE_EQ(input.dtype(), caffe2::TypeMeta::Make<int64_t>(),
               "When input_as_shape is true, the input must be a 1D tensor of "
               "data type int64_t");
           CAFFE_ENFORCE(input.numel() > 0);

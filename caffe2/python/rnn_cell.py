@@ -12,6 +12,7 @@ import logging
 import numpy as np
 import random
 import six
+import warnings
 from future.utils import viewkeys
 
 from caffe2.proto import caffe2_pb2
@@ -179,7 +180,9 @@ class RNNCell(object):
             extra_inputs = _RectifyNames(extra_input_names)
             extra_inputs = zip(extra_input_names, extra_input_sizes)
 
-        arg_names = inspect.getargspec(self.apply_override).args
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            arg_names = inspect.getargspec(self.apply_override).args
         rectified = [input_t, seq_lengths, states, timestep]
         if 'extra_inputs' in arg_names:
             rectified.append(extra_inputs)

@@ -11,6 +11,8 @@ import inspect
 from past.builtins import basestring
 from caffe2.python.model_helper import ModelHelper
 
+import warnings
+
 # flake8: noqa
 from caffe2.python.helpers.algebra import *
 from caffe2.python.helpers.arg_scope import *
@@ -94,7 +96,9 @@ class HelperWrapper(object):
                 "Or you can provide it in kwargs as model=<your_model>.")
                 new_kwargs = copy.deepcopy(model.arg_scope)
             func = self._registry[helper_name]
-            var_names, _, varkw, _= inspect.getargspec(func)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                var_names, _, varkw, _= inspect.getargspec(func)
             if varkw is None:
                 # this helper function does not take in random **kwargs
                 new_kwargs = {
