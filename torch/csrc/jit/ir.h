@@ -246,6 +246,7 @@ struct TORCH_API Node {
   Block* owning_block_;
   c10::optional<SourceRange> source_range_;
   ScopePtr scope_;
+  c10::optional<CallStackPtr> callstack_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
@@ -311,6 +312,9 @@ struct TORCH_API Node {
       return "";
     }
     return scope_->namesFromRoot();
+  }
+  c10::optional<CallStackPtr> callstack() const {
+    return callstack_;
   }
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
@@ -968,6 +972,7 @@ struct Graph {
   std::unordered_map<std::string, Value*> unique_names_;
 
   ScopePtr current_scope_;
+  c10::optional<CallStackPtr> callstack_;
 
   Block* const block_;
   // when insertNode() is called, the node is inserted before this node
@@ -1031,6 +1036,25 @@ struct Graph {
   }
   void set_current_scope(ScopePtr scope) {
     current_scope_ = std::move(scope);
+  }
+
+  void push_callee(Function* fn) {
+    if (callstack_) {
+      callstack_ = (*callstack_)->insertCallee(fn);
+    } else {
+      callstack_ = c10::make_intrusive<CallStack>(fn);
+    }
+  }
+  void pop_callee() {
+    if (callstack_) {
+      callstack_ = (*callstack_)->caller();
+    }
+  }
+  c10::optional<CallStackPtr> callstack() {
+    return callstack_;
+  }
+  void set_callstack(CallStackPtr callstack) {
+    callstack_ = std::move(callstack);
   }
 
   Value* addInput(std::string name = "") {

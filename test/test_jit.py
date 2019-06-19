@@ -631,6 +631,31 @@ class TestJit(JitTestCase):
         traced_fn = torch.jit.trace(fn, torch.ones(1))
         self.assertEqual(run(fn), run(traced_fn))
 
+    def test_callstack(self):
+        @torch.jit.script
+        def ham(x):
+            return x/7
+
+        @torch.jit.script
+        def bar(x):
+            return x*3
+
+        @torch.jit.script
+        def baz(x):
+            return ham(x)*x
+
+        @torch.jit.script
+        def foo(x):
+            return bar(x)*baz(x)*11
+
+        # We will use constant nodes to track where nodes originated.
+        # For instance, constant 7 is originated in `ham`, which is inlined into
+        # `baz`, which is inlined into `foo`. The callstack for it should be
+        # "foo baz ham".
+        FileCheck().check("prim::Constant[value=7](), callstack: foo baz ham"). \
+                    check("prim::Constant[value=3](), callstack: foo bar").     \
+                    check("prim::Constant[value=11](), callstack: foo")
+
     def test_scopes(self):
         x = torch.tensor([0.4], requires_grad=True)
         y = torch.tensor([0.7], requires_grad=True)

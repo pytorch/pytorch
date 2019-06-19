@@ -2,6 +2,7 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -244,6 +245,13 @@ std::ostream& Node::print(
   }
 
   out << "(" << inputs() << ")";
+  if (callstack()) {
+    out << ", ";
+    out << "callstack:";
+    for (Function* f : (*callstack())->asVector()) {
+      out << " " << f->name();
+    }
+  }
   std::string scName = scopeName();
   if (!scName.empty()) {
     out << ", ";
@@ -966,6 +974,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
       graph_(graph_),
       owning_block_(nullptr),
       scope_(graph_->current_scope_),
+      callstack_(graph_->callstack_),
       schema_(nullptr),
       topo_position_(0) {
   graph_->all_nodes.emplace(this);
@@ -1015,6 +1024,18 @@ void Node::cloneFrom(Node* s) {
   source_range_ = s->source_range_;
   if (s->scope_ && !s->scope_->isBlank()) {
     scope_ = s->scope_;
+  }
+
+  // Currently callstack_ corresponds to those of the graph, we need to append
+  // callstack of the source node.
+  if (s->callstack_) {
+    if (callstack_) {
+      for (Function* f : (*s->callstack_)->asVector()) {
+        callstack_ = (*callstack_)->insertCallee(f);
+      }
+    } else {
+      callstack_ = s->callstack_;
+    }
   }
   copyAttributes(*s);
 }

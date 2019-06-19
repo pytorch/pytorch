@@ -14,7 +14,9 @@ void Function::ensure_defined() {
     if (function_creator_) {
       auto creator = function_creator_;
       function_creator_ = placeholderCreator;
+      graph_->push_callee(this);
       creator(*this);
+      graph_->pop_callee();
       function_creator_ = nullptr;
     }
   } catch (RecursiveMethodCallError&) {
