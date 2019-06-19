@@ -28,21 +28,7 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  auto device = getType(options).getDeviceFromPtr(data);
-  if (options.device().has_index()) {
-    TORCH_CHECK(
-        options.device() == device,
-        "Specified device ", options.device(),
-        " does not match device of data ", device);
-  }
-  auto storage = Storage(
-      options.dtype(),
-      detail::computeStorageSize(sizes, strides),
-      InefficientStdFunctionContext::makeDataPtr(
-          data, deleter, device),
-      /*allocator=*/nullptr,
-      /*resizable=*/false);
-  return empty({0}, options).set_(storage, 0, sizes, strides);
+  return _from_blob(data, sizes, strides, deleter, options);
 }
 
 inline Tensor from_blob(
@@ -50,7 +36,7 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return from_blob(data, sizes, detail::defaultStrides(sizes), deleter, options);
+  return _from_blob(data, sizes, detail::defaultStrides(sizes), deleter, options);
 }
 
 inline Tensor from_blob(
@@ -58,14 +44,14 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     IntArrayRef strides,
     const TensorOptions& options = {}) {
-  return from_blob(data, sizes, strides, [](void*) {}, options);
+  return _from_blob(data, sizes, strides, [](void*) {}, options);
 }
 
 inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
     const TensorOptions& options = {}) {
-  return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
+  return _from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
 }
 
 namespace detail {

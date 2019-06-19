@@ -769,5 +769,16 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
     return tensor;
 }
 
+Tensor _from_blob_cpu(void* data, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)>& deleter, const TensorOptions& options) {
+  auto storage = Storage(
+      options.dtype(),
+      detail::computeStorageSize(sizes, strides),
+      InefficientStdFunctionContext::makeDataPtr(
+          data, deleter, DeviceType::CPU),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+  return empty({0}, options).set_(storage, 0, sizes, strides);
+}
+
 } // namespace native
 } // namespace at

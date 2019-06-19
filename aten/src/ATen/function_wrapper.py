@@ -971,6 +971,7 @@ def create_generic(top_env, declarations):
                     'Type': 'const Type &' if const else 'Type &',
                     'TensorOptions': 'const TensorOptions &' if const else 'TensorOptions &',
                     'TensorList': 'TensorList',
+                    'std::function<void(void*)>': 'const std::function<void(void*)>&',
                 }
 
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():

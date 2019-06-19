@@ -835,6 +835,11 @@
     CPU: _frac_out_cpu
     CUDA: _frac_out_cuda
 
+- func: _from_blob(void* data, int[] sizes, int[] strides, std::function<void(void*)> deleter, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CPU: _from_blob_cpu
+    CUDA: _from_blob_cuda
+
 - func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: full(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
