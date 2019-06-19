@@ -130,9 +130,10 @@ at::Tensor pinnedLike(at::Tensor& tensor) {
       tensor.dtype(),
       at::detail::computeStorageSize(tensor.sizes(), tensor.strides()),
       allocator,
-      /*resizable=*/false);
-  return at::empty({0}, tensor.options().device(at::kCPU))
-      .set_(storage, 0, tensor.sizes(), tensor.strides());
+      /*resizable=*/false
+  );
+  return at::empty({0}, tensor.options().device(at::kCPU)).set_(
+      storage, 0, tensor.sizes(), tensor.strides());
 }
 
 // This function initializes a vector of CUDA streams, one for every
@@ -219,7 +220,7 @@ void initializeStreamsEvents(
       // new streams in this Work to prevent being freed before the Work
       // finishes.
       c10::cuda::CUDACachingAllocator::recordStream(
-          tensor.storage().data(), streams[i]);
+        tensor.storage().data(), streams[i]);
     }
   }
 }
@@ -272,7 +273,8 @@ void ProcessGroupGloo::RecvWork::wait() {
 }
 
 ProcessGroupGloo::Options::Options()
-    : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
+    : timeout(std::chrono::milliseconds(10 * 1000)),
+      threads(2) {}
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
@@ -868,17 +870,15 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
       : AsyncSparseAllreduceWork(context, inputs, tag) {
     initializeStreamsEvents(inputs, streams, events);
 
-    // Kick off copy from CUDA tensors to pinned CPU tensors.
+    // Kick off copy from CUDA tensors to CPU tensors.
+    // Note that both coalescing the sparse tensor and copying it to CPU
+    // memory must be performed asynchronously, or we block the caller.
     tmp.reserve(inputs.size());
     at::cuda::OptionalCUDAStreamGuard guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       guard.reset_stream(streams[i]);
-      auto input_coalesced = inputs[i].coalesce();
-      auto input_indices = input_coalesced.indices();
-      auto input_values = input_coalesced.values();
-      auto indices = pinnedLike(input_indices).copy_(input_indices, true);
-      auto values = pinnedLike(input_values).copy_(input_values, true);
-      tmp.push_back(at::sparse_coo_tensor(indices, values, inputs[i].sizes()));
+      tmp.push_back(
+          inputs[i].coalesce().to(at::DeviceType::CPU, /*non_blocking=*/true));
     }
   }
 
@@ -897,18 +897,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     at::cuda::OptionalCUDAStreamGuard stream_guard;
     for (size_t i = 0; i < inputs.size(); i++) {
       stream_guard.reset_stream(streams[i]);
-      auto indices = output.indices().to(
-          inputs[i].device(),
-          /*non_blocking=*/true,
-          /*copy=*/true);
-      auto values = output.values().to(
-          inputs[i].device(),
-          /*non_blocking=*/true,
-          /*copy=*/true);
-
-      outputs.push_back(
-          at::sparse_coo_tensor(indices, values, inputs[i].sizes()));
-
+      outputs.push_back(output.to(inputs[i].device(), /*non_blocking=*/true));
       events[i].record(streams[i]);
     }
   }
