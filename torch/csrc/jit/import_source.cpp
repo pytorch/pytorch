@@ -189,7 +189,7 @@ struct SourceImporter {
 
       std::vector<Def> definitions;
       std::vector<ResolverPtr> resolvers;
-      auto parsed_treeref = p_.parseClass();
+      auto parsed_treeref = p_.parseClassLike();
       if (parsed_treeref->kind() == TK_CLASS_DEF) {
         auto class_def = ClassDef(parsed_treeref);
         for (const auto& method_def : class_def.defs()) {
@@ -237,7 +237,10 @@ struct SourceImporter {
             TupleType::namedTupleSchemaFromNamesAndTypes(qualified_name, field_names, field_types));
         owner.register_class(tt);
       } else {
-        TORCH_INTERNAL_ASSERT(false);
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Got an unrecognized type from "
+            "parseClassLike");
       }
     }
   }
