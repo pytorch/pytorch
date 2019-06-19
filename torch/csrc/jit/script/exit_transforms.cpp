@@ -343,6 +343,45 @@ void removeIfNodeExits(Block* block) {
   }
 }
 
+// This pass takes in a graph where BlockExit & LoopExit exist in the graph
+// and erases them in the graph, correctly setting block outputs.
+// A prim::BlockExit(*vals) denotes that the values are targeting the
+// block the Exit is contained on, and a prim::LoopExit(*vals) denotes that
+// the values are targeting the most recent loop block. FunctionExits are NYI.
+// Once we hit an exit node, we do not execute any further instructions
+// until the block exit reaches its destination. If a node may hit an exit
+// node that pauses execution, we use a boolean value to indicate if the exit
+// has been hit or not, and conditionalize further execution.
+// First we remove block exits of if nodes, then we replace Loop Block exits
+// with LoopExits. Then we remove LoopExits.
+//   block0(%i.2 : int, %i.12 : int):
+//     %i.11 : int = prim::If(%9)
+//       block0():
+//         %10 : int = aten::neg(%i.1)
+//          = prim::LoopExit(%25, %i.5)
+//          = prim::BlockExit(%i.5)
+//         -> ()
+//       block1():
+//          = prim::BlockExit(%i.2)
+//         -> ()
+//      = prim::BlockExit(%4, %i.11)
+//     -> ()
+//   -> becomes
+//   block0(%i.2 : int, %i.12 : int):
+//     %i.11 : int, %31 : bool, %32 : bool, %33 : int = prim::If(%9)
+//       block0():
+//         %10 : int = aten::neg(%i.1)
+//         %i.5 : int = prim::Constant[value=-1]()
+//         -> (%i.5, %27, %25, %i.5)
+//       block1():
+//         -> (%i.2, %28, %29, %30)
+//     %34 : bool, %35 : int = prim::If(%31)
+//       block0():
+//         -> (%32, %33)
+//       block1():
+//         -> (%4, %i.11)
+//     -> (%34, %35)
+//
 void TransformExits(std::shared_ptr<Graph>& graph) {
   removeIfNodeExits(graph->block());
   convertLoopBlockExits(graph->block());
