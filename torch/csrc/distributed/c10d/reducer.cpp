@@ -212,10 +212,10 @@ void Reducer::mark_variable_ready_sparse(
   auto& replica = bucket.replicas[replica_index];
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
   auto& grad = variable.grad();
+  AT_ASSERTM(grad.defined(), "Expected sparse gradient to be defined.");
   AT_ASSERTM(
       grad.options().layout() == c10::kSparse,
       "Expected variable to have sparse gradient.");
-  AT_ASSERTM(grad.defined(), "Expected sparse gradient to be defined.");
 
   // Sparse tensors cannot be grouped together with other sparse tensors
   // in a single reduction operation like we can for dense tensors.
