@@ -110,7 +110,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
     if (!classType->hasAttribute(field)) {
       throw ErrorReport(loc)
-          << "Tried to access to nonexistent attribute " << field
+          << "Tried to access nonexistent attribute " << field
           << ". Did you forget to initialize it in __init__()?";
     }
     auto& g = *m.graph();

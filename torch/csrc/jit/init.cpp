@@ -339,6 +339,15 @@ void initJITBindings(PyObject* module) {
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
       .def(
+          "_jit_try_infer_type",
+          [](py::object obj) -> TypePtr {
+            auto match = tryToInferType(obj);
+            if (match.type) {
+              return *match.type;
+            }
+            return nullptr;
+          })
+      .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);

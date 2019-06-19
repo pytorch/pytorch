@@ -1,70 +1,60 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
-#include <ATen/LegacyTHFunctionsCUDA.h>
 
 namespace at {
 namespace native {
 namespace {
 
-template <typename scalar_t, typename accscalar_t>
+#define MAX_THREADS 512
+
+template <typename scalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest3d_out_frame(
-    const int n,
-    const PackedTensorAccessor<scalar_t, 5> idata,
-    PackedTensorAccessor<scalar_t, 5> odata) {
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
+    const scalar_t* input,
+    size_t dim_b,
+    size_t dim_c,
+    size_t src_dim_d,
+    size_t src_dim_h,
+    size_t src_dim_w,
+    size_t dst_dim_d,
+    size_t dst_dim_h,
+    size_t dst_dim_w,
+    scalar_t* output) {
 
-  const int batchsize = idata.size(0);
-  const int channels = idata.size(1);
-  const int depth1 = idata.size(2);
-  const int height1 = idata.size(3);
-  const int width1 = idata.size(4);
-  const int depth2 = odata.size(2);
-  const int height2 = odata.size(3);
-  const int width2 = odata.size(4);
+  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
+    return;
 
-  const float depth_scale = (float)depth1 / (float)depth2;
-  const float height_scale = (float)height1 / (float)height2;
-  const float width_scale = (float)width1 / (float)width2;
+  int dst_c_stride = dst_dim_d * dst_dim_h * dst_dim_w;
+  int src_c_stride = src_dim_d * src_dim_h * src_dim_w;
 
-  if (index < n) {
-    const int w2 = (index % (height2 * width2)) % width2; // 0:width2-1
-    const int h2 = (index % (height2 * width2)) / width2; // 0:height2-1
-    const int d2 = index / (height2 * width2); // 0:depth2-1
-    // special case: just copy
-    if (depth1 == depth2 && height1 == height2 && width1 == width2) {
-      const int d1 = d2;
-      const int h1 = h2;
-      const int w1 = w2;
+  int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-      for (int n = 0; n < batchsize; n++) {
-        for (int c = 0; c < channels; ++c) {
-          const scalar_t val = idata[n][c][d1][h1][w1];
-          odata[n][c][d2][h2][w2] = val;
-        }
-      }
-      return;
-    }
-    //
-    const int h1 =
-        nearest_neighbor_compute_source_index(height_scale, h2, height1);
-    const int w1 =
-        nearest_neighbor_compute_source_index(width_scale, w2, width1);
-    const int d1 =
-        nearest_neighbor_compute_source_index(depth_scale, d2, depth1);
+  float scale_factor = (float)src_dim_d / (float)dst_dim_d;
+  int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
+  int src_z = nearest_neighbor_compute_source_index(scale_factor, dst_z, src_dim_d);
 
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; ++c) {
-        const scalar_t val = idata[n][c][d1][h1][w1];
-        odata[n][c][d2][h2][w2] = val;
-      }
-    }
+  scale_factor = (float)src_dim_h / (float)dst_dim_h;
+  int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
+  int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
+
+  scale_factor = (float)src_dim_w / (float)dst_dim_w;
+  int dst_x = dst_idx % dst_dim_w;
+  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
+
+  size_t src_idx = c * src_c_stride + src_z * src_dim_h * src_dim_w +
+      src_y * src_dim_w + src_x;
+  for (int b = 0; b < dim_b; b++) {
+    output[dst_idx] = input[src_idx];
+    src_idx += dim_c * src_c_stride;
+    dst_idx += dim_c * dst_c_stride;
   }
 }
 
@@ -72,64 +62,62 @@ __global__ void upsample_nearest3d_out_frame(
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest3d_backward_out_frame(
-    const int n,
-    PackedTensorAccessor<scalar_t, 5> idata,
-    const PackedTensorAccessor<scalar_t, 5> odata) {
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
+    const scalar_t* grad_o,
+    size_t dim_b,
+    size_t dim_c,
+    size_t src_dim_d,
+    size_t src_dim_h,
+    size_t src_dim_w,
+    size_t dst_dim_d,
+    size_t dst_dim_h,
+    size_t dst_dim_w,
+    scalar_t* grad_i) {
 
-  const int batchsize = idata.size(0);
-  const int channels = idata.size(1);
-  const int depth1 = idata.size(2);
-  const int height1 = idata.size(3);
-  const int width1 = idata.size(4);
-  const int depth2 = odata.size(2);
-  const int height2 = odata.size(3);
-  const int width2 = odata.size(4);
+  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
+    return;
 
-  const float depth_scale = (float)depth1 / (float)depth2;
-  const float height_scale = (float)height1 / (float)height2;
-  const float width_scale = (float)width1 / (float)width2;
+  int dst_c_stride = dst_dim_d * dst_dim_h * dst_dim_w;
+  int src_c_stride = src_dim_d * src_dim_h * src_dim_w;
 
-  if (index < n) {
-    const int w2 = (index % (height2 * width2)) % width2; // 0:width2-1
-    const int h2 = (index % (height2 * width2)) / width2; // 0:height2-1
-    const int d2 = index / (height2 * width2); // 0:depth2-1
+  int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-    // special case: just copy
-    if (depth1 == depth2 && height1 == height2 && width1 == width2) {
-      const int d1 = d2;
-      const int h1 = h2;
-      const int w1 = w2;
-      for (int n = 0; n < batchsize; n++) {
-        for (int c = 0; c < channels; ++c) {
-          const scalar_t val = odata[n][c][d1][h1][w1];
-          idata[n][c][d2][h2][w2] = val;
+  float scale_factor = (float)src_dim_d / (float)dst_dim_d;
+  int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
+  int src_z = nearest_neighbor_compute_source_index(scale_factor, dst_z, src_dim_d);
+  int src_z_up = nearest_neighbor_compute_source_index(scale_factor, dst_z+1, src_dim_d+1);
+
+  scale_factor = (float)src_dim_h / (float)dst_dim_h;
+  int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
+  int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
+  int src_y_up = nearest_neighbor_compute_source_index(scale_factor, dst_y+1, src_dim_h+1);
+
+  scale_factor = (float)src_dim_w / (float)dst_dim_w;
+  int dst_x = dst_idx % dst_dim_w;
+  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
+
+  for (int b = 0; b < dim_b; b++) {
+    accscalar_t grad = 0;
+    for (int z = src_z; z < src_z_up; z++) {
+      for (int y = src_y; y < src_y_up; y++) {
+        for (int x = src_x; x < src_x_up; x++) {
+          size_t src_idx = b * dim_c * src_c_stride + c * src_c_stride +
+              z * src_dim_h * src_dim_w + y * src_dim_w + x;
+          grad += grad_o[src_idx];
         }
       }
-      return;
     }
-    //
-    const int h1 =
-        nearest_neighbor_compute_source_index(height_scale, h2, height1);
-    const int w1 =
-        nearest_neighbor_compute_source_index(width_scale, w2, width1);
-    const int d1 =
-        nearest_neighbor_compute_source_index(depth_scale, d2, depth1);
-
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; ++c) {
-        const scalar_t val = odata[n][c][d2][h2][w2];
-        atomicAdd(&idata[n][c][d1][h1][w1], val);
-      }
-    }
+    grad_i[dst_idx] = grad;
+    dst_idx += dim_c * dst_c_stride;
   }
 }
 
 static void upsample_nearest3d_out_cuda_template(
     Tensor& output,
-    const Tensor& input,
+    const Tensor& input_,
     IntArrayRef output_size) {
-  TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
+  TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_nearest3d_out_cuda", {input_arg, output_arg});
 
   TORCH_CHECK(
@@ -141,14 +129,14 @@ static void upsample_nearest3d_out_cuda_template(
   int output_height = output_size[1];
   int output_width = output_size[2];
 
-  int nbatch = input.size(0);
-  int channels = input.size(1);
-  int input_depth = input.size(2);
-  int input_height = input.size(3);
-  int input_width = input.size(4);
+  int nbatch = input_.size(0);
+  int channels = input_.size(1);
+  int input_depth = input_.size(2);
+  int input_height = input_.size(3);
+  int input_width = input_.size(4);
 
   upsample_3d_shape_check(
-      input,
+      input_,
       Tensor(),
       nbatch,
       channels,
@@ -163,30 +151,37 @@ static void upsample_nearest3d_out_cuda_template(
       input_depth > 0 && input_height > 0 && input_width > 0 &&
       output_depth > 0 && output_height > 0 && output_width > 0);
 
+  Tensor input = input_.contiguous();
   output.resize_({input.size(0),
                   input.size(1),
                   output_depth,
                   output_height,
                   output_width});
-  output.zero_();
 
-  const int num_kernels = output_depth * output_height * output_width;
-  const int num_threads = std::min(
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  // upsample_3d_shape_check makes sure `nbatch != 0`
+  unsigned int n = output.numel() / nbatch;
+  dim3 bdim{std::min<unsigned int>(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
+  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "upsample_nearest3d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor<scalar_t, 5>();
-        auto odata = output.packed_accessor<scalar_t, 5>();
+        auto idata = input.data<scalar_t>();
+        auto odata = output.data<scalar_t>();
 
-        upsample_nearest3d_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
-               num_threads,
-               0,
-               stream>>>(num_kernels, idata, odata);
+        upsample_nearest3d_out_frame<scalar_t><<<gdim, bdim, 0, stream>>>(
+            idata,
+            nbatch,
+            channels,
+            input_depth,
+            input_height,
+            input_width,
+            output_depth,
+            output_height,
+            output_width,
+            odata);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -238,25 +233,32 @@ static void upsample_nearest3d_backward_out_cuda_template(
   Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_(
       {nbatch, channels, input_depth, input_height, input_width});
-  grad_input.zero_();
 
-  const int num_kernels = output_depth * output_height * output_width;
-  const int num_threads = std::min(
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  // upsample_3d_shape_check makes sure `nbatch != 0`
+  unsigned int n = grad_input.numel() / nbatch;
+  dim3 bdim{std::min<unsigned int>(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
+  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_nearest3d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = grad_input.packed_accessor<scalar_t, 5>();
-        auto odata = grad_output.packed_accessor<scalar_t, 5>();
+        auto idata = grad_input.data<scalar_t>();
+        auto odata = grad_output.data<scalar_t>();
 
         upsample_nearest3d_backward_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
-               num_threads,
-               0,
-               stream>>>(num_kernels, idata, odata);
+            <<<gdim, bdim, 0, stream>>>(
+                odata,
+                nbatch,
+                channels,
+                output_depth,
+                output_height,
+                output_width,
+                input_depth,
+                input_height,
+                input_width,
+                idata);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
