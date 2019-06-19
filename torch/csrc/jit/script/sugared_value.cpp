@@ -49,7 +49,6 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-
   return std::make_shared<SimpleValue>(
       emitBuiltinCall(loc, *m.graph(), symbol, self, inputs, attributes, true));
 }

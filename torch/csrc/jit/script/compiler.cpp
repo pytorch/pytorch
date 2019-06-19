@@ -1370,7 +1370,6 @@ struct to_ir {
       throw ErrorReport(targets[0])
           << "unexpected expression in variable initialization of for loop";
     }
-    auto target = Var(targets[0]).name();
     auto instances = sv->asTuple(stmt.range(), method);
     const std::string& target_name = Var(targets[0]).name().name();
     pushFrame(environment_stack->block());
