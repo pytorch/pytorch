@@ -361,6 +361,7 @@ template<class Key, class Value>
 GenericDict toGenericDict(Dict<Key, Value> dict) {
   return GenericDict(std::move(dict.impl_));
 }
+
 }
 }
 
