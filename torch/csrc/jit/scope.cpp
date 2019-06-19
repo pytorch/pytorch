@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/scope.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
+#include <torch/csrc/jit/function.h>
 
 namespace torch {
 namespace jit {
@@ -86,65 +86,33 @@ CallStackPtr CallStack::intrusive_from_this() {
   return c10::intrusive_ptr<CallStack>::reclaim(this);
 }
 
-CallStack::CallStack() {
-  fn_ = nullptr;
+CallStack::CallStack(Function* fn) : fn_(fn) {}
+
+CallStack::CallStack(CallStackPtr caller, Function* fn) : fn_(fn) {
+  caller_ = std::move(caller);
 }
 
-CallStack::CallStack(CallStackPtr parent, script::Function* fn) {
-  fn_ = fn;
-  parent_ = std::move(parent);
-}
-
-CallStackPtr CallStack::insertSubscope(script::Function* fn) {
-  if (children_.count(fn)) {
-    return children_.at(fn);
+CallStackPtr CallStack::insertCallee(Function* fn) {
+  if (callees_.count(fn)) {
+    return callees_.at(fn);
   }
   auto subscope = c10::make_intrusive<CallStack>(intrusive_from_this(), fn);
-  children_[fn] = subscope;
+  callees_[fn] = subscope;
   return subscope;
 }
 
-CallStackPtr CallStack::parent() {
-  if (!parent_) {
-    throw std::runtime_error("Cannot get parent from CallStack with no parent");
+c10::optional<CallStackPtr> CallStack::caller() const {
+  return caller_;
+}
+
+std::vector<Function*> CallStack::asVector() {
+  std::vector<Function*> r;
+  c10::optional<CallStackPtr> current = intrusive_from_this();
+  while (current) {
+    r.push_back((*current)->fn_);
+    current = (*current)->caller_;
   }
-  return parent_;
-}
-
-bool CallStack::isRoot() const {
-  return !parent_;
-}
-
-CallStackPtr CallStack::getRoot() {
-  CallStackPtr current = intrusive_from_this();
-  while (current->parent_) {
-    current = current->parent_;
-  }
-  return current;
-}
-
-size_t CallStack::getDepth() {
-  size_t d = 1;
-  CallStackPtr current = intrusive_from_this();
-  while (current->parent_) {
-    current = current->parent_;
-    d += 1;
-  }
-  return d;
-}
-
-script::Function* CallStack::fn() const {
-  return fn_;
-}
-
-std::vector<script::Function*> CallStack::asVector() {
-  std::vector<script::Function*> r;
-  auto current = intrusive_from_this();
-  while (!current->isRoot()) {
-    r.push_back(current->fn());
-    current = current->parent();
-  }
-  return std::vector<script::Function*>(r.rbegin(), r.rend());
+  return std::vector<Function*>(r.rbegin(), r.rend());
 }
 
 } // namespace jit

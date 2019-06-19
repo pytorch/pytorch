@@ -48,7 +48,7 @@ class Cloneable : public virtual Module {
         "Are you sure you called register_parameter() inside reset() "
         "and not the constructor?");
     for (const auto& parameter : parameters_) {
-      auto data = autograd::Variable(*parameter).data().clone();
+      auto data = autograd::Variable(*parameter).clone();
       copy->parameters_[parameter.key()].set_data(
           device ? data.to(*device) : data);
     }
@@ -59,7 +59,7 @@ class Cloneable : public virtual Module {
         "Are you sure you called register_buffer() inside reset() "
         "and not the constructor?");
     for (const auto& buffer : buffers_) {
-      auto data = autograd::Variable(*buffer).data().clone();
+      auto data = autograd::Variable(*buffer).clone();
       copy->buffers_[buffer.key()].set_data(device ? data.to(*device) : data);
     }
     TORCH_CHECK(

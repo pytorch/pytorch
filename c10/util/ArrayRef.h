@@ -43,6 +43,7 @@ class ArrayRef final {
   using iterator = const T*;
   using const_iterator = const T*;
   using size_type = size_t;
+  using value_type = T;
 
   using reverse_iterator = std::reverse_iterator<iterator>;
 
@@ -274,6 +275,6 @@ using IntArrayRef = ArrayRef<int64_t>;
 
 // This alias is deprecated because it doesn't make ownership
 // semantics obvious.  Use IntArrayRef instead!
-using IntList C10_DEPRECATED_USING = ArrayRef<int64_t>;
+C10_DEFINE_DEPRECATED_USING(IntList, ArrayRef<int64_t>)
 
 } // namespace c10

@@ -36,18 +36,10 @@ using ::c10::Argument;
 using ::c10::FunctionSchema;
 using ::c10::Symbol;
 
-using ::c10::ivalue::List;
 using ::c10::ivalue::Shared;
 
 using ::c10::IValue;
 using ::c10::ivalue::Future;
-using ::c10::ivalue::Tuple;
-
-using ::c10::ivalue::BoolList;
-using ::c10::ivalue::DoubleList;
-using ::c10::ivalue::GenericList;
-using ::c10::ivalue::IntList;
-using ::c10::ivalue::TensorList;
 
 using ::c10::ivalue::ConstantString;
 
@@ -78,6 +70,11 @@ using namespace ::c10::attr;
 namespace aten {
 using namespace ::c10::aten;
 }
+
+struct Function;
+namespace script {
+struct MatchedSchema;
+} // namespace script
 
 // Graph represents one "function" of computation.
 // It uses a simple ownership model where the graph owns all the nodes inside
@@ -162,9 +159,7 @@ struct Value {
 
  public:
   Value* setType(TypePtr type);
-  void inferTypeFrom(const at::Tensor& output) {
-    setType(CompleteTensorType::create(output));
-  }
+  TORCH_API void inferTypeFrom(const at::Tensor& output);
   const TypePtr& type() const {
     AT_ASSERT(type_ != nullptr);
     return type_;
@@ -251,7 +246,7 @@ struct TORCH_API Node {
   Block* owning_block_;
   c10::optional<SourceRange> source_range_;
   ScopePtr scope_;
-  CallStackPtr callstack_;
+  c10::optional<CallStackPtr> callstack_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
@@ -318,11 +313,8 @@ struct TORCH_API Node {
     }
     return scope_->namesFromRoot();
   }
-  CallStackPtr callstack() const {
+  c10::optional<CallStackPtr> callstack() const {
     return callstack_;
-  }
-  void setCallStack(CallStackPtr callstack) {
-    callstack_ = std::move(callstack);
   }
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
@@ -476,7 +468,8 @@ struct TORCH_API Node {
   // defining a new Value to represent any term that has multiple
   // definitions depending on how control flowed. Outputs of the node containing
   // control flow serve a similiar purpose defining new values for variables
-  // that would have different defintions depending on which way control flowed.
+  // that would have different definitions depending on which way control
+  // flowed.
 
   at::ArrayRef<Block*> blocks() {
     return blocks_;
@@ -641,7 +634,8 @@ struct TORCH_API Node {
   std::ostream& print(
       std::ostream& out,
       size_t level,
-      std::vector<const Node*>* groups) const;
+      std::vector<const Node*>* groups,
+      bool print_source_locations = true) const;
 
   virtual ~Node() = default;
 
@@ -978,7 +972,7 @@ struct Graph {
   std::unordered_map<std::string, Value*> unique_names_;
 
   ScopePtr current_scope_;
-  CallStackPtr current_callstack_;
+  c10::optional<CallStackPtr> callstack_;
 
   Block* const block_;
   // when insertNode() is called, the node is inserted before this node
@@ -989,7 +983,6 @@ struct Graph {
   Graph(ScopePtr scope_root)
       : next_unique_(0),
         current_scope_(std::move(scope_root)),
-        current_callstack_(c10::make_intrusive<CallStack>()),
         block_(new Block(this, nullptr)),
         insert_before_(return_node()) {}
 
@@ -1045,17 +1038,23 @@ struct Graph {
     current_scope_ = std::move(scope);
   }
 
-  void push_callstack(script::Function* fn) {
-    current_callstack_ = current_callstack_->insertSubscope(fn);
+  void push_callee(Function* fn) {
+    if (callstack_) {
+      callstack_ = (*callstack_)->insertCallee(fn);
+    } else {
+      callstack_ = c10::make_intrusive<CallStack>(fn);
+    }
   }
-  void pop_callstack() {
-    current_callstack_ = current_callstack_->parent();
+  void pop_callee() {
+    if (callstack_) {
+      callstack_ = (*callstack_)->caller();
+    }
   }
-  CallStackPtr current_callstack() {
-    return current_callstack_;
+  c10::optional<CallStackPtr> callstack() {
+    return callstack_;
   }
-  void set_current_callstack(CallStackPtr callstack) {
-    current_callstack_ = std::move(callstack);
+  void set_callstack(CallStackPtr callstack) {
+    callstack_ = std::move(callstack);
   }
 
   Value* addInput(std::string name = "") {
@@ -1083,11 +1082,13 @@ struct Graph {
   TORCH_API Node* createNone(
       TypePtr typ); // value of None with type Optional[typ]
   TORCH_API Node* createAutogradZero();
+  TORCH_API Node* createUninitialized(TypePtr typ);
   TORCH_API Node* createWithSubgraph(Symbol kind);
   TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(
       at::ArrayRef<Value*> values,
-      c10::OptNameList field_names = c10::nullopt);
+      c10::OptNameList field_names = c10::nullopt,
+      c10::optional<std::string> unqualName = c10::nullopt);
   TORCH_API Node* createTupleUnpack(Value* v);
   TORCH_API Node* createTupleIndex(
       Value* tup,
@@ -1115,6 +1116,15 @@ struct Graph {
   TORCH_API Value* insertGetAttr(Value* obj, const std::string& field) {
     return insertNode(createGetAttr(obj, field))->output();
   }
+  TORCH_API Node* createStore(const std::string& name, Value* v);
+  TORCH_API Node* createLoad(const std::string& name, const TypePtr& type);
+
+  TORCH_API Value* insertFunctionCall(
+      std::shared_ptr<Function> callee,
+      script::MatchedSchema& matched);
+  TORCH_API Value* insertMethodCall(
+      std::string method_name,
+      script::MatchedSchema& matched);
 
   // Note: defined in python_ir.cpp and can be used only in python extension
   Node* createPythonOp(
@@ -1199,7 +1209,11 @@ struct Graph {
 
   TORCH_API ~Graph();
 
-  TORCH_API std::string toString() const;
+  TORCH_API std::string toString(bool print_source_locations = true) const;
+
+  TORCH_API std::ostream& print(
+      std::ostream& out,
+      bool print_source_locations = true) const;
 
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 

@@ -361,6 +361,80 @@ graph(%x, %y):
   AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
 }
 
+void testAttributes() {
+  Graph graph;
+  script::parseIR(
+      R"IR(
+graph(%0):
+  %a = a::a[isattr=[1,2]](%0)
+  %b = a::b[intattr=10, floatattr=3.14](%0)
+  %c = a::c[myattr="qqq"](%a, %b)
+  return (%c))IR",
+      &graph);
+
+  {
+    Graph pattern;
+    script::parseIR(
+        R"IR(
+graph(%a, %b):
+  %c = a::c[myattr="qqq"](%a, %b)
+  return (%c))IR",
+        &pattern);
+    AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+  }
+  {
+    Graph pattern;
+    script::parseIR(
+        R"IR(
+graph(%a, %b):
+  %c = a::c[myattr="zzz"](%a, %b)
+  return (%c))IR",
+        &pattern);
+    AT_ASSERT(findPatternMatches(pattern, graph).empty());
+  }
+  {
+    Graph pattern;
+    script::parseIR(
+        R"IR(
+graph(%0):
+  %b = a::b[extraattr=10](%0)
+  return (%b))IR",
+        &pattern);
+    AT_ASSERT(findPatternMatches(pattern, graph).empty());
+  }
+  {
+    Graph pattern;
+    script::parseIR(
+        R"IR(
+graph(%0):
+  %b = a::b[intattr=10, floatattr=3.14](%0)
+  return (%b))IR",
+        &pattern);
+    AT_ASSERT(!findPatternMatches(pattern, graph).empty());
+  }
+  {
+    Graph pattern;
+    script::parseIR(
+        R"IR(
+graph(%0):
+  %b = a::b[intattr=10, floatattr=3.14, strattr="rrr"](%0)
+  return (%b))IR",
+        &pattern);
+    AT_ASSERT(findPatternMatches(pattern, graph).empty());
+  }
+  {
+    Graph pattern;
+    script::parseIR(
+        R"IR(
+graph(%0):
+  %a = a::a[isattr=[1,2]](%0)
+  return (%a))IR",
+        &pattern);
+    // Lists are not supported yet, thus we shouldn't match for now.
+    AT_ASSERT(findPatternMatches(pattern, graph).empty());
+  }
+}
+
 void testBadPattern() {
   Graph graph, pattern1, pattern2;
   script::parseIR(
@@ -405,6 +479,7 @@ void testSubgraphMatching() {
   testOverlappingMatches();
   testMatchInBasicBlocks1();
   testMatchInBasicBlocks2();
+  testAttributes();
   testBadPattern();
 }
 

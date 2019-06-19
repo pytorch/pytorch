@@ -16,18 +16,6 @@
 #include <cstddef>
 #include <vector>
 
-
-// The following code is used to ensure torch is linked against caffe2_gpu.
-#ifdef _MSC_VER
-namespace {
-#pragma optimize("", off)
-  int warp_size() {
-    return at::cuda::warp_size();
-  }
-#pragma optimize("", on)
-}
-#endif
-
 namespace torch { namespace cuda {
 using namespace at;
 using namespace torch::autograd;
@@ -144,7 +132,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
           // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
           Variable var = t;
-          device_outputs.push_back(make_variable(var.data(), false));
+          device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
     } else {
@@ -157,7 +145,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
           // See NOTE [ Version Counter in comm.*_coalesced ]
           AT_ASSERT(t.is_variable());
           Variable var = t;
-          device_outputs.push_back(make_variable(var.data(), false));
+          device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
     }

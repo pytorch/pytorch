@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/requires_grad_analysis.h>
 
 #include <vector>
 

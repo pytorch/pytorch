@@ -182,7 +182,7 @@ struct PythonPrintPass {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
     // to get imported twice.
-    if (classType->qualname() == "__torch__.$Module") {
+    if (classType->is_module()) {
       return;
     }
     if (std::find(class_table_.cbegin(), class_table_.cend(), classType) ==
@@ -665,15 +665,6 @@ struct PythonPrintPass {
 
     if (!print_const && node->kind() == prim::Constant)
       return;
-    if (node->kind() == prim::PythonOp) {
-      auto value = static_cast<const PythonOp*>(node);
-      if (enforce_importable_ && value->ignore_on_export) {
-        // Op has been marked as ignored, so insert an error in its place
-        indent();
-        body_ << "ops.prim.IgnoredPythonOp()\n";
-        return;
-      }
-    }
     splitLongInlines(node->inputs());
     switch (node->kind()) {
       case prim::Return:
@@ -796,14 +787,14 @@ struct PythonPrintPass {
     } else if (v.isTensorList()) {
       stmt << "[";
       const char* delim = "";
-      for (const auto& t : v.toTensorListRef()) {
+      for (const at::Tensor& t : v.toTensorListRef()) {
         stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
         delim = ", ";
       }
       stmt << "]";
     } else if (v.isBoolList()) {
       printMaybeAnnotatedConstantList(
-          stmt, "bool", v.toBoolListRef().size(), v);
+          stmt, "bool", v.toBoolList().size(), v);
     } else if (v.isIntList()) {
       printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
     } else if (v.isDoubleList()) {
@@ -849,17 +840,24 @@ struct PythonPrintPass {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
-        if (enforce_importable_) {
+        if (enforce_importable_ && !value->ignore_on_export) {
           throw script::ErrorReport(node->sourceRange())
-              << "could not export python function call " << value->name()
-              << ". Remove calls to Python functions before export. "
+              << "Could not export Python function call '" << value->name()
+              << "'. Remove calls to Python functions before export. "
               << "Did you forget add @script or @script_method annotation? "
-              << "If this is a nn.ModuleList, add it to __constants__.";
+              << "If this is a nn.ModuleList, add it to __constants__";
         }
 
-        stmt << "^" << value->name();
-        value->writeScalars(stmt);
+        if (value->ignore_on_export) {
+          stmt << "ops.prim.IgnoredPythonOp";
+        } else {
+          stmt << "^" << value->name();
+          value->writeScalars(stmt);
+        }
         printValueList(stmt, node->inputs(), "(", ")");
+      } break;
+      case prim::Uninitialized: {
+        stmt << "uninitialized(" << node->output()->type()->python_str() << ")";
       } break;
       case prim::Constant: {
         if (node->kind() == prim::Constant && !node->mustBeNone()) {
@@ -1033,7 +1031,7 @@ struct PythonPrintPass {
   }
 
  public:
-  void printFunction(const script::Function& func) {
+  void printFunction(const Function& func) {
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
@@ -1124,7 +1122,7 @@ struct PythonPrintPass {
 
 void PythonPrint(
     std::ostream& out,
-    const script::Function& func,
+    const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
     std::vector<ClassTypePtr>& class_table,
@@ -1167,6 +1165,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
       prim::Constant,
+      prim::Uninitialized,
       prim::fork,
       prim::ListConstruct,
       prim::DictConstruct,
