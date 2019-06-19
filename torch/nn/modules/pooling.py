@@ -629,18 +629,19 @@ class AvgPool3d(_AvgPoolNd):
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
 
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True):
+                 count_include_pad=True, divisor_override=None):
         super(AvgPool3d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride or kernel_size
         self.padding = padding
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
+        self.divisor_override = divisor_override
 
     @weak_script_method
     def forward(self, input):
         return F.avg_pool3d(input, self.kernel_size, self.stride,
-                            self.padding, self.ceil_mode, self.count_include_pad)
+                            self.padding, self.ceil_mode, self.count_include_pad, self.divisor_override)
 
     def __setstate__(self, d):
         super(AvgPool3d, self).__setstate__(d)
