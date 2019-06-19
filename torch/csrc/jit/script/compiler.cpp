@@ -403,11 +403,12 @@ struct Environment {
     }
 
     if (!retval) {
-      if (auto type = resolver->resolveType(ident)) {
+      if (auto type = resolver->resolveType(ident, range)) {
         if (auto class_type = type->cast<ClassType>()) {
           retval = std::make_shared<script::ClassValue>(class_type);
         } else if (auto tuple_type = type->cast<TupleType>()) {
-          retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
+          retval =
+              std::make_shared<script::NamedTupleConstructor>(tuple_type);
         }
       }
     }
@@ -3028,8 +3029,8 @@ struct FunctionResolver : public Resolver {
     return otherResolver_->resolveValue(name, m, loc);
   }
 
-  TypePtr resolveType(const std::string& name) const override {
-    return otherResolver_->resolveType(name);
+  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
+    return otherResolver_->resolveType(name, loc);
   }
 
  private:

@@ -294,12 +294,6 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  auto nargs = type_->containedTypes().size();
-  if (inputs.size() != nargs) {
-    throw ErrorReport(loc) << "Constructor expected " << nargs << "arguments "
-                           << "but got " << inputs.size();
-  }
-
   auto& g = *m.graph();
 
   auto schema = type_->schema();

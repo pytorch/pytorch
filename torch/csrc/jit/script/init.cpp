@@ -96,7 +96,7 @@ struct PythonResolver : public Resolver {
         py::hasattr(obj, "_fields");
   }
 
-  TypePtr resolveType(const std::string& name) const override {
+  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
     if (classType_ && name == classname_) {
       return classType_;
     }
@@ -111,6 +111,27 @@ struct PythonResolver : public Resolver {
     }
 
     if (isNamedTupleClass(obj)) {
+      // Currently don't support default values
+      if (py::hasattr(obj, "_field_defaults")) {
+        auto default_dict = py::cast<std::map<std::string, py::object>>(
+            py::getattr(obj, "_field_defaults"));
+        if (default_dict.size()) {
+          std::string error_msg =
+              "Default values are currently not supported"
+              " on NamedTuple fields in TorchScript. Fields "
+              "with default values: [";
+          bool first = true;
+          for (const auto& kv : default_dict) {
+            if (!first) {
+              error_msg += ", ";
+            }
+            error_msg += kv.first;
+          }
+          error_msg += "]";
+          throw ErrorReport(loc) << error_msg;
+        }
+      }
+
       py::object props = py::module::import("torch.jit")
                              .attr("_get_named_tuple_properties")(obj);
       std::string unqualName;
