@@ -115,6 +115,7 @@ struct TORCH_API Module {
                 std::make_shared<CompilationUnit>(),
                 /*is_module=*/true),
             0)) {}
+  Module() {}
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
   ~Module() {}
 
@@ -325,6 +326,7 @@ struct TORCH_API Module {
   }
 
   ModulePtr module_object() const {
+    TORCH_CHECK(module_value_.defined(), "Module being used is not defined.");
     return module_value_;
   }
   ClassTypePtr type() const {
