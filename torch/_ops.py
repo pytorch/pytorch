@@ -2,6 +2,7 @@ import torch._C
 
 import contextlib
 import ctypes
+import os
 import sys
 import types
 
@@ -66,6 +67,8 @@ class _OpNamespace(types.ModuleType):
 
 
 class _Ops(types.ModuleType):
+    __file__ = os.path.join(os.path.dirname(__file__), '_ops.py')
+
     def __init__(self):
         super(_Ops, self).__init__('torch.ops')
         self.loaded_libraries = set()

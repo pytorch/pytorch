@@ -1577,6 +1577,31 @@ class TestNN(NNTestCase):
         with self.assertRaises(TypeError):
             net.to(cpu, torch.tensor(3, dtype=torch.long), non_blocking=True)
 
+    def test_module_apply_inplace_op(self):
+        def add_one_inplace(t):
+            return t.add_(1.0)
+
+        # Test that applying an in-place operation to a module would bump
+        # the module's parameters' version counter.
+        m = nn.Linear(20, 10)
+        pvm = m.weight.mul(m.weight)
+        m_weight_version_saved = m.weight._version
+        m = m._apply(add_one_inplace)
+        self.assertGreater(m.weight._version, m_weight_version_saved)
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            pvm.backward(torch.randn(10, 20))
+
+        # Test that applying an in-place operation to a module would bump
+        # the module's parameters' gradients' version counter.
+        m = nn.Linear(20, 10)
+        m.weight.grad = torch.randn(10, 20).requires_grad_()
+        pgm = m.weight.grad.mul(m.weight.grad)
+        m_weight_grad_version_saved = m.weight.grad._version
+        m = m._apply(add_one_inplace)
+        self.assertGreater(m.weight.grad._version, m_weight_grad_version_saved)
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            pgm.backward(torch.randn(10, 20))
+
     def test_type(self):
         l = nn.Linear(10, 20)
         net = nn.Module()
