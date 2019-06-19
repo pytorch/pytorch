@@ -1343,13 +1343,14 @@ struct to_ir {
     auto sv = emitSugaredExpr(itrs[0], 1);
 
     // We will get IterableTree for builtinFunctions zip() and enumerate(),
-    // RangeValue for range(), and SimpleValue for types like List, Tensor, Dict.
+    // RangeValue for range(), and SimpleValue for types like List/Tensor/Dict/String.
     auto range_val = std::dynamic_pointer_cast<RangeValue>(sv);
     auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
     auto iterable_tree = std::dynamic_pointer_cast<IterableTree>(sv);
 
     if ((siv && (siv->getValue()->type()->kind() == TypeKind::ListType
-        || siv->getValue()->type()->isSubtypeOf(TensorType::get()))
+        || siv->getValue()->type()->isSubtypeOf(TensorType::get())
+        || siv->getValue()->type()->isSubtypeOf(StringType::get()))
         ) || range_val || iterable_tree) {
       emitLoopCommon(stmt.range(), body, sv, targets, {}); 
       return;
