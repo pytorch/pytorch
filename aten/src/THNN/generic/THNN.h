@@ -102,44 +102,6 @@ TH_API void THNN_(HardTanh_updateGradInput)(
           accreal max_val,             // upper threshold
           bool inplace);
 
-TH_API void THNN_(Im2Col_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int64_t kH, int64_t kW,
-          int64_t dilationH, int64_t dilationW,
-          int64_t padH, int64_t padW,
-          int64_t dH, int64_t dW);
-
-TH_API void THNN_(Im2Col_updateGradInput)(
-          THNNState *state,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t isizeH, int64_t isizeW,
-          int64_t kH, int64_t kW,
-          int64_t dilationH, int64_t dilationW,
-          int64_t padH, int64_t padW,
-          int64_t dH, int64_t dW);
-
-TH_API void THNN_(Col2Im_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int64_t outputHeight, int64_t outputWidth,
-          int64_t kH, int64_t kW,
-          int64_t dilationH, int64_t dilationW,
-          int64_t padH, int64_t padW,
-          int64_t dH, int64_t dW);
-
-TH_API void THNN_(Col2Im_updateGradInput)(
-          THNNState *state,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t kH, int64_t kW,
-          int64_t dilationH, int64_t dilationW,
-          int64_t padH, int64_t padW,
-          int64_t dH, int64_t dW);
-
 TH_API void THNN_(LeakyReLU_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // [MODIFIED] input tensor
@@ -526,24 +488,6 @@ TH_API void THNN_(unfolded_copy)(
           int nInputPlane,
           int inputWidth, int inputHeight,
           int outputWidth, int outputHeight);
-
-TH_API void THNN_(VolumetricAveragePooling_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH,
-          bool ceil_mode, bool count_include_pad);
-TH_API void THNN_(VolumetricAveragePooling_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH,
-          bool ceil_mode, bool count_include_pad);
 
 TH_API void THNN_(VolumetricDilatedConvolution_updateOutput)(
           THNNState *state,

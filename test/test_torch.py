@@ -3067,7 +3067,8 @@ class _TestTorchMixin(object):
     def test_qtensor_load_save(self):
         scale = 2.0
         zero_point = 10
-        r = torch.ones(15, dtype=torch.float) * 2
+        r = np.random.rand(100, 30) * 2 - 4
+        r = torch.from_numpy(r).float()
         for dtype in [torch.quint8, torch.qint8, torch.qint32]:
             qr = torch.quantize_linear(r, scale, zero_point, dtype)
             with tempfile.NamedTemporaryFile() as f:
@@ -3075,6 +3076,7 @@ class _TestTorchMixin(object):
                 torch.save(qr, f)
                 f.seek(0)
                 qr2 = torch.load(f)
+                print(qr, qr2)
                 self.assertEqual(qr.int_repr(), qr2.int_repr())
                 self.assertEqual(qr.q_scale(), qr2.q_scale())
                 self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())

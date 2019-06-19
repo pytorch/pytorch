@@ -256,7 +256,7 @@ struct ParserImpl {
       }
 
       if (kind == TK_FOR) {
-        auto target = parseExp();
+        auto target = parseIdent();
         L.expect(TK_IN);
         auto iter = parseExp();
         prefix = ListComp::create(pos, Expr(prefix), target, iter);
@@ -519,10 +519,12 @@ struct ParserImpl {
     auto body = parseStatements();
     return While::create(r, Expr(cond), List<Stmt>(body));
   }
+
   TreeRef parseFor() {
     auto r = L.cur().range;
     L.expect(TK_FOR);
-    auto targets = parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseExp);
+    auto targets =
+        parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseIdent);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
     auto body = parseStatements();
     return For::create(r, targets, itrs, body);

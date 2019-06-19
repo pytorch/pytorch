@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ...modules.module import Module
 from ...._jit_internal import weak_module
+from collections import OrderedDict
 
 @weak_module
 class Linear(Module):
@@ -128,13 +129,13 @@ class Linear(Module):
 
     def __getstate__(self):
         qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
-        state = {'_packed_weight': qlinear_unpack(self._packed_weight),
-                 'bias': self.bias,
-                 'output_scale': self.output_scale,
-                 'output_zero_point': self.output_zero_point}
+        state = self.__dict__
+        state['weight'] = qlinear_unpack(self._packed_weight)
+        self.__dict__.pop('weight')
         return state
 
     def __setstate__(self, state):
         super(Linear, self).__setstate__(state)
         qlinear_pack = torch.ops.quantized.fbgemm_linear_prepack
-        self._packed_weight = qlinear_pack(self._packed_weight)
+        self._packed_weight = qlinear_pack(state['weight'])
+        self.__dict__.pop('weight')
