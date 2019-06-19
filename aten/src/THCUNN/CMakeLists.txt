@@ -39,7 +39,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/Tanh.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalRowConvolution.cu
-${CMAKE_CURRENT_SOURCE_DIR}/VolumetricAveragePooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullConvolution.cu

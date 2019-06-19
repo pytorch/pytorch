@@ -439,7 +439,7 @@ inline at::MemoryFormat PythonArgs::toMemoryFormat(int i) {
 
 inline at::QScheme PythonArgs::toQScheme(int i) {
   if (!args[i]) return at::kPerTensorAffine;
-  AT_CHECK(THPQScheme_Check(args[i]), "qscheme arg must be an instance of the torch.qscheme");
+  TORCH_CHECK(THPQScheme_Check(args[i]), "qscheme arg must be an instance of the torch.qscheme");
   const auto qscheme = reinterpret_cast<THPQScheme*>(args[i]);
   return qscheme->qscheme;
 }

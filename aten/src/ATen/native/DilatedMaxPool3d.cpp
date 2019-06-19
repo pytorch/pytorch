@@ -184,7 +184,7 @@ void max_pool3d_with_indices_out_cpu_template(
   const int64_t oheight = pooling_output_shape<int64_t>(iheight, kH, pH, dH, dilationH, ceil_mode);
   const int64_t owidth = pooling_output_shape<int64_t>(iwidth, kW, pW, dW, dilationW, ceil_mode);
 
-  max_pool3d_with_indices_shape_check(
+  pool3d_shape_check(
     input_,
     nslices,
     kT, kH, kW,
@@ -396,7 +396,7 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
   const int64_t oheight = gradOutput.size(-2);
   const int64_t owidth = gradOutput.size(-1);
 
-  max_pool3d_with_indices_shape_check(
+  max_pool3d_backward_shape_check(
     input,
     gradOutput,
     indices,

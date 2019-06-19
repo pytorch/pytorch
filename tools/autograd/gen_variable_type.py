@@ -279,7 +279,7 @@ def should_trace(declaration):
         if any('Dimname' in arg['simple_type'] for arg in declaration['arguments']):
             return False
     # Operations involving Storage or Type are not traceable at the moment
-    if any(arg['simple_type'] in {'Storage', 'Type'} for arg in declaration['arguments']):
+    if any(arg['simple_type'] in {'Storage', 'Type', 'ConstQuantizerPtr'} for arg in declaration['arguments']):
         return False
     # We can't trace functions which don't have any Tensor or TensorList returns
     if 'Tensor' not in declaration['return_type']:
