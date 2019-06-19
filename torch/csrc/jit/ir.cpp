@@ -1311,11 +1311,9 @@ Node* Graph::createWithSubgraph(Symbol kind) {
 
 Node* Graph::createTuple(
     at::ArrayRef<Value*> values,
-    c10::OptNameList field_names,
-    c10::optional<std::string> unqualName) {
+    std::shared_ptr<FunctionSchema> schema) {
   auto types = fmap(values, [](Value* v) { return v->type(); });
-  auto tt = TupleType::create(
-      std::move(types), std::move(field_names), std::move(unqualName));
+  auto tt = TupleType::create(std::move(types), std::move(schema));
   auto n = create(prim::TupleConstruct, values);
   n->output()->setType(tt);
   return n;
