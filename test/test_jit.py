@@ -12685,28 +12685,73 @@ a")
             return a == b
         self.checkScript(fn, (torch.rand(2, 3), torch.rand(2, 3)))
 
+    def _test_dict_ops(self, the_dict, key_type, value_type):
+        def make_op(code):
+            code = code.format(key_type=key_type, value_type=value_type)
+            return torch.jit.CompilationUnit(textwrap.dedent(code)).func
+
+        keys = make_op("""
+            def func(x):
+                # type: (Dict[{key_type}, {value_type}]) -> List[{key_type}]
+                return list(x.keys())
+        """)
+        self.assertEqual(set(keys(the_dict)), set(the_dict.keys()))
+
+        values = make_op("""
+            def func(x):
+                # type: (Dict[{key_type}, {value_type}]) -> List[{value_type}]
+                return list(x.values())
+        """)
+        self.assertEqual(set(values(the_dict)), set(the_dict.values()))
+
+        length = make_op("""
+            def func(x):
+                # type: (Dict[{key_type}, {value_type}]) -> int
+                return len(x)
+        """)
+        self.assertEqual(len(the_dict), length(the_dict))
+
+        clear = make_op("""
+            def func(x):
+                # type: (Dict[{key_type}, {value_type}]) -> None
+                return x.clear()
+        """)
+        new_dict = the_dict.copy()
+        clear(new_dict)
+        self.assertEqual(0, len(new_dict))
+
+        copy = make_op("""
+            def func(x):
+                # type: (Dict[{key_type}, {value_type}]) -> Dict[{key_type}, {value_type}]
+                return x.copy()
+        """)
+        nocopy = make_op("""
+            def func(x):
+                # type: (Dict[{key_type}, {value_type}]) -> Dict[{key_type}, {value_type}]
+                return x.copy()
+        """)
+        self.assertFalse(d is copy(d))
+        self.assertTrue(d is nocopy(d))
+
+        items = make_op("""
+            def func(x):
+                # type: (Dict[{key_type}, {value_type}]) -> List[Tuple[str, Tensor]]
+                return x.items()
+        """)
+        self.assertEqual(the_dict.items(), items(the_dict))
+
     def test_dict_ops(self):
-        d = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+        str_tensor = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
+        self._test_dict_ops(the_dict=str_tensor, key_type='str', value_type='Tensor')
 
-        @torch.jit.script
-        def keys(x):
-            # type: (Dict[str, Tensor]) -> List[str]
-            return list(x.keys())
+        int_int = {1: 2, 3: 4, 5: 6}
+        self._test_dict_ops(the_dict=int_int, key_type='int', value_type='int')
 
-        self.assertEqual(set(keys(d)), set(d.keys()))
+        empty = {}
+        self._test_dict_ops(the_dict=empty, key_type='str', value_type='Tensor')
 
-        @torch.jit.script
-        def values(x):
-            # type: (Dict[str, Tensor]) -> List[Tensor]
-            return list(x.values())
-
-        self.assertEqual(set(values(d)), set(d.values()))
-
-        def length(x):
-            # type: (Dict[str, Tensor]) -> int
-            return len(x)
-
-        self.checkScript(length, (d,))
+        str_tuple = {'a': (1, torch.ones(1)), 'b': (2, torch.ones(1) + 1)}
+        self._test_dict_ops(the_dict=str_tuple, key_type='str', value_type='Tuple[int, Tensor]')
 
     def test_dict(self):
         def simple(x):
