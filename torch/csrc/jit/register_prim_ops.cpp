@@ -1700,20 +1700,20 @@ Operation dictValues(const Node* n) {
 }
 
 int dictIndex(Stack& stack) {
-  auto index = pop(stack);
+  auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(index);
+  auto value = dict.find(key);
   if (value == dict.end()) {
-    AT_ERROR("KeyError: '", index, "'");
+    AT_ERROR("KeyError: ", key);
   }
   push(stack, value->value());
   return 0;
 }
 
 int dictGet(Stack& stack) {
-  auto index = pop(stack);
+  auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(index);
+  auto value = dict.find(key);
   if (value == dict.end()) {
     push(stack, IValue());
   } else {
@@ -1724,9 +1724,9 @@ int dictGet(Stack& stack) {
 
 int dictGetDefault(Stack& stack) {
   auto default_value = pop(stack);
-  auto index = pop(stack);
+  auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  auto value = dict.find(index);
+  auto value = dict.find(key);
   if (value == dict.end()) {
     push(stack, std::move(default_value));
   } else {
@@ -1735,10 +1735,96 @@ int dictGetDefault(Stack& stack) {
   return 0;
 }
 
+// If the key is in the dict, return it. Else set it to the default value and
+// return that.
+int dictSetDefault(Stack& stack) {
+  auto default_value = pop(stack);
+  auto key = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  auto value = dict.find(key);
+  if (value == dict.end()) {
+    dict.insert(key, default_value);
+    push(stack, std::move(default_value));
+  } else {
+    push(stack, value->value());
+  }
+  return 0;
+}
+
+int dictPop(Stack& stack) {
+  auto key = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  auto value = dict.find(key);
+  if (value == dict.end()) {
+    AT_ERROR("KeyError: ", key);
+  } else {
+    auto erase_count = dict.erase(key);
+    TORCH_CHECK(
+        erase_count == 1, "Expected to erase 1 item, found ", erase_count);
+    push(stack, value->value());
+  }
+  return 0;
+}
+
+int dictPopDefault(Stack& stack) {
+  auto default_value = pop(stack);
+  auto key = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  auto value = dict.find(key);
+  if (value == dict.end()) {
+    push(stack, default_value);
+  } else {
+    auto erase_count = dict.erase(key);
+    TORCH_CHECK(
+        erase_count == 1, "Expected to erase 1 item, found ", erase_count);
+    push(stack, value->value());
+  }
+  return 0;
+}
+
+int dictPopItem(Stack& stack) {
+  auto dict = pop(stack).toGenericDict();
+  if (dict.size() == 0) {
+    AT_ERROR("popitem(): dictionary is empty");
+  }
+  auto item = iterationOrder(dict).at(0);
+  auto erase_count = dict.erase(item.first);
+  TORCH_CHECK(
+      erase_count == 1, "Expected to erase 1 item, found ", erase_count);
+
+  IValue tuple = c10::ivalue::Tuple::create({item.first, item.second});
+  push(stack, tuple);
+  return 0;
+}
+
 int dictContains(Stack& stack) {
   auto key = pop(stack);
   auto dict = pop(stack).toGenericDict();
   push(stack, dict.contains(key));
+  return 0;
+}
+
+int dictClear(Stack& stack) {
+  auto dict = pop(stack).toGenericDict();
+  std::cout << dict << "\n";
+  dict.clear();
+  std::cout << dict << "\n";
+  return 0;
+}
+
+int dictItems(Stack& stack) {
+  auto dict = pop(stack).toGenericDict();
+  std::vector<IValue> items;
+  items.reserve(dict.size());
+  for (const auto& item : iterationOrder(dict)) {
+    items.push_back(c10::ivalue::Tuple::create({item.first, item.second}));
+  }
+  push(stack, items);
+  return 0;
+}
+
+int dictCopy(Stack& stack) {
+  push(stack, pop(stack).toGenericDict().copy());
   return 0;
 }
 
@@ -1935,29 +2021,17 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("t", c10::ListPtr<IValue>),
 #undef CREATE_LIST_OPS
     Operator("aten::sort(int[](a!) self) -> ()", listSort<int64_t>),
-    Operator(
-        "aten::sort(float[](a!) self) -> ()",
-        listSort<double>),
-    Operator(
-        "aten::sort(Tensor[](a!) self) -> ()",
-        listSort<at::Tensor>),
+    Operator("aten::sort(float[](a!) self) -> ()", listSort<double>),
+    Operator("aten::sort(Tensor[](a!) self) -> ()", listSort<at::Tensor>),
     Operator("aten::sort(bool[](a!) self) -> ()", listSort<bool>),
 
     Operator("aten::eq(int[] a, int[] b) -> bool", listEq<int64_t>),
-    Operator(
-        "aten::eq(float[] a, float[] b) -> bool",
-        listEq<double>),
-    Operator(
-        "aten::eq(Tensor[] a, Tensor[] b) -> bool",
-        listEq<at::Tensor>),
+    Operator("aten::eq(float[] a, float[] b) -> bool", listEq<double>),
+    Operator("aten::eq(Tensor[] a, Tensor[] b) -> bool", listEq<at::Tensor>),
     Operator("aten::eq(bool[] a, bool[] b) -> bool", listEq<bool>),
     Operator("aten::ne(int[] a, int[] b) -> bool", listNe<int64_t>),
-    Operator(
-        "aten::ne(float[] a, float[] b) -> bool",
-        listNe<double>),
-    Operator(
-        "aten::ne(Tensor[] a, Tensor[] b) -> bool",
-        listNe<at::Tensor>),
+    Operator("aten::ne(float[] a, float[] b) -> bool", listNe<double>),
+    Operator("aten::ne(Tensor[] a, Tensor[] b) -> bool", listNe<at::Tensor>),
     Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<bool>),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
@@ -2301,7 +2375,32 @@ RegisterOperators reg2({
           " key, t default_value) -> t(*)",                                   \
           dictGetDefault),                                                    \
       Operator(                                                               \
-          "aten::__contains__(Dict(" key_type ", t) dict, " key_type         \
+          "aten::setdefault(Dict(" key_type ", t) self, " key_type            \
+          " key, t default_value) -> t(*)",                                   \
+          dictSetDefault),                                                    \
+      Operator(                                                               \
+          "aten::pop(Dict(" key_type ", t)(a!) self, " key_type               \
+          " key) -> t(*)",                                                    \
+          dictPop),                                                           \
+      Operator(                                                               \
+          "aten::pop(Dict(" key_type ", t)(a!) self, " key_type               \
+          " key, t default_value) -> t(*)",                                   \
+          dictPopDefault),                                                    \
+      Operator(                                                               \
+          "aten::popitem(Dict(" key_type ", t)(a!) self) -> ((" key_type      \
+          ", t))",                                                            \
+          dictPopItem),                                                       \
+      Operator(                                                               \
+          "aten::clear(Dict(" key_type ", t)(a!) self) -> ()", dictClear),    \
+      Operator(                                                               \
+          "aten::items(Dict(" key_type ", t) self) -> ((" key_type ", t)[])", \
+          dictItems),                                                         \
+      Operator(                                                               \
+          "aten::copy(Dict(" key_type ", t)(a) self) -> Dict(" key_type       \
+          ", t)",                                                             \
+          dictCopy),                                                          \
+      Operator(                                                               \
+          "aten::__contains__(Dict(" key_type ", t) dict, " key_type          \
           " key) -> bool",                                                    \
           dictContains),                                                      \
       Operator(                                                               \
