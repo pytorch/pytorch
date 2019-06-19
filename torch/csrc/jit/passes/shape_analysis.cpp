@@ -536,9 +536,7 @@ class ShapePropagator {
         auto orig_type = node->output()->type()->expect<TupleType>();
         node->output()->setType(TupleType::create(
             fmap(node->inputs(), [](Value* v) { return v->type(); }),
-            orig_type->hasNames() ? c10::make_optional(orig_type->names())
-                                  : c10::nullopt,
-            orig_type->unqualName()));
+            orig_type->schema()));
         return;
       }
       case prim::TupleUnpack: {
