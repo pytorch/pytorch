@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ...modules.module import Module
 from ...._jit_internal import weak_module
+from collections import OrderedDict
 
 @weak_module
 class Quantize(Module):
@@ -165,16 +166,3 @@ class Linear(Module):
         super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                       missing_keys, unexpected_keys, error_msgs)
         return
-
-    def __getstate__(self):
-        qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
-        state = {'_packed_weight': qlinear_unpack(self._packed_weight),
-                 'bias': self.bias,
-                 'output_scale': self.output_scale,
-                 'output_zero_point': self.output_zero_point}
-        return state
-
-    def __setstate__(self, state):
-        super(Linear, self).__setstate__(state)
-        qlinear_pack = torch.ops.quantized.fbgemm_linear_prepack
-        self._packed_weight = qlinear_pack(self._packed_weight)
