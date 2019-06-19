@@ -49,6 +49,8 @@ _(ProfiledTensorType) \
 _(DeviceObjType) \
 _(FunctionType) \
 _(ClassType) \
+_(InterfaceType) \
+
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1513,6 +1515,8 @@ struct CAFFE2_API ClassType : public Type {
     TORCH_INTERNAL_ASSERT(is_module(), "asking for parameterSlots of non-Module");
     return parameterSlots_->at(slot);
   }
+
+  bool isSubtypeOf(const TypePtr rhs) const override;
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
@@ -1537,5 +1541,64 @@ struct CAFFE2_API ClassType : public Type {
   // if present, this class inherits from torch.nn.Module
   // and these are the indices of the attributes which are parameters
   std::shared_ptr<std::vector<bool>> parameterSlots_;
+};
+
+
+struct InterfaceType;
+using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
+using ::torch::jit::script::CompilationUnit;
+using ::torch::jit::Function;
+
+// Interfaces are a list of abstract methods that a class might meet.
+// If a class provides those methods, it implicitly meets the interface.
+struct CAFFE2_API InterfaceType : public Type {
+  friend struct ClassType; // for isSubclassOf
+  static InterfaceTypePtr create(
+      QualifiedName qualifiedName);
+
+  DEFINE_IS_SUBCLASS(InterfaceType);
+  bool operator==(const Type& rhs) const override {
+    if (auto user_rhs = rhs.cast<InterfaceType>()) {
+      return name_ == user_rhs->name_;
+    }
+    return false;
+  }
+
+  std::string str() const override {
+    return std::string("InterfaceType<") + name_.name() + ">";
+  }
+
+  std::string python_str() const override {
+    return name_.qualifiedName();
+  }
+
+  std::string qualname() const {
+    return name_.qualifiedName();
+  }
+
+  std::string qualifier() const {
+    return name_.prefix();
+  }
+
+  std::string basename() const {
+    return name_.name();
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override;
+
+  // try to find a method of this interface,
+  // returns nullptr if not found.
+  const FunctionSchema* getMethod(const std::string& name) const;
+  void addMethod(FunctionSchema schema);
+  static const TypeKind Kind = TypeKind::InterfaceType;
+  ~InterfaceType() override;
+ private:
+  InterfaceType(QualifiedName name);
+
+  // Fully qualified name of type (note that this has to be globally unique).
+  // Looks like: "foo.bar.Baz".
+  QualifiedName name_;
+  // shared_ptr so that this header does not have to depend on 
+  // FunctionSchema.h
+  std::shared_ptr<std::vector<FunctionSchema>> methods_;
 };
 } // namespace c10

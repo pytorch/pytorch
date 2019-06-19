@@ -141,7 +141,7 @@ struct SourceResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name) const override {
-    return lib_cu_.get_class(c10::QualifiedName(name));
+    return lib_cu_.get_named_type(c10::QualifiedName(name));
   }
 
  private:

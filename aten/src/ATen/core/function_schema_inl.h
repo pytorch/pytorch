@@ -180,4 +180,31 @@ inline FunctionSchema FunctionSchema::cloneWithRemappedTypes(
       is_varret());
 }
 
+// covariant subtyping of list of Arguments
+inline bool isSubtypeOfList(ArrayRef<Argument> child, ArrayRef<Argument> parent) {
+  if (child.size() != parent.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < child.size(); ++i) {
+    const Argument& c = child[i];
+    const Argument& p = parent[i];
+    if (c.name() != p.name()) {
+      return false;
+    }
+    if (!c.type()->isSubtypeOf(p.type())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool FunctionSchema::isSubtypeOf(const FunctionSchema& rhs, bool as_method) const {
+  size_t start = as_method ? 1 : 0;
+  // functions are covariant in arguments but contravariant in returns
+  return isSubtypeOfList(
+             ArrayRef<Argument>(arguments()).slice(start),
+             ArrayRef<Argument>(rhs.arguments()).slice(start)) &&
+      isSubtypeOfList(rhs.returns(), returns());
+}
+
 } // namespace c10

@@ -40,10 +40,11 @@ void inlineCalls(Block* block) {
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
-        auto function =
-            cur->inputs().at(0)->type()->expect<ClassType>()->getMethod(name);
-        replace(cur, function, cur->inputs());
-        cur->destroy();
+        if (auto class_type = cur->inputs().at(0)->type()->cast<ClassType>()) {
+          replace(cur, class_type->getMethod(name), cur->inputs());
+          cur->destroy();
+        }
+        // otherwise this is an interface call and cannot be inlined
       } break;
       default: {
         for (auto b : cur->blocks()) {
