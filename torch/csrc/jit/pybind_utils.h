@@ -543,10 +543,14 @@ inline py::object toPyObject(IValue&& ivalue) {
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements.at(i)});
     }
-    if (tuple->type && tuple->type->hasNames() && tuple->type->unqualName()) {
+    if (tuple->type && tuple->type->schema() &&
+        tuple->type->schema()->name() != "") {
+      auto unqualName = tuple->type->schema()->name();
+      auto fieldNames = fmap(
+          tuple->type->schema()->arguments(),
+          [](const Argument& arg) { return arg.name(); });
       return py::module::import("torch.jit")
-          .attr("_create_named_tuple")(
-              t, tuple->type->names(), tuple->type->unqualName().value());
+          .attr("_create_named_tuple")(t, unqualName, fieldNames);
     } else {
       return std::move(t);
     }
