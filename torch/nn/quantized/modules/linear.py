@@ -126,16 +126,3 @@ class Linear(Module):
         super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                       missing_keys, unexpected_keys, error_msgs)
         return
-
-    def __getstate__(self):
-        qlinear_unpack = torch.ops.quantized.fbgemm_linear_unpack
-        state = self.__dict__
-        state['weight'] = qlinear_unpack(self._packed_weight)
-        self.__dict__.pop('weight')
-        return state
-
-    def __setstate__(self, state):
-        super(Linear, self).__setstate__(state)
-        qlinear_pack = torch.ops.quantized.fbgemm_linear_prepack
-        self._packed_weight = qlinear_pack(state['weight'])
-        self.__dict__.pop('weight')

@@ -70,10 +70,12 @@ class ModuleAPITest(TestCase):
         self.assertEqual(qLinear.output_scale, qLinear2.output_scale)
         self.assertEqual(qLinear.output_zero_point, qLinear2.output_zero_point)
         self.assertTrue(dir(qLinear) == dir(qLinear))
+        self.assertFalse('weight' in qLinear.__dict__)
+        self.assertFalse('weight' in qLinear2.__dict__)
         Z_q2 = qLinear(X_q)
         self.assertEqual(Z_q, Z_q2)
 
-        # test serialization of module directly- broken now, will debug later
+        # test serialization of module directly - will add this later
         # with tempfile.NamedTemporaryFile() as f:
         #     torch.save(qLinear, f)
         #     f.seek(0)
