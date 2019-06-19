@@ -195,11 +195,13 @@ class Module(object):
 
         for param in self._parameters.values():
             if param is not None:
-                # Tensors stored in modules are graph leaves, and we don't
-                # want to create copy nodes, so we have to unpack the data.
-                param.data = fn(param.data)
+                with torch.no_grad():
+                    param_applied = fn(param)
+                param.data = param_applied
                 if param._grad is not None:
-                    param._grad.data = fn(param._grad.data)
+                    with torch.no_grad():
+                        grad_applied = fn(param._grad)
+                    param._grad.data = grad_applied
 
         for key, buf in self._buffers.items():
             if buf is not None:
