@@ -607,7 +607,7 @@ class TestCppExtension(common.TestCase):
             name="test_set_default_type",
             cpp_sources="torch::Tensor get() { return torch::empty({}); }",
             functions="get",
-            verbose=False,
+            verbose=True,
         )
 
         initial_default = torch.get_default_dtype()

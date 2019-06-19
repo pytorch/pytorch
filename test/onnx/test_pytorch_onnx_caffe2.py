@@ -238,7 +238,7 @@ class TestCaffe2Backend(unittest.TestCase):
         # Note that the export call explicitly sets the names of not just the input,
         # but also the parameters. This test checks that the model can be loaded and
         # executed in Caffe2 backend correctly.
-        torch.onnx._export(model, input, f, verbose=False, export_type=ExportTypes.ZIP_ARCHIVE,
+        torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
                            input_names=['input1', 'parameter1', 'parameter2'])
 
         f.seek(0)
@@ -264,7 +264,7 @@ class TestCaffe2Backend(unittest.TestCase):
         # But note that the target first parameter name is the same as the second parameter name.
         # This test checks that given this edge condition, the model can be loaded and executed
         # in Caffe2 backend correctly.
-        torch.onnx._export(model, input, f, verbose=False, export_type=ExportTypes.ZIP_ARCHIVE,
+        torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
                            input_names=['input1', 'fc1.bias'], _retain_param_name=False)
 
         f.seek(0)
@@ -435,7 +435,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)
-        self.run_model_test(alexnet(), train=False, batch_size=BATCH_SIZE, use_gpu=False,
+        self.run_model_test(alexnet(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict, atol=1e-3)
 
     @skipIfNoCuda
@@ -1444,7 +1444,21 @@ class TestCaffe2Backend(unittest.TestCase):
         caffe2_out = prepared.run(inputs=[x.cpu().numpy()])
         self.assertEqual(caffe2_out[0].shape, x.shape)
 
-    @skipIfEmbed  # TODO
+
+    """
+    E               output {
+    E                 name: "8"
+    E                 type {
+    E                   tensor_type {
+    E                     elem_type: 1
+    E                     shape {
+    E                       dim {
+    E           -             dim_value: 0
+    E           ?                        ^
+    E           +             dim_value: 2
+    E           ?                        ^
+    """
+    @skipIfEmbed  # TODO - error above in embedded case only
     def test_traced_ints(self):
         A = 4
         H = 10
@@ -1733,6 +1747,7 @@ class TestCaffe2Backend(unittest.TestCase):
                 return torch._dim_arange(input, 1)
 
         x = torch.ones(5, 6)
+        # TODO fails on GPU
         self.run_model_test(DimArange(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_log2(self):
