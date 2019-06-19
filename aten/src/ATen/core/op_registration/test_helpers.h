@@ -57,3 +57,19 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
   ADD_FAILURE() << "Expected to throw exception containing \""
     << expectMessageContains << "\" but didn't throw";
 }
+
+template<class T>
+void expectListEquals(c10::ArrayRef<T> expected, c10::ListPtr<T> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual.get(i));
+  }
+}
+
+template<class T>
+void expectListEquals(c10::ArrayRef<T> expected, std::vector<T> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual[i]);
+  }
+}

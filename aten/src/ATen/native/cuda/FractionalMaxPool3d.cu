@@ -163,7 +163,7 @@ void fractional_max_pool3d_out_cuda_template(
     int64_t poolSizeW = pool_size[2];
 
     int64_t ndims = input.ndimension();
-    AT_CHECK(
+    TORCH_CHECK(
       input.numel() != 0 && (ndims == 4 || ndims == 5),
       "fractional_max_pool3d_out_cuda_template(): ",
       "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ",
@@ -183,17 +183,17 @@ void fractional_max_pool3d_out_cuda_template(
     int64_t inputH = input.size(dimh);
     int64_t inputW = input.size(dimw);
 
-    AT_CHECK(
+    TORCH_CHECK(
       outputT + poolSizeT - 1 < inputT,
       "fractional_max_pool3d_out_cuda_template(): ",
       "pool time (", poolSizeT, ") too large relative to input time (",
       inputT, ")");
-    AT_CHECK(
+    TORCH_CHECK(
       outputH + poolSizeH - 1 < inputH,
       "fractional_max_pool3d_out_cuda_template(): ",
       "pool height (", poolSizeH, ") too large relative to input height (",
       inputH, ")");
-    AT_CHECK(
+    TORCH_CHECK(
       outputW + poolSizeW - 1 < inputW,
       "fractional_max_pool3d_out_cuda_template(): ",
       "pool width (", poolSizeW, ") too large relative to input width (",
@@ -244,7 +244,7 @@ void fractional_max_pool3d_out_cuda_template(
         );
       }
     );
-    AT_CHECK(cudaGetLastError() == cudaSuccess,
+    TORCH_CHECK(cudaGetLastError() == cudaSuccess,
           "fractional_max_pool2d_out_cuda_template failed with error code ",
           cudaGetLastError());
   }
@@ -276,17 +276,17 @@ void fractional_max_pool3d_backward_out_cuda_template(
     int64_t inputH = input.size(dimh);
     int64_t inputW = input.size(dimw);
 
-    AT_CHECK(
+    TORCH_CHECK(
       outputT == gradOutput.size(dimt),
       "fractional_max_pool3d_backward_out_cuda_template(): ",
       "gradOutput time unexpected"
     );
-    AT_CHECK(
+    TORCH_CHECK(
       outputH == gradOutput.size(dimh),
       "fractional_max_pool3d_backward_out_cuda_template(): ",
       "gradOutput height unexpected"
     );
-    AT_CHECK(
+    TORCH_CHECK(
       outputW == gradOutput.size(dimw),
       "fractional_max_pool3d_backward_out_cuda_template(): ",
       "gradOutput width unexpected"
@@ -332,7 +332,7 @@ void fractional_max_pool3d_backward_out_cuda_template(
         );
       }
     );
-    AT_CHECK(cudaGetLastError() == cudaSuccess,
+    TORCH_CHECK(cudaGetLastError() == cudaSuccess,
           "fractional_max_pool2d_out_cuda_template failed with error code ",
           cudaGetLastError());
   }

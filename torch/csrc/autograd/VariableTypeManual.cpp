@@ -16,12 +16,6 @@ VariableType::VariableType(Context* context, TypeExtendedInterface* baseType)
   str = std::string("Variable[") + baseType->toString() + "]";
 }
 
-ScalarType VariableType::scalarType() const {
-  return baseType->scalarType();
-}
-caffe2::TypeMeta VariableType::typeMeta() const {
-  return baseType->typeMeta();
-}
 Backend VariableType::backend() const {
   return baseType->backend();
 }
@@ -36,9 +30,6 @@ Storage VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const 
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
-}
-std::unique_ptr<Generator> VariableType::generator() const {
-  return baseType->generator();
 }
 
 const char * VariableType::toString() const {
@@ -83,7 +74,7 @@ struct VariableTypeRegistry {
 
 struct VariableHooks : public at::VariableHooksInterface {
   VariableHooks(at::VariableHooksArgs) {}
-  void registerVariableTypeFor(at::LegacyTypeDispatch*, at::Backend, at::ScalarType) const override;
+  void registerVariableTypeFor(at::LegacyTypeDispatch*, at::Backend) const override;
   at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
 };
 
@@ -117,8 +108,8 @@ static VariableTypeRegistry registry;
 REGISTER_VARIABLE_HOOKS(VariableHooks)
 
 // Pre-condition: backend/scalar_type is a valid type in the type_registry
-void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend, at::ScalarType scalar_type) const {
-  auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
+void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend) const {
+  auto* baseType = context->getNonVariableTypeRaw(backend, ScalarType::Undefined);
   register_variable_type_for(static_cast<at::TypeExtendedInterface*>(baseType));
 }
 
@@ -141,13 +132,11 @@ namespace {
 std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   auto& context = at::globalContext();
   std::vector<Type*> res;
-  res.reserve(backends.size() * static_cast<int>(ScalarType::NumOptions));
+  res.reserve(backends.size());
   for (auto p : backends) {
-    for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
-      if (baseType) {
-        res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
-      }
+    auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), ScalarType::Undefined);
+    if (baseType) {
+      res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
     }
   }
   return res;
@@ -184,15 +173,11 @@ Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, in
 }
 
 const Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
+  return checked_cast_variable(t, name, pos);
 }
 
 Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
-}
-
-SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
-  return SparseTensorRef(checked_cast_variable(t.tref, name, pos).data());
+  return checked_cast_variable(t, name, pos);
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
@@ -213,7 +198,7 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
       AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " at position #", i, " "
                     "for iterable argument #", pos, " '", name, "'");
     }
-    ret[i] = static_cast<const Variable&>(t).data();
+    ret[i] = static_cast<const Variable&>(t);
   }
   return ret;
 }
@@ -230,6 +215,7 @@ void VariableType::set_data(Tensor & self, Tensor new_data) const {
   as_variable_ref(self).set_data(new_data);
 }
 
+// We don't have an outplace copy, so this can't be generated automatically
 Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   jit::Value* output = nullptr;
   if(torch::jit::tracer::isTracing()) {

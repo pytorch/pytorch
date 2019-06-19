@@ -47,7 +47,8 @@ Reducer::Reducer(
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
       process_group_(std::move(process_group)),
       expect_autograd_hooks_(false),
-      has_queued_final_callback_(false),
+      require_finalize_(false),
+      has_marked_unused_parameters_(false),
       next_bucket_(0),
       backward_stats_base_(0) {
   AT_ASSERTM(replicas_.size() >= 1, "Expected at least one model replica.");
@@ -117,11 +118,14 @@ Reducer::Reducer(
         auto grad_accumulator = variable.grad_accumulator();
 
         // Hook to execute after the gradient accumulator has executed.
-        grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>([=] {
-          std::lock_guard<std::mutex> lock(this->mutex_);
-          this->mark_variable_ready(
-              replica_index, variable_index, /* called_from_autograd= */ true);
-        }));
+        hooks_[grad_accumulator->add_post_hook(
+            torch::make_unique<LambdaPostHook>([=] {
+                std::lock_guard<std::mutex> lock(this->mutex_);
+                this->mark_variable_ready(
+                    replica_index,
+                    variable_index,
+                    /* called_from_autograd= */ true);
+            }))] = grad_accumulator;
 
         // Map raw function pointer to replica index and parameter index.
         // This is used later on when the autograd graph is traversed
@@ -147,6 +151,19 @@ Reducer::Reducer(
         backward_stats_.begin(),
         backward_stats_.end(),
         [=](std::vector<int64_t>& v) { v.resize(variable_count); });
+  }
+}
+
+Reducer::~Reducer() noexcept(false) {
+  // Remove all hooks on variables registered by this Reducer. This is necessary
+  // to make DDP failure recoverable. Otherwise, multiple Reducer instances
+  // (from recoveries) will add their hooks to the original model, and those
+  // hooks will try to invoke methods on a deleted Reducer objects.
+  for (auto& hook : hooks_) {
+    auto& key = hook.first;
+    auto& grad_accumulator = hook.second;
+    AT_ASSERTM(grad_accumulator->del_post_hook(key),
+        "Reducer attempts to delete a non-existing hook.");
   }
 }
 
@@ -231,9 +248,39 @@ void Reducer::mark_variable_ready(
   backward_stats_[replica_index][variable_index] =
       current_time_in_nanos() - backward_stats_base_;
 
+  // Any time we mark a variable ready (be it in line due to unused parameters,
+  // or via an autograd hook), we require a call to the finalize function. If
+  // this doesn't happen before the next iteration (or call to
+  // `prepare_for_backwards`), we know something is wrong.
+  require_finalize_ = true;
+
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
   auto& replica = bucket.replicas[replica_index];
+
+  // Something is wrong if all variables contained in this bucket replica have
+  // already been marked as ready.
+  if (replica.pending == 0) {
+    // Receiving a call to `mark_variable_ready` twice for the same variable
+    // is only possible if the variable was initially deemed unused, and was
+    // marked ready from the `prepare_for_backward` function, only to become
+    // part of the autograd graph at a later point in time.
+    AT_ASSERT(has_marked_unused_parameters_);
+    AT_ERROR(
+        "Expected to mark a variable ready only once. ",
+        "",
+        "This error is caused by use of a module parameter outside the ",
+        "`forward` function. The return value of the `forward` function ",
+        "is inspected by the distributed data parallel wrapper to figure ",
+        "out if any of the module's parameters went unused. If this is the ",
+        "case, it knows they won't receive gradients in a backward pass. ",
+        "If any of those parameters are then used outside `forward`, this ",
+        "error condition is triggered. ",
+        "",
+        "You can disable unused parameter detection by passing the keyword "
+        "argument `find_unused_parameters=False` to ",
+        "`torch.nn.parallel.DistributedDataParallel`.");
+  }
 
   if (bucket.expect_sparse_gradient) {
     mark_variable_ready_sparse(replica_index, variable_index);
@@ -257,12 +304,16 @@ void Reducer::mark_variable_ready(
     }
   }
 
-  // Autograd callbacks can only be registered while the engine is running.
-  // Register this reducer's final callback once per backward pass.
-  if (!has_queued_final_callback_ && called_from_autograd) {
-    has_queued_final_callback_ = true;
-    torch::autograd::Engine::get_default_engine().queue_callback(
-        [=] { this->finalize_backward(); });
+  // Run finalizer function once the final bucket was marked ready.
+  if (next_bucket_ == buckets_.size()) {
+    if (called_from_autograd) {
+      torch::autograd::Engine::get_default_engine().queue_callback([=] {
+        std::lock_guard<std::mutex> lock(this->mutex_);
+        this->finalize_backward();
+      });
+    } else {
+      finalize_backward();
+    }
   }
 }
 
@@ -427,8 +478,32 @@ void Reducer::prepare_for_backward(
   std::unordered_set<torch::autograd::Function*> seen;
   std::vector<torch::autograd::Function*> queue;
 
+  // Check that any prior reduction has finished.
+  // The variable `expect_autograd_hooks` is true until gradients for all
+  // parameters have been received and all buckets are ready.
+  if (require_finalize_) {
+    AT_ERROR(
+        "Expected to have finished reduction in the prior iteration before ",
+        "starting a new one. ",
+        "",
+        "This error indicates that your module has parameters that were ",
+        "not used in producing loss. ",
+        "",
+        "You can enable unused parameter detection by (1) passing the keyword "
+        "argument `find_unused_parameters=True` to ",
+        "`torch.nn.parallel.DistributedDataParallel`; (2) making sure all ",
+        "`forward` function outputs participate in calculating loss. "
+        "",
+        "If you already have done the above two steps, then the distributed ",
+        "data parallel module wasn't able to locate the output tensors in the ",
+        "return value of your module's `forward` function. ",
+        "Please include the loss function and the structure of the return ",
+        "value of `forward` of your module when reporting this issue (e.g. ",
+        "list, dict, iterable).");
+  }
+
   // Reset accounting.
-  has_queued_final_callback_ = false;
+  has_marked_unused_parameters_ = true;
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
   backward_stats_base_ = current_time_in_nanos();
@@ -443,6 +518,7 @@ void Reducer::prepare_for_backward(
   // variables will be called, and we don't have to search the autograd graph
   // for presence of these hooks.
   if (outputs.empty()) {
+    has_marked_unused_parameters_ = false;
     return;
   }
 
@@ -519,16 +595,16 @@ void Reducer::finalize_bucket_sparse(Bucket& bucket) {
 }
 
 void Reducer::finalize_backward() {
-  std::lock_guard<std::mutex> lock(mutex_);
-
   // No longer expect autograd hooks to fire after this function returns.
   AT_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
 
+  // No longer require call to finalize after this function returns.
+  AT_ASSERT(require_finalize_);
+  require_finalize_ = false;
+
   // Check that all buckets were completed and had their work kicked off.
-  AT_ASSERTM(
-      next_bucket_ == buckets_.size(),
-      "Expected all buckets to be ready at the end of the backward pass.");
+  AT_ASSERT(next_bucket_ == buckets_.size());
 
   // Wait for asynchronous reduction to complete and unflatten contents.
   for (auto& bucket : buckets_) {

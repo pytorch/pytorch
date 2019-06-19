@@ -58,7 +58,7 @@
 // issue, and for anyone dependent on Caffe2 it will be defined as
 // CAFFE2_CUDA_IMPORT.
 
-#ifdef CAFFE2_CUDA_BUILD_MAIN_LIB
+#ifdef CAFFE2_BUILD_MAIN_LIB
 #define CAFFE2_CUDA_API CAFFE2_CUDA_EXPORT
 #else
 #define CAFFE2_CUDA_API CAFFE2_CUDA_IMPORT

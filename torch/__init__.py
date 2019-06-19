@@ -18,7 +18,7 @@ from ._six import string_classes as _string_classes
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
-    'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed',
+    'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
@@ -53,7 +53,7 @@ if platform.system() == 'Windows':
         else:
             return ''
 
-    py_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(sys.executable), 'Library', 'bin')
+    py_dll_path = _dl_flags.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(__file__), 'lib')
 
     dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), _dl_flags.environ['PATH']]
@@ -175,7 +175,7 @@ def set_default_dtype(d):
     _C._set_default_dtype(d)
 
 # If you edit these imports, please update torch/__init__.py.in as well
-from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
+from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
 from ._tensor_str import set_printoptions
 
@@ -222,9 +222,20 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
 class BoolStorage(_C.BoolStorageBase, _StorageBase):
     pass
 
+class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
+    pass
+
+class QInt8Storage(_C.QInt8StorageBase, _StorageBase):
+    pass
+
+class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
+    pass
+
+
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage, HalfStorage, BoolStorage
+    CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
+    QInt32Storage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -274,6 +285,7 @@ del ShortStorageBase
 del CharStorageBase
 del ByteStorageBase
 del BoolStorageBase
+del QUInt8StorageBase
 
 ################################################################################
 # Import most common subpackages
@@ -283,6 +295,7 @@ import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled  # noqa: F401
 import torch.nn
+import torch.nn.quantized
 import torch.optim
 import torch.multiprocessing
 import torch.sparse

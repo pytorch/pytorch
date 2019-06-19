@@ -527,6 +527,13 @@ cholesky_solve(input2, upper=False) -> Tensor
 See :func:`torch.cholesky_solve`
 """)
 
+add_docstr_all('cholesky_inverse',
+               r"""
+cholesky_inverse(upper=False) -> Tensor
+
+See :func:`torch.cholesky_inverse`
+""")
+
 add_docstr_all('clamp',
                r"""
 clamp(min, max) -> Tensor
@@ -676,8 +683,7 @@ add_docstr_all('dense_dim',
 dense_dim() -> int
 
 If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
-this returns a the number of dense dimensions. Otherwise, this throws an
-error.
+this returns the number of dense dimensions. Otherwise, this throws an error.
 
 See also :meth:`Tensor.sparse_dim`.
 """)
@@ -698,7 +704,7 @@ See :func:`torch.diag_embed`
 
 add_docstr_all('diagflat',
                r"""
-diagflat(diagonal=0) -> Tensor
+diagflat(offset=0) -> Tensor
 
 See :func:`torch.diagflat`
 """)
@@ -989,7 +995,7 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    f(X=k) = (1 - p)^{k - 1} p
+    f(X=k) = p^{k - 1} (1 - p)
 
 """)
 
@@ -1721,13 +1727,6 @@ Example:
     torch.Size([5, 2, 3])
 """)
 
-add_docstr_all('potri',
-               r"""
-potri(upper=True) -> Tensor
-
-See :func:`torch.potri`
-""")
-
 add_docstr_all('pow',
                r"""
 pow(exponent) -> Tensor
@@ -1777,18 +1776,16 @@ Example::
 
 add_docstr_all('qr',
                r"""
-qr() -> (Tensor, Tensor)
+qr(some=True) -> (Tensor, Tensor)
 
 See :func:`torch.qr`
 """)
 
-add_docstr_all('quantize_linear',
+add_docstr_all('qscheme',
                r"""
-quantize_linear(scale, zero_point) -> Tensor
+qscheme() -> torch.qscheme
 
-Quantize a float Tensor using affine quantization scheme with given scale and
-zero_point.
-returns the quantized Tensor.
+Returns the quantization scheme of a given QTensor.
 """)
 
 add_docstr_all('q_scale',
@@ -2275,8 +2272,7 @@ add_docstr_all('sparse_dim',
 sparse_dim() -> int
 
 If :attr:`self` is a sparse COO tensor (i.e., with ``torch.sparse_coo`` layout),
-this returns a the number of sparse dimensions. Otherwise, this throws an
-error.
+this returns the number of sparse dimensions. Otherwise, this throws an error.
 
 See also :meth:`Tensor.dense_dim`.
 """)
@@ -2496,6 +2492,13 @@ add_docstr_all('byte',
 byte() -> Tensor
 
 ``self.byte()`` is equivalent to ``self.to(torch.uint8)``. See :func:`to`.
+""")
+
+add_docstr_all('bool',
+               r"""
+bool() -> Tensor
+
+``self.bool()`` is equivalent to ``self.to(torch.bool)``. See :func:`to`.
 """)
 
 add_docstr_all('char',
@@ -2955,9 +2958,9 @@ sum_to_size(*size) -> Tensor
 
 Sum ``this`` tensor to :attr:`size`.
 :attr:`size` must be broadcastable to ``this`` tensor size.
+
 Args:
-    other (:class:`torch.Tensor`): The result tensor has the same size
-        as :attr:`other`.
+    size (int...): a sequence of integers defining the shape of the output tensor.
 """)
 
 
@@ -3183,4 +3186,17 @@ Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
 add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.
+""")
+
+add_docstr_all('ndim',
+               r"""
+Alias for :meth:`~Tensor.dim()`
+""")
+
+add_docstr_all('T',
+               r"""
+Is this Tensor with its dimensions reversed.
+
+If ``n`` is the number of dimensions in ``x``,
+``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 """)

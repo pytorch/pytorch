@@ -30,8 +30,8 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
       grad_inputs[1] = grad.to(
           src_type->device_type(),
           src_type->scalarType(),
-          /*non_blocking*/false,
-          /*copy*/true);
+          /*non_blocking=*/false,
+          /*copy=*/true);
     } else {
       grad_inputs[1] = grad.toType(*src_type);
     }

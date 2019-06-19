@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace {
+
 // The function implements common subexpression elimination.
 // Since the nodes are visited in topological order, one pass is enough.
 void EliminateCommonSubexpression(
@@ -42,7 +43,15 @@ void EliminateCommonSubexpression(
 
     // Check for CSE opportunities in the parent block.
     auto parent_lookup = parent_lookup_fn(node);
+    auto g_out = node->owningGraph()->outputs();
     if (parent_lookup) {
+      // since the graph outputs may be mutated after they are returned,
+      // don't introduce new aliasing among graph outputs
+      if (aliasDb.mayContainAlias(node->outputs(), g_out) &&
+          aliasDb.mayContainAlias(parent_lookup->outputs(), g_out)) {
+        continue;
+      }
+
       node->replaceAllUsesWith(parent_lookup);
       it.destroyCurrent();
       continue;
@@ -53,6 +62,14 @@ void EliminateCommonSubexpression(
     if (!subit.second) {
       // Subexpression exists, replace the uses of node, and destroy it.
       auto existing = *subit.first;
+
+      // don't introduce new aliasing among graph outputs
+      if (aliasDb.mayContainAlias(
+              node->outputs(), node->owningGraph()->outputs()) &&
+          aliasDb.mayContainAlias(existing->outputs(), g_out)) {
+        continue;
+      }
+
       node->replaceAllUsesWith(existing);
       // Destroy the node.
       it.destroyCurrent();

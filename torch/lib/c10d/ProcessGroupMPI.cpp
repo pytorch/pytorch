@@ -552,6 +552,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
   }
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::reduce_scatter(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<std::vector<at::Tensor>>& inputTensors,
+    const ReduceScatterOptions& opts) {
+  throw std::runtime_error("ProcessGroupMPI does not support reduce_scatter");
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,

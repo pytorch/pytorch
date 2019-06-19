@@ -5,12 +5,6 @@ namespace at {
 
 UndefinedType::UndefinedType()
     : TypeDefault(UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
-ScalarType UndefinedType::scalarType() const {
-  return ScalarType::Undefined;
-}
-caffe2::TypeMeta UndefinedType::typeMeta() const {
-  return scalarTypeToTypeMeta(scalarType());
-}
 Backend UndefinedType::backend() const {
   return Backend::Undefined;
 }
@@ -28,9 +22,6 @@ Storage UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const
 }
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeTensorFromTH not defined for UndefinedType");
-}
-std::unique_ptr<Generator> UndefinedType::generator() const {
-  AT_ERROR("generator not defined for UndefinedType");
 }
 
 const char * UndefinedType::toString() const {

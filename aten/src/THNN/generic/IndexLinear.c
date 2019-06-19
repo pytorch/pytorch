@@ -2,9 +2,7 @@
 #define TH_GENERIC_FILE "THNN/generic/IndexLinear.c"
 #else
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
+#include <ATen/Parallel.h>
 
 /* Threshold used to trigger multithreading */
 #ifndef THNN_SPARSE_OMP_THRESHOLD
@@ -77,7 +75,6 @@ void THNN_(IndexLinear_updateOutput)(
   THArgCheck(THTensor_(isContiguous)(bias), 8, "bias vector must be contiguous");
   THArgCheck(THNN_(checkKeysValues)(keys, values), 1, "Keys and values should have the same number of elements");
   THArgCheck(THTensor_(isContiguous)(normalizedValues), 9, "normalizedValues vector must be contiguous");
-  int64_t i,j,k;
 
   /* Separate cases: output dimension is == 1, or > 1
    * This allows for some optimizations. */
@@ -87,150 +84,148 @@ void THNN_(IndexLinear_updateOutput)(
     if (maxNormalize)
     {
       /* Parallelize on the batch itself */
-#pragma omp parallel                                                    \
-    for private(i,j)                                                    \
-    firstprivate(outDim, keysOffset,                                    \
-                 weightData, keysData,                                  \
-                 valuesData, outputData,                                \
-                 cumSumSizesData, sizesData)                            \
-    schedule(static)                                                    \
-    if(keysSize*outDim > THNN_SPARSE_OMP_THRESHOLD && batchSize > 1)
-      for (j = 0; j < batchSize; j++)
-      {
-        scalar_t* loutputData = outputData + j;
-        scalar_t val = 0;
-        scalar_t absVal = 0;
-        int64_t offset = j == 0 ? 0 : cumSumSizesData[j - 1];
-
-        for (i = 0; i < sizesData[j]; i++)
+      auto loop = [&](int64_t start, int64_t end) {
+        for (auto j = start; j < end; j++)
         {
-          int64_t woffset = weightStride0*(keysData[offset] + keysOffset);
-          absVal = fabs(valuesData[offset]);
-          if (train)
-          {
-            if (absVal > weightData[woffset])
-            {
-              weightData[woffset] = absVal;
-              weightData[woffset+1] = 1/absVal;
-            }
+          scalar_t* loutputData = outputData + j;
+          scalar_t val = 0;
+          scalar_t absVal = 0;
+          int64_t offset = j == 0 ? 0 : cumSumSizesData[j - 1];
 
-            /*
-             * The following can be used to scale the size of the updates
-             * depending on some rule, e.g. the frequency of a feature, ...
-             * This is used at update time.
-             * TODO: implement a smarter update scale.
-             */
-            weightData[woffset+2] = 1;
+          for (auto i = 0; i < sizesData[j]; i++)
+          {
+            int64_t woffset = weightStride0*(keysData[offset] + keysOffset);
+            absVal = fabs(valuesData[offset]);
+            if (train)
+            {
+              if (absVal > weightData[woffset])
+              {
+                weightData[woffset] = absVal;
+                weightData[woffset+1] = 1/absVal;
+              }
+
+              /*
+               * The following can be used to scale the size of the updates
+               * depending on some rule, e.g. the frequency of a feature, ...
+               * This is used at update time.
+               * TODO: implement a smarter update scale.
+               */
+              weightData[woffset+2] = 1;
+            }
+            normalizedValuesData[offset] = (absVal > weightData[woffset] ? THNN_INDEXLINEAR_SIGN(valuesData[offset]):valuesData[offset]*weightData[woffset+1]) + weightData[woffset+3];
+            val += normalizedValuesData[offset] * weightData[woffset+maxNormalize];
+            offset++;
           }
-          normalizedValuesData[offset] = (absVal > weightData[woffset] ? THNN_INDEXLINEAR_SIGN(valuesData[offset]):valuesData[offset]*weightData[woffset+1]) + weightData[woffset+3];
-          val += normalizedValuesData[offset] * weightData[woffset+maxNormalize];
-          offset++;
+          *loutputData += val;
         }
-        *loutputData += val;
+      };
+      if (keysSize * outDim > THNN_SPARSE_OMP_THRESHOLD) {
+        at::parallel_for(0, batchSize, 1, loop);
+      } else {
+        loop(0, batchSize);
       }
     }
     else
     {
       /* Parallelize on the batch itself */
-#pragma omp parallel                                                    \
-    for private(i,j)                                                    \
-    firstprivate(outDim, weightData,                                    \
-                 keysData, valuesData,                                  \
-                 outputData, cumSumSizesData,                           \
-                 sizesData)                                             \
-    schedule(static)                                                    \
-    if(keysSize*outDim > THNN_SPARSE_OMP_THRESHOLD && batchSize > 1)
-      for (j = 0; j < batchSize; j++)
-      {
-        int64_t offset = j == 0 ? 0 : cumSumSizesData[j - 1];
-        scalar_t* loutputData = outputData + j;
-        scalar_t val = 0;
-
-        for (i = 0; i < sizesData[j]; i++)
+      auto loop = [&](int64_t start, int64_t end) {
+        for (auto j = start; j < end; j++)
         {
-          val += weightData[weightStride0*(keysData[offset] + keysOffset)] * valuesData[offset];
-          offset++;
+          int64_t offset = j == 0 ? 0 : cumSumSizesData[j - 1];
+          scalar_t* loutputData = outputData + j;
+          scalar_t val = 0;
+
+          for (auto i = 0; i < sizesData[j]; i++)
+          {
+            val += weightData[weightStride0*(keysData[offset] + keysOffset)] * valuesData[offset];
+            offset++;
+          }
+          *loutputData += val;
         }
-        *loutputData += val;
+      };
+      if (keysSize * outDim > THNN_SPARSE_OMP_THRESHOLD) {
+        at::parallel_for(0, batchSize, 1, loop);
+      } else {
+        loop(0, batchSize);
       }
     }
   }
   else {
-#pragma omp parallel                                                    \
-    for private(i,j,k)                                                  \
-    firstprivate(outDim, weightData,                                    \
-                 keysData, valuesData,                                  \
-                 biasData, outputData,                                  \
-                 cumSumSizesData, sizesData)                            \
-    schedule(static)                                                    \
-    if(keysSize*outDim > THNN_SPARSE_OMP_THRESHOLD && batchSize > 1)
-    for (j = 0; j < batchSize; j++)
-    {
-      int64_t offset = j == 0 ? 0 : cumSumSizesData[j -  1];
-      scalar_t val;
-      scalar_t* loutputData = outputData + j*outDim;
-      scalar_t* lweightData = weightData;
-      memcpy(loutputData, biasData, outDim*sizeof(scalar_t));
-      for (i = 0; i < sizesData[j]; i++)
+    auto loop = [&](int64_t start, int64_t end) {
+      for (auto j = start; j < end; j++)
       {
-        int64_t woffset = weightStride0*(keysData[offset] + keysOffset);
-        if (maxNormalize)
+        int64_t offset = j == 0 ? 0 : cumSumSizesData[j -  1];
+        scalar_t val;
+        scalar_t* loutputData = outputData + j*outDim;
+        scalar_t* lweightData = weightData;
+        memcpy(loutputData, biasData, outDim*sizeof(scalar_t));
+        for (auto i = 0; i < sizesData[j]; i++)
         {
-          val = valuesData[offset];
-          scalar_t absVal = fabs(val);
-          if (train)
+          int64_t woffset = weightStride0*(keysData[offset] + keysOffset);
+          if (maxNormalize)
           {
-            if (absVal > weightData[woffset])
+            val = valuesData[offset];
+            scalar_t absVal = fabs(val);
+            if (train)
             {
-              weightData[woffset] = absVal;
-              weightData[woffset+1] = 1/absVal;
+              if (absVal > weightData[woffset])
+              {
+                weightData[woffset] = absVal;
+                weightData[woffset+1] = 1/absVal;
+              }
+
+              /*
+               * The following can be used to scale the size of the updates
+               * depending on some rule, e.g. the frequency of a feature, ...
+               * The commented section thereafter is just an example of what can be done:
+               *
+               *```
+               * weightData[woffset+2] = weightData[woffset+2]==0?1:(weightData[woffset+2] / (weightData[woffset+2] + 1));
+               * scalar_t alpha = 1;
+               * scalar_t beta = 0.01;
+               * scalar_t gamma = 1 - 0.000001;
+               * scalar_t l = weightData[woffset+2]==0?1/gamma:(weightData[woffset+2] - beta) / (alpha - beta);
+               * l = gamma*l;
+               * weightData[woffset+2] = (alpha-beta)*l + beta;
+               * ```
+               *
+               * TODO: implement a smarter update scale.
+               */
+              weightData[woffset+2] = 1;
             }
 
-            /*
-             * The following can be used to scale the size of the updates
-             * depending on some rule, e.g. the frequency of a feature, ...
-             * The commented section thereafter is just an example of what can be done:
-             *
-             *```
-             * weightData[woffset+2] = weightData[woffset+2]==0?1:(weightData[woffset+2] / (weightData[woffset+2] + 1));
-             * scalar_t alpha = 1;
-             * scalar_t beta = 0.01;
-             * scalar_t gamma = 1 - 0.000001;
-             * scalar_t l = weightData[woffset+2]==0?1/gamma:(weightData[woffset+2] - beta) / (alpha - beta);
-             * l = gamma*l;
-             * weightData[woffset+2] = (alpha-beta)*l + beta;
-             * ```
-             *
-             * TODO: implement a smarter update scale.
-             */
-            weightData[woffset+2] = 1;
+            /* Normalize + Clamp */
+            val = (absVal > weightData[woffset] ? THNN_INDEXLINEAR_SIGN(val):val*weightData[woffset+1]) + weightData[woffset+3];
+            normalizedValuesData[offset] = val;
+
+            lweightData = weightData + woffset + maxNormalize;
           }
-
-          /* Normalize + Clamp */
-          val = (absVal > weightData[woffset] ? THNN_INDEXLINEAR_SIGN(val):val*weightData[woffset+1]) + weightData[woffset+3];
-          normalizedValuesData[offset] = val;
-
-          lweightData = weightData + woffset + maxNormalize;
-        }
-        else
-        {
-          val = valuesData[offset];
-          lweightData = weightData + woffset;
-        }
-        if (outDim > THNN_SPARSE_OUTDIM_THRESHOLD)
-        {
-          THBlas_(axpy)(outDim, val, lweightData, 1, loutputData, 1);
-        }
-        else
-        {
-          for (k=0; k < outDim; k++)
+          else
           {
-            loutputData[k] += lweightData[k] * val;
+            val = valuesData[offset];
+            lweightData = weightData + woffset;
           }
+          if (outDim > THNN_SPARSE_OUTDIM_THRESHOLD)
+          {
+            THBlas_(axpy)(outDim, val, lweightData, 1, loutputData, 1);
+          }
+          else
+          {
+            for (auto k = 0; k < outDim; k++)
+            {
+              loutputData[k] += lweightData[k] * val;
+            }
+          }
+          offset++;
         }
-        offset++;
       }
+    };
+    if (keysSize * outDim > THNN_SPARSE_OMP_THRESHOLD) {
+      at::parallel_for(0, batchSize, 1, loop);
+    } else {
+      loop(0, batchSize);
     }
+
   }
   return;
 }

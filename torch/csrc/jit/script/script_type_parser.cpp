@@ -1,5 +1,6 @@
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/script/parser.h>
 
 namespace torch {
 namespace jit {
@@ -24,6 +25,15 @@ const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
 
 bool isTorch(const Expr& expr) {
   return expr.kind() == TK_VAR && Var(expr).name().name() == "torch";
+}
+
+std::string collectQualname(const Select& select) {
+  Expr base = select.value();
+  if (base.kind() == TK_VAR) {
+    return Var(base).name().name() + "." + select.selector().name();
+  }
+  std::string basename = collectQualname(Select(base));
+  return basename + "." + select.selector().name();
 }
 } // namespace
 
@@ -145,8 +155,13 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
     case '.': {
       auto select = Select(expr);
       const std::string& name = select.selector().name();
-      if (isTorch(select.value()) && name == "Tensor")
+      // Special case for torch.Tensor
+      if (isTorch(select.value()) && name == "Tensor") {
         return "Tensor";
+      } else {
+        // Otherwise, it's a fully qualified class name
+        return collectQualname(select);
+      }
     } break;
   }
   return at::nullopt;
@@ -166,10 +181,13 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
     if (itr != ident_to_type_lut().end()) {
       return itr->second;
     }
-    if (auto typePtr = ClassType::get(*name)) {
-      return typePtr;
+    if (resolver_) {
+      if (auto typePtr = resolver_->resolveType(*name)) {
+        return typePtr;
+      }
     }
-    throw ErrorReport(expr) << "Unknown type name " << *name;
+
+    throw ErrorReport(expr) << "Unknown type name '" << *name << "'";
   }
   throw ErrorReport(expr.range())
       << "Expression of type " << kindToString(expr.kind())
@@ -177,7 +195,7 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
 }
 
 TypePtr ScriptTypeParser::parseType(const std::string& str) {
-  Parser p(str);
+  Parser p(std::make_shared<Source>(str));
   return parseTypeFromExpr(p.parseExp());
 }
 } // namespace script

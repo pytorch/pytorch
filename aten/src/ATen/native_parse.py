@@ -11,6 +11,7 @@ try:
 except ImportError:
     from yaml import Loader
 
+from env import NAMEDTENSOR_ENABLED
 
 # [temp translations]
 # We're currently incrementally moving from the custom func schema to the
@@ -70,6 +71,8 @@ def type_argument_translations(arg):
     elif t == 'int64_t?':
         raise RuntimeError("Please use int? and not int64_t?. "
                            "See [temp translations] for details.")
+    elif t == 'Dimname[]?':
+        t = 'DimnameList?'
     # Enables float by translating to legacy double.
     elif t == 'float':
         t = 'double'
@@ -127,6 +130,10 @@ def type_argument_translations(arg):
     # we change this at either a JIT schema or C++ level.
     elif default == 'Mean':
         default = 'Reduction::Mean'
+    elif default == 'contiguous_format':
+        default = 'MemoryFormat::Contiguous'
+    elif default == 'per_tensor_affine':
+        default = 'QScheme::PER_TENSOR_AFFINE'
     else:
         try:
             default = int(default)
@@ -211,6 +218,19 @@ def parse_arguments(args, func_variants, declaration, func_return):
     supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[1]))
     for arg in supported_topt_arguments[2]:
         arg.update({'default': 'c10::nullopt', 'is_nullable': True})
+    # add explicit support for what is needed for tril_indices / triu_indices
+    supported_topt_arguments.append(
+        [
+            {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True,
+             'default': 'long', 'is_nullable': True},
+            {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+        ]
+    )
 
     corresponding_topts = [
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},
@@ -219,6 +239,9 @@ def parse_arguments(args, func_variants, declaration, func_return):
     corresponding_topts[1]['kwarg_only'] = True
     corresponding_topts.append(corresponding_topts[1].copy())
     corresponding_topts[2]['default'] = '{}'
+    corresponding_topts.append(
+        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
+         'kwarg_only': True, 'default': 'at::kLong'})
 
     def check_topt_representation(topt_representation):
         for idx, supported_topt in enumerate(supported_topt_arguments):
@@ -346,6 +369,9 @@ def propagate_field_names(output_arguments, return_arguments):
             if 'field_name' in r:
                 output_arguments[i]['field_name'] = r['field_name']
 
+def is_named_tensor_only(declaration):
+    return any(['Dimname' in arg['type'] for arg in declaration['arguments']])
+
 
 def run(paths):
     declarations = []
@@ -376,9 +402,12 @@ def run(paths):
                 declaration['cuda_bool'] = func.get('cuda_bool', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
+                declaration['named_guard'] = func.get('named_guard', True)
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')
+                if not NAMEDTENSOR_ENABLED and is_named_tensor_only(declaration):
+                    continue
                 declarations.append(declaration)
             except Exception as e:
                 msg = '''Exception raised in processing function:

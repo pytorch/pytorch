@@ -1,11 +1,12 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/script/error_report.h>
 
 #include <torch/csrc/autograd/variable.h>
 
@@ -74,11 +75,9 @@ class ShapePropagator {
       } catch (propagation_error& e) {
         setUnshapedType(node);
       } catch (std::exception& e) {
-        if (auto sl = node->getSourceLocation()) {
-          sl->wrapAndRethrowException(e, "operation failed shape propagation");
-        } else {
-          throw;
-        }
+        throw script::ErrorReport(node->sourceRange())
+            << ExceptionMessage(e)
+            << "\nThe above operation failed shape propagation in this context";
       }
     }
   }
@@ -89,13 +88,13 @@ class ShapePropagator {
 
   bool resizesInput(Node* n) {
     static std::unordered_set<Symbol> resize_ops{
-        aten::resize_,    aten::resize_as_, aten::copy_,    aten::set_,
-        aten::add_,       aten::addbmm_,    aten::addcdiv_, aten::addcmul_,
-        aten::addmv_,     aten::addr_,      aten::baddbmm_, aten::ge_,
-        aten::gt_,        aten::le_,        aten::lerp_,    aten::lt_,
-        aten::mul_,       aten::ne_,        aten::sub_,     aten::unsqueeze_,
-        aten::t_, // could preserve DimensionedTensorType Here
-        aten::transpose_,
+        aten::resize_,
+        aten::resize_as_,
+        aten::copy_,
+        aten::set_,
+        aten::unsqueeze_,
+        aten::t_,
+        aten::transpose_, // could preserve DimensionedTensorType Here
     };
 
     if (resize_ops.count(n->kind()))
@@ -119,7 +118,7 @@ class ShapePropagator {
       }
       if (resizesInput(n)) {
         for (const auto input : n->inputs()) {
-          if (aliasDb_.writesToAlias(n, {input}, /*recurseBlocks*/ false)) {
+          if (aliasDb_.writesToAlias(n, {input})) {
             resized_alias_set.insert(input);
           }
         }
@@ -157,10 +156,9 @@ class ShapePropagator {
       return *iv;
     }
     if (CompleteTensorTypePtr type = type_->cast<CompleteTensorType>()) {
-      auto backend =
-          type->device().is_cpu() ? at::Backend::CPU : at::Backend::CUDA;
+      auto attype = type->device().is_cpu() ? at::CPU(type->scalarType())
+                                            : at::CUDA(type->scalarType());
       at::DeviceGuard device_guard(type->device());
-      auto& attype = at::getNonVariableType(backend, type->scalarType());
       auto t =
           at::empty_strided(type->sizes(), type->strides(), attype.options())
               .zero_();
@@ -419,6 +417,41 @@ class ShapePropagator {
     setUnshapedType(cat_node);
   }
 
+  void propagateTorchTensorShape(Node* node) {
+    auto input_type = node->inputs().at(0)->type();
+
+    size_t dims = 0;
+    auto input_base_type = input_type;
+    auto list_type = input_type->cast<ListType>();
+    while (list_type) {
+      dims++;
+      input_base_type = list_type->getElementType();
+      list_type = input_base_type->cast<ListType>();
+    }
+
+    at::ScalarType default_type = scalarTypeFromJitType(input_base_type);
+    if (auto grad_index = node->schema().argumentIndexWithName("dtype")) {
+      auto inp = toIValue(node->inputs().at(*grad_index));
+      if (inp == c10::nullopt) {
+        return;
+      } else if (!inp->isNone()) {
+        default_type = inp->toScalarType();
+      }
+    }
+
+    at::Device default_device = at::kCPU;
+    if (auto device_index = node->schema().argumentIndexWithName("device")) {
+      auto inp = toIValue(node->inputs().at(*device_index));
+      if (inp == c10::nullopt) {
+        return;
+      } else if (!inp->isNone()) {
+        default_device = inp->toDevice();
+      }
+    }
+    node->output()->setType(
+        DimensionedTensorType::create(default_type, default_device, dims));
+  }
+
   bool mayAliasResizedSet(at::ArrayRef<Value*> vs) {
     bool in_resize = false;
     for (auto v : vs) {
@@ -494,11 +527,18 @@ class ShapePropagator {
         }
         return;
       }
+      case aten::tensor: {
+        return propagateTorchTensorShape(node);
+      }
       case prim::TupleConstruct: {
         // We refresh the tuple type, because the input types could have been
         // refined.
+        auto orig_type = node->output()->type()->expect<TupleType>();
         node->output()->setType(TupleType::create(
-            fmap(node->inputs(), [](Value* v) { return v->type(); })));
+            fmap(node->inputs(), [](Value* v) { return v->type(); }),
+            orig_type->hasNames() ? c10::make_optional(orig_type->names())
+                                  : c10::nullopt,
+            orig_type->unqualName()));
         return;
       }
       case prim::TupleUnpack: {
@@ -518,6 +558,15 @@ class ShapePropagator {
         }
         return;
       }
+      case prim::unchecked_unwrap_optional: {
+        // If we have specialized the optional type to the element type,
+        // we want to pass it down. We write this as input.isSubtypeOf(output)
+        // to be sure that we don't screw up nested optionals.
+        if (node->input()->type()->isSubtypeOf(node->output()->type())) {
+          node->output()->setType(node->input()->type());
+        }
+        return;
+      }
       case prim::ConstantChunk: {
         Value* tensor = node->input();
         if (auto type = tensor->type()->cast<DimensionedTensorType>()) {
@@ -529,6 +578,8 @@ class ShapePropagator {
         }
         return;
       }
+      case prim::CallFunction:
+      case prim::CallMethod:
       case prim::AutogradZero: {
         setUnshapedType(node);
         return;
@@ -540,10 +591,13 @@ class ShapePropagator {
         return;
       }
       case aten::_unwrap_optional: {
-        auto input_ivalue = toIValue(node->input());
-        if (input_ivalue && input_ivalue->isNone()) {
-          return;
+        // If we have specialized the optional type to the element type,
+        // we want to pass it down. We write this as input.isSubtypeOf(output)
+        // to be sure that we don't screw up nested optionals.
+        if (node->input()->type()->isSubtypeOf(node->output()->type())) {
+          node->output()->setType(node->input()->type());
         }
+        return;
       }
       default:
         break; // fall-through
@@ -657,7 +711,7 @@ class ShapePropagator {
             "aten::atan(Tensor self) -> Tensor",
             "aten::ceil(Tensor self) -> Tensor",
             "aten::clone(Tensor self) -> Tensor",
-            "aten::contiguous(Tensor self) -> Tensor",
+            "aten::contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor",
             "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
             "aten::celu(Tensor self, Scalar alpha) -> Tensor",
             "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",

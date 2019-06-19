@@ -13,18 +13,18 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
 
   // tscores: (num_boxes, num_classes), 0 for background
   if (tscores.dim() == 4) {
-    CAFFE_ENFORCE_EQ(tscores.size(2), 1, tscores.size(2));
-    CAFFE_ENFORCE_EQ(tscores.size(3), 1, tscores.size(3));
+    CAFFE_ENFORCE_EQ(tscores.size(2), 1);
+    CAFFE_ENFORCE_EQ(tscores.size(3), 1);
   } else {
-    CAFFE_ENFORCE_EQ(tscores.dim(), 2, tscores.dim());
+    CAFFE_ENFORCE_EQ(tscores.dim(), 2);
   }
   CAFFE_ENFORCE(tscores.template IsType<float>(), tscores.dtype().name());
   // tboxes: (num_boxes, num_classes * box_dim)
   if (tboxes.dim() == 4) {
-    CAFFE_ENFORCE_EQ(tboxes.size(2), 1, tboxes.size(2));
-    CAFFE_ENFORCE_EQ(tboxes.size(3), 1, tboxes.size(3));
+    CAFFE_ENFORCE_EQ(tboxes.size(2), 1);
+    CAFFE_ENFORCE_EQ(tboxes.size(3), 1);
   } else {
-    CAFFE_ENFORCE_EQ(tboxes.dim(), 2, tboxes.dim());
+    CAFFE_ENFORCE_EQ(tboxes.dim(), 2);
   }
   CAFFE_ENFORCE(tboxes.template IsType<float>(), tboxes.dtype().name());
 
@@ -32,7 +32,8 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   int num_classes = tscores.size(1);
 
   CAFFE_ENFORCE_EQ(N, tboxes.size(0));
-  CAFFE_ENFORCE_EQ(num_classes * box_dim, tboxes.size(1));
+  int num_boxes_classes = get_box_cls_index(num_classes - 1) + 1;
+  CAFFE_ENFORCE_EQ(num_boxes_classes * box_dim, tboxes.size(1));
 
   int batch_size = 1;
   vector<float> batch_splits_default(1, tscores.size(0));
@@ -82,12 +83,13 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     // skip j = 0, because it's the background class
     int total_keep_count = 0;
     for (int j = 1; j < num_classes; j++) {
-      auto cur_scores = scores.col(j);
+      auto cur_scores = scores.col(get_score_cls_index(j));
       auto inds = utils::GetArrayIndices(cur_scores > score_thres_);
-      auto cur_boxes = boxes.block(0, j * box_dim, boxes.rows(), box_dim);
+      auto cur_boxes =
+          boxes.block(0, get_box_cls_index(j) * box_dim, boxes.rows(), box_dim);
 
       if (soft_nms_enabled_) {
-        auto cur_soft_nms_scores = soft_nms_scores.col(j);
+        auto cur_soft_nms_scores = soft_nms_scores.col(get_score_cls_index(j));
         keeps[j] = utils::soft_nms_cpu(
             &cur_soft_nms_scores,
             cur_boxes,
@@ -96,7 +98,9 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
             soft_nms_sigma_,
             nms_thres_,
             soft_nms_min_score_thres_,
-            soft_nms_method_);
+            soft_nms_method_,
+            -1, /* topN */
+            legacy_plus_one_);
       } else {
         std::sort(
             inds.data(),
@@ -105,8 +109,13 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
               return cur_scores(lhs) > cur_scores(rhs);
             });
         int keep_max = detections_per_im_ > 0 ? detections_per_im_ : -1;
-        keeps[j] =
-            utils::nms_cpu(cur_boxes, cur_scores, inds, nms_thres_, keep_max);
+        keeps[j] = utils::nms_cpu(
+            cur_boxes,
+            cur_scores,
+            inds,
+            nms_thres_,
+            keep_max,
+            legacy_plus_one_);
       }
       total_keep_count += keeps[j].size();
     }
@@ -122,7 +131,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     // Limit to max_per_image detections *over all classes*
     if (detections_per_im_ > 0 && total_keep_count > detections_per_im_) {
       // merge all scores (represented by indices) together and sort
-      auto get_all_scores_sorted = [&scores, &keeps, total_keep_count]() {
+      auto get_all_scores_sorted = [&]() {
         // flatten keeps[i][j] to [pair(i, keeps[i][j]), ...]
         // first: class index (1 ~ keeps.size() - 1),
         // second: values in keeps[first]
@@ -130,19 +139,19 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
         vector<KeepIndex> ret(total_keep_count);
 
         int ret_idx = 0;
-        for (int i = 1; i < keeps.size(); i++) {
-          auto& cur_keep = keeps[i];
+        for (int j = 1; j < num_classes; j++) {
+          auto& cur_keep = keeps[j];
           for (auto& ckv : cur_keep) {
-            ret[ret_idx++] = {i, ckv};
+            ret[ret_idx++] = {j, ckv};
           }
         }
 
         std::sort(
             ret.data(),
             ret.data() + ret.size(),
-            [&scores](const KeepIndex& lhs, const KeepIndex& rhs) {
-              return scores(lhs.second, lhs.first) >
-                  scores(rhs.second, rhs.first);
+            [this, &scores](const KeepIndex& lhs, const KeepIndex& rhs) {
+              return scores(lhs.second, this->get_score_cls_index(lhs.first)) >
+                  scores(rhs.second, this->get_score_cls_index(rhs.first));
             });
 
         return ret;
@@ -173,8 +182,9 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
 
     int cur_out_idx = 0;
     for (int j = 1; j < num_classes; j++) {
-      auto cur_scores = scores.col(j);
-      auto cur_boxes = boxes.block(0, j * box_dim, boxes.rows(), box_dim);
+      auto cur_scores = scores.col(get_score_cls_index(j));
+      auto cur_boxes =
+          boxes.block(0, get_box_cls_index(j) * box_dim, boxes.rows(), box_dim);
       auto& cur_keep = keeps[j];
       Eigen::Map<EArrXf> cur_out_scores(
           out_scores->template mutable_data<float>() + cur_start_idx +
@@ -195,7 +205,8 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
       utils::GetSubArrayRows(
           cur_boxes, utils::AsEArrXt(cur_keep), &cur_out_boxes);
       for (int k = 0; k < cur_keep.size(); k++) {
-        cur_out_classes[k] = static_cast<float>(j);
+        cur_out_classes[k] =
+            static_cast<float>(j - !output_classes_include_bg_cls_);
       }
 
       cur_out_idx += cur_keep.size();
@@ -296,7 +307,8 @@ SHOULD_NOT_DO_GRADIENT(BoxWithNMSLimit);
 } // namespace
 } // namespace caffe2
 
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+// clang-format off
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     BoxWithNMSLimit,
     "_caffe2::BoxWithNMSLimit("
       "Tensor scores, "
@@ -309,7 +321,11 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       "str soft_nms_method, "
       "float soft_nms_sigma, "
       "float soft_nms_min_score_thres, "
-      "bool rotated"
+      "bool rotated, "
+      "bool cls_agnostic_bbox_reg, "
+      "bool input_boxes_include_bg_cls, "
+      "bool output_classes_include_bg_cls, "
+      "bool legacy_plus_one "
     ") -> ("
       "Tensor scores, "
       "Tensor boxes, "
@@ -319,3 +335,4 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       //"Tensor keeps_size, "
     ")",
     caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);
+// clang-format on

@@ -37,6 +37,7 @@ bool needTrimGrad(Node* n) {
   static OperatorSet need_trim_grad_ops = {
       "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
       "aten::topk(Tensor self, int k, int dim, bool largest, bool sorted) -> (Tensor, Tensor)",
+      "aten::max_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
   };
   if (need_trim_grad_ops.find(n)) {
     return true;
@@ -212,11 +213,17 @@ class GradientHelper {
  private:
   Node* node;
 
-  SymbolicVariable gradSumToSizeOf(SymbolicVariable v, Symbol input_name) {
+  SymbolicVariable gradSumToSizeOf(
+      SymbolicVariable v,
+      Symbol input_name,
+      SymbolicVariable fw_output) {
     Value* size;
     {
-      WithInsertPoint insert_guard{node};
-      size = SymbolicVariable(node->namedInput(input_name)).size();
+      // We insert after the current node because we want to use
+      // its output.
+      WithInsertPoint insert_guard{node->next()};
+      size = SymbolicVariable(node->namedInput(input_name))
+                 .size_if_not_equal(fw_output);
     }
     return v.gradSumToSize(size);
   };
@@ -236,9 +243,11 @@ class GradientHelper {
 
     if (node->matches(
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {gradSumToSizeOf(grads.at(0), attr::self),
+      return {gradSumToSizeOf(grads.at(0), attr::self, outputs.at(0)),
               gradSumToSizeOf(
-                  grads.at(0) * node->namedInput(attr::alpha), attr::other),
+                  grads.at(0) * node->namedInput(attr::alpha),
+                  attr::other,
+                  outputs.at(0)),
               nullptr};
 
     } else if (
@@ -253,9 +262,11 @@ class GradientHelper {
     } else if (
         node->matches(
             "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
-      return {gradSumToSizeOf(grads.at(0), attr::self),
+      return {gradSumToSizeOf(grads.at(0), attr::self, outputs.at(0)),
               gradSumToSizeOf(
-                  -grads.at(0) * node->namedInput(attr::alpha), attr::other),
+                  -grads.at(0) * node->namedInput(attr::alpha),
+                  attr::other,
+                  outputs.at(0)),
               nullptr};
 
     } else if (
@@ -336,7 +347,9 @@ class GradientHelper {
         node->matches(
             "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
       return {gradSumToSizeOf(
-                  grads.at(0) * node->namedInput(attr::beta), attr::self),
+                  grads.at(0) * node->namedInput(attr::beta),
+                  attr::self,
+                  outputs.at(0)),
               grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
               inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
               nullptr,
@@ -381,7 +394,7 @@ class GradientHelper {
            node->namedInput(attr::padding),
            outputs.at(1).value(),
            outputs.at(2).value(),
-           graph->insertConstant(std::vector<bool>{true, true, true})});
+           graph->insertConstant(c10::make_list<bool>({true, true, true}))});
       // graph->insert returns a tuple automatically if multiple outputs are
       // returned. So unpack them again.
       Node* tuple_unpack_node =
@@ -410,7 +423,7 @@ class GradientHelper {
            outputs.at(2).value(),
            inputs.at(5).value(),
            inputs.at(7).value(),
-           graph->insertConstant(std::vector<bool>{true, true, true})});
+           graph->insertConstant(c10::make_list<bool>({true, true, true}))});
       // graph->insert returns a tuple automatically if multiple outputs are
       // returned. So unpack them again.
       Node* tuple_unpack_node =
@@ -804,7 +817,14 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     // we create an incorrect sum that doesn't use prev vjp, replace uses, and
     // fix the sum.
     Value* new_vjp = createAutogradAdd(tmp_vjp_in, tmp_vjp_in);
-    new_vjp->node()->moveAfter(tmp_vjp_prev->node());
+    if (tmp_vjp_prev->node()->kind() == prim::Param) {
+      // can't move a node after a block param node
+      new_vjp->node()->moveBefore(
+          *tmp_vjp_prev->node()->owningBlock()->nodes().begin());
+    } else {
+      new_vjp->node()->moveAfter(tmp_vjp_prev->node());
+    }
+
     tmp_vjp_prev->replaceAllUsesWith(new_vjp);
     new_vjp->node()->replaceInput(1, tmp_vjp_prev);
     grad_desc.df_input_vjps.emplace_back(i);
@@ -836,7 +856,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
 Gradient differentiate(std::shared_ptr<Graph>& graph) {
   Gradient grad_desc;
   // Take ownership of the graph
-  AT_CHECK(
+  TORCH_CHECK(
       graph.use_count() == 1,
       "differentiate will mutate and destroy the graph, so it requires "
       "graph.use_count() == 1, but found %d",
@@ -859,6 +879,5 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   ConstantPooling(grad_desc.df);
   return grad_desc;
 }
-
 } // namespace jit
 } // namespace torch

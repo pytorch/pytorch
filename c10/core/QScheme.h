@@ -2,9 +2,7 @@
 
 #include <c10/core/TensorTypeId.h>
 #include <c10/core/DeviceType.h>
-// For kCPU
-// TODO: Why are these defined in Backend.h?
-#include <c10/core/Backend.h>
+#include <c10/util/Exception.h>
 
 namespace c10 {
 
@@ -12,6 +10,7 @@ namespace c10 {
  * QScheme is an enum that specifies the type of quantization. This has a one
  * to one correspondence with Quantizer
  * Please refer to ATen/core/Quantizer.h to see the Quantizers classes.
+ * Keep this file in sync with torch/nn/_qscheme.py
  */
 enum class QScheme : uint8_t {
   PER_TENSOR_AFFINE = 0,
@@ -39,7 +38,7 @@ inline std::string toString(QScheme qscheme) {
     case kPerChannelSymmetric:
       return "PerChannelSymmetric";
     default:
-      AT_ERROR("Unrecognized qscheme: ", static_cast<int>(qscheme));
+      TORCH_CHECK(false, "Unrecognized qscheme: ", static_cast<int>(qscheme));
   }
 }
 

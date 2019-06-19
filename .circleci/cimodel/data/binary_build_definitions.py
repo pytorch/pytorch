@@ -9,7 +9,7 @@ import cimodel.lib.visualization as visualization
 
 
 class Conf(object):
-    def __init__(self, os, cuda_version, pydistro, parms, smoke=False, libtorch_variant=None):
+    def __init__(self, os, cuda_version, pydistro, parms, smoke, libtorch_variant, devtoolset_version):
 
         self.os = os
         self.cuda_version = cuda_version
@@ -17,9 +17,13 @@ class Conf(object):
         self.parms = parms
         self.smoke = smoke
         self.libtorch_variant = libtorch_variant
+        self.devtoolset_version = devtoolset_version
 
     def gen_build_env_parms(self):
-        return [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
+        elems = [self.pydistro] + self.parms + [binary_build_data.get_processor_arch_name(self.cuda_version)]
+        if self.devtoolset_version is not None:
+            elems.append("devtoolset" + str(self.devtoolset_version))
+        return elems
 
     def gen_docker_image(self):
 
@@ -30,6 +34,7 @@ class Conf(object):
 
         docker_distro_prefix = miniutils.override(self.pydistro, docker_word_substitution)
 
+        # The cpu nightlies are built on the soumith/manylinux-cuda80 docker image
         alt_docker_suffix = self.cuda_version or "80"
         docker_distro_suffix = "" if self.pydistro == "conda" else alt_docker_suffix
         return miniutils.quote("soumith/" + docker_distro_prefix + "-cuda" + docker_distro_suffix)
@@ -38,6 +43,7 @@ class Conf(object):
         return "smoke" if self.smoke else "binary"
 
     def gen_build_name(self, build_or_test):
+
         parts = [self.get_name_prefix(), self.os] + self.gen_build_env_parms()
 
         if self.smoke:
@@ -101,7 +107,8 @@ def gen_build_env_list(smoke):
             c.find_prop("package_format"),
             [c.find_prop("pyver")],
             c.find_prop("smoke"),
-            c.find_prop("libtorch_variant")
+            c.find_prop("libtorch_variant"),
+            c.find_prop("devtoolset_version"),
         )
         newlist.append(conf)
 
@@ -140,13 +147,12 @@ def get_nightly_tests():
     configs = gen_build_env_list(False)
     filtered_configs = filter(predicate_exclude_nonlinux_and_libtorch, configs)
 
-    mylist = []
+    tests = []
     for conf_options in filtered_configs:
-        d = {conf_options.gen_build_name("test"): {"requires": [conf_options.gen_build_name("build")]}}
-        mylist.append(d)
+        params = {"requires": ["setup", conf_options.gen_build_name("build")]}
+        tests.append({conf_options.gen_build_name("test"): params})
 
-    return mylist
-
+    return tests
 
 def get_nightly_uploads():
 
@@ -156,7 +162,7 @@ def get_nightly_uploads():
         return {
             conf.gen_build_name("upload"): OrderedDict([
                 ("context", "org-member"),
-                ("requires", [conf.gen_build_name(phase_dependency)]),
+                ("requires", ["setup", conf.gen_build_name(phase_dependency)]),
             ]),
         }
 
@@ -183,12 +189,12 @@ def gen_schedule_tree(cron_timing):
 
 def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
 
-    jobs_list = []
+    jobs_list = ["setup"]
 
     configs = gen_build_env_list(smoke)
     for build_config in configs:
         build_name = build_config.gen_build_name("build")
-        jobs_list.append(build_name)
+        jobs_list.append({build_name: {"requires": ["setup"]}})
 
     jobs_dict[toplevel_key] = OrderedDict(
         triggers=gen_schedule_tree(cron_schedule),

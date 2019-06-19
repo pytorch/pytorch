@@ -5,9 +5,10 @@
 #include <c10/util/Deprecated.h>
 #include <ATen/core/Generator.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Half.h>
 #include <c10/core/TensorTypeIdRegistration.h>
@@ -46,10 +47,7 @@ static inline void noop_deleter(void*) {}
 
 enum class TypeID {
   ${type_ids}
-  CPUComplexFloat,
-  CPUComplexDouble,
-  CUDAComplexFloat,
-  CUDAComplexDouble,
+  ComplexCPU,
   Undefined,
   NumOptions
 };
@@ -59,8 +57,6 @@ struct CAFFE2_API Type {
       : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
 
   virtual ~Type() {}
-  virtual ScalarType scalarType() const = 0;
-  virtual caffe2::TypeMeta typeMeta() const = 0;
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }
   virtual bool is_cuda() const = 0;
@@ -72,7 +68,6 @@ struct CAFFE2_API Type {
   bool is_undefined() const noexcept { return is_undefined_; }
   virtual Allocator * allocator() const = 0;
   virtual Device getDeviceFromPtr(void * data) const = 0;
-  virtual std::unique_ptr<Generator> generator() const = 0;
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
@@ -119,9 +114,8 @@ struct CAFFE2_API Type {
     return this != &other;
   }
 
-  /// Constructs the `TensorOptions` from a type and a `device_index`.
-  TensorOptions options(int16_t device_index = -1) const {
-    return TensorOptions().dtype(typeMeta())
+  TensorOptions options(ScalarType s, int16_t device_index = -1) const {
+    return TensorOptions().dtype(s)
                           .device(device_type(), device_index)
                           .layout(layout())
                           .is_variable(is_variable());
@@ -129,18 +123,14 @@ struct CAFFE2_API Type {
 
   /// Constructs the `TensorOptions` from a type and a Device.  Asserts that
   /// the device type matches the device type of the type.
-  TensorOptions options(c10::optional<Device> device_opt) const {
+  TensorOptions options(ScalarType s, c10::optional<Device> device_opt) const {
     if (!device_opt.has_value()) {
-      return options(-1);
+      return options(s, -1);
     } else {
       Device device = device_opt.value();
       AT_ASSERT(device.type() == device_type());
-      return options(device.index());
+      return options(s, device.index());
     }
-  }
-
-  operator TensorOptions() const {
-    return options();
   }
 
   // example
@@ -153,5 +143,3 @@ protected:
 };
 
 } // namespace at
-
-#include <ATen/core/Tensor.h>

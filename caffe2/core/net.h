@@ -17,7 +17,6 @@
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/simple_queue.h"
 
@@ -62,6 +61,13 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
   }
 
   virtual bool RunAsync();
+
+  /* Benchmarks a network for one individual run so that we can feed new
+   * inputs on additional calls.
+   * This function returns the number of microseconds spent
+   * during the benchmark
+   */
+  virtual float TEST_Benchmark_One_Run();
 
   /**
    * Benchmarks a network.

@@ -7,6 +7,7 @@
 #include <pybind11/stl.h>
 
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
@@ -32,6 +33,8 @@
 #include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/script/module_python.h"
+
 
 // Because of CMake setup, we can't depend on script module here just yet -
 // it pulls in generated files from a different directory and it
@@ -244,9 +247,9 @@ bool feedBlob(
     return true;
   }
 #ifdef FBCODE_CAFFE2
-  if (py::isinstance<torch::jit::script::Module>(arg)) {
+  if (auto module = torch::jit::script::as_module(arg)) {
     *blob->GetMutable<std::shared_ptr<torch::jit::script::Module>>() =
-        arg.cast<std::shared_ptr<torch::jit::script::Module>>();
+        module;
     return true;
   }
 #endif
@@ -254,6 +257,12 @@ bool feedBlob(
       "Unexpected type of argument - only numpy array or string are "
       "supported for feeding");
   return false;
+}
+
+Blob deserializeBlob(const string& content) {
+  Blob blob;
+  DeserializeBlob(content, &blob);
+  return blob;
 }
 } // namespace python_detail
 
@@ -420,7 +429,15 @@ void addObjectMethods(py::module& m) {
       .def("_wrap_tensor_impl", [](Blob* blob, void* ptr) {
         auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
             unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
-        AT_CHECK(p.defined(), "Can't wrap undefined tensor");
+        // TODO: In the near future, a PyTorch tensor without AutogradMeta will be
+        // a valid tensor. At that point, we will only accept non-requires-grad
+        // tensor into Caffe2 workspace, and don't need to perform shallow-copying
+        // here anymore.
+        p = p->shallow_copy_and_detach(
+            /*version_counter=*/p->version_counter(),
+            /*allow_tensor_metadata_change=*/p->allow_tensor_metadata_change());
+        TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
+        TORCH_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
         auto at_tensor = at::Tensor::wrap_tensor_impl(std::move(p));
         BlobSetTensor(blob, Tensor(std::move(at_tensor)));
       });
@@ -1015,7 +1032,18 @@ void addGlobalMethods(py::module& m) {
 #else // CAFFE2_USE_MKLDNN
       false
 #endif // CAFFE2_USE_MKLDNN
-      );
+  );
+
+  // if the binary is built with __HIP_PLATFORM_HCC__, this is a ROCm build
+  // and therefore we need to ignore dyndep failures (because the the module
+  // may not have a ROCm equivalent yet e.g. nccl)
+  m.attr("use_rocm") = py::bool_(
+#if __HIP_PLATFORM_HCC__
+      true
+#else // __HIP_PLATFORM_HCC__
+      false
+#endif // __HIP_PLATFORM_HCC__
+  );
 
   m.attr("use_trt") = py::bool_(
 #ifdef CAFFE2_USE_TRT
@@ -1261,6 +1289,14 @@ void addGlobalMethods(py::module& m) {
             net->TEST_Benchmark(warmup_runs, main_runs, run_individual);
         return stat;
       });
+  m.def("benchmark_net_once", [](const std::string& name) {
+    CAFFE_ENFORCE(gWorkspace);
+    auto* net = gWorkspace->GetNet(name);
+    CAFFE_ENFORCE(net, "Didn't find net: ", name);
+    py::gil_scoped_release g;
+    float stat = net->TEST_Benchmark_One_Run();
+    return stat;
+  });
 
   m.def("delete_net", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
@@ -1513,6 +1549,9 @@ void addGlobalMethods(py::module& m) {
       py::arg("name"),
       py::arg("arg"),
       py::arg("device_option") = py::none());
+  m.def("deserialize_blob", [](const string& content) {
+    return python_detail::deserializeBlob(content);
+  });
   m.def("serialize_blob", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     auto* blob = gWorkspace->GetBlob(name);
@@ -1677,6 +1716,7 @@ void addGlobalMethods(py::module& m) {
          const std::vector<int>& black_list,
          int max_batch_size,
          int max_seq_size,
+         bool adjust_batch,
          bool debug_builder,
          bool use_onnx) -> py::bytes {
         caffe2::NetDef pred_net;
@@ -1692,6 +1732,7 @@ void addGlobalMethods(py::module& m) {
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
+        opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
@@ -1806,6 +1847,8 @@ void addGlobalMethods(py::module& m) {
 
 PYBIND11_MODULE(caffe2_pybind11_state, m) {
   m.doc() = "pybind11 stateful interface to Caffe2 workspaces";
+
+  C10_LOG_API_USAGE_ONCE("caffe2.python.import");
 
   addGlobalMethods(m);
   addObjectMethods(m);

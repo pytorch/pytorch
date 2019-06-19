@@ -18,7 +18,7 @@ namespace {
 struct Fan {
   explicit Fan(Tensor& tensor) {
     const auto dimensions = tensor.ndimension();
-    AT_CHECK(
+    TORCH_CHECK(
         dimensions >= 2,
         "Fan in and fan out can not be computed for tensor with fewer than 2 dimensions");
 
@@ -73,7 +73,7 @@ Tensor constant_(Tensor tensor, Scalar value) {
 Tensor dirac_(Tensor tensor) {
   NoGradGuard guard;
 
-  AT_CHECK(
+  TORCH_CHECK(
       tensor.ndimension() >= 3 && tensor.ndimension() <= 5,
       "Only tensors with 3, 4, or 5 dimensions are supported");
 
@@ -100,7 +100,7 @@ Tensor dirac_(Tensor tensor) {
 
 Tensor eye_(Tensor matrix) {
   NoGradGuard guard;
-  AT_CHECK(
+  TORCH_CHECK(
       matrix.ndimension() == 2, "Only tensors with 2 dimensions are supported");
   return torch::eye_out(matrix, matrix.size(0), matrix.size(1));
 }
@@ -118,7 +118,7 @@ Tensor ones_(Tensor tensor) {
 Tensor orthogonal_(Tensor tensor, double gain) {
   NoGradGuard guard;
 
-  AT_CHECK(
+  TORCH_CHECK(
       tensor.ndimension() >= 2,
       "Only tensors with 2 or more dimensions are supported");
 
@@ -151,7 +151,7 @@ Tensor orthogonal_(Tensor tensor, double gain) {
 Tensor sparse_(Tensor tensor, double sparsity, double std) {
   NoGradGuard guard;
 
-  AT_CHECK(
+  TORCH_CHECK(
       tensor.ndimension() == 2, "Only tensors with 2 dimensions are supported");
 
   const auto rows = tensor.size(0);
