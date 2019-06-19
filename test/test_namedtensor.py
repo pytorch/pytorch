@@ -87,10 +87,6 @@ class TestNamedTensor(TestCase):
         for test, device in itertools.product(tests, torch.testing.get_all_device_types()):
             self.assertEqual(test.func(device).names, test.expected_names)
 
-    @unittest.skipIf(not TEST_CUDA, 'no CUDA')
-    def test_empty_cuda(self):
-        self._test_factory(torch.empty, 'cuda')
-
     def test_using_seen_interned_string_doesnt_bump_refcount(self):
         def see_name():
             seen_name = 'N'
