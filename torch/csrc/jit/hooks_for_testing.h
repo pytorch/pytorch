@@ -9,10 +9,15 @@ struct Function;
 namespace script {
 struct Module;
 }
+
+using ModuleHook = std::function<void(std::shared_ptr<script::Module> module)>;
+using FunctionHook = std::function<void(std::shared_ptr<Function> function)>;
+
 TORCH_API void didFinishEmitModule(std::shared_ptr<script::Module> module);
 TORCH_API void didFinishEmitFunction(std::shared_ptr<Function> defined);
 TORCH_API void setEmitHooks(
-    std::function<void(std::shared_ptr<script::Module> module)> for_module,
-    std::function<void(std::shared_ptr<Function> fn)> for_fn);
+    ModuleHook for_module,
+    FunctionHook for_fn);
+TORCH_API std::pair<ModuleHook, FunctionHook> getEmitHooks();
 } // namespace jit
 } // namespace torch

@@ -12,17 +12,12 @@
 
 namespace at { namespace native {
 
-template <typename scalar_t>
-void add_kernel_impl(TensorIterator& iter, Scalar alpha_scalar) {
-  auto alpha = alpha_scalar.to<scalar_t>();
-  gpu_binary_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-    return a + alpha * b;
-  });
-}
-
-static void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "add_cuda", [&]() {
-    add_kernel_impl<scalar_t>(iter, alpha_scalar);
+void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "add_cuda", [&]() {
+    auto alpha = alpha_scalar.to<scalar_t>();
+    gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return a + alpha * b;
+    });
   });
 }
 
@@ -30,24 +25,12 @@ static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
   return add_kernel_cuda(iter, -alpha_scalar);
 }
 
-template <typename scalar_t>
-void div_kernel_impl(TensorIterator& iter) {
-  gpu_binary_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-    return a / b;
-  });
-}
-
-template <typename scalar_t>
-void div_constant_impl(TensorIterator& iter, scalar_t inv_b) {
-  gpu_unary_kernel(iter, [inv_b]GPU_LAMBDA(scalar_t a) -> scalar_t {
-    return a * inv_b;
-  });
-}
-
-static void div_kernel_cuda(TensorIterator& iter) {
+void div_kernel_cuda(TensorIterator& iter) {
   if (isIntegralType(iter.dtype())) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "div_cuda", [&]() {
-      div_kernel_impl<scalar_t>(iter);
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return a / b;
+      });
     });
   } else if (iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
@@ -56,25 +39,24 @@ static void div_kernel_cuda(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "div_cuda", [&]() {
       auto inv_b = scalar_t(1.0 / iter.scalar_value<scalar_t>(2));
       iter.remove_operand(2);
-      div_constant_impl<scalar_t>(iter, inv_b);
+      gpu_kernel(iter, [inv_b]GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return a * inv_b;
+      });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "div_cuda", [&]() {
-      div_kernel_impl<scalar_t>(iter);
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return a / b;
+      });
     });
   }
 }
 
-template <typename scalar_t>
-void mul_kernel_impl(TensorIterator& iter) {
-  gpu_binary_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-    return a * b;
-  });
-}
-
-static void mul_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(), "mul_cuda", [&]() {
-    mul_kernel_impl<scalar_t>(iter);
+void mul_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "mul_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return a * b;
+    });
   });
 }
 
