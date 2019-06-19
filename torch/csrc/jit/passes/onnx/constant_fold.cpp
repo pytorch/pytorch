@@ -200,11 +200,6 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
   return parentNodes;
 }
 
-//bool isRNN(const Node* node) {
-//  auto k = node->kind();
-//  return k == onnx::RNN || k == onnx::LSTM || k == onnx::GRU;
-//}
-
 // Recursive tracker on input node dependency
 bool isDynamic(const Node* node, const Graph* graph) {
   if (node == nullptr) {
@@ -324,8 +319,9 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
   /*
    * We can do better for *static* cases like the one below.
    * This use case is quite popular, but default implementation doesn't go deep.
-   * This one replaces 7 ops shown below with just one:
+   * This handler replaces 5 ops shown below with just one:
    *
+...
 %30 : Float(2, 256, 6, 6) = onnx::AveragePool[kernel_shape=[1, 1],strides=[1, 1]](%29), scope:
 %31 : Long() = onnx::Constant[value={2}](), scope:
 %32 : Long() = onnx::Constant[value={9216}](), scope:
@@ -333,11 +329,14 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
 %34 : Tensor = onnx::Unsqueeze[axes=[0]](%32)
 %35 : Tensor = onnx::Concat[axis=0](%33, %34)
 %36 : Float(2, 9216) = onnx::Reshape(%30, %35), scope:
+...
 
    becomes:
-
+...
+%30 : Float(2, 256, 6, 6) = onnx::AveragePool[kernel_shape=[1, 1],strides=[1, 1]](%29), scope:
 %44 : Long(2) = onnx::Constant[value=    2  9216 [ Variable[CPULongType]{2} ]]()
-
+%36 : Float(2, 9216) = onnx::Reshape(%30, %44), scope:
+...
   */
 
   int axis = 0;
@@ -345,9 +344,6 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     std::vector<std::vector<Node*>> removeNodes;
     auto node = *it;
-//    if (isRNN(node)) {
-//      return;
-//    }
     if (node->kind() == onnx::Concat && node->hasUses()) {
       values = collectFoldables(axis, 0, node, removeNodes);
       if (!values.empty()) {
