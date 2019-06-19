@@ -84,6 +84,13 @@ __MATH_FUNCTIONS_DECL__ double tan(double x) {
   return ::tan(x);
 }
 
+__MATH_FUNCTIONS_DECL__ float normcdf(float x) {
+  return ::normcdff(x);
+}
+__MATH_FUNCTIONS_DECL__ double normcdf(double x) {
+  return ::normcdf(x);
+}
+
 } // namespace compat
 } // namespace cuda
 } // namespace c10

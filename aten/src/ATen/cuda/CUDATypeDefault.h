@@ -10,7 +10,7 @@ struct AT_CUDA_API CUDATypeDefault : public TypeDefault {
 
   Allocator* allocator() const override;
   Device getDeviceFromPtr(void * data) const override;
-  std::unique_ptr<Generator> generator() const override;
+  std::unique_ptr<Generator> generator() const;
 };
 
 } // namespace at

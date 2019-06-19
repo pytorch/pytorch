@@ -374,7 +374,7 @@ static std::vector<at::Tensor> extract_tensors(PyObject* obj) {
           "expected Tensor at %d (got %s)", (int)i, Py_TYPE(item)->tp_name);
     }
     auto var = (THPVariable*)item;
-    list.emplace_back(var->cdata.data());
+    list.emplace_back(var->cdata);
   }
   return list;
 }
