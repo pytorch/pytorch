@@ -126,7 +126,7 @@ struct PythonResolver : public Resolver {
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
 
-    return CompilationUnit::_get_python_cu().get_named_type(
+    return CompilationUnit::_get_python_cu().get_class(
         c10::QualifiedName(qualifiedName));
   }
 
@@ -668,14 +668,6 @@ void initJitScriptBindings(PyObject* module) {
               pythonResolver(rcb, classDef.name().name(), classType));
         }
         cu->define(methodDefs, rcbs, simpleSelf(classType));
-      });
-  m.def(
-      "_jit_script_interface_compile",
-      [](const std::string& qualifiedName,
-         const ClassDef& classDef,
-         ResolutionCallback rcb) {
-        CompilationUnit::_get_python_cu().define_interface(
-            qualifiedName, classDef, pythonResolver(rcb));
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {
