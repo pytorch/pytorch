@@ -368,7 +368,11 @@ struct ParserImpl {
 
   Maybe<Expr> maybeParseTypeAnnotation() {
     if (L.nextIf(':')) {
-      return Maybe<Expr>::create(L.cur().range, parseExp());
+      // NB: parseExp must not be called inline, since argument evaluation order
+      // changes when L.cur().range is mutated with respect to the parseExp()
+      // call.
+      auto expr = parseExp();
+      return Maybe<Expr>::create(expr.range(), expr);
     } else {
       return Maybe<Expr>::create(L.cur().range);
     }
@@ -379,7 +383,11 @@ struct ParserImpl {
     TreeRef type = maybeParseTypeAnnotation();
     TreeRef def;
     if (L.nextIf('=')) {
-      def = Maybe<Expr>::create(L.cur().range, parseExp());
+      // NB: parseExp must not be called inline, since argument evaluation order
+      // changes when L.cur().range is mutated with respect to the parseExp()
+      // call.
+      auto expr = parseExp();
+      def = Maybe<Expr>::create(expr.range(), expr);
     } else {
       def = Maybe<Expr>::create(L.cur().range);
     }
@@ -575,14 +583,37 @@ struct ParserImpl {
         paramlist.range(), List<Param>(paramlist), return_annotation);
   }
 
-  TreeRef parseClass() {
+  TreeRef parseNamedTuple(const Ident& name) {
+    const auto& range = name.range();
+    L.expect(')');
+    L.expect(':');
+    L.expect(TK_INDENT);
+    std::vector<Ident> fields;
+    std::vector<Maybe<Expr>> type_exprs;
+    while (L.cur().kind != TK_DEDENT) {
+      fields.push_back(parseIdent());
+      type_exprs.push_back(maybeParseTypeAnnotation());
+      L.expect(TK_NEWLINE);
+    }
+    L.expect(TK_DEDENT);
+    return NamedTupleDef::create(
+        range,
+        name,
+        List<Ident>::create(range, fields),
+        List<Maybe<Expr>>::create(range, type_exprs));
+  }
+
+  TreeRef parseClassLike() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
     if (L.nextIf('(')) {
-      // The parser only supports py3 syntax, so classes are new-style when
-      // they don't inherit from anything.
-      L.reportError(
-          "Inheritance is not yet supported for TorchScript classes yet.");
+      // Only support inheriting from NamedTuple right now.
+      if (L.cur().kind == TK_IDENT && L.cur().text() == "NamedTuple") {
+        L.next();
+        return parseNamedTuple(name);
+      } else {
+        L.reportError("Inheritance is not supported for TorchScript classes");
+      }
     }
     L.expect(':');
 
@@ -642,8 +673,8 @@ Parser::~Parser() = default;
 TreeRef Parser::parseFunction(bool is_method) {
   return pImpl->parseFunction(is_method);
 }
-TreeRef Parser::parseClass() {
-  return pImpl->parseClass();
+TreeRef Parser::parseClassLike() {
+  return pImpl->parseClassLike();
 }
 Lexer& Parser::lexer() {
   return pImpl->lexer();
