@@ -99,7 +99,7 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << "cannot get the length of value " << kind();
   }
   // expression for ith elemement for iterable value
-  virtual Value* get_elem(const SourceRange&loc, Function& m, Value* i) {
+  virtual Value* getelem(const SourceRange&loc, Function& m, Value* i) {
     throw ErrorReport(loc) << " cannot get the element of value " << kind();
   }
 
@@ -152,7 +152,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
   }
 
   Value* len(const SourceRange& loc, Function& m) override;
-  Value* get_elem(const SourceRange&loc, Function& m, Value* i) override;
+  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
 
  private:
   Value* value_;
@@ -225,6 +225,23 @@ struct TORCH_API ClassValue : public SugaredValue {
   }
 
   ClassTypePtr type_;
+};
+
+struct TORCH_API NamedTupleConstructor : public SugaredValue {
+  explicit NamedTupleConstructor(TupleTypePtr type) : type_(std::move(type)) {}
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+  std::string kind() const override {
+    return type_->str();
+  }
+
+  TupleTypePtr type_;
 };
 
 struct FunctionValue : public SugaredValue {
@@ -340,7 +357,9 @@ using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 // builtins operators and functions that call a method if it exists
 // on a class type, like 'len(x)' and 'x + y'
 struct TORCH_API MagicMethod : public SugaredValue {
-  MagicMethod(std::string desugared_name, SugaredValuePtr base)
+  MagicMethod(
+      std::string desugared_name,
+      SugaredValuePtr base)
       : base_value_(std::move(base)),
         desugared_name_(std::move(desugared_name)) {}
 
@@ -363,6 +382,7 @@ struct TORCH_API MagicMethod : public SugaredValue {
               << class_ptr->python_str() << " does not define a "
               << desugared_name_ << " method";
         }
+
         return MethodValue(self, desugared_name_)
             .call(loc, m, inputs.slice(1), attributes, n_binders);
       }
@@ -423,12 +443,14 @@ struct TORCH_API RangeValue : SugaredValue {
     return "range";
   }
   Value* len(const SourceRange& loc, Function& m) override;
-  Value* get_elem(const SourceRange&loc, Function& m, Value* i) override;
+  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
 
   private:
     Value* start_;
     Value* end_;
     Value* step_;
+    // a flag to determine if it's a simple range() call with only end_ from arguments
+    // If true, we will not insert length calculation and index derivation
     bool is_simple_;
 };
 
@@ -467,8 +489,11 @@ struct TORCH_API IterableTree : SugaredValue {
   // given a IterableTree node, get all the base iterables/leaves under the
   // IterableTree node, which are either SimpleValue or RangeValue. This enable
   // us to get all the basic SugaredValues that contains valid loop information
-  // with len() and get_elem()
+  // with len() and getelem()
   std::vector<SugaredValuePtr> get_base_iterables();
+
+  Value* len(const SourceRange& loc, Function& m) override;
+  Value* getelem(const SourceRange&loc, Function& m, Value* i) override;
 
   private:
     std::vector<SugaredValuePtr> children_;

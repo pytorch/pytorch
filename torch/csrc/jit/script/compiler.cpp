@@ -372,6 +372,18 @@ struct Environment {
            makeMagic(
                "__len__",
                std::make_shared<BuiltinFunction>(aten::len, at::nullopt))},
+          {"hex",
+           makeMagic(
+               "__hex__",
+               std::make_shared<BuiltinFunction>(aten::hex, at::nullopt))},
+          {"oct",
+           makeMagic(
+               "__oct__",
+               std::make_shared<BuiltinFunction>(aten::oct, at::nullopt))},
+          {"round",
+           makeMagic(
+               "__round__",
+               std::make_shared<BuiltinFunction>(aten::round, at::nullopt))},
           {"hash", std::make_shared<BuiltinFunction>(aten::hash, at::nullopt)},
           {"min", std::make_shared<BuiltinFunction>(prim::min, at::nullopt)},
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
@@ -380,7 +392,9 @@ struct Environment {
           {"divmod", std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
           {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
-          {"range", std::make_shared<BuiltinFunction>(prim::range, at::nullopt)},
+          {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
+          {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
+          {"range", std::make_shared<IterableValue>(prim::range)},
           {"zip", std::make_shared<IterableValue>(prim::zip)},
           {"enumerate", std::make_shared<IterableValue>(prim::enumerate)},
           {"rangelist",
@@ -394,8 +408,11 @@ struct Environment {
 
     if (!retval) {
       if (auto type = resolver->resolveType(ident)) {
-        const auto class_type = type->expect<ClassType>();
-        retval = std::make_shared<script::ClassValue>(class_type);
+        if (auto class_type = type->cast<ClassType>()) {
+          retval = std::make_shared<script::ClassValue>(class_type);
+        } else if (auto tuple_type = type->cast<TupleType>()) {
+          retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
+        }
       }
     }
 
@@ -569,14 +586,14 @@ struct to_ir {
         Ident::create(r, "defaults"),
         blank_decl,
         List<Stmt>::create(r, {ret}));
-    auto m = std::make_shared<Module>();
+
     CompilationUnit cu;
     // set optimize to false since we don't need to run it in optimize mode
     cu.set_optimized(false);
     cu.define({def}, {resolver}, nullptr);
     Stack stack;
     cu.get_function("defaults").run(stack);
-    return stack.at(0).toTupleRef().vec();
+    return stack.at(0).toTuple()->elements();
   }
 
   std::vector<Argument> parseArgsFromDecl(const Decl& decl, const Self& self) {
@@ -1260,9 +1277,11 @@ struct to_ir {
       const List<Stmt>& body,
       const SugaredValuePtr& iter_val,
       c10::optional<List<Expr>> targets,
-      c10::optional<Expr> cond,
-      Value* max_trip_count_val = nullptr) {
-    if (!max_trip_count_val) {
+      c10::optional<Expr> cond) {
+    Value* max_trip_count_val = nullptr;
+    if (iter_val != nullptr) {
+      max_trip_count_val = iter_val->len(range, method);
+    } else {
       max_trip_count_val = materializeConstant(
           std::numeric_limits<int64_t>::max(),
           *graph,
@@ -1290,42 +1309,24 @@ struct to_ir {
       pushFrame(body_block);
       WithInsertPoint guard(body_block);
 
-      // current_element_assigner uses an induction variable
-      // to set a current element
+      // if the FOR iters and targets are present, emit FOR target assignments
       if (iter_val != nullptr && targets) {
-        emitTargetAssign(targets.value()[0], iter_val, trip_count);
+        Value* cur_elem = iter_val->getelem(range, method, trip_count);
+        SugaredValuePtr sv = std::make_shared<SimpleValue>(cur_elem);
+        List<Expr> target_exprs = targets.value();
+        size_t n_binders = target_exprs.size();
+
+        bool starred_unpack = calcNumStarredUnpack(target_exprs, range);
+        if (starred_unpack)
+          n_binders--;
+        std::vector<SugaredValuePtr> rhs_outputs {sv};
+
+        emitExprsAssign(target_exprs, rhs_outputs, range, n_binders);
       }
 
       emitStatements(body);
 
       popFrame();
-    }
-  }
-
-  // recursively assign the targets base on the iterable tree structure
-  void emitTargetAssign(const Expr& targets, const SugaredValuePtr& root, Value* trip_count) {
-    auto iterable_tree = std::dynamic_pointer_cast<IterableTree>(root); 
-    if (iterable_tree) {
-      if (targets.kind()!= TK_TUPLE_LITERAL) {
-        throw ErrorReport(targets)
-            << "unexpected expression in variable initialization of for loop.";
-      }
-
-      // if the target is a Tuple, construct the tuple and assign the tuple with
-      // the corresponding iterable tree children
-      auto tp_targets = TupleLiteral(targets).inputs();
-      for(size_t i = 0; i < tp_targets.size(); ++ i) {
-        emitTargetAssign(tp_targets[i], iterable_tree->get_children()[i], trip_count);
-      }
-    } else {
-      // leaf of the iterable tree, which contains SimpleValue or RangeValue
-      if (targets.kind() != TK_VAR)  {
-        throw ErrorReport(targets)
-            << "unexpected expression in variable initialization of for loop.";
-      }
-      std::string target_name = Var(targets).name().name();
-      const SourceRange& loc = targets.range();
-      environment_stack->setVar(loc, target_name, root->get_elem(loc, method, trip_count));
     }
   }
 
@@ -1355,26 +1356,8 @@ struct to_ir {
 
     if ((siv && (siv->getValue()->type()->kind() == TypeKind::ListType
         || siv->getValue()->type()->isSubtypeOf(TensorType::get()))
-        ) || range_val) {
-      emitLoopCommon(stmt.range(), body, sv, targets, {}, sv->len(stmt.range(), method)); 
-      return;
-    }
-    if (iterable_tree) {
-      // if it's a iterable tree, we get the base iterables that consists of SimpleValue or RangeValue,
-      // and then calculate the minimum length of all the base iterables to be max_trip_count_val
-      std::vector<SugaredValuePtr> base_iters = iterable_tree->get_base_iterables();
-      std::vector<Value*> lengths;
-      lengths.reserve(base_iters.size());
-      for (const SugaredValuePtr& base_iter: base_iters) {
-        lengths.emplace_back(base_iter->len(stmt.range(), method));
-      }
-      Node* list_node = graph->insertNode(graph->create(prim::ListConstruct, 1)->setSourceRange(stmt.range()));
-      Value* list_lengths = list_node->output()->setType(ListType::ofInts());
-      for(auto length: lengths) {
-        list_node->addInput(length);
-      }
-      Value* max_trip_count_val = graph->insert(prim::min, {list_lengths}, {}, stmt.range());
-      emitLoopCommon(stmt.range(), body, iterable_tree, targets, {}, max_trip_count_val);
+        ) || range_val || iterable_tree) {
+      emitLoopCommon(stmt.range(), body, sv, targets, {}); 
       return;
     }
 
@@ -1389,7 +1372,7 @@ struct to_ir {
     }
     auto target = Var(targets[0]).name();
     auto instances = sv->asTuple(stmt.range(), method);
-    const std::string& target_name = target.name();
+    const std::string& target_name = Var(targets[0]).name().name();
     pushFrame(environment_stack->block());
     for (const auto& inst : instances) {
       environment_stack->setSugaredVar(itrs[0].range(), target_name, inst);
@@ -1407,7 +1390,7 @@ struct to_ir {
 
   void emitWhile(const While& stmt) {
     auto cond = stmt.cond();
-    emitLoopCommon(stmt.range(), stmt.body(), {}, {}, cond, nullptr);
+    emitLoopCommon(stmt.range(), stmt.body(), nullptr, {}, cond);
   }
 
   // Currently we do not support assigning exceptions to variables,
@@ -1446,7 +1429,7 @@ struct to_ir {
   // Validate that the `lhs` Expr's in an assignment statement are valid. That
   // is:
   //
-  // 1) All lhs Expr's are either Var or Starred nodes
+  // 1) All lhs Expr's are either Var, Tuple or Starred nodes
   // 2) There is at most one Starred node in the lhs Expr
   // 3) A Starred node can only appear when there is another non-Starred lhs
   //    Expr. Concretely this means that `*abc = func()` is illegal. Unpacking
@@ -1455,7 +1438,8 @@ struct to_ir {
     size_t num_normal_assign = 0;
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
-      if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT) {
+      if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT
+          || assignee.kind() == TK_TUPLE_LITERAL) {
         num_normal_assign++;
       } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
@@ -1744,8 +1728,13 @@ struct to_ir {
     if (starred_unpack)
       n_binders--;
     auto output = emitSugaredExpr(rhs, n_binders);
-    auto outputs = output->asTuple(
-        rhs.range(),
+    emitTupleAssign(tl, output, rhs.range(), n_binders, starred_unpack);
+  }
+
+  void emitTupleAssign(const TupleLiteral& tl, const SugaredValuePtr& rhs_output,
+                       const SourceRange& rhs_loc, size_t n_binders, bool starred_unpack) {
+    auto outputs = rhs_output->asTuple(
+        rhs_loc,
         method,
         starred_unpack ? c10::nullopt : c10::optional<size_t>{n_binders});
     if (outputs.size() < n_binders) {
@@ -1757,15 +1746,21 @@ struct to_ir {
       throw ErrorReport(tl) << "too many values to unpack: need " << n_binders
                             << " but found " << outputs.size();
     }
+
+    emitExprsAssign(tl.inputs(), outputs, rhs_loc, n_binders);
+  }
+
+  void emitExprsAssign(const List<Expr>& tl_inputs, const at::ArrayRef<SugaredValuePtr> outputs,
+                       const SourceRange& rhs_loc, size_t n_binders) {
     int i = 0;
-    for (auto assignee : tl.inputs()) {
+    for (auto assignee : tl_inputs) {
       switch (assignee.kind()) {
         case TK_SUBSCRIPT:
           emitSubscriptAssign(
-              rhs.range(),
+              rhs_loc,
               Subscript(assignee),
               NamedValue(
-                  rhs.range(), outputs.at(i)->asValue(rhs.range(), method)));
+                  rhs_loc, outputs.at(i)->asValue(rhs_loc, method)));
           i++;
           break;
         case TK_VAR:
@@ -1789,6 +1784,16 @@ struct to_ir {
           auto tup = graph->insertNode(graph->createTuple(values))->output();
           environment_stack->setVar(var.range(), Var(var).name().name(), tup);
           i += n_matched;
+        } break;
+        case TK_TUPLE_LITERAL: {
+          // recursively emit tuple assignments
+          TupleLiteral sub_tl = TupleLiteral(assignee);
+          size_t sub_n_binders = sub_tl.inputs().size();
+          bool sub_starred_unpack = calcNumStarredUnpack(sub_tl.inputs(), sub_tl.range());
+          if (sub_starred_unpack)
+            sub_n_binders--;
+          emitTupleAssign(sub_tl, outputs.at(i), rhs_loc, sub_n_binders, sub_starred_unpack);
+          i ++;
         } break;
         default:
           throw ErrorReport(assignee)
@@ -1882,6 +1887,8 @@ struct to_ir {
         return aten::__or__;
       case '^':
         return aten::__xor__;
+      case TK_IN:
+        return aten::__contains__;
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -1921,6 +1928,8 @@ struct to_ir {
         return "__or__";
       case '^':
         return "__xor__";
+      case TK_IN:
+        return "__contains__";
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -2241,7 +2250,12 @@ struct to_ir {
       const std::shared_ptr<IterableValue>& iterable) {
       std::shared_ptr<IterableTree> iterable_tree = nullptr;
       size_t input_size = inputs.size();
-      if (iterable->symbol_ == prim::enumerate) {
+
+      // Handling different iterable values
+      if (iterable->symbol_ == prim::range) {
+        std::vector<Value*> input_vals = getValues(inputs, /*maybe_unpack=*/true);
+        return std::make_shared<RangeValue>(loc, method, input_vals);
+      } else if (iterable->symbol_ == prim::enumerate) {
         // enumerate(x) can be rewrite as subtrees: (range(0, math.inf), x)
         Value* start_index = nullptr;
         if (input_size == 0) {
@@ -2342,6 +2356,7 @@ struct to_ir {
             {},
             /*required=*/true);
       }
+      case TK_IN:
       case TK_POW:
       case TK_NE:
       case TK_EQ:
@@ -2361,9 +2376,17 @@ struct to_ir {
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto overload = getOperatorOverload(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+
+        if (tree->kind() == TK_IN) {
+          // For `in` the arguments are in reverse order (the object being
+          // checked is second)
+          std::iter_swap(named_values.begin() + 0, named_values.begin() + 1);
+        }
+
         return asSimple(
             makeMagic(
-                overload, std::make_shared<BuiltinFunction>(kind, at::nullopt))
+                overload,
+                std::make_shared<BuiltinFunction>(kind, at::nullopt))
                 ->call(tree->range(), method, named_values, {}, 0));
       }
       case TK_NOT: {
@@ -2920,47 +2943,70 @@ CompilationUnit::CompilationUnit(const std::string& source) {
   define(source, nativeResolver(), nullptr);
 }
 
+std::shared_ptr<Function> CompilationUnit::define(
+    const Def& def,
+    const ResolverPtr& resolver,
+    const Self& self,
+    const std::unordered_map<std::string, std::shared_ptr<Function>>&
+        function_table) const {
+  const std::string& name = def.name().name();
+  TORCH_INTERNAL_ASSERT(resolver);
+  auto _resolver = resolver;
+  if (!self) {
+    // if self is defined, then these are methods and do not go into the
+    // global namespace otherwise, they get defined together so we add them to
+    // the function table so the methods can see each other
+    _resolver =
+        std::make_shared<FunctionResolver>(resolver.get(), function_table);
+  }
+  auto creator = [def, _resolver, self](Function& method) {
+    to_ir(def, _resolver, self, method);
+  };
+  return std::make_shared<Function>(
+      name, is_optimized(), std::make_shared<Graph>(), creator);
+}
+
 void CompilationUnit::define(
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& resolvers,
     const Self& self) {
   AT_ASSERT(definitions.size() == resolvers.size());
-  auto resolver_it = resolvers.begin();
-  std::vector<Function*> methods;
-  std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
-
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
-  std::vector<Def> ordered_defs = definitions;
-  const auto it = std::find_if(
-      ordered_defs.begin(), ordered_defs.end(), [](const Def& def) {
-        return def.name().name() == "__init__";
-      });
-  if (it != ordered_defs.end()) {
-    std::swap(ordered_defs[0], *it);
+  c10::optional<size_t> init_idx;
+  for (size_t i = 0; i < definitions.size(); i++) {
+    const auto& def = definitions[i];
+    if (def.name().name() == "__init__") {
+      init_idx = i;
+      break;
+    }
   }
 
-  for (const Def& def : ordered_defs) {
-    const std::string& name = def.name().name();
-    ResolverPtr resolver = *resolver_it++;
-    AT_ASSERT(resolver);
-    if (!self) {
-      // if self is defined, then these are methods and do not go into the
-      // global namespace otherwise, they get defined together so we add them to
-      // the function table so the methods can see each other
-      resolver =
-          std::make_shared<FunctionResolver>(resolver.get(), function_table);
-    }
-    auto creator = [def, resolver, self](Function& method) {
-      AT_ASSERT(resolver);
-      to_ir(def, resolver, self, method);
-    };
-    std::shared_ptr<Function> fn(
-        new Function(name, is_optimized(), std::make_shared<Graph>(), creator));
+  std::vector<Function*> methods;
+  std::unordered_map<std::string, std::shared_ptr<Function>> function_table;
+  if (init_idx.has_value()) {
+    // if we have an init, do it first.
+    auto fn = define(
+        definitions[*init_idx], resolvers[*init_idx], self, function_table);
+    const auto& name = fn->name();
     function_table[name] = fn;
     methods.push_back(fn.get());
     register_function(std::move(fn));
   }
+
+  for (size_t i = 0; i < definitions.size(); i++) {
+    if (init_idx.has_value() && i == *init_idx) {
+      // skip this def since it's already been compiled
+      continue;
+    }
+
+    auto fn = define(definitions[i], resolvers[i], self, function_table);
+    const auto& name = fn->name();
+    function_table[name] = fn;
+    methods.push_back(fn.get());
+    register_function(std::move(fn));
+  }
+
   for (Function* method : methods) {
     method->ensure_defined();
   }
@@ -2993,7 +3039,7 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean, bool convert_ssa) {
   // be inlined into forked closures
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
-  if (!script::getFirstClassMode()) {
+  if (script::getInlineEverythingMode()) {
     Inline(*to_clean);
   }
   // remove any uses of tuples that we inserted that are not needed

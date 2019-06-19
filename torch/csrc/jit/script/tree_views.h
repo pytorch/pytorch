@@ -299,6 +299,7 @@ struct Expr : public TreeView {
       case '|':
       case TK_LIST_COMP:
       case TK_DOTS:
+      case TK_IN:
         return;
       default:
         throw ErrorReport(tree)
@@ -702,6 +703,7 @@ struct BinOp : public Expr {
       case '^':
       case '|':
       case TK_FLOOR_DIV:
+      case TK_IN:
         if (tree->trees().size() != 2)
           throw ErrorReport(tree)
               << "BinOp expected 2 subtrees, found " << tree->trees().size();

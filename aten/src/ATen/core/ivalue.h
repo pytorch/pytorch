@@ -14,7 +14,7 @@ template<class Key, class Value> class DictPtr;
 template<class T> class ListPtr;
 struct IValue;
 namespace ivalue {
-struct TuplePtr;
+struct Tuple;
 struct Future;
 struct ConstantString;
 struct GenericDict;
@@ -145,11 +145,10 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<caffe2::Blob> toBlob() const &;
 
   // Tuple
-  IValue(ivalue::TuplePtr v);
+  IValue(c10::intrusive_ptr<ivalue::Tuple> v);
   bool isTuple() const { return Tag::Tuple == tag; }
-  ivalue::TuplePtr toTuple() &&;
-  ivalue::TuplePtr toTuple() const &;
-  c10::ArrayRef<IValue> toTupleRef() const;
+  c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
+  c10::intrusive_ptr<ivalue::Tuple> toTuple() const &;
 
   // Double
   IValue(double d)
@@ -353,6 +352,16 @@ struct CAFFE2_API IValue final {
     return static_cast<at::MemoryFormat>(toInt());
   }
 
+  // QScheme
+  IValue(at::QScheme qscheme)
+  : tag(Tag::Int), is_intrusive_ptr(false) {
+    payload.as_int = static_cast<int64_t>(qscheme);
+  }
+
+  at::QScheme toQScheme() const {
+    return static_cast<at::QScheme>(toInt());
+  }
+
 
   // for debugging
   std::string tagKind() const {
@@ -484,6 +493,11 @@ struct CAFFE2_API WeakIValue final {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
+  }
+
+  bool isSameIdentity(const WeakIValue& rhs) const {
+    return payload.as_int == rhs.payload.as_int && tag == rhs.tag &&
+        is_intrusive_ptr == rhs.is_intrusive_ptr;
   }
 
   IValue lock() const {

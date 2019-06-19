@@ -400,6 +400,7 @@ class ExprBuilder(Builder):
         ast.Gt: '>',
         ast.Is: 'is',
         ast.IsNot: 'is not',
+        ast.In: 'in',
     }
 
     @staticmethod
@@ -636,6 +637,7 @@ class ExprBuilder(Builder):
 
         elt_expr = build_expr(ctx, stmt.elt)
         target_expr = build_expr(ctx, stmt.generators[0].target)
+
         iter_expr = build_expr(ctx, stmt.generators[0].iter)
         return ListComp(r, elt_expr, target_expr, iter_expr)
 

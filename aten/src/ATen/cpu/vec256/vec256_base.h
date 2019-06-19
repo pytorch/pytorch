@@ -47,6 +47,7 @@ struct Vec256 {
 private:
   T values[32 / sizeof(T)] = {0};
 public:
+  using value_type = T;
   // Note [constexpr static function to avoid odr-usage compiler bug]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Why, you might ask, is size defined to be a static constexpr function,
