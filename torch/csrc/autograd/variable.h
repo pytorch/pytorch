@@ -244,7 +244,7 @@ struct TORCH_API Variable : public at::Tensor {
 
   /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
-      c10::optional<Tensor> gradient,
+      const Tensor& gradient,
       bool keep_graph,
       bool create_graph) const;
 
@@ -252,7 +252,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// It is rarely necessary to call this; it's used, for example, when
   /// a non-sparse gradient gets added to a sparse gradient, requiring
   /// the type of the gradient `Variable` to become non-sparse.
-  void set_data(const at::Tensor &new_data);
+  void set_data(const at::Tensor &new_data) const;
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
   /// `Variable`.

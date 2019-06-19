@@ -33,7 +33,6 @@ struct ComplexCPUType : public at::CPUTypeDefault {
             /*is_variable=*/false,
             /*is_undefined=*/false) {}
 
-  Backend backend() const override;
   const char* toString() const override;
   TypeID ID() const override;
 
@@ -68,10 +67,6 @@ struct ComplexHooks : public at::ComplexHooksInterface {
     context->registerType(Backend::ComplexCPU, new ComplexCPUType());
   }
 };
-
-Backend ComplexCPUType::backend() const {
-  return Backend::ComplexCPU;
-}
 
 const char* ComplexCPUType::toString() const {
   return "ComplexCPUType";
