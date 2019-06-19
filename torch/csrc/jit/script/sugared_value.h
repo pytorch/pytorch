@@ -215,6 +215,23 @@ struct TORCH_API ClassValue : public SugaredValue {
   ClassTypePtr type_;
 };
 
+struct TORCH_API NamedTupleConstructor : public SugaredValue {
+  explicit NamedTupleConstructor(TupleTypePtr type) : type_(std::move(type)) {}
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+  std::string kind() const override {
+    return type_->str();
+  }
+
+  TupleTypePtr type_;
+};
+
 struct FunctionValue : public SugaredValue {
   FunctionValue(std::shared_ptr<Function> callee)
       : callee_(std::move(callee)) {}
@@ -328,7 +345,9 @@ using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 // builtins operators and functions that call a method if it exists
 // on a class type, like 'len(x)' and 'x + y'
 struct TORCH_API MagicMethod : public SugaredValue {
-  MagicMethod(std::string desugared_name, SugaredValuePtr base)
+  MagicMethod(
+      std::string desugared_name,
+      SugaredValuePtr base)
       : base_value_(std::move(base)),
         desugared_name_(std::move(desugared_name)) {}
 
@@ -351,6 +370,7 @@ struct TORCH_API MagicMethod : public SugaredValue {
               << class_ptr->python_str() << " does not define a "
               << desugared_name_ << " method";
         }
+
         return MethodValue(self, desugared_name_)
             .call(loc, m, inputs.slice(1), attributes, n_binders);
       }

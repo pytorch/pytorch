@@ -295,6 +295,7 @@ import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled  # noqa: F401
 import torch.nn
+import torch.nn.quantized
 import torch.optim
 import torch.multiprocessing
 import torch.sparse
@@ -309,6 +310,7 @@ import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.openmp
 import torch.__config__
+import torch.__future__
 
 _C._init_names(list(torch._storage_classes))
 

@@ -51,7 +51,7 @@ int64_t decrementKernel(const Tensor& tensor, int64_t input) {
 
 void expectCallsIncrement(TensorTypeId type_id) {
   // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema("_test::my_op", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
   auto result = callOp(*op, dummyTensor(type_id), 5);
   EXPECT_EQ(1, result.size());
@@ -60,7 +60,7 @@ void expectCallsIncrement(TensorTypeId type_id) {
 
 void expectCallsDecrement(TensorTypeId type_id) {
   // assert that schema and cpu kernel are present
-  auto op = c10::Dispatcher::singleton().findSchema("_test::my_op", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
   auto result = callOp(*op, dummyTensor(type_id), 5);
   EXPECT_EQ(1, result.size());
@@ -110,7 +110,7 @@ void kernelWithoutOutput(const Tensor&) {
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::no_return(Tensor dummy) -> ()", &kernelWithoutOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::no_return", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::no_return", ""});
   ASSERT_TRUE(op.has_value());
   was_called = false;
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -126,7 +126,7 @@ std::tuple<> kernelWithZeroOutputs(const Tensor&) {
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithZeroOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::zero_outputs(Tensor dummy) -> ()", &kernelWithZeroOutputs);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::zero_outputs", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::zero_outputs", ""});
   ASSERT_TRUE(op.has_value());
   was_called = false;
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -142,7 +142,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntOutpu
   auto registrar = RegisterOperators()
       .op("_test::int_output(Tensor dummy, int a, int b) -> int", &kernelWithIntOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::int_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::int_output", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()), 3, 6);
@@ -158,7 +158,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorOu
   auto registrar = RegisterOperators()
       .op("_test::returning_tensor(Tensor input) -> Tensor", &kernelWithTensorOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::returning_tensor", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::returning_tensor", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -178,7 +178,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor input1, Tensor input2, Tensor input3) -> Tensor[]", &kernelWithTensorListOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), dummyTensor(TensorType1()));
@@ -197,7 +197,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListO
   auto registrar = RegisterOperators()
       .op("_test::list_output(Tensor dummy, int input1, int input2, int input3) -> int[]", &kernelWithIntListOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()), 2, 4, 6);
@@ -225,7 +225,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMultiple
   auto registrar = RegisterOperators()
      .op("_test::multiple_outputs(Tensor dummy) -> (Tensor, int, Tensor[], int?, Dict(str, Tensor))", &kernelWithMultipleOutputs);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::multiple_outputs", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::multiple_outputs", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -253,7 +253,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> Tensor", &kernelWithTensorInputByReferenceWithOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -269,7 +269,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> Tensor", &kernelWithTensorInputByValueWithOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto result = callOp(*op, dummyTensor(TensorType1()));
@@ -295,7 +295,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> ()", &kernelWithTensorInputByReferenceWithoutOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, dummyTensor(TensorType1()));
@@ -311,7 +311,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorIn
   auto registrar = RegisterOperators()
       .op("_test::tensor_input(Tensor input) -> ()", &kernelWithTensorInputByValueWithoutOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, dummyTensor(TensorType1()));
@@ -333,7 +333,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntInput
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> ()", &kernelWithIntInputWithoutOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::int_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::int_input", ""});
   ASSERT_TRUE(op.has_value());
 
   captured_int_input = 0;
@@ -350,7 +350,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntInput
   auto registrar = RegisterOperators()
       .op("_test::int_input(Tensor dummy, int input) -> int", &kernelWithIntInputWithOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::int_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::int_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, dummyTensor(TensorType1()), 3);
@@ -368,7 +368,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> ()", &kernelWithIntListInputWithoutOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::int_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::int_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
@@ -385,7 +385,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithIntListI
   auto registrar = RegisterOperators()
       .op("_test::int_list_input(Tensor dummy, int[] input) -> int", &kernelWithIntListInputWithOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::int_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::int_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, dummyTensor(TensorType1()), c10::make_list<int64_t>({2, 4, 6}));
@@ -401,7 +401,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()", &kernelWithTensorListInputWithoutOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
@@ -418,7 +418,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithTensorLi
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int", &kernelWithTensorListInputWithOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
@@ -434,7 +434,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()", &kernelWithLegacyTensorListRefInputWithoutOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
@@ -451,7 +451,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int", &kernelWithLegacyTensorListRefInputWithOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
@@ -467,7 +467,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> ()", &kernelWithLegacyTensorListInputWithoutOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
   captured_input_list_size = 0;
@@ -484,7 +484,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithLegacyTe
   auto registrar = RegisterOperators()
       .op("_test::tensor_list_input(Tensor[] input) -> int", &kernelWithLegacyTensorListInputWithOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::tensor_list_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tensor_list_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType1())}));
@@ -500,7 +500,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithStringLi
   auto registrar = RegisterOperators()
       .op("_test::stringlist_output(str[] input) -> str[]", &kernelWithStringListOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::stringlist_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::stringlist_output", ""});
   ASSERT_TRUE(op.has_value());
 
   c10::ListPtr<std::string> list = c10::make_list<std::string>({"value1", "value2"});
@@ -523,7 +523,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictInpu
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, Tensor) input) -> ()", &kernelWithDictInputWithoutOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
@@ -543,7 +543,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictInpu
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, str) input) -> str", &kernelWithDictInputWithOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
   DictPtr<string, string> dict = make_dict<string, string>();
@@ -562,7 +562,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictOutp
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", &kernelWithDictOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
 
   DictPtr<string, string> dict = make_dict<string, string>();
@@ -585,7 +585,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, Tensor) input) -> ()", &kernelWithUnorderedMapInputWithoutOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
@@ -605,7 +605,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
   auto registrar = RegisterOperators()
       .op("_test::dict_input(Dict(str, str) input) -> str", &kernelWithUnorderedMapInputWithOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
   c10::DictPtr<string, string> dict = c10::make_dict<string, string>();
@@ -624,7 +624,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, str) input) -> Dict(str, str)", &kernelWithUnorderedMapOutput);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
 
   c10::DictPtr<string, string> dict = c10::make_dict<string, string>();
@@ -647,7 +647,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMapOfLis
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, int[]) input) -> Dict(str, int[])", &kernelWithMapOfIntList);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
 
   c10::DictPtr<string, c10::ListPtr<int64_t>> dict = c10::make_dict<string, c10::ListPtr<int64_t>>();
@@ -674,7 +674,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMapOfLis
   auto registrar = RegisterOperators()
       .op("_test::dict_output(Dict(str, Dict(int,str)[]) input) -> Dict(str, Dict(int,str)[])", &kernelWithMapOfListOfMap);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::dict_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
 
   c10::DictPtr<string, c10::ListPtr<c10::DictPtr<int64_t, string>>> dict = c10::make_dict<string, c10::ListPtr<c10::DictPtr<int64_t, string>>>();
@@ -708,7 +708,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMa
   auto registrar = RegisterOperators()
       .op("_test::list_output(Dict(str, int)[] input) -> Dict(str, int)[]", &kernelWithListOfMap);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
   c10::DictPtr<string, int64_t> dict1 = c10::make_dict<string, int64_t>();
@@ -739,7 +739,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMa
   auto registrar = RegisterOperators()
       .op("_test::list_output(Dict(str, int[])[] input) -> Dict(str, int[])[]", &kernelWithListOfMapOfIntList);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::list_output", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
   c10::DictPtr<string, c10::ListPtr<int64_t>> dict1 = c10::make_dict<string, c10::ListPtr<int64_t>>();
@@ -783,7 +783,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenFallbackKernelWith
   auto registrar = RegisterOperators()
       .op("_test::no_tensor_args() -> ()", &kernelWithoutInputs);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
 
   called = false;
@@ -802,7 +802,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenFallbackKernelWith
   auto registrar = RegisterOperators()
       .op("_test::no_tensor_args(int arg) -> int", &kernelWithoutTensorInputs);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::no_tensor_args", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::no_tensor_args", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, 3);
@@ -823,7 +823,7 @@ void kernelWithOptInputWithoutOutput(Tensor arg1, const c10::optional<Tensor>& a
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> ()", &kernelWithOptInputWithoutOutput);
-  auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
 
   called = false;
@@ -858,7 +858,7 @@ c10::optional<Tensor> kernelWithOptInputWithOutput(Tensor arg1, const c10::optio
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> Tensor?", &kernelWithOptInputWithOutput);
-  auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
 
   called = false;
@@ -892,7 +892,7 @@ kernelWithOptInputWithMultipleOutputs(Tensor arg1, const c10::optional<Tensor>& 
 
 TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> (Tensor?, int?, str?)", &kernelWithOptInputWithMultipleOutputs);
-  auto op = c10::Dispatcher::singleton().findSchema("_test::opt_input", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
   ASSERT_TRUE(op.has_value());
 
   auto outputs = callOp(*op, dummyTensor(TensorType1()), dummyTensor(TensorType2()), c10::IValue(), std::string("text"));
@@ -916,7 +916,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernel_whenRegiste
   auto registrar = RegisterOperators()
       .op("_test::no_schema_specified", &kernelForSchemaInference);
 
-  auto op = c10::Dispatcher::singleton().findSchema("_test::no_schema_specified", "");
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::no_schema_specified", ""});
   ASSERT_TRUE(op.has_value());
 
   c10::optional<std::string> differences = c10::findSchemaDifferences(torch::jit::parseSchema("_test::no_schema_specified(Tensor arg1, int arg2, Tensor[] arg3) -> (int, Tensor)"), op->schema());

@@ -151,44 +151,6 @@ THC_API void THNN_(GatedLinear_updateGradInput)(
                   THCTensor *gradInput,
                   int dim);
 
-THC_API void THNN_(Im2Col_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int64_t kH, int64_t kW,
-                  int64_t dH, int64_t dW,
-                  int64_t padH, int64_t padW,
-                  int64_t sH, int64_t sW);
-
-THC_API void THNN_(Im2Col_updateGradInput)(
-                  THCState *state,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int64_t inputHeight, int64_t inputWidth,
-                  int64_t kH, int64_t kW,
-                  int64_t dH, int64_t dW,
-                  int64_t padH, int64_t padW,
-                  int64_t sH, int64_t sW);
-
-THC_API void THNN_(Col2Im_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int64_t outputHeight, int64_t outputWidth,
-                  int64_t kH, int64_t kW,
-                  int64_t dH, int64_t dW,
-                  int64_t padH, int64_t padW,
-                  int64_t sH, int64_t sW);
-
- THC_API void THNN_(Col2Im_updateGradInput)(
-                  THCState *state,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int64_t kH, int64_t kW,
-                  int64_t dH, int64_t dW,
-                  int64_t padH, int64_t padW,
-                  int64_t sH, int64_t sW);
-
 THC_API void THNN_(LeakyReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -407,27 +369,6 @@ THC_API void THNN_(IndexLinear_updateParameters)(
                   int64_t keysOffset,
                   accreal weightDecay,
                   accreal learningRate);
-
-THC_API void THNN_(SpatialAveragePooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  bool ceil_mode,
-                  bool count_include_pad);
-
-THC_API void THNN_(SpatialAveragePooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  bool ceil_mode,
-                  bool count_include_pad);
 
 THC_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCState *state,
@@ -925,27 +866,6 @@ THC_API void THNN_(TemporalRowConvolution_accGradParameters)(
                   int padW,
                   bool featFirst,
                   accreal scale);
-
-THC_API void THNN_(VolumetricAveragePooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  int kT, int kW, int kH,
-                  int dT, int dW, int dH,
-                  int padT, int padW, int padH,
-                  bool ceil_mode,
-                  bool count_include_pad);
-
-THC_API void THNN_(VolumetricAveragePooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int kT, int kW, int kH,
-                  int dT, int dW, int dH,
-                  int padT, int padW, int padH,
-                  bool ceil_mode,
-                  bool count_include_pad);
 
 // VolumetricConvolution is legacy and purposefully not bound by ATen
 THC_API void THNN_(VolumetricConvolution_updateOutput)(

@@ -35,14 +35,14 @@ inline std::vector<c10::IValue> callOp(const c10::OperatorHandle& op, Args... ar
 }
 
 inline void expectDoesntFindKernel(const char* op_name, c10::TensorTypeId dispatch_key) {
-  auto op = c10::Dispatcher::singleton().findSchema(op_name, "");
+  auto op = c10::Dispatcher::singleton().findSchema({op_name, ""});
   EXPECT_ANY_THROW(
     callOp(*op, dummyTensor(dispatch_key), 5);
   );
 }
 
 inline void expectDoesntFindOperator(const char* op_name) {
-  auto op = c10::Dispatcher::singleton().findSchema(op_name, "");
+  auto op = c10::Dispatcher::singleton().findSchema({op_name, ""});
   EXPECT_FALSE(op.has_value());
 }
 
