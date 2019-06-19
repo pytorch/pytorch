@@ -10483,7 +10483,7 @@ class _TestTorchMixin(object):
         str(obj)
         for t in torch._storage_classes:
             if t == torch.BFloat16Storage:
-                continue #Fix once fill is enabled for bfloat16
+                continue  # Fix once fill is enabled for bfloat16
             if t.is_cuda and not torch.cuda.is_available():
                 continue
             if t == torch.BoolStorage or t == torch.cuda.BoolStorage:
