@@ -548,7 +548,8 @@ which is in PyTorch's `requirements.txt`.
 
 ### Pre-commit Tidy/Linting Hook
 
-We use clang-tidy and flake8 (installed with flake-mypy) to perform additional
+We use clang-tidy and flake8 (installed with flake8-bugbear,
+flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
