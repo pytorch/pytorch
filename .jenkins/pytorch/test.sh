@@ -35,30 +35,30 @@ fi
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # JIT C++ extensions require ninja.
-  pip install -q ninja --user
+  pip_install ninja
   # ninja is installed in /var/lib/jenkins/.local/bin
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
   # TODO: move this to Docker
-  pip install -q hypothesis --user
+  pip_install hypothesis
 
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
   echo $PYTHON_VERSION
   # if [[ $PYTHON_VERSION == "2" ]]; then
-  #   pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl --user
+  #   pip_install https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl
   # else
-  #   pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl --user
+  #   pip_install https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl
   # fi
-  pip install -q tb-nightly --user
+  pip_install tb-nightly
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
-  pip install mypy --user || true
+  pip_install mypy || true
 fi
 
 # faulthandler become built-in since 3.3
 if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
-  pip install -q faulthandler --user
+  pip_install faulthandler
 fi
 
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
@@ -138,23 +138,7 @@ test_aten() {
 }
 
 test_torchvision() {
-  rm -rf ninja
-
-  echo "Installing torchvision at branch master"
-  rm -rf vision
-  # TODO: This git clone is bad, it means pushes to torchvision can break
-  # PyTorch CI
-  git clone https://github.com/pytorch/vision --quiet
-  pushd vision
-  git checkout 2f64dd90e14fe5463b4e5bd152d56e4a6f0419de
-  # python setup.py install with a tqdm dependency is broken in the
-  # Travis Python nightly (but not in latest Python nightlies, so
-  # this should be a transient requirement...)
-  # See https://github.com/pytorch/pytorch/issues/7525
-  #time python setup.py install
-  pip install --user .
-  popd
-  rm -rf vision
+  pip_install git+https://github.com/pytorch/vision.git@2f64dd90e14fe5463b4e5bd152d56e4a6f0419de
 }
 
 test_libtorch() {

@@ -147,6 +147,7 @@ struct C10_API NonVariableTypeMode {
 #ifdef NAMEDTENSOR_ENABLED
 struct C10_API NamedTensorMetaInterface {
   virtual ~NamedTensorMetaInterface();
+  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const;
 };
 #endif
 
@@ -1478,6 +1479,11 @@ protected:
     dest_impl->reserved_ = src_impl->reserved_;
     dest_impl->set_version_counter(version_counter);
     dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+#ifdef NAMEDTENSOR_ENABLED
+    if (src_impl->named_tensor_meta_ != nullptr) {
+      dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
+    }
+#endif
   }
 
 protected:

@@ -1,7 +1,36 @@
 #pragma once
 
+// This file provides two functions to help write GPU elementwise kernels:
+//
+//   gpu_kernel(TensorIterator iter, <lambda>)
+//   gpu_kernel_with_scalars(TensorIterator iter, <lambda>)
+//
+// The gpu_kernel_with_scalars generates specializations that support a
+// single scalar CPU argument, such as from `cuda_tensor + 5`. The CPU scalar
+// is lifted to a kernel paramter instead of copying to device memory.
+// This should be  used in conjuction with TensorIterator::allow_cpu_scalars_,
+// which is the default for TensorIterator::binary_op. Otherwise, all inputs
+// and the output must be on the GPU.
+//
+// For example, to write a reciprocal kernel for GPU float Tensors:
+//
+//   gpu_kernel(iter, []GPU_LAMBDA(float a) {
+//    return 1.0f / a;
+//   });
+//
+// To write a multiplication kernel for GPU float Tensors where one argument
+// may be a CPU scalar:
+//
+//   gpu_kernel_with_scalars(iter, []GPU_LAMBDA(float a, float b) {
+//     return a * b;
+//   });
+//
+// See BinaryOpsKernel.cu for the complete implementation
+//
+
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/core/Array.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
@@ -73,147 +102,113 @@ static void launch_kernel(int64_t N, const func_t& f) {
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template<typename func_t>
-void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
-  ASSERT_HOST_DEVICE_LAMBDA(func_t);
+template <typename traits, typename index_t, std::size_t... I>
+C10_HOST_DEVICE typename traits::ArgsTuple
+dereference_impl(char* const C10_RESTRICT data[], const index_t strides[], int i,
+                 c10::guts::index_sequence<I...>) {
+  return std::make_tuple(
+      *(typename traits::template arg<I>::type*)
+        (data[I] + i * strides[I])...);
+}
 
-  if (!iter.can_use_32bit_indexing()) {
-    for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_nullary_kernel(sub_iter, f);
-    }
-    return;
-  }
+template <typename traits, typename index_t>
+C10_HOST_DEVICE typename traits::ArgsTuple
+dereference(char* const C10_RESTRICT data[], const index_t strides[], int i) {
+  using Indices = c10::guts::make_index_sequence<traits::arity>;
+  return dereference_impl<traits>(data, strides, i, Indices{});
+}
 
-  char* out_data = (char*)iter.data_ptr(0);
-
+template <typename func_t>
+void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   using traits = function_traits<func_t>;
   using arg0_t = typename traits::result_type;
+  constexpr int ntensors = traits::arity + 1;
+
+  TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity + 1);
+
+  detail::Array<char*, ntensors> data;
+  for (int i = 0; i < ntensors; i++) {
+    data[i] = (char*)iter.data_ptr(i);
+  }
 
   int64_t numel = iter.numel();
-  if (numel == 0) {
-    return;
-  }
   if (iter.is_trivial_1d()) {
-    auto strides = iter.get_inner_strides();
-    int stride0 = strides[0];
+    auto inner_strides = iter.get_inner_strides();
+    detail::Array<int, ntensors> strides;
+    for (int i = 0; i < ntensors; i++) {
+      strides[i] = inner_strides[i];
+    }
     launch_kernel<launch_size_1d, 1>(numel, [=]__device__(int idx) {
-      arg0_t* out = (arg0_t*)&out_data[stride0 * idx];
-      *out = f();
+      arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
+      *out = c10::guts::apply(f, dereference<traits>(
+          &data.data[1],
+          &strides.data[1],
+          idx));
     });
   } else {
-    auto offset_calc = make_offset_calculator<1>(iter);
+    auto offset_calc = make_offset_calculator<traits::arity + 1>(iter);
     launch_kernel<launch_size_nd, launch_bound2>(numel, [=]__device__(int idx) {
       auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)&out_data[offsets[0]];
-      *out = f();
+      arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
+      *out = c10::guts::apply(f, dereference<traits>(
+          &data.data[1],
+          &offsets.data[1],
+          1));
     });
   }
 }
 
-template<typename func_t>
-void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
+template <typename func_t>
+void gpu_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
+
+  for (int arg = 0; arg < iter.ntensors(); arg++) {
+    TORCH_INTERNAL_ASSERT(iter.device(arg).is_cuda());
+  }
+
+  if (iter.numel() == 0) {
+    return;
+  }
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_unary_kernel(sub_iter, f);
+      gpu_kernel(sub_iter, f);
     }
     return;
   }
 
-  char* out_data = (char*)iter.data_ptr(0);
-  const char* in1_data = (char*)iter.data_ptr(1);
-
-  using traits = unary_function_traits<func_t>;
-  using arg0_t = typename traits::result_type;
-  using arg1_t = typename traits::arg1_t;
-
-  int64_t numel = iter.numel();
-  if (numel == 0) {
-    return;
-  }
-  if (iter.is_cpu_scalar(1)) {
-    auto a = iter.scalar_value<arg1_t>(1);
-    iter.remove_operand(1);
-    gpu_nullary_kernel(iter, [=]GPU_LAMBDA(void) {
-      return f(a);
-    });
-  } else if (iter.is_trivial_1d()) {
-    auto strides = iter.get_inner_strides();
-    int stride0 = strides[0];
-    int stride1 = strides[1];
-    launch_kernel<launch_size_1d, 1>(numel, [out_data, stride0, stride1, in1_data, f]__device__(int idx) {
-      arg0_t* out = (arg0_t*)&out_data[stride0 * idx];
-      arg1_t* in1 = (arg1_t*)&in1_data[stride1 * idx];
-      *out = f(*in1);
-    });
-  } else {
-    auto offset_calc = make_offset_calculator<2>(iter);
-    launch_kernel<launch_size_nd, launch_bound2>(numel, [=]__device__(int idx) {
-      auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)&out_data[offsets[0]];
-      arg1_t* in1 = (arg1_t*)&in1_data[offsets[1]];
-      *out = f(*in1);
-    });
-  }
+  gpu_kernel_impl(iter, f);
 }
 
-template<typename func_t>
-void gpu_binary_kernel(TensorIterator& iter, const func_t& f) {
+template <typename func_t>
+void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
 
-  if (!iter.can_use_32bit_indexing()) {
-    for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_binary_kernel(sub_iter, f);
-    }
-    return;
-  }
+  using traits = function_traits<func_t>;
+  static_assert(
+      traits::arity == 2,
+      "gpu_kernel_with_scalars only supports two input arguments");
 
-  char* out_data = (char*)iter.data_ptr(0);
-  const char* in1_data = (char*)iter.data_ptr(1);
-  const char* in2_data = (char*)iter.data_ptr(2);
-
-  using traits = binary_function_traits<func_t>;
-  using arg0_t = typename traits::result_type;
-  using arg1_t = typename traits::arg1_t;
-  using arg2_t = typename traits::arg2_t;
-
-  int numel = iter.numel();
-  if (numel == 0) {
-    return;
-  }
   if (iter.is_cpu_scalar(1)) {
+    using arg1_t = typename traits::template arg<0>::type;
+    using arg2_t = typename traits::template arg<1>::type;
     auto a = iter.scalar_value<arg1_t>(1);
     iter.remove_operand(1);
-    gpu_unary_kernel(iter, [=]GPU_LAMBDA(arg2_t b) {
+    gpu_kernel(iter, [=]GPU_LAMBDA(arg2_t b) {
       return f(a, b);
     });
   } else if (iter.is_cpu_scalar(2)) {
+    using arg1_t = typename traits::template arg<0>::type;
+    using arg2_t = typename traits::template arg<1>::type;
     auto b = iter.scalar_value<arg2_t>(2);
     iter.remove_operand(2);
-    gpu_unary_kernel(iter, [=]GPU_LAMBDA(arg1_t a) {
+    gpu_kernel(iter, [=]GPU_LAMBDA(arg1_t a) {
       return f(a, b);
     });
-  } else if (iter.is_trivial_1d()) {
-    auto strides = iter.get_inner_strides();
-    int stride0 = strides[0];
-    int stride1 = strides[1];
-    int stride2 = strides[2];
-    launch_kernel<launch_size_1d, 1>(numel, [stride0, stride1, out_data, in1_data, f, stride2, in2_data]__device__(int idx) {
-      arg0_t* out = (arg0_t*)&out_data[stride0 * idx];
-      arg1_t* in1 = (arg1_t*)&in1_data[stride1 * idx];
-      arg2_t* in2 = (arg2_t*)&in2_data[stride2 * idx];
-      *out = f(*in1, *in2);
-    });
   } else {
-    auto offset_calc = make_offset_calculator<3>(iter);
-    launch_kernel<launch_size_nd, launch_bound2>(numel, [=]__device__(int idx) {
-      auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)&out_data[offsets[0]];
-      arg1_t* in1 = (arg1_t*)&in1_data[offsets[1]];
-      arg2_t* in2 = (arg2_t*)&in2_data[offsets[2]];
-      *out = f(*in1, *in2);
-    });
+    gpu_kernel(iter, f);
   }
 }
 

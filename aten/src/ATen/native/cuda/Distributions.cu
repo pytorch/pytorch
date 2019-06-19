@@ -122,8 +122,8 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
 }
 
 /**
- * distribution_nullary_kernel is analogous to gpu_nullary_kernel in
- * ATen/native/cuda/Loops.cuh. Like gpu_nullary_kernel, it uses
+ * distribution_nullary_kernel is analogous to gpu_kernel in
+ * ATen/native/cuda/Loops.cuh. Like gpu_kernel, it uses
  * TensorIterator to launch a kernel. However, the differences are
  *   - it launches a grid-stride loop based kernel. The kernel is not
  *     generic like elementwise_kernel in Loops.cuh and is specialized

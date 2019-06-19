@@ -75,7 +75,7 @@ private:
 
   struct WeakIValueEq {
     bool operator()(const WeakIValue& t1, const WeakIValue& t2) const {
-      return t1.lock().isSameIdentity(t2.lock());
+      return t1.isSameIdentity(t2);
     }
   };
 
