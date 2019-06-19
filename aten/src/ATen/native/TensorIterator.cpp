@@ -72,8 +72,13 @@ compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
   ScalarType dtype = ScalarType::Undefined;
   for (auto& op : operands) {
     if (!op.tensor.defined()) continue;
-    if (!predicate(op.tensor)) continue;
-    auto tensor_dtype = op.tensor.scalar_type();
+    if (!predicate(op)) continue;
+    ScalarType tensor_dtype;
+    if( op.tensor.unsafeGetTensorImpl()->is_wrapped_number() && isFloatingType(op.tensor.scalar_type())) {
+      tensor_dtype = typeMetaToScalarType(caffe2::get_default_dtype());
+    } else {
+      tensor_dtype = op.tensor.scalar_type();
+    }
     if (dtype == ScalarType::Undefined) {
       dtype = tensor_dtype;
       device = op.tensor.device();
@@ -98,11 +103,36 @@ compute_result_type(at::ArrayRef<OperandInfo> operands,
 
 std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
   // See [Result type computation] in TensorIterator.h
+
+  // in case of in-place operations, result type will be defined and needs to
+  // be preserved. Not an additional predicate becaue doesn't participate in
+  // zero-dim floating point promotion.
+  auto output = compute_result_type(operands_,
+    [](const OperandInfo& op) { return op.is_output; }
+  );
+  if( std::get<1>(output) != ScalarType::Undefined ) {
+    return output;
+  }
+
   auto result_type =
       compute_result_type(operands_,
-        [](const Tensor& t) { return t.dim() > 0; },
-        [](const Tensor& t) { return !t.unsafeGetTensorImpl()->is_wrapped_number(); },
-        [](const Tensor& t) { return true; });
+        [](const OperandInfo& op) { return op.tensor.dim() > 0; },
+        [](const OperandInfo& op) { return !op.tensor.unsafeGetTensorImpl()->is_wrapped_number(); },
+        [](const OperandInfo& op) { return true; });
+
+  // if non-zero-dim tensor result is an integral type and there's a zero-dim
+  // floating point operand, we'll promote the the floating point type.
+  if( isIntegralType(std::get<1>(result_type)) ) {
+    auto alternate = compute_result_type(operands_,
+        [](const OperandInfo& op) {
+          return isFloatingType(op.tensor.scalar_type()) && op.tensor.dim() == 0;
+        }
+    );
+    if( std::get<1>(alternate) != ScalarType::Undefined) {
+      // preserve device from original result
+      return std::make_tuple(std::get<0>(result_type), std::get<1>(alternate));
+    }
+  }
 
   TORCH_INTERNAL_ASSERT(std::get<1>(result_type) != ScalarType::Undefined);
   return result_type;
@@ -110,6 +140,7 @@ std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
 
 void TensorIterator::compute_types() {
   bool missing_dtypes = false;
+  ScalarType common_dtype = dtype();
   for (auto& op : operands_) {
     if (!op.tensor.defined() && !op.is_type_defined()) {
       missing_dtypes = true;
@@ -119,7 +150,7 @@ void TensorIterator::compute_types() {
   if (missing_dtypes || compute_common_dtype_) {
     auto common_type = compute_common_type();
     auto common_device = std::get<0>(common_type);
-    auto common_dtype = std::get<1>(common_type);
+    common_dtype = std::get<1>(common_type);
     bool has_cpu_scalar = false;
     for (auto& op : operands_) {
       if (!op.is_type_defined()) {
@@ -147,23 +178,32 @@ void TensorIterator::compute_types() {
           op.dtype = common_dtype;
         }
       }
-    }
-  }
 
-  for (auto& op : operands_) {
-    auto& tensor = op.tensor;
-    if (!tensor.defined()) {
-      continue;
-    }
-    if (op.device != tensor.device() || op.dtype != tensor.scalar_type()) {
-      if (op.is_output) {
-        AT_ERROR("output with device ", tensor.device(), " and dtype ", tensor.scalar_type(),
-                 " doesn't match the desired device ", op.device, " and dtype ", op.dtype);
-      } else if (tensor.dim() == 0) {
-        tensor = tensor.to(op.options());
-      } else {
-        AT_ERROR("expected device ", op.device, " and dtype ", op.dtype,
-                 " but got device ", tensor.device(), " and dtype ", tensor.scalar_type());
+      if( op.tensor.defined() && op.tensor.scalar_type() != common_dtype )
+      {
+        auto tensor = op.tensor;
+        op.tensor = tensor.to(common_dtype);
+        op.dtype = op.tensor.scalar_type();
+        auto original_element_size = tensor.element_size();
+        auto new_element_size = op.tensor.element_size();
+        // stride size (in bytes) can change if we change the dtype.
+        if( original_element_size != new_element_size ) {
+          for( size_t i=0; i < op.stride_bytes.size(); i++ ) {
+            auto stride = op.stride_bytes[i] / original_element_size;
+            op.stride_bytes[i] = stride * new_element_size;
+          }
+        }
+      }
+      if( op.tensor.defined() && op.device != op.tensor.device()) {
+        if (op.is_output) {
+          AT_ERROR("output with device ", op.tensor.device(),
+                   " doesn't match the desired device ", op.device);
+        } else if (op.tensor.dim() == 0) {
+          op.tensor = op.tensor.to(op.options());
+        } else {
+          AT_ERROR("expected device ", op.device,
+                   " but got device ", op.tensor.device());
+        }
       }
     }
   }

@@ -51,6 +51,7 @@ TESTS = [
     'jit_fuser',
     'tensorboard',
     'namedtensor',
+    'type_promotion',
 ]
 
 WINDOWS_BLACKLIST = [

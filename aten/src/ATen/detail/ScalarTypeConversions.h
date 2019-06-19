@@ -9,7 +9,7 @@ namespace at { namespace detail {
 
 template <typename T>
 inline T load(const void* data, ScalarType src_type) {
-  return AT_DISPATCH_ALL_TYPES(src_type, "load", [&]() {
+  return AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, src_type, "load", [&]() {
     return at::convert<T>(*(scalar_t*)data);
   });
 }
