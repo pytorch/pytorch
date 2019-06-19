@@ -301,6 +301,15 @@ class TestMkldnn(TestCase):
             z.to_dense(),
         )
 
+    def test_transpose(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
+        for dim1 in range(x.ndim):
+            for dim2 in range(x.ndim):
+                self.assertEqual(
+                    x.transpose(dim1, dim2),
+                    x.to_mkldnn().transpose(dim1, dim2).to_dense(),
+                )
+
     def test_linear(self):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()

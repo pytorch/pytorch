@@ -644,6 +644,10 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_transpose_(self_clone, dim0, dim1);
   }
 
+  if (self.is_mkldnn()) {
+    return at::mkldnn_transpose(self, dim0, dim1);
+  }
+
   auto strides = self.strides().vec();
   auto sizes = self.sizes().vec();
   std::swap(strides[dim0], strides[dim1]);
