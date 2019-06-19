@@ -175,23 +175,25 @@ struct PythonPrintPass {
 
   // Any classes used are written to this table, to be later written out as
   // dependencies.
-  std::vector<ClassTypePtr>& class_table_;
-  std::vector<ClassTypePtr> class_deps_;
+  std::vector<c10::NamedTypePtr>& class_table_;
+  std::vector<c10::NamedTypePtr> class_deps_;
   // Helper to avoid duplicating class types
-  void addToClassTable(const ClassTypePtr& classType) {
+  void addToClassTable(const c10::NamedTypePtr& type) {
     // we serialize module classes separately.
     // Including them in the class table as well will cause the code
     // to get imported twice.
-    if (classType->qualname() == "__torch__.$Module") {
-      return;
+    if (auto classType = type->cast<ClassType>()) {
+      if (classType->is_module()) {
+        return;
+      }
     }
-    if (std::find(class_table_.cbegin(), class_table_.cend(), classType) ==
+    if (std::find(class_table_.cbegin(), class_table_.cend(), type) ==
         class_table_.cend()) {
-      class_table_.push_back(classType);
+      class_table_.push_back(type);
     }
-    if (std::find(class_deps_.cbegin(), class_deps_.cend(), classType) ==
+    if (std::find(class_deps_.cbegin(), class_deps_.cend(), type) ==
         class_deps_.cend()) {
-      class_deps_.push_back(classType);
+      class_deps_.push_back(type);
     }
   }
 
@@ -647,6 +649,10 @@ struct PythonPrintPass {
   void registerClassDependencies(const TypePtr& type) {
     if (const auto classType = type->cast<ClassType>()) {
       addToClassTable(classType);
+    } else if (const auto tupleType = type->cast<TupleType>()) {
+      if (tupleType->qualified_name_obj()) {
+        addToClassTable(tupleType);
+      }
     }
     for (const auto& containedType : type->containedTypes()) {
       registerClassDependencies(containedType);
@@ -787,14 +793,14 @@ struct PythonPrintPass {
     } else if (v.isTensorList()) {
       stmt << "[";
       const char* delim = "";
-      for (const auto& t : v.toTensorListRef()) {
+      for (const at::Tensor& t : v.toTensorListRef()) {
         stmt << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
         delim = ", ";
       }
       stmt << "]";
     } else if (v.isBoolList()) {
       printMaybeAnnotatedConstantList(
-          stmt, "bool", v.toBoolListRef().size(), v);
+          stmt, "bool", v.toBoolList().size(), v);
     } else if (v.isIntList()) {
       printMaybeAnnotatedConstantList(stmt, "int", v.toIntListRef().size(), v);
     } else if (v.isDoubleList()) {
@@ -887,6 +893,12 @@ struct PythonPrintPass {
         printValueList(stmt, node->inputs(), "print(", ")");
       } break;
       case prim::TupleConstruct: {
+        if (auto qualname = node->output()
+                                ->type()
+                                ->expect<TupleType>()
+                                ->qualified_name_obj()) {
+          stmt << qualname->qualifiedName();
+        }
         printValueList(
             stmt, node->inputs(), "(", node->inputs().size() == 1 ? ",)" : ")");
       } break;
@@ -1076,7 +1088,7 @@ struct PythonPrintPass {
 
   PythonPrintPass(
       std::vector<at::Tensor>& tensor_table,
-      std::vector<ClassTypePtr>& class_table,
+      std::vector<c10::NamedTypePtr>& class_table,
       bool enforce_importable,
       bool is_method)
       : tensor_table_(tensor_table),
@@ -1101,17 +1113,34 @@ struct PythonPrintPass {
     }
   }
 
-  void printClass(const ClassTypePtr& classType) {
-    body_ << "class " << classType->basename() << ":\n";
-    {
-      const auto guard = WithIndented();
-      for (auto& method : classType->methods()) {
-        printFunction(*method);
+  void printClass(const c10::NamedTypePtr& type) {
+    if (auto classType = type->cast<ClassType>()) {
+      body_ << "class " << classType->basename() << ":\n";
+      {
+        const auto guard = WithIndented();
+        // TODO fields
+        for (auto& method : classType->methods()) {
+          printFunction(*method);
+        }
       }
+    } else if (auto tupleType = type->cast<TupleType>()) {
+      TORCH_INTERNAL_ASSERT(tupleType->schema());
+      body_ << "class " << tupleType->basename();
+      body_ << "(NamedTuple):\n";
+      {
+        const auto guard = WithIndented();
+        for (const auto& attr : tupleType->schema()->arguments()) {
+          TORCH_INTERNAL_ASSERT(attr.type());
+          indent();
+          body_ << attr.name() << " : " << attr.type()->python_str() << "\n";
+        }
+      }
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
     }
     // remove `classType` from the list of deps
     class_deps_.erase(
-        std::remove(class_deps_.begin(), class_deps_.end(), classType),
+        std::remove(class_deps_.begin(), class_deps_.end(), type),
         class_deps_.end());
   }
 
@@ -1125,7 +1154,7 @@ void PythonPrint(
     const Function& func,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<ClassTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printFunction(func);
@@ -1137,7 +1166,7 @@ void PythonPrint(
     const script::CompilationUnit& cu,
     bool is_method,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<ClassTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, is_method);
   pp.printCompilationUnit(cu);
@@ -1146,9 +1175,9 @@ void PythonPrint(
 
 void PythonPrint(
     std::ostream& out,
-    const ClassTypePtr& classType,
+    const c10::NamedTypePtr& classType,
     std::vector<at::Tensor>& tensor_table,
-    std::vector<ClassTypePtr>& class_table,
+    std::vector<c10::NamedTypePtr>& class_table,
     bool enforce_importable) {
   PythonPrintPass pp(tensor_table, class_table, enforce_importable, true);
   pp.printClass(classType);

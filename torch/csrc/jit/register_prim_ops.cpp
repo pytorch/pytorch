@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/error_report.h>
@@ -25,6 +26,7 @@
 #include <c10/util/SmallVector.h>
 
 #include <algorithm>
+#include <bitset>
 #include <cctype>
 #include <cmath>
 #include <exception>
@@ -242,11 +244,12 @@ RegisterOperators reg(
          [](Stack& stack) {
            int64_t n;
            pop(stack, n);
-           std::vector<int64_t> elems(n);
+           c10::ListPtr<int64_t> elems = c10::make_list<int64_t>();
+           elems.reserve(n);
            for (int i = 0; i < n; i++) {
-             elems[i] = i;
+             elems.push_back(i);
            }
-           push(stack, jit::IntList::create(elems));
+           push(stack, std::move(elems));
            return 0;
          }),
      Operator(
@@ -334,7 +337,7 @@ RegisterOperators reg(
            IValue scalar;
            pop(stack, scalar);
            if (scalar.isDouble()) {
-             push(stack, scalar);
+             push(stack, std::move(scalar));
            } else {
              push(stack, static_cast<double>(scalar.toInt()));
            }
@@ -378,7 +381,7 @@ RegisterOperators reg(
            IValue scalar;
            pop(stack, scalar);
            if (scalar.isInt()) {
-             push(stack, scalar);
+             push(stack, std::move(scalar));
            } else {
              push(stack, static_cast<int64_t>(scalar.toDouble()));
            }
@@ -552,15 +555,19 @@ RegisterOperators reg(
          [](const Node* node) {
            size_t num_inputs = node->inputs().size();
            return [num_inputs](Stack& stack) {
+             std::stringstream ss;
              bool first = true;
              for (const IValue& i : last(stack, num_inputs)) {
                if (!first)
-                 std::cout << " ";
+                 ss << " ";
                first = false;
-               std::cout << i;
+               ss << i;
              }
              drop(stack, num_inputs);
-             std::cout << std::endl;
+             ss << std::endl;
+             auto* handler = getPrintHandler();
+             TORCH_INTERNAL_ASSERT(handler);
+             handler(ss.str());
              return 0;
            };
          }),
@@ -573,7 +580,7 @@ RegisterOperators reg(
              size.reserve(8);
              for (size_t i = 0; i < num_inputs; ++i) {
                size = at::infer_size(
-                   size, peek(stack, i, num_inputs).toIntList()->elements());
+                   size, peek(stack, i, num_inputs).toIntListRef());
              }
              drop(stack, num_inputs);
              push(stack, std::move(size));
@@ -586,17 +593,15 @@ RegisterOperators reg(
            int64_t raw_dim = node->i(attr::dim);
            int64_t chunks = node->i(attr::chunks);
            return [raw_dim, chunks](Stack& stack) {
-             Shared<IntList> sizes_l;
-             pop(stack, sizes_l);
-             const auto& shape = sizes_l->elements();
-             std::vector<int64_t> regular_shape = shape;
-             std::vector<int64_t> last_shape = shape;
+             c10::ListPtr<int64_t> shape = pop(stack).toIntList();
+             c10::ListPtr<int64_t> regular_shape = shape.copy();
+             c10::ListPtr<int64_t> last_shape = shape.copy();
              int64_t dim = at::maybe_wrap_dim(raw_dim, shape.size());
              TORCH_CHECK(
                  dim < (int64_t)regular_shape.size(),
                  "Dimension out of range for chunk");
              int64_t split_size = (regular_shape[dim] + chunks - 1) / chunks;
-             regular_shape[dim] = split_size;
+             regular_shape[dim] =split_size;
              if (shape[dim] % chunks == 0) {
                last_shape[dim] = split_size;
              } else {
@@ -627,8 +632,7 @@ RegisterOperators reg(
                drop(stack, 1);
                c10::SourceLocation location{
                    "", range->filename()->c_str(), uint32_t(line)};
-               c10::Warning::warn(location,
-                   pop(stack).toStringRef());
+               c10::Warning::warn(location, pop(stack).toStringRef());
                return 0;
              };
            }
@@ -744,11 +748,11 @@ RegisterOperators reg(
            IValue self, size;
            pop(stack, self, size);
            if (size.isNone()) {
-             push(stack, self);
+             push(stack, std::move(self));
            } else {
              push(
                  stack,
-                 at::sum_to(self.toTensor(), size.toIntList()->elements()));
+                 at::sum_to(self.toTensor(), size.toIntListRef()));
            }
            return 0;
          }),
@@ -757,8 +761,8 @@ RegisterOperators reg(
          [](Stack& stack) {
            IValue self_size, other_size;
            pop(stack, self_size, other_size);
-           const auto s = self_size.toIntList()->elements();
-           if (s == other_size.toIntList()->elements()) {
+           auto s = self_size.toIntListRef();
+           if (s.equals(other_size.toIntListRef())) {
              push(stack, IValue());
            } else {
              push(stack, s);
@@ -770,16 +774,18 @@ RegisterOperators reg(
          [](const Node* node) {
            size_t num_elems = node->outputs().size();
            return [=](Stack& stack) {
-             auto t = pop(stack).toTuple();
-             const auto& elems = t->elements();
-             if (elems.size() != num_elems) {
+             auto tuple = pop(stack).toTuple();
+             if (tuple->elements().size() != num_elems) {
                AT_ERROR(
                    "Expected a tuple of ",
                    num_elems,
                    " elements, but got ",
-                   elems.size());
+                   tuple->elements().size());
              }
-             stack.insert(stack.end(), elems.begin(), elems.end());
+             stack.insert(
+                 stack.end(),
+                 tuple->elements().begin(),
+                 tuple->elements().end());
              return 0;
            };
          }),
@@ -789,13 +795,12 @@ RegisterOperators reg(
            int64_t beg_ind = node->i(attr::beg);
            int64_t end_ind = node->i(attr::end);
            return [=](Stack& stack) {
-             auto t = pop(stack).toTuple();
-             const auto& elems = t->elements();
+             auto tuple = pop(stack).toTuple();
              std::vector<IValue> output_elems;
              for (int64_t i = beg_ind; i < end_ind; ++i) {
-               output_elems.emplace_back(elems.at(i));
+               output_elems.emplace_back(tuple->elements()[i]);
              }
-             push(stack, Tuple::create(std::move(output_elems)));
+             push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
              return 0;
            };
          }),
@@ -804,14 +809,13 @@ RegisterOperators reg(
          [](const Node* node) {
            return [](Stack& stack) {
              int64_t index = pop(stack).toInt();
-             auto tup = pop(stack).toTuple();
-             const auto& elems = tup->elements();
-             auto norm_index = normalizeIndex(index, elems.size());
+             auto tuple = pop(stack).toTuple();
+             auto norm_index = normalizeIndex(index, tuple->elements().size());
              if (norm_index < 0 ||
-                 norm_index > static_cast<int64_t>(elems.size())) {
+                 norm_index > static_cast<int64_t>(tuple->elements().size())) {
                throw std::out_of_range("Tuple list index out of range");
              }
-             stack.emplace_back(elems.at(norm_index));
+             stack.emplace_back(tuple->elements()[norm_index]);
              return 0;
            };
          }),
@@ -819,12 +823,13 @@ RegisterOperators reg(
          prim::TupleConstruct,
          [](const Node* node) {
            size_t num_inputs = node->inputs().size();
+           auto type = node->output()->type()->expect<TupleType>();
            return [=](Stack& stack) {
              std::vector<IValue> elems{
                  std::make_move_iterator(stack.end() - num_inputs),
                  std::make_move_iterator(stack.end())};
              drop(stack, num_inputs);
-             push(stack, Tuple::create(std::move(elems)));
+             push(stack, c10::ivalue::Tuple::create(std::move(elems), type));
              return 0;
            };
          }),
@@ -879,54 +884,50 @@ RegisterOperators reg(
            ListTypePtr lt = node->input()->type()->expect<ListType>();
            if (lt->getElementType() == IntType::get()) {
              return [=](Stack& stack) {
-               auto ilist = pop(stack);
-               const auto& list = ilist.toIntList()->elements();
+               auto list = pop(stack).toIntList();
                TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
                    " elements in a list but found ",
                    list.size());
-               stack.insert(stack.end(), list.begin(), list.end());
+               push_list_elements(stack, list);
                return 0;
              };
            } else if (lt->getElementType() == FloatType::get()) {
              return [=](Stack& stack) {
-               auto ilist = pop(stack);
-               const auto& list = ilist.toDoubleList()->elements();
+               auto list = pop(stack).toDoubleList();
                TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
                    " elements in a list but found ",
                    list.size());
-               stack.insert(stack.end(), list.begin(), list.end());
+               push_list_elements(stack, list);
                return 0;
              };
            } else if (lt->getElementType() == TensorType::get()) {
              return [=](Stack& stack) {
-               auto ilist = pop(stack);
-               const auto& list = ilist.toTensorList()->elements();
+               auto list = pop(stack).toTensorList();
                TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
                    " elements in a list but found ",
                    list.size());
-               stack.insert(stack.end(), list.begin(), list.end());
+               push_list_elements(stack, list);
                return 0;
              };
            } else {
              return [=](Stack& stack) {
-               auto glist = pop(stack);
-               const auto& list = glist.toGenericList()->elements();
+               auto list = pop(stack).toGenericList();
                TORCH_CHECK(
                    list.size() == num_outputs,
                    "Expected ",
                    num_outputs,
                    " elements in a list but found ",
                    list.size());
-               stack.insert(stack.end(), list.begin(), list.end());
+               push_list_elements(stack, list);
                return 0;
              };
            }
@@ -945,7 +946,7 @@ RegisterOperators reg(
            } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               std::vector<at::Tensor> vals;
+               c10::ListPtr<at::Tensor> vals = c10::make_list<at::Tensor>();
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]).toTensor());
@@ -957,7 +958,7 @@ RegisterOperators reg(
            } else {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               std::vector<IValue> vals;
+               c10::ListPtr<IValue> vals = c10::make_list<IValue>();
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));
@@ -992,7 +993,7 @@ RegisterOperators reg(
          [](Stack& stack) {
            auto val = pop(stack);
            TORCH_CHECK(!val.isNone(), "Unwrapping null optional");
-           push(stack, val);
+           push(stack, std::move(val));
            return 0;
          }),
      // This op can be removed in preprocessing before being run in the
@@ -1204,158 +1205,110 @@ RegisterOperators logging_operators(
     return 0;                                                      \
   })
 
-int stringSlice(Stack& stack) {
-  auto step = pop(stack).toInt();
-  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
-
-  auto end = pop(stack).toInt();
-  auto start = pop(stack).toInt();
-  auto string = pop(stack).toStringRef();
-  const int64_t size = string.size();
-
-  // Clamp start and end to the bounds of the list
-  start = std::max(int64_t(0), normalizeIndex(start, size));
-  end = std::min(size, normalizeIndex(end, size));
-
-  if (end <= start) {
-    // Slice is empty
-    push(stack, std::string(""));
-    return 0;
-  }
-
-  std::string result(string.begin() + start, string.begin() + end);
-  push(stack, result);
-  return 0;
-}
-
 // Equivalent to list.at(idx)
-template <typename TList> // something like Shared<IntList>
-typename TList::element_type::ElemType& getItem(TList& list, int64_t idx) {
-  const int64_t list_size = list->elements().size();
-  const int64_t normalized_idx = normalizeIndex(idx, list_size);
-  if (normalized_idx < 0 || normalized_idx >= list_size) {
-    throw std::out_of_range("list index out of range");
-  }
-  return list->elements()[normalized_idx];
-}
-
-// cannot return a reference to an element in a bool vector
-bool getBoolItem(const std::vector<bool>& list, int64_t idx) {
+template <typename T>
+T getItem(const c10::ListPtr<T>& list, int64_t idx) {
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     throw std::out_of_range("list index out of range");
   }
-  return list[normalized_idx];
+  return list.get(normalized_idx);
 }
 
-template <typename TList, typename TElement>
+template <typename T>
+void setItem(const c10::ListPtr<T>& list, int64_t idx, T&& value) {
+  const int64_t list_size = list.size();
+  const int64_t normalized_idx = normalizeIndex(idx, list_size);
+  if (normalized_idx < 0 || normalized_idx >= list_size) {
+    throw std::out_of_range("list index out of range");
+  }
+  list.set(normalized_idx, std::move(value));
+}
+
+template <typename T>
 int listAppend(Stack& stack) {
-  TList a;
-  TElement el;
-  pop(stack, a, el);
+  c10::ListPtr<T> list = c10::make_list<T>();
+  T el;
+  pop(stack, list, el);
 
-  a->elements().push_back(el);
-  push(stack, a);
+  list.push_back(std::move(el));
+  push(stack, std::move(list));
 
   return 0;
 }
 
-template <typename TList>
+template <typename T>
 int listReverse(Stack& stack) {
-  TList a;
-  pop(stack, a);
+  c10::ListPtr<T> list = c10::make_list<T>();
+  pop(stack, list);
 
-  auto& elements = a->elements();
-  std::reverse(elements.begin(), elements.end());
+  std::reverse(list.begin(), list.end());
 
   return 0;
 }
 
-template <typename TList>
+template <typename T>
 int listPop(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t idx;
   pop(stack, list, idx);
 
-  auto& elements = list->elements();
-  const int64_t list_size = elements.size();
+  const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
 
   if (list_size == 0) {
     AT_ERROR("pop from empty list");
   }
 
-  push(stack, std::move(getItem(list, idx)));
-  elements.erase(elements.begin() + normalized_idx);
+  push(stack, getItem(list, idx));
+  list.erase(list.begin() + normalized_idx);
 
   return 0;
 }
 
-template <>
-int listPop<Shared<BoolList>>(Stack& stack) {
-  Shared<BoolList> list;
-  int64_t idx;
-  pop(stack, list, idx);
-
-  auto& elements = list->elements();
-  const int64_t list_size = elements.size();
-  const int64_t normalized_idx = normalizeIndex(idx, list_size);
-
-  if (list_size == 0) {
-    AT_ERROR("pop from empty list");
-  }
-
-  push(stack, getBoolItem(elements, idx));
-  elements.erase(elements.begin() + normalized_idx);
-
-  return 0;
-}
-
-template <typename TList>
+template <typename T>
 int listClear(Stack& stack) {
-  TList a;
-  pop(stack, a);
+  c10::ListPtr<T> list = c10::make_list<T>();
+  pop(stack, list);
 
-  a->elements().clear();
+  list.clear();
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listInsert(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t idx;
-  TElement elem;
+  T elem;
   pop(stack, list, idx, elem);
 
-  auto& elements = list->elements();
-  const int64_t list_size = elements.size();
+  const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
 
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     if (normalized_idx < 0) {
-      elements.insert(elements.begin(), elem);
+      list.insert(list.begin(), elem);
     } else {
-      elements.push_back(elem);
+      list.push_back(elem);
     }
   } else {
-    elements.insert(elements.begin() + normalized_idx, elem);
+    list.insert(list.begin() + normalized_idx, elem);
   }
 
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listRemove(Stack& stack) {
-  TList list;
-  TElement elem;
+  c10::ListPtr<T> list = c10::make_list<T>();
+  T elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
-  auto pos = std::find(elements.begin(), elements.end(), elem);
+  auto pos = std::find(list.begin(), list.end(), elem);
 
-  if (pos != elements.end()) {
-    elements.erase(pos);
+  if (pos != list.end()) {
+    list.erase(pos);
   } else {
     AT_ERROR("list.remove(x): x not in list");
   }
@@ -1364,20 +1317,19 @@ int listRemove(Stack& stack) {
 }
 
 template <>
-int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
-  Shared<TensorList> list;
+int listRemove<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> list = c10::make_list<at::Tensor>();
   at::Tensor elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
   auto pos = std::find_if(
-      elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+      list.begin(), list.end(), [&](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
         return cmp_result.is_nonzero();
       });
 
-  if (pos != elements.end()) {
-    elements.erase(pos);
+  if (pos != list.end()) {
+    list.erase(pos);
   } else {
     AT_ERROR("list.remove(x): x not in list");
   }
@@ -1385,17 +1337,16 @@ int listRemove<Shared<TensorList>, at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listIndex(Stack& stack) {
-  TList list;
-  TElement elem;
+  c10::ListPtr<T> list = c10::make_list<T>();
+  T elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
-  auto pos = std::find(elements.begin(), elements.end(), elem);
+  auto pos = std::find(list.begin(), list.end(), elem);
 
-  if (pos != elements.end()) {
-    push(stack, static_cast<int64_t>(std::distance(elements.begin(), pos)));
+  if (pos != list.end()) {
+    push(stack, static_cast<int64_t>(std::distance(list.begin(), pos)));
   } else {
     AT_ERROR("'", elem, "' is not in list");
   }
@@ -1404,20 +1355,19 @@ int listIndex(Stack& stack) {
 }
 
 template <>
-int listIndex<Shared<TensorList>, at::Tensor>(Stack& stack) {
-  Shared<TensorList> list;
+int listIndex<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> list = c10::make_list<at::Tensor>();
   at::Tensor elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
   auto pos = std::find_if(
-      elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+      list.begin(), list.end(), [elem](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
         return cmp_result.is_nonzero();
       });
 
-  if (pos != elements.end()) {
-    push(stack, static_cast<int64_t>(std::distance(elements.begin(), pos)));
+  if (pos != list.end()) {
+    push(stack, static_cast<int64_t>(std::distance(list.begin(), pos)));
   } else {
     AT_ERROR("'", elem, "' is not in list");
   }
@@ -1425,28 +1375,26 @@ int listIndex<Shared<TensorList>, at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listCount(Stack& stack) {
-  TList list;
-  TElement elem;
+  c10::ListPtr<T> list = c10::make_list<T>();
+  T elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
-  const int64_t count = std::count(elements.begin(), elements.end(), elem);
+  const int64_t count = std::count(list.begin(), list.end(), elem);
   push(stack, count);
 
   return 0;
 }
 
 template <>
-int listCount<Shared<TensorList>, at::Tensor>(Stack& stack) {
-  Shared<TensorList> list;
+int listCount<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> list = c10::make_list<at::Tensor>();
   at::Tensor elem;
   pop(stack, list, elem);
 
-  auto& elements = list->elements();
   const int64_t count = std::count_if(
-      elements.begin(), elements.end(), [elem](const at::Tensor& b) {
+      list.begin(), list.end(), [&](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
         return cmp_result.is_nonzero();
       });
@@ -1455,36 +1403,34 @@ int listCount<Shared<TensorList>, at::Tensor>(Stack& stack) {
   return 0;
 }
 
-template <typename TList>
+template <typename T>
 Operation listExtend(const Node* node) {
   return [](Stack& stack) {
-    TList a;
-    TList b;
+    c10::ListPtr<T> a = c10::make_list<T>();
+    c10::ListPtr<T> b = c10::make_list<T>();
     pop(stack, a, b);
 
-    auto& vec_a = a->elements();
-    const auto& vec_b = b->elements();
-    vec_a.insert(vec_a.end(), vec_b.cbegin(), vec_b.cend());
+    a.reserve(a.size() + b.size());
+    for (size_t i = 0; i < b.size(); ++i) {
+      a.push_back(b.get(i));
+    }
     return 0;
   };
 }
 
-template <typename TList>
+template <typename T>
 Operation listCopy(const Node* node) {
   return [](Stack& stack) {
-    TList list;
+    c10::ListPtr<T> list = c10::make_list<T>();
     pop(stack, list);
-
-    const auto& vec = list->elements();
-    auto out = vec;
-    push(stack, out);
+    push(stack, list.copy());
     return 0;
   };
 }
 
 template <typename T>
 int listSelect(Stack& stack) {
-  T list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t idx;
   pop(stack, list, idx);
 
@@ -1493,54 +1439,42 @@ int listSelect(Stack& stack) {
   return 0;
 }
 
-// needs specialization because cannot return a pointer to a bool in an array
-template <>
-int listSelect<Shared<BoolList>>(Stack& stack) {
-  Shared<BoolList> list;
-  int64_t idx;
-  pop(stack, list, idx);
-
-  auto element = getBoolItem(list->elements(), idx);
-  push(stack, element);
-  return 0;
-}
-
 template <typename T>
 int listLen(Stack& stack) {
-  T a;
+  c10::ListPtr<T> a = c10::make_list<T>();
   pop(stack, a);
 
-  const int64_t size = a->elements().size();
+  const int64_t size = a.size();
   push(stack, size);
   return 0;
 }
 
 template <typename T>
 int listEq(Stack& stack) {
-  T a;
-  T b;
+  c10::ListPtr<T> a = c10::make_list<T>();
+  c10::ListPtr<T> b = c10::make_list<T>();
   pop(stack, a, b);
-  push(stack, a->elements() == b->elements() ? true : false);
+  push(stack, list_is_equal(a, b));
   return 0;
 }
 
 template <typename T>
 int listNe(Stack& stack) {
-  T a;
-  T b;
+  c10::ListPtr<T> a = c10::make_list<T>();
+  c10::ListPtr<T> b = c10::make_list<T>();
   pop(stack, a, b);
-  push(stack, !(a->elements() == b->elements()));
+  push(stack, !list_is_equal(a, b));
   return 0;
 }
 
-inline bool tensor_list_equal(Shared<TensorList> a, Shared<TensorList> b) {
-  if (a->elements().size() != b->elements().size()) {
+inline bool tensor_list_equal(const c10::ListPtr<at::Tensor>& a, const c10::ListPtr<at::Tensor>& b) {
+  if (a.size() != b.size()) {
     return false;
   }
 
-  for (size_t i = 0; i < a->elements().size(); ++i) {
-    const auto& a_element = a->elements()[i];
-    const auto& b_element = b->elements()[i];
+  for (size_t i = 0; i < a.size(); ++i) {
+    at::Tensor a_element = a[i];
+    at::Tensor b_element = b[i];
     // This preserves Python's semantics, which uses eq() to compare two
     // elements, then passes the result to bool().
     // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
@@ -1555,9 +1489,9 @@ inline bool tensor_list_equal(Shared<TensorList> a, Shared<TensorList> b) {
 
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
-int listEq<Shared<TensorList>>(Stack& stack) {
-  Shared<TensorList> a;
-  Shared<TensorList> b;
+int listEq<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> a = c10::make_list<at::Tensor>();
+  c10::ListPtr<at::Tensor> b = c10::make_list<at::Tensor>();
   pop(stack, a, b);
   push(stack, tensor_list_equal(a, b));
   return 0;
@@ -1565,9 +1499,9 @@ int listEq<Shared<TensorList>>(Stack& stack) {
 
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
-int listNe<Shared<TensorList>>(Stack& stack) {
-  Shared<TensorList> a;
-  Shared<TensorList> b;
+int listNe<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> a = c10::make_list<at::Tensor>();
+  c10::ListPtr<at::Tensor> b = c10::make_list<at::Tensor>();
   pop(stack, a, b);
   push(stack, !tensor_list_equal(a, b));
   return 0;
@@ -1581,75 +1515,75 @@ Operation listList(const Node* node) {
   };
 }
 
-template <class TList, class TElement>
+template <class T>
 int listAdd(Stack& stack) {
-  TList a;
-  TList b;
+  c10::ListPtr<T> a = c10::make_list<T>();
+  c10::ListPtr<T> b = c10::make_list<T>();
   pop(stack, a, b);
 
-  std::vector<TElement> ret;
-  const auto total_size = a->elements().size() + b->elements().size();
+  c10::ListPtr<T> ret = c10::make_list<T>();
+  const auto total_size = a.size() + b.size();
   ret.reserve(total_size);
-  for (const auto& a_element : a->elements()) {
-    ret.push_back(a_element);
+  for (T a_element : a) {
+    ret.push_back(std::move(a_element));
   }
-  for (const auto& b_element : b->elements()) {
-    ret.push_back(b_element);
+  for (T b_element : b) {
+    ret.push_back(std::move(b_element));
   }
 
-  push(stack, ret);
+  push(stack, std::move(ret));
   return 0;
 }
 
-template <class TList, class TElement>
+template <class T>
 int listMulIntLeft(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t n;
   pop(stack, list, n);
 
-  std::vector<TElement> ret;
-  const auto size = list->elements().size() * n;
+  c10::ListPtr<T> ret = c10::make_list<T>();
+  const auto size = list.size() * n;
   ret.reserve(size);
 
   for (auto i = 0; i < n; i++) {
-    for (const auto& e : list->elements()) {
-      ret.push_back(e);
+    for (T e : list) {
+      ret.push_back(std::move(e));
     }
   }
 
-  push(stack, ret);
+  push(stack, std::move(ret));
   return 0;
 }
 
-template <class TList, class TElement>
+template <class T>
 int listMulIntRight(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t n;
   pop(stack, n, list);
 
-  std::vector<TElement> ret;
-  const auto size = list->elements().size() * n;
+  c10::ListPtr<T> ret = c10::make_list<T>();
+  const auto size = list.size() * n;
   ret.reserve(size);
 
   for (auto i = 0; i < n; i++) {
-    for (const auto& e : list->elements()) {
-      ret.push_back(e);
+    for (T e : list) {
+      ret.push_back(std::move(e));
     }
   }
 
-  push(stack, ret);
+  push(stack, std::move(ret));
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listSlice(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t start;
   int64_t end;
   int64_t step;
 
   pop(stack, list, start, end, step);
-  const int64_t list_size = list->elements().size();
+  const int64_t list_size = list.size();
 
   // clamp start and end to the bounds of the list
   const auto normalized_start =
@@ -1657,76 +1591,56 @@ int listSlice(Stack& stack) {
   const auto normalized_end =
       std::min(list_size, normalizeIndex(end, list_size));
 
-  std::vector<TElement> sliced_list;
+  c10::ListPtr<T> sliced_list = c10::make_list<T>();
   if (normalized_end <= normalized_start) {
     // early exit if the slice is trivially empty
-    push(stack, sliced_list);
+    push(stack, std::move(sliced_list));
     return 0;
   }
 
   sliced_list.reserve(normalized_end - normalized_start);
 
   for (auto i = normalized_start; i < normalized_end;) {
-    sliced_list.push_back(list->elements()[i]);
+    sliced_list.push_back(list.get(i));
     i += step;
   }
 
-  push(stack, sliced_list);
+  push(stack, std::move(sliced_list));
   return 0;
 }
 
-template <typename TList>
+template <typename T>
 int listSort(Stack& stack) {
-  TList list;
-
-  pop(stack, list);
-  std::sort(list->elements().begin(), list->elements().end());
+  c10::ListPtr<T> list = pop(stack).to<c10::ListPtr<T>>();
+  std::sort(list.begin(), list.end(), [] (const T& a, const T& b) {
+    return a < b;
+  });
   return 0;
 }
 
 // Specialization for at::Tensor
 template <>
-int listSort<Shared<TensorList>>(Stack& stack) {
-  Shared<TensorList> list;
-  pop(stack, list);
+int listSort<at::Tensor>(Stack& stack) {
+  c10::ListPtr<at::Tensor> list = pop(stack).toTensorList();
   std::sort(
-      list->elements().begin(),
-      list->elements().end(),
+      list.begin(),
+      list.end(),
       [](const at::Tensor& a, const at::Tensor& b) {
         return a.lt(b).is_nonzero();
       });
   return 0;
 }
 
-template <typename TList, typename TElement>
+template <typename T>
 int listSetItem(Stack& stack) {
-  TList list;
+  c10::ListPtr<T> list = c10::make_list<T>();
   int64_t idx;
-  TElement value;
+  T value;
 
   pop(stack, list, idx, value);
-  getItem(list, idx) = value;
+  setItem(list, idx, std::move(value));
 
-  push(stack, list);
-  return 0;
-}
-
-template <>
-int listSetItem<Shared<BoolList>, bool>(Stack& stack) {
-  Shared<BoolList> list;
-  int64_t idx;
-  bool value;
-
-  pop(stack, list, idx, value);
-
-  int64_t list_size = list->elements().size();
-  auto normalized_idx = normalizeIndex(idx, list_size);
-  if (normalized_idx < 0 || normalized_idx >= list_size) {
-    throw std::out_of_range("list index out of range");
-  }
-  list->elements()[normalized_idx] = value;
-
-  push(stack, list);
+  push(stack, std::move(list));
   return 0;
 }
 
@@ -1734,21 +1648,21 @@ int dictSetItem(Stack& stack) {
   auto value = pop(stack);
   auto idx = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  dict->elements().insert_or_assign(std::move(idx), std::move(value));
+  dict.insert_or_assign(std::move(idx), std::move(value));
   return 0;
 }
 
 int dictLen(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  push(stack, int64_t(dict->elements().size()));
+  push(stack, int64_t(dict.size()));
   return 0;
 }
 
 int dictKeys(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  std::vector<IValue> keys;
-  keys.reserve(dict->elements().size());
-  for (auto item : dict->elements()) {
+  c10::impl::GenericListPtr keys = c10::impl::make_generic_list();
+  keys.reserve(dict.size());
+  for (auto& item : dict) {
     keys.push_back(item.key());
   }
   push(stack, IValue(keys));
@@ -1756,9 +1670,9 @@ int dictKeys(Stack& stack) {
 }
 
 template <typename Elem>
-std::vector<Elem> makeListForDictValues(
-    const c10::ivalue::GenericDict::IterationOrder& order) {
-  std::vector<Elem> values;
+c10::ListPtr<Elem> makeListForDictValues(
+    const std::vector<std::pair<IValue, IValue>>& order) {
+  c10::ListPtr<Elem> values = c10::make_list<Elem>();
   values.reserve(order.size());
   for (auto item : order) {
     values.push_back(item.second.to<Elem>());
@@ -1769,7 +1683,7 @@ std::vector<Elem> makeListForDictValues(
 Operation dictValues(const Node* n) {
   auto outputType = n->output()->type()->expect<ListType>();
   return [=](Stack& stack) -> int {
-    const auto& order = pop(stack).toGenericDict()->iterationOrder();
+    const auto& order = iterationOrder(pop(stack).toGenericDict());
     if (outputType->getElementType()->isSubtypeOf(TensorType::get())) {
       push(stack, makeListForDictValues<at::Tensor>(order));
     } else if (outputType->getElementType() == IntType::get()) {
@@ -1788,9 +1702,8 @@ Operation dictValues(const Node* n) {
 int dictIndex(Stack& stack) {
   auto index = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  const auto& elems = dict->elements();
-  auto value = elems.find(index);
-  if (value == elems.end()) {
+  auto value = dict.find(index);
+  if (value == dict.end()) {
     AT_ERROR("KeyError: '", index, "'");
   }
   push(stack, value->value());
@@ -1800,9 +1713,8 @@ int dictIndex(Stack& stack) {
 int dictGet(Stack& stack) {
   auto index = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  const auto& elems = dict->elements();
-  auto value = elems.find(index);
-  if (value == elems.end()) {
+  auto value = dict.find(index);
+  if (value == dict.end()) {
     push(stack, IValue());
   } else {
     push(stack, value->value());
@@ -1814,13 +1726,19 @@ int dictGetDefault(Stack& stack) {
   auto default_value = pop(stack);
   auto index = pop(stack);
   auto dict = pop(stack).toGenericDict();
-  const auto& elems = dict->elements();
-  auto value = elems.find(index);
-  if (value == elems.end()) {
-    push(stack, default_value);
+  auto value = dict.find(index);
+  if (value == dict.end()) {
+    push(stack, std::move(default_value));
   } else {
     push(stack, value->value());
   }
+  return 0;
+}
+
+int dictContains(Stack& stack) {
+  auto key = pop(stack);
+  auto dict = pop(stack).toGenericDict();
+  push(stack, dict.contains(key));
   return 0;
 }
 
@@ -1868,246 +1786,215 @@ RegisterOperators reg2({
         "aten::list(str t) -> str[]",
         [](Stack& stack) {
           auto str = pop(stack).toStringRef();
-          std::vector<IValue> chars;
+          c10::ListPtr<std::string> chars = c10::make_list<std::string>();
           chars.reserve(str.size());
           for (auto c : str) {
             chars.push_back(std::string(1, c));
           }
-          push(stack, chars);
+          push(stack, std::move(chars));
           return 0;
         }),
 // Mutable ops for lists containing mutable types.
-#define CREATE_MUTABLE_LIST_OPS(decl_type, c_type)                          \
+#define CREATE_MUTABLE_LIST_OPS(decl_type, value_type)                      \
   Operator(                                                                 \
       "aten::select(" decl_type "[](a) list, int idx) -> " decl_type "(*)", \
-      listSelect<Shared<c_type>>),                                          \
+      listSelect<value_type>),                                              \
       Operator(                                                             \
           "aten::append( " decl_type "[](a!) self, " decl_type              \
           "(c -> *) el) -> " decl_type "[](a!)",                            \
-          listAppend<Shared<c_type>, c_type::ElemType>),                    \
+          listAppend<value_type>),                                          \
       Operator(                                                             \
           "aten::reverse( " decl_type "[](a!) self) -> ()",                 \
-          listReverse<Shared<c_type>>),                                     \
+          listReverse<value_type>),                                         \
       Operator(                                                             \
           "aten::extend(" decl_type "[](a!) self, " decl_type               \
           " [] other) -> ()",                                               \
-          listExtend<Shared<c_type>>),                                      \
+          listExtend<value_type>),                                          \
       Operator(                                                             \
           "aten::copy(" decl_type                                           \
           "[](a) self)"                                                     \
           " -> " decl_type "[]",                                            \
-          listCopy<Shared<c_type>>),                                        \
+          listCopy<value_type>),                                            \
       Operator(                                                             \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type      \
           "(b -> *) el) -> " decl_type "[](a!)",                            \
-          listSetItem<Shared<c_type>, c_type::ElemType>),                   \
+          listSetItem<value_type>),                                         \
       Operator(                                                             \
           "aten::clear( " decl_type "[](a!) self) -> ()",                   \
-          listClear<Shared<c_type>>),                                       \
+          listClear<value_type>),                                           \
       Operator(                                                             \
           "aten::insert( " decl_type                                        \
-          "[](a!) self, int idx,                 \
+          "[](a!) self, int idx,                                            \
           " decl_type "(b -> *) el) -> ()",                                 \
-          listInsert<Shared<c_type>, c_type::ElemType>),                    \
+          listInsert<value_type>),                                          \
       Operator(                                                             \
           "aten::pop(" decl_type                                            \
-          "[](a!) self, int idx=-1)                    \
+          "[](a!) self, int idx=-1)                                         \
         -> " decl_type "(*)",                                               \
-          listPop<Shared<c_type>>)
+          listPop<value_type>)
 
-    CREATE_MUTABLE_LIST_OPS("Tensor", TensorList),
+    CREATE_MUTABLE_LIST_OPS("Tensor", at::Tensor),
 
     Operator(
         "aten::remove(Tensor[](a!) self, Tensor el) -> ()",
-        listRemove<Shared<TensorList>, at::Tensor>),
+        listRemove<at::Tensor>),
     Operator(
         "aten::index(Tensor[] self, Tensor el) -> int",
-        listIndex<Shared<TensorList>, at::Tensor>),
+        listIndex<at::Tensor>),
     Operator(
         "aten::count(Tensor[] self, Tensor el) -> int",
-        listCount<Shared<TensorList>, at::Tensor>),
+        listCount<at::Tensor>),
 
 // Mutable ops for lists containing immutable types.
-#define CREATE_IMMUTABLE_LIST_OPS(decl_type, c_type)                   \
+#define CREATE_IMMUTABLE_LIST_OPS(decl_type, value_type)               \
   Operator(                                                            \
       "aten::select(" decl_type "[] a, int b) -> " decl_type,          \
-      listSelect<Shared<c_type>>),                                     \
+      listSelect<value_type>),                                         \
       Operator(                                                        \
           "aten::append(" decl_type "[](a!) self, " decl_type          \
           " el) -> " decl_type "[](a!)",                               \
-          listAppend<Shared<c_type>, c_type::ElemType>),               \
+          listAppend<value_type>),                                     \
       Operator(                                                        \
           "aten::reverse(" decl_type "[](a!) self) -> ()",             \
-          listReverse<Shared<c_type>>),                                \
+          listReverse<value_type>),                                    \
       Operator(                                                        \
           "aten::extend(" decl_type "[](a!) self, " decl_type          \
           " [] other) -> ()",                                          \
-          listExtend<Shared<c_type>>),                                 \
+          listExtend<value_type>),                                     \
       Operator(                                                        \
           "aten::copy(" decl_type                                      \
           "[](a) self)"                                                \
           " -> " decl_type "[]",                                       \
-          listCopy<Shared<c_type>>),                                   \
+          listCopy<value_type>),                                       \
       Operator(                                                        \
           "aten::_set_item(" decl_type "[](a!) l, int idx, " decl_type \
           " el) -> " decl_type "[](a!)",                               \
-          listSetItem<Shared<c_type>, c_type::ElemType>),              \
+          listSetItem<value_type>),                                    \
       Operator(                                                        \
           "aten::clear( " decl_type "[](a!) self) -> ()",              \
-          listClear<Shared<c_type>>),                                  \
+          listClear<value_type>),                                      \
       Operator(                                                        \
           "aten::insert( " decl_type                                   \
-          "[](a!) self, int idx,            \
+          "[](a!) self, int idx,                                       \
           " decl_type " el) -> ()",                                    \
-          listInsert<Shared<c_type>, c_type::ElemType>),               \
+          listInsert<value_type>),                                     \
       Operator(                                                        \
           "aten::remove(" decl_type                                    \
-          "[](a!) self,                      \
+          "[](a!) self,                                                \
           " decl_type " el) -> ()",                                    \
-          listRemove<Shared<c_type>, c_type::ElemType>),               \
+          listRemove<value_type>),                                     \
       Operator(                                                        \
           "aten::index(" decl_type                                     \
-          "[] self,                           \
+          "[] self,                                                    \
           " decl_type " el) -> int",                                   \
-          listIndex<Shared<c_type>, c_type::ElemType>),                \
+          listIndex<value_type>),                                      \
       Operator(                                                        \
           "aten::count(" decl_type                                     \
-          "[] self,                           \
+          "[] self,                                                    \
           " decl_type " el) -> int",                                   \
-          listCount<Shared<c_type>, c_type::ElemType>),                \
+          listCount<value_type>),                                      \
       Operator(                                                        \
           "aten::pop(" decl_type                                       \
-          "[](a!) self, int idx=-1)             \
+          "[](a!) self, int idx=-1)                                    \
           -> " decl_type,                                              \
-          listPop<Shared<c_type>>)
+          listPop<value_type>)
 
-    CREATE_IMMUTABLE_LIST_OPS("int", IntList),
-    CREATE_IMMUTABLE_LIST_OPS("float", DoubleList),
-    CREATE_IMMUTABLE_LIST_OPS("bool", BoolList),
+    CREATE_IMMUTABLE_LIST_OPS("int", int64_t),
+    CREATE_IMMUTABLE_LIST_OPS("float", double),
+    CREATE_IMMUTABLE_LIST_OPS("bool", bool),
 
     // NOTE: this must be after the other list specializations so that operator
     // resolution doesn't pick this up first
-    CREATE_MUTABLE_LIST_OPS("t", GenericList),
+    CREATE_MUTABLE_LIST_OPS("t", IValue),
 #undef CREATE_IMMUTABLE_LIST_OPS
 #undef CREATE_MUTABLE_LIST_OPS
 
 #define CREATE_LIST_OPS(decl_type, c_type)                                          \
-  Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>),         \
+  Operator("aten::len(" decl_type "[] a) -> int", listLen<c_type::value_type>),     \
       Operator(                                                                     \
           "aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type           \
           "[]",                                                                     \
-          listAdd<Shared<c_type>, c_type::ElemType>),                               \
+          listAdd<c_type::value_type>),                                             \
       Operator(                                                                     \
           "aten::slice(" decl_type                                                  \
           "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
           "[]",                                                                     \
-          listSlice<Shared<c_type>, c_type::ElemType>),                             \
+          listSlice<c_type::value_type>),                                           \
       Operator("aten::list(" decl_type "[] l) -> " decl_type "[]", listList),       \
       Operator(                                                                     \
           "aten::mul(" decl_type "[] l, int n) -> " decl_type "[]",                 \
-          listMulIntLeft<Shared<c_type>, c_type::ElemType>),                        \
+          listMulIntLeft<c_type::value_type>),                                      \
       Operator(                                                                     \
           "aten::mul(int n, " decl_type "[] l) -> " decl_type "[]",                 \
-          listMulIntRight<Shared<c_type>, c_type::ElemType>)
+          listMulIntRight<c_type::value_type>)
 
-    CREATE_LIST_OPS("int", IntList),
-    CREATE_LIST_OPS("float", DoubleList),
-    CREATE_LIST_OPS("bool", BoolList),
-    CREATE_LIST_OPS("Tensor", TensorList),
-    CREATE_LIST_OPS("t", GenericList),
+    CREATE_LIST_OPS("int", c10::ListPtr<int64_t>),
+    CREATE_LIST_OPS("float", c10::ListPtr<double>),
+    CREATE_LIST_OPS("bool", c10::ListPtr<bool>),
+    CREATE_LIST_OPS("Tensor", c10::ListPtr<at::Tensor>),
+    CREATE_LIST_OPS("t", c10::ListPtr<IValue>),
 #undef CREATE_LIST_OPS
-    Operator("aten::sort(int[](a!) self) -> ()", listSort<Shared<IntList>>),
+    Operator("aten::sort(int[](a!) self) -> ()", listSort<int64_t>),
     Operator(
         "aten::sort(float[](a!) self) -> ()",
-        listSort<Shared<DoubleList>>),
+        listSort<double>),
     Operator(
         "aten::sort(Tensor[](a!) self) -> ()",
-        listSort<Shared<TensorList>>),
-    Operator("aten::sort(bool[](a!) self) -> ()", listSort<Shared<BoolList>>),
+        listSort<at::Tensor>),
+    Operator("aten::sort(bool[](a!) self) -> ()", listSort<bool>),
 
-    Operator("aten::eq(int[] a, int[] b) -> bool", listEq<Shared<IntList>>),
+    Operator("aten::eq(int[] a, int[] b) -> bool", listEq<int64_t>),
     Operator(
         "aten::eq(float[] a, float[] b) -> bool",
-        listEq<Shared<DoubleList>>),
+        listEq<double>),
     Operator(
         "aten::eq(Tensor[] a, Tensor[] b) -> bool",
-        listEq<Shared<TensorList>>),
-    Operator("aten::eq(bool[] a, bool[] b) -> bool", listEq<Shared<BoolList>>),
-    Operator("aten::ne(int[] a, int[] b) -> bool", listNe<Shared<IntList>>),
+        listEq<at::Tensor>),
+    Operator("aten::eq(bool[] a, bool[] b) -> bool", listEq<bool>),
+    Operator("aten::ne(int[] a, int[] b) -> bool", listNe<int64_t>),
     Operator(
         "aten::ne(float[] a, float[] b) -> bool",
-        listNe<Shared<DoubleList>>),
+        listNe<double>),
     Operator(
         "aten::ne(Tensor[] a, Tensor[] b) -> bool",
-        listNe<Shared<TensorList>>),
-    Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<Shared<BoolList>>),
-    Operator(
-        "aten::slice(str string, int start, int end=9223372036854775807, int step=1) -> str",
-        stringSlice),
+        listNe<at::Tensor>),
+    Operator("aten::ne(bool[] a, bool[] b) -> bool", listNe<bool>),
 
-// python string is methods return false if empty
-#define DEFINE_STRING_IS_OP(op_name, char_op)                      \
-  Operator(#op_name "(str self) -> bool", [](Stack& stack) {       \
-    auto string = pop(stack).toStringRef();                        \
-    push(                                                          \
-        stack,                                                     \
-        string.size() != 0 &&                                      \
-            std::all_of(string.begin(), string.end(), [](char c) { \
-              return char_op(c);                                   \
-            }));                                                   \
-    return 0;                                                      \
+#define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
+  Operator(#op_name "(int i) -> str", [](Stack& stack) { \
+    auto i = pop(stack).toInt();                         \
+    std::stringstream ss;                                \
+    if (i < 0) {                                         \
+      ss << "-";                                         \
+      i = -i;                                            \
+    }                                                    \
+    ss << "0" << prefix << char_op << i;                 \
+    push(stack, ss.str());                               \
+    return 0;                                            \
   })
 
-    // upper and lower require there to be at least one alpha character,
-    // and ignore all other characters
+    DEFINE_CONVERT_BASE_OP(aten::hex, "x", std::hex),
+    DEFINE_CONVERT_BASE_OP(aten::oct, "o", std::oct),
+
     Operator(
-        "aten::isupper(str self) -> bool",
+        "aten::bin(int i) -> str",
         [](Stack& stack) {
-          auto string = pop(stack).toStringRef();
-          bool found_alpha = false;
-          bool is_upper = true;
-          for (size_t i = 0; i < string.size() && is_upper; ++i) {
-            char c = string[i];
-            found_alpha |= std::isalpha(c);
-            is_upper &= (!std::isalpha(c) || std::isupper(c));
+          auto i = pop(stack).toInt();
+          std::stringstream ss;
+          if (i == 0) {
+            push(stack, "0b0");
+          } else {
+            if (i < 0) {
+              ss << "-";
+              i = -i;
+            }
+            std::string str = std::bitset<8 * sizeof(i)>(i).to_string();
+            str.erase(0, std::min(str.find_first_not_of('0'), str.size() - 1));
+            ss << "0b" << str;
+            push(stack, ss.str());
           }
-          push(stack, found_alpha && is_upper);
           return 0;
         }),
-    Operator(
-        "aten::islower(str self) -> bool",
-        [](Stack& stack) {
-          auto string = pop(stack).toStringRef();
-          bool found_alpha = false;
-          bool is_lower = true;
-          for (size_t i = 0; i < string.size() && is_lower; ++i) {
-            char c = string[i];
-            found_alpha |= std::isalpha(c);
-            is_lower &= (!std::isalpha(c) || std::islower(c));
-          }
-          push(stack, found_alpha && is_lower);
-          return 0;
-        }),
-
-    DEFINE_STRING_IS_OP(aten::isdigit, std::isdigit),
-    DEFINE_STRING_IS_OP(aten::isspace, std::isspace),
-    DEFINE_STRING_IS_OP(aten::isalnum, std::isalnum),
-    DEFINE_STRING_IS_OP(aten::isalpha, std::isalpha),
-
-#define DEFINE_STRING_CHAR_MAP_OP(op_name, char_op)         \
-  Operator(#op_name "(str self) -> str", [](Stack& stack) { \
-    auto string = pop(stack).toStringRef();                 \
-    std::stringstream ss;                                   \
-    for (char c : string) {                                 \
-      ss << static_cast<char>(char_op(c));                  \
-    }                                                       \
-    push(stack, ss.str());                                  \
-    return 0;                                               \
-  })
-
-    DEFINE_STRING_CHAR_MAP_OP(aten::upper, std::toupper),
-    DEFINE_STRING_CHAR_MAP_OP(aten::lower, std::tolower),
-
     Operator(
         "prim::StringIndex(str string, int index) -> str",
         [](Stack& stack) {
@@ -2131,10 +2018,24 @@ RegisterOperators reg2({
           auto string = pop(stack).toStringRef();
           TORCH_CHECK(
               string.size() == 1,
-              "String for ord() must be 1 character, found",
+              "String for ord() must be 1 character, found ",
               string.size());
           uint8_t ord = string.at(0);
           push(stack, int64_t(ord));
+          return 0;
+        }),
+    Operator(
+        "aten::chr(int i) -> str",
+        [](Stack& stack) {
+          auto i = pop(stack).toInt();
+          std::stringstream ss;
+          TORCH_CHECK(
+              i >= 0 && i < 1114111,
+              "chr() arg not in range(0x110000), found ",
+              i);
+          char c = i;
+          ss << c;
+          push(stack, ss.str());
           return 0;
         }),
 #define CREATE_COPY_OP(other_type, c_type)                                 \
@@ -2222,6 +2123,7 @@ RegisterOperators reg2({
 
     DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
     DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
+    DEFINE_UNARY_OP(aten::round, std::round(a), float, float),
     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_BINARY_FLOAT_OP(aten::log, std::log(a) / std::log(b)),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
@@ -2360,25 +2262,24 @@ RegisterOperators reg2({
         [](Stack& stack) {
           at::Tensor t;
           pop(stack, t);
-          std::vector<int64_t> elems;
+          c10::ListPtr<int64_t> elems = c10::make_list<int64_t>();
           elems.reserve(t.size(0));
           for (int i = 0; i < t.size(0); i++) {
             elems.push_back(*t[i].data<int32_t>());
           }
-          push(stack, jit::IntList::create(elems));
+          push(stack, std::move(elems));
           return 0;
         }),
     Operator(
         "aten::_list_to_tensor(int[] self) -> Tensor",
         [](Stack& stack) {
-          std::vector<int64_t> l;
-          pop(stack, l);
+          c10::ListPtr<int64_t> l = pop(stack).toIntList();
           auto t = torch::empty(
               {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
           for (size_t i = 0; i < l.size(); i++) {
-            t[i] = l[i];
+            t[i] = l.get(i);
           }
-          push(stack, t);
+          push(stack, std::move(t));
           return 0;
         }),
 #define CREATE_DICT_OPS(key_type)                                             \
@@ -2399,6 +2300,10 @@ RegisterOperators reg2({
           "aten::get(Dict(" key_type ", t) self, " key_type                   \
           " key, t default_value) -> t(*)",                                   \
           dictGetDefault),                                                    \
+      Operator(                                                               \
+          "aten::__contains__(Dict(" key_type ", t) dict, " key_type         \
+          " key) -> bool",                                                    \
+          dictContains),                                                      \
       Operator(                                                               \
           "aten::_set_item(Dict(" key_type ", t)(a!) l, " key_type            \
           " idx, t(b -> *) v) -> ()",                                         \
@@ -2520,10 +2425,10 @@ RegisterOperators regSort({
             auto g_list = pop(stack).toGenericList();
             Stack sort_stack;
             std::sort(
-                g_list->elements().begin(),
-                g_list->elements().end(),
+                g_list.begin(),
+                g_list.end(),
                 [func, reverse, &sort_stack](
-                    const IValue& a, const IValue& b) -> bool {
+                    IValue a, IValue b) -> bool {
                   // FBCode errors without this check - "strict weak ordering"
                   // TODO: remove when possible, since it just slows down
                   // sorting and doesn't do anything useful
@@ -2553,14 +2458,14 @@ std::vector<int64_t> _output_size(
       std::vector<int64_t> repeated(dim, size.toInt());
       return repeated;
     } else {
-      return size.toIntListRef();
+      return size.toIntListRef().vec();
     }
   }
   std::vector<double> scale_repeated;
   if (scale_factors.isDouble()) {
     scale_repeated = std::vector<double>(dim, scale_factors.toDouble());
   } else {
-    scale_repeated = scale_factors.toDoubleListRef();
+    scale_repeated = scale_factors.toDoubleListRef().vec();
   }
   std::vector<int64_t> ret;
   for (size_t i = 0; i < dim; ++i) {
@@ -2664,7 +2569,7 @@ Operation interpolate_op(const Node* n) {
     pop(stack, input, size, scale_factors, mode, align_corners);
     at::Tensor res = interpolate(
         input, size, scale_factors, mode, align_corners.toOptional<bool>());
-    push(stack, res);
+    push(stack, std::move(res));
     return 0;
   };
 }
@@ -2679,7 +2584,7 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   } else if (int_ivalue.isIntList()) {
     auto int_list = int_ivalue.toIntListRef();
     std::vector<double> double_vec(int_list.begin(), int_list.end());
-    scale_factor_double = double_vec;
+    scale_factor_double = c10::impl::toList(double_vec);
   } else if (int_ivalue.isNone()) {
     return IValue();
   } else {
@@ -2701,7 +2606,7 @@ Operation upsample_nearest_op(const Node* n) {
         convert_scale_factor_to_double(scale_factor_int);
     at::Tensor res =
         interpolate(input, size, scale_factor_double, "nearest", c10::nullopt);
-    push(stack, res);
+    push(stack, std::move(res));
     return 0;
   };
 }
@@ -2722,7 +2627,7 @@ Operation upsample_op(const Node* n) {
         scale_factor_double,
         mode,
         align_corners.toOptional<bool>());
-    push(stack, res);
+    push(stack, std::move(res));
     return 0;
   };
 }
@@ -2737,7 +2642,7 @@ Operation upsample_bilinear_op(const Node* n) {
         convert_scale_factor_to_double(scale_factor_int);
     at::Tensor res =
         interpolate(input, size, scale_factor_double, "bilinear", true);
-    push(stack, res);
+    push(stack, std::move(res));
     return 0;
   };
 }

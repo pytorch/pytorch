@@ -2,6 +2,9 @@
 #define TH_GENERIC_FILE "TH/generic/THTensorMath.h"
 #else
 
+#include <ATen/core/Generator.h>
+#include <ATen/core/DistributionsHelper.h>
+
 TH_API void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor);
 
 #ifndef TH_REAL_IS_HALF

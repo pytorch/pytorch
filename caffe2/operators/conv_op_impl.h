@@ -809,8 +809,8 @@ bool ConvGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
 
   // The offset corresponding to a single input image, and a single output
   // image.
-  const int input_offset = C * input_image_size;
-  const int output_offset = dY.numel() / dY.dim32(0);
+  const size_t input_offset = C * input_image_size;
+  const size_t output_offset = dY.numel() / dY.dim32(0);
   for (int image_id = 0; image_id < N; ++image_id) {
     // When we compute the gradient with respect to the filters, we need to do
     // im2col to allow gemm-type computation.

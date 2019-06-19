@@ -2,8 +2,10 @@
 
 #include <c10/core/Scalar.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #ifdef NAMEDTENSOR_ENABLED
 #include <ATen/NamedTensor.h>
@@ -11,6 +13,12 @@
 
 
 namespace at {
+
+struct Quantizer;
+// This is temporary typedef to enable Quantizer in aten native function API
+// we'll remove them when we are actually exposing Quantizer class
+// to frontend
+using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocking) const {
   if(type() == t)
@@ -816,6 +824,9 @@ inline Scalar Tensor::q_zero_point() const {
 inline Tensor Tensor::int_repr() const {
     return dispatch_type().int_repr(*this);
 }
+inline QScheme Tensor::qscheme() const {
+    return dispatch_type().qscheme(*this);
+}
 inline Tensor Tensor::to(const TensorOptions & options, bool non_blocking, bool copy) const {
     return dispatch_type().to(*this, options, non_blocking, copy);
 }
@@ -842,6 +853,9 @@ inline Tensor & Tensor::set_(const Tensor & source) {
 }
 inline Tensor & Tensor::set_() {
     return dispatch_type().set_(*this);
+}
+inline Tensor & Tensor::set_quantizer_(ConstQuantizerPtr quantizer) {
+    return dispatch_type().set_quantizer_(*this, quantizer);
 }
 inline bool Tensor::is_set_to(const Tensor & tensor) const {
     return dispatch_type().is_set_to(*this, tensor);
@@ -1334,7 +1348,11 @@ inline bool Tensor::is_cuda() const {
 }
 
 #ifdef NAMEDTENSOR_ENABLED
-inline NamedTensorMeta* Tensor::get_named_tensor_meta() const {
+inline NamedTensorMeta* Tensor::get_named_tensor_meta() {
+  return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
+}
+
+inline const NamedTensorMeta* Tensor::get_named_tensor_meta() const {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
 

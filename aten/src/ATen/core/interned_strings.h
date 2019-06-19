@@ -140,7 +140,12 @@ namespace c10 {
   _(aten, wait)                    \
   _(aten, save)                    \
   _(aten, ord)                     \
+  _(aten, chr)                     \
+  _(aten, hex)                     \
+  _(aten, oct)                     \
+  _(aten, bin)                     \
   _(prim, unchecked_unwrap_optional)\
+  _(aten, __contains__)            \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
   _(onnx, Concat)                  \

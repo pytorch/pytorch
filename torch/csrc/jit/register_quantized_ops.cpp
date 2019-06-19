@@ -32,11 +32,11 @@ caffe2::Tensor from_at_tensor(const c10::IValue& v) {
 }
 
 Int8TensorCPU from_proxy(const c10::IValue& proxy) {
-  auto t = std::move(proxy).toTuple();
+  auto t = proxy.toTuple()->elements();
   Int8TensorCPU r;
-  r.t = from_at_tensor(t->elements()[0]);
-  r.scale = t->elements()[1].toDouble();
-  r.zero_point = t->elements()[2].toInt();
+  r.t = from_at_tensor(t[0]);
+  r.scale = t[1].toDouble();
+  r.zero_point = t[2].toInt();
   return r;
 }
 

@@ -36,18 +36,10 @@ using ::c10::Argument;
 using ::c10::FunctionSchema;
 using ::c10::Symbol;
 
-using ::c10::ivalue::List;
 using ::c10::ivalue::Shared;
 
 using ::c10::IValue;
 using ::c10::ivalue::Future;
-using ::c10::ivalue::Tuple;
-
-using ::c10::ivalue::BoolList;
-using ::c10::ivalue::DoubleList;
-using ::c10::ivalue::GenericList;
-using ::c10::ivalue::IntList;
-using ::c10::ivalue::TensorList;
 
 using ::c10::ivalue::ConstantString;
 
@@ -472,7 +464,8 @@ struct TORCH_API Node {
   // defining a new Value to represent any term that has multiple
   // definitions depending on how control flowed. Outputs of the node containing
   // control flow serve a similiar purpose defining new values for variables
-  // that would have different defintions depending on which way control flowed.
+  // that would have different definitions depending on which way control
+  // flowed.
 
   at::ArrayRef<Block*> blocks() {
     return blocks_;
@@ -1070,7 +1063,8 @@ struct Graph {
   TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(
       at::ArrayRef<Value*> values,
-      c10::OptNameList field_names = c10::nullopt);
+      c10::optional<c10::QualifiedName> qualname = c10::nullopt,
+      std::shared_ptr<FunctionSchema> schema=nullptr);
   TORCH_API Node* createTupleUnpack(Value* v);
   TORCH_API Node* createTupleIndex(
       Value* tup,

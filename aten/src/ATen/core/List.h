@@ -17,9 +17,6 @@ template<class T> ListPtr<T> make_list();
 template<class T> ListPtr<T> make_list(ArrayRef<T> values);
 
 namespace detail {
-template<class T> T list_element_to(const T& element);
-template<class T> T list_element_to(const IValue& element);
-template<class T, class Enable> struct list_element_from;
 
 template<class StorageT>
 struct ListImpl final : public c10::intrusive_ptr_target {
@@ -46,7 +43,7 @@ void swap(ListElementReference<T, Iterator, StorageT>&& lhs, ListElementReferenc
 template<class T, class Iterator, class StorageT>
 class ListElementReference final {
 public:
-  operator T() &&;
+  operator T() const;
 
   ListElementReference& operator=(T&& new_value) &&;
 
@@ -175,10 +172,9 @@ template<class T> ListPtr<T> toTypedList(ListPtr<IValue> list);
 template<class T> ListPtr<IValue> toGenericList(ListPtr<T> list);
 const IValue* ptr_to_first_element(const ListPtr<IValue>& list);
 template<class T> ListPtr<T> toList(std::vector<T> list);
-template<class T> ArrayRef<T> toArrayRef(const ListPtr<T>& list);
-template<class T> std::vector<T> toVector(const ListPtr<T>& list);
-
+template<class T> const std::vector<T>& toVector(const ListPtr<T>& list);
 }
+template<class T> bool list_is_equal(const ListPtr<T>& lhs, const ListPtr<T>& rhs);
 
 /**
  * An object of this class stores a list of values of type T.
@@ -218,6 +214,8 @@ private:
   // ListImpl.
   c10::intrusive_ptr<detail::ListImpl<StorageT>> impl_;
 
+  using internal_reference_type = impl::ListElementReference<T, typename detail::ListImpl<typename ListPtr<T>::StorageT>::list_type::iterator, typename ListPtr<T>::StorageT>;
+
 public:
   using value_type = T;
   using size_type = typename detail::ListImpl<StorageT>::list_type::size_type;
@@ -251,7 +249,7 @@ public:
   ListPtr copy() const;
 
   /**
-   * Returns a reference to the element at specified location pos, with bounds checking.
+   * Returns the element at specified location pos, with bounds checking.
    * If pos is not within the range of the container, an exception of type std::out_of_range is thrown.
    */
   value_type get(size_type pos) const;
@@ -274,7 +272,7 @@ public:
    *   list[2] = 5;
    *   int64_t v = list[1];
    */
-  impl::ListElementReference<T, typename detail::ListImpl<typename ListPtr<T>::StorageT>::list_type::iterator, typename ListPtr<T>::StorageT> operator[](size_type pos) const;
+  internal_reference_type operator[](size_type pos) const;
 
   /**
    * Assigns a new value to the element at location pos.
@@ -392,15 +390,28 @@ public:
    */
   void resize(size_type count, const T& value) const;
 
-protected:
+  /**
+   * Compares two lists for equality. Two lists are equal if they have the
+   * same number of elements and for each list position the elements at
+   * that position are equal.
+   */
+  friend bool list_is_equal<T>(const ListPtr& lhs, const ListPtr& rhs);
+
+  /**
+   * Returns the number of ListPtrs currently pointing to this same list.
+   * If this is the only instance pointing to this list, returns 1.
+   */
+  // TODO Test use_count
+  size_t use_count() const;
+
+private:
   explicit ListPtr(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
+  friend struct IValue;
   template<class T_> friend ListPtr<T_> impl::toTypedList(ListPtr<IValue>);
   template<class T_> friend ListPtr<IValue> impl::toGenericList(ListPtr<T_>);
   friend const IValue* impl::ptr_to_first_element(const ListPtr<IValue>& list);
-  template<class T_, class Enable> friend struct detail::list_element_from;
   template<class T_> friend ListPtr<T_> impl::toList(std::vector<T_> list);
-  template<class T_> friend ArrayRef<T_> impl::toArrayRef(const ListPtr<T_>& list);
-  template<class T_> friend std::vector<T_> impl::toVector(const ListPtr<T_>& list);
+  template<class T_> friend const std::vector<T_>& impl::toVector(const ListPtr<T_>& list);
 };
 
 namespace impl {
@@ -434,20 +445,10 @@ inline const IValue* ptr_to_first_element(const GenericListPtr& list) {
 }
 
 template<class T>
-ArrayRef<T> toArrayRef(const ListPtr<T>& list) {
-  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename ListPtr<T>::StorageT>::value, "toArrayRef only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-  return list.impl_->list;
-}
-
-template<class T>
-std::vector<T> toVector(const ListPtr<T>& list) {
+const std::vector<T>& toVector(const ListPtr<T>& list) {
   static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename ListPtr<T>::StorageT>::value, "toVector only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-  std::vector<T> result;
-  result.reserve(list.size());
-  for (size_t i = 0; i < list.size(); ++i) {
-    result.push_back(list.get(i));
-  }
-  return result;
+
+  return list.impl_->list;
 }
 
 template<class T>
