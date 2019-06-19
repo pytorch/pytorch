@@ -258,10 +258,9 @@ static void upsample_bilinear2d_backward_out_cuda_template(
 
   Tensor grad_output = grad_output_.contiguous();
 
-  // resize_ ensures we have contiguous tensor, which is required for the kernel
-  // launch config `upsample_bilinear2d_backward_out_frame` as well as
-  // `fastAtomicAdd` used inside the kernel
   grad_input.resize_({nbatch, channels, input_height, input_width});
+  // A contiguous tensor is required for the kernel launch config
+  grad_input.contiguous();
   // initialization to zero is required here. As we launch one thread per output
   // element, and atomicAdd to input gradient. Given a sparse sampling case, our
   // threads are not covering the whole input tensor.
@@ -284,7 +283,6 @@ static void upsample_bilinear2d_backward_out_cuda_template(
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
             input_width, output_width, align_corners);
 
-        // idata is ensured to be contiguous by `resize_` call earlier
         upsample_bilinear2d_backward_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, static_cast<size_t>(num_threads)),
                num_threads,

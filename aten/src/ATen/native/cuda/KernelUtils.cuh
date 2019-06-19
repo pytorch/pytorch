@@ -1,14 +1,5 @@
 #pragma once
-// Adapted from interp.cpp from Caffe util by Pauline Luc
-// Originally developed by George Papandreou
 #include <ATen/ATen.h>
-//#include <ATen/AccumulateType.h>
-//#include <ATen/NativeFunctions.h>
-//#include <ATen/TensorUtils.h>
-//#include <ATen/Utils.h>
-#include <ATen/cuda/CUDAContext.h>
-//#include <ATen/cuda/CUDAApplyUtils.cuh>
-//#include <ATen/native/cuda/UpSample.cuh>
 
 namespace at {
 namespace native {
@@ -29,13 +20,16 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
       reinterpret_cast<at::Half*>(tensor) + index,
       static_cast<at::Half>(value));
 #else
-  if (index % 2 == 0 && index < (numel - 1)) {
+  bool low_bit = (index % 2 == 0) &&
+      (reinterpret_cast<std::uintptr_t>(tensor) % sizeof(__half2) == 0);
+
+  if (low_bit && index < (numel - 1)) {
     __half2 value2;
     value2.x = value;
     value2.y = __int2half_rz(0);
     atomicAdd(reinterpret_cast<__half2*>(tensor) + index / 2, value2);
 
-  } else if (index % 2 == 1) {
+  } else if (!low_bit && index > 0) {
     __half2 value2;
     value2.x = __int2half_rz(0);
     value2.y = value;
