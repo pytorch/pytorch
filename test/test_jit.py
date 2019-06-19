@@ -7625,7 +7625,7 @@ a")
                 for m in self.mods:
                     print(m)
                 return v
-        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+        with self.assertRaisesRegex(RuntimeError, "annot get length of the value type int"):
             M()
 
     def test_script_module_list_sequential_error(self):
@@ -9969,7 +9969,7 @@ a")
             test_sizes(torch.tensor(1))
 
     def test_for_in_tensors_fail_scalar(self):
-        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+        with self.assertRaisesRegex(RuntimeError, "cannot get length of the value type float"):
             @torch.jit.script
             def test_sizes(x):
                 # type: (float) -> int
@@ -10025,7 +10025,7 @@ a")
 
     def test_sum_list_wrong_type(self):
 
-        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+        with self.assertRaisesRegex(RuntimeError, "cannot get length of the value type int"):
             @torch.jit.script
             def sum_list(a):
                 # type: (int) -> int
