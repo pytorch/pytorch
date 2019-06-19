@@ -1364,15 +1364,10 @@ struct to_ir {
     // each module inside the list may be different types, so FOR .. in ModuleList
     // essentially should emit different stmts for each iteration, which we shouldn't
     // emit the prim::Loop node for it, the same rule applies for the Tuple case.
-    if (targets[0].kind() != TK_VAR) {
-      throw ErrorReport(targets[0])
-          << "unexpected expression in variable initialization of for loop";
-    }
     auto instances = sv->asTuple(stmt.range(), method);
-    const std::string& target_name = Var(targets[0]).name().name();
     pushFrame(environment_stack->block());
     for (const auto& inst : instances) {
-      environment_stack->setSugaredVar(itrs[0].range(), target_name, inst);
+      emitExprsAssign(targets, {inst}, itrs[0].range(), 1);
       emitStatements(body);
     }
 

@@ -10057,6 +10057,26 @@ a")
                 return x, y
             ''')
 
+    def test_for_tuple_assign(self):
+        def test_simple_assign(x):
+            # type: (Tuple[int, float]) -> float
+            sum = 0.0
+            for a in x:
+                sum += float(a)
+            return sum
+
+        self.checkScript(test_simple_assign, ((1, 2.5),))
+
+        def test_tuple_assign(x):
+            # type: (Tuple[Tuple[int, int], Tuple[int, int]]) -> int
+            sum = 0
+            for a in x:
+                sum += a[0]
+                sum += a[1]
+            return sum
+
+        self.checkScript(test_tuple_assign, (((1, 2), (4, 7)), ))
+
     def test_single_starred_lhs(self):
         with self.assertRaisesRegex(RuntimeError, 'A Starred expression may only appear on the lhs within the presence'
                                                   ' of another non-starred expression'):
