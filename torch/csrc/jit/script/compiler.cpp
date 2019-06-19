@@ -1319,9 +1319,7 @@ struct to_ir {
         bool starred_unpack = calcNumStarredUnpack(target_exprs, range);
         if (starred_unpack)
           n_binders--;
-        std::vector<SugaredValuePtr> rhs_outputs {sv};
-
-        emitExprsAssign(target_exprs, rhs_outputs, range, n_binders);
+        emitExprsAssign(target_exprs, {sv}, range, n_binders);
       }
 
       emitStatements(body);
@@ -1353,9 +1351,9 @@ struct to_ir {
     auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
     auto iterable_tree = std::dynamic_pointer_cast<IterableTree>(sv);
 
-    if ((siv && (siv->getValue()->type()->kind() == TypeKind::ListType
-        || siv->getValue()->type()->isSubtypeOf(TensorType::get()))
-        ) || range_val || iterable_tree) {
+    // For SimpleValue(except Tuple) or RanveValue/IterableTree, emit common loop
+    if ((siv && !siv->getValue()->type()->cast<TupleType>())
+        || range_val || iterable_tree) {
       emitLoopCommon(stmt.range(), body, sv, targets, {}); 
       return;
     }
@@ -1368,7 +1366,7 @@ struct to_ir {
     auto instances = sv->asTuple(stmt.range(), method);
     pushFrame(environment_stack->block());
     for (const auto& inst : instances) {
-      emitExprsAssign(targets, {inst}, itrs[0].range(), 1);
+      emitExprsAssign(targets, {inst}, itrs[0].range(), /*n_binders=*/1);
       emitStatements(body);
     }
 
