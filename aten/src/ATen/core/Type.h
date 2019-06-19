@@ -362,6 +362,7 @@ struct CAFFE2_API Type {
   virtual Tensor var(const Tensor & self, IntArrayRef dim, bool unbiased, bool keepdim) const = 0;
   virtual Tensor view_as(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor where(const Tensor & condition, const Tensor & self, const Tensor & other) const = 0;
+  virtual std::vector<Tensor> where(const Tensor & condition) const = 0;
   virtual Tensor norm(const Tensor & self, c10::optional<Scalar> p, ScalarType dtype) const = 0;
   virtual Tensor norm(const Tensor & self, Scalar p) const = 0;
   virtual Tensor norm(const Tensor & self, c10::optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) const = 0;
