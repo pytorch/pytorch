@@ -163,7 +163,7 @@ class Reducer {
 
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
-    const std::vector<bool>& expect_sparse_gradient,
-    std::vector<size_t> bucket_size);
+    const std::vector<size_t>& bucket_size,
+    const std::vector<bool>& expect_sparse_gradient = {});
 
 } // namespace c10d

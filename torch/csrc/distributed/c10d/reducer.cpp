@@ -647,9 +647,11 @@ inline bool operator==(const BucketKey& lhs, const BucketKey& rhs) {
 // of device placement and will not allow buckets to span devices.
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
-    const std::vector<bool>& expect_sparse_gradient,
-    std::vector<size_t> bucket_size_limits) {
-  AT_ASSERT(tensors.size() == expect_sparse_gradient.size());
+    const std::vector<size_t>& bucket_size_limits,
+    const std::vector<bool>& expect_sparse_gradient) {
+  // Either expect_sparse_gradient is not specified or it has as many elements
+  // as the vector with tensors.
+  AT_ASSERT(expect_sparse_gradient.empty() || (tensors.size() == expect_sparse_gradient.size()));
   AT_ASSERT(tensors.size() > 0);
 
   std::vector<std::vector<size_t>> result;
@@ -659,7 +661,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   // This is done so that we can use the consecutive bucket limits per type.
   std::unordered_map<
       BucketKey,
-      std::vector<size_t>::iterator,
+      std::vector<size_t>::const_iterator,
       torch::hash<BucketKey>>
       bucket_size_limit_iterators;
 
@@ -679,7 +681,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
 
     // If we expect a sparse gradient to be produced for this tensor, it cannot
     // be grouped together with other gradients and gets its own bucket.
-    if (expect_sparse_gradient[i]) {
+    if (!expect_sparse_gradient.empty() && expect_sparse_gradient[i]) {
       result.push_back({i});
       continue;
     }

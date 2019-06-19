@@ -361,8 +361,8 @@ class DistributedDataParallel(Module):
         # computation finishes. Experiments showed 1MB is a reasonable value.
         bucket_indices = dist._compute_bucket_assignment_by_size(
             parameters[0],
-            expect_sparse_gradient[0],
-            [1024 * 1024, self.bucket_bytes_cap])
+            [1024 * 1024, self.bucket_bytes_cap],
+            expect_sparse_gradient[0])
 
         # Note: reverse list of buckets because we want to approximate the
         # order in which their gradients are produced, and assume they

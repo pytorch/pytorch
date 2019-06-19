@@ -35,35 +35,6 @@ constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-// In c10d we only depend on ATen and c10 and therefore don't know about
-// autograd::Variable. Some functions in c10d create temporary tensors. We can't
-// mix and match use of Tensor and Variable. This hasn't been a problem for
-// operatations on dense tensors that all happen in place. When adding support
-// for sparse allreduce, we found we were in fact taking Variable arguments, and
-// tried to copy them into temporary Tensor instances in c10d.
-//
-// The best fix here is to simply make c10d depend on libtorch and use Variable
-// instances throughout (while setting `no_grad`, since we don't care about that
-// here). Until we do, we can work around this by unboxing tensors coming from
-// the Python side, and reboxing them when we return them from the
-// `Work::result` function. This interface is currently only applicable when
-// dealing with sparse tensors, where in place modification doesn't make sense.
-//
-// See https://github.com/pytorch/pytorch/issues/19145.
-//
-std::vector<at::Tensor> unbox(const std::vector<at::Tensor>& inputs) {
-  std::vector<at::Tensor> outputs;
-  outputs.reserve(inputs.size());
-  for (const auto& input : inputs) {
-    if (input.is_variable()) {
-      outputs.push_back(autograd::Variable(input).data());
-    } else {
-      outputs.push_back(input);
-    }
-  }
-  return outputs;
-}
-
 PyObject* c10d_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
@@ -227,12 +198,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
           .def(
               "allreduce",
-              [](::c10d::ProcessGroup& pg,
-                 std::vector<at::Tensor> xs,
-                 ::c10d::AllreduceOptions opts) {
-                xs = unbox(xs);
-                return pg.allreduce(xs, opts);
-              },
+              &::c10d::ProcessGroup::allreduce,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceOptions(),
               py::call_guard<py::gil_scoped_release>())
@@ -244,7 +210,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
                  ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
-                xs = unbox(xs);
                 return pg.allreduce(xs, opts);
               },
               py::arg("tensors"),
@@ -256,7 +221,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
               [](::c10d::ProcessGroup& pg, at::Tensor& x, ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
-                auto xs = unbox({x});
+                std::vector<at::Tensor> xs = {x};
                 return pg.allreduce(xs, opts);
               },
               py::arg("tensor"),
@@ -578,8 +543,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
       "_compute_bucket_assignment_by_size",
       &::c10d::compute_bucket_assignment_by_size,
       py::arg("tensors"),
-      py::arg("expect_sparse_gradient"),
       py::arg("bucket_size"),
+      py::arg("expect_sparse_gradient"),
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
