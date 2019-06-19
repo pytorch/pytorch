@@ -113,6 +113,31 @@ class TestLayers(LayersTestCase):
         assert core.BlobReference('loss_blob_in_tuple_1')\
          in self.model.loss.field_blobs()
 
+    def testFilterMetricSchema(self):
+        self.model.add_metric_field("a:b", schema.Scalar())
+        self.model.add_metric_field("a:c", schema.Scalar())
+        self.model.add_metric_field("d", schema.Scalar())
+
+        self.assertEqual(
+            self.model.metrics_schema,
+            schema.Struct(
+                ("a", schema.Struct(
+                    ("b", schema.Scalar()),
+                    ("c", schema.Scalar()),
+                )),
+                ("d", schema.Scalar()),
+            ))
+
+        self.model.filter_metrics_schema({"a:b", "d"})
+        self.assertEqual(
+            self.model.metrics_schema,
+            schema.Struct(
+                ("a", schema.Struct(
+                    ("b", schema.Scalar()),
+                )),
+                ("d", schema.Scalar()),
+            ))
+
     def testAddOutputSchema(self):
         # add the first field
         self.model.add_output_schema('struct', schema.Struct())
@@ -250,8 +275,10 @@ class TestLayers(LayersTestCase):
     @given(
         use_hashing=st.booleans(),
         modulo=st.integers(min_value=100, max_value=200),
+        use_divide_mod=st.booleans(),
+        divisor=st.integers(min_value=10, max_value=20),
     )
-    def testSparseFeatureHashIdList(self, use_hashing, modulo):
+    def testSparseFeatureHashIdList(self, use_hashing, modulo, use_divide_mod, divisor):
         record = schema.NewRecord(
             self.model.net,
             schema.List(schema.Scalar(
@@ -259,10 +286,14 @@ class TestLayers(LayersTestCase):
                 metadata=schema.Metadata(categorical_limit=60000)
             ))
         )
+        use_divide_mod = use_divide_mod if use_hashing is False else False
         output_schema = self.model.SparseFeatureHash(
             record,
             modulo=modulo,
-            use_hashing=use_hashing)
+            use_hashing=use_hashing,
+            use_divide_mod=use_divide_mod,
+            divisor=divisor,
+        )
 
         self.model.output_schema = output_schema
 
@@ -270,6 +301,10 @@ class TestLayers(LayersTestCase):
         self.assertEqual(output_schema._items.metadata.categorical_limit,
                 modulo)
         train_init_net, train_net = self.get_training_nets()
+        if use_divide_mod:
+            self.assertEqual(len(train_net.Proto().op), 3)
+        else:
+            self.assertEqual(len(train_net.Proto().op), 2)
 
     @given(
         use_hashing=st.booleans(),
@@ -742,6 +777,14 @@ class TestLayers(LayersTestCase):
             ('prediction', schema.Scalar((np.float32, (2,)))),
         ))
         loss = self.model.BatchMSELoss(input_record)
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+
+    def testBatchHuberLoss(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float32, (1,)))),
+            ('prediction', schema.Scalar((np.float32, (2,)))),
+        ))
+        loss = self.model.BatchHuberLoss(input_record)
         self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
 
     def testBatchSigmoidCrossEntropyLoss(self):

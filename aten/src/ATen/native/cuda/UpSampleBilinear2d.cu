@@ -152,7 +152,7 @@ static void upsample_bilinear2d_out_cuda_template(
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_bilinear2d_out_cuda", {input_arg, output_arg});
 
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
       output_size.size());
@@ -222,12 +222,12 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       "upsample_bilinear2d_backward_out_cuda",
       {grad_output_arg, grad_input_arg});
 
-  AT_CHECK(
+  TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
       output_size.size());
 
-  AT_CHECK(
+  TORCH_CHECK(
       input_size.size() == 4,
       "It is expected input_size equals to 4, but got size ",
       input_size.size());

@@ -88,7 +88,7 @@ static void sum_kernel_cuda(TensorIterator& iter) {
     // type promotion that does cast and reduction in a single kernel
     return sum_kernel_impl<at::Half, float, float>(iter);
   }
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "sum_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, iter.dtype(), "sum_cuda", [&]() {
     sum_kernel_impl<scalar_t>(iter);
   });
 }

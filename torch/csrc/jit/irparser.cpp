@@ -23,7 +23,7 @@ class IRParser {
       const std::string& str,
       torch::jit::Graph* graph,
       std::unordered_map<std::string, Value*>& vmap)
-      : L(str),
+      : L(std::make_shared<Source>(str)),
         g(graph),
         vmap(vmap),
         type_parser(L, /*parse_complete_tensor_types*/ true) {}

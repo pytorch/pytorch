@@ -2,10 +2,10 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/LegacyTHFunctionsCPU.h>
 #include <functional>
 #include <numeric>
 #include <vector>
@@ -143,73 +143,22 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
  TORCH_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
 }
 
-Tensor ger(const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
-  return at::legacy::th::_th_ger(self, vec2);
-}
-
-Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
-  check_1d(self, "self", "ger");
-  check_1d(vec2, "vec2", "ger");
-  return at::legacy::th::_th_ger_out(result, self, vec2);
-}
-
-Tensor mm(const Tensor& self, const Tensor& mat2) {
-  if (self.is_sparse()) {
-    return at::zeros({}, mat2.options()).addmm(self, mat2, 0, 1);
-  }
-  return at::legacy::th::_th_mm(self, mat2);
-}
-
-Tensor& mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
-  if (self.is_sparse()) {
-    return at::addmm_out(result, at::zeros({}, mat2.options()), self, mat2, 0, 1);
-  }
-  return at::legacy::th::_th_mm_out(result, self, mat2);
-}
-
-Tensor mv(const Tensor& self, const Tensor& vec) {
-  check_1d(vec, "vec", "mv");
-  return at::legacy::th::_th_mv(self, vec);
-}
-
-Tensor& mv_out(Tensor& result, const Tensor& self, const Tensor& vec) {
-  check_1d(vec, "vec", "mv");
-  return at::legacy::th::_th_mv_out(result, self, vec);
-}
-
-Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
-  return at::legacy::th::_th_addmv(self, mat, vec, beta, alpha);
-}
-
-Tensor& addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
-  return at::legacy::th::_th_addmv_(self, mat, vec, beta, alpha);
-}
-
-Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
-  check_1d(vec, "vec", "addmv");
-  return at::legacy::th::_th_addmv_out(result, self, mat, vec, beta, alpha);
-}
-
 Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::legacy::th::_th_addr(self, vec1, vec2, beta, alpha);
+  return at::_addr(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::legacy::th::_th_addr_(self, vec1, vec2, beta, alpha);
+  return at::_addr_(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return at::legacy::th::_th_addr_out(result, self, vec1, vec2, beta, alpha);
+  return at::_addr_out(result, self, vec1, vec2, beta, alpha);
 }
 
 template <typename scalar_t, bool is_bmm>
@@ -320,7 +269,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     if (is_bmm_out) {
       for (int64_t b = 0; b < bs; b++) {
         auto r = self_or_result.select(0, b);
-        at::native::mm_out(r, batch1.select(0, b), batch2.select(0, b));
+        legacy::cpu::_th_mm_out(r, batch1.select(0, b), batch2.select(0, b));
       }
     } else {
       for (int64_t b = 0; b < bs; b++) {
@@ -358,12 +307,6 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
   Scalar beta(0.0);
   Scalar alpha(1.0);
   return bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
-}
-
-Tensor dot(const Tensor& self, const Tensor& tensor) {
-  check_1d(self, "self", "dot");
-  check_1d(tensor, "tensor", "dot");
-  return at::legacy::th::_th_dot(self, tensor);
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
@@ -404,12 +347,12 @@ Tensor matmul(
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::native::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-    return has_out ? at::native::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
+    return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return has_out ? at::native::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
+    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
-    return has_out ? at::native::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
+    return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension.
@@ -584,19 +527,87 @@ Tensor &frobenius_norm_out(
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
   TORCH_CHECK(
       self.dim() == 2,
-      "Expected a tensor with 2 dimensions, but got a ",
-      self.dim(),
-      " dimensions tensor instead.");
+      "Expected a tensor with 2 dimensions, but got a tensor with ",
+      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
   return at::sum(std::get<1>(at::svd(self)), 0, keepdim);
 }
 
 Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
   TORCH_CHECK(
       self.dim() == 2,
-      "Expected a tensor with 2 dimensions, but got a ",
-      self.dim(),
-      " dimensions tensor instead.");
+      "Expected a tensor with 2 dimensions, but got a tensor with ",
+      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
   return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
+}
+
+// Non-optimized batched svd implementation. This can be merged with at::svd
+// once at::svd has been ported to ATen.
+static std::tuple<Tensor, Tensor, Tensor>
+_batch_svd(const Tensor& self, bool some, bool compute_uv)
+{
+  const int64_t ndim = self.ndimension();
+
+  TORCH_CHECK(
+      ndim >= 2,
+      "Expected a tensor with at least 2 dimensions, but got a tensor with ",
+      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
+
+  if (ndim == 2) {
+    return at::svd(self, some, compute_uv);
+  }
+
+  const int64_t n = self.size(-2);
+  const int64_t m = self.size(-1);
+  const int64_t k = std::min<int64_t>(n, m);
+  const int64_t nn = (some && compute_uv) ? k : n;
+  const int64_t mm = (some && compute_uv) ? k : m;
+  const int64_t p = batchCount(self);
+
+  Tensor t = self.reshape({p, n, m});
+
+  Tensor s = at::empty({p, k}, self.options());
+  Tensor u, v;
+  if (compute_uv) {
+    u = at::empty({p, n, nn}, self.options());
+    v = at::empty({p, m, mm}, self.options());
+  }
+
+  for (int64_t i = 0; i < p; i++) {
+    auto tuple = at::svd(t[i], some, compute_uv);
+    s[i] = std::get<1>(tuple);
+    if (compute_uv) {
+      u[i] = std::get<0>(tuple);
+      v[i] = std::get<2>(tuple);
+    }
+  }
+
+  std::vector<int64_t> shape = self.sizes().slice(0, ndim-1).vec();
+  shape[ndim-2] = k;
+  s = s.reshape(shape);
+
+  shape[ndim-2] = n;
+  shape.push_back(nn);
+  u = compute_uv ? u.reshape(shape) : at::zeros(shape, self.options());
+
+  shape[ndim-2] = m;
+  shape[ndim-1] = mm;
+  v = compute_uv ? v.reshape(shape) : at::zeros(shape, self.options());
+
+  return std::tuple<Tensor, Tensor, Tensor>(u, s, v);
+}
+
+Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
+
+  Tensor p = _move_to_end(self, dim);
+  return at::sum(std::get<1>(_batch_svd(p, true, false)), -1, keepdim);
+}
+
+Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+  TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
+
+  Tensor p = _move_to_end(self, dim);
+  return at::sum_out(result, std::get<1>(_batch_svd(p, true, false)), -1, keepdim);
 }
 
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {

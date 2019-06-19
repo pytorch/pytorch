@@ -48,8 +48,12 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
       data_type_(data_type),
       device_opt_(device_opt),
       type_id_(type_id) {
-  AT_ASSERT(type_id == UndefinedTensorId() || data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
-            device_opt_.has_value());
+  if (type_id != UndefinedTensorId()) {
+    AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
+              device_opt_.has_value());
+    // UndefinedTensorImpl is a singleton, so we skip logging it
+    C10_LOG_API_USAGE_ONCE("tensor.create");
+  }
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
   // Storages with default devices.
   strides_.push_back(1);
@@ -82,6 +86,7 @@ bool TensorImpl::compute_contiguous() const {
 }
 
 void TensorImpl::release_resources() {
+  autograd_meta_.reset();
   if (storage_) {
     storage_ = {};
   }
@@ -154,6 +159,16 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 }
 
 AutogradMetaInterface::~AutogradMetaInterface() {}
+
+#ifdef NAMEDTENSOR_ENABLED
+NamedTensorMetaInterface::~NamedTensorMetaInterface() {}
+
+std::unique_ptr<NamedTensorMetaInterface> NamedTensorMetaInterface::clone() const {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "Attempting to clone a NamedTensorMetaInterface instance.");
+}
+#endif
 
 /// NOTE [ Treating Variables as non-Variables in type dispatch ]
 ///

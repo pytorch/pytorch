@@ -1,9 +1,9 @@
 #include "import_source.h"
 
 #include <ATen/core/qualified_name.h>
+#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/resolver.h>
-#include <torch/csrc/jit/export.h>
 
 namespace torch {
 namespace jit {
@@ -114,6 +114,7 @@ struct SourceResolver : public Resolver {
         {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
         {"fork", std::make_shared<ForkValue>()},
         {"annotate", std::make_shared<AnnotateValue>()},
+        {"uninitialized", std::make_shared<UninitializedValue>()},
         {"inf",
          std::make_shared<ConstantValue>(
              std::numeric_limits<double>::infinity())},
@@ -152,7 +153,7 @@ struct SourceResolver : public Resolver {
 struct SourceImporter {
   SourceImporter(
       const CompilationUnit& lib_cu,
-      const std::string& src,
+      const std::shared_ptr<Source>& src,
       const std::vector<at::Tensor>& constant_table,
       const std::function<void(const std::string&)>& import_callback)
       : p_(src),
@@ -169,8 +170,8 @@ struct SourceImporter {
     if (version_ > CURRENT_OP_VERSION_SET) {
       throw ErrorReport(p_.lexer().cur().range)
           << "Attempting to load a script generated from a newer version of PyTorch. Maximum supported TorchScript version is "
-          << CURRENT_OP_VERSION_SET << " but the script being loaded is version "
-          << version_ << ".";
+          << CURRENT_OP_VERSION_SET
+          << " but the script being loaded is version " << version_ << ".";
     }
   }
 
@@ -194,12 +195,12 @@ struct SourceImporter {
           class_qualifier + "." + class_def.name().name();
       auto class_type =
           ClassType::create(c10::QualifiedName(qualified_classname), cu);
+      owner.register_class(class_type);
       auto self = [&](Value* v) {
         v->setType(class_type);
         return std::make_shared<SimpleValue>(v);
       };
       cu->define(definitions, resolvers, self);
-      owner.register_class(class_type);
     }
   }
 
@@ -269,7 +270,7 @@ struct SourceImporter {
 void import_functions(
     const CompilationUnit& lib_cu,
     CompilationUnit& cu,
-    const std::string& src,
+    const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const Self& self,
     const std::function<void(const std::string&)>& import_callback) {
@@ -280,7 +281,7 @@ void import_functions(
 void import_methods(
     const CompilationUnit& lib_cu,
     const std::shared_ptr<Module>& mod,
-    const std::string& src,
+    const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
   auto self = [&](Value* v) {
@@ -289,7 +290,7 @@ void import_methods(
   };
   import_functions(
       lib_cu,
-      mod->module_object()->type()->compilation_unit(),
+      *mod->module_object()->type()->compilation_unit(),
       src,
       constant_table,
       self,
@@ -299,7 +300,7 @@ void import_methods(
 void import_libs(
     CompilationUnit& lib_cu,
     const std::string& class_qualifier,
-    const std::string& src,
+    const std::shared_ptr<Source>& src,
     const std::vector<at::Tensor>& constant_table,
     const std::function<void(const std::string&)>& import_callback) {
   SourceImporter importer(lib_cu, src, constant_table, import_callback);
