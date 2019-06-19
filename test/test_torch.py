@@ -12116,6 +12116,23 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         c2 = torch.tensor([True, False], dtype=bool)
         self.assertEqual(c1.dtype, c2.dtype)
 
+    def test_fill_diagonal(self):
+        a = torch.randn(7, 3)
+        b = a.clone()
+        v = 1
+        for i in range(3):
+            b[i][i] = v
+        a.fill_diagonal(v)
+        self.assertEqual(a, b)
+
+        c = torch.randn(7, 3)
+        d = c.clone()
+        for i in range(3):
+            d[i][i] = v
+            d[i + 4][i] = v
+        c.fill_diagonal(v, wrap=True)
+        self.assertEqual(c, d)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2

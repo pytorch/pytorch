@@ -251,13 +251,46 @@ Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& opt
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor fill_diagonal(const Tensor& self, Scalar value, int64_t offset, int64_t dim1_, int64_t dim2_) {
+Tensor fill_diagonal(const Tensor& self, Scalar fill_value, bool wrap) {
   int64_t nDims = self.dim();
-  int64_t dim1 = maybe_wrap_dim(dim1_, nDims);
-  int64_t dim2 = maybe_wrap_dim(dim2_, nDims);
-  TORCH_CHECK(dim1 != dim2, "diagonal dimensions cannot be identical ", dim1_, ", ", dim2_);
-  auto diag = self.diagonal(offset, dim1, dim2);
-  diag.fill_(value);
+  TORCH_CHECK(nDims >= 2, "dimensions must large then 1 ");
+
+  if (nDims > 2) {
+    int64_t dim1 = self.size(0);
+    for (int64_t i = 1; i < nDims; i++) {
+      if (self.size(i) != dim1) {
+        AT_ERROR("all dimensions of input must be of equal length");
+      }
+    }
+  }
+
+  int64_t storage_offset = self.storage_offset();
+  std::vector<int64_t> sizes;
+  std::vector<int64_t> strides;
+
+  int64_t stride = 0;
+  for (int64_t i = 0; i < nDims; i++) {
+    stride += self.stride(i);
+  }
+  strides.push_back(stride);
+
+  if (wrap) {
+    int64_t offset = 1;
+    int64_t mul_value = 1;
+    for (int64_t i = 1; i < nDims; i++) {
+      mul_value *= self.size(i);
+      offset += mul_value;
+    }
+
+    int64_t size = (self.numel() + offset - 1) / offset;
+    sizes.push_back(size);
+  } else {
+    sizes.push_back(std::min(self.size(0), self.size(1)));
+  }
+
+  auto main_diag = self.as_strided(sizes, strides, storage_offset);
+  main_diag.fill_(fill_value);
+
   return self;
 }
 

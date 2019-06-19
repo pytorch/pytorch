@@ -223,8 +223,8 @@ inline Tensor Tensor::diagflat(int64_t offset) const {
 inline Tensor Tensor::diagonal(int64_t offset, int64_t dim1, int64_t dim2) const {
     return dispatch_type().diagonal(*this, offset, dim1, dim2);
 }
-inline Tensor Tensor::fill_diagonal(Scalar value, int64_t offset, int64_t dim1, int64_t dim2) const {
-    return dispatch_type().fill_diagonal(*this, value, offset, dim1, dim2);
+inline Tensor Tensor::fill_diagonal(Scalar fill_value, bool wrap) const {
+    return dispatch_type().fill_diagonal(*this, fill_value, wrap);
 }
 inline Tensor Tensor::div(const Tensor & other) const {
     return dispatch_type().div(*this, other);

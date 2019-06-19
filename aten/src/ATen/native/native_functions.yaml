@@ -614,7 +614,7 @@
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   variants: function, method
 
-- func: fill_diagonal(Tensor self, Scalar value, int offset=0, int dim1=0, int dim2=1) -> Tensor
+- func: fill_diagonal(Tensor self, Scalar fill_value, bool wrap=False) -> Tensor
   variants: function, method
 
 - func: div(Tensor self, Tensor other) -> Tensor
