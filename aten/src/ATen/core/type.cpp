@@ -5,11 +5,13 @@
 #include <c10/macros/Macros.h>
 namespace c10 {
 
-#ifdef C10_ANDROID
 namespace ivalue {
-Object::~Object() {}
+Object::~Object() {
+  if (on_delete_) {
+    on_delete_(this);
+  }
+}
 } // namespace ivalue
-#endif
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if(auto value = t.cast<CompleteTensorType>()) {
