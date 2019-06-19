@@ -117,25 +117,22 @@ at::TypeExtendedInterface* VariableType::getVariableTypeFromBaseType(const at::T
 }
 
 namespace {
-std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
-  auto& context = at::globalContext();
-  std::vector<Type*> res;
+std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
+  std::vector<DeprecatedTypeProperties*> res;
   res.reserve(backends.size());
   for (auto p : backends) {
-    auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), ScalarType::Undefined);
-    if (baseType) {
-      res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
-    }
+    auto& type = getNonVariableDeprecatedTypeProperties(static_cast<Backend>(p), ScalarType::Undefined);
+    res.emplace_back(&type);
   }
   return res;
 }
 }
 
-std::vector<at::Type*> VariableType::allCPUTypes() {
+std::vector<at::DeprecatedTypeProperties*> VariableType::allCPUTypes() {
   return allTypesForBackends({ Backend::CPU, Backend::SparseCPU });
 }
 
-std::vector<at::Type*> VariableType::allCUDATypes() {
+std::vector<at::DeprecatedTypeProperties*> VariableType::allCUDATypes() {
   at::globalContext().lazyInitCUDA();
   return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
@@ -145,7 +142,7 @@ const Variable & VariableType::checked_cast_variable(const Tensor & t, const cha
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
   if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
 }
@@ -155,7 +152,7 @@ Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, in
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
   if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
 }
@@ -182,8 +179,8 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
     if (!t.defined()) {
       continue;
     }
-    if (!isVariableType(t.dispatch_type())) {
-      AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " at position #", i, " "
+    if (t.type().is_variable()) {
+      AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "
                     "for iterable argument #", pos, " '", name, "'");
     }
     ret[i] = static_cast<const Variable&>(t);

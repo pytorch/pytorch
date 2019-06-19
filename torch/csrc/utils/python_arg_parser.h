@@ -345,7 +345,7 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   if (!args[i]) {
     auto scalartype = signature.params[i].default_scalartype;
     return (scalartype == at::ScalarType::Undefined) ?
-            torch::tensors::get_default_scalar_type() : scalartype;
+            at::typeMetaToScalarType(torch::tensors::get_default_tensor_options().dtype()) : scalartype;
   }
   PyObject *obj = args[i];
   if (obj == (PyObject*)&PyFloat_Type) {
@@ -387,8 +387,7 @@ static std::string cpu_prefix = "cpu:";
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    const auto& default_tensor_type = torch::tensors::get_default_tensor_type();
-    return at::Device(default_tensor_type.device_type());
+    return at::Device(torch::tensors::get_default_tensor_options().device().type());
   }
   if (THPDevice_Check(args[i])) {
     const auto device = reinterpret_cast<THPDevice*>(args[i]);

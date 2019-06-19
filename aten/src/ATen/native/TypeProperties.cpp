@@ -10,7 +10,7 @@ bool is_cuda(const Tensor& self) {
 }
 
 bool is_distributed(const Tensor& self) {
-  return self.dispatch_type().is_distributed();
+  return self.is_distributed();
 }
 
 bool is_complex(const Tensor& self) {

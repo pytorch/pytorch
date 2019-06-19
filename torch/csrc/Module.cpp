@@ -452,7 +452,7 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
 
 PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  auto scalar_type = torch::tensors::get_default_scalar_type();
+  auto scalar_type = at::typeMetaToScalarType(torch::tensors::get_default_tensor_options().dtype());
   auto dtype = (PyObject*)torch::getDtype(scalar_type);
   Py_INCREF(dtype);
   return dtype;
@@ -461,7 +461,7 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 
 PyObject *THPModule_isDefaultTypeCuda(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  if (torch::tensors::get_default_tensor_type().is_cuda()) {
+  if (torch::tensors::get_default_tensor_options().device().is_cuda()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;

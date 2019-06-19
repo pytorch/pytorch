@@ -8,6 +8,7 @@
 
 namespace c10 {
 CAFFE2_API std::ostream& operator<<(std::ostream& out, Backend b);
+CAFFE2_API std::ostream& operator<<(std::ostream& out, Layout l);
 }
 namespace at {
 

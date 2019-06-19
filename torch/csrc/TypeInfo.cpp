@@ -58,7 +58,7 @@ PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   TORCH_CHECK(r.idx < 2, "Not a type");
   at::ScalarType scalar_type;
   if (r.idx == 1) {
-    scalar_type = torch::tensors::get_default_scalar_type();
+    scalar_type = at::typeMetaToScalarType(torch::tensors::get_default_tensor_options().dtype());
     // The default tensor type can only be set to a floating point type/
     AT_ASSERT(at::isFloatingType(scalar_type));
   } else {

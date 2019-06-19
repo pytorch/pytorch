@@ -25,14 +25,14 @@ inline Layout layout_from_backend(Backend backend) {
   }
 }
 
-inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
+inline const char* toString(at::Layout layout) {
   switch (layout) {
     case at::kStrided:
-      return stream << "Strided";
+      return "Strided";
     case at::kSparse:
-      return stream << "Sparse";
+      return "Sparse";
     case at::kMkldnn:
-      return stream << "Mkldnn";
+      return "Mkldnn";
     default:
       AT_ERROR("Unknown layout");
   }

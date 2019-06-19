@@ -56,13 +56,22 @@ static void check_out_type_matches(Tensor result,
         " does not match dtype of out parameter (", result.scalar_type(), ")");
   }
   auto scalarType_arg = scalarType_is_none ? result.scalar_type() : scalarType;
-  auto layout_arg = layout_is_none ? *torch::getLayout(result.type().backend()) : layout;
+  auto layout_arg = layout_is_none ? result.layout() : layout.layout;
   auto device_type_arg = device_is_none ? result.device().type() : device.type();
-  const auto& type = torch::getVariableType(scalarType_arg, layout_arg, device_type_arg);
-  if (result.dispatch_type() != type) {
+  if (result.scalar_type() != scalarType_arg) {
     AT_ERROR(
-        "type corresponding to ", type.toString(),
-        " does not match type of out parameter (", result.type().toString(), ")");
+        "scalar type ", scalarType_arg,
+        " does not match scalar type of out parameter (", result.scalar_type(), ")");
+  }
+  if (result.layout() != layout_arg) {
+    AT_ERROR(
+        "layout ", layout_arg,
+        " does not match layout of out parameter (", result.layout(), ")");
+  }
+  if (result.device().type() != device_type_arg) {
+    AT_ERROR(
+        "device type ", device_type_arg,
+        " does not match device type of out parameter (", result.device().type(), ")");
   }
 }
 
@@ -333,7 +342,7 @@ static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.as_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::as_tensor(default_type(), default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::as_tensor(torch::tensors::get_default_tensor_options(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -409,7 +418,7 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.sparse_coo_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(default_type(), default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(torch::tensors::get_default_tensor_options(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -417,7 +426,7 @@ static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::tensor_ctor(default_type(), default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::tensor_ctor(torch::tensors::get_default_tensor_options(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
