@@ -2812,6 +2812,11 @@
     CPU: legacy::cpu::_th_set_
     CUDA: legacy::cuda::_th_set_
 
+- func: set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)
+  variants: method
+  dispatch:
+    QuantizedCPU: set_quantizer_
+
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
   device_guard: False

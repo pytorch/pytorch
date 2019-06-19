@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from ...modules.module import Module
 from ...._jit_internal import weak_module
-from collections import OrderedDict
 
 @weak_module
 class Quantize(Module):
@@ -46,28 +45,21 @@ class DeQuantize(Module):
 
 @weak_module
 class Linear(Module):
-    r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
+    r"""
+    A module that wraps the quantized fbgemm linear operator function
+    We adopt the same interface as `torch.nn.Linear`, please see https://pytorch.org/docs/stable/nn.html#torch.nn.Linear
+    for documentation.
 
-    Args:
-        in_features: size of each input sample
-        out_features: size of each output sample
-        bias: If set to ``False``, the layer will not learn an additive bias.
-            Default: ``True``
-        output_scale: the scale of the output quantized activations. Default 1
-        output_zero_point: the zero point of the output quantized activations.
-            Default: 0
-
-    Shape:
-        - Input: :math:`(N, *, H_{in})` where :math:`*` means any number of
-          additional dimensions and :math:`H_{in} = \text{in\_features}`
-        - Output: :math:`(N, *, H_{out})` where all but the last dimension
-          are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
+    Similar to `torch.nn.Linear`, attributes will be randomly initialized at
+        module creation time and will be overwritten later
 
     Attributes:
         _packed_weight: the non-learnable packed weights of the
             module which are of shape :math:`(\text{out\_features}, \text{in\_features})`.
         bias:   the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized to zero.
+        output_scale: `scale` parameter of output Quantized Tensor
+        output_zero_point: `zero_point` parameter for output Quantized Tensor
 
     Examples::
 
