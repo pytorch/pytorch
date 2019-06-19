@@ -1,5 +1,7 @@
 #include <c10d/ProcessGroup.hpp>
 
+#include <c10/util/Logging.h>
+
 namespace c10d {
 
 ProcessGroup::Work::~Work() {}
@@ -44,7 +46,9 @@ void ProcessGroup::Work::finish(std::exception_ptr exception) {
   cv_.notify_all();
 }
 
-ProcessGroup::ProcessGroup(int rank, int size) : rank_(rank), size_(size) {}
+ProcessGroup::ProcessGroup(int rank, int size) : rank_(rank), size_(size) {
+  C10_LOG_API_USAGE_ONCE("c10d.process_group");
+}
 
 ProcessGroup::~ProcessGroup() {}
 

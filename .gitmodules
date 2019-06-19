@@ -21,7 +21,7 @@
 [submodule "third_party/protobuf"]
     ignore = dirty
     path = third_party/protobuf
-    url = https://github.com/google/protobuf.git
+    url = https://github.com/protocolbuffers/protobuf.git
 [submodule "third_party/ios-cmake"]
     ignore = dirty
     path = third_party/ios-cmake
@@ -57,7 +57,7 @@
 [submodule "third-party/cpuinfo"]
     ignore = dirty
     path = third_party/cpuinfo
-    url = https://github.com/Maratyszcza/cpuinfo.git
+    url = https://github.com/pytorch/cpuinfo.git
 [submodule "third_party/python-enum"]
     ignore = dirty
     path = third_party/python-enum
@@ -110,3 +110,7 @@
     ignore = dirty
     path = third_party/foxi
     url = https://github.com/houseroad/foxi.git
+[submodule "third_party/tbb"]
+	path = third_party/tbb
+	url = https://github.com/01org/tbb
+	branch = tbb_2018

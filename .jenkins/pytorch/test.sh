@@ -45,12 +45,12 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
   echo $PYTHON_VERSION
-  if [[ $PYTHON_VERSION == "2" ]]; then
-    pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl --user
-  else
-    pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl --user
-  fi
-
+  # if [[ $PYTHON_VERSION == "2" ]]; then
+  #   pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py2-none-any.whl --user
+  # else
+  #   pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-py3-none-any.whl --user
+  # fi
+  pip install -q tb-nightly --user
   # mypy will fail to install on Python <3.4.  In that case,
   # we just won't run these tests.
   pip install mypy --user || true
@@ -146,12 +146,13 @@ test_torchvision() {
   # PyTorch CI
   git clone https://github.com/pytorch/vision --quiet
   pushd vision
+  git checkout 2f64dd90e14fe5463b4e5bd152d56e4a6f0419de
   # python setup.py install with a tqdm dependency is broken in the
   # Travis Python nightly (but not in latest Python nightlies, so
   # this should be a transient requirement...)
   # See https://github.com/pytorch/pytorch/issues/7525
   #time python setup.py install
-  pip install -q --user .
+  pip install --user .
   popd
   rm -rf vision
 }
@@ -162,13 +163,13 @@ test_libtorch() {
     python test/cpp/jit/tests_setup.py setup
     CPP_BUILD="$PWD/../cpp-build"
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      "$CPP_BUILD"/caffe2/bin/test_jit
+      "$CPP_BUILD"/caffe2/build/bin/test_jit
     else
-      "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
+      "$CPP_BUILD"/caffe2/build/bin/test_jit "[cpu]"
     fi
     python test/cpp/jit/tests_setup.py shutdown
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/bin/test_api
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$CPP_BUILD"/caffe2/build/bin/test_api
     assert_git_not_dirty
   fi
 }

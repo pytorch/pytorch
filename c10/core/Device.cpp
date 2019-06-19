@@ -38,13 +38,6 @@ DeviceType parse_type(const std::string& device_string) {
 }
 } // namespace
 
-void Device::validate() {
-  TORCH_CHECK(index_ == -1 || index_ >= 0,
-           "Device index must be -1 or non-negative, got ", index_);
-  TORCH_CHECK(!is_cpu() || index_ <= 0,
-           "CPU device index must be -1 or zero, got ", index_);
-}
-
 // `std::regex` is still in a very incomplete state in GCC 4.8.x,
 // so we have to do our own parsing, like peasants.
 // https://stackoverflow.com/questions/12530406/is-gcc-4-8-or-earlier-buggy-about-regular-expressions

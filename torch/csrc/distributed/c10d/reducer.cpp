@@ -105,11 +105,17 @@ Reducer::Reducer(
         auto grad_accumulator = variable.grad_accumulator();
 
         // Hook to execute after the gradient accumulator has executed.
-        grad_accumulator->add_post_hook(torch::make_unique<LambdaPostHook>([=] {
-          std::lock_guard<std::mutex> lock(this->mutex_);
-          this->mark_variable_ready(
-              replica_index, variable_index, /* called_from_autograd= */ true);
-        }));
+        hooks_.emplace_back(
+            grad_accumulator->add_post_hook(
+                torch::make_unique<LambdaPostHook>([=] {
+                    std::lock_guard<std::mutex> lock(this->mutex_);
+                    this->mark_variable_ready(
+                        replica_index,
+                        variable_index,
+                        /* called_from_autograd= */ true);
+                })),
+            grad_accumulator
+        );
 
         // Map raw function pointer to replica index and parameter index.
         // This is used later on when the autograd graph is traversed
@@ -135,6 +141,19 @@ Reducer::Reducer(
         backward_stats_.begin(),
         backward_stats_.end(),
         [=](std::vector<int64_t>& v) { v.resize(variable_count); });
+  }
+}
+
+Reducer::~Reducer() noexcept(false) {
+  // Remove all hooks on variables registered by this Reducer. This is necessary
+  // to make DDP failure recoverable. Otherwise, multiple Reducer instances
+  // (from recoveries) will add their hooks to the original model, and those
+  // hooks will try to invoke methods on a deleted Reducer objects.
+  for (auto& hook : hooks_) {
+    auto& key = hook.first;
+    auto& grad_accumulator = hook.second;
+    AT_ASSERTM(grad_accumulator->del_post_hook(key),
+        "Reducer attempts to delete a non-existing hook.");
   }
 }
 
@@ -395,17 +414,19 @@ void Reducer::prepare_for_backward(
         "starting a new one. ",
         "",
         "This error indicates that your module has parameters that were ",
-        "not used in producing its output (the return value of `forward`). ",
+        "not used in producing loss. ",
         "",
-        "You can enable unused parameter detection by passing the keyword "
+        "You can enable unused parameter detection by (1) passing the keyword "
         "argument `find_unused_parameters=True` to ",
-        "`torch.nn.parallel.DistributedDataParallel`. ",
+        "`torch.nn.parallel.DistributedDataParallel`; (2) making sure all ",
+        "`forward` function outputs participate in calculating loss. "
         "",
-        "If you already have this argument set, then the distributed data ",
-        "parallel module wasn't able to locate the output tensors in the ",
+        "If you already have done the above two steps, then the distributed ",
+        "data parallel module wasn't able to locate the output tensors in the ",
         "return value of your module's `forward` function. ",
-        "Please include the structure of the return value of `forward` of ",
-        "your module when reporting this issue (e.g. list, dict, iterable).");
+        "Please include the loss function and the structure of the return ",
+        "value of `forward` of your module when reporting this issue (e.g. ",
+        "list, dict, iterable).");
   }
 
   // Reset accounting.
