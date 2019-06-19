@@ -427,7 +427,7 @@ script::Module load(
   auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
     script::Module curr = module;
     for (const auto& name : qualified_name) {
-      if (curr.find_module(name)) {
+      if (!curr.find_module(name)) {
         curr.register_module(name, script::Module("__main__"));
       }
       curr = curr.get_module(name);

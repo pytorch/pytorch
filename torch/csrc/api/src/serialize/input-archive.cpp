@@ -16,8 +16,7 @@
 namespace torch {
 namespace serialize {
 
-InputArchive::InputArchive()
-    : module_("__main__") {}
+InputArchive::InputArchive() {}
 
 bool InputArchive::try_read(
     const std::string& key,

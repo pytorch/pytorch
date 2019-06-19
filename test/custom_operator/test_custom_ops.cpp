@@ -50,8 +50,6 @@ void load_serialized_module_with_custom_op_and_execute(
     const std::string& path_to_exported_script_module) {
   torch::jit::script::Module module =
       torch::jit::load(path_to_exported_script_module);
-  AT_ASSERT(module != nullptr);
-
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back(torch::ones(5));
   auto output = module.forward(inputs).toTensor();
