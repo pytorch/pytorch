@@ -15,6 +15,7 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/core/ATenDispatch.h>
 
 namespace at {
 
@@ -39,4 +40,6 @@ Type & TypeDefault::toScalarType(ScalarType s) const {
 
 ${type_method_definitions}
 
+static auto& registerer = globalATenDispatch()
+  ${function_registrations};
 }

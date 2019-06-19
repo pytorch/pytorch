@@ -25,6 +25,10 @@ struct CAFFE2_API QTensorImpl : public c10::TensorImpl {
     return quantizer_;
   }
 
+  void set_quantizer_(QuantizerPtr quantizer) {
+    quantizer_ = quantizer;
+  }
+
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *
