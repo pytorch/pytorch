@@ -1314,14 +1314,14 @@ struct to_ir {
         Value* cur_elem = iter_val->getelem(range, method, trip_count);
         SugaredValuePtr sv = std::make_shared<SimpleValue>(cur_elem);
         List<Expr> target_exprs = targets.value();
-        size_t n_binders = target_exprs.size();
 
-        bool starred_unpack = calcNumStarredUnpack(target_exprs, range);
-        if (starred_unpack)
-          n_binders--;
-        std::vector<SugaredValuePtr> rhs_outputs {sv};
-
-        emitExprsAssign(target_exprs, rhs_outputs, range, n_binders);
+        // if target exprs are more than 1, it means iteration unpacking on LHS
+        // we create Tuple literal to wrap those target exprs for assignments
+        if (target_exprs.size() > 1) {
+          Expr tl = TupleLiteral::create(range, target_exprs);
+          target_exprs = List<Expr>::create(range, {tl});
+        }
+        emitExprsAssign(target_exprs, {sv}, range, /*n_binders=*/1);
       }
 
       emitStatements(body);
@@ -1338,11 +1338,6 @@ struct to_ir {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
     }
-    if (targets.size() != 1) {
-      throw ErrorReport(stmt)
-          << "Iteration variable unpacking is not supported";
-    }
-
     // Emit loop information for builtinFunction values like range(), zip(), 
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
     auto sv = emitSugaredExpr(itrs[0], 1);
