@@ -96,7 +96,7 @@ struct PythonResolver : public Resolver {
         py::hasattr(obj, "_fields");
   }
 
-  TypePtr resolveType(const std::string& name) const override {
+  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
     if (classType_ && name == classname_) {
       return classType_;
     }
@@ -110,7 +110,31 @@ struct PythonResolver : public Resolver {
       return nullptr;
     }
 
+    auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
+        py::module::import("torch.jit").attr("_qualified_name")(obj)));
+
     if (isNamedTupleClass(obj)) {
+      // Currently don't support default values
+      if (py::hasattr(obj, "_field_defaults")) {
+        auto default_dict = py::cast<std::map<std::string, py::object>>(
+            py::getattr(obj, "_field_defaults"));
+        if (default_dict.size()) {
+          std::string error_msg =
+              "Default values are currently not supported"
+              " on NamedTuple fields in TorchScript. Fields "
+              "with default values: [";
+          bool first = true;
+          for (const auto& kv : default_dict) {
+            if (!first) {
+              error_msg += ", ";
+            }
+            error_msg += kv.first;
+          }
+          error_msg += "]";
+          throw ErrorReport(loc) << error_msg;
+        }
+      }
+
       py::object props = py::module::import("torch.jit")
                              .attr("_get_named_tuple_properties")(obj);
       std::string unqualName;
@@ -120,14 +144,15 @@ struct PythonResolver : public Resolver {
           std::tuple<std::string, decltype(fields), decltype(annotations)>>(
           props);
 
-      return TupleType::create(annotations, fields, unqualName);
+      auto tt = TupleType::create(
+          annotations,
+          qualifiedName,
+          TupleType::namedTupleSchemaFromNamesAndTypes(qualifiedName, fields, annotations));
+      CompilationUnit::_get_python_cu().register_class(tt);
+      return tt;
     }
 
-    py::str qualifiedName =
-        py::module::import("torch.jit").attr("_qualified_name")(obj);
-
-    return CompilationUnit::_get_python_cu().get_class(
-        c10::QualifiedName(qualifiedName));
+    return CompilationUnit::_get_python_cu().get_class(qualifiedName);
   }
 
  private:
@@ -507,7 +532,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<ClassTypePtr> classes;
+            std::vector<c10::NamedTypePtr> classes;
             PythonPrint(
                 ss,
                 *self.class_compilation_unit(),
@@ -584,7 +609,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Function& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<ClassTypePtr> classes;
+            std::vector<c10::NamedTypePtr> classes;
             PythonPrint(ss, self, false, tensors, classes, false);
             return ss.str();
           })
@@ -610,7 +635,7 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
-        std::vector<ClassTypePtr> classes;
+        std::vector<c10::NamedTypePtr> classes;
         PythonPrint(ss, self.function(), true, tensors, classes, false);
         return ss.str();
       });
@@ -737,7 +762,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_jit_python_print", [](py::object obj) {
     std::ostringstream ss;
     std::vector<at::Tensor> constants;
-    std::vector<ClassTypePtr> classes;
+    std::vector<c10::NamedTypePtr> classes;
     if (auto self = as_module(obj)) {
       PythonPrint(
           ss, *self->class_compilation_unit(), true, constants, classes, true);
