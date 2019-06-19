@@ -164,7 +164,7 @@ def add_torch_libs():
     torch_cpp_headers["script.h"] = "torch/script.h"
 
     torch_cpp_srcs = [
-        "torch/csrc/api/src/cuda.cpp", # this just forwards stuff, no real CUDA
+        "torch/csrc/api/src/cuda.cpp",  # this just forwards stuff, no real CUDA
         "torch/csrc/api/src/data/datasets/mnist.cpp",
         "torch/csrc/api/src/data/samplers/distributed.cpp",
         "torch/csrc/api/src/data/samplers/random.cpp",
@@ -376,39 +376,38 @@ def add_torch_libs():
     # torch-cpp is still conditionally compiled based on USE_CUDA. Ideally we'd
     # separate it out as an additive library instead.
     gpu_library_selector(
-        name = "torch-cpp",
-        deps_cpu = [":torch-cpp-cpu"],
-        deps_cuda = [":torch-cpp-cuda"],
-        merge_cpu_deps = False,
+        name="torch-cpp",
+        deps_cpu=[":torch-cpp-cpu"],
+        deps_cuda=[":torch-cpp-cuda"],
+        merge_cpu_deps=False,
     )
 
     # USE_CUDA flag is propagated through propagated_pp_flags on libtorch
     cpp_library(
-        name = "torch-cpp-cuda",
-        srcs = torch_cpp_srcs,
-        headers = torch_cpp_headers,
-        header_namespace = "torch",
-        deps = [
+        name="torch-cpp-cuda",
+        srcs=torch_cpp_srcs,
+        headers=torch_cpp_headers,
+        header_namespace="torch",
+        deps=[
             ":libtorch_cuda",
             "//caffe2/torch/fb/init:init",
         ],
-        external_deps = [
+        external_deps=[
             ("cuda", None, "cuda-lazy"),
             ("cudnn", None, "cudnn-lazy"),
         ],
     )
 
     cpp_library(
-        name = "torch-cpp-cpu",
-        srcs = torch_cpp_srcs,
-        headers = torch_cpp_headers,
-        header_namespace = "torch",
-        deps = [
+        name="torch-cpp-cpu",
+        srcs=torch_cpp_srcs,
+        headers=torch_cpp_headers,
+        header_namespace="torch",
+        deps=[
             ":libtorch",
             "//caffe2/torch/fb/init:init",
         ],
     )
-
 
     # _C_impl is still conditionally compiled based on USE_CUDA. Ideally we'd
     # separate it out as an additive library instead.

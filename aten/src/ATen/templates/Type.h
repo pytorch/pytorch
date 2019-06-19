@@ -14,6 +14,7 @@
 #include <c10/core/TensorTypeIdRegistration.h>
 #include <ATen/core/Reduction.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/intrusive_ptr.h>
 
 #include <c10/util/Optional.h>
 
@@ -41,7 +42,12 @@ using TensorList = ArrayRef<Tensor>;
 
 class Context;
 struct Generator;
+
 struct Quantizer;
+// This is temporary typedef to enable Quantizer in aten native function API
+// we'll remove them when we are actually exposing Quantizer class
+// to frontend
+using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 static inline void noop_deleter(void*) {}
 

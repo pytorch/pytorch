@@ -5,6 +5,7 @@
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
 #ifdef NAMEDTENSOR_ENABLED
@@ -12,6 +13,12 @@
 #endif
 
 namespace at {
+
+struct Quantizer;
+// This is temporary typedef to enable Quantizer in aten native function API
+// we'll remove them when we are actually exposing Quantizer class
+// to frontend
+using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocking) const {
   if(type() == t)
@@ -1108,6 +1115,10 @@ inline Tensor & Tensor::set_(const Tensor & source) {
 inline Tensor & Tensor::set_() {
     static auto table = globalATenDispatch().getOpTable("aten::set_(Tensor(a!) self) -> Tensor(a!)");
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+}
+inline Tensor & Tensor::set_quantizer_(ConstQuantizerPtr quantizer) {
+    static auto table = globalATenDispatch().getOpTable("aten::set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)");
+    return table->getOp<Tensor & (Tensor &, ConstQuantizerPtr)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, quantizer);
 }
 inline bool Tensor::is_set_to(const Tensor & tensor) const {
     static auto table = globalATenDispatch().getOpTable("aten::is_set_to(Tensor self, Tensor tensor) -> bool");
