@@ -142,7 +142,7 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   constexpr int64_t qmin = std::numeric_limits<typename T::underlying>::min();
   constexpr int64_t qmax = std::numeric_limits<typename T::underlying>::max();
   checkZeroPoint<typename T::underlying>("quantize_val", zero_point);
-  qvalue = static_cast<int64_t>(std::nearbyint(value / scale + zero_point));
+  qvalue = static_cast<int64_t>(std::nearbyint(value / scale) + zero_point);
   qvalue = std::max<int64_t>(qvalue, qmin);
   qvalue = std::min<int64_t>(qvalue, qmax);
   return static_cast<T>(qvalue);
