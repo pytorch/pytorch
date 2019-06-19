@@ -780,15 +780,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
 
 /// Run module.__getstate__() and return the result
 IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
-  auto getstate = module.find_method("__getstate__");
-  TORCH_CHECK(
-      getstate != nullptr,
-      "Cannot call '__getstate__' method because"
-      " it does not exist");
-
-  Stack stack;
-  getstate->run(stack);
-  return stack.at(0);
+  return module.get_method("__getstate__")({});
 }
 
 size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
@@ -931,9 +923,9 @@ void ScriptModuleSerializer::convertModule(
     record->set_key(filename.str());
   }
 
-  for (const auto& elem : module.get_modules()) {
+  for (script::Slot s : module.get_module_slots()) {
     torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(*elem, module_name.str(), elem->field_name(), sub_def);
+    convertModule(s.to_module(), module_name.str(), s.name(), sub_def);
   }
 }
 

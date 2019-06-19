@@ -152,6 +152,13 @@ struct TORCH_API CompilationUnit {
   }
 
  private:
+  std::shared_ptr<Function> define(
+      const Def& def,
+      const ResolverPtr& resolver,
+      const Self& self,
+      const std::unordered_map<std::string, std::shared_ptr<Function>>&
+          function_table) const;
+
   Function& register_function(std::shared_ptr<Function> fn) {
     TORCH_CHECK(
         0 == dict_.count(fn->name()),

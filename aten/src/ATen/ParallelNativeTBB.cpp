@@ -71,7 +71,28 @@ bool in_parallel_region() {
 }
 
 void intraop_launch(std::function<void()> func) {
-  tg_.run(func);
+  if (get_num_threads() > 1) {
+    tg_.run(func);
+  } else {
+    func();
+  }
+}
+
+std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+    std::function<void()> func) {
+  auto future = std::make_shared<c10::ivalue::Future>();
+  if (get_num_threads() > 1) {
+    tg_.run(
+      [func, future]() {
+        func();
+        future->markCompleted();
+      }
+    );
+  } else {
+    func();
+    future->markCompleted();
+  }
+  return future;
 }
 
 } // namespace at
