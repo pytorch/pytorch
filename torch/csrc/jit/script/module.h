@@ -232,7 +232,7 @@ struct TORCH_API Module {
     }
     return c10::nullopt;
   }
-  void apply(std::function<void(Module&)> fn);
+  void apply(const std::function<void(Module&)>& fn);
 
   /// Enables "training" mode.
   void train(bool on = true);

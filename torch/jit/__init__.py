@@ -1090,12 +1090,6 @@ def _enable_recursive_script():
     yield
     torch._C._jit_recursive_script(False)
 
-def _get_class_ast(obj):
-    if not _is_new_style_class(obj):
-        raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
-    qualified_name = _qualified_name(obj)
-    ast = get_jit_class_def(obj, obj.__name__)
-    return qualified_name, ast
 
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
@@ -1108,7 +1102,10 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
             return _convert_to_script_module(obj)
 
     if inspect.isclass(obj):
-        qualified_name, ast = _get_class_ast(obj)
+        if not _is_new_style_class(obj):
+            raise RuntimeError("TorchScript classes must be new-style classes. Please inherit from 'object'")
+        qualified_name = _qualified_name(obj)
+        ast = get_jit_class_def(obj, obj.__name__)
         _jit_script_class_compile(qualified_name, ast, _rcb)
         _add_script_class(obj, qualified_name)
         return obj
@@ -1118,14 +1115,6 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         # Forward docstrings
         fn.__doc__ = obj.__doc__
         return fn
-
-def interface(obj):
-    if not inspect.isclass(obj):
-        raise RuntimeError("interface must be applied to a class")
-    rcb = _jit_internal.createResolutionCallback(1)
-    qualified_name, ast = _get_class_ast(obj)
-    torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
-    return obj
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))

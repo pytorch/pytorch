@@ -331,7 +331,7 @@ module_list Module::get_modules() const {
   return module_list(*this, EntityType::MODULE);
 }
 
-void Module::apply(std::function<void(Module&)> fn) {
+void Module::apply(const std::function<void(Module&)>& fn) {
   for (auto submod : get_modules()) {
     submod.apply(fn);
   }
