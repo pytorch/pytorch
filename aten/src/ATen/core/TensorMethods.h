@@ -5,6 +5,7 @@
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #ifdef NAMEDTENSOR_ENABLED
 #include <ATen/NamedTensor.h>
@@ -12,6 +13,12 @@
 
 
 namespace at {
+
+struct Quantizer;
+// This is temporary typedef to enable Quantizer in aten native function API
+// we'll remove them when we are actually exposing Quantizer class
+// to frontend
+using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 inline Tensor Tensor::toType(const DeprecatedTypeProperties & t, bool non_blocking) const {
   if(type() == t)
@@ -846,6 +853,9 @@ inline Tensor & Tensor::set_(const Tensor & source) {
 }
 inline Tensor & Tensor::set_() {
     return dispatch_type().set_(*this);
+}
+inline Tensor & Tensor::set_quantizer_(ConstQuantizerPtr quantizer) {
+    return dispatch_type().set_quantizer_(*this, quantizer);
 }
 inline bool Tensor::is_set_to(const Tensor & tensor) const {
     return dispatch_type().is_set_to(*this, tensor);

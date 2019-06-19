@@ -14,6 +14,7 @@
 #include <c10/core/TensorTypeIdRegistration.h>
 #include <ATen/core/Reduction.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/intrusive_ptr.h>
 
 #include <c10/util/Optional.h>
 
@@ -41,7 +42,12 @@ using TensorList = ArrayRef<Tensor>;
 
 class Context;
 struct Generator;
+
 struct Quantizer;
+// This is temporary typedef to enable Quantizer in aten native function API
+// we'll remove them when we are actually exposing Quantizer class
+// to frontend
+using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 static inline void noop_deleter(void*) {}
 
@@ -405,6 +411,7 @@ struct CAFFE2_API Type {
   virtual Tensor & set_(Tensor & self, Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) const = 0;
   virtual Tensor & set_(Tensor & self, const Tensor & source) const = 0;
   virtual Tensor & set_(Tensor & self) const = 0;
+  virtual Tensor & set_quantizer_(Tensor & self, ConstQuantizerPtr quantizer) const = 0;
   virtual bool is_set_to(const Tensor & self, const Tensor & tensor) const = 0;
   virtual Tensor & masked_fill_(Tensor & self, const Tensor & mask, Scalar value) const = 0;
   virtual Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar value) const = 0;
