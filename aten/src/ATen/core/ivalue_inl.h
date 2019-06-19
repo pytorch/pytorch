@@ -277,14 +277,19 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 // User-defined object.
 struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
  public:
-  Object(std::shared_ptr<ClassType> type, size_t numSlots) : type_(std::move(type)) {
+  // temporary way to break cyclic dependencies in modules by forcing the deletion
+  // of functions when the module object is destructed
+  typedef void (*OnDelete)(ivalue::Object*);
+  Object(std::shared_ptr<ClassType> type, size_t numSlots, OnDelete on_delete)
+      : type_(std::move(type)), on_delete_(on_delete) {
     slots_.resize(numSlots);
   }
 
   static c10::intrusive_ptr<Object> create(
       std::shared_ptr<ClassType> type,
-      size_t numSlots) {
-    return c10::make_intrusive<Object>(std::move(type), numSlots);
+      size_t numSlots,
+      OnDelete on_delete = nullptr) {
+    return c10::make_intrusive<Object>(std::move(type), numSlots, on_delete);
   }
 
   /**
@@ -337,6 +342,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   void resizeObject(size_t slot);
   std::shared_ptr<ClassType> type_;
   std::vector<IValue> slots_;
+  OnDelete on_delete_;
 };
 
 std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::DictPtr<IValue, IValue>& dict);
