@@ -146,7 +146,8 @@ struct PythonResolver : public Resolver {
 
       return TupleType::create(
           annotations,
-          TupleType::NamedTupleSpec(annotations, fields, qualifiedName));
+          TupleType::namedTupleSchemaFromNamesAndTypes(
+              qualifiedName, fields, annotations));
     }
 
     return CompilationUnit::_get_python_cu().get_class(qualifiedName);

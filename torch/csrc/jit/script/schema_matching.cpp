@@ -436,13 +436,14 @@ static Value* packOutputs(
   if (values.size() == 1) {
     return values[0];
   }
-  c10::optional<TupleType::NamedTupleSpec> named_tuple_spec;
+  std::shared_ptr<FunctionSchema> schema;
   if (field_names) {
-    named_tuple_spec = TupleType::NamedTupleSpec(
-        fmap(values, [](Value* v) { return v->type(); }), field_names.value());
+    schema = TupleType::namedTupleSchemaFromNamesAndTypes(
+        c10::QualifiedName(), field_names.value(), fmap(values, [](Value* v) {
+          return v->type();
+        }));
   }
-  return g.insertNode(g.createTuple(values, std::move(named_tuple_spec)))
-      ->output();
+  return g.insertNode(g.createTuple(values, std::move(schema)))->output();
 }
 
 // Given a successful match between operator schema and symbol, emit a node

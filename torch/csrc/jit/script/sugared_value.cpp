@@ -85,12 +85,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     throw ErrorReport(loc) << "Cannot call methods on numbers";
   }
   if (auto tuple_type = value_->type()->cast<TupleType>()) {
-    if (!tuple_type->namedTupleSpec()) {
+    if (!tuple_type->schema()) {
       throw ErrorReport(loc) << "Getting attributes of tuples is not supported";
     }
-    auto names = tuple_type->namedTupleSpec()->names;
-    for (size_t i = 0; i < names.size(); i++) {
-      if (names[i] == field) {
+    auto attrs = tuple_type->schema()->arguments();
+    for (size_t i = 0; i < attrs.size(); i++) {
+      if (attrs[i].name() == field) {
         auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
         auto out_type = tuple_type->elements().at(i);
         auto r =
@@ -273,15 +273,13 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
     size_t n_binders) {
   auto& g = *m.graph();
 
-  auto named_tuple_spec = type_->namedTupleSpec();
-  TORCH_INTERNAL_ASSERT(named_tuple_spec);
-  auto schema = named_tuple_spec->schema;
+  auto schema = type_->schema();
+  TORCH_INTERNAL_ASSERT(schema);
   auto matched_schema = matchSchema(*schema, loc, g, inputs, attributes);
 
   auto self =
-      g.insertNode(
-           g.createTuple(matched_schema.inputs, std::move(named_tuple_spec))
-               ->setSourceRange(loc))
+      g.insertNode(g.createTuple(matched_schema.inputs, std::move(schema))
+                       ->setSourceRange(loc))
           ->output();
   self->setType(type_);
 
