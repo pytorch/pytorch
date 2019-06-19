@@ -68,6 +68,11 @@ class _ConvNd(Module):
             s += ', bias=False'
         return s.format(**self.__dict__)
 
+    def __setstate__(self, state):
+        super(_ConvNd, self).__setstate__(state)
+        if not hasattr(self, 'padding_mode'):
+            self.padding_mode = 'zeros'
+
 
 @weak_module
 class Conv1d(_ConvNd):

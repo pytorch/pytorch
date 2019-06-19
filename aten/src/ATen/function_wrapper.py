@@ -323,9 +323,6 @@ CHECKED_CAST = {
             # We're punning here (Backend and DeviceType constructors coincide)
             # but DeviceType is the correct way to classify storages
             'DeviceType::${Backend}, at::scalarTypeToTypeMeta(ScalarType::${ScalarName}))'),
-    'THGenerator*':
-        CodeTemplate(
-            'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(k${DeviceType}))'),
     # This is a cast done via direct-construction
     'IntArrayRefStride': CodeTemplate('at::IntArrayRef ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
@@ -345,7 +342,6 @@ CHECKED_USE = {
     'THDenseTensor*': '{}_',
     'THDenseIndexTensor*': '{}_',
     'THStorage*': '{}_.unsafeGetStorageImpl()',
-    'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
 
@@ -1076,6 +1072,9 @@ def create_generic(top_env, declarations):
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
+        # For method-only entries, the first argument should be self
+        if is_method and not is_namespace_function:
+            assert formals[0]['name'] == 'self'
         is_factory_method = find_formal('TensorOptions', formals) and \
             not dispatch_options and 'method' not in option['variants']
 

@@ -3028,8 +3028,8 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        ret = torch._C._nn.thnn_im2col(input, _pair(kernel_size),
-                                       _pair(dilation), _pair(padding), _pair(stride))
+        ret = torch._C._nn.im2col(input, _pair(kernel_size),
+                                  _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
         ret = input  # TODO: remove when jit supports exception control flow
@@ -3056,8 +3056,8 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         assert_int_or_pair(padding, 'padding', msg)
         assert_int_or_pair(stride, 'stride', msg)
 
-        ret = torch._C._nn.thnn_col2im(input, _pair(output_size), _pair(kernel_size),
-                                       _pair(dilation), _pair(padding), _pair(stride))
+        ret = torch._C._nn.col2im(input, _pair(output_size), _pair(kernel_size),
+                                  _pair(dilation), _pair(padding), _pair(stride))
     else:
         raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
         ret = input  # TODO: remove when jit supports exception control flow
@@ -3272,8 +3272,7 @@ def multi_head_attention_forward(query,                  # type: Tensor
         attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
 
     attn_output_weights = softmax(
-        attn_output_weights.float(), dim=-1,
-        dtype=torch.float32 if attn_output_weights.dtype == torch.float16 else attn_output_weights.dtype)
+        attn_output_weights, dim=-1)
     attn_output_weights = dropout(attn_output_weights, p=dropout_p, training=training)
 
     attn_output = torch.bmm(attn_output_weights, v)

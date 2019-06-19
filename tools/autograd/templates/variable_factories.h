@@ -12,6 +12,10 @@
 #include <initializer_list>
 #include <utility>
 
+#ifdef NAMEDTENSOR_ENABLED
+using at::DimnameList;
+#endif
+
 namespace torch {
 
 #define TENSOR(T, S, _1)                                                   \
