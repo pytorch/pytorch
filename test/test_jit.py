@@ -55,7 +55,6 @@ import random
 import shutil
 import sys
 import tempfile
-import textwrap
 import types
 import unittest
 import warnings
