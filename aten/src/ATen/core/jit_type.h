@@ -844,6 +844,37 @@ private:
   FutureType(TypePtr elem) : SingleElementType(elem) {}
 };
 
+using ::torch::jit::Function;
+struct NamedType;
+using NamedTypePtr = std::shared_ptr<NamedType>;
+
+struct CAFFE2_API NamedType : public Type {
+  NamedType(TypeKind tk, c10::QualifiedName qualifiedName)
+    : Type(tk)
+    , name_(qualifiedName) {}
+
+  std::string python_str() const {
+    return name_.qualifiedName();
+  }
+
+  std::string qualname() const {
+    return name_.qualifiedName();
+  }
+
+  std::string qualifier() const {
+    return name_.prefix();
+  }
+
+  std::string basename() const {
+    return name_.name();
+  }
+
+ protected:
+  // Fully qualified name of type (note that this has to be globally unique).
+  // Looks like: "foo.bar.Baz".
+  QualifiedName name_;
+};
+
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
 using OptNameList = c10::optional<std::vector<std::string>>;
@@ -1376,6 +1407,7 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
 CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
+
 /**
  * User Defined Types
  */
@@ -1383,10 +1415,9 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
-using ::torch::jit::Function;
 
 // This represents a class in TorchScript.
-struct CAFFE2_API ClassType : public Type {
+struct CAFFE2_API ClassType : public NamedType {
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       QualifiedName qualifiedName,
@@ -1395,29 +1426,17 @@ struct CAFFE2_API ClassType : public Type {
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
-      return name_ == user_rhs->name_;
+      return qualname() == user_rhs->qualname();
     }
     return false;
   }
 
   std::string str() const override {
-    return std::string("ClassType<") + name_.name() + ">";
+    return std::string("ClassType<") + basename() + ">";
   }
 
   std::string python_str() const override {
-    return name_.qualifiedName();
-  }
-
-  std::string qualname() const {
-    return name_.qualifiedName();
-  }
-
-  std::string qualifier() const {
-    return name_.prefix();
-  }
-
-  std::string basename() const {
-    return name_.name();
+    return qualname();
   }
 
   TypePtr getAttribute(const std::string& name) const {
@@ -1517,10 +1536,6 @@ struct CAFFE2_API ClassType : public Type {
 
  private:
   ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu, bool is_module);
-
-  // Fully qualified name of type (note that this has to be globally unique).
-  // Looks like: "foo.bar.Baz".
-  QualifiedName name_;
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
