@@ -358,29 +358,6 @@ Tensor rand_like(const Tensor& self, const TensorOptions& options) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#ifdef NAMEDTENSOR_ENABLED
-Tensor randint(
-    int64_t high,
-    IntArrayRef size,
-    at::optional<DimnameList> names,
-    const TensorOptions& options) {
-  auto result = at::randint(high, size, options);
-  internal_set_names_inplace(result, names);
-  return result;
-}
-
-Tensor randint(
-    int64_t high,
-    IntArrayRef size,
-    Generator* generator,
-    at::optional<DimnameList> names,
-    const TensorOptions& options) {
-  auto result = at::randint(high, size, generator, options);
-  internal_set_names_inplace(result, names);
-  return result;
-}
-#endif
-
 Tensor randint(int64_t high, IntArrayRef size, const TensorOptions& options) {
   return native::randint(high, size, nullptr, options);
 }
