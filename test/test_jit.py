@@ -9966,19 +9966,23 @@ a")
 
         self.checkScript(nested_tuple_assign, ((1, (2, (3, 4)), (5, 6))))
 
-        def star_tuple_assign():
-            # type: () -> Tuple[int, int, Tuple[int, int], Tuple[int, int]]
-            a, (b, *c), *d = 1, (2, 3, 4), 5, 6
-            return a, b, c, d
-
-        self.checkScript(star_tuple_assign, ())
-
         def subscript_tuple_assign(a, x, i):
             # type: (List[int], Tensor, int) -> Tuple[int, Tensor, int]
             a[i], (x[i], b) = 1, (2, 3)
             return a[i] + 1, x + 5, b
 
         self.checkScript(subscript_tuple_assign, ([12, 7, 9, 11], torch.tensor((3, 13, 17)), 0))
+
+        # python 2 does not support star assignments so we use compilation unit to test instead
+        star_code = '''
+        def star_tuple_assign():
+            # type: () -> Tuple[int, int, Tuple[int, int], Tuple[int, int]]
+            a, (b, *c), *d = 1, (2, 3, 4), 5, 6
+            return a, b, c, d
+        '''
+
+        self.checkScript(star_code, (), name='star_tuple_assign', outputs=(1, 2, (3, 4), (5, 6)))
+
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(
