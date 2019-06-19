@@ -248,10 +248,9 @@ struct TORCH_API Variable : public at::Tensor {
       bool keep_graph,
       bool create_graph) const;
 
-  /// Sets the `Tensor` held by this `Variable` to the one supplied.
-  /// It is rarely necessary to call this; it's used, for example, when
-  /// a non-sparse gradient gets added to a sparse gradient, requiring
-  /// the type of the gradient `Variable` to become non-sparse.
+  /// Sets the tensor data held by this `Variable` to be the same as `new_data`.
+  /// It requires that `new_data` has the same derived type of TensorImpl as
+  /// this `Variable`, by checking `_has_same_tensorimpl_type(this, new_data)`.
   void set_data(const at::Tensor &new_data);
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
