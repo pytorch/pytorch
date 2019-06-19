@@ -17,14 +17,14 @@ namespace torch {
 namespace serialize {
 
 InputArchive::InputArchive()
-    : module_(std::make_shared<jit::script::Module>()) {}
+    : module_("__main__") {}
 
 bool InputArchive::try_read(
     const std::string& key,
     Tensor& tensor,
     bool is_buffer) {
-  auto param = module_->find_parameter(key);
-  auto buffer = module_->find_buffer(key);
+  auto param = module_.find_parameter(key);
+  auto buffer = module_.find_buffer(key);
   if (!param && !buffer) return false;
 
   // clang-format off
@@ -60,8 +60,8 @@ void InputArchive::read(
 }
 
 bool InputArchive::try_read(const std::string& key, InputArchive& archive) {
-  if (auto named_module = module_->find_module(key)) {
-    archive.module_ = std::move(named_module);
+  if (auto named_module = module_.find_module(key)) {
+    archive.module_ = std::move(*named_module);
     return true;
   } else {
     return false;

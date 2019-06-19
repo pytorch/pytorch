@@ -45,7 +45,7 @@ class ScriptModuleDeserializer : public BlobDeserializerBase {
     std::stringstream ss;
     ss << serialized;
     ss.seekg(0);
-    *blob->GetMutable<std::shared_ptr<Module>>() = torch::jit::load(ss);
+    *blob->GetMutable<std::shared_ptr<Module>>() = std::make_shared<Module>(torch::jit::load(ss));
   }
 };
 
@@ -62,7 +62,7 @@ class ScriptModuleLoadOp final : public Operator<CPUContext> {
     std::stringstream ss;
     ss << moduleBinary;
     ss.seekg(0);
-    *OperatorBase::Output<std::shared_ptr<Module>>(0) = torch::jit::load(ss);
+    *OperatorBase::Output<std::shared_ptr<Module>>(0) = std::make_shared<Module>(torch::jit::load(ss));
     return true;
   }
 };

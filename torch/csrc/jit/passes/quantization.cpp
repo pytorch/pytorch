@@ -314,10 +314,10 @@ void InsertObserverNodes(
 }
 
 void InsertObserverNodes(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& method_name,
     Node* observer_node) {
-  script::Method method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj.get_method(method_name);
   InsertObserverNodes(method.graph(), observer_node, method.num_inputs());
 }
 
@@ -460,11 +460,11 @@ void InsertQuantDequantNodes(
 }
 
 void InsertQuantDequantNodes(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& method_name,
     const std::unordered_map<std::string, std::tuple<std::string, float, int>>&
         qparam_dict) {
-  script::Method method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj.get_method(method_name);
   InsertQuantDequantNodes(method.graph(), qparam_dict);
 }
 
@@ -546,18 +546,18 @@ void InsertQuantDequantNodesForParam(
 // qparamfunc for different qschemes and params.
 template <typename Fn>
 void InsertQuantDequantNodesForParam(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& method_name,
     const std::string& param_name,
     const Fn& getQParamFunc,
     at::ScalarType t) {
-  script::Method method = moduleObj->get_method(method_name);
+  script::Method method = moduleObj.get_method(method_name);
   InsertQuantDequantNodesForParam(method, param_name, getQParamFunc, t);
 }
 
 // Explicit Supported Template specialization for getQParamFunc.
 template TORCH_API void InsertQuantDequantNodesForParam(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& method_name,
     const std::string& param_name,
     const std::function<std::tuple<std::string, float, int>(at::Tensor)>&
@@ -565,7 +565,7 @@ template TORCH_API void InsertQuantDequantNodesForParam(
     at::ScalarType t);
 
 template TORCH_API void InsertQuantDequantNodesForParam(
-    std::shared_ptr<script::Module>& moduleObj,
+    const script::Module& moduleObj,
     const std::string& method_name,
     const std::string& param_name,
     const std::function<std::tuple<std::string, float, int>(float, float)>&
