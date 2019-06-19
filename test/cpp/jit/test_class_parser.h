@@ -21,7 +21,7 @@ void testClassParser() {
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;
 
-  const auto classDef = ClassDef(p.parseClass());
+  const auto classDef = ClassDef(p.parseClassLike());
   p.lexer().expect(TK_EOF);
 
   ASSERT_EQ(classDef.name().name(), "FooTest");

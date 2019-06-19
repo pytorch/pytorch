@@ -60,15 +60,15 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
-    if (tup->hasNames()) {
+    if (tup->schema()) {
       out << "NamedTuple";
     }
     out << "(";
     for(size_t i = 0; i < tup->elements().size(); ++i) {
       if(i > 0)
         out << ", ";
-      if (tup->hasNames()) {
-        out << tup->names()[i] << " : ";
+      if (tup->schema()) {
+        out << tup->schema()->arguments()[i].name() << " : ";
       }
       out << *(tup->elements()[i]);
     }
@@ -474,46 +474,6 @@ bool Type::isSubtypeOf(const TypePtr rhs) const {
   return *this == *rhs;
 }
 
-ClassTypePtr ClassType::create(
-    QualifiedName qualifiedName,
-    std::shared_ptr<CompilationUnit> cu,
-    bool is_module) {
-  return ClassTypePtr(new ClassType(std::move(qualifiedName), std::move(cu), is_module));
-}
-
-ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
-  auto ptr = ClassType::create(name_, compilation_unit_);
-  AT_ASSERT(numAttributes() == refined_slots.size());
-  for(size_t i = 0; i < attributeNames_.size(); ++i) {
-    AT_ASSERT(refined_slots[i]->isSubtypeOf(attributeTypes_[i]));
-    ptr->addAttribute(attributeNames_[i], refined_slots[i]);
-  }
-  return ptr;
-}
-
-  size_t ClassType::addAttribute(const std::string& name, TypePtr type, bool is_parameter) {
-    for (size_t i = 0; i < attributeNames_.size(); ++i) {
-      TORCH_CHECK(name != attributeNames_[i],
-          "attempting to add ",
-          is_parameter ? "parameter" : "attribute"
-          " '",
-          name,
-          "' but a field of the same name already exists with type ",
-          attributeTypes_[i]->python_str());
-    }
-    size_t slot = attributeNames_.size();
-    attributeNames_.push_back(name);
-    attributeTypes_.push_back(type);
-    if (is_parameter) {
-      TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter to a non module");
-    }
-    if (is_module()) {
-      parameterSlots_->push_back(is_parameter);
-    } 
-    return slot;
-  }
-
-
 std::string ProfiledTensorType::str() const {
   return "Tensor";
 }
@@ -559,32 +519,102 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     return out;
 }
 
-ClassType::ClassType(
-    QualifiedName name,
-    std::shared_ptr<CompilationUnit> cu,
-    bool is_module)
-    : Type(TypeKind::ClassType),
-      name_(std::move(name)),
-      compilation_unit_(std::move(cu)) {
-        if (is_module) {
-          parameterSlots_ = std::make_shared<std::vector<bool>>();
-        }
-      }
-
-void TupleType::createFunctionSchema() {
+std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(c10::QualifiedName qualName, std::vector<std::string> field_names, std::vector<TypePtr> field_types) {
+  TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
   std::vector<Argument> arguments;
-  for (size_t i = 0; i < elements_.size(); ++i) {
+  for (size_t i = 0; i < field_names.size(); ++i) {
     arguments.emplace_back(
-        /*name=*/names()[i],
-        /*type=*/containedTypes()[i],
+        /*name=*/field_names[i],
+        /*type=*/field_types[i],
         /*N=*/i);
   }
 
-  schema_ = std::make_shared<FunctionSchema>(
-      /*name=*/unqualName().value(),
+  auto schema = std::make_shared<FunctionSchema>(
+      /*name=*/qualName.name(),
       /*overload_name=*/std::string(""),
       /*arguments=*/arguments,
       /*returns=*/std::vector<Argument>{});
+  return schema;
+}
+
+TupleType::TupleType(std::vector<TypePtr> elements_, c10::optional<c10::QualifiedName> name, std::shared_ptr<FunctionSchema> schema)
+: NamedType(TypeKind::TupleType, std::move(name))
+, elements_(std::move(elements_))
+, schema_(std::move(schema)) {
+  has_free_variables_ =
+      std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
+        return v->hasFreeVariables();
+      });
+}
+
+bool TupleType::isSubtypeOf(const TypePtr rhs_) const {
+  if (Type::isSubtypeOf(rhs_))
+    return true;
+  auto rhs = rhs_->cast<TupleType>();
+  if (!rhs)
+    return false;
+  // unnamed tuple is not a subtype of nametuple
+  if (!schema() && rhs->schema())
+    return false;
+  // namedtuple may be a subtype of unnamed tuple
+  auto test_names_match = [](const std::shared_ptr<FunctionSchema>& lhs, const std::shared_ptr<FunctionSchema>& rhs) {
+    const auto& args_lhs = lhs->arguments();
+    const auto& args_rhs = rhs->arguments();
+    if (args_lhs.size() != args_rhs.size()) {
+      return false;
+    }
+
+    for (size_t i = 0; i < args_lhs.size(); ++i) {
+      if (args_lhs[i].name() != args_rhs[i].name()) {
+        return false;
+      }
+    }
+    return true;
+  };
+  bool names_match = !rhs->schema() || test_names_match(schema(), rhs->schema());
+  // co-variant rules for tuples
+  return names_match && compare(*rhs, [](const TypePtr a, const TypePtr b) {
+    return a->isSubtypeOf(b);
+  });
+}
+
+bool TupleType::operator==(const Type& rhs) const {
+  return compare(rhs, [](const TypePtr a, const TypePtr b) {
+    return *a == *b;
+  }) && schema_ == rhs.expect<TupleType>()->schema_;
+  // `compare` guarantees that rhs is always a TupleType, so the
+  // dynamic_cast above always success.
+}
+
+std::string TupleType::str() const {
+  std::stringstream ss;
+  if (schema_ && name_) {
+    ss << qualname();
+  } else {
+    ss << "(";
+    for(size_t i = 0; i < elements().size(); ++i) {
+      if(i > 0)
+        ss << ", ";
+      ss << elements()[i]->str();
+    }
+    ss << ")";
+  }
+  return ss.str();
+}
+std::string TupleType::python_str() const {
+  std::stringstream ss;
+  if (schema_ && name_) {
+    ss << qualname();
+  } else {
+    ss << "Tuple[";
+    for(size_t i = 0; i < elements().size(); ++i) {
+      if(i > 0)
+        ss << ", ";
+      ss << elements()[i]->python_str();
+    }
+    ss << "]";
+  }
+  return ss.str();
 }
 
 } // namespace c10
