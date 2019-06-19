@@ -6845,6 +6845,29 @@ a")
         no_bool_loop_outputs(torch.jit.script(test_nested_two).graph)
 
     def test_breaks_continues(self):
+        def test_refine_outside_loop():
+            if True:
+                x = None
+            else:
+                x = 1
+            i = 0
+            j = 0
+            while (x is None or torch.jit._unwrap_optional(x) > 3):
+                if i < 3:
+                    if i < 3:
+                        x = torch.jit.annotate(Optional[int], None)
+                        i += 1
+                        continue
+                    x = 1
+                else:
+                    x = 1 if x is None else x
+                x = x + 1
+                j = x + x
+
+            return x, j
+
+        self.checkScript(test_refine_outside_loop, ())
+
         def assign_after_break(y):
             # type: (int)
             x = 0
@@ -6977,7 +7000,7 @@ a")
                 m += k
             return m
 
-        # use of k tests the var exit pathway
+        # use of k tests the pathway where we have to insert unitialized
         self.checkScript(test_varexit, (3,))
         self.checkScript(test_varexit, (2,))
 
@@ -6992,6 +7015,21 @@ a")
             return i
 
         self.checkScript(test_break_true, ())
+
+    def test_break_continue_assign_after_break(self):
+        def test(x):
+            # type: (int)
+            i = 0
+            for i in range(5):
+                j = 1
+                if i == 2:
+                    break
+                    i = i + 5
+                x = x + i
+            return i
+
+        self.checkScript(test, (1,))
+
 
     def test_break_continue_error(self):
         with self.assertRaisesRegex(RuntimeError, "Syntax"):

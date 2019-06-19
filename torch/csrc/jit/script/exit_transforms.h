@@ -7,8 +7,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-TORCH_API void TransformBreaks(std::shared_ptr<Graph>& graph);
-TORCH_API void TransformContinues(std::shared_ptr<Graph>& graph);
+TORCH_API void TransformExits(std::shared_ptr<Graph>& graph);
 
 } // namespace script
 } // namespace jit

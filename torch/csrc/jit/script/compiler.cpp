@@ -1289,13 +1289,17 @@ struct to_ir {
 
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     auto* body_block = n->addBlock();
-
     {
       Block* condition_block = n->addBlock();
       pushFrame(condition_block);
-      WithInsertPoint insert(condition_block);
-      Value* out = cond ? emitCond(cond.value())
-                        : graph->insertConstant(true, nullptr, range);
+      Value* out;
+      if (cond) {
+        WithInsertPoint insert(condition_block);
+        out = emitCond(cond.value());
+      } else {
+        WithInsertPoint insert(n);
+        out = graph->insertConstant(true, nullptr, range);
+      }
       condition_block->registerOutput(out);
       popFrame();
     }

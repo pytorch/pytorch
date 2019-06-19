@@ -405,7 +405,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/passes/break_continue_transform.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/remove_inplace_ops.cpp
@@ -429,6 +428,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/final_returns.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/exit_transforms.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/inline_loop_condition.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp

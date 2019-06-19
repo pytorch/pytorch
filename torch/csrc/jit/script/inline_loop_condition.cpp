@@ -1,3 +1,4 @@
+
 #include <functional>
 #include <memory>
 #include <string>
@@ -10,12 +11,16 @@ namespace torch {
 namespace jit {
 namespace script {
 
+namespace {
+
 void moveBlockBeforeNode(Node* before_node, Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto block_node = *it++;
     block_node->moveBefore(before_node);
   }
 }
+
+} // namespace
 
 // The loop node is initially emitted as:
 // Loop(max_trip_count)
@@ -30,7 +35,7 @@ void moveBlockBeforeNode(Node* before_node, Block* block) {
 // Loop(max_trip_count, start_condition)
 //    block0(loop_counter, loop_carried_block*) {
 //      <body>
-//      -> (continue_condition)
+//       BlockExit(continue_condition, loop_carried_block*)
 //    }
 void inlineLoopCondition(Node* n) {
   Block* body_block = n->blocks().at(0);
@@ -39,11 +44,19 @@ void inlineLoopCondition(Node* n) {
   auto header_block = n->addBlock();
   header_block->cloneFrom(pre_header, [](Value* v) { return v; });
   moveBlockBeforeNode(n, header_block);
-  n->addInput(header_block->outputs().at(0));
+  n->insertInput(/*start_condition_index*/ 1, header_block->outputs().at(0));
   n->eraseBlock(2);
 
-  moveBlockBeforeNode(body_block->return_node(), pre_header);
-  body_block->insertOutput(0, pre_header->outputs().at(0));
+  Node* exit_n = nullptr;
+  for (Node* n : body_block->nodes().reverse()) {
+    if (n->kind() == prim::BlockExit) {
+      exit_n = n;
+      break;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(exit_n);
+  moveBlockBeforeNode(exit_n, pre_header);
+  exit_n->insertInput(0, pre_header->outputs().at(0));
   n->eraseBlock(1);
 }
 
