@@ -11,7 +11,7 @@ namespace at { namespace cuda { namespace detail {
 struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
   std::unique_ptr<THCState, void(*)(THCState*)> initCUDA() const override;
-  std::unique_ptr<Generator> initCUDAGenerator(Context*) const override;
+  Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;
