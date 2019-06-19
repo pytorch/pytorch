@@ -1933,10 +1933,10 @@ struct to_ir {
     emitExprsAssign(tl.inputs(), outputs, rhs_loc, n_binders);
   }
 
-  void emitExprsAssign(const List<Expr>& tl_inputs, const at::ArrayRef<SugaredValuePtr> outputs,
+  void emitExprsAssign(const List<Expr>& lhs_exprs, const at::ArrayRef<SugaredValuePtr> outputs,
                        const SourceRange& rhs_loc, size_t n_binders) {
     int i = 0;
-    for (auto assignee : tl_inputs) {
+    for (auto assignee : lhs_exprs) {
       switch (assignee.kind()) {
         case TK_SUBSCRIPT:
           emitSubscriptAssign(
