@@ -124,8 +124,7 @@ void RegisterOperators::checkNoDuplicateKernels_(const FunctionSchema& schema, c
 }
 
 void RegisterOperators::registerOp_(FunctionSchema&& schema, Options&& options) {
-  std::string op_name = schema.name();
-  std::string overload_name = schema.overload_name();
+  OperatorName op_name = schema.operator_name();
 
   auto operatorOptions = makeOperatorOptions_(options);
 
@@ -137,7 +136,7 @@ void RegisterOperators::registerOp_(FunctionSchema&& schema, Options&& options) 
     }
   }
 
-  auto op_handle = c10::Dispatcher::singleton().findSchema(op_name.c_str(), overload_name.c_str()).value();
+  TORCH_INTERNAL_ASSERT(c10::Dispatcher::singleton().findSchema(op_name).has_value());
 }
 
 OperatorOptions RegisterOperators::makeOperatorOptions_(const RegisterOperators::Options& options) {
