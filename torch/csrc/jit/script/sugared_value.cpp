@@ -85,12 +85,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     throw ErrorReport(loc) << "Cannot call methods on numbers";
   }
   if (auto tuple_type = value_->type()->cast<TupleType>()) {
-    if (!tuple_type->hasNames()) {
+    if (!tuple_type->schema()) {
       throw ErrorReport(loc) << "Getting attributes of tuples is not supported";
     }
-    auto names = tuple_type->names();
-    for (size_t i = 0; i < names.size(); i++) {
-      if (names[i] == field) {
+    auto attrs = tuple_type->schema()->arguments();
+    for (size_t i = 0; i < attrs.size(); i++) {
+      if (attrs[i].name() == field) {
         auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
         auto out_type = tuple_type->elements().at(i);
         auto r =
@@ -264,27 +264,9 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   Value* val = getValue();
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
-  if (val_type->cast<ListType>()) {
+  if (val_type->cast<ListType>() ||
+      val_type->isSubtypeOf(TensorType::get())) {
     return g.insert(aten::len, {val}, {}, loc);
-  } else if (val_type->isSubtypeOf(TensorType::get())) {
-    Value* outermost_dim_index = g.insertConstant(0, IntType::get(), loc);
-    // zero-dim tensor error handling
-    Value* num_dim = g.insert(aten::dim, {val}, {}, loc);
-    Value* cond_value = g.insert(aten::eq, {num_dim, outermost_dim_index}, {}, loc);
-    Node* if_node = g.insertNode(g.create(prim::If, 0)->setSourceRange(loc));
-    if_node->addInput(cond_value);
-
-    Block* true_block = if_node->addBlock();
-    if_node->addBlock();
-    {
-      WithInsertPoint guard(true_block);
-      g.insert(prim::RaiseException,
-          {std::string("iteration over a 0-d tensor!")}, {}, loc);
-    }
-
-    // calculate the outermost dim as the length of the tensor iterator
-    Value* sizes_tuple = g.insert(aten::size, {val}, {}, loc);
-    return g.insert(aten::select, {sizes_tuple, outermost_dim_index}, {}, loc);
   } else {
     throw ErrorReport(loc)
       << "Value type " << val_type->python_str() << " does not length information";
@@ -441,20 +423,17 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  auto nargs = type_->containedTypes().size();
-  if (inputs.size() != nargs) {
-    throw ErrorReport(loc) << "Constructor expected " << nargs << "arguments "
-                           << "but got " << inputs.size();
-  }
-
   auto& g = *m.graph();
 
   auto schema = type_->schema();
   TORCH_INTERNAL_ASSERT(schema);
+  auto qualname = type_->qualified_name_obj();
   auto matched_schema = matchSchema(*schema, loc, g, inputs, attributes);
 
   auto self = g.insertNode(g.createTuple(
-                                matched_schema.inputs, type_->names(), type_->unqualName())
+                                matched_schema.inputs,
+                                std::move(qualname),
+                                std::move(schema))
                                ->setSourceRange(loc))
                   ->output();
   self->setType(type_);

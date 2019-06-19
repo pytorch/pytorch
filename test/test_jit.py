@@ -9958,7 +9958,7 @@ a")
         self.checkScript(test_sizes, (torch.rand(0),))
 
     def test_for_in_tensors_rank0(self):
-        with self.assertRaisesRegex(Exception, "iteration over a 0-d tensor"):
+        with self.assertRaisesRegex(RuntimeError, "of a 0-d tensor"):
             @torch.jit.script
             def test_sizes(x):
                 sumz = 0
