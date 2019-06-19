@@ -38,9 +38,8 @@ Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
 Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
   auto inferred_size = at::infer_size(size, self.numel());
   const ideep::tensor& x = itensor_from_mkldnn(self);
-  ideep::tensor y;
-  ideep::direct_copy::compute<AllocForMKLDNN>(x, y);
-  y.reshape({inferred_size.cbegin(), inferred_size.cend()});
+  ideep::tensor y{x};
+  y.reshape<AllocForMKLDNN>({inferred_size.cbegin(), inferred_size.cend()});
   return new_with_itensor_mkldnn(std::move(y), self.options());
 }
 

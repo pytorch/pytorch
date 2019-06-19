@@ -279,6 +279,13 @@ class TestMkldnn(TestCase):
             x.reshape(size),
             x.to_mkldnn().reshape(size).to_dense(),
         )
+        # test whether share same memory for plain format tensor
+        y = x.to_mkldnn()
+        z = y.reshape(size).add_(y.reshape(size))
+        self.assertEqual(
+            y.reshape(size).to_dense(),
+            z.to_dense(),
+        )
 
     def test_clone(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10
