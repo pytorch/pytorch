@@ -105,17 +105,20 @@ class LoadOp final : public Operator<Context> {
         db_name_ = "";
       }
     }
-    CAFFE_ENFORCE(blob_names_.empty() || blob_names_.size() == OutputSize(),
-      "Number of output blobs and source_blob_names mismatch.");
-    CAFFE_ENFORCE(blob_names_.empty() || strip_prefix_.empty(),
+    CAFFE_ENFORCE(
+        blob_names_.empty() || blob_names_.size() == OutputSize(),
+        "Number of output blobs and source_blob_names mismatch.");
+    CAFFE_ENFORCE(
+        blob_names_.empty() || strip_prefix_.empty(),
         "strip_prefix and source_blob_names are mutually exclusive.");
-    CAFFE_ENFORCE(blob_names_.empty() || !load_all_,
+    CAFFE_ENFORCE(
+        blob_names_.empty() || !load_all_,
         "cannot load_all_ while using source_blob_names.");
     if (!load_all_) {
       // blob_names_ will be filled with ''source blob names'' in file/db
       // if argument source_blob_names is not given, then blob_names_ is
       // inferred from operator output
-      if(blob_names_.empty()) {
+      if (blob_names_.empty()) {
         for (const string& name : operator_def.output()) {
           blob_names_.push_back(name);
         }
@@ -123,8 +126,10 @@ class LoadOp final : public Operator<Context> {
       int idx = 0;
       std::set<std::string> name_set;
       for (const string& name : blob_names_) {
-        CAFFE_ENFORCE(name_set.insert(name).second,
-            "Duplicated source blob name: ", name);
+        CAFFE_ENFORCE(
+            name_set.insert(name).second,
+            "Duplicated source blob name: ",
+            name);
         output_indices_[name] = idx++;
       }
     }
@@ -161,8 +166,19 @@ class LoadOp final : public Operator<Context> {
 
     validateBlobStates(blob_states);
     // Loaded all the needed blobs.
-    if (load_all_ || total_loaded_blobs == OutputSize()) {
+    if (!load_all_ && total_loaded_blobs == OutputSize()) {
       VLOG(1) << "Loaded " << total_loaded_blobs << " blobs fully from db(s)";
+      return true;
+    }
+
+    if (load_all_) {
+      for (const string& name : this->debug_def().output()) {
+        CAFFE_ENFORCE(
+            blob_states.count(name),
+            "Output blob name ",
+            name,
+            " does not exist in the db(s).");
+      }
       return true;
     }
 

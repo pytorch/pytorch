@@ -18,6 +18,7 @@
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/distributed/c10d/ddp.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -64,6 +65,7 @@ std::vector<at::Tensor> unbox(const std::vector<at::Tensor>& inputs) {
 }
 
 PyObject* c10d_init(PyObject* _unused) {
+  C10_LOG_API_USAGE_ONCE("c10d.python.import");
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
@@ -134,6 +136,11 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::ScatterOptions::rootRank)
       .def_readwrite("timeout", &::c10d::ScatterOptions::timeout);
+
+  py::class_<::c10d::ReduceScatterOptions>(module, "ReduceScatterOptions")
+      .def(py::init<>())
+      .def_readwrite("reduceOp", &::c10d::ReduceScatterOptions::reduceOp)
+      .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout);
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
@@ -352,6 +359,28 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "reduce_scatter",
+              &::c10d::ProcessGroup::reduce_scatter,
+              py::arg("output_tensors"),
+              py::arg("input_tensors"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "reduce_scatter",
+              [](::c10d::ProcessGroup& pg,
+                 at::Tensor& output,
+                 std::vector<at::Tensor>& input) {
+                std::vector<at::Tensor> outputs = {output};
+                std::vector<std::vector<at::Tensor>> inputs = {input};
+                return pg.reduce_scatter(
+                    outputs, inputs, ::c10d::ReduceScatterOptions());
+              },
+              py::arg("output_tensors"),
+              py::arg("input_tensor"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "send",
               &::c10d::ProcessGroup::send,
               py::call_guard<py::gil_scoped_release>())
@@ -549,6 +578,21 @@ They are used in specifying strategies for reduction collectives, e.g.,
       &::c10d::compute_bucket_assignment_by_size,
       py::arg("tensors"),
       py::arg("bucket_size"),
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_broadcast_coalesced",
+      // Define a lambda such that the pybind11 prototype can take a std::vector
+      // for the tensor list argument, but still pass it to the underlying
+      // function as a c10::ArrayRef.
+      [](std::shared_ptr<::c10d::ProcessGroup> process_group,
+         std::vector<at::Tensor> tensors,
+         size_t buffer_size) {
+        broadcast_coalesced(process_group, tensors, buffer_size);
+      },
+      py::arg("process_group"),
+      py::arg("tensors"),
+      py::arg("buffer_size"),
       py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;

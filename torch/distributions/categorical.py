@@ -35,7 +35,7 @@ class Categorical(Distribution):
 
     Args:
         probs (Tensor): event probabilities
-        logits (Tensor): event log probabilities
+        logits (Tensor): event log-odds
     """
     arg_constraints = {'probs': constraints.simplex,
                        'logits': constraints.real}
@@ -93,11 +93,11 @@ class Categorical(Distribution):
 
     @property
     def mean(self):
-        return self.probs.new_tensor(nan).expand(self._extended_shape())
+        return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
 
     @property
     def variance(self):
-        return self.probs.new_tensor(nan).expand(self._extended_shape())
+        return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = self._extended_shape(sample_shape)

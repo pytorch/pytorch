@@ -38,13 +38,24 @@ class Tensor(torch._C._TensorBase):
     def __reduce_ex__(self, proto):
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
-        args = (self.storage(),
-                self.storage_offset(),
-                tuple(self.size()),
-                self.stride(),
-                self.requires_grad,
-                OrderedDict())  # previously was self._backward_hooks
-        return (torch._utils._rebuild_tensor_v2, args)
+        if self.is_quantized:
+            args = (self.storage(),
+                    self.storage_offset(),
+                    tuple(self.size()),
+                    self.stride(),
+                    self.q_scale().item(),
+                    self.q_zero_point().item(),
+                    self.requires_grad,
+                    OrderedDict())  # TODO: self.qscheme()
+            return (torch._utils._rebuild_qtensor, args)
+        else:
+            args = (self.storage(),
+                    self.storage_offset(),
+                    tuple(self.size()),
+                    self.stride(),
+                    self.requires_grad,
+                    OrderedDict())  # previously was self._backward_hooks
+            return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
         # Warning: this method is NOT called when you torch.load() a tensor;
@@ -252,6 +263,12 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    def pstrf(self, upper=True):
+        r"""See :func:`torch.pstrf`"""
+        warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
+                      "in the next release.", stacklevel=2)
+        return super(Tensor, self).pstrf(upper=upper)
+
     def potrf(self, upper=True):
         r"""See :func:`torch.cholesky`"""
         warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed "
@@ -259,11 +276,13 @@ class Tensor(torch._C._TensorBase):
                       ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky(upper=upper)
 
-    def pstrf(self, upper=True):
-        r"""See :func:`torch.pstrf`"""
-        warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
-                      "in the next release.", stacklevel=2)
-        return super(Tensor, self).pstrf(upper=upper)
+    def potri(self, upper=True):
+        r"""See :func:`torch.cholesky_inverse`"""
+        warnings.warn("torch.potri is deprecated in favour of torch.cholesky_inverse and will be "
+                      "removed in the next release. Please use torch.cholesky_inverse instead and "
+                      "note that the :attr:`upper` argument in torch.cholesky_inverse defaults to "
+                      "``False``.", stacklevel=2)
+        return super(Tensor, self).cholesky_inverse(upper=upper)
 
     def potrs(self, u, upper=True):
         r"""See :func:`torch.cholesky_solve`"""
@@ -405,6 +424,18 @@ class Tensor(torch._C._TensorBase):
     __gt__ = _C._TensorBase.gt
     __ge__ = _C._TensorBase.ge
     __abs__ = _C._TensorBase.abs
+
+    def __std_mean__(self, dim=None, unbiased=True, keepdim=False):
+        if dim is None:
+            return _C._VariableFunctions.std_mean(self, unbiased)
+        else:
+            return _C._VariableFunctions.std_mean(self, dim, unbiased, keepdim)
+
+    def __var_mean__(self, dim=None, unbiased=True, keepdim=False):
+        if dim is None:
+            return _C._VariableFunctions.var_mean(self, unbiased)
+        else:
+            return _C._VariableFunctions.var_mean(self, dim, unbiased, keepdim)
 
     def __len__(self):
         if self.dim() == 0:

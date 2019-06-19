@@ -19,7 +19,7 @@ MKL and MAGMA. Here are the steps to build with them.
     7z x -aoa mkl_2018.2.185.7z -omkl
 
     REM Download MAGMA files
-    REM cuda100 is also available for `CUDA_PREFIX`. There are also 2.4.0 binaries for cuda80/cuda92.
+    REM cuda100/cuda101 is also available for `CUDA_PREFIX`. There are also 2.4.0 binaries for cuda80/cuda92.
     REM The configuration could be `debug` or `release` for 2.5.0. Only `release` is available for 2.4.0.
     set CUDA_PREFIX=cuda90
     set CONFIG=release

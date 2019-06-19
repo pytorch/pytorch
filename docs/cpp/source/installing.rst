@@ -73,7 +73,6 @@ We can now run the following commands to build the application from within the
   mkdir build
   cd build
   cmake -DCMAKE_PREFIX_PATH=/absolute/path/to/libtorch ..
-  cd ..
   make
 
 where ``/absolute/path/to/libtorch`` should be the absolute (!) path to the unzipped LibTorch

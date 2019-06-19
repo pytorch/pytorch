@@ -1,6 +1,7 @@
-#include <torch/csrc/jit/script/builtin_functions.h>
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/script/builtin_functions.h>
+#include <torch/csrc/jit/script/resolver.h>
 
 namespace torch {
 namespace jit {
@@ -37,8 +38,9 @@ def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
 )SCRIPT");
 
 struct BuiltinFunctionRegistry {
-  const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
-    const static std::vector<Function*> empty;
+  const std::vector<std::shared_ptr<Function>>& getAllBuiltinFunctionsFor(
+      Symbol name) {
+    const static std::vector<std::shared_ptr<Function>> empty;
     // when initializing the builtin function library, we will re-enter
     // getAllBuiltinFunctionsFor since it is called in the compiler to
     // lookup builtins and initializing the builtin functions calls the
@@ -64,10 +66,10 @@ struct BuiltinFunctionRegistry {
   void loadSource(const std::string& source) {
     std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
     modules.emplace_back(cu);
-    cu->define(source, script::nativeResolver, /*self=*/nullptr);
+    cu->define(source, script::nativeResolver(), /*self=*/nullptr);
     for (auto& method : cu->get_functions()) {
       builtins_by_name[Symbol::fromQualString("aten::" + method->name())]
-          .push_back(method.get());
+          .push_back(method);
     }
   }
   void loadBuiltinFunctions() {
@@ -97,10 +99,12 @@ struct BuiltinFunctionRegistry {
   enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;
   std::recursive_mutex mutex;
   std::vector<std::shared_ptr<CompilationUnit>> modules;
-  std::unordered_map<Symbol, std::vector<Function*>> builtins_by_name;
+  std::unordered_map<Symbol, std::vector<std::shared_ptr<Function>>>
+      builtins_by_name;
 };
 
-TORCH_API const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
+const std::vector<std::shared_ptr<Function>>& getAllBuiltinFunctionsFor(
+    Symbol name) {
   static BuiltinFunctionRegistry registry;
   return registry.getAllBuiltinFunctionsFor(name);
 }

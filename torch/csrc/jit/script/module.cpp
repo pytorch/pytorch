@@ -1,81 +1,25 @@
-#include <torch/csrc/jit/script/module.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
 namespace jit {
 namespace script {
 
-struct RecursiveMethodCallError : public std::exception {};
-void placeholderCreator(Function&) {
-  throw RecursiveMethodCallError();
-}
-
-void Function::ensure_defined() {
-  try {
-    if (function_creator_) {
-      auto creator = function_creator_;
-      function_creator_ = placeholderCreator;
-      creator(*this);
-      function_creator_ = nullptr;
-    }
-  } catch (RecursiveMethodCallError&) {
-    throw ErrorReport() // TODO: once lower_first_class methods is removed
-                        // re-establish callsite info for debugging
-        << " method '" << name() << "' is called recursively. "
-        << "Recursive calls are not supported";
-  }
-}
-
-Value* Function::try_emit_call(
-    Graph& graph,
-    const SourceRange& loc,
-    c10::optional<NamedValue> self,
-    ArrayRef<NamedValue> args,
-    ArrayRef<NamedValue> kwargs,
-    std::stringstream& failure_messages,
-    bool conv_tensors_to_nums) {
-  ensure_defined();
-  auto fn = this->graph();
-
-  auto matched_schema = tryMatchSchema(
-      getSchema(),
-      loc,
-      graph,
-      std::move(self),
-      args,
-      kwargs,
-      failure_messages,
-      conv_tensors_to_nums);
-  if (!matched_schema)
-    return nullptr;
-
-  check_single_output();
-  return inlineCallTo(graph, *fn, matched_schema->inputs).at(0);
-}
-
-Value* Function::emit_call(
-    Graph& graph,
-    const SourceRange& loc,
-    ArrayRef<NamedValue> args,
-    ArrayRef<NamedValue> kwargs) {
-  std::stringstream failure_messages;
-  if (auto result = try_emit_call(
-          graph,
-          loc,
-          c10::nullopt,
-          args,
-          kwargs,
-          failure_messages,
-          /*conv_tensors_to_nums=*/true)) {
-    return result;
-  }
-  throw ErrorReport(loc) << failure_messages.str();
+// first class mode runs models as first class objects,
+// and does not force inlining everywhere. This is experimental
+// as we bring up the system since it will degrade performance
+// and may introduce bugs. test_jit.py provides context managers
+// that enable it for specific tests.
+thread_local bool inline_everything = true;
+bool& getInlineEverythingMode() {
+  return inline_everything;
 }
 
 void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
@@ -100,6 +44,21 @@ void Module::save(
   ExportModule(*this, filename, extra_files);
 }
 
+void module_state_to(
+    const Slot& s,
+    const c10::optional<at::Device>& device,
+    const c10::optional<at::ScalarType>& dtype,
+    bool non_blocking) {
+  // Need to access the `at::Tensor` as a `Variable` here.
+  autograd::Variable variable = s.value().toTensor();
+  // Use the data's original device or dtype if not supplied here.
+  auto new_data = variable.to(
+      device.value_or(variable.device()),
+      dtype.value_or(variable.scalar_type()),
+      non_blocking);
+  variable.set_data(new_data);
+}
+
 void Module::to_impl(
     const c10::optional<at::Device>& device,
     const c10::optional<at::ScalarType>& dtype,
@@ -110,26 +69,20 @@ void Module::to_impl(
   }
   // Then convert every of our parameters.
   for (auto& parameter : get_parameters()) {
-    // Need to access the `at::Tensor` as a `Variable` here.
-    autograd::Variable variable = parameter.value().toTensor();
-    at::Tensor data = variable.data();
-    // Use the data's original device or dtype if not supplied here.
-    auto new_data = data.to(
-        device.value_or(data.device()),
-        dtype.value_or(data.scalar_type()),
-        non_blocking);
-    variable.set_data(new_data);
+    module_state_to(parameter, device, dtype, non_blocking);
+  }
+  // Then convert every tensor attributes (buffers).
+  for (auto& attr : get_attributes()) {
+    if (attr.type()->isSubtypeOf(TensorType::get())) {
+      module_state_to(attr, device, dtype, non_blocking);
+    }
   }
 }
 
-// lower_first_class_method and lift_lowered_method are transitionary functions
-// used to translate between module-as-first-class code generation,
-// and module-as-special execution. Once module-as-first-class execution is
-// debugged, then we can remove both and remove the lowered_functions_ table.
-
 // remove the first module argument, replacing any access of its
 // parameters/attributes with extra_ivalue input Slots that hold what value to
-// pass into the graph
+// pass into the graph. Used for ONNX export to remove first-class modules
+// so it can deal purely with parameters and inputs
 std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     const ModulePtr& self,
     Graph& g_,
@@ -179,12 +132,14 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       continue;
     }
     if (e.n->kind() != prim::GetAttr) {
-      throw ErrorReport(e.n->getSourceLocation())
-          << "temporary: the only valid use of a module is looking up an attribute";
+      throw ErrorReport(e.n->sourceRange())
+          << "temporary: the only valid use of a module is looking up an "
+             "attribute but found "
+          << *e.n;
     }
     Slot slot(e.mod, e.mod->type()->getAttributeSlot(e.n->s(attr::name)));
     if (ClassTypePtr c = e.n->output()->type()->cast<ClassType>()) {
-      if (c->name() == "Module") {
+      if (c->is_module()) {
         auto obj = slot.value().toObject();
         for (Use use : e.n->output()->uses()) {
           to_scan.emplace_back(ToScan{obj, use.user, use.offset});
@@ -209,140 +164,151 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
-Method& Module::lower_first_class_method(Function* fn) {
-  fn->ensure_defined();
-  auto lowered = lower_graph(module_object(), *fn->graph());
-  Function& new_func =
-      lowered_methods_.create_function(fn->name(), lowered.first);
+Method::Method(Module* owner, std::shared_ptr<Function> function)
+    : owner_(owner), function_(std::move(function)) {}
 
-  // generate the new schema
-  // slice away the self argument
-  std::vector<Argument> args(
-      fn->getSchema().arguments().begin() + 1,
-      fn->getSchema().arguments().end());
-  size_t id = 0;
-  for (const Slot& slot : lowered.second) {
-    std::ostringstream ss;
-    ss << "slot" << id++;
-    args.emplace_back(ss.str(), slot.type());
-  }
-  new_func.setSchema(fn->getSchema().cloneWithArguments(std::move(args)));
-  return _create_lowered_method(&new_func, std::move(lowered.second));
+void Method::run(Stack& stack) {
+  stack.insert(stack.begin(), owner().module_object());
+  function_->run(stack);
 }
 
-static void createFirstClassValues(
-    Module* module,
-    Value* self,
-    std::unordered_map<Slot, Value*>& result) {
-  auto& g = *self->owningGraph();
+IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
+  stack.insert(stack.begin(), owner().module_object());
+  return (*function_)(std::move(stack), kwargs);
+}
 
-  std::vector<Node*> created;
-  struct ToScan {
-    Module* mod;
-    Value* v; // value representing module in the graph
+static std::vector<at::Tensor> loadTensors(const std::vector<Slot>& slots) {
+  std::vector<at::Tensor> result;
+  result.reserve(slots.size());
+  for(const Slot& slot : slots) {
+    result.emplace_back(slot.value().toTensor());
+  }
+  return result;
+}
+std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_graph() {
+  auto result = lower_graph(owner().module_object(), *graph());
+  return std::make_pair(result.first, loadTensors(result.second));
+}
+
+void Module::define(const std::string& src, const ResolverPtr& resolver) {
+  class_compilation_unit()->define(
+      src,
+      resolver ? resolver : script::nativeResolver(),
+      simpleSelf(module_object()->type()));
+}
+
+void Module::copy_into(
+    const ModuleLookup& module_lookup,
+    // translate current module singleton type to new module
+    // singleton type.
+    std::unordered_map<TypePtr, TypePtr>& type_remap,
+    std::vector<std::string> names) const {
+  auto curr = module_lookup(names);
+  type_remap[module_object()->type()] = curr->module_object()->type();
+  for (auto& param : get_parameters()) {
+    curr->register_parameter(
+        param.name(),
+        param.value().toTensor(),
+        /*is_buffer=*/false);
+  }
+  for (auto& attr : get_attributes()) {
+    curr->register_attribute(attr.name(), attr.type(), attr.value());
+  }
+
+  for (auto& mod : get_modules()) {
+    names.push_back(mod->field_name());
+    // Submodules must be translated first, otherwise parameter_remap entries
+    // will not be filled in for methods of this module.
+    mod->copy_into(module_lookup, type_remap, names);
+    names.pop_back();
+  }
+
+  for (auto& fn : class_compilation_unit()->get_functions()) {
+    curr->clone_method(*this, fn->name(), type_remap);
+  }
+}
+
+void Module::clone_method(
+    const Module& orig,
+    const std::string& name,
+    const std::unordered_map<TypePtr, TypePtr>& type_remap) {
+  // type remapping - when we copy method implementations from one module
+  // singleton to another, we need to update the types of the self arguments
+  // to match the new module.
+  // XXX - this only handles modules that occur as variables, not modules
+  // that appear in aggregate types. Currently this works fine because
+  // we restrict how modules can be used during the lowering step. Eventually,
+  // we will need to decide what it means for us to 'copy' a module.
+  // For instance, we can copy just the state (parameters, attributes),
+  // but share the code. Or we can copy the code. If we choose to copy the
+  // code, what should we do about aggregate types that contain a module?
+  auto type_remap_fn = [&](TypePtr in) {
+    auto it = type_remap.find(in);
+    if (it == type_remap.end())
+      return in;
+    return it->second;
   };
-  std::vector<ToScan> to_scan = {{module, self}};
+  const Function& fn = orig.class_compilation_unit()->get_function(name);
+  auto graph = fn.graph()->copy();
+  graph->remapTypes(type_remap_fn);
+  auto schema = fn.getSchema().cloneWithRemappedTypes(type_remap_fn);
+  auto copied = class_compilation_unit()->create_function(fn.name(), graph);
+  copied->setSchema(std::move(schema));
+}
 
+void Module::clone_method(const Module& orig, const std::string& name) {
+  std::unordered_map<TypePtr, TypePtr> type_remap;
+  std::vector<std::pair<const Module*, const Module*>> to_scan = {
+      {&orig, this}};
   while (!to_scan.empty()) {
-    auto s = to_scan.back();
+    auto entry = to_scan.back();
     to_scan.pop_back();
-    size_t offset = 0;
-    for (const std::string& name :
-         s.mod->module_object()->type()->attributeNames()) {
-      Value* v = g.insertGetAttr(s.v, name);
-      result[Slot(s.mod->module_object(), offset++)] = v;
-      if (std::shared_ptr<Module> sub = s.mod->find_module(name)) {
-        to_scan.emplace_back(ToScan{sub.get(), v});
-      }
+    type_remap[entry.first->module_object()->type()] =
+        entry.second->module_object()->type();
+    for (const auto& sub : entry.first->get_modules()) {
+      to_scan.emplace_back(
+          sub.get(), entry.second->get_module(sub->field_name()).get());
     }
   }
+  return clone_method(orig, name, type_remap);
 }
 
-void Module::lift_lowered_method(Method& m) {
-  auto graph = m.graph()->copy();
-  Value* self = graph->insertInput(0, "self")->setType(module_object()->type());
-  std::unordered_map<Slot, Value*> slot_to_value;
-  if (!m.initial_ivalues().empty()) {
-    WithInsertPoint guard(*graph->nodes().begin());
-    createFirstClassValues(this, self, slot_to_value);
+void Module::train(bool on) {
+  for (auto& submod : get_modules()) {
+    submod->train(on);
   }
-
-  size_t orig_graph_inputs_size = graph->inputs().size();
-  for (size_t i = 0; i < m.initial_ivalues().size(); ++i) {
-    size_t input_offset = orig_graph_inputs_size - i - 1;
-    size_t ivalue_offset = m.initial_ivalues().size() - i - 1;
-    graph->inputs()
-        .at(input_offset)
-        ->replaceAllUsesWith(
-            slot_to_value.at(m.initial_ivalues().at(ivalue_offset)));
-    graph->eraseInput(input_offset);
-  }
-
-  if (!m.initial_ivalues().empty()) {
-    // we added _all_ the submodules as first-class values but maybe did not use
-    // them. So remove any dead attribute lookups
-    EliminateDeadCode(graph);
-  }
-
-  Function& new_fn = class_cu().create_function(m.name(), std::move(graph));
-  // created lifted schema
-  // self argument is named '$self' to prevent accidental name collisions
-  // with another input that the user named 'self'
-  std::vector<Argument> new_args = {Argument("$self", module_object()->type())};
-  const auto& lowered_args = m.function().getSchema().arguments();
-  new_args.insert(
-      new_args.end(),
-      lowered_args.begin(),
-      lowered_args.begin() + m.num_inputs());
-  new_fn.setSchema(m.function().getSchema().cloneWithArguments(std::move(new_args)));
-}
-
-Method& Module::_create_lowered_method(
-    Function* func,
-    std::vector<Slot> member_inputs) {
-  std::unique_ptr<Method> m(new Method(this, func, std::move(member_inputs)));
-  return *insert(func->name(), methods_, EntityType::METHOD, std::move(m));
-}
-
-void Module::lift_lowered_methods(size_t start) {
-  for (size_t i = start; i < lowered_methods_.get_functions().size(); ++i) {
-    Method& m = _create_lowered_method(
-        lowered_methods_.get_functions().at(i).get(), {});
-    lift_lowered_method(m);
+  if (auto slot = find_attribute("training")) {
+    slot->setValue(on);
+  } else {
+    register_attribute("training", BoolType::get(), on);
   }
 }
 
-void Module::_define_lowered(
-    const std::vector<Def>& definitions,
-    const std::vector<Resolver>& resolvers) {
-  size_t start = lowered_methods_.get_functions().size();
-  lowered_methods_.define(definitions, resolvers, nullptr);
-  lift_lowered_methods(start);
-  // call lift_lowered_method for each definition
-}
+IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
+  // Look up the class
+  const auto classType =
+      class_compilation_unit()->get_class(c10::QualifiedName(name));
+  if (!classType) {
+    AT_ERROR(
+        "Could not find class with name: '",
+        name.qualifiedName(),
+        "' in module.");
+  }
 
-void Module::_define_lowered(const std::string& src, const Resolver& resolver) {
-  size_t start = lowered_methods_.get_functions().size();
-  lowered_methods_.define(src, resolver, nullptr);
-  lift_lowered_methods(start);
-}
+  // Create a bare object with correct number of slots
+  const size_t numAttrs = classType->numAttributes();
+  auto obj = c10::ivalue::Object::create(classType, numAttrs);
 
-Method& Module::_define_lowered(
-    std::string name,
-    std::shared_ptr<Graph> graph,
-    std::vector<Slot> slots) {
-  Method& m = _create_lowered_method(
-      &lowered_methods_.create_function(std::move(name), std::move(graph)),
-      std::move(slots));
-  lift_lowered_method(m);
-  return m;
-}
+  // Invoke the `__init__()` of the class with the arguments provided.
+  Stack stackWithSelf = {obj};
+  for (auto& arg : stack) {
+    stackWithSelf.push_back(std::move(arg));
+  }
+  // Note: following Python, `__init__()` modifies its first parameter in-place
+  // and returns nothing.
+  classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
 
-void Module::define(const std::string& src, const Resolver& resolver) {
-  class_cu().define(
-      src,
-      resolver ? resolver : nativeResolver,
-      simpleSelf(module_object()->type()));
+  return obj;
 }
 
 } // namespace script

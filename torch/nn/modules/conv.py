@@ -12,7 +12,9 @@ from ..._jit_internal import weak_module, weak_script_method, List
 @weak_module
 class _ConvNd(Module):
 
-    __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias', 'padding_mode']
+    __constants__ = ['stride', 'padding', 'dilation', 'groups', 'bias',
+                     'padding_mode', 'output_padding', 'in_channels',
+                     'out_channels', 'kernel_size']
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
@@ -45,7 +47,6 @@ class _ConvNd(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        n = self.in_channels
         init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
@@ -66,6 +67,11 @@ class _ConvNd(Module):
         if self.bias is None:
             s += ', bias=False'
         return s.format(**self.__dict__)
+
+    def __setstate__(self, state):
+        super(_ConvNd, self).__setstate__(state)
+        if not hasattr(self, 'padding_mode'):
+            self.padding_mode = 'zeros'
 
 
 @weak_module
@@ -479,10 +485,6 @@ class Conv3d(_ConvNd):
 
 @weak_module
 class _ConvTransposeMixin(object):
-    __constants__ = ['stride', 'padding', 'kernel_size', 'dim_size',
-                     'output_padding', 'groups', 'dilation', 'transposed',
-                     'bias', 'padding_mode']
-
     @weak_script_method
     def forward(self, input, output_size=None):
         # type(Tensor, Optional[List[int]]) -> Tensor

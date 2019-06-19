@@ -21,7 +21,6 @@ using at::ScalarType;
 using at::TensorList;
 using at::IntArrayRef;
 using at::Generator;
-using at::SparseTensorRef;
 using at::Storage;
 using at::TensorOptions;
 

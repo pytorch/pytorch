@@ -1,5 +1,5 @@
 from .module import Module
-from .linear import Linear, Bilinear
+from .linear import Identity, Linear, Bilinear
 from .conv import Conv1d, Conv2d, Conv3d, \
     ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
@@ -27,9 +27,11 @@ from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d, Upsample
 from .distance import PairwiseDistance, CosineSimilarity
 from .fold import Fold, Unfold
 from .adaptive import AdaptiveLogSoftmaxWithLoss
+from .transformer import TransformerEncoder, TransformerDecoder, \
+    TransformerEncoderLayer, TransformerDecoderLayer, Transformer 
 
 __all__ = [
-    'Module', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
+    'Module', 'Identity', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
     'ConvTranspose2d', 'ConvTranspose3d', 'Threshold', 'ReLU', 'Hardtanh', 'ReLU6',
     'Sigmoid', 'Tanh', 'Softmax', 'Softmax2d', 'LogSoftmax', 'ELU', 'SELU', 'CELU', 'GLU', 'Hardshrink',
     'LeakyReLU', 'LogSigmoid', 'Softplus', 'Softshrink', 'MultiheadAttention', 'PReLU', 'Softsign', 'Softmin',
@@ -48,5 +50,6 @@ __all__ = [
     'PairwiseDistance', 'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AdaptiveAvgPool1d',
     'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d', 'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad1d', 'ConstantPad2d',
     'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',
-    'AdaptiveLogSoftmaxWithLoss',
+    'AdaptiveLogSoftmaxWithLoss', 'TransformerEncoder', 'TransformerDecoder', 
+    'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer',
 ]

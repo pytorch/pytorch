@@ -266,6 +266,16 @@ def _str(self):
         if values.numel() == 0:
             values_str += ', size=' + str(tuple(values.shape))
         tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
+    elif self.is_quantized:
+        suffixes.append('size=' + str(tuple(self.shape)))
+        if not has_default_dtype:
+            suffixes.append('dtype=' + str(self.dtype))
+        # TODO: change to a call to self.q_scheme() when we add q_scheme method
+        # and uncomment this
+        # suffixes.append('quantization_scheme=' + 'per_tensor_affine')
+        suffixes.append('scale=' + str(self.q_scale().item()))
+        suffixes.append('zero_point=' + str(self.q_zero_point().item()))
+        tensor_str = _tensor_str(self.dequantize(), indent)
     else:
         if self.numel() == 0 and not self.is_sparse:
             # Explicitly print the shape if it is not (0,), to match NumPy behavior

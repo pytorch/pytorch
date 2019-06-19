@@ -19,18 +19,20 @@ struct Argument {
       c10::optional<int32_t> N = c10::nullopt,
       c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false,
-      c10::optional<AliasInfo> alias_info = c10::nullopt)
+      c10::optional<AliasInfo> alias_info = c10::nullopt,
+      bool is_inferred_type = false)
       : name_(std::move(name)),
         type_(type ? type : TensorType::get()),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         kwarg_only_(kwarg_only),
-        alias_info_(std::move(alias_info)) {
-          if (default_value_ && default_value_->isTensor()) {
-            auto t = default_value_->toTensor();
-            AT_ASSERT(!t.defined() || t.is_variable());
-          }
-        }
+        alias_info_(std::move(alias_info)),
+        is_inferred_type_(is_inferred_type) {
+    if (default_value_ && default_value_->isTensor()) {
+      auto t = default_value_->toTensor();
+      AT_ASSERT(!t.defined() || t.is_variable());
+    }
+  }
   const std::string& name() const {
     return name_;
   }
@@ -49,6 +51,32 @@ struct Argument {
   const c10::optional<AliasInfo>& alias_info() const {
     return alias_info_;
   }
+  bool is_inferred_type() const {
+    return is_inferred_type_;
+  }
+  std::string formatTypeMismatchMsg(const std::string& actual_type) const {
+    std::string inferred_type_hint;
+    if (is_inferred_type()) {
+      inferred_type_hint = c10::str(
+          "Inferred '",
+          name(),
+          "' to be of type 'Tensor' ",
+          "because it was not annotated with an explicit type.\n");
+    }
+    return c10::str(
+        "Expected a value of type '",
+        type()->python_str(),
+        "' for argument '",
+        name(),
+        "' but instead found type '",
+        actual_type,
+        "'.\n",
+        inferred_type_hint);
+  }
+
+  Argument cloneWithType(TypePtr new_type) const {
+    return Argument(name_, new_type, N_, default_value_, kwarg_only_, alias_info_);
+  }
 
 private:
   std::string name_;
@@ -63,12 +91,13 @@ private:
   // is this only specifyable as a keyword argument?
   bool kwarg_only_;
   c10::optional<AliasInfo> alias_info_;
+  bool is_inferred_type_;
 };
 
 namespace detail {
 inline bool defaultValueEquals_(const c10::optional<IValue>& lhs, const c10::optional<IValue>& rhs) {
   if (lhs.has_value()) {
-    return rhs.has_value() && shallowEquals(*lhs, *rhs);
+    return rhs.has_value() && impl::shallowEquals(*lhs, *rhs);
   } else {
     return !rhs.has_value();
   }
@@ -109,8 +138,7 @@ struct FunctionSchema {
       std::vector<Argument> arguments,
       std::vector<Argument> returns,
       bool is_vararg = false,
-      bool is_varret = false,
-      std::vector<std::string> writes = {})
+      bool is_varret = false)
       : FunctionSchema(
             name.toQualString(),
             std::move(overload_name),
@@ -121,14 +149,14 @@ struct FunctionSchema {
 
 private:
   OperatorName name_;
-  const std::vector<Argument> arguments_;
-  const std::vector<Argument> returns_;
+  std::vector<Argument> arguments_;
+  std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
   // currently this is used primarily to represent 'primtive' operators whose
   // arguments are not checked by schema
-  const bool is_vararg_;
-  const bool is_varret_;
+  bool is_vararg_;
+  bool is_varret_;
   void checkArg(const IValue& value, const Argument& argument, optional<size_t> pos) const;
 
 public:
@@ -178,6 +206,15 @@ public:
         is_vararg(),
         is_varret());
   }
+
+  std::string formatTypeMismatchMsg(
+      const Argument& expected,
+      const std::string& actual_type,
+      c10::optional<size_t> position = c10::nullopt,
+      c10::optional<std::string> value = c10::nullopt) const;
+
+  FunctionSchema cloneWithRemappedTypes(
+      const std::function<TypePtr(TypePtr)> type_map) const;
 
   // Check that inputs have the correct types and appends any missing default
   // values.

@@ -20,8 +20,9 @@ __all__ = [
     'lu_unpack',
     'norm',
     'meshgrid',
-    'potrf',
     'pstrf',
+    'potrf',
+    'potri',
     'potrs',
     'split',
     'stft',
@@ -225,7 +226,7 @@ def isfinite(tensor):
         tensor([ 1,  0,  1,  0,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor", str(tensor))
+        raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
 
     # Support int input, nan and inf are concepts in floating point numbers.
     # Numpy uses type 'Object' when the int overflows long, but we don't
@@ -251,7 +252,7 @@ def isinf(tensor):
         tensor([ 0,  1,  0,  1,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor", str(tensor))
+        raise TypeError("The argument is not a tensor: {}".format(repr(tensor)))
     if tensor.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
         return torch.zeros_like(tensor, dtype=torch.uint8)
     return tensor.abs() == inf
@@ -269,7 +270,7 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
 
     Returns:
         seq (sequence of Tensors): If the input has :math:`k` tensors of size
-        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
+        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also have :math:`k` tensors,
         where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
 
     Example::
@@ -296,6 +297,7 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
 
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
          center=True, pad_mode='reflect', normalized=False, onesided=True):
+    # type: (Tensor, int, Optional[int], Optional[int], Optional[Tensor], bool, str, bool, bool) -> Tensor
     r"""Short-time Fourier transform (STFT).
 
     Ignoring the optional batch dimension, this method computes the following
@@ -400,13 +402,12 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
         return_counts (bool): Whether to also return the counts for each unique
-            element. Currently only supported when `dim` is not None.
+            element.
         dim (int): the dimension to apply unique. If ``None``, the unique of the
             flattened input is returned. default: ``None``
 
     Returns:
-        (Tensor, Tensor (optional) Tensor (optional))::
-        A tensor or a tuple of tensors containing
+        (Tensor, Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
 
             - **output** (*Tensor*): the output list of unique scalar elements.
             - **inverse_indices** (*Tensor*): (optional) if
@@ -451,13 +452,11 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
             return_counts=return_counts,
         )
     else:
-        if return_counts:
-            raise NotImplementedError(
-                "torch.unique currently does not support return_counts with dim not None")
-        output, inverse_indices = torch._unique(
+        output, inverse_indices, counts = torch._unique2(
             input,
             sorted=sorted,
-            return_inverse=return_inverse
+            return_inverse=return_inverse,
+            return_counts=return_counts,
         )
     if return_inverse and return_counts:
         return output, inverse_indices, counts
@@ -533,7 +532,7 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
 def tensordot(a, b, dims=2):
     r"""Returns a contraction of a and b over multiple dimensions.
 
-    :attr:`tensordot` implements a generalizes the matrix product.
+    :attr:`tensordot` implements a generalized matrix product.
 
     Args:
       a (Tensor): Left tensor to contract
@@ -696,9 +695,11 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
     elif p == "nuc":
         if dtype is not None:
             raise ValueError("dtype argument is not supported in nuclear norm")
-        if out is None:
-            torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
-        return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
+        if dim is None:
+            if out is None:
+                return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
+            return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
+        return torch._C._VariableFunctions.nuclear_norm(input, dim, keepdim=keepdim, out=out)
     else:
         if dim is None:
             dim = tuple(range(ndim))
@@ -741,23 +742,6 @@ def chain_matmul(*matrices):
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
     return torch._C._VariableFunctions.chain_matmul(matrices)
-
-
-def potrf(a, upper=True, out=None):
-    r"""Computes the Cholesky decomposition of a symmetric positive-definite
-    matrix :math:`A`.
-
-    For more information regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
-
-    .. warning::
-        :func:`torch.potrf` is deprecated in favour of :func:`torch.cholesky` and will be removed
-        in the next release. Please use :func:`torch.cholesky` instead and note that the :attr:`upper`
-        argument in :func:`torch.cholesky` defaults to ``False``.
-    """
-    warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
-                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
-                  " torch.cholesky defaults to ``False``.", stacklevel=2)
-    return torch.cholesky(a, upper=upper, out=out)
 
 
 def pstrf(a, upper=True, out=None):
@@ -803,6 +787,40 @@ def pstrf(a, upper=True, out=None):
     warnings.warn("torch.pstrf is deprecated in favour of torch.cholesky and will be removed "
                   "in the next release.", stacklevel=2)
     return torch._C._VariableFunctions.pstrf(a, upper=upper, out=out)
+
+
+def potrf(a, upper=True, out=None):
+    r"""Computes the Cholesky decomposition of a symmetric positive-definite
+    matrix :math:`A`.
+
+    For more information regarding :func:`torch.potrf`, please check :func:`torch.cholesky`.
+
+    .. warning::
+        :func:`torch.potrf` is deprecated in favour of :func:`torch.cholesky` and will be removed
+        in the next release. Please use :func:`torch.cholesky` instead and note that the :attr:`upper`
+        argument in :func:`torch.cholesky` defaults to ``False``.
+    """
+    warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
+                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
+                  " torch.cholesky defaults to ``False``.", stacklevel=2)
+    return torch.cholesky(a, upper=upper, out=out)
+
+
+def potri(a, upper=True, out=None):
+    r"""Computes the inverse of a symmetric positive-definite matrix :math:`A` using its
+    Cholesky factor.
+
+    For more information regarding :func:`torch.potri`, please check :func:`torch.cholesky_inverse`.
+
+    .. warning::
+        :func:`torch.potri` is deprecated in favour of :func:`torch.cholesky_inverse` and will be removed
+        in the next release. Please use :func:`torch.cholesky_inverse` instead and note that the :attr:`upper`
+        argument in :func:`torch.cholesky_inverse` defaults to ``False``.
+    """
+    warnings.warn("torch.potri is deprecated in favour of torch.cholesky_inverse and will be removed in "
+                  "the next release. Please use torch.cholesky_inverse instead and note that the :attr:`upper` "
+                  "argument in torch.cholesky_inverse defaults to ``False``.", stacklevel=2)
+    return torch.cholesky_inverse(a, upper=upper, out=out)
 
 
 def potrs(b, u, upper=True, out=None):

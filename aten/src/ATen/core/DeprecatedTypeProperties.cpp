@@ -1,7 +1,7 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/Type.h>
+#include <ATen/core/Tensor.h>
 
 namespace at {
 
@@ -9,15 +9,15 @@ Tensor DeprecatedTypeProperties::unsafeTensorFromTH(void * th_pointer, bool reta
   return getDispatchType().unsafeTensorFromTH(th_pointer, retain);
 }
 
-Tensor DeprecatedTypeProperties::copy(const Tensor & src, bool non_blocking, c10::optional<Device> to_device) const {
-  if (to_device) {
-    return src.to(src.options().dtype(scalarType()).device(to_device), non_blocking, /*copy*/true);
-  }
-  return src.to(src.options().dtype(scalarType()), non_blocking, /*copy*/true);
+Storage DeprecatedTypeProperties::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+  return getDispatchType().unsafeStorageFromTH(th_pointer, retain);
 }
 
-std::unique_ptr<Generator> DeprecatedTypeProperties::generator() const {
-  return getDispatchType().generator();
+Tensor DeprecatedTypeProperties::copy(const Tensor & src, bool non_blocking, c10::optional<Device> to_device) const {
+  if (to_device) {
+    return src.to(src.options().dtype(scalarType()).device(to_device), non_blocking, /*copy=*/true);
+  }
+  return src.to(src.options().dtype(scalarType()), non_blocking, /*copy=*/true);
 }
 
 Type & DeprecatedTypeProperties::getDispatchType() const {

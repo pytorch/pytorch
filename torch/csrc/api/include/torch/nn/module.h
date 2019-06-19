@@ -382,9 +382,16 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   const ModuleType* as() const noexcept;
 
   /// Serializes the `Module` into the given `OutputArchive`.
+  ///
+  /// If the `Module` contains unserializable submodules (e.g. `nn::Functional`),
+  /// those submodules are skipped when serializing.
   virtual void save(serialize::OutputArchive& archive) const;
 
   /// Deserializes the `Module` from the given `InputArchive`.
+  ///
+  /// If the `Module` contains unserializable submodules (e.g. `nn::Functional`),
+  /// we don't check the existence of those submodules in the `InputArchive` when
+  /// deserializing.
   virtual void load(serialize::InputArchive& archive);
 
   /// Streams a pretty representation of the `Module` into the given `stream`.
@@ -395,6 +402,9 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// Override this method to change the pretty print. The input
   /// `stream` should be returned from the method, to allow easy chaining.
   virtual void pretty_print(std::ostream& stream) const;
+
+  /// Returns whether the `Module` is serializable.
+  virtual bool is_serializable() const;
 
  protected:
   /// Registers a parameter with this `Module`.
@@ -477,6 +487,14 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
       std::ostream& stream,
       const nn::Module& module);
 
+  // data parallel using this method to configure gradient edges during the
+  // replicate step.
+  template <typename ModuleType>
+  friend void replicate_grad_edges(
+      const std::shared_ptr<Module>& module,
+      const std::vector<std::shared_ptr<ModuleType>>& replicas,
+      const std::vector<Device>& devices);
+
   // Private methods.
 
   /// Used in the implementation of `Cloneable`.
@@ -556,8 +574,8 @@ template <typename ModuleType>
 std::shared_ptr<ModuleType> Module::register_module(
     std::string name,
     std::shared_ptr<ModuleType> module) {
-  AT_CHECK(!name.empty(), "Submodule name must not be empty");
-  AT_CHECK(
+  TORCH_CHECK(!name.empty(), "Submodule name must not be empty");
+  TORCH_CHECK(
       name.find('.') == std::string::npos,
       "Submodule name must not contain a dot (got '",
       name,
@@ -581,11 +599,11 @@ void Module::to_impl(Ts&&... ts) {
   }
   // Then move every parameter to the new dtype/device.
   for (auto& parameter : parameters_) {
-    parameter->set_data(autograd::Variable(*parameter).data().to(ts...));
+    parameter->set_data(autograd::Variable(*parameter).to(ts...));
   }
   // Then move every buffer to the new dtype/device.
   for (auto& buffer : buffers_) {
-    buffer->set_data(autograd::Variable(*buffer).data().to(ts...));
+    buffer->set_data(autograd::Variable(*buffer).to(ts...));
   }
 }
 

@@ -123,6 +123,34 @@ cached memory from PyTorch so that those can be used by other GPU applications.
 However, the occupied GPU memory by tensors will not be freed so it can not
 increase the amount of GPU memory available for PyTorch.
 
+.. _cufft-plan-cache:
+
+cuFFT plan cache
+----------------
+
+For each CUDA device, an LRU cache of cuFFT plans is used to speed up repeatedly
+running FFT methods (e.g., :func:`torch.fft`) on CUDA tensors of same geometry
+with same configuration. Because some cuFFT plans may allocate GPU memory,
+these caches have a maximum capacity.
+
+You may control and query the properties of the cache of current device with
+the following APIs:
+
+* ``torch.backends.cuda.cufft_plan_cache.max_size`` gives the capacity of the
+  cache (default is 4096 on CUDA 10 and newer, and 1023 on older CUDA versions).
+  Setting this value directly modifies the capacity.
+
+* ``torch.backends.cuda.cufft_plan_cache.size`` gives the number of plans
+  currently residing in the cache.
+
+* ``torch.backends.cuda.cufft_plan_cache.clear()`` clears the cache.
+
+To control and query plan caches of a non-default device, you can index the
+``torch.backends.cuda.cufft_plan_cache`` object with either a :class:`torch.device`
+object or a device index, and access one of the above attributes. E.g., to set
+the capacity of the cache for device ``1``, one can write
+``torch.backends.cuda.cufft_plan_cache[1].max_size = 10``.
+
 Best practices
 --------------
 
@@ -249,8 +277,9 @@ memory. CPU tensors and storages expose a :meth:`~torch.Tensor.pin_memory`
 method, that returns a copy of the object, with data put in a pinned region.
 
 Also, once you pin a tensor or storage, you can use asynchronous GPU copies.
-Just pass an additional ``non_blocking=True`` argument to a :meth:`~torch.Tensor.cuda`
-call. This can be used to overlap data transfers with computation.
+Just pass an additional ``non_blocking=True`` argument to a
+:meth:`~torch.Tensor.to` or a :meth:`~torch.Tensor.cuda` call. This can be used
+to overlap data transfers with computation.
 
 You can make the :class:`~torch.utils.data.DataLoader` return batches placed in
 pinned memory by passing ``pin_memory=True`` to its constructor.
@@ -272,31 +301,3 @@ There are significant caveats to using CUDA models with
 :mod:`~torch.multiprocessing`; unless care is taken to meet the data handling
 requirements exactly, it is likely that your program will have incorrect or
 undefined behavior.
-
-.. _cufft-plan-cache:
-
-cuFFT plan cache
-^^^^^^^^^^^^^^^^
-
-For each CUDA device, an LRU cache of cuFFT plans is used to speed up repeatedly
-running FFT methods (e.g., :func:`torch.fft`) on CUDA tensors of same geometry
-with same configuration. Because some cuFFT plans may allocate GPU memory,
-these caches have a maximum capacity.
-
-You may control and query the properties of the cache of current device with
-the following APIs:
-
-* ``torch.backends.cuda.cufft_plan_cache.max_size`` gives the capacity of the
-  cache (default is 4096 on CUDA 10 and newer, and 1023 on older CUDA versions).
-  Setting this value directly modifies the capacity.
-
-* ``torch.backends.cuda.cufft_plan_cache.size`` gives the number of plans
-  currently residing in the cache.
-
-* ``torch.backends.cuda.cufft_plan_cache.clear()`` clears the cache.
-
-To control and query plan caches of a non-default device, you can index the
-``torch.backends.cuda.cufft_plan_cache`` object with either a :class:`torch.device`
-object or a device index, and access one of the above attributes. E.g., to set
-the capacity of the cache for device ``1``, one can write
-``torch.backends.cuda.cufft_plan_cache[1].max_size = 10``.

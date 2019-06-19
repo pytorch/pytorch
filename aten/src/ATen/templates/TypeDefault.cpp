@@ -2,13 +2,14 @@
 
 // ${generated_comment}
 
-#include <ATen/core/SparseTensorRef.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 #include <ATen/NativeFunctions.h>
 #include <c10/core/Scalar.h>
-#include <ATen/core/SparseTensorRef.h>
 #include <c10/core/Storage.h>
 #include <ATen/Tensor.h>
 #include <c10/core/TensorOptions.h>
@@ -30,7 +31,7 @@ void TypeDefault::set_data(Tensor & self, Tensor new_data) const {
 }
 
 Type & TypeDefault::toBackend(Backend b) const {
-  return at::globalContext().getNonVariableType(b,scalarType());
+  return at::globalContext().getNonVariableType(b, ScalarType::Undefined);
 }
 Type & TypeDefault::toScalarType(ScalarType s) const {
   return at::globalContext().getNonVariableType(backend(),s);

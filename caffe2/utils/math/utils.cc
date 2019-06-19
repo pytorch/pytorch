@@ -28,15 +28,21 @@ CAFFE2_SPECIALIZED_INCREASE_INDEX_IN_DIMS(std::int32_t)
 CAFFE2_SPECIALIZED_INCREASE_INDEX_IN_DIMS(std::int64_t)
 #undef CAFFE2_SPECIALIZED_INCREASE_INDEX_IN_DIMS
 
-int GetIndexFromDims(const int n, const int* dims, const int* index) {
-  int sum = 0;
-  for (int i = 0; i < n; ++i) {
-    if (dims[i] > 1) {
-      sum = sum * dims[i] + index[i];
-    }
+#define CAFFE2_SPECIALIZED_GET_INDEX_FROM_DIMS(TIndex)        \
+  template <>                                                 \
+  C10_EXPORT TIndex GetIndexFromDims(                         \
+      const int n, const TIndex* dims, const TIndex* index) { \
+    TIndex sum = 0;                                           \
+    for (int i = 0; i < n; ++i) {                             \
+      if (dims[i] > 1) {                                      \
+        sum = sum * dims[i] + index[i];                       \
+      }                                                       \
+    }                                                         \
+    return sum;                                               \
   }
-  return sum;
-}
+CAFFE2_SPECIALIZED_GET_INDEX_FROM_DIMS(std::int32_t)
+CAFFE2_SPECIALIZED_GET_INDEX_FROM_DIMS(std::int64_t)
+#undef CAFFE2_SPECIALIZED_GET_INDEX_FROM_DIMS
 
 bool IsIdentityPermutation(const int n, const int* perm) {
   for (int i = 0; i < n; ++i) {
@@ -125,30 +131,36 @@ bool IsBothEndsReduce(
   return true;
 }
 
-void ComputeBroadcastBinaryOpDims(
-    const int A_ndim,
-    const int* A_dims,
-    const int B_ndim,
-    const int* B_dims,
-    int* A_broadcast_dims,
-    int* B_broadcast_dims,
-    int* C_broadcast_dims) {
-  const int ndim = std::max(A_ndim, B_ndim);
-  std::fill(A_broadcast_dims, A_broadcast_dims + ndim - A_ndim, 1);
-  std::fill(B_broadcast_dims, B_broadcast_dims + ndim - B_ndim, 1);
-  std::copy(A_dims, A_dims + A_ndim, A_broadcast_dims + ndim - A_ndim);
-  std::copy(B_dims, B_dims + B_ndim, B_broadcast_dims + ndim - B_ndim);
-  for (int i = 0; i < ndim; ++i) {
-    CAFFE_ENFORCE(
-        A_broadcast_dims[i] == B_broadcast_dims[i] ||
-        A_broadcast_dims[i] <= 1 || B_broadcast_dims[i] <= 1);
-    if (A_broadcast_dims[i] == 0 || B_broadcast_dims[i] == 0) {
-      C_broadcast_dims[i] = 0;
-    } else {
-      C_broadcast_dims[i] = std::max(A_broadcast_dims[i], B_broadcast_dims[i]);
-    }
+#define CAFFE2_SPECIALIZED_COMPUTE_BROADCAST_BINARY_OP_DIMS(TIndex)       \
+  template <>                                                             \
+  C10_EXPORT void ComputeBroadcastBinaryOpDims(                           \
+      const int A_ndim,                                                   \
+      const TIndex* A_dims,                                               \
+      const int B_ndim,                                                   \
+      const TIndex* B_dims,                                               \
+      TIndex* A_broadcast_dims,                                           \
+      TIndex* B_broadcast_dims,                                           \
+      TIndex* C_broadcast_dims) {                                         \
+    const int ndim = std::max(A_ndim, B_ndim);                            \
+    std::fill(A_broadcast_dims, A_broadcast_dims + ndim - A_ndim, 1);     \
+    std::fill(B_broadcast_dims, B_broadcast_dims + ndim - B_ndim, 1);     \
+    std::copy(A_dims, A_dims + A_ndim, A_broadcast_dims + ndim - A_ndim); \
+    std::copy(B_dims, B_dims + B_ndim, B_broadcast_dims + ndim - B_ndim); \
+    for (int i = 0; i < ndim; ++i) {                                      \
+      CAFFE_ENFORCE(                                                      \
+          A_broadcast_dims[i] == B_broadcast_dims[i] ||                   \
+          A_broadcast_dims[i] <= 1 || B_broadcast_dims[i] <= 1);          \
+      if (A_broadcast_dims[i] == 0 || B_broadcast_dims[i] == 0) {         \
+        C_broadcast_dims[i] = 0;                                          \
+      } else {                                                            \
+        C_broadcast_dims[i] =                                             \
+            std::max(A_broadcast_dims[i], B_broadcast_dims[i]);           \
+      }                                                                   \
+    }                                                                     \
   }
-}
+CAFFE2_SPECIALIZED_COMPUTE_BROADCAST_BINARY_OP_DIMS(std::int32_t)
+CAFFE2_SPECIALIZED_COMPUTE_BROADCAST_BINARY_OP_DIMS(std::int64_t)
+#undef CAFFE2_SPECIALIZED_COMPUTE_BROADCAST_BINARY_OP_DIMS
 
 bool IsRowwiseBroadcastBinaryOp(
     const int ndim,

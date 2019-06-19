@@ -19,6 +19,8 @@
 namespace torch {
 namespace jit {
 
+Symbol ConcretePythonOp::Kind = prim::PythonOp;
+
 using c10::Type;
 
 std::string getPythonName(const PyObject* obj_) {
@@ -212,10 +214,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "__repr__",
           [](Graph& g) {
-            std::stringstream ss;
-            ss << g;
-            return ss.str();
+            return g.toString();
           })
+      .def(
+          "str",
+          &Graph::toString,
+          py::arg("print_source_ranges") = true)
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
@@ -227,16 +231,20 @@ void initPythonIRBindings(PyObject* module_) {
           [](const std::shared_ptr<Graph> g,
              const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
+             const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
              bool defer_weight_export,
-             ::torch::onnx::OperatorExportTypes operator_export_type) {
+             ::torch::onnx::OperatorExportTypes operator_export_type,
+             bool strip_doc_string) {
             std::string graph;
             RawDataExportMap export_map;
             std::tie(graph, export_map) = export_onnx(
                 g,
                 initializers,
                 onnx_opset_version,
+                dynamic_axes,
                 defer_weight_export,
-                operator_export_type);
+                operator_export_type,
+                strip_doc_string);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -253,9 +261,11 @@ void initPythonIRBindings(PyObject* module_) {
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,
+          py::arg("dynamic_axes"),
           py::arg("defer_weight_export") = false,
           py::arg("operator_export_type") =
-              ::torch::onnx::OperatorExportTypes::ONNX)
+              ::torch::onnx::OperatorExportTypes::ONNX,
+          py::arg("strip_doc_string") = true)
       .def(
           "_pretty_print_onnx",
           [](const std::shared_ptr<Graph> g,
@@ -341,13 +351,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def("param_node", [](Graph& g) { return g.block()->param_node(); })
       .def("return_node", [](Graph& g) { return g.block()->return_node(); })
       .def(
-          "pretty_print",
-          [](Graph& g) {
-            std::ostringstream oss;
-            g.prettyPrint(oss);
-            return oss.str();
-          })
-      .GS(createFusionGroup)
+          "createFusionGroup",
+          [](Graph& g) { return g.createWithSubgraph(prim::FusionGroup); })
       .def(
           "createClone",
           [](Graph& g, Node* n, py::object fn) {
@@ -439,15 +444,9 @@ void initPythonIRBindings(PyObject* module_) {
             return ss.str();
           })
       .def(
-          "getSourceLocation",
-          [](Node& n) -> py::object {
-            std::stringstream ss;
-            if (auto sl = n.getSourceLocation()) {
-              sl->highlight(ss);
-              return py::str(ss.str());
-            } else {
-              return py::none();
-            }
+          "sourceRange",
+          [](Node& n) {
+            return n.sourceRange().str();
           })
       .def("hasMultipleOutputs", [](Node& n) { return n.outputs().size() > 1; })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
@@ -687,7 +686,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
         return DictType::create(key, value);
-      }));
+      }))
+      .def("getKeyType", &DictType::getKeyType)
+      .def("getValueType", &DictType::getValueType);
   py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
       m, "OptionalType")
       .def(py::init([](TypePtr a) { return OptionalType::create(a); }))

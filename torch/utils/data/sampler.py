@@ -43,8 +43,9 @@ class RandomSampler(Sampler):
 
     Arguments:
         data_source (Dataset): dataset to sample from
-        num_samples (int): number of samples to draw, default=len(dataset)
-        replacement (bool): samples are drawn with replacement if ``True``, default=False
+        replacement (bool): samples are drawn with replacement if ``True``, default=``False``
+        num_samples (int): number of samples to draw, default=`len(dataset)`. This argument
+            is supposed to be specified only when `replacement` is ``True``.
     """
 
     def __init__(self, data_source, replacement=False, num_samples=None):
@@ -52,16 +53,17 @@ class RandomSampler(Sampler):
         self.replacement = replacement
         self._num_samples = num_samples
 
-        if self._num_samples is not None and replacement is False:
+        if not isinstance(self.replacement, bool):
+            raise ValueError("replacement should be a boolean value, but got "
+                             "replacement={}".format(self.replacement))
+
+        if self._num_samples is not None and not replacement:
             raise ValueError("With replacement=False, num_samples should not be specified, "
                              "since a random permute will be performed.")
 
         if not isinstance(self.num_samples, int) or self.num_samples <= 0:
             raise ValueError("num_samples should be a positive integer "
                              "value, but got num_samples={}".format(self.num_samples))
-        if not isinstance(self.replacement, bool):
-            raise ValueError("replacement should be a boolean value, but got "
-                             "replacement={}".format(self.replacement))
 
     @property
     def num_samples(self):

@@ -7,6 +7,9 @@ REGISTER_CPU_OPERATOR(
     GivenTensorDoubleFill,
     GivenTensorFillOp<double, CPUContext>);
 REGISTER_CPU_OPERATOR(GivenTensorBoolFill, GivenTensorFillOp<bool, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    GivenTensorInt16Fill,
+    GivenTensorFillOp<int16_t, CPUContext>);
 REGISTER_CPU_OPERATOR(GivenTensorIntFill, GivenTensorFillOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(
     GivenTensorInt64Fill,
@@ -18,6 +21,7 @@ REGISTER_CPU_OPERATOR(
 NO_GRADIENT(GivenTensorFill);
 NO_GRADIENT(GivenTensorDoubleFill);
 NO_GRADIENT(GivenTensorBoolFill);
+NO_GRADIENT(GivenTensorInt16Fill);
 NO_GRADIENT(GivenTensorIntFill);
 NO_GRADIENT(GivenTensorInt64Fill);
 NO_GRADIENT(GivenTensorStringFill);
@@ -140,6 +144,28 @@ OPERATOR_SCHEMA(GivenTensorBoolFill)
         "input_as_shape",
         "1D tensor containing the desired output shape. First input must be in CPU context.")
     .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_BOOL>);
+
+OPERATOR_SCHEMA(GivenTensorInt16Fill)
+    .NumInputs(0, 1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .Arg(
+        "values",
+        "The value for the elements of the output tensor.",
+        true /* required */)
+    .Arg(
+        "shape",
+        "The shape of the output tensor."
+        "Cannot set the shape argument and pass in an input at the same time.")
+    .Arg(
+        "extra_shape",
+        "The additional dimensions appended at the end of the shape indicated"
+        "by the input blob."
+        "Cannot set the extra_shape argument when there is no input blob.")
+    .Arg(
+        "input_as_shape",
+        "1D tensor containing the desired output shape. First input must be in CPU context.")
+    .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_INT16>);
 
 OPERATOR_SCHEMA(GivenTensorIntFill)
     .NumInputs(0, 1)

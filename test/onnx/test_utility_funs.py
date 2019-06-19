@@ -4,9 +4,12 @@ from test_pytorch_common import TestCase, run_tests
 import torch
 import torch.onnx
 from torch.onnx import utils
-from torch.onnx.symbolic import _set_opset_version
+from torch.onnx.symbolic_helper import _set_opset_version
+
+import onnx
 
 import io
+import copy
 
 
 class TestUtilityFuns(TestCase):
@@ -36,7 +39,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         x = torch.ones(3, 2)
-        graph, _, __ = utils._model_to_graph(TransposeModule(), (x, ), None,
+        graph, _, __ = utils._model_to_graph(TransposeModule(), (x, ),
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
@@ -54,7 +57,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         x = torch.ones(1, 3)
-        graph, _, __ = utils._model_to_graph(SliceModule(), (x, ), None,
+        graph, _, __ = utils._model_to_graph(SliceModule(), (x, ),
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
@@ -72,7 +75,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         x = torch.ones(1, 2, 3)
-        graph, _, __ = utils._model_to_graph(UnsqueezeModule(), (x, ), None,
+        graph, _, __ = utils._model_to_graph(UnsqueezeModule(), (x, ),
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
@@ -91,7 +94,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         x = torch.ones(2, 3)
-        graph, _, __ = utils._model_to_graph(ConcatModule(), (x, ), None,
+        graph, _, __ = utils._model_to_graph(ConcatModule(), (x, ),
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
@@ -112,7 +115,7 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(9)
         input = torch.randn(5, 3, 7)
         h0 = torch.randn(1, 3, 3)
-        graph, _, __ = utils._model_to_graph(GruNet(), (input, h0), None,
+        graph, _, __ = utils._model_to_graph(GruNet(), (input, h0),
                                              do_constant_folding=True)
         for node in graph.nodes():
             assert node.kind() != "onnx::Slice"
@@ -131,11 +134,32 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         A = torch.randn(2, 3)
-        graph, _, __ = utils._model_to_graph(MatMulNet(), (A), None,
+        graph, _, __ = utils._model_to_graph(MatMulNet(), (A),
                                              do_constant_folding=True)
         for node in graph.nodes():
             assert node.kind() != "onnx::Transpose"
         assert len(list(graph.nodes())) == 1
+
+    def test_strip_doc_string(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, input):
+                return torch.exp(input)
+        x = torch.randn(3, 4)
+
+        def is_model_stripped(f, strip_doc_string=None):
+            if strip_doc_string is None:
+                torch.onnx.export(MyModule(), x, f)
+            else:
+                torch.onnx.export(MyModule(), x, f, strip_doc_string=strip_doc_string)
+            model = onnx.load(io.BytesIO(f.getvalue()))
+            model_strip = copy.copy(model)
+            onnx.helper.strip_doc_string(model_strip)
+            return model == model_strip
+
+        # test strip_doc_string=True (default)
+        self.assertTrue(is_model_stripped(io.BytesIO()))
+        # test strip_doc_string=False
+        self.assertFalse(is_model_stripped(io.BytesIO(), False))
 
 if __name__ == '__main__':
     run_tests()

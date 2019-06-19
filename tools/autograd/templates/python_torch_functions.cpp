@@ -50,6 +50,11 @@ static void check_out_type_matches(Tensor result,
   if (scalarType_is_none && layout_is_none && device_is_none) {  // common case
     return;
   }
+  if (!scalarType_is_none && result.scalar_type() != scalarType) {
+    AT_ERROR(
+        "dtype ", scalarType,
+        " does not match dtype of out parameter (", result.scalar_type(), ")");
+  }
   auto scalarType_arg = scalarType_is_none ? result.scalar_type() : scalarType;
   auto layout_arg = layout_is_none ? *torch::getLayout(result.type().backend()) : layout;
   auto device_type_arg = device_is_none ? result.device().type() : device.type();
@@ -116,7 +121,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .pinned_memory(r.toBool(5));
       return wrap(dispatch_arange(end, options));
     } else {
-      AT_CHECK(!r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
+      TORCH_CHECK(!r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2), r.layout(3), r.isNone(3),
                              r.device(4), r.isNone(4));
       return wrap(dispatch_arange(r.scalar(0), r.tensor(1)).set_requires_grad(r.toBool(6)));
@@ -136,7 +141,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
           .pinned_memory(r.toBool(7));
       return wrap(dispatch_arange(start, end, step, options));
     } else {
-      AT_CHECK(!r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
+      TORCH_CHECK(!r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
       check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4), r.layout(5), r.isNone(5),
                                r.device(6), r.isNone(6));
       return wrap(dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(8)));
@@ -357,6 +362,49 @@ static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyO
   END_HANDLE_TH_ERRORS
 }
 
+static Tensor dispatch_nonzero(const Tensor & self) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  return self.nonzero();
+}
+
+static Tensor dispatch_nonzero(const Tensor & self, Tensor out) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  return at::nonzero_out(out, self);
+}
+
+static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
+  AutoNoGIL no_gil;
+  OptionalDeviceGuard device_guard(device_of(self));
+  return self.nonzero_numpy();
+}
+
+static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "nonzero(Tensor input, *, Tensor out=None)|deprecated",
+    "nonzero(Tensor input, *, bool as_tuple)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    if (r.isNone(1)) {
+      return wrap(dispatch_nonzero(r.tensor(0)));
+    } else {
+      return wrap(dispatch_nonzero(r.tensor(0), r.tensor(1)));
+    }
+  } else {
+    if (r.toBool(1)) {
+      return wrap(dispatch_nonzero_numpy(r.tensor(0)));
+    } else {
+      return wrap(dispatch_nonzero(r.tensor(0)));
+    }
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -400,6 +448,7 @@ static PyMethodDef torch_functions[] = {
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"hsmm", (PyCFunction)THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"_promote_types", (PyCFunction)THPVariable__promote_types, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"nonzero", (PyCFunction)THPVariable_nonzero, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"randint", (PyCFunction)THPVariable_randint, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"range", (PyCFunction)THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
