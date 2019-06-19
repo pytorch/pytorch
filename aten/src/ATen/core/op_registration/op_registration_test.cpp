@@ -46,7 +46,7 @@ TEST(OperatorRegistrationTest, whenCallingOpWithWrongDispatchKey_thenFails) {
   ASSERT_TRUE(op.has_value());
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType2()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'TensorType2'. Registered dispatch keys are: [TensorType1]");
 }
 
 TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenCallingOp_thenCallsCatchallKernel) {
@@ -97,7 +97,7 @@ TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatcha
   auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<MockKernel>(TensorType1(), &called));
   expectThrows<c10::Error>([&] {
     c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<MockKernel>(&called));
-  }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys");
+  }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys TensorType1. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
 }
 
 TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatchallKernelInSameOpCall_thenFails) {
@@ -106,7 +106,7 @@ TEST(OperatorRegistrationTest, givenOpWithDispatchedKernel_whenRegisteringCatcha
     auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
       .kernel<MockKernel>(TensorType1(), &called)
       .catchAllKernel<MockKernel>(&called));
-  }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys");
+  }, "Tried to register a catch-all kernel for an operator which already has kernels for dispatch keys TensorType1. An operator can only have either a catch-all kernel or kernels with dispatch keys. The operator schema is _test::dummy");
 }
 
 TEST(OperatorRegistrationTest, givenOpWithCatchallKernelOutOfScope_whenRegisteringDispatchedKernelAndCallingOp_thenCallsCatchallKernel) {
@@ -131,7 +131,7 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringWithSchema_t
   ASSERT_TRUE(op.has_value()); // assert schema is registered
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType1()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'TensorType1'. Registered dispatch keys are: []");
 }
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringWithoutSchema_thenFails) {
@@ -181,7 +181,7 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterw
   ASSERT_TRUE(op.has_value()); // assert schema is registered
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType1()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'TensorType1'. Registered dispatch keys are: []");
 }
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernelsWithoutTensorInputs_whenRegistering_thenRegisters) {
@@ -202,7 +202,7 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegis
   testing::internal::CaptureStderr();
   c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().kernel<DummyKernel>(TensorType1()));
   std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_THAT(output, testing::HasSubstr("that overwrote a previously registered kernel with the same dispatch key for the same operator"));
+  EXPECT_THAT(output, testing::HasSubstr("Warning: Registered a kernel for operator _test::dummy with dispatch key TensorType1 that overwrote a previously registered kernel with the same dispatch key for the same operator."));
 }
 
 TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegisteringInSameOpCall_thenFails) {
@@ -211,7 +211,7 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenRegis
         .op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
             .kernel<DummyKernel>(TensorType1())
             .kernel<DummyKernel>(TensorType1()));
-  }, "Tried to register multiple kernels with same dispatch key");
+  }, "In operator registration: Tried to register multiple kernels with same dispatch key TensorType1 for operator schema _test::dummy");
 }
 
 TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenCalled_thenCallsNewerKernel) {
@@ -238,7 +238,7 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenRegistering_then
   testing::internal::CaptureStderr();
   c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options().catchAllKernel<DummyKernel>());
   std::string output = testing::internal::GetCapturedStderr();
-  EXPECT_THAT(output, testing::HasSubstr("that overwrote a previously registered catch-all kernel for the same operator"));
+  EXPECT_THAT(output, testing::HasSubstr("Warning: Registered a catch-all kernel for operator _test::dummy that overwrote a previously registered catch-all kernel for the same operator."));
 }
 
 TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenRegisteringInSameOpCall_thenFails) {
@@ -343,7 +343,7 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenOlder
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType1()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'TensorType1'. Registered dispatch keys are: []");
 }
 
 TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenOlderAndThenNewerKernelDeletedAndOpCalled_thenFails) {
@@ -361,7 +361,7 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenOlderAndThenNewe
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType1()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'TensorType1'. Registered dispatch keys are: []");
 }
 
 TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
@@ -379,7 +379,7 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenNewer
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType1()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'TensorType1'. Registered dispatch keys are: []");
 }
 
 TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
@@ -397,7 +397,7 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenNewerAndThenOlde
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType1()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'TensorType1'. Registered dispatch keys are: []");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCalling_thenCallsCorrectKernel) {
@@ -422,7 +422,15 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCall
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType3()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'TensorType3'. Registered dispatch keys are: [");
+
+  // also assert that the error message contains the available tensor type ids, but don't assert their order
+  expectThrows<c10::Error>([&] {
+    callOp(*op, dummyTensor(TensorType3()));
+  }, "TensorType1");
+  expectThrows<c10::Error>([&] {
+    callOp(*op, dummyTensor(TensorType3()));
+  }, "TensorType2");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallOutOfScopeAndCalling_thenFails) {
@@ -440,15 +448,15 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallOutOfSc
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType1()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'TensorType1'. Registered dispatch keys are: []");
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType2()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'TensorType2'. Registered dispatch keys are: []");
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(TensorType3()));
-  }, "Didn't find kernel to dispatch to for operator '_test::dummy'");
+  }, "Didn't find kernel to dispatch to for operator '_test::dummy'. Tried to look up kernel for dispatch key 'TensorType3'. Registered dispatch keys are: []");
 }
 
 bool called_stackbased_kernel = false;

@@ -114,7 +114,7 @@ void RegisterOperators::checkNoDuplicateKernels_(const FunctionSchema& schema, c
 
   for (const auto& kernel : options.kernels) {
     if (kernel.dispatch_key.has_value()) {
-      TORCH_CHECK(0 == dispatch_keys.count(*kernel.dispatch_key), "In operator registration: Tried to register multiple kernels with same dispatch key " + detail::dispatch_key_to_string(*kernel.dispatch_key) + " for operator schema " + toString(schema));
+      TORCH_CHECK(0 == dispatch_keys.count(*kernel.dispatch_key), "In operator registration: Tried to register multiple kernels with same dispatch key " + toString(*kernel.dispatch_key) + " for operator schema " + toString(schema));
       dispatch_keys.insert(*kernel.dispatch_key);
     } else {
       TORCH_CHECK(!has_catchall_kernel, "In operator registration: Tried to register multiple catch-all kernels for operator schema " + toString(schema));
