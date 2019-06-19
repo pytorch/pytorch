@@ -14,13 +14,13 @@ namespace detail {
     float res = 0;
     uint32_t tmp = src;
     tmp <<= 16;
-    memcpy(&res, &tmp, sizeof(tmp));
+    std::memcpy(&res, &tmp, sizeof(tmp));
     return res;
   }
 
   inline C10_HOST_DEVICE uint16_t bits_from_f32(float src) {
     uint32_t res;
-    memcpy(&res, &src, sizeof(res));
+    std::memcpy(&res, &src, sizeof(res));
     return res >>= 16;
   }
 } // namespace detail
