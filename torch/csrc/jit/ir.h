@@ -1063,7 +1063,8 @@ struct Graph {
   TORCH_API Node* createDifferentiableSubgraph();
   TORCH_API Node* createTuple(
       at::ArrayRef<Value*> values,
-      std::shared_ptr<FunctionSchema> schema = nullptr);
+      c10::optional<c10::QualifiedName> qualname = c10::nullopt,
+      std::shared_ptr<FunctionSchema> schema=nullptr);
   TORCH_API Node* createTupleUnpack(Value* v);
   TORCH_API Node* createTupleIndex(
       Value* tup,

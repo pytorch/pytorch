@@ -536,6 +536,7 @@ class ShapePropagator {
         auto orig_type = node->output()->type()->expect<TupleType>();
         node->output()->setType(TupleType::create(
             fmap(node->inputs(), [](Value* v) { return v->type(); }),
+            orig_type->qualified_name_obj(),
             orig_type->schema()));
         return;
       }

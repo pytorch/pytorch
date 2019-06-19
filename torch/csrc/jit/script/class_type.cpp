@@ -29,7 +29,7 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
 }
 
 ClassTypePtr ClassType::create(
-    QualifiedName qualifiedName,
+    c10::optional<QualifiedName> qualifiedName,
     std::shared_ptr<CompilationUnit> cu,
     bool is_module) {
   return ClassTypePtr(new ClassType(std::move(qualifiedName), std::move(cu), is_module));
@@ -81,7 +81,7 @@ std::vector<Function*> ClassType::methods() const {
 }
 
 ClassType::ClassType(
-    QualifiedName name,
+    c10::optional<QualifiedName> name,
     std::shared_ptr<CompilationUnit> cu,
     bool is_module)
     : NamedType(TypeKind::ClassType, name), compilation_unit_(std::move(cu)) {

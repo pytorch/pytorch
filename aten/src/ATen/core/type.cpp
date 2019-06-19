@@ -537,6 +537,16 @@ std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(c10
   return schema;
 }
 
+TupleType::TupleType(std::vector<TypePtr> elements_, c10::optional<c10::QualifiedName> name, std::shared_ptr<FunctionSchema> schema)
+: NamedType(TypeKind::TupleType, std::move(name))
+, elements_(std::move(elements_))
+, schema_(std::move(schema)) {
+  has_free_variables_ =
+      std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
+        return v->hasFreeVariables();
+      });
+}
+
 bool TupleType::isSubtypeOf(const TypePtr rhs_) const {
   if (Type::isSubtypeOf(rhs_))
     return true;
@@ -574,6 +584,37 @@ bool TupleType::operator==(const Type& rhs) const {
   }) && schema_ == rhs.expect<TupleType>()->schema_;
   // `compare` guarantees that rhs is always a TupleType, so the
   // dynamic_cast above always success.
+}
+
+std::string TupleType::str() const {
+  std::stringstream ss;
+  if (schema_ && name_) {
+    ss << qualname();
+  } else {
+    ss << "(";
+    for(size_t i = 0; i < elements().size(); ++i) {
+      if(i > 0)
+        ss << ", ";
+      ss << elements()[i]->str();
+    }
+    ss << ")";
+  }
+  return ss.str();
+}
+std::string TupleType::python_str() const {
+  std::stringstream ss;
+  if (schema_ && name_) {
+    ss << qualname();
+  } else {
+    ss << "Tuple[";
+    for(size_t i = 0; i < elements().size(); ++i) {
+      if(i > 0)
+        ss << ", ";
+      ss << elements()[i]->python_str();
+    }
+    ss << "]";
+  }
+  return ss.str();
 }
 
 } // namespace c10

@@ -190,5 +190,27 @@ class TestScriptPy3(JitTestCase):
                 tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)  # noqa
                 return tup
 
+    def test_named_tuple_serialization(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : int
+            b : float
+            c : List[int]
+
+        class MyMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                return MyCoolNamedTuple(3, 3.5, [3, 4, 5])
+
+        mm = MyMod()
+        mm.save('foo.zip')
+        torch._C._jit_clear_class_registry()
+        loaded = torch.jit.load('foo.zip')
+
+        out = mm()
+        out_loaded = loaded()
+
+        for name in ['a', 'b', 'c']:
+            self.assertEqual(getattr(out_loaded, name), getattr(out, name))
+
 if __name__ == '__main__':
     run_tests()
