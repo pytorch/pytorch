@@ -4567,7 +4567,6 @@ a")
             a = [1]
             if True:
                 a.append(4)
-            print(a)
             return a == [1, 4]
         self.checkScript(test_append_if, ())
 
