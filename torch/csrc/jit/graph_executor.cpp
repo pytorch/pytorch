@@ -124,7 +124,7 @@ struct CaptureList {
           ++var_capture_it;
         } break;
         case CAPTURE_LIST: {
-          c10::ListPtr<at::Tensor> lst = c10::make_list<at::Tensor>();
+          c10::List<at::Tensor> lst = c10::make_list<at::Tensor>();
           auto size = *size_it++;
           for (size_t i = 0; i < size; i++) {
             lst.emplace_back(var_capture_it->unpack(saved_for));
@@ -373,7 +373,7 @@ struct DifferentiableGraphOp {
     if (v.isTensor()) {
       v = IValue(detach(std::move(v).toTensor()));
     } else if (v.isTensorList()) {
-      c10::ListPtr<at::Tensor> lst = std::move(v).toTensorList();
+      c10::List<at::Tensor> lst = std::move(v).toTensorList();
       for (size_t i = 0; i < lst.size(); ++i) {
         lst.set(i, detach(lst.extract(i)));
       }

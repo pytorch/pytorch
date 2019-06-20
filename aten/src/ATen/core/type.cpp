@@ -5,11 +5,13 @@
 #include <c10/macros/Macros.h>
 namespace c10 {
 
-#ifdef C10_ANDROID
 namespace ivalue {
-Object::~Object() {}
+Object::~Object() {
+  if (on_delete_) {
+    on_delete_(this);
+  }
+}
 } // namespace ivalue
-#endif
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if(auto value = t.cast<CompleteTensorType>()) {
@@ -241,7 +243,7 @@ bool isSubvalueOf(const IValue& ivalue, TypePtr type) {
     auto dict_type = type->expect<DictType>();
     const auto dict = ivalue.toGenericDict();
     return std::all_of(
-        dict.begin(), dict.end(), [=](const c10::impl::GenericDictPtr::const_iterator::value_type& item) {
+        dict.begin(), dict.end(), [=](const c10::impl::GenericDict::const_iterator::value_type& item) {
           return isSubvalueOf(item.key(), dict_type->getKeyType()) &&
               isSubvalueOf(item.value(), dict_type->getValueType());
         });
@@ -517,6 +519,26 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     }
     out << ")";
     return out;
+}
+
+std::string NamedType::python_str() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->qualifiedName();
+}
+
+std::string NamedType::qualname() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->qualifiedName();
+}
+
+std::string NamedType::qualifier() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->prefix();
+}
+
+std::string NamedType::basename() const {
+  TORCH_INTERNAL_ASSERT(name_);
+  return name_->name();
 }
 
 std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(c10::QualifiedName qualName, std::vector<std::string> field_names, std::vector<TypePtr> field_types) {

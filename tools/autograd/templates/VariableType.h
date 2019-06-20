@@ -36,15 +36,11 @@ using at::Storage;
 using at::Tensor;
 using at::TensorList;
 using at::TensorOptions;
-<<<<<<< HEAD
 using at::Quantizer;
 // This is temporary typedef to enable Quantizer in aten native function API
 // we'll remove them when we are actually exposing Quantizer class
 // to frontend
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
-using at::Type;
-=======
->>>>>>> Remove Type dispatch
 using c10::optional;
 
 struct TORCH_API VariableType final {

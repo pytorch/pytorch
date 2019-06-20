@@ -113,8 +113,6 @@ class FileManager(object):
 
 
 TEMPLATE_PATH = options.source_path + "/templates"
-GENERATOR_DERIVED = CodeTemplate.from_file(
-    TEMPLATE_PATH + "/GeneratorDerived.h")
 TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.cpp")
 SPARSE_TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SparseTypeDerived.cpp")
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
@@ -145,15 +143,6 @@ case Backend::${Backend}:
 core_file_manager = FileManager(core_install_dir)
 file_manager = FileManager()
 cuda_file_manager = FileManager()
-
-generators = {
-    'CUDAGenerator.h': {
-        'name': 'CUDA',
-        'th_generator': '',
-        'header': 'THC/THC.h' if not options.rocm else 'THH/THH.h'
-    },
-}
-
 
 def backend_to_devicetype(backend):
     if backend == 'QuantizedCPU':
@@ -444,11 +433,6 @@ def generate_outputs():
     declarations += nn_parse.run(nn_files)
     declarations += native_parse.run(native_files)
     declarations = preprocess_declarations.run(declarations)
-    for fname, env in generators.items():
-        fm = file_manager
-        if env['name'] == 'CUDA':
-            fm = cuda_file_manager
-        fm.write(fname, GENERATOR_DERIVED, env)
 
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
     # and modify the declarations to include any information that will all_backends
