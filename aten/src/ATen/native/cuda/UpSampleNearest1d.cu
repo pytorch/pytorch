@@ -11,43 +11,36 @@ namespace at {
 namespace native {
 namespace {
 
-template <typename scalar_t, typename accscalar_t>
+#define MAX_THREADS 512
+
+template <typename scalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest1d_out_frame(
-    const int n,
-    const PackedTensorAccessor<scalar_t, 3> idata,
-    PackedTensorAccessor<scalar_t, 3> odata) {
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
+    const scalar_t* input,
+    size_t dim_b,
+    size_t dim_c,
+    size_t src_dim_w,
+    size_t dst_dim_w,
+    scalar_t* output) {
+  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (dst_idx >= dim_c * dst_dim_w)
+    return;
 
-  const int batchsize = idata.size(0);
-  const int channels = idata.size(1);
-  const int width1 = idata.size(2);
-  const int width2 = odata.size(2);
+  float scale_factor = (float)src_dim_w / (float)dst_dim_w;
 
-  const float scale = (float)width1 / (float)width2;
+  int c = (dst_idx / dst_dim_w) % dim_c;
 
-  if (index < n) {
-    const int w2 = index % width2;
-    // special case: just copy
-    if (width1 == width2) {
-      const int w1 = w2;
-      for (int n = 0; n < batchsize; n++) {
-        for (int c = 0; c < channels; ++c) {
-          const scalar_t val = idata[n][c][w1];
-          odata[n][c][w2] = val;
-        }
-      }
-      return;
-    }
-    //
-    const int w1 = nearest_neighbor_compute_source_index(scale, w2, width1);
+  int dst_x = dst_idx % dst_dim_w;
+  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
 
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; ++c) {
-        const scalar_t val = idata[n][c][w1];
-        odata[n][c][w2] = val;
-      }
-    }
+  size_t src_idx = c * src_dim_w + src_x;
+  int src_stride = dim_c * src_dim_w;
+  int dst_stride = dim_c * dst_dim_w;
+
+  for (int b = 0; b < dim_b; b++) {
+    output[dst_idx] = input[src_idx];
+    src_idx += src_stride;
+    dst_idx += dst_stride;
   }
 }
 
@@ -55,48 +48,41 @@ __global__ void upsample_nearest1d_out_frame(
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest1d_backward_out_frame(
-    const int n,
-    PackedTensorAccessor<scalar_t, 3> idata,
-    const PackedTensorAccessor<scalar_t, 3> odata) {
-  int index = threadIdx.x + blockIdx.x * blockDim.x;
+    const scalar_t* grad_o,
+    size_t dim_b,
+    size_t dim_c,
+    size_t src_dim_w,
+    size_t dst_dim_w,
+    scalar_t* grad_i) {
 
-  const int batchsize = idata.size(0);
-  const int channels = idata.size(1);
-  const int width1 = idata.size(2);
-  const int width2 = odata.size(2);
+  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (dst_idx >= dim_c * dst_dim_w)
+    return;
 
-  const float scale = (float)width1 / (float)width2;
+  float scale_factor = (float)src_dim_w / (float)dst_dim_w;
 
-  if (index < n) {
-    const int w2 = index % width2;
-    // special case: just copy
-    if (width1 == width2) {
-      const int w1 = w2;
-      for (int n = 0; n < batchsize; n++) {
-        for (int c = 0; c < channels; ++c) {
-          const scalar_t val = odata[n][c][w1];
-          idata[n][c][w2] = val;
-        }
-      }
-      return;
+  int c = (dst_idx / (dst_dim_w)) % dim_c;
+
+  int dst_x = dst_idx % dst_dim_w;
+  int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
+
+  for (int b = 0; b < dim_b; b++) {
+    accscalar_t grad = 0;
+    size_t src_idx = b * dim_c * src_dim_w + c * src_dim_w + src_x;
+    for (int x = src_x; x < src_x_up; x++) {
+      grad += grad_o[src_idx++];
     }
-    //
-    const int w1 = nearest_neighbor_compute_source_index(scale, w2, width1);
-
-    for (int n = 0; n < batchsize; n++) {
-      for (int c = 0; c < channels; ++c) {
-        const scalar_t d2val = odata[n][c][w2];
-        atomicAdd(&idata[n][c][w1], d2val);
-      }
-    }
+    grad_i[dst_idx] = grad;
+    dst_idx += dim_c * dst_dim_w;
   }
 }
 
 static void upsample_nearest1d_out_cuda_template(
     Tensor& output,
-    const Tensor& input,
+    const Tensor& input_,
     IntArrayRef output_size) {
-  TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
+  TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_nearest1d_out_cuda", {input_arg, output_arg});
 
   TORCH_CHECK(
@@ -106,35 +92,33 @@ static void upsample_nearest1d_out_cuda_template(
 
   int output_width = output_size[0];
 
-  int nbatch = input.size(0);
-  int channels = input.size(1);
-  int input_width = input.size(2);
+  int nbatch = input_.size(0);
+  int channels = input_.size(1);
+  int input_width = input_.size(2);
 
   upsample_1d_shape_check(
-      input, Tensor(), nbatch, channels, input_width, output_width);
+      input_, Tensor(), nbatch, channels, input_width, output_width);
 
   AT_ASSERT(input_width > 0 && output_width > 0);
 
+  Tensor input = input_.contiguous();
   output.resize_({input.size(0), input.size(1), output_width});
-  output.zero_();
 
-  const int num_kernels = output_width;
-  const int num_threads = std::min(
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  // upsample_1d_shape_check makes sure `nbatch != 0`
+  unsigned int n = output.numel() / nbatch;
+  dim3 bdim{std::min<unsigned int>(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
+  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "upsample_nearest1d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor<scalar_t, 3>();
-        auto odata = output.packed_accessor<scalar_t, 3>();
+        auto idata = input.data<scalar_t>();
+        auto odata = output.data<scalar_t>();
 
-        upsample_nearest1d_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
-               num_threads,
-               0,
-               stream>>>(num_kernels, idata, odata);
+        upsample_nearest1d_out_frame<scalar_t><<<gdim, bdim, 0, stream>>>(
+            idata, nbatch, channels, input_width, output_width, odata);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -172,25 +156,23 @@ static void upsample_nearest1d_backward_out_cuda_template(
 
   Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_({nbatch, channels, input_width});
-  grad_input.zero_();
 
-  const int num_kernels = output_width;
-  const int num_threads = std::min(
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+  // upsample_1d_shape_check makes sure `nbatch != 0`
+  unsigned int n = grad_input.numel() / nbatch;
+  dim3 bdim{std::min<unsigned int>(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
+  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_nearest1d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = grad_input.packed_accessor<scalar_t, 3>();
-        auto odata = grad_output.packed_accessor<scalar_t, 3>();
+        auto idata = grad_input.data<scalar_t>();
+        auto odata = grad_output.data<scalar_t>();
 
         upsample_nearest1d_backward_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
-               num_threads,
-               0,
-               stream>>>(num_kernels, idata, odata);
+            <<<gdim, bdim, 0, stream>>>(
+                odata, nbatch, channels, output_width, input_width, idata);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());

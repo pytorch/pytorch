@@ -38,6 +38,11 @@ bool is_quantized(const Tensor& self) {
   return self.is_quantized();
 }
 
+// True if `self` has the same derived type of TensorImpl as `other`.
+bool _has_same_tensorimpl_type(const Tensor& self, const Tensor& other) {
+  return typeid(*(self.unsafeGetTensorImpl())) == typeid(*(other.unsafeGetTensorImpl()));
+}
+
 Tensor type_as(const Tensor& self, const Tensor& other) {
   return self.toType(other.type());
 }
