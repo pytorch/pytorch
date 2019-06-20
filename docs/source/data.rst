@@ -156,7 +156,9 @@ and loading from an iterable-style dataset is roughly equivalent with::
     for indices in batch_sampler:
         yield collate_fn([next(dataset_iter) for _ in indices])
 
-See `this section <dataloader-collate_fn_>`_ on more about :attr:`collate_fn`.
+A custom :attr:`collate_fn` can be used to customize collation, e.g., padding
+sequential data to max length of a batch. See
+`this section <dataloader-collate_fn_>`_ on more about :attr:`collate_fn`.
 
 Disable automatic batching
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -225,7 +227,8 @@ properties:
   for ``list`` s, ``tuple`` s, ``namedtuple`` s, etc.
 
 Users may use customized :attr:`collate_fn` to achieve custom batching, e.g.,
-along a dimension other than the first, or to add support for custom data types.
+collating along a dimension other than the first, padding sequences of
+various lengths, or adding support for custom data types.
 
 Single- and Multi-process Data Loading
 --------------------------------------
