@@ -882,8 +882,8 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         res, new_running_mean, new_running_var, saved_mean, saved_var = out
         new_running_mean.setType(running_mean.type())
         new_running_var.setType(running_var.type())
-        saved_mean.setUniqueName("batch_norm_dead_output-" + saved_mean.uniqueName())
-        saved_var.setUniqueName("batch_norm_dead_output-" + saved_var.uniqueName())
+        saved_mean.setDebugName("batch_norm_dead_output-" + saved_mean.debugName())
+        saved_var.setDebugName("batch_norm_dead_output-" + saved_var.debugName())
         if len(input_sizes) == 2:
             res = g.op("Squeeze", res, axes_i=[2])
         return res

@@ -251,7 +251,7 @@ struct PythonPrintPass {
     // if it has a name set, then it was written as a variable so preserve that
     // unless it is being fed directly to the end of the block.
     // in which case it is not as useful to give it a name just to return it
-    if (v->hasUniqueName() && use.user->kind() != prim::Return)
+    if (v->hasDebugName() && use.user->kind() != prim::Return)
       return false;
     // don't try to inline control blocks
     if (n->blocks().size() != 0)
@@ -353,7 +353,7 @@ struct PythonPrintPass {
     buildConstantList(b->return_node(), constants);
   }
 
-  // get a new name unique across calls to uniqueName() and
+  // get a new name unique across calls to debugName() and
   // anything we have used.
   std::unordered_map<std::string, size_t> next_id;
 
@@ -393,10 +393,10 @@ struct PythonPrintPass {
     return ss.str();
   }
   // if we have to assign 'v' a name, what should it be?
-  // use the uniqueName if it was set, otherwise generate a name.
+  // use the debugName if it was set, otherwise generate a name.
   std::string genUniqueNameFor(Value* v) {
     return genName(
-        v->hasUniqueName() ? makeValidIdentifier(v->uniqueNameBase()) : "_");
+        v->hasDebugName() ? makeValidIdentifier(v->debugNameBase()) : "_");
   }
 
   // map from Value to how it should be printed at each use

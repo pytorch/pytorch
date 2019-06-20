@@ -26,7 +26,7 @@ struct LivenessAnalyzer {
     std::cout << "Liveness info:\n";
     for (auto e : liveness_sets) {
       if (e.first->outputs().size() > 0) {
-        std::cout << e.first->outputs()[0]->uniqueName();
+        std::cout << e.first->outputs()[0]->debugName();
       }
 
       std::cout << " " << e.first->kind().toQualString();
@@ -47,7 +47,7 @@ struct LivenessAnalyzer {
       } else {
         std::cout << ", ";
       }
-      std::cout << el->uniqueName() << "(" << el->unique() << ")";
+      std::cout << el->debugName() << "(" << el->unique() << ")";
     }
     std::cout << "]";
   }

@@ -222,7 +222,7 @@ struct Environment {
     auto g = b->owningGraph();
     auto load = g->insertNode(g->createLoad(name, type));
     if (meaningfulName(name)) {
-      load->output()->setUniqueName(name);
+      load->output()->setDebugName(name);
     }
     return std::make_shared<SimpleValue>(load->output());
   }
@@ -275,13 +275,13 @@ struct Environment {
       const std::string& name,
       SugaredValuePtr value) {
     Value* as_simple_value = asSimple(value);
-    if (as_simple_value && !as_simple_value->hasUniqueName() &&
+    if (as_simple_value && !as_simple_value->hasDebugName() &&
         meaningfulName(name) &&
         // note: if the value wasn't defined in this block, we might be giving a
         // name only used inside this block to a value outside of this. this is
         // not normally helpful for debugging and causes import/export jitter.
         as_simple_value->node()->owningBlock() == block()) {
-      as_simple_value->setUniqueName(name);
+      as_simple_value->setDebugName(name);
     }
     // prevent re-assignment involving any sugared values
     // any reassignment like:
@@ -705,7 +705,7 @@ struct to_ir {
     if (self) {
       AT_ASSERT(it != end);
       const auto& name = (*it).ident().name();
-      Value* new_input = block->addInput()->setUniqueName(name);
+      Value* new_input = block->addInput()->setDebugName(name);
       environment_stack->setSugaredVar(
           (*it).ident().range(), name, self(new_input));
       arguments.emplace_back(name, new_input->type());
@@ -717,7 +717,7 @@ struct to_ir {
       // Add the input to the graph
       Value* new_input = block->addInput();
       if (meaningfulName(name)) {
-        new_input->setUniqueName(name);
+        new_input->setDebugName(name);
       }
       // Record the type for the schema and set the Type on the Value*
       arguments.push_back(schema.arguments().at(arg_annotation_idx++));
