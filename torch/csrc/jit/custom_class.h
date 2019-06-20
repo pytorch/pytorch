@@ -70,27 +70,10 @@ struct class_ {
   template <class T>
   struct addInput {
     static Value* call(std::shared_ptr<Graph> graph) {
-      auto classRes = tmap.find<CurClass*>();
-      assert(classRes != tmap.end());
-      return graph->addInput()->setType(classRes->second);
+      return graph->addInput()->setType(getTypePtr<T>());
     }
   };
-  #define ADD_PRIMITIVE_INPUT(c_type, type_tag) \
-  template <>\
-  struct addInput<c_type> {\
-    static Value* call(std::shared_ptr<Graph> graph) {\
-      return graph->addInput()->setType(type_tag);\
-    }\
-  };\
 
-  ADD_PRIMITIVE_INPUT(at::Tensor, TensorType::get())
-  ADD_PRIMITIVE_INPUT(double, FloatType::get())
-  ADD_PRIMITIVE_INPUT(int64_t, IntType::get())
-  ADD_PRIMITIVE_INPUT(bool, BoolType::get())
-  ADD_PRIMITIVE_INPUT(at::Scalar, NumberType::get())
-  ADD_PRIMITIVE_INPUT(std::string, StringType::get())
-
-  // Need to add specializations for all the other supported types...
   template <class Func, size_t... arg_indices>
   std::vector<Value*> addInputs_(
       Func f,
