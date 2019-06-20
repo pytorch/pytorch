@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 
 namespace c10 {
 
@@ -16,6 +17,36 @@ template<class T> List<T> make_list(ArrayRef<T> values) {
     result.push_back(element);
   }
   return result;
+}
+
+template<>
+C10_DEPRECATED_MESSAGE("IValue isn't a valid List element type. If you know the concrete key type at compile time, please specify it to make_list<T>(). If you only know it at runtime, impl::make_generic_list() might work for you.")
+inline impl::GenericList make_list<IValue>() {
+  return impl::make_generic_list();
+}
+
+template<>
+C10_DEPRECATED_MESSAGE("IValue isn't a valid List element type. If you know the concrete key type at compile time, please specify it to make_list<T>(). If you only know it at runtime, impl::make_generic_list() might work for you.")
+inline impl::GenericList make_list<IValue>(ArrayRef<IValue> values) {
+  return impl::make_generic_list(values);
+}
+
+namespace impl {
+inline GenericList make_generic_list() {
+  return make_list<IValue>();
+}
+
+inline GenericList make_generic_list(ArrayRef<IValue> values) {
+  return make_list<IValue>(values);
+}
+
+inline GenericList make_generic_list(TypePtr elementType) {
+  return make_list<IValue>();
+}
+
+inline GenericList make_generic_list(TypePtr elementType, ArrayRef<IValue> values) {
+  return make_list<IValue>(values);
+}
 }
 
 template<class T>

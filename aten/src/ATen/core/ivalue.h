@@ -246,10 +246,6 @@ struct CAFFE2_API IValue final {
   c10::ArrayRef<at::Tensor> toTensorListRef() const;
 
   //GenericList
-  /// \cond DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
-  C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
-  /// \endcond
-  IValue(std::vector<IValue> v);
   IValue(c10::List<IValue> v);
   bool isGenericList() const { return Tag::GenericList == tag; }
   c10::List<IValue> toGenericList() &&;

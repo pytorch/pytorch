@@ -958,7 +958,7 @@ RegisterOperators reg(
            } else {
              return [=](Stack& stack) {
                const size_t stack_size = stack.size();
-               c10::List<IValue> vals = c10::make_list<IValue>();
+               c10::impl::GenericList vals = c10::impl::make_generic_list();
                vals.reserve(num_inputs);
                for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
                  vals.emplace_back(std::move(stack[i]));

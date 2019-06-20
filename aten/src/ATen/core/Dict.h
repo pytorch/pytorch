@@ -9,6 +9,8 @@
 namespace c10 {
 struct IValue;
 template<class Key, class Value> class Dict;
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
 
 /**
  * Creates an empty dict.
@@ -17,6 +19,10 @@ template<class Key, class Value>
 Dict<Key, Value> make_dict();
 
 namespace impl {
+C10_DEPRECATED_MESSAGE("Creating generic dicts without type information is deprecated. Please use make_generic_dict(keyType, valueType) instead.")
+Dict<IValue, IValue> make_generic_dict();
+
+Dict<IValue, IValue> make_generic_dict(TypePtr keyType, TypePtr valueType);
 bool shallowEquals(const IValue& lhs, const IValue& rhs);
 
 using valid_dict_key_types = guts::typelist::typelist<
@@ -202,6 +208,8 @@ public:
    * Creates an empty dict.
    */
   friend Dict make_dict<Key, Value>();
+  friend Dict<IValue, IValue> impl::make_generic_dict(TypePtr keyType, TypePtr valueType);
+  friend Dict<IValue, IValue> impl::make_generic_dict();
 
   // please use make_dict instead
   Dict() = delete;
@@ -347,10 +355,6 @@ namespace impl {
 // public API. Kernels should use Dicts with concrete Key, Value types instead
 // (maybe except for some internal prim ops).
 using GenericDict = Dict<IValue, IValue>;
-
-inline GenericDict make_generic_dict() {
-  return make_dict<IValue, IValue>();
-}
 
 template<class Key, class Value>
 Dict<Key, Value> toTypedDict(GenericDict dict) {

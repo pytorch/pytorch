@@ -13,6 +13,9 @@ class Tensor;
 namespace c10 {
 struct IValue;
 template<class T> class List;
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
+
 template<class T> List<T> make_list();
 template<class T> List<T> make_list(ArrayRef<T> values);
 
@@ -32,6 +35,14 @@ struct ListImpl final : public c10::intrusive_ptr_target {
 }
 
 namespace impl {
+
+C10_DEPRECATED_MESSAGE("Creating generic lists without type information is deprecated. Please use make_generic_list(elementType) instead.")
+List<IValue> make_generic_list();
+C10_DEPRECATED_MESSAGE("Creating generic lists without type information is deprecated. Please use make_generic_list(elementType, values) instead.")
+List<IValue> make_generic_list(ArrayRef<IValue> values);
+
+List<IValue> make_generic_list(TypePtr elementType);
+List<IValue> make_generic_list(TypePtr elementType, ArrayRef<IValue> values);
 
 template<class T, class Iterator, class StorageT> class ListIterator;
 
@@ -233,6 +244,9 @@ public:
    */
   friend List make_list<T>(ArrayRef<T>);
 
+  friend List<IValue> impl::make_generic_list();
+  friend List<IValue> impl::make_generic_list(ArrayRef<IValue>);
+
   // please use make_list instead.
   List() = delete;
 
@@ -419,14 +433,6 @@ namespace impl {
 // public API. Kernels should use Lists with concrete types instead
 // (maybe except for some internal prim ops).
 using GenericList = List<IValue>;
-
-inline GenericList make_generic_list() {
-  return make_list<IValue>();
-}
-
-inline GenericList make_generic_list(ArrayRef<IValue> values) {
-  return make_list<IValue>(values);
-}
 
 template<class T>
 List<T> toTypedList(GenericList list) {
