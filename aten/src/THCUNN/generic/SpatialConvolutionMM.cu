@@ -206,7 +206,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
       nInputPlane, inputHeight, inputWidth,
       outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
-      1, 1, THCTensor_(data)(state, columns)
+      1, 1, 
+      columns->data<scalar_t>()
     );
 
     // M,N,K are dims of matrix A and B
@@ -436,7 +437,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
         nInputPlane, inputHeight, inputWidth,
         outputHeight, outputWidth,
         kH, kW, padH, padW, dH, dW,
-        1, 1, THCTensor_(data)(state, columns)
+        1, 1, 
+        columns->data<scalar_t>()
       );
 
       // M,N,K are dims of matrix A and B
