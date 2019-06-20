@@ -12,16 +12,16 @@ namespace detail {
 constexpr const char* PREALLOCATED_OUTPUT_ARGNAME =
     "_caffe2_preallocated_outputs";
 
-using _CallCaffe2OpFunc = c10::ListPtr<at::Tensor>(
+using _CallCaffe2OpFunc = c10::List<at::Tensor>(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
-    c10::ListPtr<at::Tensor>&& outputs);
+    c10::List<at::Tensor>&& outputs);
 
 template <class Caffe2Operator>
-inline c10::ListPtr<at::Tensor> _call_caffe2_op(
+inline c10::List<at::Tensor> _call_caffe2_op(
     const c10::FunctionSchema& schema,
     std::vector<c10::IValue>&& inputs,
-    c10::ListPtr<at::Tensor>&& outputs) {
+    c10::List<at::Tensor>&& outputs) {
   Caffe2Operator op(schema, std::move(inputs), std::move(outputs));
   op.Run();
   return std::move(op).move_newstyle_outputs();
@@ -44,13 +44,13 @@ inline IValue unwrap(IValue&& ivalue) {
   if (ivalue.isTensor() && ivalue.toTensor().defined()) {
     return unwrap_tensor(std::move(ivalue).toTensor());
   } else if (ivalue.isTensorList()) {
-    c10::ListPtr<at::Tensor> list = std::move(ivalue).toTensorList();
+    c10::List<at::Tensor> list = std::move(ivalue).toTensorList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = unwrap_tensor(list.extract(i));
     }
     return std::move(list);
   } else if (ivalue.isGenericList()) {
-    c10::impl::GenericListPtr list = std::move(ivalue).toGenericList();
+    c10::impl::GenericList list = std::move(ivalue).toGenericList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = unwrap(list.extract(i));
     }
@@ -92,7 +92,7 @@ inline void _call_caffe2_op_from_c10(
   const size_t num_inputs = schema.arguments().size() -
       1; // -1 because the last argument is the list of preallocated tensors
 
-  c10::ListPtr<at::Tensor> outputs = c10::make_list<at::Tensor>();
+  c10::List<at::Tensor> outputs = c10::make_list<at::Tensor>();
   if (preallocated_outputs.isNone()) {
     // either the schema doesn't support preallocated outputs or it does but
     // they haven't been passed in. Pass a list of uninitialized tensors to
