@@ -4,6 +4,9 @@
 #include <ATen/core/jit_type.h>
 
 namespace c10 {
+
+template<class T> TypePtr getTypePtr();
+
 namespace impl {
 inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
   if (lhs.isNone()) {
@@ -19,6 +22,27 @@ inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
   } else {
     AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
   }
+}
+
+template<class Key, class Value>
+Dict<Key, Value> toTypedDict(GenericDict dict) {
+  if (dict.impl_->elementTypes.has_value()) {
+    // TODO Show types in error message: TORCH_INTERNAL_ASSERT(getTypePtr<Key>() == dict.impl_->elementTypes->keyType, "Tried to cast a Dict with key type ", (*dict.impl_->elementTypes->keyType)->str(), " to a dict with different key type ", getTypePtr<Key>()->str());
+    TORCH_INTERNAL_ASSERT(getTypePtr<Key>() == dict.impl_->elementTypes->keyType, "Tried to cast a Dict to a dict with different key type");
+    // TODO Show types in error message: TORCH_INTERNAL_ASSERT(getTypePtr<Value>() == dict.impl_->elementTypes->valueType, "Tried to cast a Dict with value type ", (*dict.impl_->elementTypes->valueType)->str(), " to a dict with different value type ", getTypePtr<Value>()->str());
+    TORCH_INTERNAL_ASSERT(getTypePtr<Value>() == dict.impl_->elementTypes->valueType, "Tried to cast a Dict to a dict with different value type");
+  } else {
+    // The dict wasn't created with type info, but we're just about to convert it to a concrete type.
+    // Store that type info to the dict so that future conversions are checked against it.
+    dict.impl_->elementTypes = detail::DictImpl::DictElementTypes {getTypePtr<Key>(), getTypePtr<Value>()};
+  }
+
+  return Dict<Key, Value>(std::move(dict.impl_));
+}
+
+template<class Key, class Value>
+GenericDict toGenericDict(Dict<Key, Value> dict) {
+  return GenericDict(std::move(dict.impl_));
 }
 }
 
@@ -39,9 +63,7 @@ inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
 }
 
 inline intrusive_ptr<DictImpl> DictImpl::copy() const {
-  auto result = make_intrusive<DictImpl>();
-  result->dict = dict;
-  return result;
+  return make_intrusive<DictImpl>(dict, elementTypes);
 }
 
 }
@@ -50,21 +72,21 @@ template<class Key, class Value>
 Dict<Key, Value> make_dict() {
   static_assert(!std::is_same<IValue, Key>::value, "IValue isn't a valid Dict key. If you know the concrete key type at compile time, please specify it to make_dict<Key, Value>(). If you only know it at runtime, impl::make_generic_dict() might work for you.");
   static_assert(!std::is_same<IValue, Value>::value, "IValue isn't a valid Dict value. If you know the concrete key type at compile time, please specify it to make_dict<Key, Value>(). If you only know it at runtime, impl::make_generic_dict() might work for you.");
-  return Dict<Key, Value>(make_intrusive<detail::DictImpl>());
+  return Dict<Key, Value>(make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), detail::DictImpl::DictElementTypes{getTypePtr<Key>(), getTypePtr<Value>()}));
 }
 
 namespace impl {
 inline GenericDict make_generic_dict(TypePtr keyType, TypePtr valueType) {
-  return GenericDict(make_intrusive<detail::DictImpl>());
+  return GenericDict(make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), detail::DictImpl::DictElementTypes{std::move(keyType), std::move(valueType)}));
 }
 inline GenericDict make_generic_dict() {
-  return GenericDict(make_intrusive<detail::DictImpl>());
+  return GenericDict(make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), c10::nullopt));
 }
 }
 
 template<class Key, class Value>
 Dict<Key, Value>::Dict(Dict&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
-  rhs.impl_ = make_intrusive<detail::DictImpl>();
+  rhs.impl_ = make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), impl_->elementTypes);
 }
 
 template<class Key, class Value>
@@ -73,7 +95,7 @@ Dict<Key, Value>::Dict(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::
 template<class Key, class Value>
 Dict<Key, Value>& Dict<Key, Value>::operator=(Dict&& rhs) noexcept {
   impl_ = std::move(rhs.impl_);
-  rhs.impl_ = make_intrusive<detail::DictImpl>();
+  rhs.impl_ = make_intrusive<detail::DictImpl>(impl_->elementTypes);
   return *this;
 }
 

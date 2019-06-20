@@ -5,6 +5,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 struct IValue;
@@ -47,7 +48,20 @@ struct DictKeyEqualTo {
 
 struct DictImpl final : public c10::intrusive_ptr_target {
   using dict_map_type = ska::flat_hash_map<IValue, IValue, DictKeyHash, DictKeyEqualTo>;
+  struct DictElementTypes final {
+    TypePtr keyType;
+    TypePtr valueType;
+  };
+
+  explicit DictImpl(dict_map_type dict_, optional<DictElementTypes> elementTypes_)
+  : dict(std::move(dict_))
+  , elementTypes(std::move(elementTypes_))
+  {}
+
   dict_map_type dict;
+
+  // TODO Right now, this is optional, but we want to make it mandatory for all dicts to know their types
+  optional<DictElementTypes> elementTypes;
 
   intrusive_ptr<DictImpl> copy() const;
 };
@@ -355,16 +369,6 @@ namespace impl {
 // public API. Kernels should use Dicts with concrete Key, Value types instead
 // (maybe except for some internal prim ops).
 using GenericDict = Dict<IValue, IValue>;
-
-template<class Key, class Value>
-Dict<Key, Value> toTypedDict(GenericDict dict) {
-  return Dict<Key, Value>(std::move(dict.impl_));
-}
-
-template<class Key, class Value>
-GenericDict toGenericDict(Dict<Key, Value> dict) {
-  return GenericDict(std::move(dict.impl_));
-}
 
 }
 }
