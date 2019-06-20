@@ -477,15 +477,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
       .def("exception", &::c10d::ProcessGroup::Work::exception)
       .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
-      .def(
-          "result",
-          [](::c10d::ProcessGroup::Work& work) -> std::vector<at::Tensor> {
-            auto tensors = work.result();
-            for (auto& tensor : tensors) {
-              tensor = autograd::make_variable(tensor);
-            }
-            return tensors;
-          })
       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
       .def(
           "wait",
