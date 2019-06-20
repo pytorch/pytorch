@@ -64,7 +64,7 @@ struct CAFFE2_API CUDAHooksInterface {
   }
 
   virtual Device getDeviceFromPtr(void* data) const {
-    AT_ERROR("Cannot get default CUDA device without ATen_cuda library. ", CUDA_HELP);
+    AT_ERROR("Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual bool hasCUDA() const {
