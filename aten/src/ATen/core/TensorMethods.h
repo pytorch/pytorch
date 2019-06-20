@@ -253,12 +253,12 @@ inline Tensor & Tensor::cosh_() {
     return table->getOp<Tensor & (Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::cumsum(int64_t dim, c10::optional<ScalarType> dtype) const {
-    static auto table = globalATenDispatch().getOpTable("aten::cumsum(Tensor self, int dim, *, ScalarType? dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, ScalarType)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, dtype);
+    static auto table = globalATenDispatch().getOpTable("aten::cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, dtype);
 }
 inline Tensor Tensor::cumprod(int64_t dim, c10::optional<ScalarType> dtype) const {
-    static auto table = globalATenDispatch().getOpTable("aten::cumprod(Tensor self, int dim, *, ScalarType? dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, ScalarType)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, dtype);
+    static auto table = globalATenDispatch().getOpTable("aten::cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, dtype);
 }
 inline Tensor Tensor::det() const {
     static auto table = globalATenDispatch().getOpTable("aten::det(Tensor self) -> Tensor");
@@ -481,8 +481,8 @@ inline Tensor Tensor::logdet() const {
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::log_softmax(int64_t dim, c10::optional<ScalarType> dtype) const {
-    static auto table = globalATenDispatch().getOpTable("aten::log_softmax(Tensor self, int dim, ScalarType? dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, ScalarType)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, dtype);
+    static auto table = globalATenDispatch().getOpTable("aten::log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, dtype);
 }
 inline Tensor Tensor::logsumexp(IntArrayRef dim, bool keepdim) const {
     static auto table = globalATenDispatch().getOpTable("aten::logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor");
@@ -505,12 +505,12 @@ inline Tensor Tensor::max_values(IntArrayRef dim, bool keepdim) const {
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim);
 }
 inline Tensor Tensor::mean(c10::optional<ScalarType> dtype) const {
-    static auto table = globalATenDispatch().getOpTable("aten::mean(Tensor self, *, ScalarType? dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, ScalarType)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dtype);
+    static auto table = globalATenDispatch().getOpTable("aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dtype);
 }
 inline Tensor Tensor::mean(IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) const {
-    static auto table = globalATenDispatch().getOpTable("aten::mean(Tensor self, int[1] dim, bool keepdim, *, ScalarType? dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, ScalarType)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
+    static auto table = globalATenDispatch().getOpTable("aten::mean(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
 }
 inline std::tuple<Tensor,Tensor> Tensor::median(int64_t dim, bool keepdim) const {
     static auto table = globalATenDispatch().getOpTable("aten::median(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
@@ -713,8 +713,8 @@ inline Tensor Tensor::smm(const Tensor & mat2) const {
     return table->getOp<Tensor (const Tensor &, const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, mat2);
 }
 inline Tensor Tensor::softmax(int64_t dim, c10::optional<ScalarType> dtype) const {
-    static auto table = globalATenDispatch().getOpTable("aten::softmax(Tensor self, int dim, ScalarType? dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, ScalarType)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, dtype);
+    static auto table = globalATenDispatch().getOpTable("aten::softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, dtype);
 }
 inline std::vector<Tensor> Tensor::split(int64_t split_size, int64_t dim) const {
     static auto table = globalATenDispatch().getOpTable("aten::split(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]");
@@ -753,12 +753,12 @@ inline int64_t Tensor::stride(int64_t dim) const {
     return table->getOp<int64_t (const Tensor &, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim);
 }
 inline Tensor Tensor::sum(c10::optional<ScalarType> dtype) const {
-    static auto table = globalATenDispatch().getOpTable("aten::sum(Tensor self, *, ScalarType? dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, ScalarType)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dtype);
+    static auto table = globalATenDispatch().getOpTable("aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dtype);
 }
 inline Tensor Tensor::sum(IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) const {
-    static auto table = globalATenDispatch().getOpTable("aten::sum(Tensor self, int[1] dim, bool keepdim, *, ScalarType? dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, ScalarType)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
+    static auto table = globalATenDispatch().getOpTable("aten::sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
 }
 inline Tensor Tensor::sum_to_size(IntArrayRef size) const {
     static auto table = globalATenDispatch().getOpTable("aten::sum_to_size(Tensor self, int[] size) -> Tensor");
@@ -781,12 +781,12 @@ inline Tensor Tensor::std(IntArrayRef dim, bool unbiased, bool keepdim) const {
     return table->getOp<Tensor (const Tensor &, IntArrayRef, bool, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, unbiased, keepdim);
 }
 inline Tensor Tensor::prod(c10::optional<ScalarType> dtype) const {
-    static auto table = globalATenDispatch().getOpTable("aten::prod(Tensor self, *, ScalarType? dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, ScalarType)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dtype);
+    static auto table = globalATenDispatch().getOpTable("aten::prod(Tensor self, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dtype);
 }
 inline Tensor Tensor::prod(int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) const {
-    static auto table = globalATenDispatch().getOpTable("aten::prod(Tensor self, int dim, bool keepdim, *, ScalarType? dtype) -> Tensor");
-    return table->getOp<Tensor (const Tensor &, int64_t, bool, ScalarType)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
+    static auto table = globalATenDispatch().getOpTable("aten::prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, int64_t, bool, c10::optional<ScalarType>)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, dim, keepdim, dtype);
 }
 inline Tensor Tensor::t() const {
     static auto table = globalATenDispatch().getOpTable("aten::t(Tensor(a) self) -> Tensor(a)");
