@@ -8,6 +8,7 @@
 #include <sstream>
 #include <string>
 #include <cstdlib>
+#include <functional>
 #include <c10/macros/Macros.h>
 
 /*
