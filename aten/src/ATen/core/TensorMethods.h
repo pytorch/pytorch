@@ -285,7 +285,8 @@ inline Tensor Tensor::diagonal(int64_t offset, int64_t dim1, int64_t dim2) const
     return table->getOp<Tensor (const Tensor &, int64_t, int64_t, int64_t)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, offset, dim1, dim2);
 }
 inline Tensor Tensor::fill_diagonal(Scalar fill_value, bool wrap) const {
-    return dispatch_type().fill_diagonal(*this, fill_value, wrap);
+    static auto table = globalATenDispatch().getOpTable("aten::fill_diagonal(Tensor self, Scalar fill_value, bool wrap=False) -> Tensor");
+    return table->getOp<Tensor (const Tensor &, Scalar, bool)>(tensorTypeIdToBackend(type_id()), is_variable())(*this, fill_value, wrap);
 }
 inline Tensor Tensor::div(const Tensor & other) const {
     static auto table = globalATenDispatch().getOpTable("aten::div(Tensor self, Tensor other) -> Tensor");
