@@ -10614,20 +10614,22 @@ a")
             DynamicSliceExportMod(), (input,), f, example_outputs=example_outs)
 
     def test_string_frontend_elif(self):
-        def elif_test(niter : int):
-            rv = 0
-            for i in range(niter):
-                if i % 3 == 0 and i % 5 == 0:
-                    rv += 35
-                elif i % 3 == 0:
-                    rv += 3
-                elif i % 5 == 0:
-                    rv += 5
-                else:
-                    rv += i
-            return rv
+        code = """
+            def func(niter : int):
+                rv = 0
+                for i in range(niter):
+                    if i % 3 == 0 and i % 5 == 0:
+                        rv += 35
+                    elif i % 3 == 0:
+                        rv += 3
+                    elif i % 5 == 0:
+                        rv += 5
+                    else:
+                        rv += i
+                return rv
+        """
 
-        self.checkScript(elif_test, (101,))
+        self.checkScript(code, (101,))
 
     def test_pyop_exception_message(self):
         class Foo(torch.jit.ScriptModule):
