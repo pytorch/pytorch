@@ -100,7 +100,7 @@ void testCustomOperators() {
     push(stack, c10::make_list<double>({1.0, 2.0}));
     push(stack, c10::make_list<at::Tensor>({autograd::make_variable(at::ones(5))}));
     op->getOperation()(stack);
-    c10::ListPtr<double> output = c10::make_list<double>();
+    c10::List<double> output = c10::make_list<double>();
     pop(stack, output);
 
     ASSERT_EQ(output.size(), 2);
@@ -130,7 +130,7 @@ void testCustomOperators() {
     Stack stack;
     push(stack, c10::make_list<at::Tensor>({autograd::make_variable(at::ones(5))}));
     op->getOperation()(stack);
-    c10::ListPtr<at::Tensor> output = c10::make_list<at::Tensor>();
+    c10::List<at::Tensor> output = c10::make_list<at::Tensor>();
     pop(stack, output);
 
     ASSERT_EQ(output.size(), 1);
