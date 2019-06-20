@@ -6,10 +6,15 @@
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/ir.h>
 
 #include <functional>
 #include <initializer_list>
 #include <utility>
+
+#ifdef NAMEDTENSOR_ENABLED
+using at::DimnameList;
+#endif
 
 namespace torch {
 
