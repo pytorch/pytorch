@@ -369,11 +369,6 @@ def declare_outputs():
              'ExtensionBackendRegistration.h', 'RegistrationDeclarations.h']
     for f in files:
         file_manager.will_write(f)
-    for fname in sorted(generators.keys()):
-        fm = file_manager
-        if generators[fname]['name'] == 'CUDA':
-            fm = cuda_file_manager
-        fm.will_write(fname)
     for backend, density in iterate_types():
         full_backend = backend if density == "Dense" else density + backend
         fm = file_manager

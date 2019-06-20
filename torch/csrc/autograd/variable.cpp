@@ -76,9 +76,9 @@ void Variable::backward(
   edges.emplace_back(autograd_meta->grad_fn_, autograd_meta->output_nr_);
 
   std::vector<Variable> inputs;
-  Tensor gradient_;
+  Tensor gradient_ = gradient;
   if (!gradient.defined()) {
-    auto gradient_ = at::ones_like(*this);
+    gradient_ = at::ones_like(*this);
   }
   inputs.push_back(std::move(as_variable_ref(gradient_)));
   Engine::get_default_engine().execute(edges, inputs, keep_graph, create_graph);

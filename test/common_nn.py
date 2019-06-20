@@ -3189,7 +3189,7 @@ class ModuleTest(TestBase):
         test_case._zero_grad_input(input)
         with freeze_rng_state():
             output = test_case._forward(module, input)
-            grad_output = output.new(output.shape).normal_()
+            grad_output = output.new(output.shape, device=output.device).normal_()
             output = output.clone()
             d_input = deepcopy(test_case._backward(module, input, output, grad_output))
             d_param = deepcopy(test_case._get_parameters(module)[1])

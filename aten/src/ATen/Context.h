@@ -68,19 +68,12 @@ class CAFFE2_API Context {
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
       thc_state = detail::getCUDAHooks().initCUDA();
-<<<<<<< HEAD
-      detail::getCUDAHooks().registerCUDATypes(this);
-=======
-      generator_registry[static_cast<int>(DeviceType::CUDA)] =
-        detail::getCUDAHooks().initCUDAGenerator(this);
->>>>>>> Remove Type dispatch
     });
     return thc_state.get();
   }
   THHState* lazyInitHIP() {
     std::call_once(thh_init,[&] {
       thh_state = detail::getHIPHooks().initHIP();
-      detail::getHIPHooks().registerHIPTypes(this);
     });
     return thh_state.get();
   }
