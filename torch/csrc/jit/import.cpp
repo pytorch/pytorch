@@ -232,7 +232,7 @@ at::Tensor ScriptModuleDeserializer::loadTensor(
   } else if (device.type() == at::DeviceType::CUDA) {
     result =
         at::empty(
-            {0}, c10::TensorOptions(type).device(storage_it->second.device()))
+            {0}, at::TensorOptions(type).device(storage_it->second.device()))
             .set_(storage_it->second, tensor_proto.offset(), dims, strides);
   }
   AT_ASSERT(result.defined());

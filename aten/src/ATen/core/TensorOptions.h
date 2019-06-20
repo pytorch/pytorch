@@ -14,7 +14,7 @@
 #include <iosfwd>
 #include <utility>
 
-namespace c10 {
+namespace at {
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
 /// designed to support the Python style API for specifying construction options
 /// on factory functions, e.g.,
@@ -96,7 +96,7 @@ namespace c10 {
 /// resolution is done before template resolution, our problem is solved.
 
 
-struct C10_API TensorOptions {
+struct CAFFE2_API TensorOptions {
   TensorOptions()
     : requires_grad_(false)
     , is_variable_(false)
@@ -560,7 +560,7 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
   return TensorOptions().requires_grad(requires_grad);
 }
 
-C10_API std::ostream& operator<<(
+CAFFE2_API std::ostream& operator<<(
     std::ostream& stream,
     const TensorOptions& options);
 
@@ -614,4 +614,4 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
   }
 }
 
-} // namespace c10
+} // namespace at

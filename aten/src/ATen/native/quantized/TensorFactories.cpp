@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 #include <c10/core/QScheme.h>
 #include <ATen/quantized/Quantizer.h>
 

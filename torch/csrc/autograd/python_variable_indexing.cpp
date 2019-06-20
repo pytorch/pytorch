@@ -14,7 +14,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 #include <vector>

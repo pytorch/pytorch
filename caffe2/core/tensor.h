@@ -7,7 +7,7 @@
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include "ATen/core/Tensor.h"
-#include <c10/core/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 namespace caffe2 {
 
@@ -71,7 +71,7 @@ class CAFFE2_API Tensor final {
   explicit Tensor(at::Device device)
     : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
         Storage::create_legacy(device, TypeMeta()),
-        c10::computeTensorTypeId(at::device(device).layout(at::kStrided))
+        at::computeTensorTypeId(at::device(device).layout(at::kStrided))
       )) {
   }
 
