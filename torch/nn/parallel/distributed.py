@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import copy
 import itertools
 
@@ -272,6 +273,8 @@ class DistributedDataParallel(Module):
         self.module = module
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
+        self.require_backward_grad_sync = True
+        self.require_forward_param_sync = True
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -377,8 +380,31 @@ class DistributedDataParallel(Module):
                                "init_process_group and have not passed "
                                "process_group argument to DDP constructor")
 
+    @contextmanager
+    def no_sync(self):
+        r"""
+        A context manager to disable gradient synchronizations across DDP
+        processes. Within this context, gradients will be accumulated on module
+        variables, which will later be synchronized in the first
+        forward-backward pass exiting the context.
+
+        Example::
+
+            >>> ddp = torch.nn.DistributedDataParallel(model, pg)
+            >>> with ddp.no_sync():
+            ...   for input in inputs:
+            ...     ddp(input).backward()  # no synchronization, accumulate grads
+            ... ddp(another_input).backward()  # synchronize grads
+        """
+        old_require_backward_grad_sync = self.require_backward_grad_sync
+        self.require_backward_grad_sync = False
+        yield
+        self.require_backward_grad_sync = old_require_backward_grad_sync
+
     def forward(self, *inputs, **kwargs):
-        self._sync_params()
+        if self.require_forward_param_sync:
+            self._sync_params()
+
         if self.device_ids:
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
             if len(self.device_ids) == 1:
@@ -389,7 +415,8 @@ class DistributedDataParallel(Module):
         else:
             output = self.module(*inputs, **kwargs)
 
-        if torch.is_grad_enabled():
+        if torch.is_grad_enabled() and self.require_backward_grad_sync:
+            self.require_forward_param_sync = True
             # We'll return the output object verbatim since it is a freeform
             # object. We need to find any tensors in this object, though,
             # because we need to figure out which parameters were used during
@@ -399,6 +426,9 @@ class DistributedDataParallel(Module):
                 self.reducer.prepare_for_backward(list(_find_tensors(output)))
             else:
                 self.reducer.prepare_for_backward([])
+        else:
+            self.require_forward_param_sync = False
+
         return output
 
     def scatter(self, inputs, kwargs, device_ids):
