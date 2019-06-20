@@ -59,10 +59,11 @@ protected:
   ReadyQueue& ready_queue_by_index(int device_index);
   void start_threads();
   virtual void thread_init(int device);
-  virtual void thread_main(std::shared_ptr<GraphTask> graph_task);
+  virtual void thread_main(GraphTask *graph_task);
   virtual void thread_on_exception(FunctionTask& task, std::exception& e);
   void reentrant_thread_init();
-  void process_queue(int device);
+  void add_thread_pool_task(GraphTask *graph_task);
+  void set_device(int device);
 
   // Ensures ready_queues_ are initialized only once
   std::once_flag start_threads_flag_;
@@ -73,20 +74,26 @@ protected:
   std::mutex post_callbacks_lock_;
 
   struct ThreadPoolShared {
-    std::atomic_int num_workers_;
+    // Data structres used by the threads for executing reentrant backwards
+    // tasks. See Note [Reentrant backwards]
+    // Number of avaliable threads for processing new GraphTasks.
+    std::atomic_uint num_workers_;
+    // The threads will wait on work_ to be notified of GraphTasks
     std::condition_variable work_;
-    std::mutex graphtasks_queue_lock_;
-    std::queue<std::shared_ptr<GraphTask>> graphtasks_queue_;
+    // To protect reads and writes to graphtask_queue_ and num_workers_
+    // and for synchronizing creating new threads when needed
+    std::mutex mutex_;
+    // Workers will process the GraphTasks added to this queue
+    std::queue<GraphTask*> graphtasks_queue_;
 
     ThreadPoolShared() : num_workers_(0) {};
  };
 
  // Temporary workaround until shutting down threads is done
- // Need shared ownership of all these objects because threads are leaked
- // when Engine shuts down
+ // We need shared ownership of all these objects because the threads are leaked
+ // when Engine shuts down, so there may be threads waiting on work_
+ // for the graphtasks_queue_ to be nonempty.
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
- // TODO don't really need this because the parent thread waits
- std::vector<std::shared_ptr<std::mutex>> device_locks_;
 };
 
 // allow python_engine to override the default engine when it loads
