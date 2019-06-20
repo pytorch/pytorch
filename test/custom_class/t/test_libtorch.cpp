@@ -35,8 +35,8 @@ struct Foo {
 static auto registry = torch::RegisterOperators("my_ops::warp_perspective",
                                                      &warp_perspective);
 static auto test = torch::jit::class_<Foo>("Foo")
-                    // .def(torch::jit::init<int64_t, int64_t>())
-                    .def(torch::jit::init<>())
+                    .def(torch::jit::init<int64_t, int64_t>())
+                    // .def(torch::jit::init<>())
                     .def("display", &Foo::display)
                     .def("add", &Foo::add)
                     .def("combine", &Foo::combine);

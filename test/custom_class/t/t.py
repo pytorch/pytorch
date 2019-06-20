@@ -21,18 +21,16 @@ class Bar:
 
 @torch.jit.script
 def f(x):
-    foo = Bar()
-    foo.display()
-    # val = torch._C.Foo(5, 3)
-    # # val = Bar(5, 3)
-    # # val.display()
-    # # val2 = Bar(100, 0)
-    # val2 = torch._C.Foo(100, 0)
-    # print("Initialization done")
+    val = torch._C.Foo(5, 3)
+    # val = Bar(5, 3)
     # val.display()
-    # val3 = val.combine(val2)
-    # val3.display()
-    # print(val, val2)
+    # val2 = Bar(100, 0)
+    val2 = torch._C.Foo(100, 0)
+    print("Initialization done")
+    val.display()
+    val3 = val.combine(val2)
+    val3.display()
+    print(val, val2)
 
 print(f.graph)
 f(torch.randn(32, 32))
