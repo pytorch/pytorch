@@ -58,8 +58,6 @@ enum class TypeID {
   CUDA,
   SparseCUDA,
   QuantizedCPU,
-  MSNPU,
-  XLA,
   ComplexCPU,
   Undefined,
   NumOptions

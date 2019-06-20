@@ -120,8 +120,6 @@ TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.h")
 TYPE_EXTENDED_INTERFACE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtendedInterface.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
-TYPE_EXTENSION_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.h")
-TYPE_EXTENSION_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.cpp")
 REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegistrationDeclarations.h")
 
 LEGACY_TH_DISPATCHER_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHDispatcher.h")
@@ -145,16 +143,8 @@ LEGACY_TH_FUNCTIONS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunct
 
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
 
-EXTENSION_BACKEND_REGISTRATION_H = CodeTemplate.from_file(TEMPLATE_PATH + "/ExtensionBackendRegistration.h")
-
 TYPE_REGISTER = CodeTemplate("""\
 context->registerType(Backend::${backend}, new ${type_name}());
-""")
-
-EXTENSION_BACKEND_REGISTER_SWITCH = CodeTemplate("""\
-case Backend::${Backend}:
-    ${Type}Dispatch::register_function(schema, fn);
-    break;
 """)
 
 core_file_manager = FileManager(core_install_dir)
@@ -170,8 +160,6 @@ backends = ['CPU', 'CUDA']
 densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
 
 quantized_backends = ['QuantizedCPU']
-
-extension_backends = ['MSNPU', 'XLA']
 
 # scalar_name, c_type, accreal, is_floating_type
 quantized_scalar_types = [
@@ -196,8 +184,6 @@ top_env = {
     'function_definitions': [],
     'type_ids': [],
     'native_function_declarations': [],
-    'extension_backend_headers': [],
-    'extension_backend_register_switches': [],
     'registration_declarations': [],
 }
 
@@ -344,32 +330,6 @@ def generate_storage_type_and_tensor(backend, density, declarations):
             '#include "ATen/{}.h"'.format(env['Type']))
 
 
-def generate_type_extension_backend(backend, declarations):
-    env = {}
-    env['Type'] = "{}Type".format(backend)
-    env['Backend'] = backend
-    env['DeviceType'] = backend_to_devicetype(backend)
-    env['TypeID'] = 'TypeID::' + backend
-    top_env['type_ids'].append(backend + ',')
-
-    declarations, definitions, registrations = function_wrapper.create_extension_backend(
-        env, declarations)
-    env['type_method_declarations'] = declarations
-    env['type_method_definitions'] = definitions
-    env['function_registrations'] = registrations
-
-    type_register = TYPE_REGISTER.substitute(backend=env['Backend'], type_name=env['Type'])
-    top_env['cpu_type_headers'].append('#include "ATen/{}.h"'.format(env['Type']))
-    top_env['cpu_type_registrations'].append(type_register)
-    file_manager.write(env['Type'] + ".cpp", TYPE_EXTENSION_CPP, env)
-    file_manager.write(env['Type'] + ".h", TYPE_EXTENSION_H, env)
-
-    extension_backend_register_switch = EXTENSION_BACKEND_REGISTER_SWITCH.substitute(env)
-    top_env['extension_backend_register_switches'].append(extension_backend_register_switch)
-    top_env['extension_backend_headers'].append(
-        '#include <ATen/{}.h>'.format(env['Type']))
-
-
 def generate_legacy_th_dispatcher(backend, density, scalar_type, declarations):
     assert density == 'Dense'
     scalar_name, c_type, accreal, is_floating_type = scalar_type
@@ -423,7 +383,7 @@ def declare_outputs():
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h',
              'LegacyTHDispatcher.h', 'LegacyTHDispatcher.cpp', 'Functions.h', 'NativeFunctions.h',
-             'RegisterCPU.cpp', 'RegisterCPU.h', 'ExtensionBackendRegistration.h', 'RegistrationDeclarations.h']
+             'RegisterCPU.cpp', 'RegisterCPU.h', 'RegistrationDeclarations.h']
     for f in files:
         file_manager.will_write(f)
     cuda_files = ['RegisterCUDA.cpp', 'RegisterCUDA.h']
@@ -451,9 +411,6 @@ def declare_outputs():
         if density == 'Dense':
             fm.will_write("{}{}{}{}.h".format('LegacyTH', backend, scalar_type[0], 'Dispatcher'))
             fm.will_write("{}{}{}{}.cpp".format('LegacyTH', backend, scalar_type[0], 'Dispatcher'))
-    for backend in extension_backends:
-        file_manager.will_write("{}Type.h".format(backend))
-        file_manager.will_write("{}Type.cpp".format(backend))
 
 
 def filter_by_extension(files, *extensions):
@@ -506,8 +463,6 @@ def generate_outputs():
 
     for backend, density in iterate_types():
         generate_storage_type_and_tensor(backend, density, declarations)
-    for backend in extension_backends:
-        generate_type_extension_backend(backend, declarations)
 
     for backend, density, scalar_type in legacy_iterate_types():
         if density == 'Dense':
@@ -539,8 +494,6 @@ def generate_outputs():
     file_manager.write('Functions.h', FUNCTIONS_H, top_env)
 
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
-
-    file_manager.write('ExtensionBackendRegistration.h', EXTENSION_BACKEND_REGISTRATION_H, top_env)
 
     file_manager.check_all_files_written()
     cuda_file_manager.check_all_files_written()
