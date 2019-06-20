@@ -107,8 +107,6 @@ git config user.name "pytorchbot"
 git commit -m "Automatic sync on $(date)" || true
 git status
 
-export dry_run=false  # yf225 TODO: remove this when we are ready to merge!
-
 if [ "$dry_run" = false ]; then
   echo "Pushing to https://github.com/pytorch/cppdocs"
   set +x
@@ -123,10 +121,6 @@ DONE
   set -x
 else
   echo "Skipping push due to dry_run"
-fi
-
-if [ "$dry_run" = false ]; then
-  exit 1  # yf225 TODO: remove this when we are ready to merge!
 fi
 
 popd
