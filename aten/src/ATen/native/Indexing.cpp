@@ -250,7 +250,7 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
   if (accumulate && self.type().device_type() == kCUDA) {
       index_put_accum_stub(self.type().device_type(), self, indices, value, unsafe);
       return self;
-  } 
+  }
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
   index_put_stub(iter->device_type(), *iter, info.indexed_sizes, info.indexed_strides, accumulate);
@@ -272,7 +272,11 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   int64_t numIndices = index.numel();
   if (source.dim() == 0 && numIndices != 1) {
     AT_INDEX_ERROR("index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
+  } else if ((source.dim() != self.dim()) && (source.dim() != 0 && self.dim() != 0)) {
+    AT_INDEX_ERROR("index_copy_(): When source and destination are not scalars, their dimensionality must match. Source dimensionality (",
+                   source.dim(), "), destination dimensionality (", self.dim(), ")");
   }
+
   if (index.scalar_type() != ScalarType::Long) {
     AT_INDEX_ERROR("index_copy_(): Expected LongTensor for index");
   }
@@ -367,6 +371,21 @@ Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& in
         n_below *= grad.size(i);
     }
     return at::_sparse_coo_tensor_unsafe(sparse_ind, grad.reshape(-1), self.sizes());
+}
+
+std::vector<Tensor> nonzero_numpy(const Tensor& self) {
+  // special case scalar for compatibility with numpy:
+  //
+  // >>> np.array(5).nonzero()
+  // (array([0]),)
+  // >>> np.array(0).nonzero()
+  // (array([], dtype=int64),)
+
+  if (self.dim() == 0) {
+    return self.unsqueeze(0).nonzero().unbind(1);
+  }
+
+  return self.nonzero().unbind(1);
 }
 
 }} // at::native

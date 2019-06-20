@@ -9,6 +9,8 @@
 #include <tuple>
 #include <vector>
 
+#include <Python.h>
+
 namespace torch {
 namespace jit {
 namespace script {
@@ -250,16 +252,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // it adds a buffer 'training' to the model if one doesn't exist
   // and then loads that parameter, casting it to bool
   if (field == "training") {
-    Slot* v = module_->find_buffer(field);
+    c10::optional<Slot> v = module_->find_attribute(field);
     if (!v) {
       bool training = py::cast<bool>(py::getattr(py_module_, "training"));
-      auto t =
-          autograd::make_variable(at::full({}, training ? 1 : 0, at::kLong));
-      module_->register_buffer("training", std::move(t));
-      v = module_->find_buffer(field);
+      module_->register_attribute(
+          "training", BoolType::get(), std::move(training));
+      v = module_->find_attribute(field);
     }
-    Value* the_tensor = m.graph()->insertGetAttr(self_, "training");
-    Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
+    Value* the_bool = m.graph()->insertGetAttr(self_, "training");
     return std::make_shared<SimpleValue>(the_bool);
   }
 
@@ -275,7 +275,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // This can also be a call to a non-script module, or a plain
   // python method. If so return this as a python value.
-
   py::object overloads =
       py_module_.attr("_overloads").attr("get")(field, py::none());
   if (!overloads.is_none()) {
@@ -318,7 +317,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
               .attr("_make_strong_submodule")(field, attr, py_module_);
       if (!result.is_none()) {
         auto submodule = as_module(result);
-        AT_CHECK(
+        TORCH_CHECK(
             submodule,
             "Result of torch.jit._make_strong_submodule "
             "was not a ScriptModule");
@@ -327,7 +326,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         module_->register_module(field, submodule);
         auto v = module_->find_module(field);
         return std::make_shared<ModuleValue>(
-            m.graph()->insertGetAttr(self_, field), v, attr);
+            m.graph()->insertGetAttr(self_, field), v, result);
       }
     } else if (py::isinstance<py::function>(attr)) {
       auto stub = py::module::import("torch.jit")
@@ -347,9 +346,10 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   if (py::isinstance(attr, py::module::import("torch").attr("Tensor"))) {
     hint = "Tensors must be added to a module as a buffer or parameter";
   }
-  throw ErrorReport(loc)
-      << "attribute '" << field << "' of type '" << typeString(attr)
-      << "' is not usable in a script method (" << hint << ")";
+  throw ErrorReport(loc) << "attribute '" << field << "' of type '"
+                         << typeString(attr)
+                         << "' is not usable in a script method (" << hint
+                         << ")";
 }
 
 std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
@@ -359,11 +359,21 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
   if (!py::isinstance(
           py_module_, py::module::import("torch.jit").attr("_ConstModuleList")))
     return SugaredValue::asTuple(loc, m, size_hint);
+
+  // the submodules in the module list may be a mix of python objects
+  // and script Modules. If we need to load a Module, we need its field
+  // name so we can emit 'self.field_name'.
+  std::unordered_map<at::ivalue::Object*, std::string> obj_to_field;
+  for (Slot s : module_->get_module_slots()) {
+    obj_to_field[s.value().toObject().get()] = s.name();
+  }
+
   std::vector<std::shared_ptr<SugaredValue>> result;
   for (py::handle py_submodule : py_module_) {
     py::object obj = py::reinterpret_borrow<py::object>(py_submodule);
     if (auto sub_module = as_module(obj)) {
-      Value* module_v = m.graph()->insertGetAttr(self_, sub_module->name());
+      Value* module_v = m.graph()->insertGetAttr(
+          self_, obj_to_field.at(sub_module->module_object().get()));
       result.emplace_back(
           std::make_shared<ModuleValue>(module_v, sub_module, obj));
     } else {
@@ -488,6 +498,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (py::isinstance<py::function>(obj)) {
+    if (typeString(obj) == "builtin_function_or_method") {
+      throw ErrorReport(loc)
+          << "You are calling a python builtin_function_or_method "
+          << "which is currently not supported in Torchscript."
+          << "Please open a feature request to add it.";
+    }
+
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
     if (auto callee = as_function(compiled_fn)) {

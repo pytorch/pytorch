@@ -483,7 +483,7 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_resnet(self):
         state_dict = model_zoo.load_url(model_urls['resnet50'], progress=False)
         self.run_model_test(resnet50(), train=False, batch_size=BATCH_SIZE,
-                            state_dict=state_dict, atol=1e-6)
+                            state_dict=state_dict, atol=1e-5)
 
     def test_squeezenet(self):
         sqnet_v1_1 = SqueezeNet(version=1.1)
@@ -895,6 +895,13 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(*shape)
         self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_cosine_similarity(self):
+        shape = (100, 128)
+        x = torch.randn(*shape)
+        y = torch.randn(*shape)
+        self.run_model_test(torch.nn.CosineSimilarity(dim=1, eps=1e-6), train=False,
+                            input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_lstm_constant_folding(self):
         class LstmNet(nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -1116,7 +1123,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_pixel_shuffle(self):
         underlying = nn.PixelShuffle(4)
-        shape = (1, 64, 5, 5)
+        shape = (1, 32, 5, 5)
         input = Variable(torch.randn(*shape),
                          requires_grad=True)
         self.run_model_test(underlying, train=False, input=(input),
@@ -1202,6 +1209,17 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_dynamic_slice_script(self):
+        class DynamicSliceModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x[1:x.size(0)]
+        module = DynamicSliceModel()
+        x = torch.rand(1, 2)
+        example_output = module(x)
+        self.run_model_test(DynamicSliceModel(), train=False, input=(x,),
+                            batch_size=BATCH_SIZE, use_gpu=False, example_outputs=example_output)
+
     def test_dynamic_slice_to_the_end(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -1242,6 +1260,16 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
                             use_gpu=False, example_outputs=(torch.ones(x.size()),))
+
+    def test_full_script(self):
+        class FullClass(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.full((4, 5), x, dtype=torch.long)
+
+        x = torch.tensor(12)
+        self.run_model_test(FullClass(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=FullClass()(x))
 
     def test_where_functional(self):
         class WhereFunctional(torch.nn.Module):
@@ -1644,6 +1672,29 @@ class TestCaffe2Backend(unittest.TestCase):
 
         self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3, use_gpu=False)
 
+    def test_tuple_input_output(self):
+        class TupleModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                # type: (Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+                return a
+
+        x = (torch.randn(3, 4), torch.randn(4, 3))
+        self.run_model_test(TupleModel(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(x,))
+
+    def test_nested_tuple_input_output(self):
+        class NestedTupleModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a, b):
+                # type: (Tensor, Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
+                return a + b[0] + b[1][0] + b[1][1]
+
+        x = torch.randn(4, 5)
+        y = (torch.randn(4, 5), (torch.randn(4, 5), torch.randn(4, 5)))
+        self.run_model_test(NestedTupleModel(), train=False, input=(x, y), batch_size=BATCH_SIZE,
+                            example_outputs=x + y[0] + y[1][0] + y[1][1])
+
     def test_topk(self):
         class TopKModel(torch.nn.Module):
             def forward(self, input):
@@ -1721,6 +1772,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_prim_shape(self):
         x = torch.randn(4, 5, requires_grad=True)
+
         @torch.jit.script
         def view_by_prim_shape(x):
             return x.view(x.shape)

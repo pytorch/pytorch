@@ -215,6 +215,23 @@ struct TORCH_API ClassValue : public SugaredValue {
   ClassTypePtr type_;
 };
 
+struct TORCH_API NamedTupleConstructor : public SugaredValue {
+  explicit NamedTupleConstructor(TupleTypePtr type) : type_(std::move(type)) {}
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+  std::string kind() const override {
+    return type_->str();
+  }
+
+  TupleTypePtr type_;
+};
+
 struct FunctionValue : public SugaredValue {
   FunctionValue(std::shared_ptr<Function> callee)
       : callee_(std::move(callee)) {}
@@ -232,12 +249,26 @@ struct FunctionValue : public SugaredValue {
     callee_->ensure_defined();
     MatchedSchema match =
         matchSchema(callee_->getSchema(), loc, *f.graph(), inputs, attributes);
-    return std::make_shared<SimpleValue>(
-        f.graph()->insertFunctionCall(callee_, match));
+    Value* output = f.graph()->insertFunctionCall(callee_, match);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
   }
 
  private:
   std::shared_ptr<Function> callee_;
+};
+
+struct TORCH_API ClosureValue : public SugaredValue {
+  ClosureValue(Value* value) : value_(value) {
+    TORCH_INTERNAL_ASSERT(value_->node()->kind() == prim::Function);
+  }
+  std::string kind() const override {
+    return "closure";
+  }
+  Value* asValue(const SourceRange& range, Function& m) override {
+    return value_;
+  }
+  Value* value_;
 };
 
 // defines how a method obtained from a module behaves in script
@@ -262,8 +293,9 @@ struct MethodValue : public SugaredValue {
     method->ensure_defined();
     MatchedSchema match = matchSchema(
         method->getSchema(), loc, *f.graph(), inputsWithSelf, attributes);
-    return std::make_shared<SimpleValue>(
-        f.graph()->insertMethodCall(method_name_, match));
+    Value* output = f.graph()->insertMethodCall(method_name_, match);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
   }
 
  private:
@@ -313,7 +345,9 @@ using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 // builtins operators and functions that call a method if it exists
 // on a class type, like 'len(x)' and 'x + y'
 struct TORCH_API MagicMethod : public SugaredValue {
-  MagicMethod(std::string desugared_name, SugaredValuePtr base)
+  MagicMethod(
+      std::string desugared_name,
+      SugaredValuePtr base)
       : base_value_(std::move(base)),
         desugared_name_(std::move(desugared_name)) {}
 
@@ -336,6 +370,7 @@ struct TORCH_API MagicMethod : public SugaredValue {
               << class_ptr->python_str() << " does not define a "
               << desugared_name_ << " method";
         }
+
         return MethodValue(self, desugared_name_)
             .call(loc, m, inputs.slice(1), attributes, n_binders);
       }
@@ -363,6 +398,13 @@ struct TORCH_API AnnotateValue : public SugaredValue {
   AnnotateValue() = default;
   std::string kind() const override {
     return "annotate";
+  }
+};
+
+struct TORCH_API UninitializedValue : public SugaredValue {
+  UninitializedValue() = default;
+  std::string kind() const override {
+    return "uninitialized";
   }
 };
 

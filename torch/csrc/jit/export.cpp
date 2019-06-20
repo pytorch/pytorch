@@ -129,13 +129,17 @@ class EncoderBase {
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
       const std::map<std::string, at::Tensor>& initializers =
-          std::map<std::string, at::Tensor>());
+        std::map<std::string, at::Tensor>(),
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes =
+        std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   void EncodeBlock(
       onnx::GraphProto* graph_proto,
       const Block* block,
       const std::map<std::string, at::Tensor>& initializers =
-          std::map<std::string, at::Tensor>());
+        std::map<std::string, at::Tensor>(),
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes =
+        std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
@@ -149,7 +153,9 @@ class EncoderBase {
   virtual void EncodeValueInfo(
       onnx::GraphProto* graph_proto,
       onnx::ValueInfoProto* v,
-      const Value* n);
+      const Value* n,
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes =
+        std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>());
 
   void AddAttribute(
       onnx::NodeProto* node_proto,
@@ -206,8 +212,10 @@ EncoderBase::EncoderBase(
 void EncoderBase::EncodeValueInfo(
     onnx::GraphProto* graph_proto,
     onnx::ValueInfoProto* v,
-    const Value* n) {
-  v->set_name(n->uniqueName());
+    const Value* n,
+    const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
+  std::string name = n->uniqueName();
+  v->set_name(name);
   if (CompleteTensorTypePtr node_type = n->type()->cast<CompleteTensorType>()) {
     onnx::TypeProto* t = v->mutable_type();
     onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
@@ -215,7 +223,13 @@ void EncoderBase::EncodeValueInfo(
     const std::vector<std::int64_t>& sizes = node_type->sizes();
     for (size_t i = 0; i < sizes.size(); i++) {
       shape->add_dim();
-      shape->mutable_dim(i)->set_dim_value(sizes[i]);
+      if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
+          (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())){
+        shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
+      }
+      else{
+        shape->mutable_dim(i)->set_dim_value(sizes[i]);
+      }
     }
     tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
   } else if (BoolTypePtr node_type = n->type()->cast<BoolType>()) {
@@ -228,14 +242,16 @@ void EncoderBase::EncodeValueInfo(
 void EncoderBase::EncodeGraph(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
-    const std::map<std::string, at::Tensor>& initializers) {
-  EncodeBlock(graph_proto, graph->block(), initializers);
+    const std::map<std::string, at::Tensor>& initializers,
+    const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
+  EncodeBlock(graph_proto, graph->block(), initializers, dynamic_axes);
 }
 
 void EncoderBase::EncodeBlock(
     onnx::GraphProto* graph_proto,
     const Block* block,
-    const std::map<std::string, at::Tensor>& initializers) {
+    const std::map<std::string, at::Tensor>& initializers,
+    const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   AT_ASSERT(graph_proto != nullptr);
   std::string block_name = "torch-jit-export";
   if (num_blocks_) {
@@ -246,11 +262,11 @@ void EncoderBase::EncodeBlock(
 
   for (auto input : block->inputs()) {
     onnx::ValueInfoProto* v = graph_proto->add_input();
-    EncodeValueInfo(graph_proto, v, input);
+    EncodeValueInfo(graph_proto, v, input, dynamic_axes);
   }
   for (auto output : block->outputs()) {
     onnx::ValueInfoProto* v = graph_proto->add_output();
-    EncodeValueInfo(graph_proto, v, output);
+    EncodeValueInfo(graph_proto, v, output, dynamic_axes);
   }
   for (auto node : block->nodes()) {
     bool is_raw_export =
@@ -404,6 +420,7 @@ class GraphEncoder : public EncoderBase {
       int64_t onnx_opset_version,
       onnx_torch::OperatorExportTypes operator_export_type,
       const std::map<std::string, at::Tensor>& initializers,
+      const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
       bool defer_weight_export,
       bool strip_doc);
 
@@ -426,6 +443,7 @@ GraphEncoder::GraphEncoder(
     int64_t onnx_opset_version,
     onnx_torch::OperatorExportTypes operator_export_type,
     const std::map<std::string, at::Tensor>& initializers,
+    const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes,
     bool defer_weight_export,
     bool strip_doc)
     : EncoderBase(operator_export_type, strip_doc),
@@ -438,7 +456,7 @@ GraphEncoder::GraphEncoder(
   // This is the version of ONNX operator set we are targeting
   imp->set_version(onnx_opset_version);
 
-  EncodeGraph(model_proto_.mutable_graph(), graph, initializers);
+  EncodeGraph(model_proto_.mutable_graph(), graph, initializers, dynamic_axes);
 
   for (const std::string& domain : domains_) {
     auto* opset = model_proto_.add_opset_import();
@@ -529,7 +547,7 @@ class ScriptModuleSerializer final {
   IValue moduleGetState(const script::Module& module);
   bool moduleHasValidGetSetState(const script::Module& module);
 
-  void convertClass(const ClassTypePtr& type, torch::ModelDef* model_def);
+  void convertClass(const c10::NamedTypePtr& type, torch::ModelDef* model_def);
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
@@ -542,10 +560,10 @@ class ScriptModuleSerializer final {
   std::vector<IValue> pickled_ivalues_;
 
   // all classes used by this module hierarchy
-  std::vector<ClassTypePtr> class_table_;
-  OrderedDict<ClassTypePtr, std::string> converted_classes_;
-  std::unordered_map<ClassTypePtr, std::vector<ClassTypePtr>> class_to_deps_;
-
+  std::vector<c10::NamedTypePtr> class_table_;
+  OrderedDict<c10::NamedTypePtr, std::string> converted_classes_;
+  std::unordered_map<c10::NamedTypePtr, std::vector<c10::NamedTypePtr>>
+      class_to_deps_;
 };
 
 // ScriptModuleSerializer's methods
@@ -612,7 +630,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   // to maintain dependency order.
   std::unordered_set<std::string> written_files;
   for (const auto& item : converted_classes_) {
-    const ClassTypePtr& class_type = item.key();
+    const c10::NamedTypePtr& class_type = item.key();
     const std::string filename =
         ImportExportHelpers::qualifierToPath(class_type->qualifier());
     if (written_files.count(filename)) {
@@ -633,13 +651,13 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 // python print the class and add to the converted_classes_. Recursively
 // python print all classes that this class depends on.
 void ScriptModuleSerializer::convertClass(
-    const ClassTypePtr& class_type,
+    const c10::NamedTypePtr& class_type,
     torch::ModelDef* model_def) {
   if (converted_classes_.contains(class_type)) {
     return;
   }
 
-  std::vector<ClassTypePtr> class_deps;
+  std::vector<c10::NamedTypePtr> class_deps;
   std::ostringstream class_stream;
   PythonPrint(
       class_stream,
@@ -709,12 +727,12 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
 
   // Check __getstate__
   //   __getstate__ is expected to be (self) -> T
-  AT_CHECK(
+  TORCH_CHECK(
       get_schema.arguments().size() == 1,
       "'__getstate__' must have 'self' as its only argument, but found ",
       get_schema.arguments().size(),
       " arguments");
-  AT_CHECK(
+  TORCH_CHECK(
       get_schema.returns().size() == 1,
       "'__getstate__' must return 1 value, but found ",
       get_schema.returns().size());
@@ -722,24 +740,24 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
   // TODO: use getMethod("__getstate__") once methods are not lowered
-  auto setstate = module.class_compilation_unit().find_function("__setstate__");
+  auto setstate = module.class_compilation_unit()->find_function("__setstate__");
   if (setstate == nullptr) {
     return false;
   }
   auto set_schema = setstate->getSchema();
 
-  AT_CHECK(
+  TORCH_CHECK(
       set_schema.arguments().size() == 2,
       "'__setstate__' must have 'self' and the state as its "
       "only arguments, but found ",
       set_schema.arguments().size(),
       " arguments");
-  AT_CHECK(
+  TORCH_CHECK(
       set_schema.returns().size() == 1,
       "'__setstate__' must return None, but found ",
       set_schema.returns().size(),
       " return values");
-  AT_CHECK(
+  TORCH_CHECK(
       set_schema.returns().at(0).type()->isSubtypeOf(NoneType::get()),
       "'__setstate__' must return None, but found value of type",
       set_schema.returns().at(0).type()->python_str());
@@ -749,7 +767,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
   auto get_type = get_schema.returns().at(0).type();
   auto set_type = set_schema.arguments().at(1).type();
 
-  AT_CHECK(
+  TORCH_CHECK(
       set_type->isSubtypeOf(get_type),
       "'__getstate__'s return type (",
       get_type->python_str(),
@@ -762,15 +780,7 @@ bool ScriptModuleSerializer::moduleHasValidGetSetState(
 
 /// Run module.__getstate__() and return the result
 IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
-  auto getstate = module.find_method("__getstate__");
-  AT_CHECK(
-      getstate != nullptr,
-      "Cannot call '__getstate__' method because"
-      " it does not exist");
-
-  Stack stack;
-  getstate->run(stack);
-  return stack.at(0);
+  return module.get_method("__getstate__")({});
 }
 
 size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
@@ -893,12 +903,12 @@ void ScriptModuleSerializer::convertModule(
     module_name << prefix << "_";
   module_name << name;
 
-  if (module.class_compilation_unit().get_functions().size() > 0) {
+  if (module.class_compilation_unit()->get_functions().size() > 0) {
     std::ostringstream methods;
     methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
     PythonPrint(
         methods,
-        module.class_compilation_unit(),
+        *module.class_compilation_unit(),
         /*is_method=*/true,
         tensor_table_,
         class_table_,
@@ -913,9 +923,9 @@ void ScriptModuleSerializer::convertModule(
     record->set_key(filename.str());
   }
 
-  for (const auto& elem : module.get_modules()) {
+  for (script::Slot s : module.get_module_slots()) {
     torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(*elem, module_name.str(), elem->name(), sub_def);
+    convertModule(s.to_module(), module_name.str(), s.name(), sub_def);
   }
 }
 
@@ -1112,6 +1122,7 @@ std::string pretty_print_onnx(
       onnx_opset_version,
       operator_export_type,
       initializers,
+      std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>{},
       defer_weight_export,
       true);
   if (google_printer) {
@@ -1129,6 +1140,7 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
+    const std::unordered_map<std::string, std::unordered_map<std::int64_t, std::string>>& dynamic_axes,
     bool defer_weight_export,
     ::torch::onnx::OperatorExportTypes operator_export_type,
     bool strip_doc_string) {
@@ -1137,6 +1149,7 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
       onnx_opset_version,
       operator_export_type,
       initializers,
+      dynamic_axes,
       defer_weight_export,
       strip_doc_string);
   return std::make_tuple(

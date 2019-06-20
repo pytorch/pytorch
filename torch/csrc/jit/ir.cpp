@@ -891,6 +891,7 @@ bool Node::hasSideEffects() const {
     case prim::AddStatValue:
     case prim::TimePoint:
     case prim::CallFunction:
+    case prim::CallMethod:
       return true;
   }
   // All other builtin ops are known to be safe.
@@ -1296,6 +1297,12 @@ Node* Graph::createNone(TypePtr typ) {
   return n;
 }
 
+Node* Graph::createUninitialized(TypePtr typ) {
+  Node* n = create(prim::Uninitialized);
+  n->output()->setType(std::move(typ));
+  return n;
+}
+
 Node* Graph::createWithSubgraph(Symbol kind) {
   auto n = create(kind, 0);
   n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope()));
@@ -1304,9 +1311,11 @@ Node* Graph::createWithSubgraph(Symbol kind) {
 
 Node* Graph::createTuple(
     at::ArrayRef<Value*> values,
-    c10::OptNameList field_names) {
+    c10::optional<c10::QualifiedName> qualname,
+    std::shared_ptr<FunctionSchema> schema) {
   auto types = fmap(values, [](Value* v) { return v->type(); });
-  auto tt = TupleType::create(std::move(types), std::move(field_names));
+  auto tt = TupleType::create(
+      std::move(types), std::move(qualname), std::move(schema));
   auto n = create(prim::TupleConstruct, values);
   n->output()->setType(tt);
   return n;
@@ -1428,8 +1437,21 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
   return n;
 }
 
+Node* Graph::createStore(const std::string& name, Value* v) {
+  auto n = create(prim::Store, {v}, /*num_outputs*/ 0);
+  n->s_(attr::name, name);
+  return n;
+}
+
+Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
+  auto n = create(prim::Load, {}, /*num_outputs*/ 1);
+  n->s_(attr::name, name);
+  n->output()->setType(type);
+  return n;
+}
+
 Value* Graph::insertFunctionCall(
-    std::shared_ptr<script::Function> callee,
+    std::shared_ptr<Function> callee,
     script::MatchedSchema& matched) {
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->output()

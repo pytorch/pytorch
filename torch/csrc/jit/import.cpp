@@ -256,7 +256,7 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
   auto src = std::make_shared<Source>(
       std::string(static_cast<const char*>(data.get()), size), path, 0);
   script::import_libs(
-      main_module_->class_compilation_unit(),
+      *main_module_->class_compilation_unit(),
       qualifier,
       src,
       tensor_table_,
@@ -266,9 +266,9 @@ void ScriptModuleDeserializer::importCallback(const std::string& qualifier) {
 void ScriptModuleDeserializer::moduleSetState(
     const std::shared_ptr<script::Module>& module,
     IValue state) {
-  auto setstate = module->class_compilation_unit().find_function("__setstate__");
+  auto setstate = module->class_compilation_unit()->find_function("__setstate__");
 
-  AT_CHECK(
+  TORCH_CHECK(
       setstate != nullptr,
       "Cannot call '__setstate__' method because"
       " it does not exist");
@@ -330,7 +330,7 @@ void ScriptModuleDeserializer::convertModule(
     std::function<void(const std::string&)> import_callback =
         [this](const std::string& qualifier) { importCallback(qualifier); };
     script::import_methods(
-        main_module_->class_compilation_unit(),
+        *main_module_->class_compilation_unit(),
         module,
         src,
         tensor_table_,
@@ -346,7 +346,7 @@ void ScriptModuleDeserializer::convertModule(
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
     if (slot.type()->kind() != TypeKind::OptionalType) {
-      AT_CHECK(
+      TORCH_CHECK(
           !slot.value().isNone(),
           "The field '",
           slot.name(),
@@ -410,7 +410,7 @@ std::shared_ptr<script::Module> load(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     script::ExtraFilesMap& extra_files) {
-  auto module = std::make_shared<script::Module>();
+  auto module = std::make_shared<script::Module>("TODO");
 
   auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
     std::shared_ptr<script::Module> curr = module;

@@ -3,7 +3,6 @@
 #include <memory>
 
 #include <fbgemm/Fbgemm.h>
-#include <fbgemm/src/FbgemmI8DepthwiseAvx2.h>
 
 #include "caffe2/quantization/server/dnnlowp.h"
 

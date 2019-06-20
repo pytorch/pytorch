@@ -248,6 +248,29 @@ class TestOperators(TestCase):
         x = torch.ones(20, 16, 50, 40, requires_grad=True)
         self.assertONNX(nn.Conv2d(16, 13, 3, bias=False), x)
 
+    def test_conv_variable_length(self):
+        x = torch.ones(5, 3, 6, 6, requires_grad=True)
+        model = torch.nn.Conv2d(3, 2, 3)
+        y = model(x)
+
+        dynamic_axes = {'input_1': [0, 2, 3], 'output_1': {0: 'output_1_variable_dim_0', 1: 'output_1_variable_dim_1'}}
+        model_proto_name = 'conv2d.onnx'
+        torch.onnx.export(model, x, model_proto_name, verbose=True, input_names=["input_1"], output_names=["output_1"],
+                          example_outputs=y, dynamic_axes=dynamic_axes)
+
+        import onnx
+        onnx_model = onnx.load(model_proto_name)
+        onnx.checker.check_model(onnx_model)
+
+        # Asserting the default dynamic axes names are generated when custom names are not provided
+        assert(onnx_model.graph.input[0].type.tensor_type.shape.dim[0].dim_param == "input_1_dynamic_axes_1")
+        assert(onnx_model.graph.input[0].type.tensor_type.shape.dim[2].dim_param == "input_1_dynamic_axes_2")
+        assert(onnx_model.graph.input[0].type.tensor_type.shape.dim[3].dim_param == "input_1_dynamic_axes_3")
+
+        # Asserting the custom names are applied when provided
+        assert(onnx_model.graph.output[0].type.tensor_type.shape.dim[0].dim_param == "output_1_variable_dim_0")
+        assert(onnx_model.graph.output[0].type.tensor_type.shape.dim[1].dim_param == "output_1_variable_dim_1")
+
     def test_convtranspose(self):
         x = torch.ones(2, 3, 4, 5, requires_grad=True)
         self.assertONNX(nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False,
@@ -480,10 +503,6 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
 
-    def test_upsample_bilinear(self):
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
-
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.unsqueeze(len(x.shape)), x)
@@ -517,6 +536,10 @@ class TestOperators(TestCase):
     def test_rrelu(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(torch.nn.RReLU(), x)
+
+    def test_prelu(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(torch.nn.PReLU(2), x)
 
     def test_log_sigmoid(self):
         x = torch.randn(1, 2, 3, 4)
@@ -562,6 +585,11 @@ class TestOperators(TestCase):
     def test_nonzero(self):
         x = torch.tensor([[[2., 2.], [1., 0.]], [[0., 0.], [1., 1.]]], requires_grad=True)
         self.assertONNX(lambda x: torch.nonzero(x), x)
+
+    def test_gather(self):
+        data = torch.randn(3, 4, 3, requires_grad=True)
+        index = torch.tensor([2, 0]).view(1, 2, 1).expand(3, 2, 3)
+        self.assertONNX(lambda data, index: data.gather(1, index), (data, index))
 
     def test_master_opset(self):
         x = torch.randn(2, 3).float()
