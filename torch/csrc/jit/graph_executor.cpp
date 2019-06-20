@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/autodiff.h>
+#include <torch/csrc/jit/custom_graph_executor_impl.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/graph_executor_impl.h>
 #include <torch/csrc/jit/interpreter.h>
@@ -594,13 +595,15 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
 };
 
+RegisterGraphExecutorImpl reg_graph_executor_impl(
+    kDefaultExecutor,
+    [](std::shared_ptr<Graph> graph, bool optimize) {
+      return new GraphExecutorImpl(graph, optimize);
+    });
+
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
-    : pImpl(
-          getProfilingMode()
-              ? dynamic_cast<GraphExecutorImplBase*>(
-                    new ProfilingGraphExecutorImpl(graph, optimize))
-              : dynamic_cast<GraphExecutorImplBase*>(
-                    new GraphExecutorImpl(graph, optimize))) {}
+    : pImpl(dynamic_cast<GraphExecutorImplBase*>(
+          getGraphExecutorImpl()(graph, optimize))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);

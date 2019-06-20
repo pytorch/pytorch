@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/custom_graph_executor_impl.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
@@ -9,14 +9,10 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/profiling_graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
-
-thread_local bool profiling_mode = false;
-bool& getProfilingMode() {
-  return profiling_mode;
-}
 
 std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
     const std::shared_ptr<Graph>& graph,
@@ -80,10 +76,17 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   return *optimized_plan_;
 }
 
-
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   AT_ERROR("not supported");
 }
+
+namespace {
+RegisterGraphExecutorImpl r(
+    kProfilingExecutor,
+    [](std::shared_ptr<Graph> graph, bool optimize) {
+      return new ProfilingGraphExecutorImpl(graph, optimize);
+    });
+} // namespace
 
 } // namespace jit
 } // namespace torch
