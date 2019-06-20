@@ -245,7 +245,9 @@ public:
   friend List make_list<T>(ArrayRef<T>);
 
   friend List<IValue> impl::make_generic_list();
-  friend List<IValue> impl::make_generic_list(ArrayRef<IValue>);
+  friend List<IValue> impl::make_generic_list(ArrayRef<IValue> values);
+  friend List<IValue> impl::make_generic_list(TypePtr elementType);
+  friend List<IValue> impl::make_generic_list(TypePtr elementType, ArrayRef<IValue> values);
 
   // please use make_list instead.
   List() = delete;
