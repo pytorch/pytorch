@@ -63,7 +63,7 @@ struct FunctionTask {
   bool isShutdownTask_;
 
   FunctionTask(std::shared_ptr<GraphTask> base, std::shared_ptr<Function> fn, InputBuffer inputs, bool isShutdownTask = false)
-    : base_(base)
+    : base_(std::move(base))
     , fn_(std::move(fn))
     , inputs_(std::move(inputs))
     , isShutdownTask_(isShutdownTask) {}
@@ -363,7 +363,7 @@ auto Engine::thread_main(std::shared_ptr<GraphTask> graph_task) -> void {
 void Engine::reentrant_thread_init() {
   at::init_num_threads();
   auto tp_shared= thread_pool_shared_;
-  while(1) {
+  while(true) {
     std::unique_lock<std::mutex> lk(tp_shared->graphtasks_queue_lock_);
     ++tp_shared->num_workers_;
     tp_shared->work_.wait(lk, [&tp_shared]{ return !tp_shared->graphtasks_queue_.empty();});
@@ -736,6 +736,7 @@ std::atomic<EngineStub> engine_stub(get_base_engine);
 void set_default_engine_stub(EngineStub stub) {
   engine_stub.store(stub);
 }
+
 
 Engine& Engine::get_default_engine() {
   return engine_stub.load()();
