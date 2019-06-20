@@ -459,6 +459,8 @@ ListPtr<T> toList(std::vector<T> list) {
   return result;
 }
 
+using GenericList = GenericListPtr;
+
 }
 
 template<class T> using List = ListPtr<T>;
