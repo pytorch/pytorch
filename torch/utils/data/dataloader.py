@@ -95,17 +95,12 @@ class DataLoader(object):
                  :ref:`multiprocessing-best-practices` on more details related
                  to multiprocessing in PyTorch.
 
-    .. note:: ``len(dataloader)`` is determined by length of the sampler used.
-              When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
+    .. note:: ``len(dataloader)`` heuristic based on the length of the sampler used.
+              When :attr:`dataset` is a subclass of :class:`~torch.utils.data.IterableDataset`,
               an infinite sampler is used, whose :meth:`__len__` is not
-              implemented. With :class:`~torch.utils.data.IterableDataset` the
-              actual iterator size depends on :attr:`num_workers`.
-              If :attr:`num_workers > 0` (i.e., multi-process loading), each
-              worker gets a copy of the same iterable dataset object and can
-              return duplicate data, unless the dataset copies and/or the
-              workers are configured differently (e.g., in :meth:`__iter__`).
-              See :class:`~torch.utils.data.IterableDataset` for more details
-              and examples.
+              implemented. So one should not query this method unless they work
+              with a map-style dataset. See `Dataset Types`_ for more details on
+              these two types of dataset.
     """
 
     __initialized = False
@@ -612,9 +607,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
         self.index_queues = []
         self.workers = []
-        # A list of booleans representing whether each worker still has word to
+        # A list of booleans representing whether each worker still has work to
         # do, i.e., not having exhausted its iterable dataset object. It always
-        # contains all `True`s if not using an iterable dataset
+        # contains all `True`s if not using an iterable-style dataset
         # (i.e., if kind != Iterable).
         self.workers_status = []
         for i in range(self.num_workers):
