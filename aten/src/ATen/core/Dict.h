@@ -8,13 +8,13 @@
 
 namespace c10 {
 struct IValue;
-template<class Key, class Value> class DictPtr;
+template<class Key, class Value> class Dict;
 
 /**
  * Creates an empty dict.
  */
 template<class Key, class Value>
-DictPtr<Key, Value> make_dict();
+Dict<Key, Value> make_dict();
 
 namespace impl {
 bool shallowEquals(const IValue& lhs, const IValue& rhs);
@@ -84,7 +84,7 @@ public:
 private:
   Iterator iterator_;
   friend class DictIterator<Key, Value, Iterator>;
-  friend class DictPtr<Key, Value>;
+  friend class Dict<Key, Value>;
   friend bool operator==<Key, Value, Iterator>(const DictIterator<Key, Value, Iterator>& lhs, const DictIterator<Key, Value, Iterator>& rhs);
 };
 
@@ -134,7 +134,7 @@ private:
   DictEntryRef<Key, Value, Iterator> entryRef_;
 
   friend class DictIterator<Key, Value, typename detail::DictImpl::dict_map_type::iterator>;
-  friend class DictPtr<Key, Value>;
+  friend class Dict<Key, Value>;
   friend bool operator==<Key, Value, Iterator>(const DictIterator& lhs, const DictIterator& rhs);
 
   // TODO We also need comparison operators <, >, <=, >=, see ListIterator.
@@ -150,19 +150,19 @@ inline bool operator!=(const DictIterator<Key, Value, Iterator>& lhs, const Dict
   return !(lhs == rhs);
 }
 
-template<class Key, class Value> DictPtr<Key, Value> toTypedDict(DictPtr<IValue, IValue> dict);
-template<class Key, class Value> DictPtr<IValue, IValue> toGenericDict(DictPtr<Key, Value> dict);
+template<class Key, class Value> Dict<Key, Value> toTypedDict(Dict<IValue, IValue> dict);
+template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Value> dict);
 }
 
 /**
  * An object of this class stores a map from Key to Value.
  * You can create instances using the make_dict<Key, Value>() function.
  *
- * This is a pointer type. After a copy, both DictPtrs
+ * This is a pointer type. After a copy, both Dicts
  * will share the same storage:
  *
- * > DictPtr<int, string> a = make_dict<int, string>();
- * > DictPtr<int, string> b = a;
+ * > Dict<int, string> a = make_dict<int, string>();
+ * > Dict<int, string> b = a;
  * > b.insert(3, "three");
  * > ASSERT("three" == a.at(3));
  *
@@ -172,7 +172,7 @@ template<class Key, class Value> DictPtr<IValue, IValue> toGenericDict(DictPtr<K
  * for the kernel API.
  */
 template<class Key, class Value>
-class DictPtr final {
+class Dict final {
 private:
   static_assert((std::is_same<IValue, Key>::value && std::is_same<IValue, Value>::value) || guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "Invalid Key type for Dict. We only support int64_t, double, bool, and string.");
 
@@ -181,15 +181,15 @@ private:
   // ska::flat_hash_map, return references to it or something like that,
   // because such operations would get expensive if we switch out
   // the actual map implementation.
-  // This is an intrusive_ptr because DictPtr is a pointer type.
+  // This is an intrusive_ptr because Dict is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // DictImpl.
   c10::intrusive_ptr<detail::DictImpl> impl_;
 
-  explicit DictPtr(c10::intrusive_ptr<detail::DictImpl>&& impl);
+  explicit Dict(c10::intrusive_ptr<detail::DictImpl>&& impl);
   friend struct IValue;
-  template<class K, class V> friend DictPtr<K, V> impl::toTypedDict(DictPtr<IValue, IValue>);
-  template<class K, class V> friend DictPtr<IValue, IValue> impl::toGenericDict(DictPtr<K, V>);
+  template<class K, class V> friend Dict<K, V> impl::toTypedDict(Dict<IValue, IValue>);
+  template<class K, class V> friend Dict<IValue, IValue> impl::toGenericDict(Dict<K, V>);
 
 public:
   using key_type = Key;
@@ -201,24 +201,24 @@ public:
   /**
    * Creates an empty dict.
    */
-  friend DictPtr make_dict<Key, Value>();
+  friend Dict make_dict<Key, Value>();
 
   // please use make_dict instead
-  DictPtr() = delete;
+  Dict() = delete;
 
-  ~DictPtr() = default;
+  ~Dict() = default;
 
-  DictPtr(const DictPtr&) = default;
-  DictPtr& operator=(const DictPtr&) = default;
-  DictPtr(DictPtr&&) noexcept;
-  DictPtr& operator=(DictPtr&&) noexcept;
+  Dict(const Dict&) = default;
+  Dict& operator=(const Dict&) = default;
+  Dict(Dict&&) noexcept;
+  Dict& operator=(Dict&&) noexcept;
 
   /**
-   * Create a new DictPtr pointing to a deep copy of the same data.
-   * The DictPtr returned is a new dict with separate storage.
+   * Create a new Dict pointing to a deep copy of the same data.
+   * The Dict returned is a new dict with separate storage.
    * Changes in it are not reflected in the original dict or vice versa.
    */
-  DictPtr copy() const;
+  Dict copy() const;
 
   /**
    * Returns an iterator to the first element of the container.
@@ -343,35 +343,30 @@ public:
 };
 
 namespace impl {
-// GenericDictPtr is how IValue stores dicts. It is, however, not part of the
+// GenericDict is how IValue stores dicts. It is, however, not part of the
 // public API. Kernels should use Dicts with concrete Key, Value types instead
 // (maybe except for some internal prim ops).
-using GenericDictPtr = DictPtr<IValue, IValue>;
+using GenericDict = Dict<IValue, IValue>;
 
-inline GenericDictPtr make_generic_dict() {
+inline GenericDict make_generic_dict() {
   return make_dict<IValue, IValue>();
 }
 
 template<class Key, class Value>
-DictPtr<Key, Value> toTypedDict(GenericDictPtr dict) {
-  return DictPtr<Key, Value>(std::move(dict.impl_));
+Dict<Key, Value> toTypedDict(GenericDict dict) {
+  return Dict<Key, Value>(std::move(dict.impl_));
 }
 
 template<class Key, class Value>
-GenericDictPtr toGenericDict(DictPtr<Key, Value> dict) {
-  return GenericDictPtr(std::move(dict.impl_));
+GenericDict toGenericDict(Dict<Key, Value> dict) {
+  return GenericDict(std::move(dict.impl_));
 }
 
-using GenericDict = GenericDictPtr;
 }
-
-template<class Key, class Value> using Dict = DictPtr<Key, Value>;
-
 }
 
 namespace torch {
-  template<class Key, class Value> using DictPtr = c10::DictPtr<Key, Value>;
-  template<class Key, class Value> using Dict = DictPtr<Key, Value>;
+  template<class Key, class Value> using Dict = c10::Dict<Key, Value>;
 }
 
 #include <ATen/core/Dict_inl.h>
