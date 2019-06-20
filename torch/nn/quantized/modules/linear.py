@@ -51,17 +51,9 @@ class Linear(Module):
         Y_q = torch.ops.quantized.fbgemm_linear(x, self._packed_weight, self.bias, self.output_scale, self.output_zero_point)
         return Y_q
 
+    # TODO: remove after https://github.com/pytorch/pytorch/pull/21933 is landed
     def state_dict(self, destination=None, prefix='', keep_vars=False):
-        r"""Adaptation of state_dict method to handle packing of weights
-        Returns a dictionary containing a whole state of the module.
-
-        Both parameters and persistent buffers (e.g. running averages) are
-        included. Keys are corresponding parameter and buffer names.
-
-        Returns:
-            dict:
-                a dictionary containing a whole state of the module
-
+        r"""
         Example::
 
             >>> module.state_dict().keys()
@@ -74,47 +66,19 @@ class Linear(Module):
         raw_dict.pop(prefix + '_packed_weight')
         return raw_dict
 
+    # def _save_to_state_dict(self, destination, prefix, keep_vars):
+    #     super()._save_to_state_dict(destination, prefix, keep_vars)
+    #     destination[prefix + 'weight'] = torch.ops.quantized.fbgemm_linear_unpack(destination[prefix + '_packed_weight'])
+    #     destination.pop(prefix + '_packed_weight')
+
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         r"""
-        Adaptation of default _load_from_state_dict method
-        to handle packing and unpacking of weights
-        Copies parameters and buffers from :attr:`state_dict` into only
-        this module, but not its descendants. This is called on every submodule
-        in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
-        module in input :attr:`state_dict` is provided as :attr:`local_metadata`.
-        For state dicts without metadata, :attr:`local_metadata` is empty.
-        Subclasses can achieve class-specific backward compatible loading using
-        the version number at `local_metadata.get("version", None)`.
-
-        .. note::
-            :attr:`state_dict` is not the same object as the input
-            :attr:`state_dict` to :meth:`~torch.nn.Module.load_state_dict`. So
-            it can be modified.
-
-        Arguments:
-            state_dict (dict): a dict containing parameters and
-                persistent buffers.
-            prefix (str): the prefix for parameters and buffers used in this
-                module
-            local_metadata (dict): a dict containing the metadata for this module.
-                See
-            strict (bool): whether to strictly enforce that the keys in
-                :attr:`state_dict` with :attr:`prefix` match the names of
-                parameters and buffers in this module
-            missing_keys (list of str): if ``strict=True``, add missing keys to
-                this list
-            unexpected_keys (list of str): if ``strict=True``, add unexpected
-                keys to this list
-            error_msgs (list of str): error messages should be added to this
-                list, and will be reported together in
-                :meth:`~torch.nn.Module.load_state_dict`
+            Modify state_dict first and then use default load function
         """
-        # Modify state_dict first and then use default load function
         self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(state_dict[prefix + 'weight'])
         self.bias = state_dict[prefix + 'bias']
-        # TODO: Remove once  https://github.com/pytorch/pytorch/pull/21852 lands
-
+        # state_dict.pop(prefix + 'weight')
         super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                       missing_keys, unexpected_keys, error_msgs)
         return
