@@ -52,9 +52,6 @@ class ProcessGroup {
     // Returns source rank if this objects represents a recv-from-any.
     virtual int sourceRank() const;
 
-    // Returns result tensors, if applicable.
-    virtual std::vector<at::Tensor> result() const;
-
     // Ensures that operations on the output tensors that are invoked
     // after this function returns are correctly sequenced after the
     // asynchronous completion of this work.
