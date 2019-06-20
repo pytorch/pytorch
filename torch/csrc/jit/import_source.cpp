@@ -1,9 +1,10 @@
 #include "import_source.h"
 
 #include <ATen/core/qualified_name.h>
+#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/resolver.h>
-#include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/script/script_type_parser.h>
 
 namespace torch {
 namespace jit {
@@ -52,8 +53,12 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
       Function& m,
       const std::string& name) override {
     auto fullName = c10::QualifiedName(basename_, name);
-    if (auto classType = cu_.get_class(fullName)) {
-      return std::make_shared<ClassValue>(classType);
+    if (auto serializable_type = cu_.get_type(fullName)) {
+      if (auto classType = serializable_type->cast<ClassType>()) {
+        return std::make_shared<ClassValue>(classType);
+      } else if (auto tupleType = serializable_type->cast<TupleType>()) {
+        return std::make_shared<NamedTupleConstructor>(tupleType);
+      }
     }
 
     return std::make_shared<ClassNamespaceValue>(std::move(fullName), cu_);
@@ -114,6 +119,7 @@ struct SourceResolver : public Resolver {
         {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
         {"fork", std::make_shared<ForkValue>()},
         {"annotate", std::make_shared<AnnotateValue>()},
+        {"uninitialized", std::make_shared<UninitializedValue>()},
         {"inf",
          std::make_shared<ConstantValue>(
              std::numeric_limits<double>::infinity())},
@@ -139,8 +145,8 @@ struct SourceResolver : public Resolver {
     return nullptr;
   }
 
-  TypePtr resolveType(const std::string& name) const override {
-    return lib_cu_.get_class(c10::QualifiedName(name));
+  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
+    return lib_cu_.get_type(c10::QualifiedName(name));
   }
 
  private:
@@ -169,8 +175,8 @@ struct SourceImporter {
     if (version_ > CURRENT_OP_VERSION_SET) {
       throw ErrorReport(p_.lexer().cur().range)
           << "Attempting to load a script generated from a newer version of PyTorch. Maximum supported TorchScript version is "
-          << CURRENT_OP_VERSION_SET << " but the script being loaded is version "
-          << version_ << ".";
+          << CURRENT_OP_VERSION_SET
+          << " but the script being loaded is version " << version_ << ".";
     }
   }
 
@@ -183,23 +189,59 @@ struct SourceImporter {
 
       std::vector<Def> definitions;
       std::vector<ResolverPtr> resolvers;
-      auto class_def = ClassDef(p_.parseClass());
-      for (const auto& method_def : class_def.defs()) {
-        definitions.emplace_back(method_def);
-        resolvers.emplace_back(resolver_);
-      }
+      auto parsed_treeref = p_.parseClassLike();
+      if (parsed_treeref->kind() == TK_CLASS_DEF) {
+        auto class_def = ClassDef(parsed_treeref);
+        for (const auto& method_def : class_def.defs()) {
+          definitions.emplace_back(method_def);
+          resolvers.emplace_back(resolver_);
+        }
 
-      auto cu = std::make_shared<CompilationUnit>();
-      const auto qualified_classname =
-          class_qualifier + "." + class_def.name().name();
-      auto class_type =
-          ClassType::create(c10::QualifiedName(qualified_classname), cu);
-      owner.register_class(class_type);
-      auto self = [&](Value* v) {
-        v->setType(class_type);
-        return std::make_shared<SimpleValue>(v);
-      };
-      cu->define(definitions, resolvers, self);
+        auto cu = std::make_shared<CompilationUnit>();
+        const auto qualified_classname =
+            class_qualifier + "." + class_def.name().name();
+        auto class_type =
+            ClassType::create(c10::QualifiedName(qualified_classname), cu);
+        owner.register_class(class_type);
+        auto self = [&](Value* v) {
+          v->setType(class_type);
+          return std::make_shared<SimpleValue>(v);
+        };
+        cu->define(definitions, resolvers, self);
+      } else if (parsed_treeref->kind() == TK_NAMED_TUPLE_DEF) {
+        auto named_tuple_def = NamedTupleDef(parsed_treeref);
+
+        auto qualified_name = c10::QualifiedName(
+            class_qualifier + "." + named_tuple_def.name().name());
+
+        std::vector<std::string> field_names;
+        std::vector<TypePtr> field_types;
+
+        for (const auto& name_ident : named_tuple_def.fields()) {
+          field_names.push_back(name_ident.name());
+        }
+
+        ScriptTypeParser type_parser(resolver_);
+        for (const auto& maybe_type_expr : named_tuple_def.type_exprs()) {
+          if (maybe_type_expr.present()) {
+            field_types.push_back(
+                type_parser.parseTypeFromExpr(maybe_type_expr.get()));
+          } else {
+            field_types.push_back(TensorType::get());
+          }
+        }
+
+        auto tt = TupleType::create(
+            field_types,
+            qualified_name,
+            TupleType::namedTupleSchemaFromNamesAndTypes(qualified_name, field_names, field_types));
+        owner.register_class(tt);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Got an unrecognized type from "
+            "parseClassLike");
+      }
     }
   }
 
@@ -289,7 +331,7 @@ void import_methods(
   };
   import_functions(
       lib_cu,
-      mod->module_object()->type()->compilation_unit(),
+      *mod->module_object()->type()->compilation_unit(),
       src,
       constant_table,
       self,

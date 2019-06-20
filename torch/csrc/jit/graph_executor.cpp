@@ -61,11 +61,6 @@ std::shared_ptr<Graph> lastExecutedOptimizedGraph() {
   return last_executed_optimized_graph.lock();
 }
 
-void ExecutionPlan::run(Stack& stack) const {
-  InterpreterState(code).run(stack);
-  last_executed_optimized_graph = graph;
-}
-
 namespace {
 
 using tensor_list = std::vector<at::Tensor>;
@@ -100,7 +95,7 @@ struct CaptureList {
       //  This is to avoid any implicit mutation to TensorList happened
       //  between forward & backward.
       capture_types_.emplace_back(CAPTURE_LIST);
-      const std::vector<at::Tensor>& tensors = val.toTensorListRef();
+      c10::ArrayRef<at::Tensor> tensors = val.toTensorListRef();
       sizes_.push_back(tensors.size());
 
       for (const at::Tensor& tensor : tensors) {
@@ -129,13 +124,13 @@ struct CaptureList {
           ++var_capture_it;
         } break;
         case CAPTURE_LIST: {
-          std::vector<at::Tensor> lst;
+          c10::List<at::Tensor> lst = c10::make_list<at::Tensor>();
           auto size = *size_it++;
           for (size_t i = 0; i < size; i++) {
             lst.emplace_back(var_capture_it->unpack(saved_for));
             var_capture_it++;
           }
-          stack.emplace_back(TensorList::create(std::move(lst)));
+          stack.emplace_back(std::move(lst));
         } break;
         case CAPTURE_IVALUE: {
           stack.push_back(*ivalue_capture_it++);
@@ -181,7 +176,7 @@ struct UnpackInstructions {
         } break;
         case PUSH_LIST: {
           std::vector<at::Tensor> lst(input_it, input_it + *sizes_it++);
-          stack.emplace_back(TensorList::create(std::move(lst)));
+          stack.emplace_back(c10::impl::toList(std::move(lst)));
         } break;
       }
     }
@@ -229,7 +224,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
     size_t output_index = 0;
     for (IValue& v : stack) {
       if (v.isTensorList()) {
-        for (at::Tensor tensor : v.toTensorListRef()) {
+        for (const at::Tensor& tensor : v.toTensorListRef()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
@@ -275,7 +270,7 @@ struct DifferentiableGraphBackward : public autograd::Function {
 
   void addInputIValue(const IValue& v) {
     if (v.isTensorList()) {
-      const std::vector<at::Tensor>& tensors = v.toTensorListRef();
+      c10::ArrayRef<at::Tensor> tensors = v.toTensorListRef();
       input_instructions_.pushTensorList(tensors.size());
       for (const at::Tensor& tensor : tensors) {
         addInputVariable(tensor);
@@ -367,23 +362,22 @@ struct DifferentiableGraphOp {
  private:
   friend GraphExecutor* detail::getGradExecutor(Operation& op);
 
-  void detach(at::Tensor& t) const {
-    if (t.defined()) {
-      t = autograd::as_variable_ref(t).detach();
+  at::Tensor detach(at::Tensor t) const {
+    if (!t.defined()) {
+      return t;
     }
+    return autograd::as_variable_ref(t).detach();
   }
 
   void detach(IValue& v) const {
     if (v.isTensor()) {
-      auto t = std::move(v).toTensor();
-      detach(t);
-      v = IValue{t};
+      v = IValue(detach(std::move(v).toTensor()));
     } else if (v.isTensorList()) {
-      std::vector<at::Tensor> lst = v.toTensorListRef();
-      for (at::Tensor& t : lst) {
-        detach(t);
+      c10::List<at::Tensor> lst = std::move(v).toTensorList();
+      for (size_t i = 0; i < lst.size(); ++i) {
+        lst.set(i, detach(lst.extract(i)));
       }
-      v = TensorList::create(std::move(lst));
+      v = std::move(lst);
     }
   }
 
@@ -467,6 +461,27 @@ GraphExecutor* getGradExecutor(Operation& op) {
 }
 } // namespace detail
 
+void GraphExecutorImplBase::run(Stack& stack) {
+  TORCH_CHECK(
+      stack.size() >= num_inputs,
+      "expected ",
+      num_inputs,
+      " inputs, but got only ",
+      stack.size());
+
+  C10_LOG_API_USAGE_ONCE("torch.graph_executor.run");
+  logging::getLogger()->addStatValue(
+      logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
+
+  if (tracer::isTracing()) {
+    return runTraced(stack);
+  }
+
+  ExecutionPlan plan = getPlanFor(stack);
+  InterpreterState(plan.code).run(stack);
+  last_executed_optimized_graph = plan.graph;
+}
+
 // a Graph can be created via tracing, or via a language-based frontend
 // GraphExecutor runs it. It can run the same graph on many different sizes
 // and different requires_grad states, and handles specializations for each
@@ -479,36 +494,18 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
-  // entry point where execution begins
-  void run(Stack& stack) override {
-    TORCH_CHECK(
-        stack.size() >= num_inputs,
-        "expected ",
-        num_inputs,
-        " inputs, but got only ",
-        stack.size());
-
-    C10_LOG_API_USAGE_ONCE("torch.graph_executor.run");
-    logging::getLogger()->addStatValue(
-        logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
-
-    if (tracer::isTracing()) {
-      return runTraced(stack);
-    }
-
-    auto& execution_plan =
-        optimize ? getOrCompile(stack) : getOrCompileFallback();
-    return execution_plan.run(stack);
+  ExecutionPlan getPlanFor(Stack& stack) override {
+    return optimize ? getOrCompile(stack) : getOrCompileFallback();
   }
 
   GraphExecutorState getDebugState() override {
     GraphExecutorState state;
     state.graph = graph.get();
     if (fallback) {
-      state.fallback = fallback.getDebugState();
+      state.fallback = fallback;
     }
     for (auto& entry : plan_cache) {
-      state.execution_plans.emplace(entry.first, entry.second.getDebugState());
+      state.execution_plans.emplace(entry.first, entry.second);
     }
     return state;
   }
@@ -602,8 +599,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     return ExecutionPlan(opt_graph);
   }
 
-  void runOptimization(
-      std::shared_ptr<Graph>& graph) {
+  void runOptimization(std::shared_ptr<Graph>& graph) {
     // Basic graph preprocessing to eliminate noise.
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
@@ -625,8 +621,8 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     for (const auto& pass : getCustomPasses()) {
       pass(graph);
     }
-    // decomposition pass, decompose certain ops that will be used in the following
-    // passes (like batchmm and jit fusion)
+    // decomposition pass, decompose certain ops that will be used in the
+    // following passes (like batchmm and jit fusion)
     DecomposeOps(graph);
     // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
@@ -658,41 +654,6 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     return false;
   }
 
-  void runTraced(Stack& stack) {
-    const auto& state = tracer::getTracingState();
-    auto inputs = last(stack, num_inputs);
-    auto input_values = fmap(
-        inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
-
-    ArgumentSpec spec =
-        arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
-    // NB: we could just run the fallback in here and call it a day, but that
-    // would loose all the control flow information we have in the graph. Thus,
-    // we run the fallback to get the correct output values, but we will
-    // override the tracing states later.
-    {
-      // No need to trace a script module.
-      ResourceGuard guard(tracer::pauseTracing());
-      getOrCompileFallback().run(stack);
-    }
-
-    // Traces always have types propagated through them, so we make sure to
-    // also propagate types through the graph we are inserting here.
-    // However, this->graph itself may already have been generated with
-    // tracing and so we only do the type propgation if no concrete types have
-    // been set.
-    auto local_graph = this->graph->copy();
-    arg_spec_creator_.specializeTypes(*local_graph, spec);
-    PropagateInputShapes(local_graph);
-    auto output_values =
-        inlineCallTo(*state->graph, *local_graph, input_values);
-
-    auto outputs = last(stack, num_outputs);
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      tracer::setValueTrace(outputs[i], output_values[i]);
-    }
-  }
-
   ~GraphExecutorImpl() override = default;
 
   ArgumentSpecCreator arg_spec_creator_;
@@ -715,6 +676,10 @@ GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
+}
+
+ExecutionPlan GraphExecutor::getPlanFor(Stack& inputs) {
+  return pImpl->getPlanFor(inputs);
 }
 
 std::shared_ptr<Graph> GraphExecutor::graph() const {

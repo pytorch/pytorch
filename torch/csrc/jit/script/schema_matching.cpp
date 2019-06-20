@@ -149,8 +149,7 @@ static Value* tryMatchArgument(
     if (failure_messages) {
       err() << "Could not match type " << value->type()->python_str() << " to "
             << arg.type()->python_str() << " in argument '" << arg.name()
-            << "': " << matched_type.errMsg << "\n"
-            << named_value.locOr(loc);
+            << "': " << matched_type.errMsg << ".\n";
     }
     return nullptr;
   }
@@ -162,23 +161,22 @@ static Value* tryMatchArgument(
 
   if (!value->type()->isSubtypeOf(concrete_type)) {
     if (failure_messages) {
-      auto& ostream =
-          err() << arg.formatTypeMismatchMsg(value->type()->python_str());
+      auto& ostream = err()
+          << arg.formatTypeMismatchMsg(value->type()->python_str());
 
       if (auto v = value->type()->cast<ListType>()) {
         if (v->getElementType()->isSubtypeOf(TensorType::get())) {
           ostream << "Empty lists default to List[Tensor]. Use torch.jit."
                      "annotate(List[my_type], []) to create an empty list of"
-                     " another type\n";
+                     " another type.\n";
         }
       }
 
       if (value->type() == NumberType::get() &&
           value->node()->kind() == aten::item) {
         ostream << "Use int(tensor) or float(tensor) to retrieve item() from a "
-                << "tensor with the appropriate type\n";
+                << "tensor with the appropriate type.\n";
       }
-      ostream << named_value.locOr(loc);
     }
 
     return nullptr;
@@ -263,7 +261,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     std::ostream* failure_messages,
     bool allow_conversions) {
   auto err = [&]() -> std::ostream& {
-    *failure_messages << "\nfor operator " << schema << ":\n";
+    *failure_messages << "\n" << schema << ":\n";
     return *failure_messages;
   };
 
@@ -320,9 +318,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
       const NamedValue& nv = kwargs[*kwarg_idx];
       if (used_kwarg[*kwarg_idx]) {
         if (failure_messages) {
-          err() << "argument " << nv.name()
-                << " specified twice in schema, submit a bug report!\n"
-                << nv.locOr(loc);
+          err() << "Argument " << nv.name()
+                << " specified twice in schema, submit a bug report!\n";
         }
         return c10::nullopt;
       }
@@ -334,17 +331,22 @@ c10::optional<MatchedSchema> tryMatchSchema(
       actual_named_value = NamedValue(*arg.default_value());
     } else {
       if (failure_messages) {
-        err() << "argument " << schema.arguments()[schema_i].name()
-              << " not provided.\n"
-              << loc;
+        err() << "Argument " << schema.arguments()[schema_i].name()
+              << " not provided.\n";
       }
       return c10::nullopt;
     }
 
     // Make sure the actual_named_value found matches the type of arg
     Value* positional = tryMatchArgument(
-        arg, graph, loc, *actual_named_value,
-        failure_messages, err, allow_conversions, type_env);
+        arg,
+        graph,
+        loc,
+        *actual_named_value,
+        failure_messages,
+        err,
+        allow_conversions,
+        type_env);
     if (!positional) {
       return c10::nullopt;
     }
@@ -352,7 +354,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
   }
   // check for unused self argument
   if (self != c10::nullopt && failure_messages) {
-    err() << "provided self argument not used in schema\n";
+    err() << "Provided self argument not used in schema.\n";
   }
 
   if (schema.is_vararg()) {
@@ -364,9 +366,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
   // check for unused positional arguments
   if (used_args < args.size()) {
     if (failure_messages) {
-      err() << "expected at most " << used_args << " arguments "
-            << "but found " << args.size() << " positional arguments.\n"
-            << loc << "\n";
+      err() << "Expected at most " << used_args << " arguments "
+            << "but found " << args.size() << " positional arguments.\n";
     }
     return c10::nullopt;
   }
@@ -376,9 +377,9 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (!used_kwarg[i]) {
       if (failure_messages) {
         if (!schema.argumentIndexWithName(nv.name())) {
-          err() << "keyword argument " << nv.name() << " unknown\n";
+          err() << "Keyword argument " << nv.name() << " unknown.\n";
         } else {
-          err() << "keyword argument " << nv.name() << " specified twice\n";
+          err() << "Keyword argument " << nv.name() << " specified twice.\n";
         }
       }
       return c10::nullopt;
@@ -435,7 +436,14 @@ static Value* packOutputs(
   if (values.size() == 1) {
     return values[0];
   }
-  return g.insertNode(g.createTuple(values, std::move(field_names)))->output();
+  std::shared_ptr<FunctionSchema> schema;
+  if (field_names) {
+    schema = TupleType::namedTupleSchemaFromNamesAndTypes(c10::QualifiedName(), field_names.value(), fmap(values, [](Value* v) { return v->type(); }));
+  }
+  return g
+      .insertNode(
+          g.createTuple(values, c10::nullopt, std::move(schema)))
+      ->output();
 }
 
 // Given a successful match between operator schema and symbol, emit a node
@@ -520,7 +528,9 @@ Value* emitBuiltinCall(
               attributes,
               render_errors ? &failure_messages : nullptr,
               allow_conversions)) {
-        return graph.insertFunctionCall(method, *result);
+        // we inline builtin calls because they are normally very small
+        // wrappers and are not useful for keeping around to debug
+        return inlineCallTo(graph, *method->graph(), result->inputs).at(0);
       }
     }
   }
@@ -533,8 +543,15 @@ Value* emitBuiltinCall(
   // If errors were required, but we didn't eagerly render error strings,
   // then replay schema matching with error strings eagerly rendered.
   if (!render_errors) {
-    return emitBuiltinCall(loc, graph, name, self, inputs,
-                           attributes, required, /*render_errors=*/true);
+    return emitBuiltinCall(
+        loc,
+        graph,
+        name,
+        self,
+        inputs,
+        attributes,
+        required,
+        /*render_errors=*/true);
   }
 
   // no operators found with the same name, print out similarly named operators
@@ -542,23 +559,25 @@ Value* emitBuiltinCall(
     const auto close_symbols = findSimilarOperators(name);
     auto error = ErrorReport(loc);
     const auto& user_function_name = name.toQualString();
-    error << "unknown builtin op: " << user_function_name << "\n";
+    error << "Unknown builtin op: " << user_function_name << ".\n";
     if (close_symbols.size() == 0) {
       error
           << "Could not find any similar ops to " << user_function_name
-          << ". This op may not exist or may not be currently supported in TorchScript\n";
+          << ". This op may not exist or may not be currently supported in TorchScript.\n";
     } else {
       error << "Here are some suggestions: \n";
       for (const auto& sym : close_symbols) {
         error << "\t" << sym.toQualString() << "\n";
       }
+      error << "\nThe original call is";
     }
     throw error;
   }
 
-  throw ErrorReport(loc) << "arguments for call are not valid:\n"
+  throw ErrorReport(loc) << "Arguments for call are not valid.\n"
+                         << "The following operator variants are available:\n"
                          << prefixLine(failure_messages.str(), "  ")
-                         << "for call at";
+                         << "\nThe original call is";
 }
 } // namespace script
 } // namespace jit

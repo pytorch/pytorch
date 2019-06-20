@@ -16,8 +16,8 @@ CONFIG_TREE_DATA = [
             ("5.4", [
                 XImportant("3.6"),
                 ("3.6", [
-                    ("xla", [X(True)]),
-                    ("namedtensor", [X(True)]),
+                    ("xla", [XImportant(True)]),
+                    ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
             ("7", [X("3.6")]),
@@ -25,7 +25,12 @@ CONFIG_TREE_DATA = [
     ]),
     ("xenial", [
         ("clang", [
-            ("5", [XImportant("3.6")]),  # This is actually the ASAN build
+            ("5", [
+                XImportant("3.6"),  # This is actually the ASAN build
+                ("3.6", [
+                    ("namedtensor", [XImportant(True)]),  # ASAN
+                ]),
+            ]),
         ]),
         ("cuda", [
             ("9", [
@@ -38,6 +43,9 @@ CONFIG_TREE_DATA = [
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
                 X("2.7"),
                 XImportant("3.6"),
+                ("2.7", [
+                    ("namedtensor", [XImportant(True)]),
+                ]),
             ]),
             ("9.2", [X("3.6")]),
             ("10", [X("3.6")]),
@@ -147,6 +155,9 @@ class XlaConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["is_xla"] = node_name
 
+    def child_constructor(self):
+        return ImportantConfigNode
+
 
 class NamedTensorConfigNode(TreeConfigNode):
     def modify_label(self, label):
@@ -155,6 +166,9 @@ class NamedTensorConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["is_namedtensor"] = node_name
 
+    def child_constructor(self):
+        return ImportantConfigNode
+
 
 class ImportantConfigNode(TreeConfigNode):
     def modify_label(self, label):
@@ -162,6 +176,9 @@ class ImportantConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_important"] = node_name
+
+    def get_children(self):
+        return []
 
 
 class XenialCompilerConfigNode(TreeConfigNode):

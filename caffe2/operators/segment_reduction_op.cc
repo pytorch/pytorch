@@ -600,15 +600,15 @@ using LengthsMaxCPUOp = caffe2::AbstractLengthsDef<
     caffe2::MaxReducerDef,
     true>::ForwardOp;
 
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     LengthsSum,
     "_caffe2::LengthsSum(Tensor data, Tensor lengths) -> Tensor",
     LengthsSumCPUOp);
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     LengthsMean,
     "_caffe2::LengthsMean(Tensor data, Tensor lengths) -> Tensor",
     LengthsMeanCPUOp);
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     LengthsMax,
     "_caffe2::LengthsMax(Tensor data, Tensor lengths) -> Tensor",
     LengthsMaxCPUOp);

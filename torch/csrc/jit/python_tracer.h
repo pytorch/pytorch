@@ -22,7 +22,7 @@ Node* preRecordPythonTrace(
     THPObjectPtr pyobj,
     const std::string& arg_types,
     at::ArrayRef<autograd::Variable> inputs,
-    pyobj_list scalar_args);
+    std::vector<THPObjectPtr> scalar_args);
 
 std::shared_ptr<Graph> createGraphByTracing(
     const py::function& func,
