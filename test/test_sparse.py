@@ -1430,14 +1430,13 @@ class TestSparse(TestCase):
             device=self.device)
         self._test_log1p_tensor(input, torch.zeros([5, 6, 0]))
 
-    @cpu_only
     def test_mv(self):
         i = self.index_tensor([[0, 1, 1], [2, 0, 2]])
         v = self.value_tensor([3, 4, 5])
         x = self.sparse_tensor(i, v, torch.Size([2, 3]))
         y = torch.ones(3)
 
-        self.assertEqual(self.value_tensor([[3], [9]]), x.matmul(y))
+        self.assertEqual(self.value_tensor([3, 9]), x.matmul(y))
 
     def test_sparse_add_coalesce(self):
         i = self.index_tensor([[1, 2, 1]])

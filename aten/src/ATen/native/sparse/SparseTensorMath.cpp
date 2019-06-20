@@ -187,11 +187,9 @@ Tensor norm_sparse(const SparseTensor& self, Scalar value) {
 // mv(SparseTensor, Tensor)
 // --------------------------------------------------------------------
 
-Tensor mv_sparse_cpu(const SparseTensor& self, const Tensor& vec)
+Tensor mv_sparse(const SparseTensor& self, const Tensor& vec)
 {
   AT_ASSERT(self.is_sparse());
-  TORCH_CHECK(!self.is_cuda(), "mv: expected 'self' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!vec.is_cuda(), "mv: expected 'vec' to be a CPU tensor, but got a CUDA tensor");
 
   TORCH_CHECK(self.ndimension() == 2 && 
               vec.ndimension() == 1,
@@ -199,11 +197,11 @@ Tensor mv_sparse_cpu(const SparseTensor& self, const Tensor& vec)
               "SparseTensor Dim: ", self.ndimension(), "Tensor Dim: ", vec.ndimension());
 
   TORCH_CHECK(vec.size(-1) == self.size(-1),
-              "tow tensor's last size should be equal");
+              "two tensor's last size should be equal");
 
   auto result = self.matmul(vec.unsqueeze(-1));
 
-  return result;
+  return result.squeeze(-1);
 }
 
 // --------------------------------------------------------------------
