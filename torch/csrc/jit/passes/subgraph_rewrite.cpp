@@ -29,9 +29,8 @@ void SubgraphRewriter::RegisterRewritePattern(
 std::shared_ptr<script::Module> SubgraphRewriter::runOnModule(
     std::shared_ptr<script::Module> module) {
   nodes_to_delete_.clear();
-  const auto& methods = module->get_methods();
-  for (const auto& m : methods) {
-    auto g = m->function().graph();
+  for (const auto& m : module->get_methods()) {
+    auto g = m.function().graph();
     runOnGraph(g);
   }
   return module;

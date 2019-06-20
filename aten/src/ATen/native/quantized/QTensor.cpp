@@ -110,5 +110,10 @@ QScheme qscheme_quant(const Tensor& self) {
   return quantizer->qscheme();
 }
 
+Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
+  get_qtensorimpl(self)->set_quantizer_(quantizer);
+  return self;
+}
+
 } // namespace native
 } // namespace at

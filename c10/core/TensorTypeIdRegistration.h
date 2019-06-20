@@ -11,6 +11,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorTypeId.h>
+#include <c10/util/flat_hash_map.h>
 
 #include <atomic>
 #include <mutex>
@@ -22,10 +23,10 @@ class C10_API TensorTypeIdCreator final {
  public:
   TensorTypeIdCreator();
 
-  c10::TensorTypeId create();
+  TensorTypeId create();
 
-  static constexpr c10::TensorTypeId undefined() noexcept {
-    return c10::TensorTypeId(0);
+  static constexpr TensorTypeId undefined() noexcept {
+    return TensorTypeId(0);
   }
 
  private:
@@ -38,12 +39,15 @@ class C10_API TensorTypeIdRegistry final {
  public:
   TensorTypeIdRegistry();
 
-  void registerId(c10::TensorTypeId id);
-  void deregisterId(c10::TensorTypeId id);
+  void registerId(TensorTypeId id, std::string name);
+  void deregisterId(TensorTypeId id);
+
+  const std::string& toString(TensorTypeId id) const;
 
  private:
-  std::unordered_set<c10::TensorTypeId> registeredTypeIds_;
-  std::mutex mutex_;
+  using TypeIdName = std::string;
+  ska::flat_hash_map<TensorTypeId, TypeIdName> registeredTypeIds_;
+  mutable std::mutex mutex_;
 
   C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
 };
@@ -52,10 +56,12 @@ class C10_API TensorTypeIds final {
  public:
   static TensorTypeIds& singleton();
 
-  c10::TensorTypeId createAndRegister();
-  void deregister(c10::TensorTypeId id);
+  TensorTypeId createAndRegister(std::string name);
+  void deregister(TensorTypeId id);
 
-  static constexpr c10::TensorTypeId undefined() noexcept;
+  const std::string& toString(TensorTypeId id) const;
+
+  static constexpr TensorTypeId undefined() noexcept;
 
  private:
   TensorTypeIds();
@@ -66,34 +72,37 @@ class C10_API TensorTypeIds final {
   C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIds);
 };
 
-inline constexpr c10::TensorTypeId TensorTypeIds::undefined() noexcept {
+inline constexpr TensorTypeId TensorTypeIds::undefined() noexcept {
   return TensorTypeIdCreator::undefined();
 }
 
 class C10_API TensorTypeIdRegistrar final {
  public:
-  TensorTypeIdRegistrar();
+  explicit TensorTypeIdRegistrar(std::string name);
   ~TensorTypeIdRegistrar();
 
-  c10::TensorTypeId id() const noexcept;
+  TensorTypeId id() const noexcept;
 
  private:
-  c10::TensorTypeId id_;
+  TensorTypeId id_;
 
   C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistrar);
 };
 
-inline c10::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
+inline TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
   return id_;
 }
 
-#define C10_DECLARE_TENSOR_TYPE(TensorName)                \
+C10_API std::string toString(TensorTypeId id);
+C10_API std::ostream& operator<<(std::ostream&, c10::TensorTypeId);
+
+#define C10_DECLARE_TENSOR_TYPE(TensorName)                             \
   C10_API ::c10::TensorTypeId TensorName()
 
-#define C10_DEFINE_TENSOR_TYPE(TensorName)                 \
-  C10_EXPORT ::c10::TensorTypeId TensorName() {            \
-    static ::c10::TensorTypeIdRegistrar registration_raii; \
-    return registration_raii.id();                         \
+#define C10_DEFINE_TENSOR_TYPE(TensorName)                              \
+  C10_EXPORT ::c10::TensorTypeId TensorName() {                         \
+    static ::c10::TensorTypeIdRegistrar registration_raii(#TensorName); \
+    return registration_raii.id();                                      \
   }
 
 C10_DECLARE_TENSOR_TYPE(UndefinedTensorId);

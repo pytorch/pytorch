@@ -291,7 +291,11 @@ class LegacyTracedModule(Module):
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
-        trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        try:
+            trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
+        except Exception as e:
+            torch._C._tracer_abandon()
+            raise e
         ret_inputs = tuple(x.clone() for x in all_trace_inputs)
         torch._C._tracer_set_force_outplace(self._force_outplace)
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
@@ -473,7 +477,8 @@ class TracingCheckError(Exception):
 
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
-def _check_trace(check_inputs, func, executor_options, traced_func, check_tolerance, force_outplace, is_trace_module):
+def _check_trace(check_inputs, func, executor_options, traced_func, check_tolerance,
+                 force_outplace, is_trace_module, _module_class):
     # Note: tracing is independent of optimizations, which consume the trace
     executor_options['optimize'] = False
     for inputs in check_inputs:
@@ -490,6 +495,7 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
                 copied_dict,
                 check_trace=False,
                 _force_outplace=force_outplace,
+                _module_class=_module_class,
                 **executor_options)
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
@@ -501,6 +507,7 @@ def _check_trace(check_inputs, func, executor_options, traced_func, check_tolera
                 _clone_inputs(inputs),
                 check_trace=False,
                 _force_outplace=force_outplace,
+                _module_class=_module_class,
                 **executor_options)
             check_mod_func = check_mod
 
@@ -728,6 +735,12 @@ def trace(func,
     if not _enabled:
         return func
 
+    if isinstance(func, torch.jit.ScriptModule):
+        # it is hard to trace it because the forward method on ScriptModule is already defined, so it
+        # would result in an error.
+        warnings.warn('The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.')
+        return func
+
     if isinstance(func, torch.nn.Module):
         return trace_module(func, {'forward': example_inputs}, optimize,
                             check_trace, wrap_check_inputs(check_inputs),
@@ -764,9 +777,9 @@ def trace(func,
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
         if check_inputs is not None:
-            _check_trace(check_inputs, func, executor_options, traced, check_tolerance, _force_outplace, False)
+            _check_trace(check_inputs, func, executor_options, traced, check_tolerance, _force_outplace, False, _module_class)
         else:
-            _check_trace([example_inputs], func, executor_options, traced, check_tolerance, _force_outplace, False)
+            _check_trace([example_inputs], func, executor_options, traced, check_tolerance, _force_outplace, False, _module_class)
 
     return traced
 
@@ -857,10 +870,10 @@ def trace_module(mod,
         if check_trace:
             if check_inputs is not None:
                 _check_trace(check_inputs, func, executor_options, check_trace_method,
-                             check_tolerance, _force_outplace, True)
+                             check_tolerance, _force_outplace, True, _module_class)
             else:
                 _check_trace([inputs], func, executor_options, check_trace_method,
-                             check_tolerance, _force_outplace, True)
+                             check_tolerance, _force_outplace, True, _module_class)
 
         return module
 
@@ -982,6 +995,11 @@ def _try_compile_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
 
+    if not inspect.isfunction(fn) and not inspect.ismethod(fn):
+        raise RuntimeError("`{}` is not a function. Recursive scripting only supports "
+                           "Python functions or methods currently.\n"
+                           "Consider manually annotating `{}` with @torch.jit.script.".format(fn))
+
     if isinstance(fn, torch.nn.Module):
         # Since modules are callable pybind recognizes them as functions, but
         # don't do anything for them
@@ -994,11 +1012,23 @@ def _try_compile_fn(fn):
     return torch.jit.script(fn, _rcb=rcb)
 
 
+@contextlib.contextmanager
+def _disable_emit_hooks():
+    hooks = torch._C._jit_get_emit_hooks()
+    torch._C._jit_set_emit_hooks(None, None)
+    yield
+    torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+
+
 def _create_method_from_fn(module, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = script_method(fn, createResolutionCallbackFromClosure(fn))
-    _create_methods_from_stubs(self, (stub,))
+    with _disable_emit_hooks():
+        # We don't want to call the hooks here since the graph that is calling
+        # this function is not yet complete
+        _create_methods_from_stubs(module, (stub,))
+    return stub
 
 
 # ScriptClasses must be new-style classes because we construct them using their
@@ -1450,7 +1480,7 @@ if _enabled:
                       return input
         """
         def __init__(self, optimize=True):
-            self.__dict__['_c'] = torch._C.ScriptModule()
+            self.__dict__['_c'] = torch._C.ScriptModule(type(self).__name__)
             Module.__init__(self)
             self._c._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self._c)
@@ -1639,6 +1669,25 @@ if _enabled:
                         # for 'None' parameters/buffers, don't actually add their values if it exists
                         continue
                     ScriptModule.__setattr__(self, name, getattr(original, name))
+
+            # Copy annotations, pull types from `__annotations__` or try to infer
+            # the type if possible
+            class_annotations = getattr(original, '__annotations__', {})
+            for name in dir(original):
+                if name in ("training", "__dict__"):
+                    # TODO: removing this skip should let us remove the code to add training as an
+                    # attribute in python_sugared_value.cpp
+                    continue
+                if hasattr(self, name):
+                    # Don't re-copy properties
+                    continue
+                item = getattr(original, name)
+                if name in class_annotations:
+                    the_type = torch.jit.annotations.ann_to_type(class_annotations[name])
+                else:
+                    the_type = torch._C._jit_try_infer_type(item)
+                if the_type is not None:
+                    self._c._register_attribute(name, the_type, item)
 
             # Copy overloads
             self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
@@ -2037,8 +2086,8 @@ def _get_named_tuple_properties(obj):
             annotations.append(torch._C.TensorType.get())
     return type(obj).__name__, fields, annotations
 
-def _create_named_tuple(t, names, unqual_name):
-    TupleType = collections.namedtuple(unqual_name, names)
+def _create_named_tuple(t, unqual_name, field_names):
+    TupleType = collections.namedtuple(unqual_name, field_names)
     return TupleType(*t)
 
 class _disable_tracing(object):
