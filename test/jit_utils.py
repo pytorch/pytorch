@@ -280,6 +280,17 @@ class JitTestCase(TestCase):
             ge = torch.jit.script(script, optimize)
             ge(*inputs)
 
+    def get_frame_vars(self, frames_up):
+        frame = inspect.currentframe()
+        i = 0
+        while i < frames_up + 1:
+            frame = frame.f_back
+            i += 1
+        defined_vars = {}
+        defined_vars.update(frame.f_locals)
+        defined_vars.update(frame.f_globals)
+        return defined_vars
+
     def checkScript(self,
                     script,
                     inputs,
@@ -288,25 +299,21 @@ class JitTestCase(TestCase):
                     capture_output=False,
                     frames_up=1):
         if isinstance(script, str):
+            # Compile the string to a Script function
             cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
             scripted_fn = getattr(cu, name)
-            the_locals = {}
 
-            frame = inspect.currentframe()
-            i = 0
-            while i < frames_up:
-                frame = frame.f_back
-                i += 1
-            defined_vars = {}
-            defined_vars.update(frame.f_locals)
-            defined_vars.update(frame.f_globals)
+            # Execute the Python function so we can run it later and get its
+            # outputs
+            frame = self.get_frame_vars()
             the_locals = {}
-            execWrapper(script, glob=defined_vars, loc=the_locals)
-            defined_vars.update(the_locals)
-            python_fn = defined_vars[name]
+            execWrapper(script, glob=frame, loc=the_locals)
+            frame.update(the_locals)
+            python_fn = frame[name]
         else:
             python_fn = script
-            # Check the string frontend first
+
+            # Check the string frontend
             source = textwrap.dedent(inspect.getsource(script))
             self.checkScript(
                 source,
@@ -315,13 +322,14 @@ class JitTestCase(TestCase):
                 script.__name__,
                 capture_output,
                 frames_up=frames_up + 1)
+
             # Continue checking the Python frontend
             scripted_fn = torch.jit.script(script, optimize, _frames_up=1)
 
         if capture_output:
             with self.capture_stdout() as script_stdout:
                 script_outputs = scripted_fn(*inputs)
-            with self.capture_stdout() as python_stdout:
+            with self.capture_stdout() as _python_stdout:
                 python_outputs = python_fn(*inputs)
             if not IS_WINDOWS:
                 self.assertExpected(script_stdout[0], subname='stdout')
