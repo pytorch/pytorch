@@ -2147,6 +2147,7 @@ graph(%Ra, %Rb):
         @torch.jit.script
         def constant_prop(input_tensor):
             a = 2 * 3
+            print(a)
             b = a + 2
             return b + input_tensor
 
