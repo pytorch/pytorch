@@ -10629,7 +10629,7 @@ a")
                 return rv
         """
 
-        self.checkScript(code, (101,))
+        self.checkScript(dedent(code), (101,))
 
     def test_pyop_exception_message(self):
         class Foo(torch.jit.ScriptModule):

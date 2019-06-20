@@ -305,7 +305,7 @@ class JitTestCase(TestCase):
 
             # Execute the Python function so we can run it later and get its
             # outputs
-            frame = self.get_frame_vars()
+            frame = self.get_frame_vars(frames_up)
             the_locals = {}
             execWrapper(script, glob=frame, loc=the_locals)
             frame.update(the_locals)
