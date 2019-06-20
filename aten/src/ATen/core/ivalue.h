@@ -10,10 +10,8 @@ struct Function;
 } // namespace jit
 } // namespace torch
 namespace c10 {
-template<class Key, class Value> class DictPtr;
-template<class T> class ListPtr;
-template<class Key, class Value> using Dict = DictPtr<Key, Value>;
-template<class T> using List = ListPtr<T>;
+template<class Key, class Value> class Dict;
+template<class T> class List;
 struct IValue;
 namespace ivalue {
 struct Tuple;

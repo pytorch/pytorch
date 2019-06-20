@@ -12,9 +12,9 @@ class Tensor;
 }
 namespace c10 {
 struct IValue;
-template<class T> class ListPtr;
-template<class T> ListPtr<T> make_list();
-template<class T> ListPtr<T> make_list(ArrayRef<T> values);
+template<class T> class List;
+template<class T> List<T> make_list();
+template<class T> List<T> make_list(ArrayRef<T> values);
 
 namespace detail {
 
@@ -61,14 +61,14 @@ private:
   ListElementReference(const ListElementReference&) = delete;
   ListElementReference& operator=(const ListElementReference&) = delete;
 
-  // allow moving, but only our friends (i.e. the ListPtr class) can move us
+  // allow moving, but only our friends (i.e. the List class) can move us
   ListElementReference(ListElementReference&&) noexcept = default;
   ListElementReference& operator=(ListElementReference&& rhs) & noexcept {
     iterator_ = std::move(rhs.iterator_);
     return *this;
   }
 
-  friend class ListPtr<T>;
+  friend class List<T>;
   friend class ListIterator<T, Iterator, StorageT>;
 
   Iterator iterator_;
@@ -109,21 +109,21 @@ public:
       return copy;
   }
 
-  ListIterator& operator+=(typename ListPtr<T>::size_type offset) {
+  ListIterator& operator+=(typename List<T>::size_type offset) {
       iterator_ += offset;
       return *this;
   }
 
-  ListIterator& operator-=(typename ListPtr<T>::size_type offset) {
+  ListIterator& operator-=(typename List<T>::size_type offset) {
       iterator_ -= offset;
       return *this;
   }
 
-  ListIterator operator+(typename ListPtr<T>::size_type offset) const {
+  ListIterator operator+(typename List<T>::size_type offset) const {
     return ListIterator{iterator_ + offset};
   }
 
-  ListIterator operator-(typename ListPtr<T>::size_type offset) const {
+  ListIterator operator-(typename List<T>::size_type offset) const {
     return ListIterator{iterator_ - offset};
   }
 
@@ -165,25 +165,25 @@ private:
   }
 
   friend class ListIterator<T, typename detail::ListImpl<StorageT>::list_type::iterator, StorageT>;
-  friend class ListPtr<T>;
+  friend class List<T>;
 };
 
-template<class T> ListPtr<T> toTypedList(ListPtr<IValue> list);
-template<class T> ListPtr<IValue> toGenericList(ListPtr<T> list);
-const IValue* ptr_to_first_element(const ListPtr<IValue>& list);
-template<class T> ListPtr<T> toList(std::vector<T> list);
-template<class T> const std::vector<T>& toVector(const ListPtr<T>& list);
+template<class T> List<T> toTypedList(List<IValue> list);
+template<class T> List<IValue> toGenericList(List<T> list);
+const IValue* ptr_to_first_element(const List<IValue>& list);
+template<class T> List<T> toList(std::vector<T> list);
+template<class T> const std::vector<T>& toVector(const List<T>& list);
 }
-template<class T> bool list_is_equal(const ListPtr<T>& lhs, const ListPtr<T>& rhs);
+template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
 
 /**
  * An object of this class stores a list of values of type T.
  *
- * This is a pointer type. After a copy, both ListPtrs
+ * This is a pointer type. After a copy, both Lists
  * will share the same storage:
  *
- * > ListPtr<int> a = make_list<string>();
- * > ListPtr<int> b = a;
+ * > List<int> a = make_list<string>();
+ * > List<int> b = a;
  * > b.push_back("three");
  * > ASSERT("three" == a.get(0));
  *
@@ -193,7 +193,7 @@ template<class T> bool list_is_equal(const ListPtr<T>& lhs, const ListPtr<T>& rh
  * breaking backwards compatibility for the kernel API.
  */
 template<class T>
-class ListPtr final {
+class List final {
 private:
   // List of types that don't use IValue based lists
   using types_with_direct_list_implementation = guts::typelist::typelist<
@@ -209,12 +209,12 @@ private:
     IValue  // All other types store the list as std::vector<IValue>
   >;
 
-  // This is an intrusive_ptr because ListPtr is a pointer type.
+  // This is an intrusive_ptr because List is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // ListImpl.
   c10::intrusive_ptr<detail::ListImpl<StorageT>> impl_;
 
-  using internal_reference_type = impl::ListElementReference<T, typename detail::ListImpl<typename ListPtr<T>::StorageT>::list_type::iterator, typename ListPtr<T>::StorageT>;
+  using internal_reference_type = impl::ListElementReference<T, typename detail::ListImpl<typename List<T>::StorageT>::list_type::iterator, typename List<T>::StorageT>;
 
 public:
   using value_type = T;
@@ -226,27 +226,27 @@ public:
   /**
    * Constructs an empty list.
    */
-  friend ListPtr make_list<T>();
+  friend List make_list<T>();
 
   /**
    * Constructs a list with some initial values
    */
-  friend ListPtr make_list<T>(ArrayRef<T>);
+  friend List make_list<T>(ArrayRef<T>);
 
   // please use make_list instead.
-  ListPtr() = delete;
+  List() = delete;
 
-  ListPtr(const ListPtr&) = default;
-  ListPtr& operator=(const ListPtr&) = default;
-  ListPtr(ListPtr&&) noexcept;
-  ListPtr& operator=(ListPtr&&) noexcept;
+  List(const List&) = default;
+  List& operator=(const List&) = default;
+  List(List&&) noexcept;
+  List& operator=(List&&) noexcept;
 
   /**
-   * Create a new ListPtr pointing to a deep copy of the same data.
-   * The ListPtr returned is a new list with separate storage.
+   * Create a new List pointing to a deep copy of the same data.
+   * The List returned is a new list with separate storage.
    * Changes in it are not reflected in the original list or vice versa.
    */
-  ListPtr copy() const;
+  List copy() const;
 
   /**
    * Returns the element at specified location pos, with bounds checking.
@@ -268,7 +268,7 @@ public:
    *
    * You cannot store the reference, but you can read it and assign new values to it:
    *
-   *   ListPtr<int64_t> list = ...;
+   *   List<int64_t> list = ...;
    *   list[2] = 5;
    *   int64_t v = list[1];
    */
@@ -395,81 +395,75 @@ public:
    * same number of elements and for each list position the elements at
    * that position are equal.
    */
-  friend bool list_is_equal<T>(const ListPtr& lhs, const ListPtr& rhs);
+  friend bool list_is_equal<T>(const List& lhs, const List& rhs);
 
   /**
-   * Returns the number of ListPtrs currently pointing to this same list.
+   * Returns the number of Lists currently pointing to this same list.
    * If this is the only instance pointing to this list, returns 1.
    */
   // TODO Test use_count
   size_t use_count() const;
 
 private:
-  explicit ListPtr(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
+  explicit List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements);
   friend struct IValue;
-  template<class T_> friend ListPtr<T_> impl::toTypedList(ListPtr<IValue>);
-  template<class T_> friend ListPtr<IValue> impl::toGenericList(ListPtr<T_>);
-  friend const IValue* impl::ptr_to_first_element(const ListPtr<IValue>& list);
-  template<class T_> friend ListPtr<T_> impl::toList(std::vector<T_> list);
-  template<class T_> friend const std::vector<T_>& impl::toVector(const ListPtr<T_>& list);
+  template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
+  template<class T_> friend List<IValue> impl::toGenericList(List<T_>);
+  friend const IValue* impl::ptr_to_first_element(const List<IValue>& list);
+  template<class T_> friend List<T_> impl::toList(std::vector<T_> list);
+  template<class T_> friend const std::vector<T_>& impl::toVector(const List<T_>& list);
 };
 
 namespace impl {
-// GenericListPtr is how IValue stores lists. It is, however, not part of the
+// GenericList is how IValue stores lists. It is, however, not part of the
 // public API. Kernels should use Lists with concrete types instead
 // (maybe except for some internal prim ops).
-using GenericListPtr = ListPtr<IValue>;
+using GenericList = List<IValue>;
 
-inline GenericListPtr make_generic_list() {
+inline GenericList make_generic_list() {
   return make_list<IValue>();
 }
 
-inline GenericListPtr make_generic_list(ArrayRef<IValue> values) {
+inline GenericList make_generic_list(ArrayRef<IValue> values) {
   return make_list<IValue>(values);
 }
 
 template<class T>
-ListPtr<T> toTypedList(GenericListPtr list) {
-  static_assert(std::is_same<IValue, typename ListPtr<T>::StorageT>::value, "Can only call toTypedList with lists that store their elements as IValues.");
-  return ListPtr<T>(std::move(list.impl_));
+List<T> toTypedList(GenericList list) {
+  static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toTypedList with lists that store their elements as IValues.");
+  return List<T>(std::move(list.impl_));
 }
 
 template<class T>
-GenericListPtr toGenericList(ListPtr<T> list) {
-  static_assert(std::is_same<IValue, typename ListPtr<T>::StorageT>::value, "Can only call toGenericList with lists that store their elements as IValues.");
-  return GenericListPtr(std::move(list.impl_));
+GenericList toGenericList(List<T> list) {
+  static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toGenericList with lists that store their elements as IValues.");
+  return GenericList(std::move(list.impl_));
 }
 
-inline const IValue* ptr_to_first_element(const GenericListPtr& list) {
+inline const IValue* ptr_to_first_element(const GenericList& list) {
   return &list.impl_->list[0];
 }
 
 template<class T>
-const std::vector<T>& toVector(const ListPtr<T>& list) {
-  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename ListPtr<T>::StorageT>::value, "toVector only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
+const std::vector<T>& toVector(const List<T>& list) {
+  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename List<T>::StorageT>::value, "toVector only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
 
   return list.impl_->list;
 }
 
 template<class T>
-ListPtr<T> toList(std::vector<T> list) {
-  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename ListPtr<T>::StorageT>::value, "toList only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-  ListPtr<T> result = make_list<T>();
+List<T> toList(std::vector<T> list) {
+  static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename List<T>::StorageT>::value, "toList only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
+  List<T> result = make_list<T>();
   result.impl_->list = std::move(list);
   return result;
 }
 
-using GenericList = GenericListPtr;
-
 }
-
-template<class T> using List = ListPtr<T>;
-
 }
 
 namespace torch {
-  template<class T> using ListPtr = c10::ListPtr<T>;
-  template<class T> using List = ListPtr<T>;
+  template<class T> using List = c10::List<T>;
 }
 
 #include <ATen/core/List_inl.h>
