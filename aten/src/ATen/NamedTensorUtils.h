@@ -14,6 +14,10 @@ inline bool has_names(TensorList tensors) {
 // Sets the names of `tensor` to be `names`.
 CAFFE2_API void internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
 
+// Converts dim to an positional index. Errors if `dim` cannot be used to
+// refer to any dimension of tensor.
+CAFFE2_API int64_t dimname_to_position(const Tensor& tensor, Dimname dim);
+
 namespace namedinference {
 
 optional<std::vector<Dimname>> erase_name(optional<DimnameList> self_names, int64_t dim);

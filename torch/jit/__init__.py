@@ -995,6 +995,11 @@ def _try_compile_fn(fn):
         # Don't do anything for @ignore'd functions
         return None
 
+    if not inspect.isfunction(fn) and not inspect.ismethod(fn):
+        raise RuntimeError("`{}` is not a function. Recursive scripting only supports "
+                           "Python functions or methods currently.\n"
+                           "Consider manually annotating `{}` with @torch.jit.script.".format(fn))
+
     if isinstance(fn, torch.nn.Module):
         # Since modules are callable pybind recognizes them as functions, but
         # don't do anything for them
@@ -1007,11 +1012,23 @@ def _try_compile_fn(fn):
     return torch.jit.script(fn, _rcb=rcb)
 
 
+@contextlib.contextmanager
+def _disable_emit_hooks():
+    hooks = torch._C._jit_get_emit_hooks()
+    torch._C._jit_set_emit_hooks(None, None)
+    yield
+    torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+
+
 def _create_method_from_fn(module, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = script_method(fn, createResolutionCallbackFromClosure(fn))
-    _create_methods_from_stubs(self, (stub,))
+    with _disable_emit_hooks():
+        # We don't want to call the hooks here since the graph that is calling
+        # this function is not yet complete
+        _create_methods_from_stubs(module, (stub,))
+    return stub
 
 
 # ScriptClasses must be new-style classes because we construct them using their
@@ -1653,6 +1670,25 @@ if _enabled:
                         continue
                     ScriptModule.__setattr__(self, name, getattr(original, name))
 
+            # Copy annotations, pull types from `__annotations__` or try to infer
+            # the type if possible
+            class_annotations = getattr(original, '__annotations__', {})
+            for name in dir(original):
+                if name in ("training", "__dict__"):
+                    # TODO: removing this skip should let us remove the code to add training as an
+                    # attribute in python_sugared_value.cpp
+                    continue
+                if hasattr(self, name):
+                    # Don't re-copy properties
+                    continue
+                item = getattr(original, name)
+                if name in class_annotations:
+                    the_type = torch.jit.annotations.ann_to_type(class_annotations[name])
+                else:
+                    the_type = torch._C._jit_try_infer_type(item)
+                if the_type is not None:
+                    self._c._register_attribute(name, the_type, item)
+
             # Copy overloads
             self.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
 
@@ -2050,8 +2086,8 @@ def _get_named_tuple_properties(obj):
             annotations.append(torch._C.TensorType.get())
     return type(obj).__name__, fields, annotations
 
-def _create_named_tuple(t, names, unqual_name):
-    TupleType = collections.namedtuple(unqual_name, names)
+def _create_named_tuple(t, unqual_name, field_names):
+    TupleType = collections.namedtuple(unqual_name, field_names)
     return TupleType(*t)
 
 class _disable_tracing(object):

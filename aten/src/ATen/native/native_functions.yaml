@@ -1987,9 +1987,21 @@
   variants: function, method
   device_guard: False
 
+- func: mkldnn_transpose(Tensor self, int dim0, int dim1) -> Tensor
+  device_guard: False
+  requires_tensor: True
+  dispatch:
+    MkldnnCPU: mkldnn_transpose
+
 - func: transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   variants: method
   device_guard: False
+
+- func: mkldnn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
+  device_guard: False
+  requires_tensor: True
+  dispatch:
+    MkldnnCPU: mkldnn_transpose_
 
 - func: one_hot(Tensor self, int num_classes=-1) -> Tensor
   python_module: nn
@@ -2035,6 +2047,9 @@
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
+
+- func: _has_same_tensorimpl_type(Tensor self, Tensor other) -> bool
+  variants: function
 
 - func: _unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
   variants: function
@@ -2811,6 +2826,11 @@
   dispatch:
     CPU: legacy::cpu::_th_set_
     CUDA: legacy::cuda::_th_set_
+
+- func: set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)
+  variants: method
+  dispatch:
+    QuantizedCPU: set_quantizer_
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
@@ -4737,26 +4757,26 @@
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool3d_forward_out
-    CUDA: legacy::cuda::_thnn_avg_pool3d_forward_out
+    CPU: avg_pool3d_out_cpu
+    CUDA: avg_pool3d_out_cuda
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool3d_forward
-    CUDA: legacy::cuda::_thnn_avg_pool3d_forward
+    CPU: avg_pool3d_cpu
+    CUDA: avg_pool3d_cuda
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool3d_backward_out
-    CUDA: legacy::cuda::_thnn_avg_pool3d_backward_out
+    CPU: avg_pool3d_backward_out_cpu
+    CUDA: avg_pool3d_backward_out_cuda
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_avg_pool3d_backward
-    CUDA: legacy::cuda::_thnn_avg_pool3d_backward
+    CPU: avg_pool3d_backward_cpu
+    CUDA: avg_pool3d_backward_cuda
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples, *, Tensor(a!) output, Tensor(b!) indices) -> (Tensor(a!), Tensor(b!))
@@ -5222,35 +5242,29 @@
     CPU: legacy::cpu::_thnn_tanh_backward
     CUDA: legacy::cuda::_thnn_tanh_backward
 
-- func: thnn_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: nn
-
-- func: thnn_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1) -> Tensor
-  python_module: nn
-
-- func: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv_transpose2d_forward_out
-    CUDA: legacy::cuda::_thnn_conv_transpose2d_forward_out
+    CPU: conv_transpose2d_out_cpu
+    CUDA: conv_transpose2d_out_cuda
 
-- func: thnn_conv_transpose2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation) -> (Tensor output, Tensor columns, Tensor ones)
+- func: conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv_transpose2d_forward
-    CUDA: legacy::cuda::_thnn_conv_transpose2d_forward
+    CPU: conv_transpose2d_cpu
+    CUDA: conv_transpose2d_cuda
 
-- func: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv_transpose2d_backward_out
-    CUDA: legacy::cuda::_thnn_conv_transpose2d_backward_out
+    CPU: conv_transpose2d_backward_out_cpu
+    CUDA: conv_transpose2d_backward_out_cuda
 
-- func: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+- func: conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv_transpose2d_backward
-    CUDA: legacy::cuda::_thnn_conv_transpose2d_backward
+    CPU: conv_transpose2d_backward_cpu
+    CUDA: conv_transpose2d_backward_cuda
 
 - func: thnn_conv_transpose3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
