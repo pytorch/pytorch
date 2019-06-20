@@ -223,6 +223,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: diag_embed
    .. automethod:: diagflat
    .. automethod:: diagonal
+   .. automethod:: fill_diagonal
    .. automethod:: digamma
    .. automethod:: digamma_
    .. automethod:: dim
