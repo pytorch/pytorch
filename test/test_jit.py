@@ -25,7 +25,8 @@ from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, enable_profiling_mode, disable_inline_everything_mode
+    _trace, enable_cpu_fuser_if, enable_profiling_mode, disable_inline_everything_mode, \
+    execWrapper
 from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -2836,12 +2837,6 @@ graph(%Ra, %Rb):
         s = str(torch.ops)
         self.assertRegex(s, r'ops')
 
-def execWrapper(code, glob, loc):
-    if PY2:
-        exec(code) in glob, loc
-    else:
-        exec(code, glob, loc)
-
 
 class TestScript(JitTestCase):
     @contextmanager
@@ -4239,7 +4234,6 @@ a")
         self.checkScript(func, [torch.ones(4, 5, 6)])
 
     def test_func_call(self):
-        script = '''
         def add(a, b):
             return a + b
 
@@ -4248,14 +4242,14 @@ a")
 
         def func(alpha, beta, x, y):
             return add(mul(alpha, x), mul(beta, y))
-        '''
+
         alpha = torch.rand(1, dtype=torch.float, requires_grad=True)
         beta = torch.rand(1, dtype=torch.float, requires_grad=True)
         x = torch.rand(3, dtype=torch.float, requires_grad=True)
         y = torch.rand(3, dtype=torch.float, requires_grad=True)
         outputs = alpha * x + beta * y
         # NOTE: cannot optimize yet because broadcasts are not inserted before the fuser runs
-        self.checkScript(script, [alpha, beta, x, y], optimize=False, outputs=outputs)
+        self.checkScript(func, [alpha, beta, x, y], optimize=False)
 
     def test_profiling_graph_executor(self):
         @torch.jit.script
@@ -5121,7 +5115,7 @@ a")
         def divmod_test_iterator(func, num, den):
             for i in num:
                 for j in den:
-                    self.checkScript(func, (i, j))
+                    self.checkScript(func, (i, j), frames_up=2)
 
         num_int = [1024, -1024]
         den_int = [10, -10]
@@ -5254,7 +5248,7 @@ a")
             return c
 
         inputs = self._make_scalar_vars([4321, 1234], torch.int64)
-        self.checkScript(func, inputs, optimize=True)
+        self.checkScript(func, inputs)
 
     def test_script_for_in_range(self):
         def fn():
@@ -5262,7 +5256,7 @@ a")
             for i in range(100):
                 c += i
             return c
-        self.checkScript(fn, (), outputs=4950, optimize=True)
+        self.checkScript(fn, ())
 
     def test_script_for_in_range_dynamic(self):
         def fn():
@@ -5276,7 +5270,6 @@ a")
         self.checkScript(fn, (), optimize=False)
 
     def test_script_for_in_range_ast(self):
-        @torch.jit.script
         def test_script_for_in_range_ast():
             c = 0
             for i in range(100):
@@ -5286,7 +5279,7 @@ a")
                 c += acc
             return c
 
-        self.assertEqual(test_script_for_in_range_ast(), 161700)
+        self.checkScript(test_script_for_in_range_ast, ())
 
     def test_script_for_in_range_if_ast(self):
         @torch.jit.script
@@ -5308,7 +5301,7 @@ a")
             for i in range(7, 100):
                 x += i
             return x
-        self.checkScript(fn, (), outputs=4929, optimize=True)
+        self.checkScript(fn, ())
 
     def test_script_for_in_range_start_end_step(self):
         def fn(start, end, step):
@@ -5319,7 +5312,7 @@ a")
             return x
 
         def check(inp):
-            self.checkScript(fn, inp, outputs=fn(*inp), optimize=True)
+            self.checkScript(fn, inp)
         check((7, 100, 7))
         check((7, 100, -7))
         check((2, -11, -3))
@@ -5400,13 +5393,10 @@ a")
         self.checkScript(test_script_clamp_min, input, optimize=True)
 
     def test_script_bool_constant(self):
-        script = '''
         def test_script_bool_constant():
             a = True
             return a
-        '''
-        outputs = [1]
-        self.checkScript(script, [], outputs[0], True, 'test_script_bool_constant')
+        self.checkScript(test_script_bool_constant, ())
 
     def test_ternary(self):
         def func(a, b):
@@ -5485,12 +5475,7 @@ a")
 
         def check_cast(from_type, to_type, value, raises=False):
             code = template.format(from_type=from_type, to_type=to_type)
-            expected = getattr(builtins, to_type)(value)
-            if raises:
-                with self.assertRaisesRegex(RuntimeError, "Cannot cast"):
-                    cu = torch.jit.CompilationUnit(code)
-            else:
-                self.checkScript(code, (value,), name='cast', outputs=expected)
+            self.checkScript(code, (value,), name='cast')
 
         check_cast('int', 'float', 1)
         check_cast('int', 'bool', 1)
@@ -10629,22 +10614,20 @@ a")
             DynamicSliceExportMod(), (input,), f, example_outputs=example_outs)
 
     def test_string_frontend_elif(self):
-        code = '''
-            def elif_test(niter : int):
-                rv = 0
-                for i in range(niter):
-                    if i % 3 == 0 and i % 5 == 0:
-                        rv += 35
-                    elif i % 3 == 0:
-                        rv += 3
-                    elif i % 5 == 0:
-                        rv += 5
-                    else:
-                        rv += i
-                return rv
-        '''
+        def elif_test(niter : int):
+            rv = 0
+            for i in range(niter):
+                if i % 3 == 0 and i % 5 == 0:
+                    rv += 35
+                elif i % 3 == 0:
+                    rv += 3
+                elif i % 5 == 0:
+                    rv += 5
+                else:
+                    rv += i
+            return rv
 
-        self.checkScript(code, (101,), name='elif_test', outputs=3028)
+        self.checkScript(elif_test, (101,))
 
     def test_pyop_exception_message(self):
         class Foo(torch.jit.ScriptModule):
