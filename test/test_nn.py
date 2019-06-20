@@ -4686,19 +4686,20 @@ class TestNN(NNTestCase):
                 # skip some of the error handling
                 self.param.data.copy_(state_dict[prefix + "serialized"] - 1)
 
-        m = CustomState()
-        m.param[0] = 10
-        m.sub.weight[0, 0] = 555
+        # use sequential to verify nesting
+        m = nn.Sequential(CustomState())
+        m[0].param[0] = 10
+        m[0].sub.weight[0, 0] = 555
         state_dict = m.state_dict()
-        self.assertEqual(state_dict["serialized"].item(), 11)
-        self.assertIn("sub.weight", state_dict)
-        self.assertNotIn("param", state_dict)
+        self.assertEqual(state_dict["0.serialized"].item(), 11)
+        self.assertIn("0.sub.weight", state_dict)
+        self.assertNotIn("0.param", state_dict)
         del m
-        mm = CustomState()
-        self.assertEqual(mm.param[0].item(), 1)
+        mm = nn.Sequential(CustomState())
+        self.assertEqual(mm[0].param[0].item(), 1)
         mm.load_state_dict(state_dict)
-        self.assertEqual(mm.param[0].item(), 10)
-        self.assertEqual(mm.sub.weight[0, 0].item(), 555)
+        self.assertEqual(mm[0].param[0].item(), 10)
+        self.assertEqual(mm[0].sub.weight[0, 0].item(), 555)
 
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
