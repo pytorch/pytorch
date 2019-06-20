@@ -36,7 +36,7 @@ thread_local size_t thread_num_ = 0;
 
 int _num_pool_threads(int nthreads) {
   if (nthreads == NOT_SET) {
-    nthreads = TaskThreadPoolBase::defaultNumThreads();
+    nthreads = intraop_default_num_threads();
   } else {
     TORCH_INTERNAL_ASSERT(nthreads > 0);
   }
@@ -71,7 +71,6 @@ void _unset_thread_num() {
 
 } // namespace internal
 
-//TODO: use OMP and MKL env. vars as default values
 void init_num_threads() {
   #ifdef _OPENMP
   omp_set_num_threads(1);
@@ -97,7 +96,7 @@ int get_num_threads() {
   if (nthreads > 0) {
     return nthreads;
   } else if (nthreads == NOT_SET) {
-    return TaskThreadPoolBase::defaultNumThreads();
+    return intraop_default_num_threads();
   } else {
     TORCH_INTERNAL_ASSERT(nthreads == CONSUMED);
     return internal::_get_intraop_pool().size() + 1;
@@ -116,15 +115,29 @@ bool in_parallel_region() {
 }
 
 void intraop_launch(std::function<void()> func) {
-  if (!in_parallel_region()) {
-    internal::_get_intraop_pool.run([func](){
-      func();
-    });
+  if (!in_parallel_region() && get_num_threads() > 1) {
+    internal::_get_intraop_pool().run(func);
   } else {
     // execute inline if we're in parallel region
     func();
   }
+}
 
+std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+    std::function<void()> func) {
+  auto future = std::make_shared<c10::ivalue::Future>();
+  if (!in_parallel_region() && get_num_threads() > 1) {
+    internal::_get_intraop_pool().run(
+      [func, future]() {
+        func();
+        future->markCompleted();
+      }
+    );
+  } else {
+    func();
+    future->markCompleted();
+  }
+  return future;
 }
 
 } // namespace at

@@ -7,6 +7,7 @@
 #include <pybind11/stl.h>
 
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
@@ -256,6 +257,12 @@ bool feedBlob(
       "Unexpected type of argument - only numpy array or string are "
       "supported for feeding");
   return false;
+}
+
+Blob deserializeBlob(const string& content) {
+  Blob blob;
+  DeserializeBlob(content, &blob);
+  return blob;
 }
 } // namespace python_detail
 
@@ -1025,7 +1032,18 @@ void addGlobalMethods(py::module& m) {
 #else // CAFFE2_USE_MKLDNN
       false
 #endif // CAFFE2_USE_MKLDNN
-      );
+  );
+
+  // if the binary is built with __HIP_PLATFORM_HCC__, this is a ROCm build
+  // and therefore we need to ignore dyndep failures (because the the module
+  // may not have a ROCm equivalent yet e.g. nccl)
+  m.attr("use_rocm") = py::bool_(
+#if __HIP_PLATFORM_HCC__
+      true
+#else // __HIP_PLATFORM_HCC__
+      false
+#endif // __HIP_PLATFORM_HCC__
+  );
 
   m.attr("use_trt") = py::bool_(
 #ifdef CAFFE2_USE_TRT
@@ -1531,6 +1549,9 @@ void addGlobalMethods(py::module& m) {
       py::arg("name"),
       py::arg("arg"),
       py::arg("device_option") = py::none());
+  m.def("deserialize_blob", [](const string& content) {
+    return python_detail::deserializeBlob(content);
+  });
   m.def("serialize_blob", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     auto* blob = gWorkspace->GetBlob(name);

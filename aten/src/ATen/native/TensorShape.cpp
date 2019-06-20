@@ -13,6 +13,9 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <algorithm>
 #include <vector>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace at {
 namespace native {
@@ -301,9 +304,6 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto tid = self.type_id();
-  TORCH_CHECK(
-      tid == CPUTensorId() || tid == CUDATensorId(),
-      "as_strided is only implemented for strided CPU, CUDA and QuantizedCPU tensors.");
   auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid);
   setStrided(result, size, stride, storage_offset);
   return result;
@@ -312,9 +312,6 @@ Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef s
 Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto tid = self.type_id();
-  TORCH_CHECK(
-      tid == QuantizedCPUTensorId(),
-      "as_strided is only implemented for strided CPU, CUDA and QuantizedCPU tensors.");
   auto result = detail::make_tensor<QTensorImpl>(Storage(self.storage()), tid, get_qtensorimpl(self)->quantizer());
   setStrided(result, size, stride, storage_offset);
   return result;
@@ -453,9 +450,18 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
+#ifdef NAMEDTENSOR_ENABLED
+    if (self.names().has_value()) {
+      AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
+                     self.sizes(), " at dimension ", self.names()->at(dim));
+    }
+#endif
     AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
+#ifdef NAMEDTENSOR_ENABLED
+  const auto outnames = namedinference::erase_name(self.names(), dim);
+#endif
   if (index < 0) {
     index += size;
   }
@@ -464,7 +470,13 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   auto storage_offset = self.storage_offset() + index * strides[dim];
   sizes.erase(sizes.begin() + dim);
   strides.erase(strides.begin() + dim);
-  return self.as_strided(sizes, strides, storage_offset);
+  auto result = self.as_strided(sizes, strides, storage_offset);
+#ifdef NAMEDTENSOR_ENABLED
+  if (outnames) {
+    internal_set_names_inplace(result, *outnames);
+  }
+#endif
+  return result;
 }
 
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
@@ -858,6 +870,17 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
     grids.push_back(tensors[i].view(view_shape).expand(shape));
   }
   return grids;
+}
+
+// Numpy-style `a.T`: returns the tensor
+// with dims reversed
+Tensor numpy_T(const Tensor &self) {
+  int64_t n = self.dim();
+  DimVector transpose_dims;
+  for (int64_t i = n - 1; i >= 0; --i) {
+    transpose_dims.push_back(i);
+  }
+  return self.permute(transpose_dims);
 }
 }
 

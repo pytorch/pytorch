@@ -31,9 +31,6 @@ Storage VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const 
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
 }
-std::unique_ptr<Generator> VariableType::generator() const {
-  return baseType->generator();
-}
 
 const char * VariableType::toString() const {
   return str.c_str();
@@ -181,10 +178,6 @@ const Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos
 
 Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
   return checked_cast_variable(t, name, pos);
-}
-
-SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
-  return SparseTensorRef(checked_cast_variable(t.tref, name, pos));
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {

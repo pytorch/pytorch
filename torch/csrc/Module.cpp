@@ -27,6 +27,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/QScheme.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/autograd/generated/python_nn_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
@@ -37,6 +38,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
+#include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/init.h>
@@ -61,7 +63,7 @@ namespace py = pybind11;
 
 PyObject* module;
 
-THPGenerator *THPDefaultGenerator   = nullptr;
+THPGenerator *THPDefaultCPUGenerator = nullptr;
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -101,6 +103,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   }
   torch::utils::initializeLayouts();
   torch::utils::initializeMemoryFormats();
+  torch::utils::initializeQSchemes();
   torch::utils::initializeDtypes();
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
@@ -118,6 +121,9 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   THPCharStorage_postInit(module);
   THPByteStorage_postInit(module);
   THPBoolStorage_postInit(module);
+  THPQUInt8Storage_postInit(module);
+  THPQInt8Storage_postInit(module);
+  THPQInt32Storage_postInit(module);
   THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -258,6 +264,13 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
     // never modified.
     //NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
     m->d_getset->doc = const_cast<char *>(doc_str);
+  } else if (Py_TYPE(obj) == &PyType_Type) {
+    PyTypeObject* t = (PyTypeObject *)obj;
+    if (t->tp_doc) {
+      return PyErr_Format(PyExc_RuntimeError,
+          "Type '%s' already has a docstring", t->tp_name);
+    }
+    t->tp_doc = doc_str;
   } else {
     return PyErr_Format(PyExc_TypeError,
         "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);
@@ -561,7 +574,19 @@ static void warning_handler(
     const c10::SourceLocation& source_location,
     const char* msg) {
   AutoGIL gil;
-  if (PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1) < 0) {
+  auto result = -1;
+  if (source_location.file == nullptr) {
+    result = PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1);
+  } else {
+    result = PyErr_WarnExplicit(
+        /*category=*/PyExc_UserWarning,
+        /*message=*/msg,
+        /*filename=*/source_location.file,
+        /*lineno=*/source_location.line,
+        /*module=*/nullptr,
+        /*registry=*/nullptr);
+  }
+  if (result < 0) {
     throw python_error();
   }
 }
@@ -625,6 +650,7 @@ PyObject* initModule() {
   THPDTypeInfo_init(module);
   THPLayout_init(module);
   THPMemoryFormat_init(module);
+  THPQScheme_init(module);
   THPDevice_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
@@ -649,6 +675,9 @@ PyObject* initModule() {
   ASSERT_TRUE(THPCharStorage_init(module));
   ASSERT_TRUE(THPByteStorage_init(module));
   ASSERT_TRUE(THPBoolStorage_init(module));
+  ASSERT_TRUE(THPQUInt8Storage_init(module));
+  ASSERT_TRUE(THPQInt8Storage_init(module));
+  ASSERT_TRUE(THPQInt32Storage_init(module));
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
@@ -714,11 +743,10 @@ PyObject* initModule() {
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
 #endif
 
-  auto& defaultGenerator = at::globalContext().defaultGenerator(at::kCPU);
-  THPDefaultGenerator = (THPGenerator*)THPGenerator_NewWithGenerator(
-    defaultGenerator);
+  auto defaultGenerator = at::detail::getDefaultCPUGenerator();
+  THPDefaultCPUGenerator = (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
   // This reference is meant to be given away, so no need to incref here.
-  ASSERT_TRUE(set_module_attr("default_generator", (PyObject*)THPDefaultGenerator, /* incref= */ false));
+  ASSERT_TRUE(set_module_attr("default_generator", (PyObject*)THPDefaultCPUGenerator, /* incref= */ false));
 
 #ifdef USE_NUMPY
   if (_import_array() < 0) return nullptr;

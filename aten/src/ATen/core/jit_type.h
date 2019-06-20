@@ -16,14 +16,16 @@
 
 namespace torch {
 namespace jit {
+struct Function;
 namespace script {
 struct CompilationUnit;
-struct Function;
 }
 } // namespace jit
 } // namespace torch
 
 namespace c10 {
+
+struct FunctionSchema;
 
 #define C10_FORALL_TYPES(_) \
 _(TensorType) \
@@ -45,6 +47,7 @@ _(OptionalType) \
 _(VarType) \
 _(ProfiledTensorType) \
 _(DeviceObjType) \
+_(FunctionType) \
 _(ClassType) \
 
 enum class TypeKind {
@@ -104,7 +107,14 @@ public:
     return kind_;
   }
 
-  virtual bool requires_grad() const { return false; }
+  virtual bool requires_grad() const {
+    for(const auto& ct : containedTypes()) {
+      if (ct->requires_grad()) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   // Dynamically cast this object to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid.
@@ -192,9 +202,7 @@ struct SingleElementType : public Type {
   at::ArrayRef<TypePtr> containedTypes() const override {
     return elem;
   }
-  bool requires_grad() const override {
-    return elem->requires_grad();
-  }
+
   bool operator==(const Type& rhs) const override {
     if(auto rhs_ = rhs.cast<T>()) {
       return *getElementType() == *rhs_->getElementType();
@@ -433,7 +441,7 @@ struct CAFFE2_API VaryingShape {
 
   bool operator ==(const VaryingShape &other) const
   {
-    return size_ != other.size_ && dims_ == dims_;
+    return size_ == other.size_ && dims_ == dims_;
   }
 
   const c10::optional<int64_t>& operator [] (int i) const
@@ -789,10 +797,6 @@ struct CAFFE2_API DictType : public Type {
     return types;
   }
 
-  bool requires_grad() const override {
-    return getValueType()->requires_grad() || getKeyType()->requires_grad();
-  }
-
   bool operator==(const Type& rhs) const override {
     if (auto dict_rhs = rhs.cast<DictType>()) {
       return *getKeyType() == *(dict_rhs->getKeyType()) &&
@@ -845,8 +849,8 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 using OptNameList = c10::optional<std::vector<std::string>>;
 // This type represents a Tuple
 struct CAFFE2_API TupleType : public Type {
-  static TupleTypePtr create(std::vector<TypePtr> types, OptNameList names=c10::nullopt) {
-    return TupleTypePtr(new TupleType(std::move(types), std::move(names))); // NOLINT(modernize-make-shared)
+  static TupleTypePtr create(std::vector<TypePtr> types, OptNameList names=c10::nullopt, c10::optional<std::string> unqualName=c10::nullopt) {
+    return TupleTypePtr(new TupleType(std::move(types), std::move(names), std::move(unqualName))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(TupleType);
   at::ArrayRef<TypePtr> elements() const {
@@ -875,10 +879,7 @@ struct CAFFE2_API TupleType : public Type {
       return a->isSubtypeOf(b);
     });
   }
-  bool requires_grad() const override {
-    return std::any_of(elements_.begin(), elements_.end(),
-                       [](const TypePtr& ptr) { return ptr->requires_grad(); });
-  }
+
   std::string str() const override {
     std::stringstream ss;
     ss << "(";
@@ -910,6 +911,9 @@ struct CAFFE2_API TupleType : public Type {
   const std::vector<std::string> &names() const {
     return names_.value();
   }
+  const c10::optional<std::string> &unqualName() const {
+    return unqualName_;
+  }
 
   at::ArrayRef<TypePtr> containedTypes() const override {
     return elements_;
@@ -917,18 +921,26 @@ struct CAFFE2_API TupleType : public Type {
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     return create(std::move(contained_types));
   }
-
+  const std::shared_ptr<FunctionSchema>& schema() const {
+    return schema_;
+  }
   static const TypeKind Kind = TypeKind::TupleType;
 private:
-  TupleType(std::vector<TypePtr> elements_, OptNameList names)
+  TupleType(std::vector<TypePtr> elements_, OptNameList names, c10::optional<std::string> unqualName)
   : Type(TypeKind::TupleType)
   , elements_(std::move(elements_))
-  , names_(std::move(names)) {
+  , names_(std::move(names))
+  , unqualName_(std::move(unqualName)) {
     has_free_variables_ =
         std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
           return v->hasFreeVariables();
         });
+    if (names && unqualName) {
+      createFunctionSchema();
+    }
   }
+
+  void createFunctionSchema();
 
   bool compare(const Type& rhs, std::function<bool(const TypePtr, const TypePtr)> fn) const {
     if(rhs.kind() != kind())
@@ -950,6 +962,8 @@ private:
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
   OptNameList names_;
+  c10::optional<std::string> unqualName_;
+  std::shared_ptr<FunctionSchema> schema_;
 };
 
 struct NumberType;
@@ -1087,6 +1101,41 @@ private:
   : Type(TypeKind::StringType) {}
 };
 
+struct FunctionType;
+using FunctionTypePtr = std::shared_ptr<FunctionType>;
+// This type represents a Python Function
+struct CAFFE2_API FunctionType : public Type {
+  static FunctionTypePtr create(
+      std::shared_ptr<torch::jit::Function> function) {
+    return FunctionTypePtr(
+        new FunctionType(function)); // NOLINT(modernize-make-shared)
+  }
+  DEFINE_IS_SUBCLASS(FunctionType);
+  bool operator==(const Type& rhs) const override {
+    if (auto func_type = rhs.cast<FunctionType>()) {
+      return func_type->function_ == function_;
+    }
+
+    return false;
+  }
+  std::string str() const override {
+    return "Function";
+  }
+  std::string python_str() const override {
+    throw "Function";
+  }
+  std::shared_ptr<torch::jit::Function> function() const {
+    return function_;
+  }
+  static const TypeKind Kind = TypeKind::FunctionType;
+
+ private:
+  FunctionType(std::shared_ptr<torch::jit::Function> function)
+      : Type(TypeKind::FunctionType), function_(function) {}
+
+  std::shared_ptr<torch::jit::Function> function_;
+};
+
 struct NoneType;
 using NoneTypePtr = std::shared_ptr<NoneType>;
 // This type represents a Python None
@@ -1218,7 +1267,7 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   } else if (type == IntType::get()) {
     return at::ScalarType::Long;
   } else if (type == BoolType::get()) {
-    return at::ScalarType::Byte;
+    return at::ScalarType::Bool;
   }
   AT_ASSERTM(
       0,
@@ -1265,7 +1314,15 @@ template<class T> struct getTypePtr_<std::vector<T>> final {
     return type;
   }
 };
-template<class T> struct getTypePtr_<ArrayRef<T>> final {
+template <class T>
+struct getTypePtr_<c10::ArrayRef<T>> final {
+  static TypePtr call() {
+    static auto type = ListType::create(getTypePtr_<T>::call());
+    return type;
+  }
+};
+template <class T>
+struct getTypePtr_<c10::ListPtr<T>> final {
   static TypePtr call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
@@ -1307,6 +1364,9 @@ CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
+  MatchTypeReturn(TypePtr type) : type(type) {}
+  MatchTypeReturn(std::string errMsg) : errMsg(std::move(errMsg)) {}
+
   c10::optional<TypePtr> type; // nullopt if there is no match
   std::string errMsg; // is there is no match, this contains the reason
 };
@@ -1323,18 +1383,14 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
-using ::torch::jit::script::Function;
+using ::torch::jit::Function;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public Type {
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       QualifiedName qualifiedName,
-      std::shared_ptr<CompilationUnit> cu);
-
-  // Create a type representing a Module,
-  // These do not have methods, and are not globally registered
-  static ClassTypePtr createModuleType(std::shared_ptr<CompilationUnit> module);
+      std::shared_ptr<CompilationUnit> cu, bool is_module = false);
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
@@ -1342,12 +1398,6 @@ struct CAFFE2_API ClassType : public Type {
       return name_ == user_rhs->name_;
     }
     return false;
-  }
-
-  bool isSubtypeOf(const TypePtr rhs) const override {
-    // XXX: We do not have inheritance implemented, only types that are the
-    // same can subtype from each other.
-    return *this == *rhs;
   }
 
   std::string str() const override {
@@ -1399,9 +1449,9 @@ struct CAFFE2_API ClassType : public Type {
   }
 
   std::shared_ptr<Function> getMethod(const std::string& name) const;
-  CompilationUnit& compilation_unit();
-  const CompilationUnit& compilation_unit() const;
   std::vector<Function*> methods() const;
+  std::shared_ptr<CompilationUnit> compilation_unit();
+  std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
 
   size_t numAttributes() const {
@@ -1452,10 +1502,14 @@ struct CAFFE2_API ClassType : public Type {
   // that would invalidate the refinement.
   // These variants are not registered in the global class table.
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
+
+  bool is_module() const {
+    return is_module_;
+  }
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu);
+  ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu, bool is_module);
 
   // Fully qualified name of type (note that this has to be globally unique).
   // Looks like: "foo.bar.Baz".
@@ -1472,5 +1526,6 @@ struct CAFFE2_API ClassType : public Type {
   // Holds method attributes
   std::shared_ptr<CompilationUnit> compilation_unit_;
 
+  bool is_module_;
 };
 } // namespace c10

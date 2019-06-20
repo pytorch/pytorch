@@ -336,6 +336,11 @@ class ChunkDataset final
     return batch_buffer_->get_batch();
   }
 
+  /// Helper method around get_batch as `batch_size` is not strictly necessary
+  BatchType get_batch() {
+    return get_batch(options_.batch_size_);
+  }
+
   /// This will clear any internal state and starts the internal prefetching
   /// mechanism for the chunk dataset.
   void reset() override {

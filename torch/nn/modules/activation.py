@@ -829,6 +829,7 @@ class PReLU(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['num_parameters']
 
     def __init__(self, num_parameters=1, init=0.25):
         self.num_parameters = num_parameters

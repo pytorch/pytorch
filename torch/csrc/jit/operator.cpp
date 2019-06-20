@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/operator.h>
 #include <ATen/ATen.h>
 #include <torch/csrc/jit/alias_info.h>
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/edit_distance.h>
@@ -132,8 +132,8 @@ void registerOperator(Operator&& op) {
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }
-    if (!aliasAnalysisHasSpecialCaseFor(s) &&
-        op.options().aliasAnalysis() == AliasAnalysisKind::DEFAULT) {
+    if (op.isC10Op() && !aliasAnalysisHasSpecialCaseFor(s) &&
+        op.aliasAnalysisKind() == AliasAnalysisKind::DEFAULT) {
       AT_ERROR(
           "Missing special case in alias analysis for non-schematized"
           " operator ",
@@ -246,11 +246,16 @@ const Operator& getOperatorFor(const Node* node) {
       er << ", ";
     er << *node->inputs()[i]->type();
   }
-  er << "\ncandidates were:\n";
   const auto& candidates = getAllOperatorsFor(node->kind());
-  for (auto& candidate : candidates) {
-    er << "  " << candidate->schema() << "\n";
+  if (candidates.size() > 0) {
+    er << "\ncandidates were:\n";
+    for (auto& candidate : candidates) {
+      er << "  " << candidate->schema() << "\n";
+    }
+  } else {
+    er << "\nno candidates found\n";
   }
+  er << "within the graph:\n";
   er << *node->owningGraph() << "\n";
   throw er;
 }

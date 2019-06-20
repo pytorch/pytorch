@@ -891,6 +891,13 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randn(*shape)
         self.run_model_test(MyModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_cosine_similarity(self):
+        shape = (100, 128)
+        x = torch.randn(*shape)
+        y = torch.randn(*shape)
+        self.run_model_test(torch.nn.CosineSimilarity(dim=1, eps=1e-6), train=False,
+                            input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_lstm_constant_folding(self):
         class LstmNet(nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -1062,6 +1069,15 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(MyModule(), train=False, input=(x),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_rand(self):
+        x = torch.randn(1, 2, 3, 4)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return (torch.rand(1, 2, 3, 4) + x).shape
+        self.run_model_test(MyModule(), train=False, input=(x),
+                            batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_convtranspose(self):
         model = nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False, padding=1, output_padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE, atol=1e-7)
@@ -1103,7 +1119,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_pixel_shuffle(self):
         underlying = nn.PixelShuffle(4)
-        shape = (1, 64, 5, 5)
+        shape = (1, 32, 5, 5)
         input = Variable(torch.randn(*shape),
                          requires_grad=True)
         self.run_model_test(underlying, train=False, input=(input),
@@ -1189,6 +1205,17 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_dynamic_slice_script(self):
+        class DynamicSliceModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return x[1:x.size(0)]
+        module = DynamicSliceModel()
+        x = torch.rand(1, 2)
+        example_output = module(x)
+        self.run_model_test(DynamicSliceModel(), train=False, input=(x,),
+                            batch_size=BATCH_SIZE, use_gpu=False, example_outputs=example_output)
+
     def test_dynamic_slice_to_the_end(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -1207,6 +1234,38 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_tensor_factories_script(self):
+        class TensorFactory(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.zeros(x.shape, dtype=torch.float) + torch.ones(x.shape, dtype=torch.float)
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),))
+
+    def test_tensor_like_factories_script(self):
+        class TensorFactory(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                zeros = torch.zeros_like(x, dtype=torch.float, layout=torch.strided, device=torch.device('cpu'))
+                ones = torch.ones_like(x, dtype=torch.float, layout=torch.strided, device=torch.device('cpu'))
+                return zeros + ones
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),))
+
+    def test_full_script(self):
+        class FullClass(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.full((4, 5), x, dtype=torch.long)
+
+        x = torch.tensor(12)
+        self.run_model_test(FullClass(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=FullClass()(x))
 
     def test_where_functional(self):
         class WhereFunctional(torch.nn.Module):
@@ -1609,6 +1668,29 @@ class TestCaffe2Backend(unittest.TestCase):
 
         self.run_model_test(MyModel(), train=False, input=lstm_in, batch_size=3, use_gpu=False)
 
+    def test_tuple_input_output(self):
+        class TupleModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                # type: (Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+                return a
+
+        x = (torch.randn(3, 4), torch.randn(4, 3))
+        self.run_model_test(TupleModel(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            example_outputs=(x,))
+
+    def test_nested_tuple_input_output(self):
+        class NestedTupleModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a, b):
+                # type: (Tensor, Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
+                return a + b[0] + b[1][0] + b[1][1]
+
+        x = torch.randn(4, 5)
+        y = (torch.randn(4, 5), (torch.randn(4, 5), torch.randn(4, 5)))
+        self.run_model_test(NestedTupleModel(), train=False, input=(x, y), batch_size=BATCH_SIZE,
+                            example_outputs=x + y[0] + y[1][0] + y[1][1])
+
     def test_topk(self):
         class TopKModel(torch.nn.Module):
             def forward(self, input):
@@ -1686,6 +1768,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     def test_prim_shape(self):
         x = torch.randn(4, 5, requires_grad=True)
+
         @torch.jit.script
         def view_by_prim_shape(x):
             return x.view(x.shape)
@@ -1712,6 +1795,106 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.randint(0, 1, (3, 5))
         y = torch.randint(0, 1, (3, 5))
         self.run_model_test(OrModel(), train=False, input=(x, y), batch_size=BATCH_SIZE)
+
+    def test_dropout(self):
+        class DropoutModel(torch.nn.Module):
+            def __init__(self):
+                super(DropoutModel, self).__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        x = torch.randn(1, 2, 3)
+        self.run_model_test(DropoutModel(), train=False, input=x, batch_size=BATCH_SIZE)
+
+    def test_while(self):
+        class WhileModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                a = 0
+                while a < 4:
+                    a += 1
+                return x + a
+
+        model = WhileModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_while_cond(self):
+        class WhileModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, a):
+                b = (a < 4)
+                while b:
+                    a += b.to(torch.long)
+                    b = (a < 4)
+                return x + a
+
+        model = WhileModel()
+        x = torch.zeros(1, 2, 3, dtype=torch.long)
+        a = torch.tensor([0], dtype=torch.long)
+        outputs = model(x, a)
+        self.run_model_test(model, train=False, input=(x, a), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_loop(self):
+        class LoopModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(5):
+                    x = x + i
+                return x
+
+        model = LoopModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_dynamic_loop(self):
+        class LoopModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(x.size(2)):
+                    x = x + i
+                return x
+
+        model = LoopModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_nested_loops(self):
+        class NestedLoopsModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(5):
+                    a = 0
+                    while a < 4:
+                        a += 1
+                        for j in range(a):
+                            x = x + j
+                    x = x + a
+                return x
+
+        model = NestedLoopsModel()
+        inputs = torch.zeros(1, 2, 3, dtype=torch.long)
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_select(self):
+        class SelectModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.select(x, 0, 1)
+
+        model = SelectModel()
+        inputs = torch.randn(3, 2, 1)
+        self.run_model_test(model, train=False, input=(inputs, ), batch_size=BATCH_SIZE)
 
 # a bit of metaprogramming to set up all the rnn tests
 

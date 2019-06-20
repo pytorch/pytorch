@@ -15,7 +15,7 @@ namespace at { namespace native { namespace {
 using namespace vec256;
 
 static void sum_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "sum_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, iter.dtype(), "sum_cpu", [&] {
     binary_kernel_reduce_vec(
       iter,
       [=](scalar_t a, scalar_t b) -> scalar_t { return a + b; },

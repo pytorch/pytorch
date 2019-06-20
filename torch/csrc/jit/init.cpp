@@ -36,6 +36,7 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
+#include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
 #include <torch/csrc/jit/python_ir.h>
@@ -46,6 +47,7 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/utils/auto_gil.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -53,6 +55,7 @@
 #include <ATen/core/function_schema.h>
 
 #include <pybind11/functional.h>
+#include <pybind11/iostream.h>
 
 #include <memory>
 #include <sstream>
@@ -145,7 +148,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_observers",
-          [](std::shared_ptr<script::Function>& function_var,
+          [](std::shared_ptr<Function>& function_var,
              py::function pyObserverFunction) {
             // Overloaded jit pass for pure functions instead of modules.
             // Create a new node that would be used in the insert observer pass:
@@ -159,7 +162,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_insert_quantdequant",
-          [](std::shared_ptr<Graph>& g, py::dict& pyQParamDict) {
+          [](std::shared_ptr<script::Module>& moduleObj,
+             const std::string& methodName,
+             py::dict& pyQParamDict) {
             if (!pyQParamDict.size()) {
               return;
             }
@@ -167,7 +172,7 @@ void initJITBindings(PyObject* module) {
             auto qparam_dict = py::cast<std::unordered_map<
                 std::string,
                 std::tuple<std::string, float, int>>>(pyQParamDict);
-            return InsertQuantDequantNodes(g, qparam_dict);
+            return InsertQuantDequantNodes(moduleObj, methodName, qparam_dict);
           })
       .def(
           "_jit_pass_insert_quantdequant_for_weight_bias",
@@ -331,6 +336,18 @@ void initJITBindings(PyObject* module) {
           "_jit_set_profiling_mode",
           [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
       .def(
+          "_jit_set_inline_everything_mode",
+          [](bool enabled) { script::getInlineEverythingMode() = enabled; })
+      .def(
+          "_jit_try_infer_type",
+          [](py::object obj) -> TypePtr {
+            auto match = tryToInferType(obj);
+            if (match.type) {
+              return *match.type;
+            }
+            return nullptr;
+          })
+      .def(
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
@@ -353,11 +370,9 @@ void initJITBindings(PyObject* module) {
     return states;
   });
 
-  py::class_<ExecutionPlanState>(m, "ExecutionPlanState")
-      .def_property_readonly(
-          "graph", [](ExecutionPlanState& s) { return s.graph; })
-      .def_property_readonly(
-          "code", [](ExecutionPlanState& s) { return s.code; });
+  py::class_<ExecutionPlan>(m, "ExecutionPlan")
+      .def_property_readonly("graph", [](ExecutionPlan& s) { return s.graph; })
+      .def_property_readonly("code", [](ExecutionPlan& s) { return s.code; });
 
   py::class_<Gradient>(m, "Gradient")
       .def_property_readonly("f", [](Gradient& m) { return m.f; })
@@ -518,7 +533,7 @@ void initJITBindings(PyObject* module) {
         // information of this IValue is used both to record the correct type in
         // the trace.
         output_ivalue = toIValue(py_func_output);
-        Value* out_val = jit::tracer::getNestedValueTrace(output_ivalue);
+        Value* out_val = jit::tracer::getValueTrace(output_ivalue);
         body_block->registerOutput(out_val);
         node_output =
             fork_node->output()->setType(FutureType::create(out_val->type()));
@@ -560,6 +575,16 @@ void initJITBindings(PyObject* module) {
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
+
+  setPrintHandler([](const std::string& str) {
+    py::gil_scoped_acquire acquire;
+    try {
+      auto _stdout = py::module::import("sys").attr("stdout");
+      _stdout.attr("write")(str);
+    } catch (py::error_already_set& e) {
+      throw std::runtime_error(e.what());
+    }
+  });
 }
 } // namespace jit
 } // namespace torch

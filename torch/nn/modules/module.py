@@ -41,8 +41,8 @@ class Module(object):
                 self.conv2 = nn.Conv2d(20, 20, 5)
 
             def forward(self, x):
-               x = F.relu(self.conv1(x))
-               return F.relu(self.conv2(x))
+                x = F.relu(self.conv1(x))
+                return F.relu(self.conv2(x))
 
     Submodules assigned in this way will be registered, and will have their
     parameters converted too when you call :meth:`to`, etc.

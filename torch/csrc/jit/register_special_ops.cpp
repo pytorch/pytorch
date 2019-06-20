@@ -48,7 +48,7 @@ int64_t list_size(const IValue& list) {
   } else if (list.isDoubleList()) {
     return list.toDoubleListRef().size();
   } else if (list.isBoolList()) {
-    return list.toBoolListRef().size();
+    return list.toBoolList().size();
   }
   AT_ASSERTM(0, "Unexpected list type", list);
 }
@@ -82,14 +82,14 @@ void checkSequenceSize(int64_t n, int64_t dim, int64_t seq_size) {
   }
 }
 
-template <typename DTYPE>
+template <typename DTYPE, typename List>
 void storeLastDimension(
     char* data,
     const std::vector<int64_t>& sizes,
     const c10::ArrayRef<int64_t>& strides,
     int64_t dim,
     int elementSize,
-    const std::vector<DTYPE>& obj) {
+    List obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
@@ -99,7 +99,6 @@ void storeLastDimension(
   }
 }
 
-// bool vector needs to be cast to uint8_t
 template <>
 void storeLastDimension<bool>(
     char* data,
@@ -107,12 +106,12 @@ void storeLastDimension<bool>(
     const c10::ArrayRef<int64_t>& strides,
     int64_t dim,
     int elementSize,
-    const std::vector<bool>& obj) {
+    const c10::ListPtr<bool>& obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
   for (int64_t i = 0; i < n; i++) {
-    *(uint8_t*)data = static_cast<uint8_t>(obj[i]);
+    *(bool*)data = static_cast<bool>(obj[i]);
     data += strides[dim] * elementSize;
   }
 }
@@ -146,7 +145,7 @@ void recursiveStore(
           data, sizes, strides, dim, elementSize, obj.toDoubleListRef());
     } else {
       storeLastDimension<bool>(
-          data, sizes, strides, dim, elementSize, obj.toBoolListRef());
+          data, sizes, strides, dim, elementSize, obj.toBoolList());
     }
   }
 }
@@ -159,10 +158,10 @@ RegisterOperators reg({
 
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
-              (std::move(peek(stack, 1, 3))).toIntList()->elements(),
+              (std::move(peek(stack, 1, 3))).toIntListRef(),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
-          pack(stack, std::move(result));
+          pack(stack, c10::impl::toList(std::move(result)));
           return 0;
         }),
     Operator(
@@ -182,7 +181,7 @@ RegisterOperators reg({
         [](Stack& stack) {
           RECORD_FUNCTION("sizes", last(stack, 2));
 
-          auto list = peek(stack, 0, 2).toIntListRef();
+          auto list = peek(stack, 0, 2).toIntList().copy();
           auto defaults = peek(stack, 1, 2).toIntListRef();
           drop(stack, 2);
 
@@ -191,16 +190,16 @@ RegisterOperators reg({
           // TODO: allow list of optionals to be filled in with defaults
           // i.e. list_with_default([1, 2, None], [1, 2, 3]) -> [1, 2, 3]
 
-          push(stack, list);
+          push(stack, std::move(list));
           return 0;
         }),
     Operator(
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
           return [](Stack& stack) {
-            auto a = pop(stack).toIntList()->elements();
-            auto b = pop(stack).toIntList()->elements();
-            push(stack, at::infer_size(a, b));
+            auto a = pop(stack);
+            auto b = pop(stack);
+            push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
             return 0;
           };
         }),
@@ -219,7 +218,7 @@ RegisterOperators reg({
 
             at::Tensor result =
                 at::embedding_renorm_(weight, input, max_norm, norm_type);
-            push(stack, result);
+            push(stack, std::move(result));
 
             return 0;
           };
@@ -280,8 +279,8 @@ RegisterOperators reg({
           if (scalar_type != initial_scalar_type || dev != tensor.device()) { \
             tensor = tensor.to(dev, scalar_type);                             \
           }                                                                   \
-          push(stack, tensor);                                                \
           tensor.set_requires_grad(requires_grad);                            \
+          push(stack, std::move(tensor));                                     \
           return 0;                                                           \
         };                                                                    \
       }),
@@ -291,7 +290,7 @@ RegisterOperators reg({
             DEFINE_TORCH_TENSOR_OP(
                 bool,
                 bool,
-                at::empty({}, at::CPU(at::kByte).options()).fill_(scalar_val))
+                at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
 
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp
@@ -299,9 +298,9 @@ RegisterOperators reg({
         "aten::_infer_size(int[] a, int[] b) -> int[]",
         [](const Node* node) {
           return [](Stack& stack) {
-            auto a = pop(stack).toIntList()->elements();
-            auto b = pop(stack).toIntList()->elements();
-            push(stack, at::infer_size(a, b));
+            auto a = pop(stack);
+            auto b = pop(stack);
+            push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
             return 0;
           };
         }),
@@ -320,7 +319,7 @@ RegisterOperators reg({
 
             at::Tensor result =
                 at::embedding_renorm_(weight, input, max_norm, norm_type);
-            push(stack, result);
+            push(stack, std::move(result));
 
             return 0;
           };
@@ -377,7 +376,7 @@ RegisterOperators reg({
                   "Pass in a dtype argument to ensure consistent behavior");
             }
             tensor.set_requires_grad(requires_grad);
-            push(stack, tensor);
+            push(stack, std::move(tensor));
             return 0;
           };
         }),

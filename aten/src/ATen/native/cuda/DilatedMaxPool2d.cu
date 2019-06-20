@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/native/DilatedMaxPool.h>
+#include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
@@ -177,7 +177,7 @@ void max_pool2d_with_indices_out_cuda_template(
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
 
-  max_pool2d_with_indices_shape_check(
+  pool2d_shape_check(
     input_,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
@@ -270,7 +270,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
-  max_pool2d_with_indices_shape_check(
+  max_pool2d_backward_shape_check(
     input_,
     gradOutput_,
     indices,
@@ -324,7 +324,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
 
 } // namespace
 
-std::tuple<Tensor& ,Tensor&> max_pool2d_with_indices_out_cuda(
+std::tuple<Tensor&, Tensor&> max_pool2d_with_indices_out_cuda(
   Tensor& output,
   Tensor& indices,
   const Tensor& input,
@@ -346,7 +346,7 @@ std::tuple<Tensor& ,Tensor&> max_pool2d_with_indices_out_cuda(
   return std::tuple<Tensor&, Tensor&>(output, indices);
 }
 
-std::tuple<Tensor ,Tensor> max_pool2d_with_indices_cuda(
+std::tuple<Tensor, Tensor> max_pool2d_with_indices_cuda(
   const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
@@ -365,7 +365,7 @@ std::tuple<Tensor ,Tensor> max_pool2d_with_indices_cuda(
     padding,
     dilation,
     ceil_mode);
-  return std::tuple<Tensor&, Tensor&>(output, indices);
+  return std::tuple<Tensor, Tensor>(output, indices);
 }
 
 Tensor& max_pool2d_with_indices_backward_out_cuda(
