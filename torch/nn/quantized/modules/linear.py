@@ -173,3 +173,14 @@ class Linear(Module):
         super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                       missing_keys, unexpected_keys, error_msgs)
         return
+
+    def set_state(self, state):
+        r"""
+        This is just used in convert_modules right now, we'll add ser/deser
+        using torch.save/torch.load later.
+        """
+        pack = torch.ops.quantized.fbgemm_linear_prepack
+        self._packed_wegiht = pack(state['weight'])
+        self.bias = state['bias']
+        self.output_scale = state['output_scale']
+        self.output_zero_point = state['output_zero_point']
