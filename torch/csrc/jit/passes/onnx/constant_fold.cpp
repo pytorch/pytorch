@@ -239,7 +239,7 @@ std::vector<int64_t> collectFoldables(int& axis, int level, Node* node,
   if (node->kind() == onnx::Constant) {
     if (node->hasAttribute(attr::value) &&
         node->kindOf(attr::value) == AttributeKind::t) {
-      at::Tensor val = node->t(attr::value);
+      const at::Tensor& val = node->t(attr::value);
       if (val.numel() == 1) {
         ret.emplace_back(val.item().toLong());
       }
@@ -340,7 +340,7 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
   */
 
   int axis = 0;
-  std::vector<long int> values;
+  std::vector<int64_t> values;
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     std::vector<std::vector<Node*>> removeNodes;
     auto node = *it;
@@ -356,8 +356,8 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict) {
         newSourceNodeOutput->inferTypeFrom(updatedVal);
         node->outputs().at(0)->replaceAllUsesWith(newSourceNodeOutput);
         node->removeAllInputs();
-        for (auto itn = removeNodes.begin(); itn != removeNodes.end(); ++itn) {
-          for (auto n : *itn) {
+        for (auto& nvec : removeNodes) {
+          for (auto& n : nvec) {
             if (node != n) {
               n->destroy();
             }

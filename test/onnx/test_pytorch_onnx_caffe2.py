@@ -1839,7 +1839,7 @@ class TestCaffe2Backend(unittest.TestCase):
         inputs = torch.zeros(1, 2, 3, dtype=torch.long)
         outputs = model(inputs)
         self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
-                            example_outputs=(outputs,), use_gpu=False) # TODO 'ONNXWhile' on CUDA
+                            example_outputs=(outputs,), use_gpu=False)  # TODO 'ONNXWhile' on CUDA
 
     def test_while_cond(self):
         class WhileModel(torch.jit.ScriptModule):
@@ -1856,7 +1856,7 @@ class TestCaffe2Backend(unittest.TestCase):
         a = torch.tensor([0], dtype=torch.long)
         outputs = model(x, a)
         self.run_model_test(model, train=False, input=(x, a), batch_size=BATCH_SIZE,
-                            example_outputs=(outputs,), use_gpu=False) # TODO 'ONNXWhile' on CUDA
+                            example_outputs=(outputs,), use_gpu=False)  # TODO 'ONNXWhile' on CUDA
 
     def test_loop(self):
         class LoopModel(torch.jit.ScriptModule):
@@ -1870,7 +1870,7 @@ class TestCaffe2Backend(unittest.TestCase):
         inputs = torch.zeros(1, 2, 3, dtype=torch.long)
         outputs = model(inputs)
         self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
-                            example_outputs=(outputs,), use_gpu=False) # TODO 'ONNXWhile' on CUDA
+                            example_outputs=(outputs,), use_gpu=False)  # TODO 'ONNXWhile' on CUDA
 
     def test_dynamic_loop(self):
         class LoopModel(torch.jit.ScriptModule):
@@ -1884,7 +1884,7 @@ class TestCaffe2Backend(unittest.TestCase):
         inputs = torch.zeros(1, 2, 3, dtype=torch.long)
         outputs = model(inputs)
         self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
-                            example_outputs=(outputs,), use_gpu=False) # TODO 'ONNXWhile' on CUDA
+                            example_outputs=(outputs,), use_gpu=False)  # TODO 'ONNXWhile' on CUDA
 
     def test_nested_loops(self):
         class NestedLoopsModel(torch.jit.ScriptModule):
@@ -1903,7 +1903,7 @@ class TestCaffe2Backend(unittest.TestCase):
         inputs = torch.zeros(1, 2, 3, dtype=torch.long)
         outputs = model(inputs)
         self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
-                            example_outputs=(outputs,), use_gpu=False) # TODO 'ONNXWhile' on CUDA
+                            example_outputs=(outputs,), use_gpu=False)  # TODO 'ONNXWhile' on CUDA
 
     def test_select(self):
         class SelectModel(torch.nn.Module):
