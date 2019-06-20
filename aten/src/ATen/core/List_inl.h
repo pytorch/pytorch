@@ -31,7 +31,7 @@ template<class T> List<T> make_list(ArrayRef<T> values) {
 template<>
 C10_DEPRECATED_MESSAGE("IValue isn't a valid List element type. If you know the concrete key type at compile time, please specify it to make_list<T>(). If you only know it at runtime, impl::make_generic_list() might work for you.")
 inline impl::GenericList make_list<IValue>() {
-  return impl::make_generic_list();
+  return impl::GenericList(make_intrusive<detail::ListImpl<IValue>>());
 }
 
 template<>
