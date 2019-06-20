@@ -130,9 +130,6 @@
 #include <THNN/generic/SpatialConvolutionMM.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SpatialFullDilatedConvolution.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SpatialDilatedConvolution.c>
 #include <TH/THGenerateFloatTypes.h>
 

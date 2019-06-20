@@ -88,7 +88,7 @@ void Variable::set_data(const at::Tensor &new_data) {
   // from `new_data` to `var`. It requires that `new_data` has the same derived
   // type of TensorImpl as `var`.
   TORCH_CHECK(
-    typeid(*(this->unsafeGetTensorImpl())) == typeid(*(new_data.unsafeGetTensorImpl())),
+    _has_same_tensorimpl_type(*this, new_data),
     "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have different types of TensorImpl.");
 
   // Resets gradient accumulator if metadata is out of date
