@@ -2147,7 +2147,6 @@ graph(%Ra, %Rb):
         @torch.jit.script
         def constant_prop(input_tensor):
             a = 2 * 3
-            print(a)
             b = a + 2
             return b + input_tensor
 
@@ -4568,6 +4567,7 @@ a")
             a = [1]
             if True:
                 a.append(4)
+            print(a)
             return a == [1, 4]
         self.checkScript(test_append_if, ())
 
@@ -5508,7 +5508,7 @@ a")
         self.checkScript(test_not_cast, (torch.tensor(1),))
         self.checkScript(test_not_cast, (torch.tensor(0),))
 
-        with self.assertRaisesRegex(RuntimeError, "Could not cast value of type Tuple\[Tensor, Tensor\]"):  # noqa: W605
+        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[Tensor, Tensor\]"):  # noqa: W605
             @torch.jit.script
             def test_mult(x, y):
                 return not(x, y)
@@ -5533,7 +5533,7 @@ a")
         self.checkScript(test_cast_float, (0.,))
         self.checkScript(test_cast_float, (-1.,))
 
-        with self.assertRaisesRegex(RuntimeError, "Could not cast value of type Tuple\[int, int\] to bool"):  # noqa: W605
+        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[int, int\] to bool"):  # noqa: W605
             @torch.jit.script
             def test_bad_conditional(x):
                 if (1, 2):
@@ -10804,7 +10804,7 @@ a")
         def test_test():
             return torch.jit._unwrap_optional(1)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot match an Optional\\[T\\] to None"):
+        with self.assertRaisesRegex(RuntimeError, r"Cannot match an Optional\[T\] to None"):
             @torch.jit.script
             def test_no_type():
                 # type: () -> int
