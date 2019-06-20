@@ -106,7 +106,7 @@ void storeLastDimension<bool>(
     const c10::ArrayRef<int64_t>& strides,
     int64_t dim,
     int elementSize,
-    const c10::ListPtr<bool>& obj) {
+    const c10::List<bool>& obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);

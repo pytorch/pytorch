@@ -361,6 +361,8 @@ template<class Key, class Value>
 GenericDictPtr toGenericDict(DictPtr<Key, Value> dict) {
   return GenericDictPtr(std::move(dict.impl_));
 }
+
+using GenericDict = GenericDictPtr;
 }
 
 template<class Key, class Value> using Dict = DictPtr<Key, Value>;
