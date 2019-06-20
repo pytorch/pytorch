@@ -467,8 +467,16 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #           It won't need to get from any queue, which would also need to be
     #           guarded by periodic status checks.
     #
-    #           Note that this may leave corrupted data in the queue, but we
-    #           don't care about the data anyways once we are shutting down.
+    #           Nonetheless, `cancel_join_thread` must only be called when the
+    #           queue is **not** going to be read from or write into by another
+    #           process, because it may hold onto a lock or leave corrupted data
+    #           in the queue, leading other readers/writers to hang.
+    #
+    #           `pin_memory_thread`'s `data_queue` is a `queue.Queue` that does
+    #           a blocking `put` if the queue is full. So there is no above
+    #           problem, but we do need to wrap the `put` in a loop that breaks
+    #           not only upon success, but also when the main process stops
+    #           reading, i.e., is shutting down.
     #
     #
     # Now let's get back to 1:
@@ -478,39 +486,72 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     # To achieve this, we implement the following logic along with the design
     # choices mentioned above:
     #
-    # `done_event`:
-    #   A `multiprocessing.Event` shared among all processes and threads. This
-    #   is used to signal the workers and pin_memory_thread that the iterator is
+    # `workers_done_event`:
+    #   A `multiprocessing.Event` shared among the main process and all worker
+    #   processes. This is used to signal the workers that the iterator is
     #   shutting down. After it is set, they will not send processed data to
     #   queues anymore, and only wait for the final `None` before exiting.
     #   `done_event` isn't strictly needed. I.e., we can just check for `None`
     #   from the input queue, but it allows us to skip wasting resources
     #   processing data if we are already shutting down.
     #
-    # [worker processes]
+    # `pin_memory_thread_done_event`:
+    #   A `threading.Event` for a similar purpose to that of
+    #   `workers_done_event`, but is for the `pin_memory_thread`. The reason
+    #   that separate events are neede is that `pin_memory_thread` reads from
+    #   the output queue of the workers. But the workers, upon seeing that
+    #   `workers_done_event` is set, only wants to see the final `None`, and is
+    #   not required to flush all data in the output queue (e.g., it may call
+    #   `cancel_join_thread` on that queue if its `IterableDataset` iterator
+    #   happens to exhaust coincidentally, which is out of the control of the
+    #   main process). Thus, since we will exit `pin_memory_thread` before the
+    #   workers (see below), two separete events are used.
+    #
+    # NOTE: In short, the protocol is that the main process will set these
+    #       `done_event`s and then the corresponding processes/threads a `None`,
+    #       and that they may exit at any time after receiving the `None`.
+    #
+    # NOTE: Using `None` as the final signal is valid, since normal data will
+    #       always be a 2-tuple with the 1st element being the index of the data
+    #       transferred (different from dataset index/key), and the 2nd being
+    #       either the dataset key or the data sample (depending on which part
+    #       of the data model the queue is at).
+    #
+    # [ worker processes ]
     #   While loader process is alive:
-    #     Get from index_queue.
-    #       If got a `None`, exit.
+    #     Get from `index_queue`.
     #       If get anything else,
-    #          Check `done_event`.
+    #          Check `workers_done_event`.
     #            If set, continue to next iteration
     #                    i.e., keep getting until see the `None`, then exit.
-    #            Otherwise, process data.
+    #            Otherwise, process data:
+    #                If is fetching from an `IterableDataset` and the iterator
+    #                    is exhausted, send an `_IterableDatasetStopIteration`
+    #                    object to signal iteration end. The main process, upon
+    #                    receiving such an object, will send `None` to this
+    #                    worker and not use the corresponding `index_queue`
+    #                    anymore.
     #       If timed out,
-    #          No matter `done_event` is set (still need to see `None`) or not,
-    #          must continue to next iteration .
+    #          No matter `workers_done_event` is set (still need to see `None`)
+    #          or not, must continue to next iteration.
+    #   (outside loop)
+    #   If `workers_done_event` is set,  (this can be False with `IterableDataset`)
+    #     `data_queue.cancel_join_thread()`.  (Everything is ending here:
+    #                                          main process won't read from it;
+    #                                          other workers will also call
+    #                                          `cancel_join_thread`.)
     #
-    # [pin_memory_thread]
+    # [ pin_memory_thread ]
     #   # No need to check main thread. If this thread is alive, the main loader
     #   # thread must be alive, because this thread is set as daemonic.
-    #   While True:
-    #     Get from index_queue.
-    #       If got a `None`, exit.
-    #       If get anything else,
-    #          Check `done_event`.
-    #            If set, continue to next iteration
-    #                    i.e., keep getting until see the `None`, then exit.
-    #            Otherwise, process data.
+    #   While `pin_memory_thread_done_event` is not set:
+    #     Get from `index_queue`.
+    #       If timed out, continue to get in the next iteration.
+    #       Otherwise, process data.
+    #       While `pin_memory_thread_done_event` is not set:
+    #         Put processed data to `data_queue` (a `queue.Queue` with blocking put)
+    #         If timed out, continue to put in the next iteration.
+    #         Otherwise, break, i.e., continuing to the out loop.
     #
     #   NOTE: we don't check the status of the main thread because
     #           1. if the process is killed by fatal signal, `pin_memory_thread`
@@ -520,24 +561,27 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #              This won't busy-wait either because `.get(timeout)` does not
     #              busy-wait.
     #
-    # [main process]
+    # [ main process ]
     #   In the DataLoader Iter's `__del__`
-    #     a. Set `done_event` (shared with `pin_memory_thread` and workers).
-    #
-    #        Note: from here on, the workers & `pin_memory_thread` may exit at
-    #              any time after they receive `None`.
-    #
     #     b. Exit `pin_memory_thread`
-    #          i.   Put `None` in `worker_result_queue`.
-    #          ii.  Join the `pin_memory_thread`.
+    #          i.   Set `pin_memory_thread_done_event`.
+    #          ii   Put `None` in `worker_result_queue`.
+    #          iii. Join the `pin_memory_thread`.
+    #          iv.  `worker_result_queue.cancel_join_thread()`.
     #
     #     c. Exit the workers.
-    #          i.   Put `None` in each worker's `index_queue`.
-    #          ii.  Join the workers.
+    #          i.   Set `workers_done_event`.
+    #          ii.  Put `None` in each worker's `index_queue`.
+    #          iii. Join the workers.
+    #          iv.  Call `.cancel_join_thread()` on each worker's `index_queue`.
     #
-    #        NOTE: This has to be after (b) because it may leave corrupted data
-    #              in `worker_result_queue`, which `pin_memory_thread` reads
-    #              from.
+    #        NOTE: (c) is better placed after (b) because it may leave corrupted
+    #              data in `worker_result_queue`, which `pin_memory_thread`
+    #              reads from, in which case the `pin_memory_thread` can only
+    #              happen at timeing out, which is slow. Nonetheless, same thing
+    #              happens if a worker is killed by signal at unfortunate times,
+    #              but in other cases, we are better off having a non-corrupted
+    #              `worker_result_queue` for `pin_memory_thread`.
     #
     #   NOTE: If `pin_memory=False`, there is no `pin_memory_thread` and (b)
     #         can be omitted
@@ -564,7 +608,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         #                  \ (worker_id, data)   if data is already fetched (out-of-order)
         self.task_info = {}
         self.tasks_outstanding = 0  # always equal to count(v for v in task_info.values() if len(v) == 1)
-        self.done_event = multiprocessing.Event()
+        self.workers_done_event = multiprocessing.Event()
 
         self.index_queues = []
         self.workers = []
@@ -572,14 +616,14 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # do, i.e., not having exhausted its iterable dataset object. It always
         # contains all `True`s if not using an iterable dataset
         # (i.e., if kind != Iterable).
-        self.worker_status = []
+        self.workers_status = []
         for i in range(self.num_workers):
             index_queue = multiprocessing.Queue()
-            index_queue.cancel_join_thread()
+            # index_queue.cancel_join_thread()
             w = multiprocessing.Process(
                 target=_utils.worker._worker_loop,
                 args=(self.dataset_kind, self.dataset, index_queue,
-                      self.worker_result_queue, self.done_event,
+                      self.worker_result_queue, self.workers_done_event,
                       self.auto_collation, self.collate_fn, self.drop_last,
                       self.base_seed + i, self.worker_init_fn, i, self.num_workers))
             w.daemon = True
@@ -592,14 +636,16 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             w.start()
             self.index_queues.append(index_queue)
             self.workers.append(w)
-            self.worker_status.append(True)
+            self.workers_status.append(True)
 
         if self.pin_memory:
+            self.pin_memory_thread_done_event = threading.Event()
             self.data_queue = queue.Queue()
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(self.worker_result_queue, self.data_queue,
-                      torch.cuda.current_device(), self.done_event))
+                      torch.cuda.current_device(),
+                      self.pin_memory_thread_done_event))
             pin_memory_thread.daemon = True
             pin_memory_thread.start()
             # Similar to workers (see comment above), we only register
@@ -637,7 +683,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # worker failures.
             failed_workers = []
             for worker_id, w in enumerate(self.workers):
-                if self.worker_status[worker_id] and not w.is_alive():
+                if self.workers_status[worker_id] and not w.is_alive():
                     failed_workers.append(w)
                     self._shutdown_worker(worker_id)
             if len(failed_workers) > 0:
@@ -687,12 +733,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # we try to advance `self.rcvd_idx` to find the next valid index.
             #
             # This part needs to run in the loop because both the `self._get_data()`
-            # call and `IterableDatasetStopIteration` check below can mark
+            # call and `_IterableDatasetStopIteration` check below can mark
             # extra worker(s) as dead.
             while self.rcvd_idx < self.send_idx:
                 info = self.task_info[self.rcvd_idx]
                 worker_id = info[0]
-                if len(info) == 2 or self.worker_status[worker_id]:  # has data or is still active
+                if len(info) == 2 or self.workers_status[worker_id]:  # has data or is still active
                     break
                 del self.task_info[self.rcvd_idx]
                 self.rcvd_idx += 1
@@ -713,8 +759,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             self.tasks_outstanding -= 1
 
             if self.dataset_kind == _DatasetKind.Iterable:
-                # Check for IterableDatasetStopIteration
-                if isinstance(data, _utils.worker.IterableDatasetStopIteration):
+                # Check for _IterableDatasetStopIteration
+                if isinstance(data, _utils.worker._IterableDatasetStopIteration):
                     self._shutdown_worker(data.worker_id)
                     self._try_put_index()
                     continue
@@ -736,7 +782,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             return
         for _ in range(self.num_workers):  # find the next active worker, if any
             worker_queue_idx = next(self.worker_queue_idx_cycle)
-            if self.worker_status[worker_queue_idx]:
+            if self.workers_status[worker_queue_idx]:
                 break
         else:
             # not found (i.e., didn't break)
@@ -764,14 +810,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # exhausting an `IterableDataset`. This should be used only when this
         # `_DataLoaderIter` is going to continue running.
 
-        assert self.worker_status[worker_id]
+        assert self.workers_status[worker_id]
 
         # Signal termination to that specific worker.
         q = self.index_queues[worker_id]
         # Indicate that no more data will be put on this queue by the current
         # process.
         q.put(None)
-        q.close()
 
         # Note that we don't actually join the worker here, nor do we remove the
         # worker's pid from C side struct because (1) joining may be slow, and
@@ -781,7 +826,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # Joinning is deferred to `_shutdown_workers`, which it is called when
         # all workers finish their jobs (e.g., `IterableDataset` replicas) or
         # when this iterator is garbage collected.
-        self.worker_status[worker_id] = False
+        self.workers_status[worker_id] = False
 
     def _shutdown_workers(self):
         # Called when shutting down this `_DataLoaderIter`.
@@ -796,33 +841,24 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         if not self.shutdown:
             self.shutdown = True
             try:
-                self.done_event.set()
-
                 # Exit `pin_memory_thread` first because exiting workers may leave
                 # corrupted data in `worker_result_queue` which `pin_memory_thread`
                 # reads from.
                 if hasattr(self, 'pin_memory_thread'):
+                    self.pin_memory_thread_done_event.set()
                     # Use hasattr in case error happens before we set the attribute.
-                    # First time do `worker_result_queue.put` in this process.
-
-                    # `cancel_join_thread` in case that `pin_memory_thread` exited.
-                    self.worker_result_queue.cancel_join_thread()
-                    self.worker_result_queue.put(None)
                     self.pin_memory_thread.join()
-                    # Indicate that no more data will be put on this queue by the
-                    # current process. This **must** be called after
-                    # `pin_memory_thread` is joined because that thread shares the
-                    # same pipe handles with this loader thread. If the handle is
-                    # closed, Py3 will error in this case, but Py2 will just time
-                    # out even if there is data in the queue.
-                    self.worker_result_queue.close()
 
                 # Exit workers now.
+                self.workers_done_event.set()
                 for worker_id in range(self.num_workers):
-                    if self.worker_status[worker_id]:
+                    if self.workers_status[worker_id]:
                         self._shutdown_worker(worker_id)
                 for w in self.workers:
                     w.join()
+                for q in self.index_queues:
+                    q.cancel_join_thread()
+                    q.close()
             finally:
                 # Even though all this function does is putting into queues that
                 # we have called `cancel_join_thread` on, weird things can

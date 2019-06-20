@@ -101,7 +101,7 @@ def get_worker_info():
 
 
 r"""Dummy class used to signal the end of an IterableDataset"""
-IterableDatasetStopIteration = namedtuple('IterableDatasetStopIteration', ['worker_id'])
+_IterableDatasetStopIteration = namedtuple('_IterableDatasetStopIteration', ['worker_id'])
 
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
@@ -122,8 +122,6 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
         random.seed(seed)
         torch.manual_seed(seed)
 
-        data_queue.cancel_join_thread()
-
         global _worker_info
         _worker_info = WorkerInfo(id=worker_id, num_workers=num_workers,
                                   seed=seed, dataset=dataset)
@@ -142,7 +140,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
 
         # When using Iterable mode, some worker can exit earlier than others due
         # to the IterableDataset behaving differently for different workers.
-        # When such things happen, an `IterableDatasetStopIteration` object is
+        # When such things happen, an `_IterableDatasetStopIteration` object is
         # sent over to the main process with the ID of this worker, so that the
         # main process won't send more tasks to this worker, and will send
         # `None` to this worker to properly exit it.
@@ -164,7 +162,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
             if r is None:
                 # Received the final signal
                 assert done_event.is_set() or iteration_end
-                return
+                break
             elif done_event.is_set() or iteration_end:
                 # `done_event` is set. But I haven't received the final signal
                 # (None) yet. I will keep continuing until get it, and skip the
@@ -179,17 +177,21 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                     data = fetcher.fetch(index)
                 except Exception as e:
                     if isinstance(e, StopIteration) and dataset_kind == _DatasetKind.Iterable:
-                        data = IterableDatasetStopIteration(worker_id)
+                        data = _IterableDatasetStopIteration(worker_id)
                         # Set `iteration_end`
                         #   (1) to save future `next(...)` calls, and
-                        #   (2) to avoid sending multiple `IterableDatasetStopIteration`s.
+                        #   (2) to avoid sending multiple `_IterableDatasetStopIteration`s.
                         iteration_end = True
                     else:
-                        # It is important that we don't store exc_info in a variable,
-                        # see NOTE [ Python Traceback Reference Cycle Problem ]
+                        # It is important that we don't store exc_info in a variable.
+                        # `ExceptionWrapper` does the correct thing.
+                        # See NOTE [ Python Traceback Reference Cycle Problem ]
                         data = ExceptionWrapper(sys.exc_info())
             data_queue.put((idx, data))
             del data, idx, index, r  # save memory
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
         pass
+    if done_event.is_set():
+        data_queue.cancel_join_thread()
+        data_queue.close()

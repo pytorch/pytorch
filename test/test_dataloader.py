@@ -236,6 +236,8 @@ def set_faulthander_if_available(_=None):
             faulthandler.register(signal.SIGUSR1, chain=False)
 
 
+set_faulthander_if_available()
+
 # Process `pid` must have called `set_faulthander_if_available`
 def print_traces_of_all_threads(pid):
     if HAS_FAULTHANDLER:
@@ -818,7 +820,8 @@ class TestDataLoader(TestCase):
         expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
-        dataloader = DataLoader(dataset, num_workers=num_workers)
+        dataloader = DataLoader(dataset, num_workers=num_workers,
+                                worker_init_fn=set_faulthander_if_available)
         dataloader_iter = iter(dataloader)
         fetched = sorted([d.item() for d in dataloader_iter])
 
@@ -889,7 +892,8 @@ class TestDataLoader(TestCase):
         # worker 0 should return 0 batches
         # worker 1 should return 1 batches
         # worker 2 should return 3 batches
-        dataloader = DataLoader(dataset, num_workers=num_workers, batch_size=7, drop_last=True)
+        dataloader = DataLoader(dataset, num_workers=num_workers, batch_size=7, drop_last=True,
+                                worker_init_fn=set_faulthander_if_available)
         dataloader_iter = iter(dataloader)
         fetched = list(dataloader_iter)
         self.assertEqual(len(fetched), 2)

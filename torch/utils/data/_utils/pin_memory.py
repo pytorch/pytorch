@@ -16,33 +16,25 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
 
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
-    while True:
+    while not done_event.is_set():
         try:
             r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         except queue.Empty:
             continue
-        except Exception:
-            if done_event.is_set():
-                # Weird things can happen when shutting down, e.g., fd being
-                # closed when tensors are shared via fds.
-                break
-            raise
-        if r is None:
-            assert done_event.is_set()
-            return
-        elif done_event.is_set():
-            # Haven't seen the final signal yet. Keep getting until None.
-            continue
-        elif isinstance(r[1], ExceptionWrapper):
-            out_queue.put(r)
-        else:
-            idx, data = r
+        idx, data = r
+        if not isinstance(data, ExceptionWrapper):
             try:
                 data = pin_memory(data)
             except Exception:
-                out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
-            else:
-                out_queue.put((idx, data))
+                data = ExceptionWrapper(sys.exc_info())
+            r = (idx, data)
+        while not done_event.is_set():
+            try:
+                out_queue.put(r, timeout=MP_STATUS_CHECK_INTERVAL)
+                break
+            except queue.Full:
+                continue
+        del r  # save memory
 
 
 def pin_memory(data):

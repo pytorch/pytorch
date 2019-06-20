@@ -29,7 +29,7 @@ class _IterableDatasetFetcher(_BaseDatasetFetcher):
                 except StopIteration:
                     break
             if len(data) == 0 or (self.drop_last and len(data) < len(possibly_batched_index)):
-                raise StopIteration()
+                raise StopIteration
         else:
             data = next(self.dataset_iter)
         return self.collate_fn(data)
