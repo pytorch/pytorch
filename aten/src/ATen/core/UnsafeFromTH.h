@@ -1,6 +1,7 @@
 #include <ATen/core/Tensor.h>
 
 namespace at {
+namespace impl {
 
 inline Tensor unsafeTensorFromTH(void * th_pointer, bool retain) {
   auto tensor_impl = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(static_cast<TensorImpl*>(th_pointer));
@@ -16,5 +17,5 @@ inline Storage unsafeStorageFromTH(void * th_pointer, bool retain) {
   }
   return Storage(c10::intrusive_ptr<StorageImpl>::reclaim(static_cast<StorageImpl*>(th_pointer)));
 }
-
-}
+} // namespace impl
+} // namespace at
