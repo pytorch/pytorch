@@ -139,6 +139,9 @@ struct CAFFE2_API Type {
     }
   }
 
+  // example
+  // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
+  ${pure_virtual_type_method_declarations}
 protected:
   TensorTypeId type_id_;
   bool is_variable_;
