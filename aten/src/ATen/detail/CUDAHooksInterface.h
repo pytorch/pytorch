@@ -58,8 +58,8 @@ struct CAFFE2_API CUDAHooksInterface {
     AT_ERROR("Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual std::unique_ptr<Generator> initCUDAGenerator(Context*) const {
-    AT_ERROR("Cannot initialize CUDA generator without ATen_cuda library. ", CUDA_HELP);
+  virtual Generator* getDefaultCUDAGenerator(DeviceIndex device_index = -1) const {
+    AT_ERROR("Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual bool hasCUDA() const {
