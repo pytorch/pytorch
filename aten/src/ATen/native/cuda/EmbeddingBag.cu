@@ -13,16 +13,21 @@
 
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
+#include <thrust/device_vector.h>
 
-const int WARP_SIZE = 32;
-const int MODE_SUM = 0;
-const int MODE_MEAN = 1;
-const int MODE_MAX = 2;
+#include "EmbeddingBackwardKernel.cuh"
 
 namespace at {
 namespace native {
 
 namespace {
+
+constexpr int MODE_SUM = 0;
+constexpr int MODE_MEAN = 1;
+constexpr int MODE_MAX = 2;
+
+constexpr int WARP_SIZE = 32;
+
 
 // This kernel assumes that all input tensors except `weight` and
 // per_sample_weights are contiguous.
@@ -104,78 +109,6 @@ __global__ void EmbeddingBag_updateOutputKernel(
   }
 }
 
-// FIXME: removed the accGradParametersKernelByFeature case present in
-// LookupTable. That kernel is faster at small sizes (<768 indices), which
-// does not need EmbeddingBag (LookupTable + Sum works fine), but would
-// still be nice to not be slow in that case.
-
-// This kernel assumes that all input tensors are contiguous.
-template <typename scalar_t>
-__global__ void EmbeddingBag_accGradParametersKernel_sum_avg(
-    int64_t *input, int64_t *indices, scalar_t *gradOutput,
-    scalar_t *gradWeight, int64_t *offset2bag, int64_t *count, ptrdiff_t numel,
-    int64_t stride, int mode, const int64_t *bag_size,
-    scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
-    int64_t* segment_offsets, int64_t num_of_segments, scalar_t *grad_weight_per_segment) {
-
-  const int id = blockIdx.y * blockDim.y + threadIdx.y;
-  const int startFeature = blockIdx.x * blockDim.x + threadIdx.x;
-  if (startFeature >= stride) {
-    return;
-  }
-  if (id >= num_of_segments) {
-    return;
-  }
-  const int idx_end = (id == num_of_segments-1)?numel:segment_offsets[id+1];
-
-  // FIXME: use `acc_type<scalar_t, true>` for improved accuracy.
-  scalar_t weight = 0;
-  int tt = input[segment_offsets[id]];
-  for (int idx=segment_offsets[id]; idx < idx_end; ++idx) {
-    if(tt != input[idx]) {
-      printf("WTF\n");
-    }
-
-    const int origRow = indices[idx];
-    const int seq_number = offset2bag[origRow];
-    const int gradOutputRow = ((int)seq_number) * stride;
-
-    scalar_t scale = count ? 1.0 / count[idx] : 1.0;
-    if (per_sample_weights) {
-      scale *= per_sample_weights[origRow * per_sample_weights_stride];
-    }
-
-    scalar_t gradient = gradOutput[gradOutputRow + startFeature];
-
-    if (mode == MODE_MEAN) {
-      gradient /= bag_size[seq_number];
-    }
-    weight += gradient * scale;
-  }
-  grad_weight_per_segment[id * stride + startFeature] = weight;
-}
-
-// This kernel assumes that all input tensors are contiguous.
-template <typename scalar_t>
-__global__ void EmbeddingBag_accGradParametersKernel_scatter(
-    int64_t *input, int64_t *indices, scalar_t *gradOutput,
-    scalar_t *gradWeight, int64_t *offset2bag, int64_t *count, ptrdiff_t numel,
-    int64_t stride, int mode, const int64_t *bag_size,
-    scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
-    int64_t* segment_offsets, int64_t num_of_segments, const scalar_t *grad_weight_per_segment) {
-
-  const int id = blockIdx.y * blockDim.y + threadIdx.y;
-  const int startFeature = blockIdx.x * blockDim.x + threadIdx.x;
-  if (startFeature >= stride) {
-    return;
-  }
-  if (id >= num_of_segments) {
-    return;
-  }
-  const int weightRow = ((int)input[segment_offsets[id]]) * stride;
-  gradWeight[weightRow + startFeature] = grad_weight_per_segment[id*stride + startFeature];
-}
-
 
 
 Tensor embedding_bag_backward_cuda_sum_avg(
@@ -195,7 +128,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
   if (numel == 0) {
     // all empty bags
-    return grad_weight;
+    return at::zeros({num_weights, grad.size(1)}, grad.options());
   }
 
   int64_t stride = grad_weight.stride(0);
@@ -251,72 +184,9 @@ Tensor embedding_bag_backward_cuda_sum_avg(
         thrust::equal_to<int64_t>(), thrust::maximum<int64_t>());
   }
 
-
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  auto policy = thrust::cuda::par(allocator).on(stream);
-  auto sorted_indices_dev = device_ptr(sorted_indices.data<int64_t>());
-  auto dummy = at::empty_like(indices);
-  auto dummy_dev = device_ptr(dummy.data<int64_t>());
-  auto segment_offsets = at::ones_like(indices);
-  auto segment_offsets_dev = device_ptr(segment_offsets.data<int64_t>());
-  auto ends = thrust::unique_by_key_copy(
-          policy,
-          sorted_indices_dev,
-          sorted_indices_dev + numel,
-          thrust::make_counting_iterator(0),
-          dummy_dev,
-          segment_offsets_dev);
-  int64_t num_of_segments = thrust::get<0>(ends) - dummy_dev;
-/*
-  std::cout << "\n\nnumel: " << numel <<  std::endl;
-  std::cout << "sorted_indices/input" <<  std::endl;
-  std::cout << sorted_indices << std::endl;
-  std::cout << "segment_offsets" <<  std::endl;
-  std::cout << segment_offsets << std::endl;
-  std::cout << "num_of_segments: " <<  num_of_segments << std::endl;
-*/
-  auto grad_weight_per_segment = at::empty({num_of_segments, stride}, grad.options());
-
-  dim3 grid(THCCeilDiv(stride, (ptrdiff_t)32), THCCeilDiv(num_of_segments, (int64_t)32));
-  dim3 block(32, 32);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      grad.scalar_type(), "embedding_bag_backward_cuda_sum_avg_kernel", [&] {
-        EmbeddingBag_accGradParametersKernel_sum_avg<
-            scalar_t><<<grid, block, 0, stream>>>(
-            sorted_indices.data<int64_t>(), orig_indices.data<int64_t>(),
-            grad.data<scalar_t>(), grad_weight.data<scalar_t>(),
-            offset2bag.data<int64_t>(),
-            count.defined() ? count.data<int64_t>() : nullptr, numel, stride,
-            mode, bag_size.data<int64_t>(),
-            per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
-            per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-            segment_offsets.data<int64_t>(), num_of_segments, grad_weight_per_segment.data<scalar_t>());
-      });
-  THCudaCheck(cudaGetLastError());
-/*
-  std::cout << "grad_weight_per_segment" <<  std::endl;
-  std::cout << grad_weight_per_segment << std::endl;
-*/
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-    grad.scalar_type(), "EmbeddingBag_accGradParametersKernel_scatter", [&] {
-      EmbeddingBag_accGradParametersKernel_scatter<
-          scalar_t><<<grid, block, 0, stream>>>(
-          sorted_indices.data<int64_t>(), orig_indices.data<int64_t>(),
-          grad.data<scalar_t>(), grad_weight.data<scalar_t>(),
-          offset2bag.data<int64_t>(),
-          count.defined() ? count.data<int64_t>() : nullptr, numel, stride,
-          mode, bag_size.data<int64_t>(),
-          per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
-          per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-          segment_offsets.data<int64_t>(), num_of_segments, grad_weight_per_segment.data<scalar_t>());
-    });
-  THCudaCheck(cudaGetLastError());
-
-/*
-  std::cout << "grad_weight" <<  std::endl;
-  std::cout << grad_weight << std::endl;
-*/
-  return grad_weight;
+  return embedding_bag_backward_cuda_kernel(grad, orig_indices, sorted_indices,
+          offset2bag, bag_size, count, num_weights, scale_grad_by_freq,
+          mode == MODE_MEAN, per_sample_weights);
 }
 
 template <typename scalar_t>
@@ -339,7 +209,8 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
       int64_t word_idx = max_indices[bag * stride + featureDim];
       if (word_idx >= 0) {
         // If bag is empty, we have max_indices[idx] set to -1 in forward.
-        atomicAdd(&(gradWeight[word_idx * stride + featureDim]), gradOutput[bag * stride + featureDim]);
+        atomicAdd(&(gradWeight[word_idx * stride + featureDim]),
+                gradOutput[bag * stride + featureDim]);
       }
     }
   }
@@ -453,7 +324,8 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
     case MODE_MEAN:
       if (mode == MODE_MEAN)
         AT_ASSERT(!per_sample_weights.defined());
-      return embedding_bag_backward_cuda_sum_avg(grad, indices, offset2bag, bag_size_, num_weights, scale_grad_by_freq, mode, per_sample_weights);
+      return embedding_bag_backward_cuda_sum_avg(grad, indices, offset2bag,
+              bag_size_, num_weights, scale_grad_by_freq, mode, per_sample_weights);
 
     case MODE_MAX:
       AT_ASSERT(!per_sample_weights.defined());
