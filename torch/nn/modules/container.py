@@ -87,9 +87,9 @@ class Sequential(Module):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
-    def forward(self, input):
+    def forward(self, *input):
         for module in self._modules.values():
-            input = module(input)
+            input = module(*input)
         return input
 
 
