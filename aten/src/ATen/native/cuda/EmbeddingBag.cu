@@ -183,10 +183,9 @@ Tensor embedding_bag_backward_cuda_sum_avg(
         thrust::make_reverse_iterator(count_data + numel),
         thrust::equal_to<int64_t>(), thrust::maximum<int64_t>());
   }
-
-  return embedding_bag_backward_cuda_kernel(grad, orig_indices, sorted_indices,
-          offset2bag, bag_size, count, num_weights, scale_grad_by_freq,
-          mode == MODE_MEAN, per_sample_weights);
+  return embedding_backward_cuda_kernel(grad, orig_indices, sorted_indices,
+      count, num_weights, /* padding_idx= */ -1, scale_grad_by_freq,
+      mode == MODE_MEAN, offset2bag, bag_size, per_sample_weights);
 }
 
 template <typename scalar_t>

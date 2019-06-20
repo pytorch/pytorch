@@ -323,8 +323,8 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     );
   }
 
-  return embedding_backward_cuda_kernel(grad, orig_indices, sorted_indices,
-      count, num_weights, padding_idx);
+  return embedding_backward_cuda_kernel(grad, orig_indices,
+      sorted_indices, count, num_weights, padding_idx);
 }
 
 Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
