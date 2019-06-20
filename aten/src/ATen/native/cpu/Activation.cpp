@@ -27,7 +27,7 @@ static void threshold_kernel(
     using Vec = Vec256<scalar_t>;
     scalar_t threshold = threshold_scalar.to<scalar_t>();
     scalar_t value = value_scalar.to<scalar_t>();
-    binary_kernel_vec(
+    cpu_kernel_vec(
         iter,
         [&](scalar_t x, scalar_t other) -> scalar_t {
           return x <= threshold ? value : other;

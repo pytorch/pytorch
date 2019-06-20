@@ -195,7 +195,7 @@ def sign(g, self):
     return g.op("Sign", self)
 
 
-def slice_op(g, input, axes, starts, ends):
+def _slice(g, input, axes, starts, ends):
     assert len(starts) == len(ends)
     if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
         return input
@@ -392,8 +392,8 @@ def select(g, self, dim, index):
         # of Gather in caffe2. We need to change this as soon as possible.
         # TODO: this breaks if index == -1
         index_val = _parse_arg(index, 'i')
-        slice_node = sym_help._slice_op(g, self, axes=[dim],
-                                        starts=[index_val], ends=[index_val + 1])
+        slice_node = sym_help._slice_helper(g, self, axes=[dim],
+                                            starts=[index_val], ends=[index_val + 1])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
@@ -425,6 +425,10 @@ def squeeze(g, self, dim=None):
 
 
 def prelu(g, self, weight):
+    if self.isCompleteTensor():
+        self_sizes = self.type().sizes()
+        if self_sizes and len(self_sizes) > 2:
+            weight = g.op("Unsqueeze", weight, axes_i=list(range(1, len(self_sizes) - 1)))
     return g.op("PRelu", self, weight)
 
 
@@ -572,8 +576,8 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
                                         kernel_shape_i=[1 for _ in range(ndims)],
                                         strides_i=[1 for _ in range(ndims)])
             # convert indices to have non-flattened indices values
-            s = sym_help._slice_op(g, flattened_indices, axes=[2 + i for i in range(ndims)],
-                                   starts=tuple_fn(0), ends=tuple_fn(1))
+            s = sym_help._slice_helper(g, flattened_indices, axes=[2 + i for i in range(ndims)],
+                                       starts=tuple_fn(0), ends=tuple_fn(1))
             indices = sub(g, indices, s)
             return r, indices
         else:
@@ -701,55 +705,33 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
-def upsample_nearest2d(g, input, output_size):
-    output_size = sym_help._maybe_get_const(output_size, 'is')
-    if sym_help._is_value(output_size):
-        offset = 2
-        input_length = len(input.type().sizes())
-        offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
-        dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-        divisor = sym_help._slice_op(g,
-                                     g.op("Shape", input),
-                                     axes=[0],
-                                     starts=[offset],
-                                     ends=[input_length])
-        divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-        scale_dims = g.op("Div", dividend, divisor)
-        scales = g.op("Concat", offsets, scale_dims, axis_i=0)
-    else:
-        height_scale = float(output_size[-2]) / input.type().sizes()[-2]
-        width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-        scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale, width_scale]))
+def _interpolate(name, dim, interpolate_mode):
+    def symbolic_fn(g, input, output_size, align_corners=None):
+        align_corners = sym_help._maybe_get_scalar(align_corners)
+        if align_corners:
+            return _unimplemented(name, "align_corners == True")
 
-    return g.op("Upsample", input, scales, mode_s="nearest")
+        output_size = sym_help._maybe_get_const(output_size, 'is')
+        if sym_help._is_value(output_size):
+            offset = 2
+            offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
+            dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+            divisor = sym_help._slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
+            divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+            scale_dims = g.op("Div", dividend, divisor)
+            scales = g.op("Concat", offsets, scale_dims, axis_i=0)
+        else:
+            scales_constant = [1. if i < 2 else
+                               float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
+                               for i in range(0, dim)]
+            scales = g.op("Constant", value_t=torch.tensor(scales_constant))
+        return g.op("Upsample", input, scales, mode_s=interpolate_mode)
+    return symbolic_fn
 
 
-def upsample_bilinear2d(g, input, output_size, align_corners):
-    align_corners = sym_help._maybe_get_scalar(align_corners)
-    if align_corners:
-        return _unimplemented("upsample_bilinear2d", "align_corners == True")
-
-    output_size = sym_help._maybe_get_const(output_size, 'is')
-    if sym_help._is_value(output_size):
-        offset = 2
-        input_length = len(input.type().sizes())
-        offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
-        dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-        divisor = sym_help._slice_op(g,
-                                     g.op("Shape", input),
-                                     axes=[0],
-                                     starts=[offset],
-                                     ends=[input_length])
-        divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-        scale_dims = g.op("Div", dividend, divisor)
-        scales = g.op("Concat", offsets, scale_dims, axis_i=0)
-    else:
-        height_scale = float(output_size[-2]) / input.type().sizes()[-2]
-        width_scale = float(output_size[-1]) / input.type().sizes()[-1]
-        scales = g.op("Constant", value_t=torch.tensor([1., 1., height_scale,
-                                                        width_scale]))
-    return g.op("Upsample", input, scales,
-                mode_s="linear")
+upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
+upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
+upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
 
 
 def wrap_logical_op_with_cast_to(to_type):
@@ -988,6 +970,11 @@ def layer_norm(g, self, normalized_shape, weight, bias, eps, cudnn_enable):
                 eps_f=eps, cudnn_enable_i=cudnn_enable, operator_s="layer_norm")
 
 
+@parse_args('v', 'v', 'i', 'f')
+def cosine_similarity(g, x1, x2, dim, eps):
+    return g.op("ATen", x1, x2, dim_i=dim, eps_f=eps, operator_s="cosine_similarity")
+
+
 # ignore clone operators that are inserted by PyTorch autograd
 def clone(g, input):
     return input
@@ -1162,8 +1149,8 @@ def ones_like(g, input, dtype, layout, device, pin_memory=False):
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     const_value = sym_help._maybe_get_const(value, 't')
     if sym_help._is_value(const_value):
-        tmp = zeros(sizes, dtype, layout, device)
-        return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
+        tmp = zeros(g, sizes, dtype, layout, device)
+        return add(g, tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
         dtype = sym_help._get_const(dtype, 'i', 'dtype')
         return g.op("ConstantOfShape", sizes,
@@ -1191,7 +1178,7 @@ def slice(g, self, dim, start, end, step):
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
         dim = _parse_arg(dim, 'i')
-        return sym_help._slice_op(g, self, axes=[dim], starts=[start], ends=[end])
+        return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
 
 
 @parse_args('v', 'f', 'f')
@@ -1278,8 +1265,8 @@ def pixel_shuffle(g, self, upscale_factor):
     if len(dims) != 4:
         return _unimplemented("pixel_shuffle", "only support 4d input")
     output_channel = dims[1] // upscale_factor // upscale_factor
-    after_view = view(g, self, [-1, upscale_factor, upscale_factor,
-                                output_channel, dims[2], dims[3]])
+    after_view = view(g, self, [-1, output_channel, upscale_factor, upscale_factor,
+                                dims[2], dims[3]])
     after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
     return view(g, after_transpose,
                 [-1, output_channel, dims[2] * upscale_factor, dims[3] *
@@ -1336,7 +1323,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         reform_permutation = [(0, 1), (3, 4), (1, 3)]
 
     def reform_weights(g, w, n, intervals):
-        slices = [sym_help._slice_op(g, w, axes=[0], starts=[x * n], ends=[y * n]) for x, y in intervals]
+        slices = [sym_help._slice_helper(g, w, axes=[0], starts=[x * n], ends=[y * n]) for x, y in intervals]
         return g.op('Concat', *slices, axis_i=0)
 
     def transform_weights(layer_index):
@@ -1350,7 +1337,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh, bias_concat))
 
     def retrieve_state(x, start, end):
-        return x if num_layers == 1 else sym_help._slice_op(g, x, axes=[0], starts=[start], ends=[end])
+        return x if num_layers == 1 else sym_help._slice_helper(g, x, axes=[0], starts=[start], ends=[end])
 
     for i in range(num_layers):
         if unidirectional:
@@ -1582,7 +1569,7 @@ def isnan(g, input):
 
 @parse_args('v', 'i', 'i', 'i')
 def narrow(g, input, dim, start, length):
-    return sym_help._slice_op(g, input, axes=[dim], starts=[start], ends=[start + length])
+    return sym_help._slice_helper(g, input, axes=[dim], starts=[start], ends=[start + length])
 
 
 def argmax(g, input, dim, keepdim):

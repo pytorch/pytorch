@@ -45,7 +45,7 @@ class TestMkldnn(TestCase):
             with self.assertRaises(RuntimeError) as context:
                 torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cuda')).to_mkldnn()
         # some factory functions
-        for creator in [torch.ones, torch.zeros, torch.randn, torch.rand]:
+        for creator in [torch.ones, torch.randn, torch.rand]:
             with self.assertRaises(RuntimeError) as context:
                 creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
 
@@ -216,6 +216,55 @@ class TestMkldnn(TestCase):
         torch.add(mx, my, alpha=alpha, out=mkldnn_out)
         self.assertEqual(out, mkldnn_out.to_dense())
 
+    def test_mul(self):
+        N = torch.randint(3, 10, (1,)).item()
+        C = torch.randint(3, 100, (1,)).item()
+        value = torch.randn(1, dtype=torch.float32).item()
+
+        x = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
+        y = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
+        mx = x.to_mkldnn()
+        my = y.to_mkldnn()
+
+        # mul
+        self.assertEqual(
+            x * y,
+            (mx * my).to_dense())
+
+        self.assertEqual(
+            x * value,
+            (mx * value).to_dense())
+
+        self.assertEqual(
+            torch.mul(x, y),
+            torch.mul(mx, my).to_dense())
+
+        self.assertEqual(
+            torch.mul(x, value),
+            torch.mul(mx, value).to_dense())
+
+        # mul_
+        x *= y
+        mx *= my
+        self.assertEqual(x, mx.to_dense())
+
+        x *= value
+        mx *= value
+        self.assertEqual(x, mx.to_dense())
+
+        # mul_out
+        out = x.clone()
+        mkldnn_out = out.to_mkldnn()
+        torch.mul(x, y, out=out)
+        torch.mul(mx, my, out=mkldnn_out)
+        self.assertEqual(out, mkldnn_out.to_dense())
+
+        out = x.clone()
+        mkldnn_out = out.to_mkldnn()
+        torch.mul(x, value, out=out)
+        torch.mul(mx, value, out=mkldnn_out)
+        self.assertEqual(out, mkldnn_out.to_dense())
+
     def test_view(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
         self.assertRaisesRegex(RuntimeError,
@@ -229,6 +278,13 @@ class TestMkldnn(TestCase):
         self.assertEqual(
             x.reshape(size),
             x.to_mkldnn().reshape(size).to_dense(),
+        )
+        # test whether share same memory for plain format tensor
+        y = x.to_mkldnn()
+        z = y.reshape(size).add_(y.reshape(size))
+        self.assertEqual(
+            y.reshape(size).to_dense(),
+            z.to_dense(),
         )
 
     def test_clone(self):
@@ -244,6 +300,15 @@ class TestMkldnn(TestCase):
             y.to_dense(),
             z.to_dense(),
         )
+
+    def test_transpose(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
+        for dim1 in range(x.ndim):
+            for dim2 in range(x.ndim):
+                self.assertEqual(
+                    x.transpose(dim1, dim2),
+                    x.to_mkldnn().transpose(dim1, dim2).to_dense(),
+                )
 
     def test_linear(self):
         in_features = torch.randint(3, 10, (1,)).item()
@@ -307,6 +372,15 @@ class TestMkldnn(TestCase):
         x2 = torch.empty(4, 5, 2, 3, dtype=torch.float32, layout=torch._mkldnn)
         self.assertEqual(x1.size(), x2.to_dense().size())
         self.assertEqual(x1.dtype, x2.to_dense().dtype)
+
+    def test_zero_(self):
+        x1 = torch.randn(4, 5, dtype=torch.float32) * 10
+        x2 = x1.clone().to_mkldnn()
+        self.assertEqual(
+            x1.zero_(),
+            x2.zero_().to_dense(),
+        )
+
 
 if __name__ == '__main__':
     run_tests()

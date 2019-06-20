@@ -104,5 +104,15 @@ Tensor& set_storage_cpu(Tensor& self, Storage storage, int64_t storage_offset, I
   return self;
 }
 
+QScheme qscheme_quant(const Tensor& self) {
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  return quantizer->qscheme();
+}
+
+Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
+  get_qtensorimpl(self)->set_quantizer_(quantizer);
+  return self;
+}
+
 } // namespace native
 } // namespace at

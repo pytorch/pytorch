@@ -537,10 +537,6 @@ class TestOperators(TestCase):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='nearest'), x)
 
-    def test_upsample_bilinear(self):
-        x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
-
     def test_unsqueeze(self):
         x = torch.randn(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.unsqueeze(len(x.shape)), x)
@@ -574,6 +570,10 @@ class TestOperators(TestCase):
     def test_rrelu(self):
         x = torch.randn(1, 2, 3, 4)
         self.assertONNX(torch.nn.RReLU(), x)
+
+    def test_prelu(self):
+        x = torch.randn(1, 2, 3, 4)
+        self.assertONNX(torch.nn.PReLU(2), x)
 
     def test_log_sigmoid(self):
         x = torch.randn(1, 2, 3, 4)

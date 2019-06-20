@@ -8,8 +8,8 @@ from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
 
-# Borrowed from cPython implementation 
-# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411# 
+# Borrowed from cPython implementation
+# https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
 
 _reserved_prefix = '__jit'
 _reserved_names = {'print'}
@@ -283,6 +283,13 @@ class StmtBuilder(Builder):
         return Assign(lhs, rhs)
 
     @staticmethod
+    def build_AnnAssign(ctx, stmt):
+        rhs = build_expr(ctx, stmt.value)
+        lhs = build_expr(ctx, stmt.target)
+        the_type = build_expr(ctx, stmt.annotation)
+        return Assign(lhs, rhs, the_type)
+
+    @staticmethod
     def build_Return(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("return"))
         return Return(r, None if stmt.value is None else build_expr(ctx, stmt.value))
@@ -332,8 +339,14 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
+        target = stmt.target.id
+        target_range = ctx.make_range(
+            stmt.target.lineno,
+            stmt.target.col_offset,
+            stmt.target.col_offset + len(target)
+        )
         return For(
-            r, [build_expr(ctx, stmt.target)],
+            r, [Ident(target_range, target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
 
     @staticmethod
@@ -393,6 +406,7 @@ class ExprBuilder(Builder):
         ast.Gt: '>',
         ast.Is: 'is',
         ast.IsNot: 'is not',
+        ast.In: 'in',
     }
 
     @staticmethod
@@ -628,9 +642,15 @@ class ExprBuilder(Builder):
             raise NotSupportedError(r, "comprehension ifs not supported yet")
 
         elt_expr = build_expr(ctx, stmt.elt)
-        target_expr = build_expr(ctx, stmt.generators[0].target)
+
+        target = stmt.generators[0].target
+        target_range = ctx.make_range(
+            target.lineno,
+            target.col_offset,
+            target.col_offset + len(target.id)
+        )
         iter_expr = build_expr(ctx, stmt.generators[0].iter)
-        return ListComp(r, elt_expr, target_expr, iter_expr)
+        return ListComp(r, elt_expr, Ident(target_range, target.id), iter_expr)
 
     @staticmethod
     def build_Starred(ctx, expr):
