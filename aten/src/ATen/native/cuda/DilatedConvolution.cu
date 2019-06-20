@@ -192,16 +192,16 @@ void conv_dilated_all_cuda_template(
   // Temporary buffers:
   int64_t m = std::accumulate(
       kernel_size.begin(), kernel_size.end(), 1, std::multiplies<int64_t>());
-  int64_t n = std::accumulate(
+  int64_t output_vsize = std::accumulate(
       output_size.begin(), output_size.end(), 1, std::multiplies<int64_t>());
   Tensor columns = at::empty({0}, options);
   Tensor grad_columns = at::empty({0}, options);
   if (output.defined() || grad_weight.defined()) {
-    columns.resize_({nInputPlane * m, n});
+    columns.resize_({nInputPlane * m, output_vsize});
     grad_columns.zero_();  // should not be necessary
   }
   if (grad_input.defined()) {
-    grad_columns.resize_({nInputPlane * m, n});
+    grad_columns.resize_({nInputPlane * m, output_vsize});
     grad_columns.zero_();  // should not be necessary
   }
   // Initialize
@@ -214,6 +214,14 @@ void conv_dilated_all_cuda_template(
   if (output.defined() && !bias.defined()) {
     output.zero_();
   }
+#ifdef __HIP_PLATFORM_HCC__
+  // See ROCm-sum issue below.
+  Tensor ones = at::empty({0}, options);
+  if (grad_bias.defined()) {
+    ones.resize_({output_vsize});
+    ones.fill_(1);
+  }
+#endif
   // Helpers
   Tensor grad_output_n;
   std::vector<int64_t> dims(dim);
@@ -347,10 +355,29 @@ void conv_dilated_all_cuda_template(
 
           // Gradient of bias:
           if (grad_bias.defined()) {
-            /* For gemm argument derivation, see
-               conv_dilated_all_cuda_template in
+            /* For gemv argument derivation, see
+               conv_dilated_all_cpu_template in
                ATen/native/DilatedConvolution.cpp */
+#ifndef __HIP_PLATFORM_HCC__
             grad_bias += grad_output_n.sum(dims);
+#else
+            /* When using ROCm, the sum evaluation is inaccurate for
+               double tensors. The reason is currently unknown. Hence,
+               we use gemv until the ROCm-sum issue is resolved. */
+            at::cuda::blas::gemv<scalar_t>(
+               stream,
+               /*trans=*/'t',
+               /*    m=*/output_vsize,
+               /*    n=*/nOutputPlane,
+               /*alpha=*/ScalarConvert<int, scalar_t>::to(1),
+               /*    A=*/grad_output_n.data<scalar_t>(),
+               /*  lda=*/output_vsize,
+               /*    x=*/ones.data<scalar_t>(),
+               /* incx=*/1,
+               /* beta=*/ScalarConvert<int, scalar_t>::to(1),
+               /*    y=*/grad_bias.data<scalar_t>(),
+               /* incy=*/1);
+#endif
             /*
               TODO: when scale != 1 is introduced then use:
                 grad_bias += scale * grad_output_n.sum(dims);
