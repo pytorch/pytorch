@@ -29,6 +29,10 @@ constexpr int NROWS_PER_THREAD = 10;
     constexpr int WARP_SIZE = 32;
 #endif
 
+__host__ __device__ __forceinline__
+int64_t ceil_div(int64_t x, int64_t y) {
+  return (x + y - 1) / y;
+}
 
 __global__
 void segment_sizes_kernel(int64_t *ret, const int64_t *segment_offsets,
@@ -38,7 +42,7 @@ void segment_sizes_kernel(int64_t *ret, const int64_t *segment_offsets,
     const int64_t idx_start = segment_offsets[id];
     const int64_t idx_end = (id == num_of_segments-1)?numel:segment_offsets[id+1];
     const int64_t size = idx_end - idx_start;
-    ret[id] = (size + blocksize - 1) / blocksize;
+    ret[id] = ceil_div(size, blocksize);
   }
 }
 
@@ -212,7 +216,7 @@ Tensor embedding_backward_cuda_kernel(
 
   thrust::device_vector<int64_t> segment_sizes(num_of_segments);
   {
-    segment_sizes_kernel<<<THCCeilDiv(num_of_segments, (ptrdiff_t)32), 32, 0, stream>>> (
+    segment_sizes_kernel<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
             thrust::raw_pointer_cast(segment_sizes.data()),
             thrust::raw_pointer_cast(segment_offsets.data()),
             num_of_segments,
@@ -229,7 +233,7 @@ Tensor embedding_backward_cuda_kernel(
   const int num_of_split_segments = segment_sizes[num_of_segments-1] + segment_sizes_offsets[num_of_segments-1];
   thrust::device_vector<int64_t> split_segment_offsets(num_of_split_segments);
   {
-    split_segment_offsets_kernel<<<THCCeilDiv(num_of_segments, (ptrdiff_t)32), 32, 0, stream>>> (
+    split_segment_offsets_kernel<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
             thrust::raw_pointer_cast(split_segment_offsets.data()),
             thrust::raw_pointer_cast(segment_sizes.data()),
             thrust::raw_pointer_cast(segment_sizes_offsets.data()),
@@ -239,9 +243,9 @@ Tensor embedding_backward_cuda_kernel(
   }
 
   auto grad_weight_per_segment = at::empty({num_of_split_segments, stride}, grad.options());
-  const int stride_warped = THCCeilDiv(stride, (ptrdiff_t)WARP_SIZE)*WARP_SIZE;
+  const int stride_warped = ceil_div(stride, WARP_SIZE)*WARP_SIZE;
   const int block = std::min(stride_warped, MAX_BLOCK_SIZE);
-  const int grid = THCCeilDiv((ptrdiff_t)num_of_split_segments*stride_warped, (ptrdiff_t)block);
+  const int grid = ceil_div(num_of_split_segments*stride_warped, block);
 
   if (offset2bag.defined()) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -276,7 +280,7 @@ Tensor embedding_backward_cuda_kernel(
 
   THCudaCheck(cudaGetLastError());
 
-  const int grid2 = THCCeilDiv(num_of_segments*stride_warped, (ptrdiff_t)block);
+  const int grid2 = ceil_div(num_of_segments*stride_warped, block);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
           grad.scalar_type(), "embedding_bag_backward_cuda_sum_and_scatter", [&] {
             sum_and_scatter<scalar_t><<<grid2, block, 0, stream>>>(
