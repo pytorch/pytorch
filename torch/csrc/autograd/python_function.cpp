@@ -73,7 +73,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   if (!r) throw python_error();
 
   auto num_outputs = PyTuple_GET_SIZE(r.get());
-  tensor_list tensor_results(num_outputs);
+  variable_list variable_results(num_outputs);
   for (int i = 0; i != num_outputs; ++i) {
     PyObject* obj = PyTuple_GET_ITEM(r.get(), i);
     if (obj != Py_None) {
@@ -83,7 +83,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
         msg += "')'";
         throw std::runtime_error(msg);
       }
-      tensor_results[i] = ((THPVariable*)obj)->cdata.variable_data();
+      variable_results[i] = ((THPVariable*)obj)->cdata.variable_data();
     }
   }
 
@@ -95,7 +95,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   // in backward anyway.
   return wrap_outputs(
       inputs,
-      std::move(tensor_results),
+      std::move(variable_results),
       [this](edge_list&& next_edges) {
         return std::make_shared<Error>(
             name() + " is not differentiable twice", std::move(next_edges));

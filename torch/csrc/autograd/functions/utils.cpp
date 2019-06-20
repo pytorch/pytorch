@@ -9,14 +9,14 @@
 
 namespace torch { namespace autograd {
 
-variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
+variable_list wrap_outputs(const variable_list& inputs, variable_list&& outputs,
                            const function_constructor& ctr) {
   variable_list result;
   result.reserve(outputs.size());
   if (!any_variable_requires_grad(inputs)) {
     for (auto& output : outputs) {
       if (output.defined()) {
-        result.push_back(make_variable(output, /*requires_grad=*/false));
+        result.push_back(output);
       } else {
         result.emplace_back();
       }
@@ -25,9 +25,8 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
     auto grad_fn = ctr(collect_next_edges(inputs));
     for (auto& output : outputs) {
       if (output.defined()) {
-        auto variable = autograd::make_variable(output, /*requires_grad=*/false);
-        autograd::create_gradient_edge(variable, grad_fn);
-        result.push_back(std::move(variable));
+        autograd::create_gradient_edge(output, grad_fn);
+        result.push_back(std::move(output));
       } else {
         grad_fn->add_input_metadata(Function::undefined_input());
         result.emplace_back();

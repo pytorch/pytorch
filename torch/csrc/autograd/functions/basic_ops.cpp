@@ -16,11 +16,11 @@ auto Error::apply(variable_list&& inputs) -> variable_list {
 }
 
 auto DelayedError::apply(variable_list&& inputs) -> variable_list {
-  tensor_list outputs;
+  variable_list outputs;
   outputs.reserve(inputs.size());
   for (auto& var : inputs) {
     // FIXME: share version counters
-    outputs.emplace_back(var.defined() ? var.variable_data() : at::Tensor());
+    outputs.emplace_back(var.defined() ? var.variable_data() : Variable());
   }
   return wrap_outputs(inputs, std::move(outputs), [&](edge_list&& next_edges) {
     return std::make_shared<Error>(msg, std::move(next_edges));
