@@ -1172,7 +1172,6 @@ graph(%Pa, %Pb):
   return (%Pq)""", """
 graph(%Ra, %Rb):
   return (%Ra)""", graph)
-        print(graph)
         FileCheck().run(input_str, graph)
 
     def test_expand_quantlint(self):
