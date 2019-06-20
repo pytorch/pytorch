@@ -1202,7 +1202,8 @@ class ShapePropagator {
 
     // Requirements:
     //   dims           : preserved
-    //   scalar type    : preserved unless specified.
+    //   scalar type    : dtype if specified, preserved if floating point,
+    //    otherwise long/int64
     //   device         : preserved
     //   tensor inputs  : 1
     //   tensor outputs : 1
