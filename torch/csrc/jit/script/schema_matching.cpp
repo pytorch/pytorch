@@ -332,6 +332,8 @@ c10::optional<MatchedSchema> tryMatchSchema(
       // Argument has a default value and no value was provided, so use the
       // default
       actual_named_value = NamedValue(*arg.default_value());
+    } else if (arg.type()->cast<OptionalType>()) {
+      actual_named_value = NamedValue(IValue());
     } else {
       if (failure_messages) {
         err() << "argument " << schema.arguments()[schema_i].name()
