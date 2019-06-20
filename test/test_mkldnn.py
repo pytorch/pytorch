@@ -279,6 +279,13 @@ class TestMkldnn(TestCase):
             x.reshape(size),
             x.to_mkldnn().reshape(size).to_dense(),
         )
+        # test whether share same memory for plain format tensor
+        y = x.to_mkldnn()
+        z = y.reshape(size).add_(y.reshape(size))
+        self.assertEqual(
+            y.reshape(size).to_dense(),
+            z.to_dense(),
+        )
 
     def test_clone(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10
@@ -293,6 +300,15 @@ class TestMkldnn(TestCase):
             y.to_dense(),
             z.to_dense(),
         )
+
+    def test_transpose(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
+        for dim1 in range(x.ndim):
+            for dim2 in range(x.ndim):
+                self.assertEqual(
+                    x.transpose(dim1, dim2),
+                    x.to_mkldnn().transpose(dim1, dim2).to_dense(),
+                )
 
     def test_linear(self):
         in_features = torch.randint(3, 10, (1,)).item()
