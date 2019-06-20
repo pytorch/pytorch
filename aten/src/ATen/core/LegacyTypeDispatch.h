@@ -59,7 +59,8 @@ class CAFFE2_API LegacyTypeDispatch {
   }
   Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
     if (p != Backend::Undefined) {
-      initForBackend(p);
+      initForDeviceType(backendToDeviceType(p));
+      initForScalarType(s);
     }
     auto type = getNonVariableTypeRaw(p, s);
 
@@ -102,11 +103,10 @@ class CAFFE2_API LegacyTypeDispatch {
     type_registry[static_cast<int>(b)] = std::move(t);
     detail::getVariableHooks().registerVariableTypeFor(this, b);
   }
-  void initForBackend(Backend b) {
-    auto p = backendToDeviceType(b);
+private:
+  void initForDeviceType(DeviceType p) {
     static std::once_flag cpu_once;
     static std::once_flag cuda_once;
-    static std::once_flag complex_once;
     if (p == DeviceType::CPU) {
       std::call_once(cpu_once, [] {
         getLegacyDeviceTypeInit().initCPU();
@@ -120,13 +120,17 @@ class CAFFE2_API LegacyTypeDispatch {
         getLegacyDeviceTypeInit().initHIP();
       });
     }
-    if (b == Backend::ComplexCPU || b == Backend::ComplexCUDA) {
-      std::call_once(complex_once, [] {
+  }
+  void initForScalarType(ScalarType s) {
+    static std::once_flag once;
+    // Only complex may need initialization
+    if (isComplexType(s)) {
+      std::call_once(once, [] {
         getLegacyDeviceTypeInit().initComplex();
       });
     }
   }
- private:
+
   // NB: type_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   TypeUniquePtr type_registry
