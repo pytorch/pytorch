@@ -46,6 +46,12 @@ class _InfiniteConstantSampler(Sampler):
         while True:
             yield None
 
+    def __len__(self):
+        # This has to be a TypeError, otherwise, since this is used in
+        # `len(dataloader)`, `list(dataloader)` will fail.
+        # see NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
+        raise TypeError('Cannot determine the DataLoader length of a IterableDataset')
+
 
 class DataLoader(object):
     r"""
@@ -98,9 +104,11 @@ class DataLoader(object):
     .. note:: ``len(dataloader)`` heuristic based on the length of the sampler used.
               When :attr:`dataset` is a subclass of :class:`~torch.utils.data.IterableDataset`,
               an infinite sampler is used, whose :meth:`__len__` is not
-              implemented. So one should not query this method unless they work
-              with a map-style dataset. See `Dataset Types`_ for more details on
-              these two types of dataset.
+              implemented, because the actual length depends on both the
+              iterable as well as multi-process loading configurations. So one
+              should not query this method unless they work with a map-style
+              dataset. See `Dataset Types`_ for more details on these two types
+              of datasets.
     """
 
     __initialized = False
@@ -248,7 +256,7 @@ class DataLoader(object):
             return self.sampler
 
     def __len__(self):
-        return len(self._index_sampler)
+        return len(self._index_sampler)  # with iterable-style dataset, this will error
 
 
 class _BaseDataLoaderIter(object):

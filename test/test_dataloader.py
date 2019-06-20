@@ -115,6 +115,18 @@ class TestDatasetRandomSplit(TestCase):
             pass
 
 
+class CountingDataset(Dataset):
+    def __init__(self, n):
+        super(CountingDataset, self).__init__()
+        self.n = n
+
+    def __getitem__(self, i):
+        return i
+
+    def __len__(self):
+        return self.n
+
+
 class CountingIterableDataset(IterableDataset):
     def __init__(self, n):
         super(CountingIterableDataset, self).__init__()
@@ -805,30 +817,61 @@ class TestDataLoader(TestCase):
         with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified batch_sampler"):
             DataLoader(dataset, batch_sampler=3)
 
-    def test_iterable_dataset(self):
-        # [non-batched] single process loading
+    def test_builtin_collection_conversion(self):
+        for coll_ty in (list, tuple):
+            for num_workers in (0, 1):
+                # map-style dataset
+                dataset = CountingDataset(20)
+                # no auto-batching
+                fetched = coll_ty(DataLoader(dataset, batch_size=None, num_workers=num_workers))
+                self.assertEqual(fetched, coll_ty(range(20)))
+                # auto-batching
+                fetched = coll_ty(DataLoader(dataset, batch_size=2, num_workers=num_workers))
+                self.assertEqual(fetched, coll_ty(torch.tensor([i, i + 1]) for i in range(0, 20, 2)))
+
+                # iterable-style dataset
+                dataset = CountingIterableDataset(20)
+                # no auto-batching
+                fetched = coll_ty(DataLoader(dataset, batch_size=None, num_workers=num_workers))
+                self.assertEqual(fetched, coll_ty(range(20)))
+                # auto-batching
+                # this IterableDataset isn't configured for each worker, so for
+                # the equality test below to be valid, we cannot have more than 1 workers.
+                assert num_workers in [0, 1], "invalid test"
+                fetched = coll_ty(DataLoader(dataset, batch_size=2, num_workers=num_workers))
+                self.assertEqual(fetched, coll_ty(torch.tensor([i, i + 1]) for i in range(0, 20, 2)))
+
+    def test_iterable_style_dataset(self):
+        # [no auto-batching] single process loading
         dataset = CountingIterableDataset(20)
-        fetched = list(DataLoader(dataset))
+        dataloader = DataLoader(dataset, batch_size=None)
+        fetched = list(dataloader)
         self.assertEqual(len(fetched), 20)
         for i, d in enumerate(fetched):
-            self.assertIsInstance(d, torch.Tensor)
+            # non-batched should not convert ints into tensors
+            self.assertIsInstance(d, torch._six.int_classes)
             self.assertEqual(d, i)
+        with self.assertRaisesRegex(TypeError, "Cannot determine the DataLoader length of a IterableDataset"):
+            len(dataloader)  # DataLoader with iterable-style dataset should error in __len__
 
-        # [non-batched] multiprocessing loading
+        # [no auto-batching] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
         expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
-        dataloader = DataLoader(dataset, num_workers=num_workers,
+        dataloader = DataLoader(dataset, num_workers=num_workers, batch_size=None,
                                 worker_init_fn=set_faulthander_if_available)
         dataloader_iter = iter(dataloader)
-        fetched = sorted([d.item() for d in dataloader_iter])
-
+        fetched = sorted([d for d in dataloader_iter])
         for a, b in zip(fetched, expected):
+            # non-batched should not convert ints into tensors
+            self.assertIsInstance(a, torch._six.int_classes)
             self.assertEqual(a, b)
+        with self.assertRaisesRegex(TypeError, "Cannot determine the DataLoader length of a IterableDataset"):
+            len(dataloader)  # DataLoader with iterable-style dataset should error in __len__
 
-        # [non-batched] test that workers exit gracefully
+        # [no auto-batching] test that workers exit gracefully
         workers = dataloader_iter.workers
         del dataloader_iter
         try:
@@ -840,7 +883,7 @@ class TestDataLoader(TestCase):
             for w in workers:
                 w.terminate()
 
-        # [batched] single process loading
+        # [auto-batching] single process loading
         dataset = CountingIterableDataset(20)
         fetched = list(DataLoader(dataset, batch_size=7))
         self.assertEqual(len(fetched), 3)
@@ -848,7 +891,7 @@ class TestDataLoader(TestCase):
         self.assertEqual(fetched[1].tolist(), list(range(7, 14)))
         self.assertEqual(fetched[2].tolist(), list(range(14, 20)))
 
-        # [batched] multiprocessing loading
+        # [auto-batching] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
         expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
@@ -864,7 +907,7 @@ class TestDataLoader(TestCase):
         fetched = set(tuple(t.tolist()) for t in fetched)
         self.assertEqual(fetched, {tuple(range(4)), tuple(range(7)), tuple(range(7, 14)), tuple(range(14, 20))})
 
-        # [batched] test that workers exit gracefully
+        # [auto-batching] test that workers exit gracefully
         workers = dataloader_iter.workers
         del dataloader_iter
         try:
@@ -876,14 +919,14 @@ class TestDataLoader(TestCase):
             for w in workers:
                 w.terminate()
 
-        # [batched & drop_last] single process loading
+        # [auto-batching & drop_last] single process loading
         dataset = CountingIterableDataset(20)
         fetched = list(DataLoader(dataset, batch_size=7, drop_last=True))
         self.assertEqual(len(fetched), 2)
         self.assertEqual(fetched[0].tolist(), list(range(7)))
         self.assertEqual(fetched[1].tolist(), list(range(7, 14)))
 
-        # [batched & drop_last] multiprocessing loading
+        # [auto-batching & drop_last] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
         expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
@@ -900,7 +943,7 @@ class TestDataLoader(TestCase):
         fetched = set(tuple(t.tolist()) for t in fetched)
         self.assertEqual(fetched, {tuple(range(7)), tuple(range(7, 14))})
 
-        # [batched & drop_last] test that workers exit gracefully
+        # [auto-batching & drop_last] test that workers exit gracefully
         workers = dataloader_iter.workers
         del dataloader_iter
         try:

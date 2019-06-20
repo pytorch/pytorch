@@ -39,7 +39,13 @@ class Sampler(object):
     #     raising an `NotImplementedError` will propagate and and make the call
     #     fail where it could have use `__iter__` to complete the call.
     #
-    # Thus, the only sensible thing to do is to **not** provide a default `__len__`.
+    # Thus, the only two sensible things to do are
+    #
+    #   + **not** provide a default `__len__`.
+    #
+    #   + raise a `TypeError` instead, which is what Python uses when users call
+    #     a method that is not defined on an object.
+    #     (@ssnl verifies that this works on at least Python 3.7.)
 
 
 class SequentialSampler(Sampler):
