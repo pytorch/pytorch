@@ -145,6 +145,8 @@ Tensor& empty_out(
     Tensor& result,
     IntArrayRef size,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // Preferably, this argument would not be accepted by _out, but the code
+  // generator requires the out and non-out overloads to match exactly
   TORCH_CHECK(
       !optional_memory_format.has_value(),
       "'memory_format' argument is incompatible with 'out' tensor argument");
@@ -153,8 +155,6 @@ Tensor& empty_out(
     result.sparse_resize_and_clear_(size, size.size(), 0);
   } else {
     result.resize_(size);
-    auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
-    result.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   }
   return result;
 }
