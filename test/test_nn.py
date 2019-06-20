@@ -4675,7 +4675,7 @@ class TestNN(NNTestCase):
             def __init__(self):
                 super(CustomState, self).__init__()
                 self.param = torch.nn.Parameter(torch.ones(1))
-                self.sub = torch.nn.Linear(5,5)
+                self.sub = torch.nn.Linear(5, 5)
 
             def _save_to_state_dict(self, destination, prefix, keep_vars):
                 destination[prefix + "serialized"] = self.param.data + 1
