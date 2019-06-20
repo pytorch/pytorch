@@ -9,22 +9,6 @@
 
 namespace c10 {
 
-namespace detail {
-  inline C10_HOST_DEVICE float f32_from_bits(uint16_t src) {
-    float res = 0;
-    uint32_t tmp = src;
-    tmp <<= 16;
-    std::memcpy(&res, &tmp, sizeof(tmp));
-    return res;
-  }
-
-  inline C10_HOST_DEVICE uint16_t bits_from_f32(float src) {
-    uint32_t res;
-    std::memcpy(&res, &src, sizeof(res));
-    return res >>= 16;
-  }
-} // namespace detail
-
 struct alignas(2) BFloat16 {
   uint16_t val_;
 

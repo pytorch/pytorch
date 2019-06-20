@@ -2656,6 +2656,38 @@ class _TestTorchMixin(object):
                 self.assertEqual(var1, var2)
                 self.assertEqual(mean1, mean2)
 
+    def test_std_mean_some_dims(self):
+        sizes = (4, 6, 7, 5, 3)
+        dims = len(sizes)
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(sizes, device=device)
+            for num_of_dims in range(2, dims):
+                dim_list = list(combinations(list(range(dims)), r=num_of_dims))
+                for dim in dim_list:
+                    for unbiased in [False, True]:
+                        for keepdim in [False, True]:
+                            std1, mean1 = torch.std_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            std2 = x.std(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            mean2 = x.mean(dim=dim, keepdim=keepdim)
+                            self.assertEqual(std1, std2)
+                            self.assertEqual(mean1, mean2)
+
+    def test_var_mean_some_dims(self):
+        sizes = (4, 6, 7, 5, 3)
+        dims = len(sizes)
+        for device in torch.testing.get_all_device_types():
+            x = torch.rand(sizes, device=device)
+            for num_of_dims in range(2, dims):
+                dim_list = list(combinations(list(range(dims)), r=num_of_dims))
+                for dim in dim_list:
+                    for unbiased in [False, True]:
+                        for keepdim in [False, True]:
+                            var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                            mean2 = x.mean(dim=dim, keepdim=keepdim)
+                            self.assertEqual(var1, var2)
+                            self.assertEqual(mean1, mean2)
+
     def test_zeros_like(self):
         expected = torch.zeros(100, 100)
 
@@ -3078,6 +3110,32 @@ class _TestTorchMixin(object):
                 self.assertEqual(qr.int_repr(), qr2.int_repr())
                 self.assertEqual(qr.q_scale(), qr2.q_scale())
                 self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
+
+    def test_qtensor_copy(self):
+        scale = 0.5
+        zero_point = 10
+        val = 100
+        numel = 10
+        # copy from same scale and zero_point
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        q2 = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        q.copy_(q2)
+        self.assertEqual(q.int_repr(), q2.int_repr())
+        self.assertEqual(q.q_scale(), q2.q_scale())
+        self.assertEqual(q.q_zero_point(), q2.q_zero_point())
+        # copying from different scale and zero_point
+        scale = 3.2
+        zero_point = 5
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        # check original scale and zero_points are set correctly
+        self.assertEqual(q.q_scale(), scale)
+        self.assertEqual(q.q_zero_point(), zero_point)
+        q.copy_(q2)
+        # check scale and zero_points has been copied
+        self.assertEqual(q.int_repr(), q2.int_repr())
+        self.assertEqual(q.q_scale(), q2.q_scale())
+        self.assertEqual(q.q_zero_point(), q2.q_zero_point())
+
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
@@ -7809,6 +7867,11 @@ class _TestTorchMixin(object):
             index = torch.tensor([0, 1], device=device)
             dest.index_copy_(0, index, src)
             self.assertEqual(dest, torch.tensor([[True, True], [True, True]], device=device))
+
+            # Error cases
+            a = torch.randn(3, 5)
+            c = torch.zeros(3)
+            self.assertRaises(IndexError, lambda: a.index_copy_(dim=1, index=torch.tensor([3]), source=c))
 
     def test_index_add(self):
         num_copy, num_dest = 3, 3

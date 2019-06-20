@@ -34,5 +34,5 @@ struct CAFFE2_API NamedTensorMeta : public c10::NamedTensorMetaInterface {
   std::vector<Dimname> names_;
 };
 
-}
+} // namespace at
 #endif

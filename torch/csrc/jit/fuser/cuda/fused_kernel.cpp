@@ -2,16 +2,12 @@
 #include <torch/csrc/jit/fuser/compiler.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/CUDAGenerator.h>
 #include <THC/THC.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/jit/fuser/cpu/dynamic_library.h>
 #include <torch/csrc/jit/fuser/cuda/thnvrtc.h>
 #include <torch/csrc/jit/resource_guard.h>
-
-// Note: unclear why this forward declaration is necessary
-#include <THC/THCGenerator.hpp>
-#include <THC/THCTensorRandom.h>
-THCGenerator* THCRandom_getGenerator(THCState* state);
 
 #include <cuda_runtime.h>
 
@@ -221,15 +217,19 @@ void FusedKernelCUDA::launch_raw(
   const auto nBlocks = std::min(maxBlocks_, ceilDiv(numel, kBlockSize));
 
   // Adds random state to arguments if necessary
-  // Note: offset defined here so its lifetime extends to the launch
-  uint64_t offset;
+  // Note: philox_engine_inputs defined here so its lifetime extends to the launch
+  std::pair<uint64_t, uint64_t> philox_engine_inputs;
   if (has_random_) {
     const auto rand_offset =
         4 * (std::ceil(numel / (4.0 * kBlockSize * nBlocks)) + 1);
-    auto gen = THCRandom_getGenerator(at::globalContext().getTHCState());
-    offset = gen->state.philox_seed_offset.fetch_add(rand_offset);
-    arguments.push_back(&gen->state.initial_seed);
-    arguments.push_back(&offset);
+    auto gen = at::cuda::detail::getDefaultCUDAGenerator();
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen->mutex_);
+      philox_engine_inputs = gen->philox_engine_inputs(rand_offset);
+    }
+    arguments.push_back(&philox_engine_inputs.first);
+    arguments.push_back(&philox_engine_inputs.second);
   }
 
   // Launches kernel on current stream (device was set by executor)
