@@ -52,7 +52,7 @@ static thread_local bool checkpoint_valid = true;
 // on it in a few places (e.g. AccumulateGrad function).
 
 struct FunctionTask {
-  GraphTask* base_;
+  std::shared_ptr<GraphTask> base_;
   std::shared_ptr<Function> fn_;
   // This buffer serves as an implicit "addition" node for all of the
   // gradients flowing here.  Once all the dependencies are finished, we
@@ -62,7 +62,7 @@ struct FunctionTask {
   // exit. The engine sends a shutdown task to every queue upon its destruction.
   bool isShutdownTask_;
 
-  FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs, bool isShutdownTask = false)
+  FunctionTask(std::shared_ptr<GraphTask> base, std::shared_ptr<Function> fn, InputBuffer inputs, bool isShutdownTask = false)
     : base_(base)
     , fn_(std::move(fn))
     , inputs_(std::move(inputs))
@@ -243,10 +243,6 @@ Engine::~Engine() {
 }
 
 auto Engine::thread_init(int device) -> void {
-  thread_init_full(device, nullptr);
-}
-
-auto Engine::thread_init_full(int device, GraphTask *graph_task) -> void {
   at::init_num_threads();
   // Note [Allocating GPUs to autograd threads]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -290,7 +286,7 @@ auto Engine::thread_init_full(int device, GraphTask *graph_task) -> void {
     }
   }
   worker_device = device;
-  thread_main(graph_task);
+  thread_main(nullptr);
 }
 
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
@@ -307,7 +303,9 @@ auto Engine::thread_init_full(int device, GraphTask *graph_task) -> void {
 // completely unrelated to that of Eval1 (it's not a recursive call).
 // It's all ok and is handled right now, but it should be accounted for
 // in case this code is to be changed.
-auto Engine::thread_main(GraphTask *graph_task) -> void {
+auto Engine::thread_main(std::shared_ptr<GraphTask> graph_task) -> void {
+  auto device_lock = device_locks_[worker_device+1];
+  std::lock_guard<std::mutex> lck(*device_lock);
   auto queue = ready_queues_[worker_device + 1];
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
@@ -355,6 +353,34 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
         }
       }
     }
+  }
+
+  if (graph_task) {
+    graph_task->not_done_.notify_all();
+  }
+}
+
+void Engine::reentrant_thread_init() {
+  at::init_num_threads();
+  auto tp_shared= thread_pool_shared_;
+  while(1) {
+    std::unique_lock<std::mutex> lk(tp_shared->graphtasks_queue_lock_);
+    ++tp_shared->num_workers_;
+    tp_shared->work_.wait(lk, [&tp_shared]{ return !tp_shared->graphtasks_queue_.empty();});
+    --tp_shared->num_workers_;
+    auto graph_task = tp_shared->graphtasks_queue_.front();
+    tp_shared->graphtasks_queue_.pop();
+    lk.unlock();
+    worker_device = graph_task->owner_;
+    if (worker_device != -1) {
+      for (size_t i = 0; i < static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES); i++) {
+        auto* impl = c10::impl::device_guard_impl_registry[i].load();
+        if (impl && worker_device < impl->deviceCount()) {
+          impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), worker_device));
+        }
+      }
+    }
+    thread_main(graph_task);
   }
 }
 
@@ -627,23 +653,23 @@ auto Engine::execute(const edge_list& roots,
   // Lock post_callbacks_lock_ before clearing final_callbacks_
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
-  GraphTask graph_task(keep_graph, create_graph);
+  std::shared_ptr<GraphTask> graph_task = std::make_shared<GraphTask>(keep_graph, create_graph);
   // Lock mutex while GraphTask is being set up
-  std::unique_lock<std::mutex> lock(graph_task.mutex_);
+  std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
   // Now compute the dependencies for all executable functions and queue the root
   auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
-  compute_dependencies(graph_root.get(), graph_task);
+  compute_dependencies(graph_root.get(), *graph_task);
   if (!outputs.empty()) {
-    graph_task.init_to_execute(*graph_root, outputs);
+    graph_task->init_to_execute(*graph_root, outputs);
   }
-  ready_queue(at::kCPU).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
+  ready_queue(at::kCPU).push(FunctionTask(graph_task, std::move(graph_root), InputBuffer(0)));
 
   // Not a worker
   if (worker_device == NO_DEVICE) {
     // Wait for all tasks to complete
-    graph_task.not_done_.wait(lock, [&graph_task]{
-      return graph_task.outstanding_tasks_.load() == 0;
+    graph_task->not_done_.wait(lock, [&graph_task]{
+      return graph_task->outstanding_tasks_.load() == 0;
     });
   } else {
     // Get back to work while we wait for our new graph_task to
@@ -652,17 +678,31 @@ auto Engine::execute(const edge_list& roots,
     // graph_task.owner_ = worker_device;
     // lock.unlock();
     // thread_main(&graph_task);
-    lock.unlock();
-    std::thread t(&Engine::thread_init_full, this, worker_device, &graph_task);
-    t.join();
+    // If no extra threads remaining, create a new thread for reentrant call
+    if (!thread_pool_shared_->num_workers_.load()) {
+      std::thread t(&Engine::reentrant_thread_init, this);
+      t.detach();
+    }
+    graph_task->owner_ = worker_device;
+    device_locks_[worker_device+1]->unlock();
+    {
+      std::lock_guard<std::mutex> lck(thread_pool_shared_->graphtasks_queue_lock_);
+      thread_pool_shared_->graphtasks_queue_.push(graph_task);
+      thread_pool_shared_->work_.notify_one();
+    }
+    graph_task->not_done_.wait(lock, [&graph_task]{
+      return graph_task->outstanding_tasks_.load() == 0;
+    });
+    // acquire lock on device again because this is a reentrant call
+    device_locks_[worker_device+1]->lock();
   }
 
   // Check for an exception while running backwards
-  if (graph_task.has_error_.load()) {
-    std::rethrow_exception(graph_task.exception_);
+  if (graph_task->has_error_.load()) {
+    std::rethrow_exception(graph_task->exception_);
   }
 
-  if (!graph_task.not_ready_.empty()) {
+  if (!graph_task->not_ready_.empty()) {
     throw std::runtime_error("could not compute gradients for some functions");
   }
 
@@ -680,7 +720,7 @@ auto Engine::execute(const edge_list& roots,
     cb_lock.lock();
   }
 
-  return graph_task.captured_vars_;
+  return graph_task->captured_vars_;
 }
 
 // note that when python is present, this base engine will be overriden
@@ -696,7 +736,6 @@ std::atomic<EngineStub> engine_stub(get_base_engine);
 void set_default_engine_stub(EngineStub stub) {
   engine_stub.store(stub);
 }
-
 
 Engine& Engine::get_default_engine() {
   return engine_stub.load()();
@@ -743,6 +782,20 @@ auto Engine::start_threads() -> void {
   ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_threads);
   for (auto& queue : ready_queues_)
     queue.reset(new ReadyQueue());
+
+  device_locks_ = std::vector<std::shared_ptr<std::mutex>>(num_threads);
+  for (auto& mut : device_locks_) {
+    mut.reset(new std::mutex());
+  }
+
+  thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
+  // TODO how many extra threads at beginning?
+  int num_reentrant_threads = 0; //num_threads;
+  for (int i = 0; i < num_reentrant_threads; ++i) {
+    std::thread t(&Engine::reentrant_thread_init, this);
+    t.detach();
+  }
+
   for (int i = 0; i < num_threads; ++i) {
     std::thread t(&Engine::thread_init, this, i - 1);
     t.detach();

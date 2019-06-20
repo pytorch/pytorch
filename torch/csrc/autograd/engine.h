@@ -12,6 +12,7 @@
 #include <exception>
 #include <functional>
 #include <memory>
+#include <queue>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -57,10 +58,11 @@ protected:
   ReadyQueue& ready_queue(at::Device device);
   ReadyQueue& ready_queue_by_index(int device_index);
   void start_threads();
-  virtual void thread_init_full(int device, GraphTask *graphtask);
   virtual void thread_init(int device);
-  virtual void thread_main(GraphTask *graph_task);
+  virtual void thread_main(std::shared_ptr<GraphTask> graph_task);
   virtual void thread_on_exception(FunctionTask& task, std::exception& e);
+  void reentrant_thread_init();
+  void process_queue(int device);
 
   // Ensures ready_queues_ are initialized only once
   std::once_flag start_threads_flag_;
@@ -69,6 +71,22 @@ protected:
   std::vector<std::function<void()>> final_callbacks_;
   // To protect reads and writes to final_callbacks_
   std::mutex post_callbacks_lock_;
+
+  struct ThreadPoolShared {
+    std::atomic_int num_workers_;
+    std::condition_variable work_;
+    std::mutex graphtasks_queue_lock_;
+    std::queue<std::shared_ptr<GraphTask>> graphtasks_queue_;
+
+    ThreadPoolShared() : num_workers_(0) {};
+ };
+
+ // Temporary workaround until shutting down threads is done
+ // Need shared ownership of all these objects because threads are leaked
+ // when Engine shuts down
+ std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
+ // TODO don't really need this because the parent thread waits
+ std::vector<std::shared_ptr<std::mutex>> device_locks_;
 };
 
 // allow python_engine to override the default engine when it loads
