@@ -209,12 +209,14 @@ class PackedSequence(PackedSequence_):
         return self.data.is_pinned()
 
 
+@torch._jit_internal.delayed_script
 def invert_permutation(permutation):
+    # type: (Optional[Tensor]) -> Optional[Tensor]
     if permutation is None:
         return None
     output = torch.empty_like(permutation)
-    output.scatter_(0, permutation,
-                    torch.arange(0, permutation.numel(), device=permutation.device))
+    src = torch.arange(0, permutation.numel(), device=permutation.device, dtype=torch.long)
+    output.scatter_(0, permutation, src)
     return output
 
 

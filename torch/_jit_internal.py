@@ -27,6 +27,23 @@ boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 COMPILATION_PENDING = object()
 COMPILED = object()
 
+jit_script = None
+
+def delayed_script(fn):
+    # You can't modify closed-over variables in Python 2, so make this a dict and
+    # mutate it
+    compiled_fn = {}
+
+    def wrapper(*args):
+        if jit_script is None:
+            raise RuntimeError("Called too early")
+
+        if 'fn' not in compiled_fn:
+            compiled_fn['fn'] = jit_script(fn, _frames_up=1)
+        return compiled_fn['fn'](*args)
+
+    return wrapper
+
 
 def createResolutionCallback(frames_up=0):
     """

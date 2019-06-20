@@ -1116,6 +1116,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
         fn.__doc__ = obj.__doc__
         return fn
 
+torch._jit_internal.jit_script = script
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
