@@ -6741,21 +6741,21 @@ a")
 
     def test_dtype_op_shape(self):
         ops = ['sum', 'mean', 'prod']
-        self._test_dtype_op_shape(ops, [])
-        self._test_dtype_op_shape(ops, [0, False])
+        self._test_dtype_op_shape(ops, args=[])
+        self._test_dtype_op_shape(ops, args=[0, False])
 
         ops = ['sum', 'mean']
-        self._test_dtype_op_shape(ops, [[0, 1], False], 4)
+        self._test_dtype_op_shape(ops, args=[[0, 1], False], input_dims=4)
 
         ops = ['prod']
-        self._test_dtype_op_shape(ops, [0, False])
-        self._test_dtype_op_shape(ops, [0, True])
+        self._test_dtype_op_shape(ops, args=[0, False])
+        self._test_dtype_op_shape(ops, args=[0, True])
 
     def test_dtype_op_shape2(self):
         ops = ['cumprod', 'cumsum', 'softmax', 'log_softmax']
-        self._test_dtype_op_shape(ops, [0])
+        self._test_dtype_op_shape(ops, args=[0])
 
-        self._test_dtype_op_shape(ops, [1], 4)
+        self._test_dtype_op_shape(ops, args=[1], input_dims=4)
 
     def test_filecheck_parse(self):
         def test_check():
