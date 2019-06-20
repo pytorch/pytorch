@@ -33,12 +33,6 @@ inline std::string toString(at::IntArrayRef l) {
   return ss.str();
 }
 
-inline std::string toString(const c10::Layout& layout) {
-  std::stringstream ss;
-  ss << layout;
-  return ss.str();
-}
-
 inline void assertSameType(
     const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
@@ -111,27 +105,6 @@ inline void assertSizesMatch(
   if (tensors[index].sizes() != sizes) {
     fn("invalid tensor size at index " + std::to_string(index) + " (expected " +
        toString(sizes) + ", got " + toString(tensors[index].sizes()) + ")");
-  }
-}
-
-inline void assertLayoutMatch(
-    std::function<void(const std::string&)> fn,
-    const c10::Layout& expected,
-    const at::ArrayRef<at::Tensor>& tensors,
-    size_t index) {
-  const auto& actual = tensors[index].layout();
-  if (actual != expected) {
-    fn("invalid tensor layout at index " + std::to_string(index) +
-       " (expected " + toString(expected) + ", got " + toString(actual) + ")");
-  }
-}
-
-inline void assertLayoutMatch(
-    std::function<void(const std::string&)> fn,
-    const at::ArrayRef<at::Tensor>& tensors) {
-  const auto& layout = tensors[0].layout();
-  for (size_t i = 1; i < tensors.size(); i++) {
-    assertLayoutMatch(fn, layout, tensors, i);
   }
 }
 
