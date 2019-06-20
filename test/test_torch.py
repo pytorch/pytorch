@@ -3005,8 +3005,7 @@ class _TestTorchMixin(object):
                          "scale=1.0, zero_point=2)")
 
     def test_qtensor_quant_dequant(self):
-        r = np.random.rand(3, 2) * 2 - 4
-        r = torch.from_numpy(r).float()
+        r = torch.rand(3, 2, dtype=torch.float) * 2 - 4
         scale = 2
         zero_point = 2
         qr = torch.quantize_linear(r, scale, zero_point, torch.quint8)
@@ -3030,8 +3029,7 @@ class _TestTorchMixin(object):
         self.assertEqual(zero_point, q.q_zero_point())
 
     def test_qtensor_dtypes(self):
-        r = np.random.rand(3, 2) * 2 - 4
-        r = torch.from_numpy(r).float()
+        r = torch.rand(3, 2, dtype=torch.float) * 2 - 4
         scale = 2
         zero_point = 2
         qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
@@ -3053,8 +3051,7 @@ class _TestTorchMixin(object):
         self.assertEqual(qt, qt2.dequantize())
 
     def test_qtensor_per_channel_affine(self):
-        r = np.random.rand(3, 2) * 2 - 4
-        r = torch.from_numpy(r).float()
+        r = torch.rand(3, 2, dtype=torch.float) * 2 - 4
         scales = torch.tensor([2.0, 3.0]).float()
         zero_points = torch.tensor([5, 10]).int()
         axis = [1]
@@ -3072,7 +3069,7 @@ class _TestTorchMixin(object):
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
 
     def test_qtensor_permute(self):
-        r = torch.rand(100, 30).float()
+        r = torch.rand(100, 30, dtype = torch.float)
         scale = 2
         zero_point = 2
         qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
@@ -3098,8 +3095,7 @@ class _TestTorchMixin(object):
     def test_qtensor_load_save(self):
         scale = 2.0
         zero_point = 10
-        r = np.random.rand(100, 30) * 2 - 4
-        r = torch.from_numpy(r).float()
+        r = torch.rand(100, 30, dtype=torch.float) * 2 - 4
         for dtype in [torch.quint8, torch.qint8, torch.qint32]:
             qr = torch.quantize_linear(r, scale, zero_point, dtype)
             with tempfile.NamedTemporaryFile() as f:
