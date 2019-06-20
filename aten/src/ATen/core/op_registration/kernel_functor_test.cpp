@@ -12,7 +12,7 @@ using c10::KernelCache;
 using c10::Stack;
 using c10::guts::make_unique;
 using c10::intrusive_ptr;
-using c10::DictPtr;
+using c10::Dict;
 using c10::make_dict;
 using at::Tensor;
 using std::unique_ptr;
@@ -183,7 +183,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorOutput_wh
 }
 
 struct KernelWithTensorListOutput final : OperatorKernel {
-  c10::ListPtr<Tensor> operator()(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
+  c10::List<Tensor> operator()(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
     return c10::make_list<Tensor>({input1, input2, input3});
   }
 };
@@ -204,7 +204,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListOutpu
 }
 
 struct KernelWithIntListOutput final : OperatorKernel {
-  c10::ListPtr<int64_t> operator()(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
+  c10::List<int64_t> operator()(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
     return c10::make_list<int64_t>({input1, input2, input3});
   }
 };
@@ -225,11 +225,11 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListOutput_w
 }
 
 struct KernelWithMultipleOutputs final : OperatorKernel {
-  std::tuple<Tensor, int64_t, c10::ListPtr<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>> operator()(Tensor) {
-    DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
+  std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> operator()(Tensor) {
+    Dict<string, Tensor> dict = make_dict<string, Tensor>();
     dict.insert("first", dummyTensor(TensorType1()));
     dict.insert("second", dummyTensor(TensorType2()));
-    return std::tuple<Tensor, int64_t, c10::ListPtr<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>>(
+    return std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
       dummyTensor(TensorType2()),
       5,
       c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}),
@@ -396,7 +396,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntInput_withOu
 int64_t captured_input_list_size = 0;
 
 struct KernelWithIntListInputWithoutOutput final : OperatorKernel {
-  void operator()(Tensor, const c10::ListPtr<int64_t>& input1) {
+  void operator()(Tensor, const c10::List<int64_t>& input1) {
     captured_input_list_size = input1.size();
   }
 };
@@ -415,7 +415,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
 }
 
 struct KernelWithIntListInputWithOutput final : OperatorKernel {
-  int64_t operator()(Tensor, const c10::ListPtr<int64_t>& input1) {
+  int64_t operator()(Tensor, const c10::List<int64_t>& input1) {
     return input1.size();
   }
 };
@@ -433,7 +433,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithIntListInput_wi
 }
 
 struct KernelWithTensorListInputWithoutOutput final : OperatorKernel {
-  void operator()(const c10::ListPtr<Tensor>& input1) {
+  void operator()(const c10::List<Tensor>& input1) {
     captured_input_list_size = input1.size();
   }
 };
@@ -452,7 +452,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
 }
 
 struct KernelWithTensorListInputWithOutput final : OperatorKernel {
-  int64_t operator()(const c10::ListPtr<Tensor>& input1) {
+  int64_t operator()(const c10::List<Tensor>& input1) {
     return input1.size();
   }
 };
@@ -472,7 +472,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTensorListInput
 int captured_dict_size = 0;
 
 struct KernelWithDictInputWithoutOutput final : OperatorKernel {
-  void operator()(DictPtr<string, Tensor> input1) {
+  void operator()(Dict<string, Tensor> input1) {
     captured_dict_size = input1.size();
   }
 };
@@ -485,7 +485,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_witho
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
-  DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
+  Dict<string, Tensor> dict = make_dict<string, Tensor>();
   dict.insert("key1", dummyTensor(TensorType1()));
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
@@ -494,7 +494,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_witho
 }
 
 struct KernelWithDictInputWithOutput final : OperatorKernel {
-  string operator()(DictPtr<string, string> input1) {
+  string operator()(Dict<string, string> input1) {
     return input1.at("key2");
   }
 };
@@ -506,7 +506,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withO
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  DictPtr<string, string> dict = make_dict<string, string>();
+  Dict<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -515,7 +515,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictInput_withO
 }
 
 struct KernelWithDictOutput final : OperatorKernel {
-  DictPtr<string, string> operator()(DictPtr<string, string> input) {
+  Dict<string, string> operator()(Dict<string, string> input) {
     return input;
   }
 };
@@ -527,7 +527,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithDictOutput_when
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  DictPtr<string, string> dict = make_dict<string, string>();
+  Dict<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -786,7 +786,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithOptionalInputs_
 }
 
 struct KernelForSchemaInference final : OperatorKernel {
-  std::tuple<int64_t, Tensor> operator()(Tensor arg1, int64_t arg2, const c10::ListPtr<Tensor>& arg3) {
+  std::tuple<int64_t, Tensor> operator()(Tensor arg1, int64_t arg2, const c10::List<Tensor>& arg3) {
     return {};
   }
 };

@@ -1282,7 +1282,7 @@ struct getTypePtr_<c10::ArrayRef<T>> final {
   }
 };
 template <class T>
-struct getTypePtr_<c10::ListPtr<T>> final {
+struct getTypePtr_<c10::List<T>> final {
   static TypePtr call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
@@ -1297,7 +1297,7 @@ struct getTypePtr_<std::unordered_map<K, V>> final {
   }
 };
 template <class K, class V>
-struct getTypePtr_<c10::DictPtr<K, V>> final {
+struct getTypePtr_<c10::Dict<K, V>> final {
   static TypePtr call() {
     static auto type =
         DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
