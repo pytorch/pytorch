@@ -2734,6 +2734,28 @@ graph(%Ra, %Rb):
 
         self.assertEqual(str(warns[0]), str(script_warns[0]))
 
+    def test_trace_rnn_batch(self):
+        sequence_lengths = torch.tensor([5, 4, 3, 2, 1], requires_grad=False)
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gru = nn.GRU(5, 5)
+
+            def forward(self, x, sequence_lengths):
+                packed = torch.nn.utils.rnn.pack_padded_sequence(x, sequence_lengths.squeeze(0))
+                # packed = torch.nn.utils.rnn.pack_padded_sequence(x, sequence_lengths.squeeze(0), enforce_sorted=False)
+                output, hidden = self.gru(packed)
+                output, _ = torch.nn.utils.rnn.pad_packed_sequence(output, total_length=5)
+                return output, hidden
+
+        inputs = (torch.ones(5, 5, 5), sequence_lengths)
+        check1 = (torch.ones(1, 3, 3), sequence_lengths)
+        # check2 = (torch.ones(3, 3, 3), sequence_lengths)
+        traced = torch.jit.trace(M(), inputs)
+        print(traced.graph)
+        traced = torch.jit.trace(M(), inputs, check_inputs=[check1])
+
     def test_no_erroneous_warnings(self):
         import warnings
 

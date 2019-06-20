@@ -571,6 +571,10 @@ void initJITBindings(PyObject* module) {
     toIValue(obj, type);
   });
 
+  m.def("_is_tracing", []() {
+    return jit::tracer::isTracing();
+  });
+
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);

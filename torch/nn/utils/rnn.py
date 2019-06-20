@@ -65,7 +65,7 @@ class PackedSequence(PackedSequence_):
         # NB: if unsorted_indices is provided, it should be the inverse permutation
         # to sorted_indices. Don't assert it here because the PackedSequence ctor
         # should only be used internally.
-        if unsorted_indices is None:
+        if unsorted_indices is None and sorted_indices is not None:
             unsorted_indices = invert_permutation(sorted_indices)
 
         # support being called as `PackedSequence(data, batch_sizes, sorted_indices)`
@@ -209,11 +209,10 @@ class PackedSequence(PackedSequence_):
         return self.data.is_pinned()
 
 
+# We can't trace `numel()` since it outputs an `int`, so compile this function
+# if it is called while tracing
 @torch._jit_internal.delayed_script
 def invert_permutation(permutation):
-    # type: (Optional[Tensor]) -> Optional[Tensor]
-    if permutation is None:
-        return None
     output = torch.empty_like(permutation)
     src = torch.arange(0, permutation.numel(), device=permutation.device, dtype=torch.long)
     output.scatter_(0, permutation, src)

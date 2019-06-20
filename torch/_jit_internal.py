@@ -6,6 +6,7 @@ circular dependency problems
 
 import weakref
 import inspect
+import torch
 from torch._six import builtins
 
 # Tracks standalone weak script functions
@@ -30,11 +31,18 @@ COMPILED = object()
 jit_script = None
 
 def delayed_script(fn):
+    """
+    Compiles `fn` when it is first called during tracing.
+    """
     # You can't modify closed-over variables in Python 2, so make this a dict and
     # mutate it
     compiled_fn = {}
 
     def wrapper(*args):
+        if not torch._C._is_tracing():
+            # Not tracing, don't do anything
+            return fn(*args)
+
         if jit_script is None:
             raise RuntimeError("Called too early")
 

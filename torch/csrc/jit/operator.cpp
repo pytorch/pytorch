@@ -240,15 +240,15 @@ const Operator& getOperatorFor(const Node* node) {
   auto er = script::ErrorReport(node->sourceRange());
   er << "Schema not found for node. File a bug report.\n";
   er << "Node: " << *node << "\n";
-  er << "Input types:";
+  er << "Input types: ";
   for (size_t i = 0; i < node->inputs().size(); ++i) {
     if (i > 0)
       er << ", ";
-    er << *node->inputs()[i]->type();
+    er << node->inputs()[i]->type()->python_str();
   }
   const auto& candidates = getAllOperatorsFor(node->kind());
   if (candidates.size() > 0) {
-    er << "\ncandidates were:\n";
+    er << "\nCandidates were:\n";
     for (auto& candidate : candidates) {
       er << "  " << candidate->schema() << "\n";
     }
