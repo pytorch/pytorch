@@ -47,6 +47,7 @@ PyObject* c10d_init(PyObject* _unused) {
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(py::init<
            std::vector<std::vector<torch::autograd::Variable>>,
+           std::vector<std::vector<bool>>,
            std::vector<std::vector<size_t>>,
            std::shared_ptr<::c10d::ProcessGroup>>())
       .def(
@@ -543,6 +544,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       &::c10d::compute_bucket_assignment_by_size,
       py::arg("tensors"),
       py::arg("bucket_size"),
+      py::arg("expect_sparse_gradient"),
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
