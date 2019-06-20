@@ -50,29 +50,29 @@ namespace detail {
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {};
 
   template<class Key, class Value, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<DictPtr<Key, Value>, AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<Dict<Key, Value>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<Value, AllowDeprecatedTypes> {
-    static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported input type: DictPtr<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
+    static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported input type: Dict<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
   };
 
   template<class Key, class Value, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<std::unordered_map<Key, Value>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<Value, AllowDeprecatedTypes> {
-    static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::unordered_map<Key, Value>. Please use DictPtr<Key, Value> instead.");
+    static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::unordered_map<Key, Value>. Please use Dict<Key, Value> instead.");
     static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported input type: std::unordered_map<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<ListPtr<T>, AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<List<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: ListPtr<Scalar>. Please use ListPtr<int64_t>, ListPtr<double> or Tensor instead.");
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: List<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
   };
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<std::vector<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: std::vector<Scalar>. Please use ListPtr<int64_t>, ListPtr<double> or Tensor instead.");
-    // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::vector<T>. Please use ListPtr<T> instead.");
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: std::vector<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
+    // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::vector<T>. Please use List<T> instead.");
   };
 
   // The following specialisations of assert_is_valid_input_type are technically not
@@ -111,31 +111,31 @@ namespace detail {
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
 
   template<class Key, class Value, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<DictPtr<Key, Value>, AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<Dict<Key, Value>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<Value, AllowDeprecatedTypes> {
-    static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported output type: DictPtr<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
-    static_assert(!std::is_same<Value, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: DictPtr<Key, Scalar>. Please use DictPtr<Key, int64_t> or DictPtr<Key, double>.");
+    static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported output type: Dict<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
+    static_assert(!std::is_same<Value, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: Dict<Key, Scalar>. Please use Dict<Key, int64_t> or Dict<Key, double>.");
   };
 
   template<class Key, class Value, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<std::unordered_map<Key, Value>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<Value, AllowDeprecatedTypes> {
-    static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Value>. Please use DictPtr<Key, Value> instead.");
+    static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Value>. Please use Dict<Key, Value> instead.");
     static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
-    static_assert(!std::is_same<Value, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Scalar>. Please use DictPtr<Key, int64_t> or DictPtr<Key, double>.");
+    static_assert(!std::is_same<Value, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Scalar>. Please use Dict<Key, int64_t> or Dict<Key, double>.");
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<ListPtr<T>, AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<List<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: ListPtr<Scalar>. Please use ListPtr<int64_t>, ListPtr<double> or Tensor instead.");
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: List<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
   };
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<std::vector<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: std::vector<Scalar>. Please use ListPtr<int64_t>, ListPtr<double> or Tensor instead.");
-    // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::vector<T>. Please use ListPtr<T> instead.");
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: std::vector<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
+    // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::vector<T>. Please use List<T> instead.");
   };
 
   // The following specialisations of assert_is_valid_output_type are technically not

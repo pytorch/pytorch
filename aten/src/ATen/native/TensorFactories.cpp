@@ -444,9 +444,11 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGenerator* generator) {
   result.resize_({n});
   int64_t r__stride_0 = result.stride(0);
 
-  for(int64_t i = 0; i < n; i++) {
-    r__data[i*r__stride_0] = static_cast<scalar_t>(i);
-  }
+  at::parallel_for(0, n, internal::GRAIN_SIZE,
+                  [&r__data, &r__stride_0](int64_t p_begin, int64_t p_end) {
+    for(int64_t i = p_begin; i < p_end; i++)
+      r__data[i*r__stride_0] = static_cast<scalar_t>(i);
+  });
 
   for(int64_t i = 0; i < n - 1; i++)
   {
@@ -767,17 +769,6 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
     auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::CPUTensorId());
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
     return tensor;
-}
-
-Tensor _from_blob_cpu(void* data, IntArrayRef sizes, IntArrayRef strides, const std::function<void(void*)>& deleter, const TensorOptions& options) {
-  auto storage = Storage(
-      options.dtype(),
-      detail::computeStorageSize(sizes, strides),
-      InefficientStdFunctionContext::makeDataPtr(
-          data, deleter, DeviceType::CPU),
-      /*allocator=*/nullptr,
-      /*resizable=*/false);
-  return empty({0}, options).set_(storage, 0, sizes, strides);
 }
 
 } // namespace native

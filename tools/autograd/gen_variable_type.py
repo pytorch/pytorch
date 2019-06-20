@@ -43,7 +43,7 @@ DONT_RECORD_TRACE = {
     'conv_transpose2d', 'conv_transpose3d', 'lstm_cell', 'gru_cell',
     'rnn_tanh_cell', 'rnn_relu_cell', 'linear',
     # FIXME: figure out a better way when we support sparse tensors in jit
-    '_coalesced_', '_from_blob',
+    '_coalesced_',
 }
 
 # These functions have their names recorded under trace renamed,
