@@ -133,10 +133,6 @@
 
 # Convolutions
 
-- name: _thnn_conv_transpose2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] output_padding=0, IntArrayRef[2] dilation=1)
-  cname: SpatialFullDilatedConvolution
-  buffers: [columns, ones]
-
 - name: _thnn_conv_transpose3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0, IntArrayRef[3] output_padding=0, IntArrayRef[3] dilation=1)
   cname: VolumetricFullDilatedConvolution
   buffers: [finput, fgrad_input]

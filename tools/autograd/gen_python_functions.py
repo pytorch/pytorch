@@ -34,7 +34,6 @@ SKIP_PYTHON_BINDINGS = [
     'numpy_T',  # this needs to be an attribute in Python, not a function
     'nonzero(_(out|numpy))?',
     'set_quantizer_',
-    '_from_blob',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature

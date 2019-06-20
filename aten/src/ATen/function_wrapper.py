@@ -956,7 +956,6 @@ def create_generic(top_env, declarations):
                     'Type': 'const Type &' if const else 'Type &',
                     'TensorOptions': 'const TensorOptions &' if const else 'TensorOptions &',
                     'TensorList': 'TensorList',
-                    'std::function<void(void*)>': 'const std::function<void(void*)>&',
                 }
 
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
@@ -1199,11 +1198,6 @@ def create_derived(backend_type_env, declarations):
     legacy_th_definitions = []  # type: List[str]
     is_cuda = 'CUDA' in backend_type_env['Backend']
 
-    def replace_with_null(argument):
-        # type: (THFormal) -> bool
-        return (argument['type'] == 'THGenerator*' and
-                backend_type_env['Backend'] == 'CUDA')
-
     def requires_checked_cast(argument):
         # type: (THFormal) -> bool
         if argument['type'] == 'IntArrayRef':
@@ -1220,9 +1214,7 @@ def create_derived(backend_type_env, declarations):
 
     def get_argument(env, argument, option):
         # type: (Environment, THFormal, FunctionOption) -> str
-        if replace_with_null(argument):
-            return 'NULL'
-        elif requires_checked_cast(argument):
+        if requires_checked_cast(argument):
             checked_use = CHECKED_USE.get(
                 argument['type'], '{}_').format(argument['name'])
             if nullable_argument(argument):
@@ -1256,8 +1248,7 @@ def create_derived(backend_type_env, declarations):
         # Devices are handled in the body of the function.
         if argument['name'] == 'device':
             return True
-        return 'CUDA' in backend_type_env['Backend'] and (
-            option['mode'] == 'TH' and argument['type'] == 'THGenerator*')
+        return False
 
     def get_arguments(env, arguments, option):
         # type: (Environment, List[THFormal], FunctionOption) -> List[str]
@@ -1444,7 +1435,7 @@ def create_derived(backend_type_env, declarations):
                                 size=arg.get('size'))
                             case_body.append("auto {}_ = {};".format(
                                 arg['name'], check_cast))
-                        if drop_argument(arg, option) or replace_with_null(arg):
+                        if drop_argument(arg, option):
                             case_body.append(
                                 "(void) {}_; //silence unused warning".format(arg['name']))
 
