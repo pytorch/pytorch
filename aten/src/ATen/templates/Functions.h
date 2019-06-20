@@ -15,7 +15,6 @@
 #include <ATen/core/Reduction.h>
 #include <c10/util/Optional.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/ATenDispatch.h>
 
 namespace at {
 
@@ -71,24 +70,14 @@ inline Tensor from_blob(
 
 namespace detail {
 
-static inline Backend infer_backend(const Tensor & t) {
+static inline TypeExtendedInterface & infer_type(const Tensor & t) {
   TORCH_CHECK(t.defined(), "undefined Tensor");
-  return tensorTypeIdToBackend(t.type_id());
+  return getType(t);
 }
-static inline Backend infer_backend(const TensorList & tl) {
+static inline TypeExtendedInterface & infer_type(const TensorList & tl) {
   TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tensorTypeIdToBackend(tl[0].type_id());
+  return getType(tl[0]);
 }
-
-static inline bool infer_is_variable(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return t.is_variable();
-}
-static inline bool infer_is_variable(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tl[0].is_variable();
-}
-
 
 } // namespace detail
 
