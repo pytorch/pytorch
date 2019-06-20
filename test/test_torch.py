@@ -3037,7 +3037,8 @@ class _TestTorchMixin(object):
         self.assertEqual(q.dtype, q_el.dtype)
 
         # create via empty_like but change the dtype (currently not supported)
-        self.assertRaises(RuntimeError, lambda: torch.empty_like(q, dtype=torch.qint8))
+        with self.assertRaises(RuntimeError):
+            torch.empty_like(q, dtype=torch.qint8)
 
     def test_qtensor_dtypes(self):
         r = np.random.rand(3, 2) * 2 - 4
