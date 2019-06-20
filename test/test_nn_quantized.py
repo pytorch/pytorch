@@ -93,13 +93,11 @@ class ModuleAPITest(TestCase):
         qr = torch.quantize_linear(r, scale, zero_point, dtype)
         quant_m = nnq.Quantize(scale, zero_point, dtype)
         qr2 = quant_m(r)
-        print(qr2)
         self.assertEqual(qr, qr2)
         # testing Dequantize API
         rqr = qr.dequantize()
         dequant_m = nnq.DeQuantize()
         rqr2 = dequant_m(qr2)
-        print(rqr2)
         self.assertEqual(rqr, rqr2)
 
 

@@ -3072,8 +3072,7 @@ class _TestTorchMixin(object):
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
 
     def test_qtensor_permute(self):
-        r = np.random.rand(100, 30) * 2 - 4
-        r = torch.from_numpy(r).float()
+        r = torch.rand(100, 30).float()
         scale = 2
         zero_point = 2
         qr = torch.quantize_linear(r, scale, zero_point, torch.qint8)
@@ -3108,7 +3107,6 @@ class _TestTorchMixin(object):
                 torch.save(qr, f)
                 f.seek(0)
                 qr2 = torch.load(f)
-                print(qr, qr2)
                 self.assertEqual(qr.int_repr(), qr2.int_repr())
                 self.assertEqual(qr.q_scale(), qr2.q_scale())
                 self.assertEqual(qr.q_zero_point(), qr2.q_zero_point())
