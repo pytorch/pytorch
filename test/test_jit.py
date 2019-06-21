@@ -748,6 +748,14 @@ class TestJit(JitTestCase):
                 self.assertFalse(fn.has_trace_for(*unk_config))
         self.assertEqual(fn.hits, 0)
 
+    def test_optional_args(self):
+        @torch.jit.script
+        def norm_test():
+            t = torch.ones(10, 5)
+            return int(torch.norm(torch.norm(t, dim=0)))
+
+        self.assertEqual(norm_test(), 7)
+
     def test_cse(self):
         x = torch.tensor([0.4, 0.3], requires_grad=True)
         y = torch.tensor([0.7, 0.5], requires_grad=True)
