@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 r""""Signal handling for multiprocessing data loading.
 
 NOTE [ Signal handling in multiprocessing data loading ]
@@ -61,9 +63,11 @@ def _set_SIGCHLD_handler():
         previous_handler = None
 
     def handler(signum, frame):
+        print('inside SIGCHLD handler: pre _error_if_any_worker_fails')
         # This following call uses `waitid` with WNOHANG from C side. Therefore,
         # Python can still get and update the process status successfully.
         _error_if_any_worker_fails()
+        print('inside SIGCHLD handler: after _error_if_any_worker_fails')
         if previous_handler is not None:
             previous_handler(signum, frame)
 
