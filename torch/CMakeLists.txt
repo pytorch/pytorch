@@ -155,6 +155,12 @@ else()
       -Wno-strict-aliasing)
 endif()
 
+if (NOT WIN32)
+  # Enable hidden visibility by default to make pybind11 behavior more robust
+  # See https://pybind11.readthedocs.io/en/stable/faq.html#someclass-declared-with-greater-visibility-than-the-type-of-its-field-someclass-member-wattributes
+  list(APPEND TORCH_PYTHON_COMPILE_OPTIONS "-fvisibility=hidden")
+endif()
+
 if (USE_CUDA)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp

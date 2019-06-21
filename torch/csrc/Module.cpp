@@ -602,10 +602,7 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
 }
 
 
-#ifdef _WIN32
-__declspec(dllexport)
-#endif
-PyObject* initModule() {
+PYBIND11_EXPORT PyObject* initModule() {
   HANDLE_TH_ERRORS
   at::init_num_threads();
 
