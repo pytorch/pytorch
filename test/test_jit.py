@@ -3445,6 +3445,47 @@ def foo(xyz):
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
+    def test_serialized_source_ranges(self):
+        class Sequence(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sequence, self).__init__()
+                self.lstm1 = nn.LSTMCell(1, 51)
+                self.lstm2 = nn.LSTMCell(51, 51)
+                self.linear = nn.Linear(51, 1)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                # TODO: add future as input with default val
+                # see https://github.com/pytorch/pytorch/issues/8724
+                outputs = torch.empty((3, 0), dtype=torch.double)
+                h_t = torch.zeros((3, 51), dtype=torch.double)
+                c_t = torch.zeros((3, 51), dtype=torch.double)
+                h_t2 = torch.zeros((3, 51), dtype=torch.double)
+                c_t2 = torch.zeros((3, 51), dtype=torch.double)
+
+                output = torch.zeros([3, 51])
+                future = 2
+
+                # TODO: chunk call should appear as the for loop iterable
+                # We hard-code it to 4 for now.
+                a, b, c, d = input.chunk(input.size(1), dim=1)
+                for input_t in (a, b, c, d):
+                    h_t, c_t = self.lstm1(input_t, (h_t, c_t))
+                    h_t2, c_t2 = self.lstm2(h_t, (h_t2, c_t2))
+                    output = self.linear(h_t2)
+                    outputs = torch.cat((outputs, output), 1)
+                for _ in range(future):  # if we should predict the future
+                    h_t, c_t = self.lstm1(output, (h_t, c_t))
+                    h_t2, c_t2 = self.lstm2(h_t, (h_t2, c_t2))
+                    output = self.linear(h_t2)
+                    outputs = torch.cat((outputs, output), 1)
+                return outputs
+
+        foo = Sequence()
+        # print(foo.graph, flush=True)
+        # imported = self.getExportImportCopy(foo)
+        # imported(torch.rand(3, 4), torch.rand(5, 6))
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 
