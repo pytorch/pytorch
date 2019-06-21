@@ -32,9 +32,12 @@ multiprocessing data loading robust to errors.
 
 import signal
 import threading
-from torch._C import _set_worker_pids, _remove_worker_pids, _error_if_any_worker_fails, _set_worker_signal_handlers  # noqa: F401
 from . import IS_WINDOWS
 
+# Some of the following imported functions are not used in this file, but are to
+# be used `_utils.signal_handling.XXXXX`.
+from torch._C import _set_worker_pids, _remove_worker_pids  # noqa: F401
+from torch._C import _error_if_any_worker_fails, _set_worker_signal_handlers  # noqa: F401
 
 _SIGCHLD_handler_set = False
 r"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one

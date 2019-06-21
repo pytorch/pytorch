@@ -2086,8 +2086,8 @@ def _get_named_tuple_properties(obj):
             annotations.append(torch._C.TensorType.get())
     return type(obj).__name__, fields, annotations
 
-def _create_named_tuple(t, names, unqual_name):
-    TupleType = collections.namedtuple(unqual_name, names)
+def _create_named_tuple(t, unqual_name, field_names):
+    TupleType = collections.namedtuple(unqual_name, field_names)
     return TupleType(*t)
 
 class _disable_tracing(object):

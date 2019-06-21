@@ -186,8 +186,8 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
     //                       "empty_like for quantized Tensor only works for
     //                        PerTensorAffine scheme right now");
     return at::_empty_affine_quantized(self.sizes(), options,
-                                       self.q_scale().toDouble(),
-                                       self.q_zero_point().toLong());
+                                       self.q_scale()
+                                       self.q_zero_point());
   }
   return at::empty(self.sizes(), options);
 }
@@ -450,9 +450,11 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGenerator* generator) {
   result.resize_({n});
   int64_t r__stride_0 = result.stride(0);
 
-  for(int64_t i = 0; i < n; i++) {
-    r__data[i*r__stride_0] = static_cast<scalar_t>(i);
-  }
+  at::parallel_for(0, n, internal::GRAIN_SIZE,
+                  [&r__data, &r__stride_0](int64_t p_begin, int64_t p_end) {
+    for(int64_t i = p_begin; i < p_end; i++)
+      r__data[i*r__stride_0] = static_cast<scalar_t>(i);
+  });
 
   for(int64_t i = 0; i < n - 1; i++)
   {
