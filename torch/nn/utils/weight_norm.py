@@ -88,7 +88,7 @@ def weight_norm(module, name='weight', dim=0, init='default', gamma=2.):
     See https://arxiv.org/abs/1602.07868
 
     Args:
-        module (nn.Module): containing module
+        module (Module): containing module
         name (str, optional): name of weight parameter
         dim (int, optional): dimension over which to compute the norm
         init (str, optional): initialization scheme; one in ['default', 'norm_preserving']
@@ -107,7 +107,7 @@ def weight_norm(module, name='weight', dim=0, init='default', gamma=2.):
 
         >>> m = weight_norm(nn.Linear(20, 40), name='weight')
         >>> m
-        Linear (20 -> 40)
+        Linear(in_features=20, out_features=40, bias=True)
         >>> m.weight_g.size()
         torch.Size([40, 1])
         >>> m.weight_v.size()
