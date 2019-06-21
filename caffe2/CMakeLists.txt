@@ -885,7 +885,7 @@ endif()
 # Native threadpool settings
 if (USE_EIGEN_THREADPOOL)
   message(STATUS "Using Eigen thread pool as a native thread pool")
-  target_compile_definitions(caffe2 PUBLIC "-DUSE_EIGEN_THREADPOOL=1")
+  target_compile_definitions(torch PUBLIC "-DUSE_EIGEN_THREADPOOL=1")
 endif()
 
 if (MSVC AND NOT BUILD_SHARED_LIBS)
