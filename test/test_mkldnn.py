@@ -2,7 +2,13 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 import unittest
 
-import torchvision
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 import torch
 import torch.jit
@@ -393,10 +399,12 @@ class TestMkldnn(TestCase):
                 mkldnn_model(x.to_mkldnn()).to_dense(),
             )
 
+    @skipIfNoTorchVision
     def test_resnet18(self):
         model = torchvision.models.resnet.resnet18(pretrained=False)
         self._test_imagenet_model(model)
 
+    @skipIfNoTorchVision
     def test_resnext50_32x4d(self):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
