@@ -125,7 +125,10 @@ static Variable valueToTensor(c10::TensorTypeId type_id, ScalarType scalar_type,
   if (PyFloat_Check(value)) {
     return at::scalar_tensor(Scalar(THPUtils_unpackDouble(value)), options);
   }
-  throw TypeError("can't assign a %s to a %s", Py_TYPE(value)->tp_name, torch::utils::options_to_string(options).c_str());
+  throw TypeError(
+    "can't assign a %s to a %s",
+    Py_TYPE(value)->tp_name,
+    torch::utils::type_to_string(getNonVariableDeprecatedTypeProperties(tensorTypeIdToBackend(type_id), scalar_type)).c_str());
 }
 
 static Variable boolToIndexingTensor(const Variable& self, bool value) {
