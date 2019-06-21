@@ -16,6 +16,7 @@ struct CAFFE2_API CPUGenerator : public Generator {
   std::shared_ptr<CPUGenerator> clone() const;
   void set_current_seed(uint64_t seed) override;
   uint64_t current_seed() const override;
+  uint64_t seed() override;
   static DeviceType device_type();
   uint32_t random();
   uint64_t random64();
