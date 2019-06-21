@@ -18,6 +18,7 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/pass_manager.h"
 #include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/passes/bailout_graph.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
@@ -25,6 +26,7 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/guard_elimination.h"
 #include "torch/csrc/jit/passes/insert_guards.h"
+#include "torch/csrc/jit/passes/liveness.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
@@ -907,7 +909,17 @@ static void checkShape(
   ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
 }
 
-void testInsertAndEliminateGuards() {
+std::vector<std::size_t> values_to_value_ids(
+    const std::vector<Value*>& values) {
+  std::vector<std::size_t> result;
+  for (auto v : values) {
+    result.push_back(v->unique());
+  }
+  return result;
+};
+
+void testInsertAndEliminateRedundantGuards() {
+
   static const auto basic_example = R"JIT(
   def basic(x, y):
     a = x + y
@@ -943,9 +955,59 @@ void testInsertAndEliminateGuards() {
   ASSERT_EQ(num_guards, 11);
   // now eliminate as many guards as possible
   // we should be left with two guards on x and y's defs
-  EliminateGuards(copy);
+  EliminateRedundantGuards(copy);
   num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
   ASSERT_EQ(num_guards, 2);
+}
+
+void testInsertBailOuts() {
+  static const auto basic_example = R"JIT(
+  def basic_loop(x, y):
+
+      a = x + 1
+      b = y + 2
+      c = x + y + 3
+
+      for i in range(10):
+          a = a + b
+          # invariant
+          d = b * c
+          #
+          a = a - d
+
+      e = a + 4
+      return e
+  )JIT";
+
+  auto cu = compile(basic_example);
+  auto& fun = cu->get_function("basic_loop");
+  auto pr = ProfilingRecord::instrumentGraph(fun.graph());
+  auto x = at::randn({2, 3}, at::kCPU);
+  auto y = at::randn({2, 3}, at::kCPU);
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+  auto stack = createStack({v(x), v(y)});
+  // introduce some profiling information
+  Code cd(pr->profiled_graph_);
+  InterpreterState is{cd};
+  is.run(stack);
+  auto copy = pr->profiled_graph_->copy();
+  InsertGuards(copy);
+  EliminateRedundantGuards(copy);
+  auto nodes = copy->block()->nodes();
+  auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
+  auto num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
+  ASSERT_EQ(num_guards, 3);
+  InsertBailOuts(copy);
+  auto is_bailout = [](Node* n) { return n->kind() == prim::BailOut; };
+  auto num_bailouts = std::count_if(nodes.begin(), nodes.end(), is_bailout);
+  ASSERT_EQ(num_guards, num_bailouts);
+  std::vector<Node*> bailouts(num_bailouts);
+  std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
+
+  for (auto blo : bailouts) {
+    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::Constant);
+    ASSERT_TRUE(blo->inputs().at(0)->type()->cast<FunctionType>());
+  }
 }
 
 void testProfiler() {

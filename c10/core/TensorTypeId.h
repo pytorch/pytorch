@@ -35,10 +35,6 @@ class C10_API TensorTypeId final
   friend C10_API std::string toString(TensorTypeId);
 };
 
-C10_API std::string toString(TensorTypeId id);
-
-C10_API std::ostream& operator<<(std::ostream&, c10::TensorTypeId);
-
 } // namespace c10
 
 C10_DEFINE_HASH_FOR_IDWRAPPER(c10::TensorTypeId)
