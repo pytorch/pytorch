@@ -270,7 +270,7 @@ class BuildExtension(build_ext, object):
                         cflags = cflags['nvcc']
                     if HIP_COMP:
                        cflags = COMMON_HIPCC_FLAGS + cflags
-                    else
+                    else:
                        cflags = COMMON_NVCC_FLAGS + ['--compiler-options', "'-fPIC'"] + cflags
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
@@ -558,7 +558,7 @@ def library_paths(cuda=False):
     if cuda:
         if HIP_COMP:
             lib_dir = 'lib'
-        else
+        else:
             lib_dir = 'lib/x64' if IS_WINDOWS else 'lib64'
         paths.append(_join_cuda_home(lib_dir))
         if CUDNN_HOME is not None:
