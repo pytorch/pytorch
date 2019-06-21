@@ -15,7 +15,11 @@ if NOT DEFINED BUILD_BINARY (
 )
 
 if NOT DEFINED BUILD_SHARED_LIBS (
-  set BUILD_SHARED_LIBS=OFF
+  :: On CI, we test with BUILD_SHARED_LIBS=OFF.
+  :: By default, it will be BUILD_SHARED_LIBS=ON.
+  if NOT DEFINED BUILD_ENVIRONMENT (
+    set BUILD_SHARED_LIBS=OFF
+  )
 )
 
 IF NOT DEFINED BUILDING_WITH_TORCH_LIBS (
@@ -51,22 +55,7 @@ if NOT DEFINED MSVC_Z7_OVERRIDE (
 )
 
 if NOT DEFINED CMAKE_GENERATOR (
-  if DEFINED APPVEYOR_BUILD_WORKER_IMAGE (
-    if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2017" (
-      set CMAKE_GENERATOR="Visual Studio 15 2017 Win64"
-    ) else if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2015" (
-      set CMAKE_GENERATOR="Visual Studio 14 2015 Win64"
-    ) else (
-      echo "You made a programming error: unknown APPVEYOR_BUILD_WORKER_IMAGE:"
-      echo %APPVEYOR_BUILD_WORKER_IMAGE%
-      exit /b
-    )
-  ) else (
-    :: In default we use win64 VS 2015.
-    :: Main reason is that currently, cuda 9 does not support VS 2017 newest
-    :: version. To use cuda you will have to use 2015.
-    set CMAKE_GENERATOR="Visual Studio 15 2017 Win64"
-  )
+  set CMAKE_GENERATOR=Visual Studio 15 2017
 )
 
 :: Install pyyaml for Aten codegen

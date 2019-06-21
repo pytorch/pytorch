@@ -24,10 +24,10 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
            const bool inverse, IntArrayRef signal_sizes, const bool normalized,
            const bool onesided) {
 
-  AT_CHECK(signal_ndim >= 1 && signal_ndim <= 3,
+  TORCH_CHECK(signal_ndim >= 1 && signal_ndim <= 3,
            "Expected signal_ndim to be 1, 2, or 3, but got signal_ndim=",
            signal_ndim);
-  AT_CHECK(at::isFloatingType(self.scalar_type()),
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
            "Expected an input tensor of floating types, but got input=",
            self.type(), self.sizes());
 
@@ -62,14 +62,14 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
   // now we assume that input is batched as [ B x signal_dims... ]
 
   if (complex_input) {
-    AT_CHECK(input.size(signal_ndim + 1) == 2,
+    TORCH_CHECK(input.size(signal_ndim + 1) == 2,
              "Expected an input tensor with a last dimension of size 2 "
              "representing real + imaginary components, but got input ",
              self.type(), self.sizes());
   }
 
   // build signal_sizes and output_size
-  AT_CHECK(signal_sizes.size() == 0 || static_cast<int64_t>(signal_sizes.size()) == signal_ndim,
+  TORCH_CHECK(signal_sizes.size() == 0 || static_cast<int64_t>(signal_sizes.size()) == signal_ndim,
            "Expected signal_sizes to be empty (default) or of signal_ndim=",
            signal_ndim, "D, but got signal_sizes=", signal_sizes);
   std::vector<int64_t> output_sizes(signal_ndim + 1 + static_cast<int64_t>(complex_output));
@@ -98,7 +98,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
         output_sizes[i + 1] = input_size;
       }
       checked_signal_sizes[i] = input_size;
-      AT_CHECK(signal_sizes.size() == 0 || signal_sizes[i] == checked_signal_sizes[i],
+      TORCH_CHECK(signal_sizes.size() == 0 || signal_sizes[i] == checked_signal_sizes[i],
                "Expected given signal_sizes=", signal_sizes," to have same "
                "shape with input at signal dimension ", i, ", but got "
                "signal_sizes=", signal_sizes, " and input=", self.type(),

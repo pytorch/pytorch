@@ -12,7 +12,7 @@ test_cpu_speed_mnist () {
 
   cd examples/mnist
 
-  pip install -q -r requirements.txt
+  conda install -c pytorch torchvision-cpu
 
   # Download data
   python main.py --epochs 0

@@ -1,32 +1,10 @@
 #include <math.h>
 
 #include <ATen/ATen.h>
+#include <ATen/TensorUtils.h>
 
 namespace at {
 namespace native {
-
-// Corresponds to THNN_CHECK_DIM_SIZE
-static inline void check_dim_size(
-    const Tensor& data,
-    int64_t dim,
-    int64_t dim_size,
-    int64_t size) {
-  /* Check dimension size of a tensor */
-  AT_CHECK(
-      data.dim() == dim && data.size(dim_size) == size,
-      "Expected tensor of dimension ",
-      dim,
-      " and tensor.size[",
-      dim_size,
-      "] == ",
-      size,
-      " but got: dimension ",
-      data.dim(),
-      " and tensor.size[",
-      dim_size,
-      "] = ",
-      data.size(dim_size));
-}
 
 static inline void upsample_1d_shape_check(
     const Tensor& input,
@@ -35,7 +13,7 @@ static inline void upsample_1d_shape_check(
     int64_t nchannels,
     int64_t input_width,
     int64_t output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_width > 0 && output_width > 0,
       "Input and output sizes should be greater than 0, but got input (W: ",
       input_width,
@@ -44,7 +22,7 @@ static inline void upsample_1d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.numel() != 0 && input.dim() == 3,
         "Non-empty 3D data tensor expected but got a tensor with sizes ",
         input.sizes());
@@ -64,7 +42,7 @@ static inline void upsample_2d_shape_check(
     int64_t input_width,
     int64_t output_height,
     int64_t output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_height > 0 && input_width > 0 && output_height > 0 &&
           output_width > 0,
       "Input and output sizes should be greater than 0,"
@@ -79,7 +57,7 @@ static inline void upsample_2d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.numel() != 0 && input.dim() == 4,
         "Non-empty 4D data tensor expected but got a tensor with sizes ",
         input.sizes());
@@ -102,7 +80,7 @@ static inline void upsample_3d_shape_check(
     int64_t output_depth,
     int64_t output_height,
     int64_t output_width) {
-  AT_CHECK(
+  TORCH_CHECK(
       input_depth > 0 && input_height > 0 && input_width > 0 &&
           output_depth > 0 && output_height > 0 && output_width > 0,
       "Input and output sizes should be greater than 0, but got input (D: ",
@@ -120,7 +98,7 @@ static inline void upsample_3d_shape_check(
       ")");
 
   if (input.defined()) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.numel() != 0 && input.dim() == 5,
         "Non-empty 5D data tensor expected but got a tensor with sizes ",
         input.sizes());

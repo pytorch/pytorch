@@ -2687,6 +2687,22 @@ CAFFE2_CUDA_EXPORT void CopyVector<float, CUDAContext>(
   }
 }
 
+template <>
+CAFFE2_CUDA_EXPORT void CopyVector<int, CUDAContext>(
+    const int N,
+    const int* src,
+    int* dst,
+    CUDAContext* context) {
+  if (src != dst && N > 0) {
+    cudaMemcpyAsync(
+        dst,
+        src,
+        sizeof(int) * N,
+        cudaMemcpyDeviceToDevice,
+        context->cuda_stream());
+  }
+}
+
 namespace {
 
 template <typename T>

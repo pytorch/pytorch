@@ -8,7 +8,6 @@
 // To explicitly use interned strings as symbols in your code, you must add
 // them to this list.
 
-#if !defined(C10_MOBILE) || defined(FEATURE_TORCH_MOBILE)
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
 _(aten, __and__) \
 _(aten, __iand__) \
@@ -249,7 +248,6 @@ _(aten, conv3d) \
 _(aten, conv_tbc) \
 _(aten, conv_tbc_backward) \
 _(aten, conv_transpose1d) \
-_(aten, conv_transpose2d) \
 _(aten, conv_transpose3d) \
 _(aten, convolution) \
 _(aten, copy_sparse_to_sparse) \
@@ -258,6 +256,8 @@ _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
 _(aten, cross) \
+_(aten, std_mean) \
+_(aten, var_mean) \
 _(aten, ctc_loss) \
 _(aten, cudnn_affine_grid_generator) \
 _(aten, cudnn_affine_grid_generator_backward) \
@@ -656,9 +656,8 @@ _(aten, thnn_conv_dilated2d_forward) \
 _(aten, thnn_conv_dilated3d) \
 _(aten, thnn_conv_dilated3d_backward) \
 _(aten, thnn_conv_dilated3d_forward) \
-_(aten, thnn_conv_transpose2d) \
-_(aten, thnn_conv_transpose2d_backward) \
-_(aten, thnn_conv_transpose2d_forward) \
+_(aten, conv_transpose2d) \
+_(aten, conv_transpose2d_backward) \
 _(aten, thnn_conv_transpose3d) \
 _(aten, thnn_conv_transpose3d_backward) \
 _(aten, thnn_conv_transpose3d_forward) \
@@ -906,6 +905,8 @@ _(attr, padding_value) \
 _(attr, params) \
 _(attr, pdist) \
 _(attr, cdist) \
+_(attr, std_mean) \
+_(attr, var_mean) \
 _(attr, periodic) \
 _(attr, pivot) \
 _(attr, pivots) \
@@ -1013,4 +1014,3 @@ _(attr, workspace) \
 _(attr, x) \
 _(attr, x1) \
 _(attr, x2)
-#endif

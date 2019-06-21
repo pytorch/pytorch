@@ -67,11 +67,11 @@ void replication_pad1d_out_cpu_template(
   int dimw = 1;
   int dimslices = 0;
   long nbatch = 1;
-  AT_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
+  TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
   int pad_l = paddingSize[0];
   int pad_r = paddingSize[1];
 
-  AT_CHECK(input_.numel() > 0
+  TORCH_CHECK(input_.numel() > 0
       && (input_.ndimension() == 2 || input_.ndimension() == 3),
       "non-empty 2D or 3D (batch mode) tensor expected for input");
 
@@ -87,7 +87,7 @@ void replication_pad1d_out_cpu_template(
   long iwidth = input_.size(dimw);
   long owidth  = iwidth + pad_l + pad_r;
 
-  AT_CHECK(owidth >= 1,
+  TORCH_CHECK(owidth >= 1,
       "input (W: ", iwidth, ") is too small."
       " Calculated output W: ", owidth);
 
@@ -193,7 +193,7 @@ Tensor& replication_pad1d_backward_out_cpu_template(
   int dimw = 1;
   int dimslices = 0;
   long nbatch = 1;
-  AT_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
+  TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
   int pad_l = paddingSize[0];
   int pad_r = paddingSize[1];
 
@@ -209,7 +209,7 @@ Tensor& replication_pad1d_backward_out_cpu_template(
   long iwidth = input.size(dimw);
   long owidth  = iwidth + pad_l + pad_r;
 
-  AT_CHECK(owidth == gradOutput_.size(dimw),
+  TORCH_CHECK(owidth == gradOutput_.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth,
       " Got: ", gradOutput_.size(dimw));
 
@@ -329,7 +329,7 @@ void replication_pad2d_out_cpu_template(Tensor& output,
     const Tensor& input_,
     IntArrayRef paddingSize)
 {
-  AT_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
+  TORCH_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
   int pad_l = paddingSize[0];
   int pad_r = paddingSize[1];
   int pad_t = paddingSize[2];
@@ -339,7 +339,7 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   int dimslices = 0;
   int64_t nbatch = 1;
 
-  AT_CHECK(input_.numel() > 0 && (input_.dim() == 3 || input_.dim() == 4),
+  TORCH_CHECK(input_.numel() > 0 && (input_.dim() == 3 || input_.dim() == 4),
       "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
 
   if (input_.dim() == 4)
@@ -357,7 +357,7 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   int64_t oheight = iheight + pad_t + pad_b;
   int64_t owidth  = iwidth + pad_l + pad_r;
 
-  AT_CHECK(owidth >= 1 || oheight >= 1,
+  TORCH_CHECK(owidth >= 1 || oheight >= 1,
       "input (H: ", iheight, ", W: ", iwidth, " ) is too small."
       " Calculated output H: ", oheight, " W: ", owidth);
 
@@ -473,7 +473,7 @@ Tensor& replication_pad2d_backward_out_cpu_template(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  AT_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
+  TORCH_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
   int pad_l = paddingSize[0];
   int pad_r = paddingSize[1];
   int pad_t = paddingSize[2];
@@ -498,10 +498,10 @@ Tensor& replication_pad2d_backward_out_cpu_template(
   int64_t oheight = iheight + pad_t + pad_b;
   int64_t owidth  = iwidth + pad_l + pad_r;
 
-  AT_CHECK(owidth == gradOutput_.size(dimw),
+  TORCH_CHECK(owidth == gradOutput_.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
       gradOutput_.size(dimw));
-  AT_CHECK(oheight == gradOutput_.size(dimh),
+  TORCH_CHECK(oheight == gradOutput_.size(dimh),
       "gradOutput height unexpected. Expected: ", oheight, ", Got: ",
       gradOutput_.size(dimh));
 
@@ -557,7 +557,7 @@ static inline void shapeCheck3d(
   int dimd = 1;
   int dimslices = 0;
 
-  AT_CHECK(input.numel() > 0 && (input.dim() == 4 || input.dim() == 5),
+  TORCH_CHECK(input.numel() > 0 && (input.dim() == 4 || input.dim() == 5),
       "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ", input);
 
   if (input.dim() == 5)
@@ -577,7 +577,7 @@ static inline void shapeCheck3d(
   int64_t oheight = iheight + ptop + pbottom;
   int64_t owidth  = iwidth + pleft + pright;
 
-  AT_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
+  TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
       "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
       ") is too small."
       " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
@@ -674,7 +674,7 @@ void replication_pad3d_out_cpu_template(
     const Tensor& input_,
     IntArrayRef paddingSize)
 {
-  AT_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
+  TORCH_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
   int pleft = paddingSize[0];
   int pright = paddingSize[1];
   int ptop = paddingSize[2];
@@ -832,7 +832,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  AT_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
+  TORCH_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
   int pleft = paddingSize[0];
   int pright = paddingSize[1];
   int ptop = paddingSize[2];

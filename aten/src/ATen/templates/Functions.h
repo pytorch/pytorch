@@ -15,6 +15,8 @@
 #include <ATen/core/Reduction.h>
 #include <c10/util/Optional.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/core/ATenDispatch.h>
+#include <ATen/Context.h>
 
 namespace at {
 
@@ -28,9 +30,9 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  auto device = getType(options).getDeviceFromPtr(data);
+  auto device = globalContext().getDeviceFromPtr(data, options.device().type());
   if (options.device().has_index()) {
-    AT_CHECK(
+    TORCH_CHECK(
         options.device() == device,
         "Specified device ", options.device(),
         " does not match device of data ", device);
@@ -70,14 +72,24 @@ inline Tensor from_blob(
 
 namespace detail {
 
-static inline TypeExtendedInterface & infer_type(const Tensor & t) {
-  AT_CHECK(t.defined(), "undefined Tensor");
-  return getType(t);
+static inline Backend infer_backend(const Tensor & t) {
+  TORCH_CHECK(t.defined(), "undefined Tensor");
+  return tensorTypeIdToBackend(t.type_id());
 }
-static inline TypeExtendedInterface & infer_type(const TensorList & tl) {
-  AT_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return getType(tl[0]);
+static inline Backend infer_backend(const TensorList & tl) {
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  return tensorTypeIdToBackend(tl[0].type_id());
 }
+
+static inline bool infer_is_variable(const Tensor & t) {
+  TORCH_CHECK(t.defined(), "undefined Tensor");
+  return t.is_variable();
+}
+static inline bool infer_is_variable(const TensorList & tl) {
+  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
+  return tl[0].is_variable();
+}
+
 
 } // namespace detail
 

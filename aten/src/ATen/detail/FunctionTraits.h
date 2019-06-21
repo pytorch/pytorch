@@ -38,6 +38,7 @@ struct function_traits<ReturnType(Args...)> {
   // arity is the number of arguments.
   enum { arity = sizeof...(Args) };
 
+  typedef std::tuple<Args...> ArgsTuple;
   typedef ReturnType result_type;
 
   template <size_t i>
@@ -47,6 +48,12 @@ struct function_traits<ReturnType(Args...)> {
       // the i-th argument is equivalent to the i-th tuple element of a tuple
       // composed of those arguments.
   };
+};
+
+template <typename T>
+struct nullary_function_traits {
+  using traits = function_traits<T>;
+  using result_type = typename traits::result_type;
 };
 
 template <typename T>
