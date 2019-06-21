@@ -5635,8 +5635,11 @@ a")
         self.checkScript(func3, (torch.tensor([-5, 10, -20]),))
 
     def test_number_div(self):
-        self.checkScript(div_int_future, (), optimize=True)
-        self.checkScript(div_float_future, (), optimize=True)
+        def div_int_future():
+            return 1 / 2
+
+        self.assertEqual(div_int_future(), torch.jit.script(div_int_future)())
+        self.checkScript(div_float_future, ())
 
         if PY2:
             with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
@@ -5644,8 +5647,8 @@ a")
             with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
                 torch.jit.script(div_float_nofuture)
         else:
-            self.checkScript(div_int_nofuture, (), optimize=True)
-            self.checkScript(div_float_nofuture, (), optimize=True)
+            self.checkScript(div_int_nofuture, ())
+            self.checkScript(div_float_nofuture, ())
 
     def test_floor_div(self):
         @torch.jit.script
@@ -10646,7 +10649,8 @@ a")
 
     def test_string_frontend_elif(self):
         code = '''
-            def func(niter : int):
+            def func(niter):
+                # type: (int)
                 rv = 0
                 for i in range(niter):
                     if i % 3 == 0 and i % 5 == 0:
@@ -16298,8 +16302,10 @@ class TestClassType(JitTestCase):
         def _xor():  # noqa: E306
             return BinOps(4) ^ 3
 
-        for func in [add, sub, mul, pow, truediv, ne, eq, lt, gt, le, ge, _and,
-                     _or, _xor]:
+        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor]
+        if not PY2:
+            ops += truediv
+        for func in ops:
             self.checkScript(func, ())
 
         with self.assertRaisesRegex(RuntimeError, "__add__ method"):
