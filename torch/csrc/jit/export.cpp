@@ -547,7 +547,7 @@ class ScriptModuleSerializer final {
   IValue moduleGetState(const script::Module& module);
   bool moduleHasValidGetSetState(const script::Module& module);
 
-  void convertClass(const ClassTypePtr& type, torch::ModelDef* model_def);
+  void convertClass(const c10::NamedTypePtr& type, torch::ModelDef* model_def);
 
   std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
@@ -560,10 +560,10 @@ class ScriptModuleSerializer final {
   std::vector<IValue> pickled_ivalues_;
 
   // all classes used by this module hierarchy
-  std::vector<ClassTypePtr> class_table_;
-  OrderedDict<ClassTypePtr, std::string> converted_classes_;
-  std::unordered_map<ClassTypePtr, std::vector<ClassTypePtr>> class_to_deps_;
-
+  std::vector<c10::NamedTypePtr> class_table_;
+  OrderedDict<c10::NamedTypePtr, std::string> converted_classes_;
+  std::unordered_map<c10::NamedTypePtr, std::vector<c10::NamedTypePtr>>
+      class_to_deps_;
 };
 
 // ScriptModuleSerializer's methods
@@ -630,7 +630,7 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
   // to maintain dependency order.
   std::unordered_set<std::string> written_files;
   for (const auto& item : converted_classes_) {
-    const ClassTypePtr& class_type = item.key();
+    const c10::NamedTypePtr& class_type = item.key();
     const std::string filename =
         ImportExportHelpers::qualifierToPath(class_type->qualifier());
     if (written_files.count(filename)) {
@@ -651,13 +651,13 @@ void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
 // python print the class and add to the converted_classes_. Recursively
 // python print all classes that this class depends on.
 void ScriptModuleSerializer::convertClass(
-    const ClassTypePtr& class_type,
+    const c10::NamedTypePtr& class_type,
     torch::ModelDef* model_def) {
   if (converted_classes_.contains(class_type)) {
     return;
   }
 
-  std::vector<ClassTypePtr> class_deps;
+  std::vector<c10::NamedTypePtr> class_deps;
   std::ostringstream class_stream;
   PythonPrint(
       class_stream,

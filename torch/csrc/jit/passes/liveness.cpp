@@ -22,7 +22,8 @@ struct LivenessAnalyzer {
     return result;
   }
 
-  void dump(const std::map<Node*, std::vector<Value*>>& liveness_sets) {
+  void dump(
+      const std::unordered_map<Node*, std::vector<Value*>>& liveness_sets) {
     std::cout << "Liveness info:\n";
     for (auto e : liveness_sets) {
       if (e.first->outputs().size() > 0) {
