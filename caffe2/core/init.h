@@ -115,13 +115,13 @@ class CAFFE2_API InitRegisterer {
   namespace {                                                              \
   ::caffe2::InitRegisterer                                                 \
       g_caffe2_initregisterer_##name(function, false, description, #name); \
-  }  // namespace
+  } // namespace
 
 #define REGISTER_CAFFE2_EARLY_INIT_FUNCTION(name, function, description)  \
   namespace {                                                             \
   ::caffe2::InitRegisterer                                                \
       g_caffe2_initregisterer_##name(function, true, description, #name); \
-  }  // namespace
+  } // namespace
 
 /**
  * @brief Determine whether GlobalInit has already been run
