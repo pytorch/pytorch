@@ -1136,8 +1136,9 @@ def create_generic(top_env, declarations):
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
 
-        top_env['registration_declarations'].append(
-            check_namedtensor_enabled(REGISTRATION_DECLARATION.substitute(option)))
+        if NAMEDTENSOR_ENABLED or not is_named_tensor_only:
+            top_env['registration_declarations'].append(
+                REGISTRATION_DECLARATION.substitute(env))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
