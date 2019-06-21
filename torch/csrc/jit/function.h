@@ -88,6 +88,7 @@ struct TORCH_API Function : public std::enable_shared_from_this<Function> {
   }
 
   GraphExecutor& get_executor() {
+    ensure_defined();
     std::call_once(executor_init_, [&] {
       check_single_output();
       executor_ = GraphExecutor(graph(), optimize_);
