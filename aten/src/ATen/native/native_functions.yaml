@@ -3928,6 +3928,7 @@
   dispatch:
     CPU: legacy::cpu::_th_min
     CUDA: legacy::cuda::_th_min
+    QuantizedCPU: min_quant
 
 - func: max(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3945,6 +3946,7 @@
   dispatch:
     CPU: legacy::cpu::_th_max
     CUDA: legacy::cuda::_th_max
+    QuantizedCPU: max_quant
 
 - func: median(Tensor self) -> Tensor
   variants: method, function
@@ -3962,6 +3964,7 @@
   dispatch:
     CPU: legacy::cpu::_th_sort
     CUDA: legacy::cuda::_th_sort
+    QuantizedCPU: sort_quant
 
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
   variants: method, function
