@@ -30,6 +30,18 @@
 namespace torch {
 namespace jit {
 
+void packGradient(const Gradient& gradient, Node* dnode);
+bool needsGradient(const std::shared_ptr<const Graph>& graph);
+void runOptimization(std::shared_ptr<Graph>& graph);
+void runNondiffOptimization(std::shared_ptr<Graph>& graph);
+void debugSetAutodiffSubgraphInlining(bool state);
+bool getAutodiffSubgraphInlining();
+
+// Tunable parameters for deciding when to create/keep subgraphs of
+// differentiable code
+const size_t autodiffSubgraphNodeThreshold = 2;
+const size_t autodiffSubgraphInlineThreshold = 5;
+
 // a Graph can be created via tracing, or via a language-based frontend
 // GraphExecutor runs it. It can run the same graph on many different sizes
 // and different requires_grad states, and handles specializations for each

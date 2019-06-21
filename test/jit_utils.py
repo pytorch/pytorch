@@ -281,8 +281,9 @@ class JitTestCase(TestCase):
                     frames_up=1,
                     check_expected=False):
         if isinstance(script, str):
-            cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
-            ge = getattr(cu, name)
+            with enable_profiling_mode():
+                cu = torch.jit.CompilationUnit(script, optimize, _frames_up=frames_up)
+                ge = getattr(cu, name)
         else:
             if capture_output:
                 with self.capture_stdout() as captured:
@@ -301,7 +302,8 @@ class JitTestCase(TestCase):
                 frames_up=2,
                 check_expected=check_expected)
             # Continue checking the Python frontend
-            ge = torch.jit.script(script, optimize, _frames_up=1)
+            with enable_profiling_mode():
+                ge = torch.jit.script(script, optimize, _frames_up=1)
 
         if capture_output:
             with self.capture_stdout() as captured:
