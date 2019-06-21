@@ -1064,7 +1064,7 @@ def create_generic(top_env, declarations):
                 definition=TENSOR_METHOD_DEFINITION.substitute(option))
 
         def gen_namespace_function(option, dispatch_tensor, dispatch_options):
-            # type: (Any, str, str) -> FunctionCode
+            # type: (Any, str, Any) -> FunctionCode
             if dispatch_tensor:
                 option['inferred_backend'] = 'at::detail::infer_backend({})'.format(dispatch_tensor)
                 option['inferred_is_variable'] = 'at::detail::infer_is_variable({})'.format(dispatch_tensor)
@@ -1095,7 +1095,7 @@ def create_generic(top_env, declarations):
             return code
 
         def add_namedtensor_enabled_macro(code):
-            # type: FunctionCode -> FunctionCode
+            # type: (FunctionCode) -> FunctionCode
             return FunctionCode(
                 definition=NAMEDTENSOR_CHECK.substitute(code=code.definition),
                 declaration=NAMEDTENSOR_CHECK.substitute(code=code.declaration))
@@ -1138,7 +1138,7 @@ def create_generic(top_env, declarations):
 
         if NAMEDTENSOR_ENABLED or not is_named_tensor_only:
             top_env['registration_declarations'].append(
-                REGISTRATION_DECLARATION.substitute(env))
+                REGISTRATION_DECLARATION.substitute(option))
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
