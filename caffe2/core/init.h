@@ -15,8 +15,7 @@ class CAFFE2_API Caffe2InitializeRegistry {
   // multiple shared libraries loaded with RTLD_LOCAL
   static Caffe2InitializeRegistry* Registry();
 
-  void
-  Register(
+  void Register(
       InitFunction function,
       bool run_early,
       const char* description,
@@ -102,25 +101,26 @@ class CAFFE2_API Caffe2InitializeRegistry {
 
 class CAFFE2_API InitRegisterer {
  public:
-  InitRegisterer(internal::Caffe2InitializeRegistry::InitFunction function,
-                 bool run_early,
-                 const char* description,
-                 const char* name = nullptr) {
-    internal::Caffe2InitializeRegistry::Registry()
-        ->Register(function, run_early, description, name);
+  InitRegisterer(
+      internal::Caffe2InitializeRegistry::InitFunction function,
+      bool run_early,
+      const char* description,
+      const char* name = nullptr) {
+    internal::Caffe2InitializeRegistry::Registry()->Register(
+        function, run_early, description, name);
   }
 };
 
-#define REGISTER_CAFFE2_INIT_FUNCTION(name, function, description)             \
-  namespace {                                                                  \
-  ::caffe2::InitRegisterer g_caffe2_initregisterer_##name(                     \
-      function, false, description, #name);                                     \
+#define REGISTER_CAFFE2_INIT_FUNCTION(name, function, description)         \
+  namespace {                                                              \
+  ::caffe2::InitRegisterer                                                 \
+      g_caffe2_initregisterer_##name(function, false, description, #name); \
   }  // namespace
 
-#define REGISTER_CAFFE2_EARLY_INIT_FUNCTION(name, function, description)       \
-  namespace {                                                                  \
-  ::caffe2::InitRegisterer g_caffe2_initregisterer_##name(                     \
-      function, true, description, #name);                                      \
+#define REGISTER_CAFFE2_EARLY_INIT_FUNCTION(name, function, description)  \
+  namespace {                                                             \
+  ::caffe2::InitRegisterer                                                \
+      g_caffe2_initregisterer_##name(function, true, description, #name); \
   }  // namespace
 
 /**
