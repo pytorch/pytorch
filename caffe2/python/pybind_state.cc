@@ -249,7 +249,7 @@ bool feedBlob(
 #ifdef FBCODE_CAFFE2
   if (auto module = torch::jit::script::as_module(arg)) {
     *blob->GetMutable<torch::jit::script::Module>() =
-        module;
+        *module;
     return true;
   }
 #endif
