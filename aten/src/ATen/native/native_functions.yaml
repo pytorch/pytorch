@@ -2674,12 +2674,12 @@
   dispatch:
     CPU: dequantize_linear_cpu
 
-- func: q_scale(Tensor self) -> Scalar
+- func: q_scale(Tensor self) -> float
   variants: function, method
   dispatch:
     QuantizedCPU: q_scale_quant
 
-- func: q_zero_point(Tensor self) -> Scalar
+- func: q_zero_point(Tensor self) -> int
   variants: function, method
   dispatch:
     QuantizedCPU: q_zero_point_quant

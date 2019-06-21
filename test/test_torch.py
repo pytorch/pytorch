@@ -3055,8 +3055,8 @@ class _TestTorchMixin(object):
     def test_qtensor_per_channel_affine(self):
         r = np.random.rand(3, 2) * 2 - 4
         r = torch.from_numpy(r).float()
-        scales = torch.tensor([2.0, 3.0]).float()
-        zero_points = torch.tensor([5, 10]).int()
+        scales = torch.tensor([2.0, 3.0]).double()
+        zero_points = torch.tensor([5, 10]).long()
         axis = [1]
 
         def quantize_c(data, scales, zero_points):
