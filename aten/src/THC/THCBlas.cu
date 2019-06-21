@@ -238,6 +238,10 @@ void adjustLdLevel3(char transa, char transb, int64_t m, int64_t n, int64_t k, i
 
 }
 
+// Check https://gist.github.com/umanwizard/2b2e2fc12485ef6dc1cdfb1421276dd9
+// to repro the bug. We don't know the exact conditions that trigger it,
+// but using Sgemm or Hgemm on Maxwell or Pascal seems to be a
+// necessary condition.
 static void checkCuda90Bug(int i_m, int i_n, int i_k)
 {
 #if CUDA_VERSION < 9200 && CUDA_VERSION >= 9000
@@ -304,6 +308,7 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
       int i_lda = (int)lda;
       int i_ldb = (int)ldb;
       int i_ldc = (int)ldc;
+      checkCuda90Bug(i_m, i_n, i_k);
 
       cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
       cublasSetStream(handle, THCState_getCurrentStream(state));
