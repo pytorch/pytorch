@@ -85,10 +85,6 @@ std::string get_parallel_info() {
   ss << "Experimental: single thread pool" << std::endl;
   #endif
 
-  #if USE_EIGEN_THREADPOOL
-  ss << "Using Eigen thread pool" << std::endl;
-  #endif
-
   return ss.str();
 }
 
