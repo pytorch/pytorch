@@ -49,8 +49,6 @@ using c10::optional;
 struct TORCH_API VariableType final : public at::TypeDefault {
   VariableType(Context* context, at::TypeExtendedInterface* baseType);
   at::Backend backend() const override;
-  at::Allocator* allocator() const override;
-  at::Device getDeviceFromPtr(void * data) const override;
   const char * toString() const override;
   at::TypeID ID() const override;
   at::Type & toBackend(at::Backend b) const override;

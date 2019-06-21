@@ -14,8 +14,6 @@ namespace at {
 struct UndefinedType final : public TypeDefault {
   explicit UndefinedType();
   virtual Backend backend() const override;
-  virtual Allocator* allocator() const override;
-  virtual Device getDeviceFromPtr(void* data) const override;
   virtual const char * toString() const override;
   virtual Type & toBackend(Backend b) const override;
   virtual Type & toScalarType(ScalarType s) const override;
