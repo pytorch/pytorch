@@ -40,7 +40,7 @@ List<T> List<T>::copy() const {
 
 namespace detail {
   template<class T>
-  T list_element_to(const T& element) {
+  T list_element_to(T element) {
     return element;
   }
   template<class T>
@@ -117,7 +117,10 @@ template<class T>
 typename List<T>::value_type List<T>::extract(size_type pos) const {
   auto& elem = impl_->list.at(pos);
   auto result = detail::list_element_to<T>(std::move(elem));
-  elem = detail::list_element_from<T, StorageT>(T{});
+  if (std::is_same<IValue, StorageT>::value) {
+    // Reset the list element to a T() instead of None to keep it correctly typed
+    elem = detail::list_element_from<T, StorageT>(T{});
+  }
   return result;
 }
 
