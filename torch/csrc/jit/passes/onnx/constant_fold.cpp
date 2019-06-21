@@ -87,7 +87,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     }
     updated_val = inputTensorValues[0];
     for (size_t i = 0; i < axesAttr.size(); ++i) {
-      // ONNX and numpy slice accepts negative starts and ends values.
+      // ONNX slice accepts negative starts and ends values.
       int64_t axis = axesAttr[i], start = startsAttr[i], end = endsAttr[i];
       if (start < 0) {
         start = updated_val.sizes()[axis] + start;

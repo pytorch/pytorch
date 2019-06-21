@@ -48,7 +48,7 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
-    def test_constant_fold_narrow(self):
+    def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
@@ -67,7 +67,7 @@ class TestUtilityFuns(TestCase):
         assert len(list(graph.nodes())) == 1
 
     def test_constant_fold_slice_index_exceeds_dim(self):
-        class SliceModuleIndexExceedsDim(torch.nn.Module):
+        class SliceIndexExceedsDimModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
                 b = a[1:10]         # index exceeds dimension
@@ -75,7 +75,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         x = torch.ones(1, 3)
-        graph, _, __ = utils._model_to_graph(SliceModuleIndexExceedsDim(), (x, ),
+        graph, _, __ = utils._model_to_graph(SliceIndexExceedsDimModule(), (x, ),
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
 
@@ -86,7 +86,7 @@ class TestUtilityFuns(TestCase):
         assert len(list(graph.nodes())) == 1
 
     def test_constant_fold_slice_negative_index(self):
-        class SliceModuleNegativeIndex(torch.nn.Module):
+        class SliceNegativeIndexModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
                 b = a[0:-1]        # index relative to the end
@@ -94,7 +94,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(9)
         x = torch.ones(1, 3)
-        graph, _, __ = utils._model_to_graph(SliceModuleNegativeIndex(), (x, ),
+        graph, _, __ = utils._model_to_graph(SliceNegativeIndexModule(), (x, ),
                                              do_constant_folding=True,
                                              _disable_torch_constant_prop=True)
         for node in graph.nodes():
