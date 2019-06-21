@@ -28,8 +28,23 @@ black_listed_operators = ["upsample_nearest2d", "upsample_bilinear2d"]
 for black_listed_op in black_listed_operators:
     vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
 
-
 # Add new operator here
+@parse_args('v', 'i', 'i')
+def sort(g, self, dim, decending, out=None):
+    if out is not None:
+        _unimplemented("Sort", "Out parameter is not supported for sort")
+
+    # TODO: add decending to ONNX TopK so ascending sort is supported
+    if not decending:
+        _unimplemented("Sort", "Cannot sort in ascending order")
+
+    shape_ = g.op("Shape", self)
+    axis = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
+    start = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64)) 
+    end = g.op("Constant", value_t=torch.tensor(dim + 1, dtype=torch.int64)) 
+    slice_ = sym_help._slice_op(g, shape_, axes=axis, starts=start, ends=end, steps=None, dynamic_slice=True)
+    return g.op("TopK", self, slice_, axis_i=dim, outputs=2)
+
 @parse_args('v', 'i', 'i', 'i', 'i')
 def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
