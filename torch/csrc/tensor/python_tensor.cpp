@@ -38,15 +38,12 @@ struct PyTensorType {
   int backend;
   int scalar_type;
 
-  TensorOptions options() {
-    return TensorOptions(backendToDeviceType(static_cast<Backend>(backend)))
-        .layout(layout_from_backend(static_cast<Backend>(backend)))
-        .dtype(static_cast<ScalarType>(scalar_type))
-        .is_variable(true);
-  }
-
   Backend get_backend() const {
     return static_cast<Backend>(backend);
+  }
+
+  TensorTypeId get_type_id() const {
+    return backendToTensorTypeId(static_cast<Backend>(backend));
   }
 
   ScalarType get_scalar_type() const {
@@ -69,7 +66,7 @@ static TypeError unavailable_type(const PyTensorType& type) {
 static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
   auto& tensor_type = *((PyTensorType*)type);
-  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(tensor_type.options(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(tensor_type.get_type_id(), tensor_type.get_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -83,7 +80,7 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
     // be nullptr if you had a tensor of some type, in which case you can
     // skip initializign aten_type(), but TestAutograd.test_type_conversions
     // seems to violate this property (for whatever reason.)
-    if (var.type_id() == backendToTensorTypeId(self->get_backend()) &&
+    if (var.type_id() == self->get_type_id() &&
         var.scalar_type() == static_cast<ScalarType>(self->scalar_type)) {
       Py_RETURN_TRUE;
     }
@@ -368,9 +365,13 @@ void py_set_default_dtype(PyObject* obj) {
   }
 }
 
-c10::TensorOptions get_default_tensor_options() {
+c10::TensorTypeId get_default_tensor_type_id() {
   AT_ASSERT(default_tensor_type);
-  return default_tensor_type->options();
+  return default_tensor_type->get_type_id();
+}
+
+ScalarType get_default_scalar_type() {
+  return typeMetaToScalarType(get_default_dtype());
 }
 
 }} // namespace torch::tensors
