@@ -216,8 +216,6 @@ class TestONNXOpset(TestCase):
 
         ops = [
             {"op_name" : "Constant"},
-            {"op_name" : "Constant"},
-            {"op_name" : "Reshape"},
             {"op_name" : "Gather", "attributes" : [{"name" : "axis", "i" : 1, "type" : 2}]}]
         ops = {9 : ops}
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9])
