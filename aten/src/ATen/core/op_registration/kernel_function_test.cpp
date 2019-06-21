@@ -11,7 +11,7 @@ using c10::KernelCache;
 using c10::Stack;
 using c10::guts::make_unique;
 using c10::intrusive_ptr;
-using c10::DictPtr;
+using c10::Dict;
 using c10::make_dict;
 using at::Tensor;
 using std::string;
@@ -167,7 +167,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorOutput_w
   EXPECT_EQ(TensorType2(), result[0].toTensor().type_id());
 }
 
-c10::ListPtr<Tensor> kernelWithTensorListOutput(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
+c10::List<Tensor> kernelWithTensorListOutput(const Tensor& input1, const Tensor& input2, const Tensor& input3) {
   return c10::make_list<Tensor>({input1, input2, input3});
 }
 
@@ -186,7 +186,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorListOutp
   EXPECT_EQ(TensorType1(), result[0].toTensorListRef()[2].type_id());
 }
 
-c10::ListPtr<int64_t> kernelWithIntListOutput(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
+c10::List<int64_t> kernelWithIntListOutput(const Tensor&, int64_t input1, int64_t input2, int64_t input3) {
   return c10::make_list<int64_t>({input1, input2, input3});
 }
 
@@ -205,11 +205,11 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntListOutput_
   EXPECT_EQ(6, result[0].toIntListRef()[2]);
 }
 
-std::tuple<Tensor, int64_t, c10::ListPtr<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>> kernelWithMultipleOutputs(Tensor) {
-  DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
+std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>> kernelWithMultipleOutputs(Tensor) {
+  Dict<string, Tensor> dict = make_dict<string, Tensor>();
   dict.insert("first", dummyTensor(TensorType1()));
   dict.insert("second", dummyTensor(TensorType2()));
-  return std::tuple<Tensor, int64_t, c10::ListPtr<Tensor>, c10::optional<int64_t>, DictPtr<string, Tensor>>(
+  return std::tuple<Tensor, int64_t, c10::List<Tensor>, c10::optional<int64_t>, Dict<string, Tensor>>(
     dummyTensor(TensorType2()),
     5,
     c10::make_list<Tensor>({dummyTensor(TensorType1()), dummyTensor(TensorType2())}),
@@ -362,7 +362,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntInput_withO
 
 int64_t captured_input_list_size = 0;
 
-void kernelWithIntListInputWithoutOutput(Tensor, const c10::ListPtr<int64_t>& input1) {
+void kernelWithIntListInputWithoutOutput(Tensor, const c10::List<int64_t>& input1) {
   captured_input_list_size = input1.size();
 }
 
@@ -379,7 +379,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntListInput_w
   EXPECT_EQ(3, captured_input_list_size);
 }
 
-int64_t kernelWithIntListInputWithOutput(Tensor, const c10::ListPtr<int64_t>& input1) {
+int64_t kernelWithIntListInputWithOutput(Tensor, const c10::List<int64_t>& input1) {
   return input1.size();
 }
 
@@ -395,7 +395,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithIntListInput_w
   EXPECT_EQ(3, outputs[0].toInt());
 }
 
-void kernelWithTensorListInputWithoutOutput(const c10::ListPtr<Tensor>& input1) {
+void kernelWithTensorListInputWithoutOutput(const c10::List<Tensor>& input1) {
   captured_input_list_size = input1.size();
 }
 
@@ -412,7 +412,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorListInpu
   EXPECT_EQ(2, captured_input_list_size);
 }
 
-int64_t kernelWithTensorListInputWithOutput(const c10::ListPtr<Tensor>& input1) {
+int64_t kernelWithTensorListInputWithOutput(const c10::List<Tensor>& input1) {
   return input1.size();
 }
 
@@ -430,7 +430,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithTensorListInpu
 
 int captured_dict_size = 0;
 
-void kernelWithDictInputWithoutOutput(DictPtr<string, Tensor> input1) {
+void kernelWithDictInputWithoutOutput(Dict<string, Tensor> input1) {
   captured_dict_size = input1.size();
 }
 
@@ -442,7 +442,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictInput_with
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
-  DictPtr<string, Tensor> dict = make_dict<string, Tensor>();
+  Dict<string, Tensor> dict = make_dict<string, Tensor>();
   dict.insert("key1", dummyTensor(TensorType1()));
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
@@ -450,7 +450,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictInput_with
   EXPECT_EQ(2, captured_dict_size);
 }
 
-string kernelWithDictInputWithOutput(DictPtr<string, string> input1) {
+string kernelWithDictInputWithOutput(Dict<string, string> input1) {
   return input1.at("key2");
 }
 
@@ -461,7 +461,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictInput_with
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  DictPtr<string, string> dict = make_dict<string, string>();
+  Dict<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -469,7 +469,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictInput_with
   EXPECT_EQ("value2", outputs[0].toString()->string());
 }
 
-DictPtr<string, string> kernelWithDictOutput(DictPtr<string, string> input) {
+Dict<string, string> kernelWithDictOutput(Dict<string, string> input) {
   return input;
 }
 
@@ -480,7 +480,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithDictOutput_whe
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  DictPtr<string, string> dict = make_dict<string, string>();
+  Dict<string, string> dict = make_dict<string, string>();
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -630,7 +630,7 @@ TEST(OperatorRegistrationTest_FunctionBasedKernel, givenKernelWithOptionalInputs
   EXPECT_TRUE(outputs[2].isNone());
 }
 
-std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, const c10::ListPtr<Tensor>& arg3) {
+std::tuple<int64_t, Tensor> kernelForSchemaInference(Tensor arg1, int64_t arg2, const c10::List<Tensor>& arg3) {
   return {};
 }
 
