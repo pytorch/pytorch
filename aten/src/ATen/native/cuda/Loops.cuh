@@ -127,7 +127,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity + 1);
 
-  detail::Array<char*, ntensors> data;
+  at::detail::Array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
     data[i] = (char*)iter.data_ptr(i);
   }
@@ -135,7 +135,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   int64_t numel = iter.numel();
   if (iter.is_trivial_1d()) {
     auto inner_strides = iter.get_inner_strides();
-    detail::Array<int, ntensors> strides;
+    at::detail::Array<int, ntensors> strides;
     for (int i = 0; i < ntensors; i++) {
       strides[i] = inner_strides[i];
     }
