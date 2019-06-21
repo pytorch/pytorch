@@ -1038,7 +1038,7 @@ void addGlobalMethods(py::module& m) {
   // and therefore we need to ignore dyndep failures (because the the module
   // may not have a ROCm equivalent yet e.g. nccl)
   m.attr("use_rocm") = py::bool_(
-#if __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_HCC__
       true
 #else // __HIP_PLATFORM_HCC__
       false

@@ -106,6 +106,9 @@ struct TORCH_API Method {
   // first-class function in class_compilation_unit()
   std::shared_ptr<Function> function_;
 };
+static void clearMethods(c10::ivalue::Object* self) {
+  self->type()->compilation_unit()->drop_all_functions();
+}
 
 struct TORCH_API Module {
   Module(std::string class_name)
@@ -432,7 +435,8 @@ struct TORCH_API Module {
             QualifiedName(std::move(class_name)),
             std::make_shared<CompilationUnit>(),
             /*is_module=*/true),
-        0);
+        0,
+        clearMethods);
   }
   // mutable be we lazily initialize in module_object.
   mutable ModulePtr module_value_;

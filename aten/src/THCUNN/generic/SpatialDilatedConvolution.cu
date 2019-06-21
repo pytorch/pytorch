@@ -180,7 +180,7 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
       outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
-      THCTensor_(data)(state, columns)
+      columns->data<scalar_t>()
     );
 
     // M,N,K are dims of matrix A and B
@@ -311,7 +311,7 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
       THCTensor_(data)(state, gradColumns),
       nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
-      THCTensor_(data)(state, gradInput_n)
+      gradInput_n->data<scalar_t>()
     );
   }
 
@@ -415,7 +415,7 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
         outputHeight, outputWidth,
         kH, kW, padH, padW, dH, dW,
         dilationH, dilationW,
-        THCTensor_(data)(state, columns)
+        columns->data<scalar_t>()
       );
 
       // M,N,K are dims of matrix A and B
