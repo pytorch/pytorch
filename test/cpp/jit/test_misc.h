@@ -1003,28 +1003,11 @@ void testInsertBailOuts() {
   ASSERT_EQ(num_guards, num_bailouts);
   std::vector<Node*> bailouts(num_bailouts);
   std::copy_if(nodes.begin(), nodes.end(), bailouts.begin(), is_bailout);
-  auto last_graph = bailouts[num_bailouts - 1]->g(attr::Subgraph);
-  ASSERT_EQ(last_graph->inputs().size(), 1);
-  ASSERT_EQ(last_graph->outputs().size(), 1);
-  auto lb_nodes = last_graph->nodes();
-  auto is_add = [](Node* n) { return n->kind() == aten::add; };
-  auto is_loop = [](Node* n) { return n->kind() == prim::Loop; };
-  auto lb_graph_num_adds =
-      std::count_if(lb_nodes.begin(), lb_nodes.end(), is_add);
-  auto lb_graph_num_loops =
-      std::count_if(lb_nodes.begin(), lb_nodes.end(), is_loop);
-  ASSERT_EQ(lb_graph_num_adds, 1);
-  ASSERT_EQ(lb_graph_num_loops, 0);
-  auto first_graph = bailouts[0]->g(attr::Subgraph);
-  auto fst_nodes = first_graph->nodes();
-  ASSERT_EQ(first_graph->inputs().size(), 2);
-  ASSERT_EQ(first_graph->outputs().size(), 1);
-  auto fst_graph_num_adds =
-      std::count_if(fst_nodes.begin(), fst_nodes.end(), is_add);
-  auto fst_graph_num_loops =
-      std::count_if(fst_nodes.begin(), fst_nodes.end(), is_loop);
-  ASSERT_EQ(fst_graph_num_loops, 1);
-  ASSERT_EQ(fst_graph_num_adds, 5);
+
+  for (auto blo : bailouts) {
+    ASSERT_EQ(blo->inputs().at(0)->node()->kind(), prim::Constant);
+    ASSERT_TRUE(blo->inputs().at(0)->type()->cast<FunctionType>());
+  }
 }
 
 void testProfiler() {

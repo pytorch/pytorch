@@ -4285,7 +4285,7 @@ a")
             a = torch.ones(3)
             # check prim::BailOuts are inserted
             bailout_graph_str = str(def_in_one_branch.graph_for(a, True))
-            FileCheck().check_count("prim::BailOut", 6).run(bailout_graph_str)
+            FileCheck().check_count("prim::BailOut", 3).run(bailout_graph_str)
             # this triggers all 3 bailouts
             self.assertEqual(def_in_one_branch(a, False), 6.0)
             # this triggers 2 bailouts
