@@ -96,7 +96,8 @@ struct TORCH_API SugaredValue
 
   // return length of this thing, if not then it can't be iterated.
   virtual Value* len(const SourceRange& loc, Function& m) {
-    throw ErrorReport(loc) << "cannot get the length of value " << kind();
+    throw ErrorReport(loc) << "'" << kind() << "'"
+                           << " object is not iterable";
   }
   // expression for ith elemement for iterable value
   virtual Value* getelem(const SourceRange&loc, Function& m, Value* i) {
@@ -451,7 +452,7 @@ struct TORCH_API RangeValue : SugaredValue {
     Value* step_;
     // a flag to determine if it's a simple range() call with only end_ from arguments
     // If true, we will not insert length calculation and index derivation
-    bool is_simple_;
+    bool has_only_end_;
 };
 
 // matched against for special handling of iterables like zip(), enumerate()
