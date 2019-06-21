@@ -3,7 +3,7 @@
 #include <THCUNN/common.h>
 #include <THC/THCReduceApplyUtils.cuh>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
 #include <thrust/functional.h>
