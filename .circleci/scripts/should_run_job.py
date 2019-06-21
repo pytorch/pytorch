@@ -49,7 +49,8 @@ default_set = [
 
     # Other checks
     'pytorch-short-perf-test-gpu',
-    'pytorch-doc-push',
+    'pytorch-python-doc-push',
+    'pytorch-cpp-doc-push',
 ]
 
 # Takes in commit message to analyze via stdin

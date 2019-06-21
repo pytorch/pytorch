@@ -507,7 +507,7 @@ at::Tensor _convolution_nogroup(
 
   if (params.transposed) {
     if (dim == 4) {
-      return at::thnn_conv_transpose2d(
+      return at::conv_transpose2d(
           input, weight, kernel_size, bias,
           stride, padding, output_padding, dilation);
     } else if (dim == 5) {
