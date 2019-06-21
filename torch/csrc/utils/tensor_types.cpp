@@ -34,12 +34,6 @@ std::string type_to_string(const at::DeprecatedTypeProperties& type) {
   return ss.str();
 }
 
-std::string options_to_string(const TensorOptions& options) {
-  std::ostringstream ss;
-  ss << backend_to_string(options.backend()) << "." << toString(typeMetaToScalarType(options.dtype())) << "Tensor";
-  return ss.str();
-}
-
 at::DeprecatedTypeProperties* type_from_string(const std::string& str) {
   static std::string cuda_prefix("torch.cuda.");
   static std::once_flag cpu_once;
