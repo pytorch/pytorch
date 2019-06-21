@@ -159,7 +159,7 @@ __device__ __forceinline__ static int nearest_neighbor_compute_source_index(
     int dst_index,
     int input_size) {
   const int src_index =
-      min<int>(static_cast<int>(floorf(dst_index * scale)), input_size - 1);
+      min(static_cast<int>(floorf(dst_index * scale)), input_size - 1);
   return src_index;
 }
 
@@ -173,8 +173,8 @@ __device__ __forceinline__ static scalar_t upsample_get_value_bounded(
     int width,
     int y,
     int x) {
-  int access_y = max<int>(min<int>(y, height - 1), 0);
-  int access_x = max<int>(min<int>(x, width - 1), 0);
+  int access_y = max(min(y, height - 1), 0);
+  int access_x = max(min(x, width - 1), 0);
   return data[batch][channel][access_y][access_x];
 }
 
@@ -189,8 +189,8 @@ __device__ __forceinline__ static void upsample_increment_value_bounded(
     int y,
     int x,
     accscalar_t value) {
-  int access_y = max<int>(min<int>(y, height - 1), 0);
-  int access_x = max<int>(min<int>(x, width - 1), 0);
+  int access_y = max(min(y, height - 1), 0);
+  int access_x = max(min(x, width - 1), 0);
   /* TODO: result here is trucated to scalar_t,
      check: https://github.com/pytorch/pytorch/pull/19630#discussion_r281426912
    */

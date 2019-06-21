@@ -2397,7 +2397,63 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @skip_if_not_multigpu
     @skip_if_not_nccl
-    def test_accumulate_gradients(self):
+    def test_accumulate_gradients_no_sync(self):
+        # This is the recommended way to implement accumulate grads
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        global_batch_size = self.world_size
+        local_batch_size = len(devices)
+
+        model, ddp_model, input, target = \
+            self._prepare_single_device_module(
+                process_group, devices, devices, global_batch_size)
+
+        def step_model(model, input, target):
+            model.train()
+            output = model(input)
+            loss = F.mse_loss(output, target.to(output.device))
+            loss.backward()
+
+        # ensure accumulate grads works with no_grad
+        with torch.no_grad():
+            with ddp_model.no_sync():
+                ddp_model.train()
+                ddp_model(input)
+
+        # check two model parameters over 2 iterations
+        for iteration in range(2):
+            # single cpu/gpu training
+            step_model(model, input, target)
+
+            ddp_input = input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size]
+            ddp_target = target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size]
+
+            if iteration % 2 == 0:
+                # accumulate grads locally when iteration == 0
+                with ddp_model.no_sync():
+                    step_model(ddp_model, ddp_input, ddp_target)
+            else:
+                # sync grads when iteration == 1
+                step_model(ddp_model, ddp_input, ddp_target)
+
+            for i, j in zip(model.parameters(), ddp_model.parameters()):
+                if iteration % 2 == 0:
+                    self.assertNotEqual(i.grad, j.grad)
+                else:
+                    self.assertEqual(i.grad, j.grad)
+
+            # Shuffle the input so that DDP input is different
+            torch.manual_seed(1337 + iteration)
+            input = input[torch.randperm(global_batch_size)]
+
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_accumulate_gradients_module(self):
+        # This is NOT the recommended way to implement accumulating grads, but
+        # we would like to make sure DDP does not mess up with the underlying
+        # module.
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         store = c10d.FileStore(self.file.name, self.world_size)

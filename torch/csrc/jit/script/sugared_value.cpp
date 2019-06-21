@@ -85,12 +85,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     throw ErrorReport(loc) << "Cannot call methods on numbers";
   }
   if (auto tuple_type = value_->type()->cast<TupleType>()) {
-    if (!tuple_type->hasNames()) {
+    if (!tuple_type->schema()) {
       throw ErrorReport(loc) << "Getting attributes of tuples is not supported";
     }
-    auto names = tuple_type->names();
-    for (size_t i = 0; i < names.size(); i++) {
-      if (names[i] == field) {
+    auto attrs = tuple_type->schema()->arguments();
+    for (size_t i = 0; i < attrs.size(); i++) {
+      if (attrs[i].name() == field) {
         auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
         auto out_type = tuple_type->elements().at(i);
         auto r =
@@ -110,7 +110,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
     if (!classType->hasAttribute(field)) {
       throw ErrorReport(loc)
-          << "Tried to access to nonexistent attribute " << field
+          << "Tried to access nonexistent attribute " << field
           << ". Did you forget to initialize it in __init__()?";
     }
     auto& g = *m.graph();
@@ -148,6 +148,21 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
                          << " cannot be used as a tuple";
 }
 
+static bool isRecursive(const TypePtr& classType, const TypePtr& attrType) {
+  if (attrType->isSubtypeOf(classType)) {
+    return true;
+  }
+
+  // Recursively check contained types. We need to do this because a user may do
+  // A -> B -> A.
+  for (const auto& type : attrType->containedTypes()) {
+    if (isRecursive(classType, type)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void SimpleValue::setAttr(
     const SourceRange& loc,
     Function& m,
@@ -174,6 +189,14 @@ void SimpleValue::setAttr(
         m.graph()->inputs().at(0)->type() == classType;
 
     if (isInitializing) {
+      if (isRecursive(classType, newValue->type())) {
+        throw ErrorReport(loc)
+            << "Assignment to attribute '" << field
+            << "' cannot be of a type that contains class "
+            << "'" << classType->python_str() << "'.\n"
+            << "Classes that recursively contain instances of themselves"
+            << " are not yet supported";
+      }
       classType->addAttribute(field, newValue->type());
       expectedType = newValue->type();
 
@@ -248,6 +271,10 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
+  if (!type_->getMethod("__init__")) {
+    throw ErrorReport(loc)
+        << "Class " << type_->basename() << " does not have an __init__ function defined.";
+  }
 
   // Call the init function
   MethodValue(self, "__init__").call(loc, m, inputs, attributes, n_binders);
@@ -271,20 +298,17 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  auto nargs = type_->containedTypes().size();
-  if (inputs.size() != nargs) {
-    throw ErrorReport(loc) << "Constructor expected " << nargs << "arguments "
-                           << "but got " << inputs.size();
-  }
-
   auto& g = *m.graph();
 
   auto schema = type_->schema();
   TORCH_INTERNAL_ASSERT(schema);
+  auto qualname = type_->qualified_name_obj();
   auto matched_schema = matchSchema(*schema, loc, g, inputs, attributes);
 
   auto self = g.insertNode(g.createTuple(
-                                matched_schema.inputs, type_->names(), type_->unqualName())
+                                matched_schema.inputs,
+                                std::move(qualname),
+                                std::move(schema))
                                ->setSourceRange(loc))
                   ->output();
   self->setType(type_);

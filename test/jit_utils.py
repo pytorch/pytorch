@@ -53,12 +53,6 @@ class JitTestCase(TestCase):
         self.clearHooks()
         torch._C._jit_clear_class_registry()
 
-    @contextmanager
-    def disableEmitHook(self):
-        self.clearHooks()
-        yield None
-        self.setHooks()
-
     def _isHookExceptionOk(self, e):
         se = str(e)
         allowed = ("Could not export Python function",
@@ -73,7 +67,7 @@ class JitTestCase(TestCase):
         if func.name == "<lambda>" or "aten::" in func.name or not _inline_everything:
             return
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with self.disableEmitHook():
+        with torch.jit._disable_emit_hooks():
             try:
                 src, constants = _jit_python_print(func)
                 cu = torch.jit.CompilationUnit()._import(src, constants)
@@ -98,7 +92,7 @@ class JitTestCase(TestCase):
             return c
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with self.disableEmitHook():
+        with torch.jit._disable_emit_hooks():
             try:
                 if len(module.code) == 0:
                     # short-circuit if this is an empty module
@@ -256,6 +250,26 @@ class JitTestCase(TestCase):
         if set_graph:
             trace.set_graph(graph)
         return graph
+
+    def checkScriptRaisesRegex(self, script, inputs, exception, regex,
+                               optimize=True, outputs=None, capture_output=False):
+        """
+        Checks that a given function will throw the correct exception,
+        when executed with normal python, the string frontend, and the AST frontend
+        """
+        # normal python
+        with self.assertRaisesRegex(exception, regex):
+            script(*inputs)
+        # string frontend
+        with self.assertRaisesRegex(exception, regex):
+            source = textwrap.dedent(inspect.getsource(script))
+            cu = torch.jit.CompilationUnit(source, optimize)
+            ge = getattr(cu, script.__name__)
+            ge(*inputs)
+        # python AST frontend
+        with self.assertRaisesRegex(exception, regex):
+            ge = torch.jit.script(script, optimize)
+            ge(*inputs)
 
     def checkScript(self,
                     script,
