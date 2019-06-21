@@ -269,8 +269,8 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
       val_type->isSubtypeOf(TensorType::get())) {
     return g.insert(aten::len, {val}, {}, loc);
   } else {
-    throw ErrorReport(loc)
-      << "cannot get length of the value type " << val_type->python_str();
+    throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
+                           << " object is not iterable";
   }
 }
 
@@ -301,42 +301,33 @@ RangeValue::RangeValue(const SourceRange& loc, Function& m, std::vector<Value*> 
       start_ = g.insertConstant(0, nullptr, loc);
       step_ = g.insertConstant(1, nullptr, loc);
       // range() call only contains end, easier to calculate len() and getitem()
-      is_simple_ = true;
-    } else if (inputs.size() <= 3) {
-      start_ = inputs[0];
-      end_ = inputs[1];
-      if (inputs.size() == 3) {
-        step_ = inputs[2];
-        // error handling when step_val = 0 during runtime
-        Value* cond_val = g.insert(aten::eq, {step_, g.insertConstant(0, nullptr, loc)}, {}, loc);
-        Node* if_node = g.insertNode(g.create(prim::If, 0)->setSourceRange(loc));
-        if_node->addInput(cond_val);
-        auto true_block = if_node->addBlock();
-        if_node->addBlock();
-        WithInsertPoint guard(true_block);
-        g.insert(prim::RaiseException,
-            {std::string("range() arg 3 must not be zero")}, {}, loc);
-      } else {
-        step_ = g.insertConstant(1, nullptr, loc);
-      }
-      is_simple_ = false;
+      has_only_end_ = true;
+  } else if (inputs.size() <= 3) {
+    start_ = inputs[0];
+    end_ = inputs[1];
+    if (inputs.size() == 3) {
+      step_ = inputs[2];
     } else {
-      throw ErrorReport(loc)
-          << "range expected at most 3 arguments, got " << inputs.size();
+      step_ = g.insertConstant(1, nullptr, loc);
     }
+    has_only_end_ = false;
+  } else {
+    throw ErrorReport(loc) << "range expected at most 3 arguments, got "
+                           << inputs.size();
+  }
 }
 
 Value* RangeValue::len(const SourceRange& loc, Function& m) {
-  if (is_simple_) {
+  if (has_only_end_) {
     return end_;
-  } else{
+  } else {
     Graph& g = *m.graph();
     return g.insert(aten::__range_length, {start_, end_, step_}, {}, loc);
   }
 }
 
 Value* RangeValue::getelem(const SourceRange&loc, Function& m, Value* i)  {
-  if (is_simple_) {
+  if (has_only_end_) {
     return i;
   } else {
     auto& g = *m.graph();
@@ -372,12 +363,8 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
   for (const SugaredValuePtr& base_iter: base_iters) {
     lengths.emplace_back(base_iter->len(loc, m));
   }
-  Node* list_node = g.insertNode(g.create(prim::ListConstruct, 1)->setSourceRange(loc));
-  Value* list_lengths = list_node->output()->setType(ListType::ofInts());
-  for(auto length: lengths) {
-    list_node->addInput(length);
-  }
-  return g.insert(prim::min, {list_lengths}, {}, loc);
+  Node* list_node = g.insertNode(g.createList(IntType::get(), lengths));
+  return g.insert(prim::min, {list_node->output()}, {}, loc);
 }
 
 Value* IterableTree::getelem(const SourceRange&loc, Function& m, Value* i)  {

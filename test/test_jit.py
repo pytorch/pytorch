@@ -4195,7 +4195,7 @@ a")
             a = torch.ones(3)
             # check prim::BailOuts are inserted
             bailout_graph_str = str(def_in_one_branch.graph_for(a, True))
-            FileCheck().check_count("prim::BailOut", 6).run(bailout_graph_str)
+            FileCheck().check_count("prim::BailOut", 3).run(bailout_graph_str)
             # this triggers all 3 bailouts
             self.assertEqual(def_in_one_branch(a, False), 6.0)
             # this triggers 2 bailouts
@@ -6941,7 +6941,7 @@ a")
                 for m in self.mods:
                     print(m)
                 return v
-        with self.assertRaisesRegex(RuntimeError, "annot get length of the value type int"):
+        with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
             M()
 
     def test_script_module_list_sequential_error(self):
@@ -9129,7 +9129,7 @@ a")
             for i in range(2, -11, 0):
                 x += i
             return x
-        with self.assertRaisesRegex(torch.jit.Error, "must not be zero"):
+        with self.assertRaisesRegex(RuntimeError, "must not be zero"):
             fn()
 
     def test_for_in_range_no_arg(self):
@@ -9285,7 +9285,7 @@ a")
             test_sizes(torch.tensor(1))
 
     def test_for_in_tensors_fail_scalar(self):
-        with self.assertRaisesRegex(RuntimeError, "cannot get length of the value type float"):
+        with self.assertRaisesRegex(RuntimeError, "'float' object is not iterable"):
             @torch.jit.script
             def test_sizes(x):
                 # type: (float) -> int
@@ -9341,7 +9341,7 @@ a")
 
     def test_sum_list_wrong_type(self):
 
-        with self.assertRaisesRegex(RuntimeError, "cannot get length of the value type int"):
+        with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
             @torch.jit.script
             def sum_list(a):
                 # type: (int) -> int
