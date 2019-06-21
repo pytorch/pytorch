@@ -2,6 +2,7 @@
 #include "ATen/Parallel.h"
 
 #include "c10/util/Flags.h"
+#include "caffe2/core/init.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -17,7 +18,8 @@ C10_DEFINE_int(inter_op_threads, 0, "Number of inter-op threads");
 C10_DEFINE_int(intra_op_threads, 0, "Number of intra-op threads");
 C10_DEFINE_int(tensor_dim, 50, "Tensor dim");
 C10_DEFINE_int(benchmark_iter, 10, "Number of times to run benchmark")
-C10_DEFINE_bool(extra_stats, false, "Collect extra stats; warning: skews results");
+C10_DEFINE_bool(extra_stats, false,
+    "Collect extra stats; warning: skews results");
 C10_DEFINE_string(task_type, "add", "Tensor operation: add or mm");
 
 namespace {
@@ -38,7 +40,8 @@ void wait() {
   }
 }
 
-void _launch_tasks_tree(int level, int end_level, at::Tensor& left, at::Tensor& right) {
+void _launch_tasks_tree(
+    int level, int end_level, at::Tensor& left, at::Tensor& right) {
   if (level == end_level) {
     at::parallel_for(0, FLAGS_sub_iter, 1,
         [&left, &right](int64_t begin, int64_t end) {
@@ -96,7 +99,8 @@ void print_runtime_stats(const std::vector<float>& runtimes) {
   }
   float mean = sum / N;
   float sd = sqrt(sqr_sum / N - mean * mean);
-  std::cout << "N = " << N << ", mean = " << mean << ", sd = " << sd << std::endl;
+  std::cout << "N = " << N << ", mean = " << mean << ", sd = " << sd
+            << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -104,6 +108,8 @@ int main(int argc, char** argv) {
     std::cout << "Failed to parse command line flags" << std::endl;
     return -1;
   }
+  caffe2::internal::Caffe2InitializeRegistry::Registry()
+                   ->RunNamedFunction("registerThreadPools");
   at::init_num_threads();
 
   if (FLAGS_inter_op_threads > 0) {
