@@ -5,8 +5,6 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
 
-C10_DECLARE_bool(caffe2_init_omp_mkl);
-
 namespace caffe2 {
 
 namespace internal {

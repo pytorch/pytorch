@@ -23,19 +23,11 @@ C10_DEFINE_int(
     "The number of mkl threads. 0 to use default value. If set, "
     "this overrides the caffe2_omp_num_threads flag if both are set. "
     "Does not have effect if MKL is not used.");
-C10_DEFINE_bool(
-    caffe2_init_omp_mkl,
-    true,
-    "Initialize OMP and MKL in Caffe2");
 
 namespace caffe2 {
 
 #ifdef _OPENMP
 bool Caffe2SetOpenMPThreads(int*, char***) {
-  if (!FLAGS_caffe2_init_omp_mkl) {
-    return true;
-  }
-
   if (!getenv("OMP_NUM_THREADS")) {
     // OMP_NUM_THREADS not passed explicitly, so *disable* OMP by
     // default. The user can use the CLI flag to override.
@@ -57,10 +49,6 @@ REGISTER_CAFFE2_INIT_FUNCTION(Caffe2SetOpenMPThreads,
 
 #ifdef CAFFE2_USE_MKL
 bool Caffe2SetMKLThreads(int*, char***) {
-  if (!FLAGS_caffe2_init_omp_mkl) {
-    return true;
-  }
-
   if (!getenv("MKL_NUM_THREADS")) {
     VLOG(1) << "MKL_NUM_THREADS not passed, defaulting to 1 thread";
     mkl_set_num_threads(1);
