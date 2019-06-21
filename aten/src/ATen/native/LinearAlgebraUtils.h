@@ -236,16 +236,32 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   strides[input.dim() - 1] = m;
   strides[input.dim() - 2] = 1;
 
-  auto U_empty = at::empty_strided(sizes, strides, input.options());
+  Tensor U_empty;
+  if (!input.is_cuda()) {
+    U_empty = at::empty_strided(sizes, strides, input.options());
+  } else {
+    U_empty = at::empty_strided(sizes, strides,
+                                at::TensorOptions(at::kCPU).dtype(input.dtype()).pinned_memory(true));
+  }
 
   sizes[input.dim() - 2] = n;
   sizes[input.dim() - 1] = n;
   // VT should be a row-major or a batch of row-major matrices
-  auto VT_empty = at::empty(sizes, input.options());
+  Tensor VT_empty;
+  if (!input.is_cuda()) {
+    VT_empty = at::empty(sizes, input.options());
+  } else {
+    VT_empty = at::empty(sizes, at::TensorOptions(at::kCPU).dtype(input.dtype()).pinned_memory(true));
+  }
 
   sizes.pop_back();
   sizes[input.dim() - 2] = std::min(m, n);
-  auto S_empty = at::empty(sizes, input.options());
+  Tensor S_empty;
+  if (!input.is_cuda()) {
+    S_empty = at::empty(sizes, input.options());
+  } else {
+    S_empty = at::empty(sizes, at::TensorOptions(at::kCPU).dtype(input.dtype()).pinned_memory(true));
+  }
   return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);  
 }
 

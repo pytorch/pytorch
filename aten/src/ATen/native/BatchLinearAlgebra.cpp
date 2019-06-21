@@ -855,6 +855,8 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
   return std::tuple<Tensor&, Tensor&>(Q, R);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 template <typename scalar_t>
 static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
                       char jobz, std::vector<int64_t>& infos) {
@@ -894,7 +896,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
     scalar_t* U_working_ptr = &U_data[i * U_stride];
     scalar_t* VT_working_ptr = &VT_data[i * VT_stride];
     
-    // Compute S, U (optionally) and V (optionally)
+    // Compute S, U (optionally) and VT (optionally)
     lapackSvd<scalar_t>(jobz, m, n, self_working_ptr, m,
                         S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work_data, lwork, iwork_data, &info);
     infos[i] = info;
