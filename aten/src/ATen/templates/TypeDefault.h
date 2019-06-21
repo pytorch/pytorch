@@ -38,9 +38,6 @@ struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
       bool create_graph) const override;
   void set_data(Tensor & self, Tensor new_data) const override;
 
-  Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
-  Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
-
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
   ${type_method_declarations}
