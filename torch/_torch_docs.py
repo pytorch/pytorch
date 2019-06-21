@@ -4144,7 +4144,7 @@ add_docstr(torch.arange,
            r"""
 arange(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a 1-D tensor of size :math:`\left\lfloor \frac{\text{end} - \text{start}}{\text{step}} \right\rfloor`
+Returns a 1-D tensor of size :math:`\left\lceil \frac{\text{end} - \text{start}}{\text{step}} \right\rceil`
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
@@ -6656,8 +6656,7 @@ Generator(device='cpu') -> Generator
 
 Creates and returns a generator object which manages the state of the algorithm that
 produces pseudo random numbers. Used as a keyword argument in many :ref:`inplace-random-sampling`
-functions. Currently only creation of CPU Generator is supported through
-this API.
+functions.
 
 Arguments:
     device (:class:`torch.device`, optional): the desired device for the generator.
@@ -6668,6 +6667,7 @@ Returns:
 Example::
 
     >>> g_cpu = torch.Generator()
+    >>> g_cuda = torch.Generator(device='cuda')
 """)
 
 

@@ -421,6 +421,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_quantized_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
@@ -456,6 +457,15 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_win.cpp
     )
+    if (USE_CUDA AND NOT USE_ROCM)
+      list(APPEND Caffe2_GPU_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/fused_kernel.cpp
+      )
+      add_library(thnvrtc SHARED ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/thnvrtc.cpp)
+      target_link_libraries(thnvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
+      target_include_directories(thnvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+      install(TARGETS thnvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+    endif()
   else ()
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/dynamic_library_unix.cpp

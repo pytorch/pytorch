@@ -26,6 +26,7 @@ struct CompilationUnit;
 namespace c10 {
 
 struct FunctionSchema;
+using OptNameList = c10::optional<std::vector<std::string>>;
 
 #define C10_FORALL_TYPES(_) \
 _(TensorType) \
@@ -844,103 +845,64 @@ private:
   FutureType(TypePtr elem) : SingleElementType(elem) {}
 };
 
+using ::torch::jit::Function;
+struct NamedType;
+using NamedTypePtr = std::shared_ptr<NamedType>;
+
+struct CAFFE2_API NamedType : public Type {
+  NamedType(TypeKind tk, c10::optional<c10::QualifiedName> qualifiedName)
+    : Type(tk)
+    , name_(std::move(qualifiedName)) {}
+
+  std::string python_str() const;
+  std::string qualname() const;
+  std::string qualifier() const;
+  std::string basename() const;
+
+  const c10::optional<QualifiedName>& qualified_name_obj() const {
+    return name_;
+  }
+
+ protected:
+  // Fully qualified name of type (note that this has to be globally unique).
+  // Looks like: "foo.bar.Baz".
+  c10::optional<QualifiedName> name_;
+};
+
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
-using OptNameList = c10::optional<std::vector<std::string>>;
+using NameList = std::vector<std::string>;
 // This type represents a Tuple
-struct CAFFE2_API TupleType : public Type {
-  static TupleTypePtr create(std::vector<TypePtr> types, OptNameList names=c10::nullopt, c10::optional<std::string> unqualName=c10::nullopt) {
-    return TupleTypePtr(new TupleType(std::move(types), std::move(names), std::move(unqualName))); // NOLINT(modernize-make-shared)
+struct CAFFE2_API TupleType : public NamedType {
+  static std::shared_ptr<FunctionSchema> namedTupleSchemaFromNamesAndTypes(c10::QualifiedName, std::vector<std::string>, std::vector<TypePtr>);
+  static TupleTypePtr create(std::vector<TypePtr> types, c10::optional<c10::QualifiedName> name=c10::nullopt, std::shared_ptr<FunctionSchema> schema=nullptr) {
+    return TupleTypePtr(new TupleType(std::move(types), std::move(name), std::move(schema))); // NOLINT(modernize-make-shared)
   }
   DEFINE_IS_SUBCLASS(TupleType);
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
   }
-  bool operator==(const Type& rhs) const override {
-    return compare(rhs, [](const TypePtr a, const TypePtr b) {
-      return *a == *b;
-    }) && names_ == rhs.expect<TupleType>()->names_;
-    // `compare` guarantees that rhs is always a TupleType, so the
-    // dynamic_cast above always success.
-  }
-  bool isSubtypeOf(const TypePtr rhs_) const override {
-    if (Type::isSubtypeOf(rhs_))
-      return true;
-    auto rhs = rhs_->cast<TupleType>();
-    if (!rhs)
-      return false;
-    // unnamed tuple is not a subtype of nametuple
-    if (!hasNames() && rhs->hasNames())
-      return false;
-    // namedtuple may be a subtype of unnamed tuple
-    bool names_match = !rhs->hasNames() || names() == rhs->names();
-    // co-variant rules for tuples
-    return names_match && compare(*rhs, [](const TypePtr a, const TypePtr b) {
-      return a->isSubtypeOf(b);
-    });
-  }
+  bool operator==(const Type& rhs) const override;
+  bool isSubtypeOf(const TypePtr rhs_) const override;
 
-  std::string str() const override {
-    std::stringstream ss;
-    ss << "(";
-    for(size_t i = 0; i < elements().size(); ++i) {
-      if(i > 0)
-        ss << ", ";
-      ss << elements()[i]->str();
-    }
-    ss << ")";
-    return ss.str();
-  }
-  std::string python_str() const override {
-    std::stringstream ss;
-    ss << "Tuple[";
-    for(size_t i = 0; i < elements().size(); ++i) {
-      if(i > 0)
-        ss << ", ";
-      ss << elements()[i]->python_str();
-    }
-    ss << "]";
-    return ss.str();
-  }
+  std::string str() const override;
+  std::string python_str() const override;
   bool hasFreeVariables() const override {
     return has_free_variables_;
   }
-  bool hasNames() const {
-    return names_.has_value();
-  }
-  const std::vector<std::string> &names() const {
-    return names_.value();
-  }
-  const c10::optional<std::string> &unqualName() const {
-    return unqualName_;
-  }
-
   at::ArrayRef<TypePtr> containedTypes() const override {
     return elements_;
   }
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     return create(std::move(contained_types));
   }
-  const std::shared_ptr<FunctionSchema>& schema() const {
+  const std::shared_ptr<FunctionSchema> &schema() const {
     return schema_;
   }
+
   static const TypeKind Kind = TypeKind::TupleType;
 private:
-  TupleType(std::vector<TypePtr> elements_, OptNameList names, c10::optional<std::string> unqualName)
-  : Type(TypeKind::TupleType)
-  , elements_(std::move(elements_))
-  , names_(std::move(names))
-  , unqualName_(std::move(unqualName)) {
-    has_free_variables_ =
-        std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
-          return v->hasFreeVariables();
-        });
-    if (names && unqualName) {
-      createFunctionSchema();
-    }
-  }
-
-  void createFunctionSchema();
+  TupleType(std::vector<TypePtr> elements_, c10::optional<c10::QualifiedName> name, std::shared_ptr<FunctionSchema> schema);
 
   bool compare(const Type& rhs, std::function<bool(const TypePtr, const TypePtr)> fn) const {
     if(rhs.kind() != kind())
@@ -961,8 +923,6 @@ private:
 
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
-  OptNameList names_;
-  c10::optional<std::string> unqualName_;
   std::shared_ptr<FunctionSchema> schema_;
 };
 
@@ -1322,7 +1282,7 @@ struct getTypePtr_<c10::ArrayRef<T>> final {
   }
 };
 template <class T>
-struct getTypePtr_<c10::ListPtr<T>> final {
+struct getTypePtr_<c10::List<T>> final {
   static TypePtr call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
@@ -1337,7 +1297,7 @@ struct getTypePtr_<std::unordered_map<K, V>> final {
   }
 };
 template <class K, class V>
-struct getTypePtr_<c10::DictPtr<K, V>> final {
+struct getTypePtr_<c10::Dict<K, V>> final {
   static TypePtr call() {
     static auto type =
         DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());
@@ -1376,6 +1336,7 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
 CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
+
 /**
  * User Defined Types
  */
@@ -1383,41 +1344,28 @@ CAFFE2_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
-using ::torch::jit::Function;
 
 // This represents a class in TorchScript.
-struct CAFFE2_API ClassType : public Type {
+struct CAFFE2_API ClassType : public NamedType {
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
-      QualifiedName qualifiedName,
+      c10::optional<QualifiedName> qualifiedName,
       std::shared_ptr<CompilationUnit> cu, bool is_module = false);
 
   DEFINE_IS_SUBCLASS(ClassType);
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
-      return name_ == user_rhs->name_;
+      return qualname() == user_rhs->qualname();
     }
     return false;
   }
 
   std::string str() const override {
-    return std::string("ClassType<") + name_.name() + ">";
+    return std::string("ClassType<") + basename() + ">";
   }
 
   std::string python_str() const override {
-    return name_.qualifiedName();
-  }
-
-  std::string qualname() const {
-    return name_.qualifiedName();
-  }
-
-  std::string qualifier() const {
-    return name_.prefix();
-  }
-
-  std::string basename() const {
-    return name_.name();
+    return qualname();
   }
 
   TypePtr getAttribute(const std::string& name) const {
@@ -1450,9 +1398,9 @@ struct CAFFE2_API ClassType : public Type {
 
   std::shared_ptr<Function> getMethod(const std::string& name) const;
   std::vector<Function*> methods() const;
+
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
-
 
   size_t numAttributes() const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
@@ -1462,7 +1410,7 @@ struct CAFFE2_API ClassType : public Type {
   // Attributes are stored in a specific slot at runtime for effiency.
   // When emitting instructions we specify the slot so that attribute access is
   // a constant lookup
-  size_t getAttributeSlot(const std::string& name) const {
+  c10::optional<size_t> findAttributeSlot(const std::string& name) const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t slot = 0;
     for (const auto& attr : attributeNames_) {
@@ -1471,7 +1419,13 @@ struct CAFFE2_API ClassType : public Type {
       }
       slot++;
     }
-    throw std::runtime_error("Couldn't find attribute: " + name);
+    return c10::nullopt;
+  }
+  size_t getAttributeSlot(const std::string& name) const {
+    if (auto r = findAttributeSlot(name)) {
+      return *r;
+    }
+    TORCH_CHECK(false, python_str(), " does not have a field with the name '", name, "'");
   }
 
   bool hasAttribute(const std::string& name) const {
@@ -1482,10 +1436,7 @@ struct CAFFE2_API ClassType : public Type {
         attributeNames_.cend();
   }
 
-  void addAttribute(const std::string& name, TypePtr type) {
-    attributeNames_.push_back(name);
-    attributeTypes_.push_back(type);
-  }
+  size_t addAttribute(const std::string& name, TypePtr type, bool is_parameter=false);
 
   at::ArrayRef<std::string> attributeNames() const {
     return attributeNames_;
@@ -1504,16 +1455,16 @@ struct CAFFE2_API ClassType : public Type {
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
 
   bool is_module() const {
-    return is_module_;
+    return bool(parameterSlots_);
+  }
+  bool is_parameter(size_t slot) const {
+    TORCH_INTERNAL_ASSERT(is_module(), "asking for parameterSlots of non-Module");
+    return parameterSlots_->at(slot);
   }
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:
-  ClassType(QualifiedName name, std::shared_ptr<CompilationUnit> cu, bool is_module);
-
-  // Fully qualified name of type (note that this has to be globally unique).
-  // Looks like: "foo.bar.Baz".
-  QualifiedName name_;
+  ClassType(c10::optional<QualifiedName> name, std::shared_ptr<CompilationUnit> cu, bool is_module);
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module
@@ -1526,6 +1477,9 @@ struct CAFFE2_API ClassType : public Type {
   // Holds method attributes
   std::shared_ptr<CompilationUnit> compilation_unit_;
 
-  bool is_module_;
+
+  // if present, this class inherits from torch.nn.Module
+  // and these are the indices of the attributes which are parameters
+  std::shared_ptr<std::vector<bool>> parameterSlots_;
 };
 } // namespace c10
