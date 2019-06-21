@@ -50,8 +50,9 @@ at::DeprecatedTypeProperties* type_from_string(const std::string& str) {
   const std::unordered_map<std::string, at::DeprecatedTypeProperties*>* map = nullptr;
 
   if (str == "torch.Tensor") {
-    auto default_options = torch::tensors::get_default_tensor_options();
-    return &getNonVariableDeprecatedTypeProperties(default_options.backend(), typeMetaToScalarType(default_options.dtype()));
+    auto backend = tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id());
+    auto scalar_type = torch::tensors::get_default_scalar_type();
+    return &getNonVariableDeprecatedTypeProperties(backend, scalar_type);
   }
 
   if (std::mismatch(cuda_prefix.begin(), cuda_prefix.end(), str.begin()).first == cuda_prefix.end()) {
