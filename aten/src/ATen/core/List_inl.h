@@ -31,13 +31,13 @@ template<class T> List<T> make_list(ArrayRef<T> values) {
 template<>
 C10_DEPRECATED_MESSAGE("IValue isn't a valid List element type. If you know the concrete key type at compile time, please specify it to make_list<T>(). If you only know it at runtime, impl::make_generic_list() might work for you.")
 inline impl::GenericList make_list<IValue>() {
-  return impl::GenericList(make_intrusive<detail::ListImpl<IValue>>());
+  return impl::GenericList(make_intrusive<detail::ListImpl<IValue>>(std::vector<IValue>{}, c10::nullopt));
 }
 
 template<>
 C10_DEPRECATED_MESSAGE("IValue isn't a valid List element type. If you know the concrete key type at compile time, please specify it to make_list<T>(). If you only know it at runtime, impl::make_generic_list() might work for you.")
 inline impl::GenericList make_list<IValue>(ArrayRef<IValue> values) {
-  return impl::make_generic_list(values);
+  return impl::GenericList(make_intrusive<detail::ListImpl<IValue>>(values.vec(), c10::nullopt));
 }
 
 namespace impl {
@@ -46,9 +46,7 @@ inline GenericList make_generic_list() {
 }
 
 inline GenericList make_generic_list(ArrayRef<IValue> values) {
-  GenericList result = make_generic_list();
-  detail::add_initial_elements(result, values);
-  return result;
+  return GenericList(make_intrusive<detail::ListImpl<IValue>>(values.vec(), c10::nullopt));
 }
 
 inline GenericList make_generic_list(TypePtr elementType) {
@@ -57,9 +55,7 @@ inline GenericList make_generic_list(TypePtr elementType) {
 }
 
 inline GenericList make_generic_list(TypePtr elementType, ArrayRef<IValue> values) {
-  GenericList result = make_generic_list(std::move(elementType));
-  detail::add_initial_elements(result, values);
-  return result;
+  return GenericList(make_intrusive<detail::ListImpl<IValue>>(values.vec(), std::move(elementType)));
 }
 
 template<class T>
