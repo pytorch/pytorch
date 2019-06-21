@@ -310,6 +310,9 @@ class CMake:
         parallel_backend = os.getenv('PARALLEL_BACKEND')
         if parallel_backend:
             CMake.defines(args, PARALLEL_BACKEND=parallel_backend)
+        single_thread_pool = os.getenv('EXPERIMENTAL_SINGLE_THREAD_POOL')
+        if single_thread_pool:
+            CMake.defines(args, EXPERIMENTAL_SINGLE_THREAD_POOL=single_thread_pool)
 
         if USE_GLOO_IBVERBS:
             CMake.defines(args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")

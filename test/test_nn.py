@@ -4669,6 +4669,38 @@ class TestNN(NNTestCase):
 
         self.assertEqual(refcycles, 0)
 
+    def test_load_state_dict_custom(self):
+
+        class CustomState(nn.Module):
+            def __init__(self):
+                super(CustomState, self).__init__()
+                self.param = torch.nn.Parameter(torch.ones(1))
+                self.sub = torch.nn.Linear(5, 5)
+
+            def _save_to_state_dict(self, destination, prefix, keep_vars):
+                destination[prefix + "serialized"] = self.param.data + 1
+
+            def _load_from_state_dict(self, state_dict, prefix, local_metadata,
+                                      strict, missing_keys, unexpected_keys,
+                                      error_msgs):
+                # skip some of the error handling
+                self.param.data.copy_(state_dict[prefix + "serialized"] - 1)
+
+        # use sequential to verify nesting
+        m = nn.Sequential(CustomState())
+        m[0].param[0] = 10
+        m[0].sub.weight[0, 0] = 555
+        state_dict = m.state_dict()
+        self.assertEqual(state_dict["0.serialized"].item(), 11)
+        self.assertIn("0.sub.weight", state_dict)
+        self.assertNotIn("0.param", state_dict)
+        del m
+        mm = nn.Sequential(CustomState())
+        self.assertEqual(mm[0].param[0].item(), 1)
+        mm.load_state_dict(state_dict)
+        self.assertEqual(mm[0].param[0].item(), 10)
+        self.assertEqual(mm[0].sub.weight[0, 0].item(), 555)
+
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
 
@@ -5985,11 +6017,11 @@ class TestNN(NNTestCase):
         wrong_d_model = 63
         wrong_nhead = 5
 
-        def test(encoder_input_shape, decoder_input_shape, 
+        def test(encoder_input_shape, decoder_input_shape,
                  src_mask_len=None, tgt_mask_len=None, memory_mask_size=None):
             encoder_input = torch.randn(encoder_input_shape)
             decoder_input = torch.randn(decoder_input_shape)
-            model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers, 
+            model = getattr(nn, model_name)(d_model, nhead, num_encoder_layers,
                                             num_decoder_layers, dim_feedforward, dropout)
 
             if src_mask_len is not None:
@@ -6008,7 +6040,7 @@ class TestNN(NNTestCase):
                 memory_task = None
 
             with self.assertRaises(RuntimeError):
-                model(encoder_input, decoder_input, 
+                model(encoder_input, decoder_input,
                       src_mask=src_mask, tgt_mask=tgt_mask, memory_mask=memory_task)
 
         correct_encoder_input_shape = (seq_len, bsz, d_model)
@@ -6043,7 +6075,7 @@ class TestNN(NNTestCase):
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         with self.assertRaises(AssertionError):
-            model = getattr(nn, model_name)(d_model, wrong_nhead, num_encoder_layers, 
+            model = getattr(nn, model_name)(d_model, wrong_nhead, num_encoder_layers,
                                             num_decoder_layers, dim_feedforward, dropout)
 
         # Incorrect src_mask
@@ -6062,8 +6094,8 @@ class TestNN(NNTestCase):
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_tgt_mask_size = tgt_len + 1
-        test(encoder_input_shape, decoder_input_shape, 
-             tgt_mask_len=wrong_tgt_mask_size, 
+        test(encoder_input_shape, decoder_input_shape,
+             tgt_mask_len=wrong_tgt_mask_size,
              memory_mask_size=(wrong_tgt_mask_size, wrong_src_mask_size))
 
     def test_rnn_args_check(self):
