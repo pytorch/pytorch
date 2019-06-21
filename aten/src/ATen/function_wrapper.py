@@ -1064,7 +1064,7 @@ def create_generic(top_env, declarations):
                 definition=TENSOR_METHOD_DEFINITION.substitute(option))
 
         def gen_namespace_function(option, dispatch_tensor, dispatch_options):
-            # type: (Any, str, Any) -> FunctionCode
+            # type: (Any, Optional[str], Any) -> FunctionCode
             if dispatch_tensor:
                 option['inferred_backend'] = 'at::detail::infer_backend({})'.format(dispatch_tensor)
                 option['inferred_is_variable'] = 'at::detail::infer_is_variable({})'.format(dispatch_tensor)
