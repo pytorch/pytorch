@@ -1613,7 +1613,7 @@ struct to_ir {
   // Validate that the `lhs` Expr's in an assignment statement are valid. That
   // is:
   //
-  // 1) All lhs Expr's are either Var or Starred nodes
+  // 1) All lhs Expr's are either Var, Tuple or Starred nodes
   // 2) There is at most one Starred node in the lhs Expr
   // 3) A Starred node can only appear when there is another non-Starred lhs
   //    Expr. Concretely this means that `*abc = func()` is illegal. Unpacking
@@ -1622,7 +1622,8 @@ struct to_ir {
     size_t num_normal_assign = 0;
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
-      if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT) {
+      if (assignee.kind() == TK_VAR || assignee.kind() == TK_SUBSCRIPT
+          || assignee.kind() == TK_TUPLE_LITERAL) {
         num_normal_assign++;
       } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
@@ -1911,8 +1912,13 @@ struct to_ir {
     if (starred_unpack)
       n_binders--;
     auto output = emitSugaredExpr(rhs, n_binders);
-    auto outputs = output->asTuple(
-        rhs.range(),
+    emitTupleAssign(tl, output, rhs.range(), n_binders, starred_unpack);
+  }
+
+  void emitTupleAssign(const TupleLiteral& tl, const SugaredValuePtr& rhs_output,
+                       const SourceRange& rhs_loc, size_t n_binders, bool starred_unpack) {
+    auto outputs = rhs_output->asTuple(
+        rhs_loc,
         method,
         starred_unpack ? c10::nullopt : c10::optional<size_t>{n_binders});
     if (outputs.size() < n_binders) {
@@ -1924,15 +1930,21 @@ struct to_ir {
       throw ErrorReport(tl) << "too many values to unpack: need " << n_binders
                             << " but found " << outputs.size();
     }
+
+    emitExprsAssign(tl.inputs(), outputs, rhs_loc, n_binders);
+  }
+
+  void emitExprsAssign(const List<Expr>& lhs_exprs, const at::ArrayRef<SugaredValuePtr> outputs,
+                       const SourceRange& rhs_loc, size_t n_binders) {
     int i = 0;
-    for (auto assignee : tl.inputs()) {
+    for (auto assignee : lhs_exprs) {
       switch (assignee.kind()) {
         case TK_SUBSCRIPT:
           emitSubscriptAssign(
-              rhs.range(),
+              rhs_loc,
               Subscript(assignee),
               NamedValue(
-                  rhs.range(), outputs.at(i)->asValue(rhs.range(), method)));
+                  rhs_loc, outputs.at(i)->asValue(rhs_loc, method)));
           i++;
           break;
         case TK_VAR:
@@ -1956,6 +1968,16 @@ struct to_ir {
           auto tup = graph->insertNode(graph->createTuple(values))->output();
           environment_stack->setVar(var.range(), Var(var).name().name(), tup);
           i += n_matched;
+        } break;
+        case TK_TUPLE_LITERAL: {
+          // recursively emit tuple assignments
+          TupleLiteral sub_tl = TupleLiteral(assignee);
+          size_t sub_n_binders = sub_tl.inputs().size();
+          bool sub_starred_unpack = calcNumStarredUnpack(sub_tl.inputs(), sub_tl.range());
+          if (sub_starred_unpack)
+            sub_n_binders--;
+          emitTupleAssign(sub_tl, outputs.at(i), rhs_loc, sub_n_binders, sub_starred_unpack);
+          i ++;
         } break;
         default:
           throw ErrorReport(assignee)
