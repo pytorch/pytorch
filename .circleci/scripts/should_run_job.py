@@ -25,6 +25,7 @@ default_set = [
     'caffe2-py2-cuda9.1-cudnn7-ubuntu16.04',
     # Caffe2 ONNX
     'caffe2-onnx-py2-gcc5-ubuntu16.04',
+    'caffe2-onnx-py3.6-clang7-ubuntu16.04',
     # Caffe2 Clang
     'caffe2-py2-clang7-ubuntu16.04',
     # Caffe2 CMake
@@ -43,9 +44,13 @@ default_set = [
     # PyTorch Android
     'pytorch-linux-xenial-py3-clang5-android-ndk-r19c',
 
+    # XLA
+    'pytorch-xla-linux-trusty-py3.6-gcc5.4',
+
     # Other checks
     'pytorch-short-perf-test-gpu',
-    'pytorch-doc-push',
+    'pytorch-python-doc-push',
+    'pytorch-cpp-doc-push',
 ]
 
 # Takes in commit message to analyze via stdin

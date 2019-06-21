@@ -636,7 +636,8 @@ std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value* v) -> Value* {
     AT_ERROR(
-        "Graph::copy() encountered a use of a value not in scope. Run lint!");
+        "Graph::copy() encountered a use of a value " + v->uniqueName() +
+        " not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
@@ -1311,9 +1312,11 @@ Node* Graph::createWithSubgraph(Symbol kind) {
 
 Node* Graph::createTuple(
     at::ArrayRef<Value*> values,
-    c10::OptNameList field_names) {
+    c10::optional<c10::QualifiedName> qualname,
+    std::shared_ptr<FunctionSchema> schema) {
   auto types = fmap(values, [](Value* v) { return v->type(); });
-  auto tt = TupleType::create(std::move(types), std::move(field_names));
+  auto tt = TupleType::create(
+      std::move(types), std::move(qualname), std::move(schema));
   auto n = create(prim::TupleConstruct, values);
   n->output()->setType(tt);
   return n;

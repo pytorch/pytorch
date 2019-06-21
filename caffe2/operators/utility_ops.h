@@ -1376,7 +1376,7 @@ class RangeOp : public Operator<Context> {
     T step = 1;
 
     for (int i = 0; i < InputSize(); ++i) {
-      CAFFE_ENFORCE_EQ(Input(0).dim(), 0, "All inputs must be scalar.");
+      CAFFE_ENFORCE_EQ(Input(i).numel(), 1, "All inputs must be scalar/1D tensor.");
     }
 
     switch (InputSize()) {

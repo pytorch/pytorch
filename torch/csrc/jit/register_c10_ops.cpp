@@ -7,40 +7,6 @@ namespace torch {
 namespace jit {
 namespace {
 
-at::Tensor unwrap_tensor(at::Tensor&& tensor) {
-  if (tensor.is_variable()) {
-    return torch::autograd::Variable(std::move(tensor)).tensor_data();
-  } else {
-    return std::move(tensor);
-  }
-}
-
-IValue unwrap(IValue&& ivalue) {
-  // TODO Remove the .defined() check once we don't have undefined tensors on the stack anymore (@wanchaol is working on this)
-  if (ivalue.isTensor() && ivalue.toTensor().defined()) {
-    return unwrap_tensor(std::move(ivalue).toTensor());
-  } else if (ivalue.isTensorList()) {
-    c10::ListPtr<at::Tensor> list = std::move(ivalue).toTensorList();
-    for (size_t i = 0; i < list.size(); ++i) {
-      list[i] = unwrap_tensor(list.extract(i));
-    }
-    return std::move(list);
-  } else if (ivalue.isGenericList()) {
-    c10::impl::GenericListPtr list = std::move(ivalue).toGenericList();
-    for (size_t i = 0; i < list.size(); ++i) {
-      list[i] = unwrap(list.extract(i));
-    }
-    return std::move(list);
-  } else if (ivalue.isGenericDict()) {
-    for (auto& item : ivalue.toGenericDict()) {
-      item.setValue(unwrap(item.value()));
-    }
-    return std::move(ivalue);
-  } else {
-    return std::move(ivalue);
-  }
-}
-
 at::Tensor wrap_tensor(at::Tensor&& tensor) {
   if (tensor.is_variable()) {
     return std::move(tensor);
@@ -53,13 +19,13 @@ IValue wrap(IValue&& ivalue) {
   if (ivalue.isTensor()) {
     return wrap_tensor(std::move(ivalue).toTensor());
   } else if (ivalue.isTensorList()) {
-    c10::ListPtr<at::Tensor> list = std::move(ivalue).toTensorList();
+    c10::List<at::Tensor> list = std::move(ivalue).toTensorList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = wrap_tensor(list.extract(i));
     }
     return std::move(list);
   } else if (ivalue.isGenericList()) {
-    c10::impl::GenericListPtr list = std::move(ivalue).toGenericList();
+    c10::impl::GenericList list = std::move(ivalue).toGenericList();
     for (size_t i = 0; i < list.size(); ++i) {
       list[i] = wrap(list.extract(i));
     }
@@ -168,11 +134,6 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           }
         }
         graph->insertNode(node);
-      }
-
-      // unwrap tensor inputs from variable
-      for (auto iter = stack.end() - input_size; iter != stack.end(); ++iter) {
-        *iter = unwrap(std::move(*iter));
       }
 
       c10::Dispatcher::singleton().lookup(op, &stack).call(&stack);

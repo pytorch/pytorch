@@ -7,7 +7,6 @@ import unittest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import Tensor
 from torch.testing import FileCheck
 
 from common_utils import run_tests, IS_WINDOWS, skipIfRocm, IS_SANDCASTLE

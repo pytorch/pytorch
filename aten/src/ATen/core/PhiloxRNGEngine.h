@@ -21,14 +21,14 @@
 namespace at {
 
 // typedefs for holding vector data
-namespace {
+namespace detail {
 
 typedef at::detail::Array<uint32_t, 4> UINT4;
 typedef at::detail::Array<uint32_t, 2> UINT2;
 typedef at::detail::Array<double, 2> DOUBLE2;
 typedef at::detail::Array<float, 2> FLOAT2;
 
-} // anonymous namespace
+} // namespace detail
 
 /**
  * Note [Philox Engine implementation]
@@ -73,7 +73,7 @@ public:
                                  uint64_t offset = 0) {
     key[0] = static_cast<uint32_t>(seed);
     key[1] = static_cast<uint32_t>(seed >> 32);
-    counter = UINT4(0);
+    counter = detail::UINT4(0);
     counter[2] = static_cast<uint32_t>(subsequence);
     counter[3] = static_cast<uint32_t>(subsequence >> 32);
     STATE = 0;
@@ -85,9 +85,9 @@ public:
    */
   C10_HOST_DEVICE inline uint32_t operator()() {
     if(STATE == 0) {
-      UINT4 counter_ = counter;
-      UINT2 key_ = key;
-      
+      detail::UINT4 counter_ = counter;
+      detail::UINT2 key_ = key;
+
       counter_ = single_round(counter_, key_);
       key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
       counter_ = single_round(counter_, key_);
@@ -163,9 +163,9 @@ public:
   }
 
 private:
-  UINT4 counter;
-  UINT4 output;
-  UINT2 key;
+  detail::UINT4 counter;
+  detail::UINT4 output;
+  detail::UINT2 key;
   uint32_t STATE;
 
   C10_HOST_DEVICE inline uint32_t mulhilo32(uint32_t a, uint32_t b,
@@ -180,12 +180,12 @@ private:
     #endif
   }
 
-  C10_HOST_DEVICE inline UINT4 single_round(UINT4 ctr, UINT2 key) {
+  C10_HOST_DEVICE inline detail::UINT4 single_round(detail::UINT4 ctr, detail::UINT2 key) {
     uint32_t hi0;
     uint32_t hi1;
     uint32_t lo0 = mulhilo32(kPhiloxSA, ctr[0], &hi0);
     uint32_t lo1 = mulhilo32(kPhiloxSB, ctr[2], &hi1);
-    UINT4 ret;
+    detail::UINT4 ret;
     ret[0] = hi1 ^ ctr[1] ^ key[0];
     ret[1] = lo1;
     ret[2] = hi0 ^ ctr[3] ^ key[1];
