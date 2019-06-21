@@ -955,7 +955,7 @@ class TestDataLoader(TestCase):
             for w in workers:
                 w.terminate()
 
-    def test_chain_iterable_dataset(self):
+    def test_chain_iterable_style_dataset(self):
         # chaining (concatenation)
         dataset1 = CountingIterableDataset(20)
         dataset2 = CountingIterableDataset(15)
