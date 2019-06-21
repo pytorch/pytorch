@@ -86,11 +86,12 @@ Tensor int_repr_quant(const Tensor& self) {
 
 Tensor per_tensor_affine_qtensor_cpu(const Tensor& self, double scale, int64_t zero_point) {
   Tensor dst = at::_empty_affine_quantized(self.sizes(), self.options().dtype(toQIntType(self.scalar_type())), scale, zero_point);
+  Tensor self_contig = self.contiguous();
   AT_DISPATCH_QINT_TYPES(dst.scalar_type(), "per_tensor_affine_qtensor", [&]() {
-    underlying_t* self_data = self.data<underlying_t>();
+    underlying_t* self_data = self_contig.data<underlying_t>();
     underlying_t* dst_data = reinterpret_cast<underlying_t *>(dst.data<scalar_t>());
     if (self.numel() > 0) {
-      memcpy(dst_data, self_data, self.numel());
+      memcpy(dst_data, self_data, self.nbytes());
     }
   });
   return dst;
