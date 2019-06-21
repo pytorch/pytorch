@@ -854,25 +854,10 @@ struct CAFFE2_API NamedType : public Type {
     : Type(tk)
     , name_(std::move(qualifiedName)) {}
 
-  std::string python_str() const {
-    TORCH_INTERNAL_ASSERT(name_);
-    return name_->qualifiedName();
-  }
-
-  std::string qualname() const {
-    TORCH_INTERNAL_ASSERT(name_);
-    return name_->qualifiedName();
-  }
-
-  std::string qualifier() const {
-    TORCH_INTERNAL_ASSERT(name_);
-    return name_->prefix();
-  }
-
-  std::string basename() const {
-    TORCH_INTERNAL_ASSERT(name_);
-    return name_->name();
-  }
+  std::string python_str() const;
+  std::string qualname() const;
+  std::string qualifier() const;
+  std::string basename() const;
 
   const c10::optional<QualifiedName>& qualified_name_obj() const {
     return name_;
@@ -1297,7 +1282,7 @@ struct getTypePtr_<c10::ArrayRef<T>> final {
   }
 };
 template <class T>
-struct getTypePtr_<c10::ListPtr<T>> final {
+struct getTypePtr_<c10::List<T>> final {
   static TypePtr call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
@@ -1312,7 +1297,7 @@ struct getTypePtr_<std::unordered_map<K, V>> final {
   }
 };
 template <class K, class V>
-struct getTypePtr_<c10::DictPtr<K, V>> final {
+struct getTypePtr_<c10::Dict<K, V>> final {
   static TypePtr call() {
     static auto type =
         DictType::create(getTypePtr_<K>::call(), getTypePtr_<V>::call());

@@ -14,7 +14,7 @@ using Var = SymbolicVariable;
 using namespace torch::autograd;
 
 void testIValue() {
-  c10::ListPtr<int64_t> foo = c10::make_list<int64_t>({3, 4, 5});
+  c10::List<int64_t> foo = c10::make_list<int64_t>({3, 4, 5});
   ASSERT_EQ(foo.use_count(), 1);
   IValue bar{foo};
   ASSERT_EQ(foo.use_count(), 2);
