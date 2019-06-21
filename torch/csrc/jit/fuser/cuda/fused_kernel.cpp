@@ -41,7 +41,9 @@ std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
 }
 #else
 std::pair<std::unique_ptr<cpu::DynamicLibrary>, THNVRTC*> loadNVRTC() {
-#ifdef __APPLE__
+#if defined(_WIN32)
+  std::string libthnvrtc = "thnvrtc.dll";
+#elif defined(__APPLE__)
   std::string libthnvrtc = "libthnvrtc.dylib";
 #else
   std::string libthnvrtc = "libthnvrtc.so";
