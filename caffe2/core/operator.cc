@@ -112,7 +112,7 @@ compute_input_size_(const std::vector<c10::IValue>& inputs) {
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     std::vector<c10::IValue> inputs,
-    c10::ListPtr<at::Tensor> outputs)
+    c10::List<at::Tensor> outputs)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       newstyle_inputs_(std::move(inputs)),
       newstyle_outputs_(std::move(outputs)),
