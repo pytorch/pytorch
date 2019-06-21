@@ -166,8 +166,23 @@ const static std::unordered_set<std::string> reserved_names = {
     "yield",
 };
 
+struct ExprInfo {
+  std::string s;
+  Node* n;
+};
+
+struct ExprInfoStream {
+  std::vector<std::shared_ptr<ExprInfo>> exprs;
+};
+
+ExprInfoStream& operator<<(
+    ExprInfoStream& stream,
+    const std::shared_ptr<ExprInfo>& es) {
+  stream.exprs.push_back(es);
+}
+
 struct PythonPrintPass {
-  std::ostringstream body_;
+  ExprInfoStream body_;
 
   // constants are written to this table, and given then named CONSTANTS.cN
   // where N is the index into this table.
@@ -401,14 +416,30 @@ struct PythonPrintPass {
         v->hasUniqueName() ? makeValidIdentifier(v->uniqueNameBase()) : "_");
   }
 
-  // map from Value to how it should be printed at each use
-  std::unordered_map<Value*, std::string> value_names_;
+  Node* curr_node = nullptr;
 
-  std::string useOf(Value* v) const {
-    return value_names_.at(v);
+  struct CurrNodeCtxMgr {
+    CurrNodeCtxMgr(Node* n, PythonPrintPass* p)
+        : n(n), orig(p->curr_node), p(p) {
+      p->curr_node = n;
+    }
+
+    ~CurrNodeCtxMgr() {
+      p->curr_node = orig;
+    }
+
+    Node *n, *orig;
+    PythonPrintPass* p;
+  };
+
+  // map from Value to how it should be printed at each use
+  std::unordered_map<Value*, ExprInfo> value_to_expr_str_;
+
+  std::shared_ptr<ExprInfo> useOf(Value* v) const {
+    return value_to_expr_str_.at(v);
   }
   void assignValue(Value* v, const std::string& s) {
-    value_names_[v] = s;
+    value_to_expr_str_[v] = std::make_shared<ExprInfo>(s, curr_node);
   }
   void assignValue(Value* v, Value* w) {
     assignValue(v, useOf(w));
@@ -421,7 +452,7 @@ struct PythonPrintPass {
 
   size_t level = 0;
   // indent to the current indent level
-  std::ostream& indent() {
+  ExprInfoStream& indent() {
     for (size_t i = 0; i < level; ++i) {
       body_ << "  ";
     }
@@ -449,7 +480,7 @@ struct PythonPrintPass {
   }
 
   void printValueList(
-      std::ostream& stmt,
+      ExprInfoStream& stmt,
       at::ArrayRef<Value*> list,
       const char* begin = "",
       const char* end = "") {
@@ -464,7 +495,7 @@ struct PythonPrintPass {
   }
 
   void printDict(
-      std::ostream& stmt,
+      ExprInfoStream& stmt,
       at::ArrayRef<Value*> key_value_pairs,
       const char* begin = "{",
       const char* end = "}") {
@@ -660,6 +691,7 @@ struct PythonPrintPass {
   }
 
   void printNode(Node* node, bool print_const) {
+    CurrNodeCtxMgr guard(node, this);
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
     for (const auto input : node->inputs()) {
@@ -724,7 +756,7 @@ struct PythonPrintPass {
           assignValue(graph->inputs().at(i), node->inputs().at(i));
         }
         printBody(graph->block());
-        std::stringstream ss;
+        ExprInfoStream ss;
         ss << "fork(" << name << ")";
         printOutputDefinition(node, ss.str());
       } break;
@@ -750,7 +782,7 @@ struct PythonPrintPass {
         printBody(graph->block());
       } break;
       default:
-        std::stringstream ss;
+        ExprInfoStream ss;
         printRHS(ss, node);
 
         // we prevent long constants from inlining here.
@@ -768,7 +800,7 @@ struct PythonPrintPass {
   }
 
   void printMaybeAnnotatedConstantList(
-      std::ostream& stmt,
+      ExprInfoStream& stmt,
       const char* the_type,
       size_t list_size,
       const IValue& the_list) {
@@ -779,13 +811,13 @@ struct PythonPrintPass {
     }
   }
 
-  void printConstant(std::ostream& stmt, const IValue& v) {
+  void printConstant(ExprInfoStream& stmt, const IValue& v) {
     if (v.isTensor()) {
       stmt << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
     } else if (v.isString()) {
       printQuotedString(stmt, v.toStringRef());
     } else if (v.isDevice()) {
-      std::stringstream ss;
+      ExprInfoStream ss;
       ss << v.toDevice();
       stmt << "torch.device(";
       printQuotedString(stmt, ss.str());
@@ -811,7 +843,7 @@ struct PythonPrintPass {
     }
   }
 
-  void printNone(std::ostream& stmt, const Node* node) {
+  void printNone(ExprInfoStream& stmt, const Node* node) {
     if (node->output()->type()->isSubtypeOf(NoneType::get())) {
       stmt << "None";
       return;
@@ -842,7 +874,7 @@ struct PythonPrintPass {
   }
 
   // Prints the RHS value of a Node, e.g. `aten.add(x, y)`
-  void printRHS(std::ostream& stmt, Node* node) {
+  void printRHS(ExprInfoStream& stmt, Node* node) {
     switch (node->kind()) {
       case prim::PythonOp: {
         auto value = static_cast<const PythonOp*>(node);
@@ -989,7 +1021,7 @@ struct PythonPrintPass {
     }
   }
 
-  std::ostream& printBlock(Block* root, bool block_has_other_statements) {
+  ExprInfoStream& printBlock(Block* root, bool block_has_other_statements) {
     // pythons weird 'pass' syntax creates a bunch of places where we have to
     // check if this block would be empty. But not everything in a block is a
     // node. Sometimes if, loop, and return statements will follow this block
@@ -1007,7 +1039,7 @@ struct PythonPrintPass {
 
   void printDefaultValue(
       const TypePtr& typ,
-      std::ostream& stmt,
+      ExprInfoStream& stmt,
       const IValue& value) {
     // xxx - many weak script modules store default values for broadcasting
     // lists that are not actually the same type as the argument. We can only
