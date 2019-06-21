@@ -1,3 +1,4 @@
+from __future__ import print_function
 r"""Definition of the DataLoader and it's iterator _DataLoaderIter classes.
 
 To support these two classes, in `./_utils` we define many utility methods and
@@ -690,6 +691,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 if self.workers_status[worker_id] and not w.is_alive():
                     failed_workers.append(w)
                     self._shutdown_worker(worker_id)
+            print('_try_get_data meets exception', e, 'workers_status', [wid in failed_workers for wid in range(self.num_workers)])
             if len(failed_workers) > 0:
                 pids_str = ', '.join(str(w.pid) for w in failed_workers)
                 raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str))
