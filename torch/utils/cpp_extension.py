@@ -274,11 +274,10 @@ class BuildExtension(build_ext, object):
                        cflags = COMMON_NVCC_FLAGS + ['--compiler-options', "'-fPIC'"] + cflags
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
-                if not HIP_COMP:
-                    # NVCC does not allow multiple -std to be passed, so we avoid
-                    # overriding the option if the user explicitly passed it.
-                    if not any(flag.startswith('-std=') for flag in cflags):
-                        cflags.append('-std=c++11')
+                # NVCC does not allow multiple -std to be passed, so we avoid
+                # overriding the option if the user explicitly passed it.
+                if not any(flag.startswith('-std=') for flag in cflags):
+                    cflags.append('-std=c++11')
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
