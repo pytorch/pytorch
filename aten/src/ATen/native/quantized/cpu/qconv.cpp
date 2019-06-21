@@ -129,7 +129,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         conv_p,
         act_ptr,
         nullptr,
-        act.q_zero_point().toInt(),
+        act.q_zero_point(),
         row_offset_buf.data());
 
     fbgemm::DoNothing<> NoOpObj{};
@@ -138,8 +138,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     const auto* bias_ptr =
         reinterpret_cast<int32_t*>(bias_contig.data<c10::qint32>());
 
-    float act_scale = act.q_scale().toFloat();
-    int32_t act_zero_point = act.q_zero_point().toInt();
+    float act_scale = act.q_scale();
+    int32_t act_zero_point = act.q_zero_point();
 
     float weight_scale_float = pack_ptr.w_scale;
     int32_t weight_zero_point_int32 = pack_ptr.w_zp;
