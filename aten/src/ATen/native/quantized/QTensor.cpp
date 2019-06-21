@@ -22,10 +22,10 @@ Tensor quantize_linear_per_channel_cpu(
   TORCH_CHECK(scales.numel() == zero_points.numel(),
               "number of elements in scales and zero_points must match");
   TORCH_CHECK(axis.size() == 1, "only axis of size 1 is supported right now");
-  float* scales_data = scales.data<float>();
-  int32_t* zero_points_data = zero_points.data<int32_t>();
-  std::vector<float> scale_vals(scales_data, scales_data + scales.numel());
-  std::vector<int32_t> zero_point_vals(
+  double* scales_data = scales.data<double>();
+  int64_t* zero_points_data = zero_points.data<int64_t>();
+  std::vector<double> scale_vals(scales_data, scales_data + scales.numel());
+  std::vector<int64_t> zero_point_vals(
       zero_points_data, zero_points_data + zero_points.numel());
   auto quantizer = make_per_channel_affine_quantizer(
       scale_vals, zero_point_vals, axis, dtype);
@@ -53,16 +53,16 @@ Tensor dequantize_linear_cpu(
   return f;
 }
 
-Scalar q_scale_quant(const Tensor& self) {
+double q_scale_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
-  return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale());
+  return static_cast<PerTensorAffineQuantizer*>(quantizer.get())->scale();
 }
 
-Scalar q_zero_point_quant(const Tensor& self) {
+int64_t q_zero_point_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
-  return Scalar(static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point());
+  return static_cast<PerTensorAffineQuantizer*>(quantizer.get())->zero_point();
 }
 
 Quantizer* quantizer(const Tensor& self) {
