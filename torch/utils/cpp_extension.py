@@ -86,7 +86,7 @@ with compiling PyTorch from source.
                               !! WARNING !!
 '''
 HIP_COMP = os.path.exists('/opt/rocm')
-CUDA_HOME = ('/opt/rocm' if HIP_COMP else find_cuda_home())
+CUDA_HOME = ('/opt/rocm' if HIP_COMP else _find_cuda_home())
 CUDNN_HOME = ('/opt/rocm/miopen' if HIP_COMP else (os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')))
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
