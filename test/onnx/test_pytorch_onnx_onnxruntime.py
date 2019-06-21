@@ -24,6 +24,7 @@ class TestONNXRuntime(unittest.TestCase):
     # is maintained in the above case.
     def test_index_select_constant_scaler_index(self):
         index = 2
+
         class IndexSelectScalerIndexModel(torch.nn.Module):
             def forward(self, x):
                 return torch.index_select(x, 1, torch.tensor(index))
@@ -42,10 +43,12 @@ class TestONNXRuntime(unittest.TestCase):
         assert np.allclose(ort_outs[0], numpy_out)
 
     def test_index_select_scaler_index(self):
+
         class IndexSelectScalerIndexModel(torch.nn.Module):
             def __init__(self, index_base):
                 super(IndexSelectScalerIndexModel, self).__init__()
                 self.index_base = torch.tensor(index_base)
+
             def forward(self, x, index_offset):
                 index = self.index_base + index_offset
                 return torch.index_select(x, 1, index)
