@@ -94,62 +94,12 @@ void adjustLdLevel2(int64_t m, int64_t n, int64_t *lda)
 
 void THCudaBlas_Sgemv(THCState *state, char trans, int64_t m, int64_t n, float alpha, float *a, int64_t lda, float *x, int64_t incx, float beta, float *y, int64_t incy)
 {
-  adjustLdLevel2(m, n, &lda);
-
-  cublasOperation_t op;
-  if (trans == 't') op = CUBLAS_OP_T;
-  else if (trans == 'n') op = CUBLAS_OP_N;
-  else if (trans == 'c') op = CUBLAS_OP_C;
-  else THError("Cublas_Sgemv parameter trans should be 't', 'n' or 'c'.");
-
-  if( (m <= INT_MAX) && (n <= INT_MAX) &&
-      (lda > 0) && (lda <= INT_MAX) &&
-      (incx > 0) && (incx <= INT_MAX) &&
-      (incy > 0) && (incy <= INT_MAX) )
-  {
-    int i_m = (int)m;
-    int i_n = (int)n;
-    int i_lda = (int)lda;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
-
-    cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-    cublasSetStream(handle, THCState_getCurrentStream(state));
-    THCublasCheck(cublasSgemv(handle, op, i_m, i_n, &alpha, a, i_lda, x, i_incx, &beta, y, i_incy));
-    return;
-  }
-  THError("Cublas_Sgemv only supports m, n, lda, incx, incy"
-          "in the range 0 < [val] <= %d", INT_MAX);
+  at::cuda::blas::gemv<float>(THCState_getCurrentStream(state), trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 void THCudaBlas_Dgemv(THCState *state, char trans, int64_t m, int64_t n, double alpha, double *a, int64_t lda, double *x, int64_t incx, double beta, double *y, int64_t incy)
 {
-  adjustLdLevel2(m, n, &lda);
-
-  cublasOperation_t op;
-  if (trans == 't') op = CUBLAS_OP_T;
-  else if (trans == 'n') op = CUBLAS_OP_N;
-  else if (trans == 'c') op = CUBLAS_OP_C;
-  else THError("Cublas_Sgemv parameter trans should be 't', 'n' or 'c'.");
-
-  if( (m <= INT_MAX) && (n <= INT_MAX) &&
-      (lda > 0) && (lda <= INT_MAX) &&
-      (incx > 0) && (incx <= INT_MAX) &&
-      (incy > 0) && (incy <= INT_MAX) )
-  {
-    int i_m = (int)m;
-    int i_n = (int)n;
-    int i_lda = (int)lda;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
-
-    cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
-    cublasSetStream(handle, THCState_getCurrentStream(state));
-    THCublasCheck(cublasDgemv(handle, op, i_m, i_n, &alpha, a, i_lda, x, i_incx, &beta, y, i_incy));
-    return;
-  }
-  THError("Cublas_Dgemv only supports m, n, lda, incx, incy"
-          "in the range 0 < [val] <= %d", INT_MAX);
+  at::cuda::blas::gemv<double>(THCState_getCurrentStream(state), trans, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 void THCudaBlas_Sger(THCState *state, int64_t m, int64_t n, float alpha, float *x, int64_t incx, float *y, int64_t incy, float *a, int64_t lda)
@@ -456,3 +406,4 @@ void THCudaBlas_Dgetrs(THCState *state, char transa, int n, int nrhs, const doub
   THError("THCudaBlas_Dgetrs not supported in ROCM.");
 #endif
 }
+
