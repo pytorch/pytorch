@@ -18,19 +18,18 @@
 #include <sstream>
 
 namespace py = pybind11;
-using namespace std;
 namespace torch {
 namespace jit {
 
-
+namespace detail {
 template <class R, class...>
 struct types {
-  const static bool hasRet = true;
+  constexpr static bool hasRet = true;
   using type = types;
 };
 template <class... args>
 struct types<void, args...> {
-  const static bool hasRet = false;
+  constexpr static bool hasRet = false;
   using type = types;
 };
 template <class Sig>
@@ -39,18 +38,25 @@ template <class R, class CurClass, class... Args>
 struct args<R (CurClass::*)(Args...)> : types<R, Args...> {};
 template <class Sig>
 using args_t = typename args<Sig>::type;
-template<class... Types>
-types<void, Types...> init() {}
+} // namespace detail
+template <class... Types>
+detail::types<void, Types...> init() {}
 
 template <class CurClass>
-struct class_ {
+class class_ {
   std::string className;
   std::shared_ptr<py::class_<CurClass>> pyClass = nullptr;
   std::shared_ptr<script::CompilationUnit> classCu = nullptr;
   ClassTypePtr classTypePtr;
 
   const std::string parentModule = "torch._C";
-  class_(string className_) : className(className_) {
+
+ public:
+  class_(string className_) : className(std::move(className_)) {
+    // Currently we register everything as a python class just for convenience.
+    // We'll want to remove this at some point to get rid of the python
+    // dependency. It would require significant changes to class registration,
+    // (I think)?
     auto obj = py::module::import(parentModule.c_str());
     pyClass = std::make_shared<py::class_<CurClass>>(obj, className.c_str());
     auto newClass =
@@ -59,6 +65,8 @@ struct class_ {
                 *pyClass,
                 ("__torch__." + parentModule + "." + className_).c_str());
 
+    // We currently represent custom classes as torchscript classes with a
+    // capsule attribute.
     classCu = std::make_shared<script::CompilationUnit>();
     tmap.put<CurClass*>(ClassType::create(
         c10::QualifiedName("__torch__." + parentModule + "." + className),
@@ -67,13 +75,51 @@ struct class_ {
     classTypePtr->addAttribute("capsule", CapsuleType::get());
     script::CompilationUnit::_get_python_cu().register_class(classTypePtr);
   }
+
+  template <typename... Types>
+  class_& def(detail::types<void, Types...>) { // Used in combination with
+                                               // torch::jit::init<...>()
+    pyClass->def(py::init<Types...>());
+    auto graph = std::make_shared<Graph>();
+    auto qualFuncName = className + "::__init__";
+    // auto qualFuncName = className + "::__init__." + type_name<int64_t,
+    // Types...>();
+    auto func = [](CurClass* cur, Types... args) { *cur = CurClass(args...); };
+    //  auto func = [](CurClass* cur, Types... args) {
+    //     auto res = new Capsule();
+    //     res->ptr = (void*)(new CurClass(args...));
+    //     return res;
+    //   };
+    std::vector<Value*> inputs = addInputs(func, graph);
+    static auto classRegistry =
+        torch::RegisterOperators().op(qualFuncName, std::move(func));
+    auto capsuleNode =
+        graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))
+            ->output()
+            ->setType(CapsuleType::get());
+    auto n = graph->insertNode(
+        graph->create(prim::SetAttr, {inputs[0], capsuleNode}, 0));
+    n->s_(attr::name, "capsule");
+    auto res = graph->insertNode(
+        graph->create(Symbol::fromQualString(qualFuncName), inputs, 0));
+    graph->registerOutput(
+        graph->insertConstant(IValue())->setType(NoneType::get()));
+    classCu->create_function("__init__", graph);
+    return *this;
+  }
+  template <typename Func>
+  class_& def(string name, Func f) {
+    auto res = def_(name, f, detail::args_t<decltype(f)>{});
+    return *this;
+  }
+
+ private:
   template <class T>
   struct addInput {
     static Value* call(std::shared_ptr<Graph> graph) {
       return graph->addInput()->setType(getTypePtr<T>());
     }
   };
-
   template <class Func, size_t... arg_indices>
   std::vector<Value*> addInputs_(
       Func f,
@@ -81,7 +127,7 @@ struct class_ {
       guts::index_sequence<arg_indices...>) {
     using argTypes =
         typename guts::infer_function_traits_t<Func>::parameter_types;
-    vector<Value*> res = {
+    std::vector<Value*> res = {
         addInput<guts::typelist::element_t<arg_indices, argTypes>>::call(
             graph)...};
     return res;
@@ -104,37 +150,8 @@ struct class_ {
   std::string type_name () {
       return type_name<First>() + "_" + type_name<Second, Rest...>();
   }
-  template <typename... Types>
-  class_& def(types<void, Types...>) {  // Used in combination with torch::jit::init<...>()
-    pyClass->def(py::init<Types...>());
-    auto graph = std::make_shared<Graph>();
-    auto qualFuncName = className + "::__init__";
-    // auto qualFuncName = className + "::__init__." + type_name<int64_t, Types...>();
-    auto func = [](CurClass* cur, Types... args) { *cur = CurClass(args...); };
-  //  auto func = [](CurClass* cur, Types... args) {
-  //     auto res = new Capsule();
-  //     res->ptr = (void*)(new CurClass(args...));
-  //     return res;
-  //   };
-    std::vector<Value*> inputs = addInputs(func, graph);
-    static auto classRegistry =
-        torch::RegisterOperators().op(qualFuncName, std::move(func));
-    auto capsuleNode =
-        graph->insertNode(graph->create(prim::CreateCapsule, {}, 1))
-            ->output()
-            ->setType(CapsuleType::get());
-    auto n = graph->insertNode(
-        graph->create(prim::SetAttr, {inputs[0], capsuleNode}, 0));
-    n->s_(attr::name, "capsule");
-    auto res = graph->insertNode(
-        graph->create(Symbol::fromQualString(qualFuncName), inputs, 0));
-    graph->registerOutput(inputs[0]);
-    classCu->create_function("__init__", graph);
-    return *this;
-  }
-
   template <typename Func, typename R, typename... Types>
-  class_& def_(string name, Func f, types<R, Types...> funcInfo) {
+  class_& def_(string name, Func f, detail::types<R, Types...> funcInfo) {
     pyClass->def(name.c_str(), f);
     auto qualFuncName = className + "::" + name;
     auto func = [f](CurClass* cur, Types... args) {
@@ -156,11 +173,6 @@ struct class_ {
     }
     graph->registerOutput(res);
     classCu->create_function(name, graph);
-    return *this;
-  }
-  template <typename Func>
-  class_& def(string name, Func f) {
-    auto res = def_(name, f, args_t<decltype(f)>{});
     return *this;
   }
 };
