@@ -195,14 +195,8 @@ void conv_dilated_all_cuda_template(
   int64_t output_vsize = std::accumulate(
       output_size.begin(), output_size.end(), 1, std::multiplies<int64_t>());
   Tensor columns = at::empty({0}, options);
-  Tensor grad_columns = at::empty({0}, options);
-  if (output.defined() || grad_weight.defined()) {
+  if (output.defined() || grad_weight.defined() || grad_input.defined()) {
     columns.resize_({nInputPlane * m, output_vsize});
-    grad_columns.zero_();  // should not be necessary
-  }
-  if (grad_input.defined()) {
-    grad_columns.resize_({nInputPlane * m, output_vsize});
-    grad_columns.zero_();  // should not be necessary
   }
   // Initialize
   if (grad_weight.defined()) {
@@ -291,23 +285,23 @@ void conv_dilated_all_cuda_template(
                 stream,
                 /*transa=*/'n',
                 /*transb=*/'t',
-                /*     m=*/grad_columns.size(1),
-                /*     n=*/grad_columns.size(0),
+                /*     m=*/columns.size(1),
+                /*     n=*/columns.size(0),
                 /*     k=*/nOutputPlane,
                 /* alpha=*/ScalarConvert<int, scalar_t>::to(1),
                 /*     A=*/grad_output_n.data<scalar_t>(),
-                /*   lda=*/grad_columns.size(1),
+                /*   lda=*/columns.size(1),
                 /*     B=*/weight.data<scalar_t>(),
-                /*   ldb=*/grad_columns.size(0),
+                /*   ldb=*/columns.size(0),
                 /*  beta=*/ScalarConvert<int, scalar_t>::to(0),
-                /*     C=*/grad_columns.data<scalar_t>(),
-                /*   ldc=*/grad_columns.size(1));
+                /*     C=*/columns.data<scalar_t>(),
+                /*   ldc=*/columns.size(1));
             // Unpack columns back into input:
             Tensor grad_input_n = grad_input.select(0, elt);
 
             col2hvol<scalar_t, dim>(
                 stream,
-                grad_columns.data<scalar_t>(),
+                columns.data<scalar_t>(),
                 nInputPlane,
                 input_size,
                 output_size,

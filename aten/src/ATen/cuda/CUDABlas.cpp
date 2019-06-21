@@ -9,7 +9,6 @@
 #define CUDA_R_16F CUBLAS_DATA_HALF
 #endif
 
-<<<<<<< HEAD
 #define TORCH_CUDABLAS_CHECK(EXPR)              \
   do {                                          \
     cublasStatus_t __err = EXPR;                \
@@ -17,17 +16,6 @@
                 "CUDA error: ",                 \
                 _cublasGetErrorEnum(__err),     \
                 " when calling `" #EXPR "`");   \
-=======
-#define TORCH_CUDABLAS_CHECK(EXPR)        \
-  do {                                    \
-    cublasStatus_t __err = EXPR;          \
-    if (__err != CUBLAS_STATUS_SUCCESS) { \
-      AT_ERROR(                           \
-          "CUDA error: ",                 \
-          _cublasGetErrorEnum(__err),     \
-          " when calling `" #EXPR "`");   \
-    }                                     \
->>>>>>> master
   } while (0)
 
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
