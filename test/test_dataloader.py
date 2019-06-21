@@ -556,7 +556,8 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
             elif exit_method == 'loader_kill':
                 kill_pid(os.getpid())
             elif exit_method == 'worker_kill':
-                kill_pid(workers[-1].pid)  # kill last worke
+                # kill_pid(workers[-1].pid)  # kill last worker
+                os.kill(workers[-1].pid, signal.SIGKILL)
                 workers[-1].join(JOIN_TIMEOUT)
                 assert not workers[-1].is_alive()
 
