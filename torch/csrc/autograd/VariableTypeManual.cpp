@@ -19,18 +19,6 @@ VariableType::VariableType(Context* context, TypeExtendedInterface* baseType)
 Backend VariableType::backend() const {
   return baseType->backend();
 }
-Allocator* VariableType::allocator() const {
-  return baseType->allocator();
-}
-Device VariableType::getDeviceFromPtr(void * data) const {
-  return baseType->getDeviceFromPtr(data);
-}
-Storage VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
-  return baseType->unsafeStorageFromTH(th_pointer, retain);
-}
-Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
-}
 
 const char * VariableType::toString() const {
   return str.c_str();

@@ -9,7 +9,11 @@ namespace c10 {
 
 inline C10_HOST_DEVICE BFloat16::BFloat16(float value) {
   uint32_t res;
+#if defined(__CUDA_ARCH__)
+  cudaMemcpy(&res, &value, sizeof(res), cudaMemcpyDeviceToHost);
+#else
   std::memcpy(&res, &value, sizeof(res));
+#endif
   val_ = res >> 16;
 }
 
