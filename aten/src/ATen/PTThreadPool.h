@@ -5,6 +5,7 @@
 
 #if USE_EIGEN_THREADPOOL
 #include "unsupported/Eigen/CXX11/ThreadPool"
+#include "Eigen/src/Core/util/Macros.h"
 #endif
 
 namespace at {
@@ -18,7 +19,7 @@ struct PTThreadPoolEnvironment {
 
   class EnvThread {
    public:
-    EnvThread(std::function<void()> f) : thr_(std::move(f)) {}
+    explicit EnvThread(std::function<void()> f) : thr_(std::move(f)) {}
     ~EnvThread() { thr_.join(); }
     void OnCancel() { }
 
@@ -44,13 +45,22 @@ struct PTThreadPoolEnvironment {
 };
 
 struct CAFFE2_API PTThreadPool
+#if EIGEN_VERSION_AT_LEAST(3, 3, 90)
   : Eigen::ThreadPoolTempl<PTThreadPoolEnvironment>, TaskThreadPoolBase {
+#else
+  : Eigen::NonBlockingThreadPoolTempl<PTThreadPoolEnvironment>, TaskThreadPoolBase {
+#endif
 
   explicit PTThreadPool(
     int pool_size,
-    int numa_node_id = -1) :
+    int /* unused */ = -1) :
+#if EIGEN_VERSION_AT_LEAST(3, 3, 90)
     Eigen::ThreadPoolTempl<PTThreadPoolEnvironment>(
         pool_size < 0 ? defaultNumThreads() : pool_size, false) {}
+#else
+    Eigen::NonBlockingThreadPoolTempl<EigenTaskThreadPoolEnvironment>(
+        pool_size < 0 ? defaultNumThreads() : pool_size) {}
+#endif
 
   void run(const std::function<void()>& func) override {
     Schedule(func);
