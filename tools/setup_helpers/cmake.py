@@ -316,7 +316,7 @@ class CMake:
 
         use_eigen_threadpool = os.getenv('USE_EIGEN_THREADPOOL')
         if use_eigen_threadpool:
-            defines(cmake_args, USE_EIGEN_THREADPOOL=use_eigen_threadpool)
+            CMake.defines(args, USE_EIGEN_THREADPOOL=use_eigen_threadpool)
 
         if USE_GLOO_IBVERBS:
             CMake.defines(args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
