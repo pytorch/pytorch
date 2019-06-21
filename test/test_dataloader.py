@@ -530,9 +530,11 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
     it = iter(loader)
     if use_workers:
         workers = it.workers
+        worker_psutil_ps = [psutil.Process(w.pid) for w in workers]
+        for worker_psutil_p in worker_psutil_ps:
+            assert worker_psutil_p.is_running()
 
-    def kill_pid(pid):
-        psutil_p = psutil.Process(pid)
+    def kill_pid(psutil_p):
         psutil_p.kill()
         psutil_p.wait(JOIN_TIMEOUT)
         assert not psutil_p.is_running()
@@ -554,10 +556,11 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
             if exit_method == 'loader_error':
                 raise RuntimeError('Loader error')
             elif exit_method == 'loader_kill':
-                kill_pid(os.getpid())
+                kill_pid(psutil.Process())
             elif exit_method == 'worker_kill':
-                # kill_pid(workers[-1].pid)  # kill last worker
-                os.kill(workers[-1].pid, signal.SIGKILL)
+                for worker_psutil_p in worker_psutil_ps:
+                    assert worker_psutil_p.is_running()
+                kill_pid(worker_psutil_ps[-1])  # kill last worker
                 workers[-1].join(JOIN_TIMEOUT)
                 assert not workers[-1].is_alive()
 
