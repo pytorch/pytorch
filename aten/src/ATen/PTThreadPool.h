@@ -58,7 +58,7 @@ struct CAFFE2_API PTThreadPool
     Eigen::ThreadPoolTempl<PTThreadPoolEnvironment>(
         pool_size < 0 ? defaultNumThreads() : pool_size, false) {}
 #else
-    Eigen::NonBlockingThreadPoolTempl<EigenTaskThreadPoolEnvironment>(
+    Eigen::NonBlockingThreadPoolTempl<PTThreadPoolEnvironment>(
         pool_size < 0 ? defaultNumThreads() : pool_size) {}
 #endif
 
