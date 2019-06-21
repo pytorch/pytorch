@@ -24,6 +24,10 @@
 #include <limits>
 #include <memory>
 
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/Dimname.h>
+#endif
+
 // To solve the conflict of s_addr in inaddr.h
 #ifdef _MSC_VER
 #ifdef s_addr
