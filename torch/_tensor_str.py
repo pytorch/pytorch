@@ -239,9 +239,17 @@ def get_summarized_data(self):
 def _str(self):
     prefix = 'tensor('
     indent = len(prefix)
-
     suffixes = []
-    if not torch._C._is_default_type_cuda():
+
+    # Note [Print tensor device]:
+    # A general logic here is we only print device when it doesn't match
+    # the device specified in default tensor type.
+    # Currently torch.set_default_tensor_type() only supports CPU/CUDA.
+    # In other cases, we don't have a way to set them as default yet,
+    # and we should always print out device for them.
+    if self.device.type == 'xla':
+        suffixes.append('device=\'' + str(self.device) + '\'')
+    elif not torch._C._is_default_type_cuda():
         if self.device.type == 'cuda':
             suffixes.append('device=\'' + str(self.device) + '\'')
     else:
