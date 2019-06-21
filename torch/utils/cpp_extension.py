@@ -246,7 +246,7 @@ class BuildExtension(build_ext, object):
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
-        # Register .cu and .cuh as valid source extensions.
+        # Register .cu, .cuh, and .hip as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh', '.hip']
         # Save the original _compile method for later.
         if self.compiler.compiler_type == 'msvc':
