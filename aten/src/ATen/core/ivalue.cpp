@@ -18,7 +18,7 @@ CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
 namespace {
 
 template<class T>
-std::ostream& printList(std::ostream & out, const c10::ListPtr<T> &v,
+std::ostream& printList(std::ostream & out, const c10::List<T> &v,
   const std::string start, const std::string finish) {
   out << start;
   for(size_t i = 0; i < v.size(); ++i) {
@@ -161,7 +161,7 @@ static bool CompareIValue(const std::pair<IValue, IValue>& aWrap,
   AT_ERROR("Illegal dict key");
 }
 
-std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::DictPtr<IValue, IValue>& dict) {
+std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict) {
   std::vector<std::pair<IValue, IValue>> ordered;
   for (auto& element : dict) {
     ordered.emplace_back(element.key(), element.value());
