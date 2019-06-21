@@ -14,6 +14,7 @@
 #include <c10/core/TensorTypeIdRegistration.h>
 #include <ATen/core/Reduction.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/intrusive_ptr.h>
 
 #include <c10/util/Optional.h>
 
@@ -45,7 +46,12 @@ using TensorList = ArrayRef<Tensor>;
 
 class Context;
 struct Generator;
+
 struct Quantizer;
+// This is temporary typedef to enable Quantizer in aten native function API
+// we'll remove them when we are actually exposing Quantizer class
+// to frontend
+using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 static inline void noop_deleter(void*) {}
 
@@ -70,10 +76,6 @@ struct CAFFE2_API Type {
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }
-  virtual Allocator * allocator() const = 0;
-  virtual Device getDeviceFromPtr(void * data) const = 0;
-  virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
-  virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
   virtual Type & toBackend(Backend b) const = 0;
   virtual Type & toScalarType(ScalarType s) const = 0;
@@ -137,9 +139,6 @@ struct CAFFE2_API Type {
     }
   }
 
-  // example
-  // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
-  ${pure_virtual_type_method_declarations}
 protected:
   TensorTypeId type_id_;
   bool is_variable_;

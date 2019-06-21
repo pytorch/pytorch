@@ -7,6 +7,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
+#include <ATen/native/cuda/LaunchUtils.h>
 
 namespace at { namespace native {
 
@@ -36,15 +37,6 @@ static int getNumThreads(int nElem) {
     }
   }
   return MAX_BLOCK_SIZE;
-}
-
-static int lastPow2(unsigned int n) {
-    n |= (n >>  1);
-    n |= (n >>  2);
-    n |= (n >>  4);
-    n |= (n >>  8);
-    n |= (n >> 16);
-    return n - (n >> 1);
 }
 
 // Returns the index of the most significant 1 bit in `val`.

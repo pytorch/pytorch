@@ -33,6 +33,7 @@ SKIP_PYTHON_BINDINGS = [
     'copy_sparse_to_sparse_', 'copy_',
     'numpy_T',  # this needs to be an attribute in Python, not a function
     'nonzero(_(out|numpy))?',
+    'set_quantizer_',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -151,7 +152,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,double,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
-    'QScheme',
+    'QScheme', 'double',
 }
 
 TENSOR_OPTIONS = CodeTemplate("""\
