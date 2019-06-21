@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 
 #include <algorithm>
+#include <mutex>
 
 float THCudaBlas_Sdot(THCState *state, int64_t n, float *x, int64_t incx, float *y, int64_t incy)
 {
@@ -245,19 +246,14 @@ void adjustLdLevel3(char transa, char transb, int64_t m, int64_t n, int64_t k, i
 static void checkCuda90Bug(int i_m, int i_n, int i_k)
 {
 #if CUDA_VERSION < 9200 && CUDA_VERSION >= 9000
-  static bool alreadyWarned = false;
-  if (alreadyWarned) {
-    return;
-  }
+  static std::once_flag alreadyWarned;
   const int LIMIT = 1 << 21;
   if (i_m > LIMIT || i_n > LIMIT || i_k > LIMIT) {
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major == 5 || prop->major == 6) {
-      if (!alreadyWarned) {
-        fprintf(stderr, "Matrix multiplication for dimensions larger than 2^21 has known bugs on your combination of CUDA version and device type. "
-            "Please consider upgrading to CUDA 9.2 or later.\n");
-        alreadyWarned = true;
-      }
+      std::call_once(alreadyWarned, []() {
+        TORCH_WARN("Matrix multiplication for dimensions larger than 2^21 has known bugs on your combination of CUDA version and device type. Please consider upgrading to CUDA 9.2 or later.");
+      });
     }
   }
 #endif
