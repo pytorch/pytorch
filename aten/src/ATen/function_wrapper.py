@@ -1163,7 +1163,8 @@ def create_generic(top_env, declarations):
                 option['inferred_backend'] = 'Backend::CPU'
                 option['inferred_is_variable'] = 'false'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
-            top_env['function_declarations'].append(declaration.substitute(env))
+            top_env['function_declarations'].append(
+                check_namedtensor_enabled(declaration.substitute(env)))
             if is_factory_method:
                 top_env['function_definitions'].append(
                     check_namedtensor_enabled(FACTORY_DEFINITION.substitute(env)))
