@@ -28,10 +28,7 @@ namespace at {
 
 struct ComplexCPUType : public at::CPUTypeDefault {
   ComplexCPUType()
-      : CPUTypeDefault(
-            ComplexCPUTensorId(),
-            /*is_variable=*/false,
-            /*is_undefined=*/false) {}
+      : CPUTypeDefault() {}
 
   const char* toString() const override;
   TypeID ID() const override;
