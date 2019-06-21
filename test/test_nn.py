@@ -1942,42 +1942,63 @@ class TestNN(NNTestCase):
         self._test_nonlinearity_propagate_nan('cuda')
 
     def test_weight_norm(self):
+        # default init
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
         expected_output = m(input)
 
-        # add weight normalization
-        m = torch.nn.utils.weight_norm(m)
+        # default init: add weight normalization
+        m = torch.nn.utils.weight_norm(m, init='default')
         self.assertEqual(m.weight_v.size(), m.weight.size())
         self.assertEqual(m.weight_g.size(), (7, 1))
         self.assertEqual(m(input), expected_output)
 
-        # remove weight norm
+        # default init: remove weight norm
         m = torch.nn.utils.remove_weight_norm(m)
         self.assertFalse(hasattr(m, 'weight_g'))
         self.assertFalse(hasattr(m, 'weight_v'))
         self.assertEqual(m(input), expected_output)
 
-        # test with dim=1
-        m = torch.nn.utils.weight_norm(m, dim=1)
+        # default init: test with dim=1
+        m = torch.nn.utils.weight_norm(m, dim=1, init='default')
         self.assertEqual(m.weight_v.size(), m.weight.size())
         self.assertEqual(m.weight_g.size(), (1, 5))
         self.assertEqual(m(input), expected_output)
 
-        # test with dim=None
+        # default init: test with dim=None
         m = nn.Linear(5, 7)
         expected_output = m(input)
-        m = torch.nn.utils.weight_norm(m, dim=None)
+        m = torch.nn.utils.weight_norm(m, dim=None, init='default')
         self.assertEqual(m(input), expected_output)
 
+        # norm_preserving init
+        input = torch.randn(3, 5)
+        m = nn.Linear(5, 7)
+
+        # norm_preserving init: add weight normalization
+        m = torch.nn.utils.weight_norm(m, init='default')
+        self.assertEqual(m.weight_v.size(), m.weight.size())
+        self.assertEqual(m.weight_g.size(), (7, 1))
+
+        # norm_preserving init: remove weight norm
+        m = torch.nn.utils.remove_weight_norm(m)
+        self.assertFalse(hasattr(m, 'weight_g'))
+        self.assertFalse(hasattr(m, 'weight_v'))
+
+        # norm_preserving init: test with dim=1
+        m = torch.nn.utils.weight_norm(m, dim=1, init='default')
+        self.assertEqual(m.weight_v.size(), m.weight.size())
+        self.assertEqual(m.weight_g.size(), (1, 5))
+
         with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
-            m = torch.nn.utils.weight_norm(m)
-            m = torch.nn.utils.weight_norm(m)
+            m = torch.nn.utils.weight_norm(m, init='default')
+            m = torch.nn.utils.weight_norm(m, init='default')
 
     def test_weight_norm_pickle(self):
-        m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
-        m = pickle.loads(pickle.dumps(m))
-        self.assertIsInstance(m, nn.Linear)
+        for wn_init in ['default', 'norm_preserving']:
+            m = torch.nn.utils.weight_norm(nn.Linear(5, 7), init=wn_init)
+            m = pickle.loads(pickle.dumps(m))
+            self.assertIsInstance(m, nn.Linear)
 
     def test_spectral_norm(self):
         input = torch.randn(3, 5)
