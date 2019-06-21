@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
 
 namespace c10 {
 namespace impl {
@@ -47,19 +46,8 @@ inline intrusive_ptr<DictImpl> DictImpl::copy() const {
 }
 
 template<class Key, class Value>
-Dict<Key, Value> make_dict() {
-  static_assert(!std::is_same<IValue, Key>::value, "IValue isn't a valid Dict key. If you know the concrete key type at compile time, please specify it to make_dict<Key, Value>(). If you only know it at runtime, impl::make_generic_dict() might work for you.");
-  static_assert(!std::is_same<IValue, Value>::value, "IValue isn't a valid Dict value. If you know the concrete key type at compile time, please specify it to make_dict<Key, Value>(). If you only know it at runtime, impl::make_generic_dict() might work for you.");
-  return Dict<Key, Value>(make_intrusive<detail::DictImpl>());
-}
-
-namespace impl {
-inline GenericDict make_generic_dict(TypePtr keyType, TypePtr valueType) {
-  return GenericDict(make_intrusive<detail::DictImpl>());
-}
-inline GenericDict make_generic_dict() {
-  return GenericDict(make_intrusive<detail::DictImpl>());
-}
+Dict<Key, Value>::Dict()
+  :Dict(make_intrusive<detail::DictImpl>()) {
 }
 
 template<class Key, class Value>

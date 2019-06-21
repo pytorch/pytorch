@@ -16,8 +16,6 @@ template<class T> class List;
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
-template<class T> List<T> make_list();
-template<class T> List<T> make_list(ArrayRef<T> values);
 
 namespace detail {
 
@@ -35,14 +33,6 @@ struct ListImpl final : public c10::intrusive_ptr_target {
 }
 
 namespace impl {
-
-C10_DEPRECATED_MESSAGE("Creating generic lists without type information is deprecated. Please use make_generic_list(elementType) instead.")
-List<IValue> make_generic_list();
-C10_DEPRECATED_MESSAGE("Creating generic lists without type information is deprecated. Please use make_generic_list(elementType, values) instead.")
-List<IValue> make_generic_list(ArrayRef<IValue> values);
-
-List<IValue> make_generic_list(TypePtr elementType);
-List<IValue> make_generic_list(TypePtr elementType, ArrayRef<IValue> values);
 
 template<class T, class Iterator, class StorageT> class ListIterator;
 
@@ -193,7 +183,7 @@ template<class T> bool list_is_equal(const List<T>& lhs, const List<T>& rhs);
  * This is a pointer type. After a copy, both Lists
  * will share the same storage:
  *
- * > List<int> a = make_list<string>();
+ * > List<int> a;
  * > List<int> b = a;
  * > b.push_back("three");
  * > ASSERT("three" == a.get(0));
@@ -237,20 +227,14 @@ public:
   /**
    * Constructs an empty list.
    */
-  friend List make_list<T>();
+  List();
 
   /**
-   * Constructs a list with some initial values
+   * Constructs a list with some initial values.
+   * Example:
+   *   List<int> a({2, 3, 4});
    */
-  friend List make_list<T>(ArrayRef<T>);
-
-  friend List<IValue> impl::make_generic_list();
-  friend List<IValue> impl::make_generic_list(ArrayRef<IValue> values);
-  friend List<IValue> impl::make_generic_list(TypePtr elementType);
-  friend List<IValue> impl::make_generic_list(TypePtr elementType, ArrayRef<IValue> values);
-
-  // please use make_list instead.
-  List() = delete;
+  explicit List(ArrayRef<T> initial_values);
 
   List(const List&) = default;
   List& operator=(const List&) = default;
@@ -462,7 +446,7 @@ const std::vector<T>& toVector(const List<T>& list) {
 template<class T>
 List<T> toList(std::vector<T> list) {
   static_assert(std::is_same<T, IValue>::value || std::is_same<T, typename List<T>::StorageT>::value, "toList only works for lists that store their elements as std::vector<T>. You tried to call it for a list that stores its elements as std::vector<IValue>.");
-  List<T> result = make_list<T>();
+  List<T> result;
   result.impl_->list = std::move(list);
   return result;
 }

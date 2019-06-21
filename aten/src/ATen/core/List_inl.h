@@ -1,65 +1,24 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
 
 namespace c10 {
 
-namespace detail {
 template<class T>
-void add_initial_elements(const List<T>& list, ArrayRef<T> values) {
-  list.reserve(values.size());
+List<T>::List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements)
+: impl_(std::move(elements)) {}
+
+template<class T>
+List<T>::List()
+: List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>()) {}
+
+template<class T>
+List<T>::List(ArrayRef<T> values)
+: List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>()) {
+  impl_->list.reserve(values.size());
   for (const T& element : values) {
-    list.push_back(element);
+    impl_->list.push_back(element);
   }
-}
-}
-
-template<class T>
-List<T> make_list() {
-  return List<T>(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>());
-}
-
-template<class T> List<T> make_list(ArrayRef<T> values) {
-  List<T> result = make_list<T>();
-  detail::add_initial_elements(result, values);
-  return result;
-}
-
-template<>
-C10_DEPRECATED_MESSAGE("IValue isn't a valid List element type. If you know the concrete key type at compile time, please specify it to make_list<T>(). If you only know it at runtime, impl::make_generic_list() might work for you.")
-inline impl::GenericList make_list<IValue>() {
-  return impl::GenericList(make_intrusive<detail::ListImpl<IValue>>());
-}
-
-template<>
-C10_DEPRECATED_MESSAGE("IValue isn't a valid List element type. If you know the concrete key type at compile time, please specify it to make_list<T>(). If you only know it at runtime, impl::make_generic_list() might work for you.")
-inline impl::GenericList make_list<IValue>(ArrayRef<IValue> values) {
-  impl::GenericList result(make_intrusive<detail::ListImpl<IValue>>());
-  detail::add_initial_elements(result, values);
-  return result;
-}
-
-namespace impl {
-inline GenericList make_generic_list() {
-  return GenericList(make_intrusive<detail::ListImpl<IValue>>());
-}
-
-inline GenericList make_generic_list(ArrayRef<IValue> values) {
-  auto result = GenericList(make_intrusive<detail::ListImpl<IValue>>());
-  detail::add_initial_elements(result, values);
-  return result;
-}
-
-inline GenericList make_generic_list(TypePtr elementType) {
-  return GenericList(make_intrusive<detail::ListImpl<IValue>>());
-}
-
-inline GenericList make_generic_list(TypePtr elementType, ArrayRef<IValue> values) {
-  auto result = GenericList(make_intrusive<detail::ListImpl<IValue>>());
-  detail::add_initial_elements(result, values);
-  return result;
-}
 }
 
 template<class T>
@@ -73,9 +32,6 @@ List<T>& List<T>::operator=(List&& rhs) noexcept {
   rhs.impl_ = make_intrusive<detail::ListImpl<StorageT>>();
   return *this;
 }
-
-template<class T>
-List<T>::List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements): impl_(std::move(elements)) {}
 
 template<class T>
 List<T> List<T>::copy() const {
