@@ -587,12 +587,6 @@ TEST(ListTest_NonIValueBasedList, whenCallingExtractWithExistingPosition_thenRet
   EXPECT_EQ(4, list.extract(1));
 }
 
-TEST(ListTest_NonIValueBasedList, whenCallingExtractWithExistingPosition_thenListElementBecomesInvalid) {
-  List<int64_t> list = make_list<int64_t>({3, 4});
-  list.extract(0);
-  EXPECT_EQ(0, list.get(0));
-}
-
 TEST(ListTest_NonIValueBasedList, whenCallingExtractWithNonExistingPosition_thenThrowsException) {
   List<int64_t> list = make_list<int64_t>({3, 4});
   EXPECT_THROW(list.extract(2), std::out_of_range);
