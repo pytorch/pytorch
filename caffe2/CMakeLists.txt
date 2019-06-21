@@ -882,6 +882,12 @@ if ("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
   target_compile_definitions(torch PUBLIC "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
 endif()
 
+# Native threadpool settings
+if (USE_EIGEN_THREADPOOL)
+  message(STATUS "Using Eigen thread pool as a native thread pool")
+  target_compile_definitions(caffe2 PUBLIC "-DUSE_EIGEN_THREADPOOL=1")
+endif()
+
 if (MSVC AND NOT BUILD_SHARED_LIBS)
   # Note [Supporting both static and dynamic libraries on Windows]
   # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
