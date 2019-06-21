@@ -32,8 +32,6 @@ struct CAFFE2_API ${Type}Dispatch {
 struct CAFFE2_API ${Type} : public TypeDefault {
   explicit ${Type}();
 
-  Allocator* allocator() const override;
-  Device getDeviceFromPtr(void * data) const override;
   virtual Backend backend() const override;
   virtual const char * toString() const override;
   virtual TypeID ID() const override;
