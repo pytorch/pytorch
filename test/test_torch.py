@@ -3136,6 +3136,32 @@ class _TestTorchMixin(object):
         self.assertEqual(q.q_scale(), q2.q_scale())
         self.assertEqual(q.q_zero_point(), q2.q_zero_point())
 
+    def test_qtensor_compare_api(self):
+        scale = 2.0
+        zero_point = 10
+        r = torch.ones(15, dtype=torch.float) * 2
+        r_max, r_min, r_argmax, r_argmin = torch.max(r), torch.min(r), torch.argmax(r), torch.argmin(r)
+        r_sort, _ = torch.sort(r)
+        r_argsort = torch.argsort(r)
+        for dtype in [torch.quint8, torch.qint8, torch.qint32]:
+            if dtype == torch.qint32:
+                zero_point = 0
+
+            def quantize(r):
+                return torch.quantize_linear(r, scale, zero_point, dtype)
+            qr = quantize(r)
+            max, min, argmax, argmin = torch.max(qr), torch.min(qr), torch.argmax(qr), torch.argmin(qr)
+            sort, _ = torch.sort(qr)
+            argsort = torch.argsort(qr)
+            print('rmax', quantize(r_max))
+            print('r', max)
+            # TODO: change to use self.assertEqual(qtensor)
+            self.assertEqual(quantize(r_max).int_repr(), max.int_repr())
+            self.assertEqual(quantize(r_min).int_repr(), min.int_repr())
+            self.assertEqual(r_argmax, argmax)
+            self.assertEqual(r_argmin, argmin)
+            self.assertEqual(quantize(r_sort).int_repr(), sort.int_repr())
+            self.assertEqual(r_argsort, argsort)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'fewer than 2 GPUs detected')
     def test_device_guard(self):
