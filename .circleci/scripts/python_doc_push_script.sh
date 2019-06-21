@@ -7,7 +7,7 @@ sudo apt-get -y install expect-dev
 # This is where the local pytorch install in the docker image is located
 pt_checkout="/var/lib/jenkins/workspace"
 
-echo "doc_push_script.sh: Invoked with $*"
+echo "python_doc_push_script.sh: Invoked with $*"
 
 git clone https://github.com/pytorch/pytorch.github.io -b site
 pushd pytorch.github.io
@@ -18,14 +18,14 @@ set -ex
 # (pytorch.github.io/$install_path)
 install_path="$1"
 if [ -z "$install_path" ]; then
-echo "error: doc_push_script.sh: install_path (arg1) not specified"
+echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
 fi
 
 # Argument 2: What version of the docs we are building.
 version="$2"
 if [ -z "$version" ]; then
-echo "error: doc_push_script.sh: version (arg2) not specified"
+echo "error: python_doc_push_script.sh: version (arg2) not specified"
   exit 1
 fi
 
