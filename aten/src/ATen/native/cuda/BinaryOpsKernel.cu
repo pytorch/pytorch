@@ -64,7 +64,7 @@ void mul_kernel_cuda(TensorIterator& iter) {
       return a * b;
       });
     }
-  }
+  });
 }
 
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
