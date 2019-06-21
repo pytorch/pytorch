@@ -143,18 +143,25 @@ def shell(command, cwd=None):
 
 
 def run_test(executable, test_module, test_directory, options):
+    if test_module != 'test_dataloader':
+        return 0
     unittest_args = options.additional_unittest_args
     if options.verbose:
         unittest_args.append('--verbose')
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    argv = [test_module + '.py'] + unittest_args
+    argv = [test_module + '.py'] + unittest_args + ['TestDataLoader.test_proper_exit']
 
     command = executable + argv
-    return shell(command, test_directory)
+    for _ in range(75):
+        exitcode = shell(command, test_directory)
+        if exitcode != 0:
+            break
+    return exitcode
 
 
 def test_cpp_extensions(executable, test_module, test_directory, options):
+    return 0
     try:
         cpp_extension.verify_ninja_availability()
     except RuntimeError:
@@ -189,6 +196,7 @@ def test_cpp_extensions(executable, test_module, test_directory, options):
 
 
 def test_distributed(executable, test_module, test_directory, options):
+    return 0
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
     if options.verbose and not mpi_available:
         print_to_stderr(

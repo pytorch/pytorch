@@ -436,11 +436,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #           `_DataLoaderiter._try_get_data()` for details.
     #
     #           Additionally, for child exit on non-Windows platforms, we also
-    #           register a SIGCHLD handler (which is supported on Windows) on
-    #           the main process, which checks if any of the workers fail in the
-    #           (Python) handler. This is more efficient and faster in detecting
-    #           worker failures, compared to only using the above mechanism.
-    #           See `DataLoader.cpp` and `_utils/signal_handling.py` for details.
+    #           register a SIGCHLD handler (which is not supported on Windows)
+    #           on the main process, which checks if any of the workers fail in
+    #           the (Python) handler. This is more efficient and faster in
+    #           detecting worker failures, compared to only using the above
+    #           mechanism. See `DataLoader.cpp` and `_utils/signal_handling.py`
+    #           for details.
     #
     #           For `.get()` calls where the sender(s) is not the workers, we
     #           guard them with timeouts, and check the status of the sender

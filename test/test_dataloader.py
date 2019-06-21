@@ -1209,9 +1209,6 @@ class TestDataLoader(TestCase):
                 exit_methods = [None, 'loader_error', 'loader_kill']
 
             for exit_method in exit_methods:
-                if exit_method == 'worker_kill' and hold_iter_reference:
-                    # FIXME: this combination sometimes hangs.
-                    continue
 
                 desc = []
                 desc.append('is_iterable_dataset={}'.format(is_iterable_dataset))
