@@ -69,19 +69,17 @@ inline intrusive_ptr<DictImpl> DictImpl::copy() const {
 }
 
 template<class Key, class Value>
-Dict<Key, Value> make_dict() {
-  static_assert(!std::is_same<IValue, Key>::value, "IValue isn't a valid Dict key. If you know the concrete key type at compile time, please specify it to make_dict<Key, Value>(). If you only know it at runtime, impl::make_generic_dict() might work for you.");
-  static_assert(!std::is_same<IValue, Value>::value, "IValue isn't a valid Dict value. If you know the concrete key type at compile time, please specify it to make_dict<Key, Value>(). If you only know it at runtime, impl::make_generic_dict() might work for you.");
-  return Dict<Key, Value>(make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), detail::DictImpl::DictElementTypes{getTypePtr<Key>(), getTypePtr<Value>()}));
+Dict<Key, Value>::Dict()
+  :Dict(make_intrusive<detail::DictImpl>(
+      typename detail::DictImpl::dict_map_type(),
+      {getTypePtr<Key>(), getTypePtr<Value>()})) {
 }
 
-namespace impl {
-inline GenericDict make_generic_dict(TypePtr keyType, TypePtr valueType) {
-  return GenericDict(make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), detail::DictImpl::DictElementTypes{std::move(keyType), std::move(valueType)}));
-}
-inline GenericDict make_generic_dict() {
-  return GenericDict(make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), c10::nullopt));
-}
+template<>
+inline Dict<IValue, IValue>::Dict()
+  :Dict(make_intrusive<detail::DictImpl>(
+    detail::DictImpl::dict_map_type(),
+    c10::nullopt)) {
 }
 
 template<class Key, class Value>

@@ -13,17 +13,7 @@ template<class Key, class Value> class Dict;
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
-/**
- * Creates an empty dict.
- */
-template<class Key, class Value>
-Dict<Key, Value> make_dict();
-
 namespace impl {
-C10_DEPRECATED_MESSAGE("Creating generic dicts without type information is deprecated. Please use make_generic_dict(keyType, valueType) instead.")
-Dict<IValue, IValue> make_generic_dict();
-
-Dict<IValue, IValue> make_generic_dict(TypePtr keyType, TypePtr valueType);
 bool shallowEquals(const IValue& lhs, const IValue& rhs);
 
 using valid_dict_key_types = guts::typelist::typelist<
@@ -176,12 +166,11 @@ template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Va
 
 /**
  * An object of this class stores a map from Key to Value.
- * You can create instances using the make_dict<Key, Value>() function.
  *
  * This is a pointer type. After a copy, both Dicts
  * will share the same storage:
  *
- * > Dict<int, string> a = make_dict<int, string>();
+ * > Dict<int, string> a;
  * > Dict<int, string> b = a;
  * > b.insert(3, "three");
  * > ASSERT("three" == a.at(3));
@@ -221,12 +210,7 @@ public:
   /**
    * Creates an empty dict.
    */
-  friend Dict make_dict<Key, Value>();
-  friend Dict<IValue, IValue> impl::make_generic_dict(TypePtr keyType, TypePtr valueType);
-  friend Dict<IValue, IValue> impl::make_generic_dict();
-
-  // please use make_dict instead
-  Dict() = delete;
+  Dict();
 
   ~Dict() = default;
 

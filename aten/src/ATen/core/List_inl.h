@@ -7,59 +7,43 @@ namespace c10 {
 
 template<class T> TypePtr getTypePtr();
 
-namespace detail {
 template<class T>
-void add_initial_elements(const List<T>& list, ArrayRef<T> values) {
-  list.reserve(values.size());
+List<T>::List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements)
+: impl_(std::move(elements)) {}
+
+template<class T>
+List<T>::List()
+: List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>(
+  typename detail::ListImpl<typename List<T>::StorageT>::list_type(),
+  getTypePtr<T>())) {}
+
+template<>
+inline List<IValue>::List()
+: List(make_intrusive<detail::ListImpl<IValue>>(
+  typename detail::ListImpl<IValue>::list_type(),
+  c10::nullopt)) {}
+
+template<class T>
+List<T>::List(ArrayRef<T> values)
+: List(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>(
+    typename detail::ListImpl<typename List<T>::StorageT>::list_type(),
+    getTypePtr<T>())) {
+  impl_->list.reserve(values.size());
   for (const T& element : values) {
-    list.push_back(element);
+    impl_->list.push_back(element);
   }
 }
-}
-
-template<class T>
-List<T> make_list() {
-  return List<T>(make_intrusive<detail::ListImpl<typename List<T>::StorageT>>(std::vector<typename List<T>::StorageT>{}, getTypePtr<T>()));
-}
-
-template<class T> List<T> make_list(ArrayRef<T> values) {
-  List<T> result = make_list<T>();
-  detail::add_initial_elements(result, values);
-  return result;
-}
 
 template<>
-C10_DEPRECATED_MESSAGE("IValue isn't a valid List element type. If you know the concrete key type at compile time, please specify it to make_list<T>(). If you only know it at runtime, impl::make_generic_list() might work for you.")
-inline impl::GenericList make_list<IValue>() {
-  return impl::GenericList(make_intrusive<detail::ListImpl<IValue>>(std::vector<IValue>{}, c10::nullopt));
-}
-
-template<>
-C10_DEPRECATED_MESSAGE("IValue isn't a valid List element type. If you know the concrete key type at compile time, please specify it to make_list<T>(). If you only know it at runtime, impl::make_generic_list() might work for you.")
-inline impl::GenericList make_list<IValue>(ArrayRef<IValue> values) {
-  return impl::GenericList(make_intrusive<detail::ListImpl<IValue>>(values.vec(), c10::nullopt));
+inline List<IValue>::List(ArrayRef<IValue> values)
+: List(make_intrusive<detail::ListImpl<IValue>>(
+    values.vec(),
+    c10::nullopt)) {
 }
 
 namespace impl {
-inline GenericList make_generic_list() {
-  return GenericList(make_intrusive<detail::ListImpl<IValue>>(std::vector<IValue>{}, c10::nullopt));
-}
-
-inline GenericList make_generic_list(ArrayRef<IValue> values) {
-  return GenericList(make_intrusive<detail::ListImpl<IValue>>(values.vec(), c10::nullopt));
-}
-
-inline GenericList make_generic_list(TypePtr elementType) {
-  // TODO Assert that elementType would result in an IValue-based list
-  return GenericList(make_intrusive<detail::ListImpl<IValue>>(std::vector<IValue>{}, std::move(elementType)));
-}
-
-inline GenericList make_generic_list(TypePtr elementType, ArrayRef<IValue> values) {
-  return GenericList(make_intrusive<detail::ListImpl<IValue>>(values.vec(), std::move(elementType)));
-}
-
 template<class T>
-List<T> toTypedList(GenericList list) {
+List<T> toTypedList(impl::GenericList list) {
   static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toTypedList with lists that store their elements as IValues.");
   if (list.impl_->elementType.has_value()) {
     // TODO Show types in error message: TORCH_INTERNAL_ASSERT(getTypePtr<T>() == list.impl_->elementType, "Tried to cast a List with element type ", (*list.impl_->elementType)->str(), " to a list with different element type ", getTypePtr<T>()->str());
@@ -73,7 +57,7 @@ List<T> toTypedList(GenericList list) {
 }
 
 template<class T>
-GenericList toGenericList(List<T> list) {
+impl::GenericList toGenericList(List<T> list) {
   static_assert(std::is_same<IValue, typename List<T>::StorageT>::value, "Can only call toGenericList with lists that store their elements as IValues.");
   return GenericList(std::move(list.impl_));
 }
@@ -90,9 +74,6 @@ List<T>& List<T>::operator=(List&& rhs) noexcept {
   rhs.impl_ = make_intrusive<detail::ListImpl<StorageT>>(std::vector<StorageT>{}, impl_->elementType);
   return *this;
 }
-
-template<class T>
-List<T>::List(c10::intrusive_ptr<detail::ListImpl<StorageT>>&& elements): impl_(std::move(elements)) {}
 
 template<class T>
 List<T> List<T>::copy() const {
