@@ -24,35 +24,35 @@
 
 namespace at {
 
-struct ComplexCPUType {
-  static Tensor empty(IntArrayRef size, const TensorOptions & options) {
-    AT_ASSERT(options.device().is_cpu());
+static Tensor empty_complex(IntArrayRef size, const TensorOptions & options) {
+  AT_ASSERT(options.device().is_cpu());
 
-    for (auto x: size) {
-      TORCH_CHECK(x >= 0, "Trying to create tensor using size with negative dimension: ", size);
-    }
-    auto* allocator = at::getCPUAllocator();
-    int64_t nelements = at::prod_intlist(size);
-    auto dtype = options.dtype();
-    auto storage_impl = c10::make_intrusive<StorageImpl>(
-        dtype,
-        nelements,
-        allocator->allocate(nelements * dtype.itemsize()),
-        allocator,
-        /*resizable=*/true);
-
-    auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUTensorId());
-    // Default TensorImpl has size [0]
-    if (size.size() != 1 || size[0] != 0) {
-      tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-    }
-    return tensor;
+  for (auto x: size) {
+    TORCH_CHECK(x >= 0, "Trying to create tensor using size with negative dimension: ", size);
   }
-};
+  auto* allocator = at::getCPUAllocator();
+  int64_t nelements = at::prod_intlist(size);
+  auto dtype = options.dtype();
+  auto storage_impl = c10::make_intrusive<StorageImpl>(
+      dtype,
+      nelements,
+      allocator->allocate(nelements * dtype.itemsize()),
+      allocator,
+      /*resizable=*/true);
 
-static auto& complex_empty_registration = globalATenDispatch()
-  .registerOp(Backend::ComplexCPU, "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", &ComplexCPUType::empty);
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::ComplexCPUTensorId());
+  // Default TensorImpl has size [0]
+  if (size.size() != 1 || size[0] != 0) {
+    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+  }
+  return tensor;
+}
 
-} // namespace at
+static auto& complex_empty_registration = globalATenDispatch().registerOp(
+    Backend::ComplexCPU,
+    "aten::empty(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor",
+    &empty_complex);
+
+}
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) { }
