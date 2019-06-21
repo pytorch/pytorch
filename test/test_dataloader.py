@@ -556,7 +556,9 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
             elif exit_method == 'loader_kill':
                 kill_pid(os.getpid())
             elif exit_method == 'worker_kill':
-                kill_pid(workers[-1].pid)  # kill last worker
+                kill_pid(workers[-1].pid)  # kill last worke
+                workers[-1].join(JOIN_TIMEOUT)
+                assert not workers[-1].is_alive()
 
     if not hold_iter_reference:
         # Tries to trigger the __del__ clean-up rather than the automatic
