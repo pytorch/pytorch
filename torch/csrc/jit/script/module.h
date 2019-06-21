@@ -109,13 +109,9 @@ struct TORCH_API Method {
 
 struct TORCH_API Module {
   Module(std::string class_name)
-      : module_value_(c10::ivalue::Object::create(
-            ClassType::create(
-                QualifiedName(std::move(class_name)),
-                std::make_shared<CompilationUnit>(),
-                /*is_module=*/true),
-            0)) {}
-  Module() : Module("__main__") {}
+      : module_value_(create_module_object(std::move(class_name))) {}
+  // module_value_ null and will be lazily initialized if is needed
+  Module() {}
   Module(ModulePtr module_value) : module_value_(std::move(module_value)) {}
   ~Module() {}
 
@@ -326,6 +322,11 @@ struct TORCH_API Module {
   }
 
   ModulePtr module_object() const {
+    if (!module_value_) {
+      // User has created a Model without assigning it to something already
+      // loaded. This is done in tests, and when using the .define method.
+      module_value_ = create_module_object("__main__");
+    }
     return module_value_;
   }
   ClassTypePtr type() const {
@@ -425,7 +426,16 @@ struct TORCH_API Module {
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
-  ModulePtr module_value_;
+  static ModulePtr create_module_object(std::string class_name) {
+    return c10::ivalue::Object::create(
+        ClassType::create(
+            QualifiedName(std::move(class_name)),
+            std::make_shared<CompilationUnit>(),
+            /*is_module=*/true),
+        0);
+  }
+  // mutable be we lazily initialize in module_object.
+  mutable ModulePtr module_value_;
 };
 
 // this iterator for the slot list defined below has a position in the list i_
