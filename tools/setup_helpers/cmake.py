@@ -314,10 +314,6 @@ class CMake:
         if single_thread_pool:
             CMake.defines(args, EXPERIMENTAL_SINGLE_THREAD_POOL=single_thread_pool)
 
-        use_eigen_threadpool = os.getenv('USE_EIGEN_THREADPOOL')
-        if use_eigen_threadpool:
-            CMake.defines(args, USE_EIGEN_THREADPOOL=use_eigen_threadpool)
-
         if USE_GLOO_IBVERBS:
             CMake.defines(args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
 

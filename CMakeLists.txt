@@ -138,7 +138,6 @@ cmake_dependent_option(
     USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
     "USE_GLOO" OFF)
 option(USE_TBB "Use TBB" OFF)
-option(USE_EIGEN_THREADPOOL, "Use Eigen thread pool" OFF)
 option(USE_MKL_SEQ "Use sequential MKL" OFF)
 option(USE_MKL_TBB "Use TBB version of MKL" OFF)
 
