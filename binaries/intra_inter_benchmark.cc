@@ -2,7 +2,6 @@
 #include "ATen/Parallel.h"
 
 #include "c10/util/Flags.h"
-#include "caffe2/core/init.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -101,7 +100,10 @@ void print_runtime_stats(const std::vector<float>& runtimes) {
 }
 
 int main(int argc, char** argv) {
-  caffe2::GlobalInit(&argc, &argv);
+  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
+    std::cout << "Failed to parse command line flags" << std::endl;
+    return -1;
+  }
   at::init_num_threads();
 
   if (FLAGS_inter_op_threads > 0) {
