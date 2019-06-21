@@ -238,8 +238,8 @@ void adjustLdLevel3(char transa, char transb, int64_t m, int64_t n, int64_t k, i
 
 }
 
-// Check https://gist.github.com/umanwizard/2b2e2fc12485ef6dc1cdfb1421276dd9
-// to repro the bug. We don't know the exact conditions that trigger it,
+// Check https://github.com/pytorch/pytorch/issues/22078
+// for information about the bug. We don't know the exact conditions that trigger it,
 // but using Sgemm or Hgemm on Maxwell or Pascal seems to be a
 // necessary condition.
 static void checkCuda90Bug(int i_m, int i_n, int i_k)
