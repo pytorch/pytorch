@@ -259,7 +259,7 @@ struct ParserImpl {
         // TK_FOR targets should only parse exprs prec greater than 4, which only
         // includes subset of Exprs that suppose to be on the LHS according to the
         // python grammer https://docs.python.org/3/reference/grammar.html
-        auto target = parseExp(4);
+        auto target = parseLHSExp();
         L.expect(TK_IN);
         auto iter = parseExp();
         prefix = ListComp::create(pos, Expr(prefix), target, iter);
@@ -334,7 +334,7 @@ struct ParserImpl {
 
   // parse LHS acceptable exprs, which only includes subset of Exprs that prec is
   // greater than 4 according to the python grammer
-  Expr parseLhsExp() {
+  Expr parseLHSExp() {
     return parseExp(4);
   }
 
@@ -540,8 +540,7 @@ struct ParserImpl {
   TreeRef parseFor() {
     auto r = L.cur().range;
     L.expect(TK_FOR);
-    auto targets =
-        parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseLhsExp);
+    auto targets = parseList(TK_NOTHING, ',', TK_IN, &ParserImpl::parseLHSExp);
     auto itrs = parseList(TK_NOTHING, ',', ':', &ParserImpl::parseExp);
     auto body = parseStatements();
     return For::create(r, targets, itrs, body);
