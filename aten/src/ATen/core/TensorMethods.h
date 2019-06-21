@@ -1064,13 +1064,13 @@ inline Tensor Tensor::dequantize() const {
     static auto table = globalATenDispatch().getOpTable("aten::dequantize(Tensor self) -> Tensor");
     return table->getOp<Tensor (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
-inline Scalar Tensor::q_scale() const {
-    static auto table = globalATenDispatch().getOpTable("aten::q_scale(Tensor self) -> Scalar");
-    return table->getOp<Scalar (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+inline double Tensor::q_scale() const {
+    static auto table = globalATenDispatch().getOpTable("aten::q_scale(Tensor self) -> float");
+    return table->getOp<double (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
-inline Scalar Tensor::q_zero_point() const {
-    static auto table = globalATenDispatch().getOpTable("aten::q_zero_point(Tensor self) -> Scalar");
-    return table->getOp<Scalar (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
+inline int64_t Tensor::q_zero_point() const {
+    static auto table = globalATenDispatch().getOpTable("aten::q_zero_point(Tensor self) -> int");
+    return table->getOp<int64_t (const Tensor &)>(tensorTypeIdToBackend(type_id()), is_variable())(*this);
 }
 inline Tensor Tensor::int_repr() const {
     static auto table = globalATenDispatch().getOpTable("aten::int_repr(Tensor self) -> Tensor");
