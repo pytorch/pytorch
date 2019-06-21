@@ -61,7 +61,7 @@ DOUBLE_TENSORTYPES = [torch.double]
 
 dtype2prec = {torch.float: 1e-5,
               torch.double: 1e-5,
-              torch.half: 1e-1}
+              torch.half: 1e-2}
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
