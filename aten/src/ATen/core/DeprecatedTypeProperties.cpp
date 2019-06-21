@@ -2,15 +2,16 @@
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/UnsafeFromTH.h>
 
 namespace at {
 
 Tensor DeprecatedTypeProperties::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  return getDispatchType().unsafeTensorFromTH(th_pointer, retain);
+  return at::unsafeTensorFromTH(th_pointer, retain);
 }
 
 Storage DeprecatedTypeProperties::unsafeStorageFromTH(void * th_pointer, bool retain) const {
-  return getDispatchType().unsafeStorageFromTH(th_pointer, retain);
+  return at::unsafeStorageFromTH(th_pointer, retain);
 }
 
 Tensor DeprecatedTypeProperties::copy(const Tensor & src, bool non_blocking, c10::optional<Device> to_device) const {
