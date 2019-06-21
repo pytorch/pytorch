@@ -139,6 +139,8 @@ cmake_dependent_option(
     "USE_GLOO" OFF)
 option(USE_TBB "Use TBB" OFF)
 option(USE_EIGEN_THREADPOOL, "Use Eigen thread pool" OFF)
+option(USE_MKL_SEQ "Use sequential MKL" OFF)
+option(USE_MKL_TBB "Use TBB version of MKL" OFF)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)

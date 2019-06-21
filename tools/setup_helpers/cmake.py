@@ -298,10 +298,10 @@ class CMake:
             CMake.defines(args, USE_TBB=check_env_flag('USE_TBB'))
 
         if os.getenv('MKL_SEQ'):
-            CMake.defines(args, INTEL_MKL_SEQUENTIAL=check_env_flag('MKL_SEQ'))
+            CMake.defines(args, USE_MKL_SEQ=check_env_flag('MKL_SEQ'))
 
         if os.getenv('MKL_TBB'):
-            CMake.defines(args, INTEL_MKL_TBB=check_env_flag('MKL_TBB'))
+            CMake.defines(args, USE_MKL_TBB=check_env_flag('MKL_TBB'))
 
         mkldnn_threading = os.getenv('MKLDNN_THREADING')
         if mkldnn_threading:
