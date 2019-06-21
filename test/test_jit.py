@@ -15684,14 +15684,14 @@ class TestDict(JitTestCase):
         self.checkScript(setdefault, (self.dict(), 'a', torch.randn(2, 2)))
         self.checkScript(setdefault, (self.dict(), 'nonexistant', torch.randn(2, 2)))
 
-    # def test_update(self):
-    #     def update(a, b):
-    #         # type: (Dict[str, Tensor], Dict[str, Tensor]) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]
-    #         a.update(b)
-    #         return a, b
-    #
-    #     self.checkScript(update, (self.dict(), self.dict()))
-    #     self.checkScript(update, (self.dict(), self.dict2()))
+    def test_update(self):
+        def update(a, b):
+            # type: (Dict[str, Tensor], Dict[str, Tensor]) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]
+            a.update(b)
+            return a, b
+
+        self.checkScript(update, (self.dict(), self.dict()))
+        self.checkScript(update, (self.dict(), self.dict2()))
 
     def test_popitem(self):
         @torch.jit.script

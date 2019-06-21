@@ -1806,9 +1806,17 @@ int dictContains(Stack& stack) {
 
 int dictClear(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  std::cout << dict << "\n";
   dict.clear();
-  std::cout << dict << "\n";
+  return 0;
+}
+
+int dictUpdate(Stack& stack) {
+  auto to_add = pop(stack).toGenericDict();
+  auto dict = pop(stack).toGenericDict();
+
+  for (auto item : to_add) {
+    dict.insert(item.key(), item.value());
+  }
   return 0;
 }
 
@@ -2392,6 +2400,10 @@ RegisterOperators reg2({
           dictPopItem),                                                       \
       Operator(                                                               \
           "aten::clear(Dict(" key_type ", t)(a!) self) -> ()", dictClear),    \
+      Operator(                                                               \
+          "aten::update(Dict(" key_type ", t)(a!) self, Dict(" key_type       \
+          ", t)(a!) to_add) -> ()",                                           \
+          dictUpdate),                                                        \
       Operator(                                                               \
           "aten::items(Dict(" key_type ", t) self) -> ((" key_type ", t)[])", \
           dictItems),                                                         \
