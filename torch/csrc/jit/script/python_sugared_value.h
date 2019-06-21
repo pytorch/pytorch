@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <torch/csrc/jit/pybind_utils.h>
@@ -160,6 +161,12 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       Function& m,
       const c10::optional<size_t>& size_hint = {}) override;
 
+  void setAttr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field,
+      Value* newValue) override;
+
  private:
   Value* self_;
   std::shared_ptr<Module> module_;
@@ -184,6 +191,8 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
  private:
   py::dict dispatched_fn_;
 };
+
+TORCH_API bool& getRecursiveScriptMode();
 
 } // namespace script
 } // namespace jit

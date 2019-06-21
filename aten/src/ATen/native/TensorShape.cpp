@@ -5,7 +5,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
@@ -14,6 +13,9 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <algorithm>
 #include <vector>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 namespace at {
 namespace native {
@@ -48,7 +50,7 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::legacy::th::_th_cat_out(result, tensors, dim);
+  return at::_cat_out(result, tensors, dim);
 }
 
 static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_except /* should already be wrapped */) {
@@ -178,7 +180,7 @@ Tensor cat(TensorList tensors, int64_t dim) {
   }
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::legacy::th::_th_cat(tensors, dim);
+  return at::_cat(tensors, dim);
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -302,9 +304,6 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto tid = self.type_id();
-  TORCH_CHECK(
-      tid == CPUTensorId() || tid == CUDATensorId(),
-      "as_strided is only implemented for strided CPU, CUDA and QuantizedCPU tensors.");
   auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid);
   setStrided(result, size, stride, storage_offset);
   return result;
@@ -313,9 +312,6 @@ Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef s
 Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto tid = self.type_id();
-  TORCH_CHECK(
-      tid == QuantizedCPUTensorId(),
-      "as_strided is only implemented for strided CPU, CUDA and QuantizedCPU tensors.");
   auto result = detail::make_tensor<QTensorImpl>(Storage(self.storage()), tid, get_qtensorimpl(self)->quantizer());
   setStrided(result, size, stride, storage_offset);
   return result;
@@ -454,9 +450,18 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
+#ifdef NAMEDTENSOR_ENABLED
+    if (self.names().has_value()) {
+      AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
+                     self.sizes(), " at dimension ", self.names()->at(dim));
+    }
+#endif
     AT_INDEX_ERROR("select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
+#ifdef NAMEDTENSOR_ENABLED
+  const auto outnames = namedinference::erase_name(self.names(), dim);
+#endif
   if (index < 0) {
     index += size;
   }
@@ -465,7 +470,13 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   auto storage_offset = self.storage_offset() + index * strides[dim];
   sizes.erase(sizes.begin() + dim);
   strides.erase(strides.begin() + dim);
-  return self.as_strided(sizes, strides, storage_offset);
+  auto result = self.as_strided(sizes, strides, storage_offset);
+#ifdef NAMEDTENSOR_ENABLED
+  if (outnames) {
+    internal_set_names_inplace(result, *outnames);
+  }
+#endif
+  return result;
 }
 
 Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
@@ -613,6 +624,10 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
     return sparse_transpose_(self, dim0, dim1);
   }
 
+  if (self.is_mkldnn()) {
+    return at::mkldnn_transpose_(self, dim0, dim1);
+  }
+
   auto strides = self.strides().vec();
   auto sizes = self.sizes().vec();
   std::swap(strides[dim0], strides[dim1]);
@@ -631,6 +646,10 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
   if (self.is_sparse()) {
     Tensor self_clone = self.clone();  // yes, this is what THS does
     return sparse_transpose_(self_clone, dim0, dim1);
+  }
+
+  if (self.is_mkldnn()) {
+    return at::mkldnn_transpose(self, dim0, dim1);
   }
 
   auto strides = self.strides().vec();
@@ -859,6 +878,17 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
     grids.push_back(tensors[i].view(view_shape).expand(shape));
   }
   return grids;
+}
+
+// Numpy-style `a.T`: returns the tensor
+// with dims reversed
+Tensor numpy_T(const Tensor &self) {
+  int64_t n = self.dim();
+  DimVector transpose_dims;
+  for (int64_t i = n - 1; i >= 0; --i) {
+    transpose_dims.push_back(i);
+  }
+  return self.permute(transpose_dims);
 }
 }
 

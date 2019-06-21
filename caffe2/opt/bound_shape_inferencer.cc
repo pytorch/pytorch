@@ -4,11 +4,6 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
-C10_DEFINE_bool(
-    caffe2_extract_feature_length_for_shape_inference,
-    false,
-    "If true, infer shape information instead of using global flag");
-
 namespace caffe2 {
 
 namespace {
@@ -47,6 +42,35 @@ void BoundShapeInferencer::EnsureShapeNames(
   }
 }
 
+void BoundShapeInferencer::InferOps(
+    const OperatorDef& op,
+    caffe2::Workspace* /* ws */) {
+  if (op.type() == "SparseLengthsSum" ||
+      op.type() == "SparseLengthsSumFused8BitRowwise" ||
+      op.type() == "SparseLengthsWeightedSum" ||
+      op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
+    InferSparseLengthsSum(op);
+  } else if (op.type() == "FC" || op.type() == "FCTransposed") {
+    InferFC(op);
+  } else if (op.type() == "Concat") {
+    InferConcat(op);
+  } else if (op.type() == "Reshape") {
+    InferReshape(op);
+  } else if (op.type() == "LengthsRangeFill") {
+    InferLengthsRangeFill(op);
+  } else if (
+      (caffe2::StartsWith(op.type(), "GivenTensor") &&
+       caffe2::EndsWith(op.type(), "Fill")) ||
+      op.type() == "ConstantFill" || op.type() == "Int8GivenTensorFill" ||
+      op.type() == "Int8GivenIntTensorFill") {
+    InferGivenTensorFill(op);
+  } else if (op.type() == "Shape") {
+    InferShape(op);
+  } else {
+    InferCommonOp(op);
+  }
+}
+
 void BoundShapeInferencer::InferBoundShapeAndType(
     const NetDef& net,
     const std::unordered_map<std::string, ShapeInfo>& info,
@@ -59,31 +83,7 @@ void BoundShapeInferencer::InferBoundShapeAndType(
     if (unsupported.count(op.type())) {
       continue;
     }
-
-    if (op.type() == "SparseLengthsSum" ||
-        op.type() == "SparseLengthsSumFused8BitRowwise" ||
-        op.type() == "SparseLengthsWeightedSum" ||
-        op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
-      InferSparseLengthsSum(op);
-    } else if (op.type() == "FC" || op.type() == "FCTransposed") {
-      InferFC(op);
-    } else if (op.type() == "Concat") {
-      InferConcat(op);
-    } else if (op.type() == "Reshape") {
-      InferReshape(op);
-    } else if (op.type() == "LengthsRangeFill") {
-      InferLengthsRangeFill(op);
-    } else if (
-        (caffe2::StartsWith(op.type(), "GivenTensor") &&
-         caffe2::EndsWith(op.type(), "Fill")) ||
-        op.type() == "ConstantFill" || op.type() == "Int8GivenTensorFill" ||
-        op.type() == "Int8GivenIntTensorFill") {
-      InferGivenTensorFill(op);
-    } else if (op.type() == "Shape") {
-      InferShape(op);
-    } else {
-      InferCommonOp(op);
-    }
+    InferOps(op, ws);
   }
 
   // Doing a reverse pass to infer the input shapes if applicable
@@ -230,7 +230,7 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
   if (weight) {
     CAFFE_ENFORCE_EQ(
         op.input_size(), 4, "SparseLengthsWeightedSum must have 4 inputs");
-    CheckAndSetTensorShapeAndType(
+    SetTensorShapeAndTypeIfNotExist(
         op.input(weight),
         ShapeInfo::DimType::SEQ,
         {spec_.max_seq_size},

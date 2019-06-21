@@ -7,6 +7,7 @@
 #include <pybind11/stl.h>
 
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
@@ -257,6 +258,12 @@ bool feedBlob(
       "supported for feeding");
   return false;
 }
+
+Blob deserializeBlob(const string& content) {
+  Blob blob;
+  DeserializeBlob(content, &blob);
+  return blob;
+}
 } // namespace python_detail
 
 class GetPythonGradient : public GradientMakerBase {
@@ -422,7 +429,15 @@ void addObjectMethods(py::module& m) {
       .def("_wrap_tensor_impl", [](Blob* blob, void* ptr) {
         auto p = c10::intrusive_ptr<c10::TensorImpl, at::UndefinedTensorImpl>::
             unsafe_reclaim_from_nonowning(static_cast<c10::TensorImpl*>(ptr));
+        // TODO: In the near future, a PyTorch tensor without AutogradMeta will be
+        // a valid tensor. At that point, we will only accept non-requires-grad
+        // tensor into Caffe2 workspace, and don't need to perform shallow-copying
+        // here anymore.
+        p = p->shallow_copy_and_detach(
+            /*version_counter=*/p->version_counter(),
+            /*allow_tensor_metadata_change=*/p->allow_tensor_metadata_change());
         TORCH_CHECK(p.defined(), "Can't wrap undefined tensor");
+        TORCH_CHECK(!p->is_variable(), "Can wrap only non-variable tensor");
         auto at_tensor = at::Tensor::wrap_tensor_impl(std::move(p));
         BlobSetTensor(blob, Tensor(std::move(at_tensor)));
       });
@@ -1017,7 +1032,18 @@ void addGlobalMethods(py::module& m) {
 #else // CAFFE2_USE_MKLDNN
       false
 #endif // CAFFE2_USE_MKLDNN
-      );
+  );
+
+  // if the binary is built with __HIP_PLATFORM_HCC__, this is a ROCm build
+  // and therefore we need to ignore dyndep failures (because the the module
+  // may not have a ROCm equivalent yet e.g. nccl)
+  m.attr("use_rocm") = py::bool_(
+#ifdef __HIP_PLATFORM_HCC__
+      true
+#else // __HIP_PLATFORM_HCC__
+      false
+#endif // __HIP_PLATFORM_HCC__
+  );
 
   m.attr("use_trt") = py::bool_(
 #ifdef CAFFE2_USE_TRT
@@ -1523,6 +1549,9 @@ void addGlobalMethods(py::module& m) {
       py::arg("name"),
       py::arg("arg"),
       py::arg("device_option") = py::none());
+  m.def("deserialize_blob", [](const string& content) {
+    return python_detail::deserializeBlob(content);
+  });
   m.def("serialize_blob", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     auto* blob = gWorkspace->GetBlob(name);
@@ -1818,6 +1847,8 @@ void addGlobalMethods(py::module& m) {
 
 PYBIND11_MODULE(caffe2_pybind11_state, m) {
   m.doc() = "pybind11 stateful interface to Caffe2 workspaces";
+
+  C10_LOG_API_USAGE_ONCE("caffe2.python.import");
 
   addGlobalMethods(m);
   addObjectMethods(m);

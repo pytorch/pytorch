@@ -579,6 +579,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         opts.threads = threads
         return opts
 
+    def test_empty_tensors(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        xs = [torch.FloatTensor([])]
+        pg.broadcast(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
     def test_broadcast_checks(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
@@ -1343,6 +1351,30 @@ class ProcessGroupNCCLTest(TestCase):
 
     def tearDown(self):
         pass
+
+    def test_empty_tensors(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        xs = [torch.cuda.FloatTensor([])]
+        pg.broadcast(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
+        pg.allreduce(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
+        pg.reduce(xs).wait()
+        self.assertEqual(0, xs[0].numel())
+
+        ys = [[torch.cuda.FloatTensor([]) for _ in range(self.world_size)]]
+        pg.allgather(ys, xs).wait()
+        for y in ys[0]:
+            self.assertEqual(0, y.numel())
+
+        ys = [torch.cuda.FloatTensor([])]
+        xs = [[torch.cuda.FloatTensor([]) for _ in range(self.world_size)]]
+        pg.reduce_scatter(ys, xs).wait()
+        self.assertEqual(0, ys[0].numel())
 
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -2365,7 +2397,63 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @skip_if_not_multigpu
     @skip_if_not_nccl
-    def test_accumulate_gradients(self):
+    def test_accumulate_gradients_no_sync(self):
+        # This is the recommended way to implement accumulate grads
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        global_batch_size = self.world_size
+        local_batch_size = len(devices)
+
+        model, ddp_model, input, target = \
+            self._prepare_single_device_module(
+                process_group, devices, devices, global_batch_size)
+
+        def step_model(model, input, target):
+            model.train()
+            output = model(input)
+            loss = F.mse_loss(output, target.to(output.device))
+            loss.backward()
+
+        # ensure accumulate grads works with no_grad
+        with torch.no_grad():
+            with ddp_model.no_sync():
+                ddp_model.train()
+                ddp_model(input)
+
+        # check two model parameters over 2 iterations
+        for iteration in range(2):
+            # single cpu/gpu training
+            step_model(model, input, target)
+
+            ddp_input = input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size]
+            ddp_target = target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size]
+
+            if iteration % 2 == 0:
+                # accumulate grads locally when iteration == 0
+                with ddp_model.no_sync():
+                    step_model(ddp_model, ddp_input, ddp_target)
+            else:
+                # sync grads when iteration == 1
+                step_model(ddp_model, ddp_input, ddp_target)
+
+            for i, j in zip(model.parameters(), ddp_model.parameters()):
+                if iteration % 2 == 0:
+                    self.assertNotEqual(i.grad, j.grad)
+                else:
+                    self.assertEqual(i.grad, j.grad)
+
+            # Shuffle the input so that DDP input is different
+            torch.manual_seed(1337 + iteration)
+            input = input[torch.randperm(global_batch_size)]
+
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_accumulate_gradients_module(self):
+        # This is NOT the recommended way to implement accumulating grads, but
+        # we would like to make sure DDP does not mess up with the underlying
+        # module.
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -2455,6 +2543,71 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # Run a few iterations where we use the output.
         for _ in range(4):
             output = model(input)
+            loss = criterion(output, target)
+            loss.backward()
+
+    @skip_if_not_nccl
+    @skip_if_not_multigpu
+    def test_failure_recovery(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # need to create a separate file for the recovered FileStore, because
+        # the original one will be deleted when destructing the first FileStore.
+        recovery_filename = self.file.name + "_recovery"
+
+        if self.rank == 0:
+            # the file will be deleted by the recovered FileStore
+            open(recovery_filename, "w").close()
+
+        # not necessary to run barrier here, as DDP will synchronize
+
+        class TestModel(nn.Module):
+            def __init__(self):
+                super(TestModel, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = TestModel().float().to(device_id)
+        ddp = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        batch_size = 4
+        criterion = nn.CrossEntropyLoss()
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+
+        for _ in range(6):
+            output = ddp(input)
+            loss = criterion(output, target)
+            loss.backward()
+
+        del ddp
+        del process_group
+        del store  # this will delete self.file
+
+        store = c10d.FileStore(recovery_filename, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        ddp = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        input = torch.rand([batch_size, 2], dtype=torch.float)
+        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(device_id)
+        for _ in range(6):
+            output = ddp(input)
             loss = criterion(output, target)
             loss.backward()
 

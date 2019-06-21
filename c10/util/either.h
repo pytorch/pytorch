@@ -130,6 +130,15 @@ class either final {
     return std::move(right());
   }
 
+  template<class Result, class LeftMapFunc, class RightMapFunc>
+  Result map(LeftMapFunc&& leftMapFunc, RightMapFunc&& rightMapFunc) const {
+    if (Side::left == _side) {
+      return std::forward<LeftMapFunc>(leftMapFunc)(_left);
+    } else {
+      return std::forward<RightMapFunc>(rightMapFunc)(_right);
+    }
+  }
+
  private:
   union {
     Left _left;
