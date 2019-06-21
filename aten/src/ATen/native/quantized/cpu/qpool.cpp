@@ -119,8 +119,8 @@ Tensor q_maxpool_2d(Tensor qx,                  // Input Tensor (Quantized)
   Tensor qy = at::_empty_affine_quantized(
     oSizes,
     qx.options().dtype(toQIntType(qx.scalar_type())),
-    qx.q_scale().toDouble(),
-    qx.q_zero_point().toLong());
+    qx.q_scale(),
+    qx.q_zero_point());
   auto qx_contig = qx.contiguous();
   auto qxd = qx_contig.data<Q>();
   auto qyd = qy.data<Q>();
