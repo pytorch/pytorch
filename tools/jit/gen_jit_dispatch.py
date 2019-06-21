@@ -171,7 +171,13 @@ Operator(
 """)
 
 
-blacklisted_types = {'Storage', 'DimnameList?', 'ConstQuantizerPtr', 'Dimname', 'DimnameList?'}
+blacklisted_types = {
+    'Storage',
+    'DimnameList?',
+    'ConstQuantizerPtr',
+    'Dimname',
+}
+
 default_only_types = {'Generator'}
 
 
