@@ -636,7 +636,8 @@ std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value* v) -> Value* {
     AT_ERROR(
-        "Graph::copy() encountered a use of a value not in scope. Run lint!");
+        "Graph::copy() encountered a use of a value " + v->uniqueName() +
+        " not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
@@ -1297,6 +1298,12 @@ Node* Graph::createNone(TypePtr typ) {
   return n;
 }
 
+Node* Graph::createUninitialized(TypePtr typ) {
+  Node* n = create(prim::Uninitialized);
+  n->output()->setType(std::move(typ));
+  return n;
+}
+
 Node* Graph::createWithSubgraph(Symbol kind) {
   auto n = create(kind, 0);
   n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope()));
@@ -1305,9 +1312,11 @@ Node* Graph::createWithSubgraph(Symbol kind) {
 
 Node* Graph::createTuple(
     at::ArrayRef<Value*> values,
-    c10::OptNameList field_names) {
+    c10::optional<c10::QualifiedName> qualname,
+    std::shared_ptr<FunctionSchema> schema) {
   auto types = fmap(values, [](Value* v) { return v->type(); });
-  auto tt = TupleType::create(std::move(types), std::move(field_names));
+  auto tt = TupleType::create(
+      std::move(types), std::move(qualname), std::move(schema));
   auto n = create(prim::TupleConstruct, values);
   n->output()->setType(tt);
   return n;
@@ -1443,7 +1452,7 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 }
 
 Value* Graph::insertFunctionCall(
-    std::shared_ptr<script::Function> callee,
+    std::shared_ptr<Function> callee,
     script::MatchedSchema& matched) {
   Value* fn_constant = insertNode(create(prim::Constant))
                            ->output()

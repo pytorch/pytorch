@@ -14,7 +14,7 @@ struct GuardElimination {
   void run() {
     moveGuardsToDefs(graph_->block());
     coalesceGuards(graph_->block());
-    eliminateGuards(graph_->block());
+    eliminateRedundantGuards(graph_->block());
   }
 
   void moveGuardsToDefs(Block* b) {
@@ -82,7 +82,7 @@ struct GuardElimination {
     return true;
   }
 
-  void eliminateGuards(Block* b) {
+  void eliminateRedundantGuards(Block* b) {
     // a very simple pass to eliminate redundant guards for ops
     // whose outputs are fully determined by their inputs
     // i.e. if inputs to such ops are guarded we are allowed
@@ -98,7 +98,7 @@ struct GuardElimination {
       } else {
         it++;
         for (Block* ib : n->blocks()) {
-          eliminateGuards(ib);
+          eliminateRedundantGuards(ib);
         }
       }
     }
@@ -147,7 +147,7 @@ static void removeProfilingNodes(Block* b) {
   }
 }
 
-void EliminateGuards(std::shared_ptr<Graph> graph) {
+void EliminateRedundantGuards(std::shared_ptr<Graph> graph) {
   GuardElimination ge(std::move(graph));
   ge.run();
 }

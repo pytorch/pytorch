@@ -97,7 +97,6 @@ def setUp():
         torch.cuda.manual_seed_all(0)
     np.random.seed(seed=0)
 
-
 def convert_cuda(model, input):
     cuda_model = model.cuda()
     # input might be nested - we want to move everything to GPU
