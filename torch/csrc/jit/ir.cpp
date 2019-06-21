@@ -636,7 +636,7 @@ std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value* v) -> Value* {
     AT_ERROR(
-        "Graph::copy() encountered a use of a value " + v->uniqueName() +
+        "Graph::copy() encountered a use of a value " + v->debugName() +
         " not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
