@@ -11,7 +11,7 @@
 #include <thread>
 
 C10_DEFINE_int(iter_pow, 10, "Number of tasks, 2^N");
-C10_DEFINE_int(sub_iter, 1000, "Number of subtasks");
+C10_DEFINE_int(sub_iter, 1024, "Number of subtasks");
 C10_DEFINE_int(warmup_iter_pow, 3, "Number of warmup tasks, 2^N");
 C10_DEFINE_int(inter_op_threads, 0, "Number of inter-op threads");
 C10_DEFINE_int(intra_op_threads, 0, "Number of intra-op threads");
