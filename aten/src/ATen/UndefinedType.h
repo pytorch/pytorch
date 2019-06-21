@@ -20,8 +20,6 @@ struct UndefinedType final : public TypeDefault {
   virtual Type & toBackend(Backend b) const override;
   virtual Type & toScalarType(ScalarType s) const override;
   virtual TypeID ID() const override;
-  virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
-  virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 };
 
 } // namespace at

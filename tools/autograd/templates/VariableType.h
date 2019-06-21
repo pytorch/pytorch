@@ -55,8 +55,6 @@ struct TORCH_API VariableType final : public at::TypeDefault {
   at::TypeID ID() const override;
   at::Type & toBackend(at::Backend b) const override;
   at::Type & toScalarType(at::ScalarType s) const override;
-  Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
-  at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
   static at::TypeExtendedInterface* getVariableTypeFromBaseType(const at::Type& baseType);
   static bool isVariableType(const at::Type& type);
