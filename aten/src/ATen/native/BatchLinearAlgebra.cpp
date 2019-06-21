@@ -848,6 +848,8 @@ std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
 }
 
 std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
+  TORCH_CHECK(self.dim() >= 2,
+              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   Tensor Q_tmp, R_tmp;
   std::tie(Q_tmp, R_tmp) = at::_qr_helper(self, some);
   Q.resize_as_(Q_tmp).copy_(Q_tmp);
@@ -913,30 +915,51 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
   int64_t k = std::min(m, n);
   
   char jobz = compute_uv ? (some ? 'S' : 'A') : 'N';
-  auto self_working_copy = cloneBatchedColumnMajor(self);
 
   Tensor U_working_copy, S_working_copy, VT_working_copy;
   std::tie(U_working_copy, S_working_copy, VT_working_copy) = _create_U_S_VT(self, some, compute_uv);
 
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "svd_cpu", [&]{
-    apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobz, infos);
-  });
+  if (self.numel() > 0) {
+    auto self_working_copy = cloneBatchedColumnMajor(self);
 
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "svd_cpu");
-  } else {
-    singleCheckErrors(infos[0], "svd_cpu");
-  }
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "svd_cpu", [&]{
+      apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobz, infos);
+    });
 
-  if (compute_uv) {
-    if (some) {
-      VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+    if (self.dim() > 2) {
+      batchCheckErrors(infos, "svd_cpu");
+    } else {
+      singleCheckErrors(infos[0], "svd_cpu");
     }
-  } else {
-    VT_working_copy.zero_();
-    U_working_copy.zero_();
+
+    if (compute_uv) {
+      if (some) {
+        VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+      }
+    } else {
+      VT_working_copy.zero_();
+      U_working_copy.zero_();
+    }
   }
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
+}
+
+std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
+  TORCH_CHECK(self.dim() >= 2,
+              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  return at::_svd_helper(self, some, compute_uv);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& VT,
+                                              const Tensor& self, bool some, bool compute_uv) {
+  TORCH_CHECK(self.dim() >= 2,
+              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  Tensor U_tmp, S_tmp, VT_tmp;
+  std::tie(U_tmp, S_tmp, VT_tmp) = at::_svd_helper(self, some, compute_uv);
+  U.resize_as_(U_tmp).copy_(U_tmp);
+  S.resize_as_(S_tmp).copy_(S_tmp);
+  VT.resize_as_(VT_tmp).copy_(VT_tmp);
+  return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, VT);
 }
 
 }}  // namespace at::native

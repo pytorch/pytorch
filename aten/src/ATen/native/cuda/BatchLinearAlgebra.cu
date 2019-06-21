@@ -1213,42 +1213,48 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
 
   char jobchar = compute_uv ? 'N' : (some ? 'S' : 'A');
 
-  // The input matrix, U, S and VT have to reside in pinned memory.
-  // Additionally, the input and U have to be in column major format.
-  // _create_U_S_VT takes care of a part of these requirements (for U, S and VT)
-  // For the input matrix, this requirements are being taken care of below.
-  // Specify strides
-  auto self_col_major_strides = at::detail::defaultStrides(self.sizes());
-  self_col_major_strides[self.dim() - 2] = 1;
-  self_col_major_strides[self.dim() - 1] = m;
-  // Create strided tensor in pinned memory
-  auto self_working_copy = at::empty_strided(self.sizes(), self_col_major_strides,
-                                             at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
-
   Tensor U_working_copy, S_working_copy, VT_working_copy;
   std::tie(U_working_copy, S_working_copy, VT_working_copy) = _create_U_S_VT(self, some, compute_uv);
 
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "svd_cpu", [&]{
-    apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobchar, infos);
-  });
+  if (self.numel() > 0) {
+    // The input matrix, U, S and VT have to reside in pinned memory.
+    // Additionally, the input and U have to be in column major format.
+    // _create_U_S_VT takes care of a part of these requirements (for U, S and VT)
+    // For the input matrix, this requirements are being taken care of below.
+    // Specify strides
+    auto self_col_major_strides = at::detail::defaultStrides(self.sizes());
+    self_col_major_strides[self.dim() - 2] = 1;
+    self_col_major_strides[self.dim() - 1] = m;
+    // Create strided tensor in pinned memory
+    auto self_working_copy = at::empty_strided(self.sizes(), self_col_major_strides,
+                                               at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
 
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "svd_cpu");
-  } else {
-    singleCheckErrors(infos[0], "svd_cpu");
-  }
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "svd_cuda", [&]{
+      apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobchar, infos);
+    });
 
-  U_working_copy = U_working_copy.to(self.device());
-  S_working_copy = S_working_copy.to(self.device());
-  VT_working_copy = VT_working_copy.to(self.device());
+    if (self.dim() > 2) {
+      batchCheckErrors(infos, "svd_cuda");
+    } else {
+      singleCheckErrors(infos[0], "svd_cuda");
+    }
 
-  if (compute_uv) {
-    if (some) {
-      VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+    U_working_copy = U_working_copy.to(self.device());
+    S_working_copy = S_working_copy.to(self.device());
+    VT_working_copy = VT_working_copy.to(self.device());
+
+    if (compute_uv) {
+      if (some) {
+        VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+      }
+    } else {
+      VT_working_copy.zero_();
+      U_working_copy.zero_();
     }
   } else {
-    VT_working_copy.zero_();
-    U_working_copy.zero_();
+    U_working_copy = U_working_copy.to(self.device());
+    S_working_copy = S_working_copy.to(self.device());
+    VT_working_copy = VT_working_copy.to(self.device());
   }
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
