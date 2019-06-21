@@ -616,8 +616,8 @@ class CAFFE2_API Tensor {
   Tensor to_sparse() const;
   Tensor to_mkldnn() const;
   Tensor dequantize() const;
-  Scalar q_scale() const;
-  Scalar q_zero_point() const;
+  double q_scale() const;
+  int64_t q_zero_point() const;
   Tensor int_repr() const;
   QScheme qscheme() const;
   Tensor to(const TensorOptions & options, bool non_blocking=false, bool copy=false) const;

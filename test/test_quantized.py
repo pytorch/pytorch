@@ -24,7 +24,7 @@ def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
         qmin = np.iinfo(dtype).min
     if qmax is None:
         qmax = np.iinfo(dtype).max
-    qx = np.round(x / scale + zero_point).astype(np.int64)
+    qx = (np.round(x / scale + zero_point)).astype(np.int64)
     qx = np.clip(qx, qmin, qmax)
     qx = qx.astype(dtype)
     return qx
@@ -166,8 +166,8 @@ class TestQuantizedOps(TestCase):
         qY_hat = relu(qX)
 
         Y[Y < 0] = 0
-        qY = _quantize(Y, scale, zero_point, dtype=np_type)
-        np.testing.assert_equal(qY, qY_hat.int_repr())
+        qY = torch.quantize_linear(torch.from_numpy(Y), scale=scale, zero_point=zero_point, dtype=torch_type)
+        self.assertEqual(qY.int_repr(), qY_hat.int_repr())
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_same_qparams(self):

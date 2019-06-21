@@ -9,21 +9,6 @@ Backend UndefinedType::backend() const {
   return Backend::Undefined;
 }
 
-Allocator* UndefinedType::allocator() const {
-  AT_ERROR("allocator not defined for UndefinedType");
-}
-
-Device UndefinedType::getDeviceFromPtr(void*) const {
-  AT_ERROR("getDeviceFromPtr not defined for UndefinedType");
-}
-
-Storage UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
-  AT_ERROR("unsafeStorageFromTH not defined for UndefinedType");
-}
-Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  AT_ERROR("unsafeTensorFromTH not defined for UndefinedType");
-}
-
 const char * UndefinedType::toString() const {
   return "UndefinedType";
 }
