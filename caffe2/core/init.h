@@ -63,10 +63,7 @@ class CAFFE2_API Caffe2InitializeRegistry {
     return RunRegisteredInitFunctionsInternal(init_functions_, pargc, pargv);
   }
 
-  bool RunNamedFunction(
-      const char* name,
-      int* pargc = nullptr,
-      char*** pargv = nullptr) {
+  bool RunNamedFunction(const char* name, int* pargc, char*** pargv) {
     if (named_functions_.count(name)) {
       return named_functions_[name](pargc, pargv);
     }
@@ -98,6 +95,14 @@ class CAFFE2_API Caffe2InitializeRegistry {
   bool init_functions_run_yet_ = false;
 };
 }  // namespace internal
+
+bool unsafeRunCaffe2InitFunction(
+    const char* name,
+    int* pargc = nullptr,
+    char*** pargv = nullptr) {
+  return internal::Caffe2InitializeRegistry::Registry()->RunNamedFunction(
+      name, pargc, pargv);
+}
 
 class CAFFE2_API InitRegisterer {
  public:
