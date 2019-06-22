@@ -3275,7 +3275,7 @@ def foo(x):
         self.checkScript(test_sizes, (torch.rand(0),))
 
     def test_for_in_tensors_rank0(self):
-        with self.assertRaisesRegex(Exception, "iteration over a 0-d tensor"):
+        with self.assertRaisesRegex(RuntimeError, "of a 0-d tensor"):
             @torch.jit.script
             def test_sizes(x):
                 sumz = 0
@@ -3286,7 +3286,7 @@ def foo(x):
             test_sizes(torch.tensor(1))
 
     def test_for_in_tensors_fail_scalar(self):
-        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+        with self.assertRaisesRegex(RuntimeError, "'float' object is not iterable"):
             @torch.jit.script
             def test_sizes(x):
                 # type: (float) -> int
@@ -3342,7 +3342,7 @@ def foo(x):
 
     def test_sum_list_wrong_type(self):
 
-        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+        with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
             @torch.jit.script
             def sum_list(a):
                 # type: (int) -> int
@@ -5334,7 +5334,7 @@ a")
             for i in range(2, -11, 0):
                 x += i
             return x
-        with self.assertRaisesRegex(torch.jit.Error, "must not be zero"):
+        with self.assertRaisesRegex(RuntimeError, "must not be zero"):
             fn()
 
     def test_script_optional_none(self):
@@ -7112,7 +7112,7 @@ a")
                 for m in self.mods:
                     print(m)
                 return v
-        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
+        with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
             M()
 
     def test_script_module_list_sequential_error(self):
@@ -9223,12 +9223,135 @@ a")
         self.checkScript(return_stmt, (torch.rand(1),))
 
     def test_for_range_no_arg(self):
-        with self.assertRaisesRegex(RuntimeError, r'range expected 1 arguments, got 0'):
+        with self.assertRaisesRegex(RuntimeError, r'range expected at least 1 arguments, got 0'):
             @torch.jit.script
             def range_no_arg(x):
                 for _ in range():
                     x += 1
                 return x
+
+    def test_for_in_enumerate(self):
+        def fn(x):
+            # type: (List[int]) -> int
+            sum = 0
+            for (i, v) in enumerate(x):
+                sum += i * v
+
+            return sum
+
+        self.checkScript(fn, ([1, 2, 3, 4, 5],))
+
+        def fn_enumerate_start_index(x):
+            # type: (List[int]) -> int
+            sum = 0
+            for (i, v) in enumerate(x, start=1):
+                sum += i * v
+
+            return sum
+
+        self.checkScript(fn, ([1, 2, 3, 4, 5],))
+
+        def fn_nested_enumerate(x):
+            # type: (List[int]) -> int
+            sum = 0
+            for (i, (j, v)) in enumerate(enumerate(x)):
+                sum += i * j * v
+
+            return sum
+
+        self.checkScript(fn, ([1, 2, 3, 4, 5],))
+
+        with self.assertRaisesRegex(RuntimeError, r'enumerate expected at least 1 arguments, got 0'):
+            @torch.jit.script
+            def enumerate_no_arg(x):
+                # type: (List[int]) -> int
+                sum = 0
+                for _ in enumerate():
+                    sum += 1
+
+                return sum
+
+        with self.assertRaisesRegex(RuntimeError, r'enumerate expected at most 2 arguments, got 3'):
+            @torch.jit.script
+            def enumerate_too_many_args(x):
+                # type: (List[int]) -> int
+                sum = 0
+                for _ in enumerate(x, x, x):
+                    sum += 1
+
+                return sum
+
+    def test_for_in_zip(self):
+        def fn(x, y):
+            # type: (List[int], List[int]) -> int
+            sum = 0
+            for (i, j) in zip(x, y):
+                sum += i * j
+
+            return sum
+
+        self.checkScript(fn, ([1, 2, 3, 4, 5], [2, 3, 4, 5, 6]))
+
+        def fn_multi_inputs(x, y, z):
+            # type: (List[int], List[int], List[int]) -> int
+            sum = 0
+            for (i, j, k) in zip(x, y, z):
+                sum += i * j * k
+
+            return sum
+
+        self.checkScript(fn_multi_inputs, ([1, 2, 3, 4], [2, 3, 4, 5], [3, 4, 5, 6]))
+
+        def fn_nested_zip(x, y, z):
+            # type: (List[int], List[int], List[int]) -> int
+            sum = 0
+            for (i, (j, k)) in zip(x, zip(y, z)):
+                sum += i * j * k 
+
+            return sum
+
+        self.checkScript(fn_multi_inputs, ([1, 2, 3, 4], [2, 3, 4, 5], [3, 4, 5, 6]))
+
+        with self.assertRaisesRegex(RuntimeError, r'zip expected at least 1 arguments, got 0'):
+            @torch.jit.script
+            def zip_no_arg(x):
+                # type: (List[int]) -> int
+                sum = 0
+                for _ in zip():
+                    sum += 1
+
+                return sum
+
+        with self.assertRaisesRegex(RuntimeError, r'too many values to unpack: need 2 but found 3'):
+            @torch.jit.script
+            def fn_nested_zip_wrong_target_assign(x, y, z):
+                # type: (List[int], List[int], List[int]) -> int
+                sum = 0
+                for (i, (j, k)) in zip(x, y, z):
+                    sum += i * j * k 
+
+                return sum
+
+    def test_for_in_zip_enumerate(self):
+        def fn_zip_enumerate(x, y):
+            # type: (List[int], List[int]) -> int
+            sum = 0
+            for (i, (j, v), k) in zip(x, enumerate(y), range(0, 100)):
+                sum += i * j * v * k
+
+            return sum
+
+        self.checkScript(fn_zip_enumerate, ([1, 2, 3, 4], [2, 3, 4, 5]))
+
+        def fn_enumerate_zip(x, y):
+            # type: (List[int], List[int]) -> int
+            sum = 0
+            for (i, (j, v)) in enumerate(zip(x, y)):
+                sum += i * j * v
+
+            return sum
+
+        self.checkScript(fn_enumerate_zip, ([1, 2, 3, 4], [2, 3, 4, 5]))
 
     def test_list_iterables(self):
         with self.assertRaisesRegex(RuntimeError, 'List of iterables is not supported currently'):
@@ -9249,6 +9372,26 @@ a")
                     y += j
                 return x, y
             ''')
+
+    def test_for_tuple_assign(self):
+        def test_simple_assign(x):
+            # type: (Tuple[int, float]) -> float
+            sum = 0.0
+            for a in x:
+                sum += float(a)
+            return sum
+
+        self.checkScript(test_simple_assign, ((1, 2.5),))
+
+        def test_tuple_assign(x):
+            # type: (Tuple[Tuple[int, int], Tuple[int, int]]) -> int
+            sum = 0
+            for a in x:
+                sum += a[0]
+                sum += a[1]
+            return sum
+
+        self.checkScript(test_tuple_assign, (((1, 2), (4, 7)), ))
 
     def test_single_starred_lhs(self):
         with self.assertRaisesRegex(RuntimeError, 'A Starred expression may only appear on the lhs within the presence'
@@ -9408,7 +9551,7 @@ a")
             SomeModule()
 
     def test_single_starred_expr_for_loop(self):
-        with self.assertRaisesRegex(RuntimeError, 'expected ident but found'):
+        with self.assertRaisesRegex(RuntimeError, 'A Starred expression may only appear'):
             cu = torch.jit.CompilationUnit('''
             def test():
                 x = 0
