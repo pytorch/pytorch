@@ -98,7 +98,7 @@ void print_runtime_stats(const std::vector<float>& runtimes) {
     sqr_sum += runtimes[idx] * runtimes[idx];
   }
   float mean = sum / N;
-  float sd = sqrt(sqr_sum / N - mean * mean);
+  float sd = std::sqrt(sqr_sum / N - mean * mean);
   std::cout << "N = " << N << ", mean = " << mean << ", sd = " << sd
             << std::endl;
 }
@@ -108,8 +108,7 @@ int main(int argc, char** argv) {
     std::cout << "Failed to parse command line flags" << std::endl;
     return -1;
   }
-  caffe2::internal::Caffe2InitializeRegistry::Registry()
-                   ->RunNamedFunction("registerThreadPools");
+  caffe2::unsafeRunCaffe2InitFunction("registerThreadPools");
   at::init_num_threads();
 
   if (FLAGS_inter_op_threads > 0) {
