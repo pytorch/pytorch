@@ -78,6 +78,8 @@ namespace jit {
   _(ClassParser)                       \
   _(Profiler)                          \
   _(InsertAndEliminateRedundantGuards) \
+  _(LivenessFor)                       \
+  _(LivenessIf)                        \
   _(InsertBailOuts)                    \
   _(PeepholeOptimize)                  \
   _(RecordFunction)                    \
