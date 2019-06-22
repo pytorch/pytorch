@@ -96,7 +96,7 @@ class CAFFE2_API Caffe2InitializeRegistry {
 };
 }  // namespace internal
 
-bool unsafeRunCaffe2InitFunction(
+CAFFE2_API bool unsafeRunCaffe2InitFunction(
     const char* name,
     int* pargc = nullptr,
     char*** pargv = nullptr) {
