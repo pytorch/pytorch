@@ -158,6 +158,7 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
         "given numpy array has byte order different from the native byte order. "
         "Conversion between byte orders is currently not supported.");
   }
+  auto blob_type = at::device(kCPU).dtype(numpy_dtype_to_aten(PyArray_TYPE(array)));
   Py_INCREF(obj);
   return at::from_blob(
       data_ptr,
@@ -167,7 +168,7 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
           AutoGIL gil;
           Py_DECREF(obj);
       },
-      at::device(kCPU).dtype(numpy_dtype_to_aten(PyArray_TYPE(array)))
+      blob_type
   );
 }
 
