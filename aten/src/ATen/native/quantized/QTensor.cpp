@@ -36,7 +36,9 @@ Tensor int_repr_quant(const Tensor& self) {
   Tensor dst = at::empty(self.sizes(), self.options().dtype(at::kByte));
   uint8_t* self_data = reinterpret_cast<uint8_t *>(self.data<qint8>());
   uint8_t* dst_data = dst.data<uint8_t>();
-  memcpy(dst_data, self_data, self.numel());
+  if (self.numel() > 0) {
+    memcpy(dst_data, self_data, self.numel());
+  }
   return dst;
 }
 

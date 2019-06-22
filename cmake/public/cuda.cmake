@@ -329,9 +329,9 @@ if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
       CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
     message(FATAL_ERROR
       "CUDA ${CUDA_VERSION} is not compatible with std::tuple from GCC version "
-      ">= 6. Please upgrade to CUDA 9.2 or use the following option to use "
-      "another version (for example): \n"
-      "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-5\n")
+      ">= 6. Please upgrade to CUDA 9.2 or set the following environment "
+      "variable to use another version (for example): \n"
+      "  export CUDAHOSTCXX='/usr/bin/gcc-5'\n")
   endif()
 elseif (CUDA_VERSION VERSION_EQUAL 8.0)
   # CUDA 8.0 requires GCC version <= 5
