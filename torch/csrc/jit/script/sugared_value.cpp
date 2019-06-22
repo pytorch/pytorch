@@ -259,6 +259,122 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }
 
+Value* SimpleValue::len(const SourceRange& loc, Function& m) {
+  // List, Tuple, Tensor, fill in missing information desugaring
+  Value* val = getValue();
+  TypePtr val_type = val->type();
+  Graph& g = *m.graph();
+  if (val_type->cast<ListType>() ||
+      val_type->isSubtypeOf(TensorType::get())) {
+    return g.insert(aten::len, {val}, {}, loc);
+  } else {
+    throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
+                           << " object is not iterable";
+  }
+}
+
+Value* SimpleValue::getelem(const SourceRange&loc, Function& m, Value* i) {
+  Value* val = getValue();
+  TypePtr val_type = val->type();
+  Graph& g = *m.graph();
+  Value* cur_elem = nullptr;
+  if (val_type->cast<ListType>()) {
+    cur_elem = g.insert(aten::select, {val, i}, {}, loc);
+  } else if (val_type->isSubtypeOf(TensorType::get())) {
+    cur_elem = g.insert(aten::select, {val, 0, i}, {}, loc);
+  } else {
+    throw ErrorReport(loc)
+      << "cannot get element of the value type " << val_type->python_str();
+  }
+  return cur_elem;
+}
+
+RangeValue::RangeValue(const SourceRange& loc, Function& m, std::vector<Value*> inputs) {
+  Graph& g = *m.graph();
+  if(inputs.size() == 0) {
+    throw ErrorReport(loc) << "range expected at least 1 arguments, got 0";
+  } else if (inputs.size() == 1) {
+      end_ = inputs[0];
+      start_ = g.insertConstant(0, nullptr, loc);
+      step_ = g.insertConstant(1, nullptr, loc);
+      // range() call only contains end, easier to calculate len() and getitem()
+      has_only_end_ = true;
+  } else if (inputs.size() <= 3) {
+    start_ = inputs[0];
+    end_ = inputs[1];
+    if (inputs.size() == 3) {
+      step_ = inputs[2];
+    } else {
+      step_ = g.insertConstant(1, nullptr, loc);
+    }
+    has_only_end_ = false;
+  } else {
+    throw ErrorReport(loc) << "range expected at most 3 arguments, got "
+                           << inputs.size();
+  }
+}
+
+Value* RangeValue::len(const SourceRange& loc, Function& m) {
+  if (has_only_end_) {
+    return end_;
+  } else {
+    Graph& g = *m.graph();
+    return g.insert(aten::__range_length, {start_, end_, step_}, {}, loc);
+  }
+}
+
+Value* RangeValue::getelem(const SourceRange&loc, Function& m, Value* i)  {
+  if (has_only_end_) {
+    return i;
+  } else {
+    auto& g = *m.graph();
+    return g.insert(aten::__derive_index, {i, start_, step_}, {}, loc);
+  }
+}
+
+std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
+  std::vector<SugaredValuePtr> base_iters {};
+
+  for(SugaredValuePtr sv: children_) {
+    if (auto iv = std::dynamic_pointer_cast<IterableTree>(sv)) {
+      std::vector<SugaredValuePtr> child_iters = iv->get_base_iterables();
+      //merge child iters with the base_iters
+      base_iters.insert(base_iters.end(), std::make_move_iterator(child_iters.begin()), std::make_move_iterator(child_iters.end()));
+
+    } else {
+      // IterableTree leaves, either SimpleValue or RangeValue
+      base_iters.emplace_back(sv);
+    }
+  }
+  return base_iters;
+}
+
+Value* IterableTree::len(const SourceRange& loc, Function& m) {
+  // if it's a iterable tree, we get the base iterables that consists of SimpleValue or RangeValue,
+  // and then calculate the minimum length of all the base iterables to be max_trip_count_val
+  Graph& g = *m.graph();
+  std::vector<SugaredValuePtr> base_iters = get_base_iterables();
+  std::vector<Value*> lengths;
+  lengths.reserve(base_iters.size());
+
+  for (const SugaredValuePtr& base_iter: base_iters) {
+    lengths.emplace_back(base_iter->len(loc, m));
+  }
+  Node* list_node = g.insertNode(g.createList(IntType::get(), lengths));
+  return g.insert(prim::min, {list_node->output()}, {}, loc);
+}
+
+Value* IterableTree::getelem(const SourceRange&loc, Function& m, Value* i)  {
+  std::vector<Value*> child_items;
+  for(const SugaredValuePtr& child: children_) {
+    child_items.emplace_back(child->getelem(loc, m, i));
+  }
+  // If you call getelem() on a IterableTree sugared value, we will create Tuple
+  // from the children items, and make the Tuple value as the element
+  Graph& g = *m.graph();
+  return g.insertNode(g.createTuple(child_items))->output();
+}
+
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
     Function& m,
