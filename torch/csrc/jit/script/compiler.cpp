@@ -2250,7 +2250,8 @@ struct to_ir {
         std::vector<Value*> input_vals = getValues(inputs, /*maybe_unpack=*/true);
         return std::make_shared<RangeValue>(loc, method, input_vals);
       } else if (iterable->symbol_ == prim::enumerate) {
-        // enumerate(x) can be rewrite as subtrees: (range(0, math.inf), x)
+        // enumerate(x) can be rewrite as subtrees: IterableTree(RangeValue(0,
+        // math.inf), SimpleValue(x))
         Value* start_index = nullptr;
         if (input_size == 0) {
           throw ErrorReport(loc) << "enumerate expected at least 1 arguments, got 0";
@@ -2278,7 +2279,8 @@ struct to_ir {
         SugaredValuePtr expr_sv = emitSugaredExpr(inputs[0], 1);
         iterable_tree = std::make_shared<IterableTree>(std::vector<SugaredValuePtr>({range_sv, expr_sv}));
       } else if (iterable->symbol_ == prim::zip) {
-        // zip(x, y) can be rewrite as subtrees: (x, y)
+        // zip(x, y) can be rewrite as subtrees: IterableTree(IterableTree(x),
+        // IterableTree(y))
         if (inputs.size() == 0) {
           throw ErrorReport(loc) << "zip expected at least 1 arguments, got 0";
         }
