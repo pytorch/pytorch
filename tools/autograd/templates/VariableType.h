@@ -24,6 +24,7 @@ struct Variable;
 using at::Context;
 using at::Device;
 #ifdef NAMEDTENSOR_ENABLED
+using at::Dimname;
 using at::DimnameList;
 #endif
 using at::Generator;
