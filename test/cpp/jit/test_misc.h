@@ -913,7 +913,7 @@ std::vector<std::string> values_to_value_ids(
     const std::vector<Value*>& values) {
   std::vector<std::string> result;
   for (auto v : values) {
-    result.push_back(v->uniqueName());
+    result.push_back(v->debugName());
   }
   return result;
 };
