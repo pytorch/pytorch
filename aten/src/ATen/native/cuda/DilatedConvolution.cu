@@ -208,14 +208,38 @@ void conv_dilated_all_cuda_template(
   if (output.defined() && !bias.defined()) {
     output.zero_();
   }
+
 #ifdef __HIP_PLATFORM_HCC__
-  // See ROCm-sum issue below.
+  /* When using ROCm, the sum evaluation is inaccurate for double
+     tensors. The reason is currently unknown. Hence, we use gemv for
+     computing `grad_output_n.sum(dims)` until the ROCm-sum issue is
+     resolved. */
   Tensor ones = at::empty({0}, options);
   if (grad_bias.defined()) {
     ones.resize_({output_vsize});
     ones.fill_(1);
   }
+  /* MSVC does not like #ifdef-s inside the CPP macro
+     AT_DISPATCH_FLOATING_TYPES_AND_HALF. So, we define the code
+     branching outside the CPP macro: */
+#define CALCULATE_GRAD_BIAS                          \
+  at::cuda::blas::gemv<scalar_t>(                    \
+      stream,                                        \
+      /*trans=*/'t',                                 \
+      /*    m=*/output_vsize,                        \
+      /*    n=*/nOutputPlane,                        \
+      /*alpha=*/ScalarConvert<int, scalar_t>::to(1), \
+      /*    A=*/grad_output_n.data<scalar_t>(),      \
+      /*  lda=*/output_vsize,                        \
+      /*    x=*/ones.data<scalar_t>(),               \
+      /* incx=*/1,                                   \
+      /* beta=*/ScalarConvert<int, scalar_t>::to(1), \
+      /*    y=*/grad_bias.data<scalar_t>(),          \
+      /* incy=*/1)
+#else
+#define CALCULATE_GRAD_BIAS grad_bias += grad_output_n.sum(dims)
 #endif
+
   // Helpers
   Tensor grad_output_n;
   std::vector<int64_t> dims(dim);
@@ -225,7 +249,6 @@ void conv_dilated_all_cuda_template(
       input.scalar_type(), "conv_dilated<>", [&] {
         // For each elt in batch, do:
         for (int elt = 0; elt < batchSize; elt++) {
-
           // Matrix multiply per output:
           Tensor input_n = input.select(0, elt);
 
@@ -326,7 +349,8 @@ void conv_dilated_all_cuda_template(
                 pad_size,
                 dilation_size,
                 columns.data<scalar_t>());
-            scalar_t scale = ScalarConvert<int, scalar_t>::to(1); // TODO: expose as argument?
+            scalar_t scale = ScalarConvert<int, scalar_t>::to(
+                1); // TODO: expose as argument?
             /* For gemm argument derivation, see
                conv_dilated_all_cuda_template in
                ATen/native/DilatedConvolution.cpp */
@@ -352,26 +376,8 @@ void conv_dilated_all_cuda_template(
             /* For gemv argument derivation, see
                conv_dilated_all_cpu_template in
                ATen/native/DilatedConvolution.cpp */
-#ifndef __HIP_PLATFORM_HCC__
-            grad_bias += grad_output_n.sum(dims);
-#else
-            /* When using ROCm, the sum evaluation is inaccurate for
-               double tensors. The reason is currently unknown. Hence,
-               we use gemv until the ROCm-sum issue is resolved. */
-            at::cuda::blas::gemv<scalar_t>(
-               stream,
-               /*trans=*/'t',
-               /*    m=*/output_vsize,
-               /*    n=*/nOutputPlane,
-               /*alpha=*/ScalarConvert<int, scalar_t>::to(1),
-               /*    A=*/grad_output_n.data<scalar_t>(),
-               /*  lda=*/output_vsize,
-               /*    x=*/ones.data<scalar_t>(),
-               /* incx=*/1,
-               /* beta=*/ScalarConvert<int, scalar_t>::to(1),
-               /*    y=*/grad_bias.data<scalar_t>(),
-               /* incy=*/1);
-#endif
+            CALCULATE_GRAD_BIAS; /* MSVC does not like #ifdef-s
+                                    inside the CPP macros, see above. */
             /*
               TODO: when scale != 1 is introduced then use:
                 grad_bias += scale * grad_output_n.sum(dims);
