@@ -63,25 +63,37 @@ void maybe_initialize_cuda(const Device device) {
 Tensor dispatch_zeros(c10::TensorTypeId type_id, at::ScalarType scalar_type, optional<Device> device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
-  return torch::zeros(sizes, options(type_id, scalar_type).device(std::move(device)));
+  if (device.has_value()) {
+    return torch::zeros(sizes, options(type_id, scalar_type).device(std::move(device)));
+  }
+  return torch::zeros(sizes, options(type_id, scalar_type));
 }
 
 Tensor dispatch_ones(c10::TensorTypeId type_id, at::ScalarType scalar_type, optional<Device> device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
-  return torch::ones(sizes, options(type_id, scalar_type).device(std::move(device)));
+  if (device.has_value()) {
+    return torch::ones(sizes, options(type_id, scalar_type).device(std::move(device)));
+  }
+  return torch::ones(sizes, options(type_id, scalar_type));
 }
 
 Tensor dispatch_full(c10::TensorTypeId type_id, at::ScalarType scalar_type, Scalar fill_value, optional<Device> device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
-  return torch::full(sizes, fill_value, options(type_id, scalar_type).device(std::move(device)));
+  if (device.has_value()) {
+    return torch::full(sizes, fill_value, options(type_id, scalar_type).device(std::move(device)));
+  }
+  return torch::full(sizes, fill_value, options(type_id, scalar_type));
 }
 
 Tensor new_with_sizes(c10::TensorTypeId type_id, at::ScalarType scalar_type, optional<Device> device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
-  return torch::empty(sizes, options(type_id, scalar_type).device(std::move(device)));
+  if (device.has_value()) {
+    return torch::empty(sizes, options(type_id, scalar_type).device(std::move(device)));
+  }
+  return torch::empty(sizes, options(type_id, scalar_type));
 }
 
 Tensor new_with_storage(c10::TensorTypeId type_id, at::ScalarType scalar_type, Storage storage) {
@@ -300,7 +312,10 @@ Tensor legacy_sparse_tensor_ctor(c10::TensorTypeId type_id, at::ScalarType scala
   if (r.idx == 0) {
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type_id, deviceOptional);
-    return at::empty({0}, options(type_id, scalar_type).device(r.deviceOptional(0)));
+    if (deviceOptional.has_value()) {
+      return at::empty({0}, options(type_id, scalar_type).device(r.deviceOptional(0)));
+    }
+    return at::empty({0}, options(type_id, scalar_type));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return autograd::make_variable(at::unsafeTensorFromTH(cdata, true));
