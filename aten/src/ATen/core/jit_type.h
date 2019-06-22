@@ -787,7 +787,7 @@ struct CAFFE2_API DictType : public Type {
       return getKeyType()->isSubtypeOf(dict_rhs->getKeyType()) &&
           getValueType()->isSubtypeOf(dict_rhs->getValueType());
     }
-    return false;
+    return Type::isSubtypeOf(rhs);
   }
 
   bool hasFreeVariables() const override {
