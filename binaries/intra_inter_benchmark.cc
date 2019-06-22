@@ -98,7 +98,7 @@ void print_runtime_stats(const std::vector<float>& runtimes) {
     sqr_sum += runtimes[idx] * runtimes[idx];
   }
   float mean = sum / N;
-  float sd = sqrt(sqr_sum / N - mean * mean);
+  float sd = std::sqrt(sqr_sum / N - mean * mean);
   std::cout << "N = " << N << ", mean = " << mean << ", sd = " << sd
             << std::endl;
 }
