@@ -450,8 +450,10 @@ struct TORCH_API RangeValue : SugaredValue {
     Value* start_;
     Value* end_;
     Value* step_;
-    // a flag to determine if it's a simple range() call with only end_ from arguments
-    // If true, we will not insert length calculation and index derivation
+    // a flag to determine if it's a simple range() call with only end_ from
+    // arguments If true, we will not insert length calculation and index
+    // derivation nodes to simplify the graph and enable more possible
+    // optimizations
     bool has_only_end_;
 };
 
