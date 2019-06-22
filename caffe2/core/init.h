@@ -99,10 +99,7 @@ class CAFFE2_API Caffe2InitializeRegistry {
 CAFFE2_API bool unsafeRunCaffe2InitFunction(
     const char* name,
     int* pargc = nullptr,
-    char*** pargv = nullptr) {
-  return internal::Caffe2InitializeRegistry::Registry()->RunNamedFunction(
-      name, pargc, pargv);
-}
+    char*** pargv = nullptr);
 
 class CAFFE2_API InitRegisterer {
  public:
