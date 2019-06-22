@@ -54,7 +54,7 @@ struct TopoMoveTestFixture {
       inputs.push_back(nodes.at(name)->output());
     }
     auto node = graph->appendNode(graph->create(prim::AutogradZero, inputs));
-    node->output()->setDebugName(name);
+    node->output()->setUniqueName(name);
     nodes[name] = node;
 
     if (blockInputNames.size() != 0) {
