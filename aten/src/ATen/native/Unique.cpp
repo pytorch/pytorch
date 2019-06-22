@@ -156,14 +156,14 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
     const bool return_counts) {
 
     auto sizes = self.sizes().vec();
-    // check how many zero dimentions exist
+    // check how many zero dimensions exist
     auto num_zero_dims = std::count(sizes.begin(), sizes.end(), 0);
     
-    // tensor is not well formed as it has 0 sized dimentions
+    // tensor is not well formed as it has 0 sized dimensions
     if (self.size(dim) == 0){
       AT_CHECK(
           num_zero_dims == 1,
-          "Number of zero sized dimentions is more than one, so unique cannot be applied ")
+          "Number of zero sized dimensions is more than one, so unique cannot be applied ")
       Tensor output = at::empty({0}, self.options());
       Tensor inverse_indices =
           at::empty({0}, self.options().dtype(kLong));
@@ -173,7 +173,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
     }
     
     AT_CHECK(num_zero_dims == 0,
-    "There are 0 sized dimentions, and they aren't selected, so unique cannot be applied");
+    "There are 0 sized dimensions, and they aren't selected, so unique cannot be applied");
   
   // reshape tensor as [dim, -1]
   Tensor input_flat = self.transpose(dim, 0);
