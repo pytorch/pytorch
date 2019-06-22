@@ -57,7 +57,10 @@ namespace detail {
   }
   template<class T, class StorageT>
   StorageT list_element_from(T&& element) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     return std::move(element);
+#pragma GCC diagnostic pop
   }
 }
 

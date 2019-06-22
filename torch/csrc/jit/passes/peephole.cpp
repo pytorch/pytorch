@@ -40,8 +40,8 @@ void PeepholeOptimizeImpl(Block* block, bool addmm_fusion_enabled) {
       if (auto input_type = node->namedInput(attr::self)
                                 ->type()
                                 ->cast<CompleteTensorType>()) {
-        auto expanded_sizes = node->get<std::vector<int64_t>>(attr::size);
-        if (expanded_sizes == input_type->sizes()) {
+        auto expanded_sizes = node->get<c10::List<int64_t>>(attr::size);
+        if (!expanded_sizes.has_value() || c10::impl::toVector(*expanded_sizes) == input_type->sizes()) {
           node->output()->replaceAllUsesWith(node->namedInput(attr::self));
         }
       }

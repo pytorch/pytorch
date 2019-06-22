@@ -26,7 +26,10 @@ struct TORCH_API RegisterOperators {
   template <typename Implementation>
   C10_DEPRECATED_MESSAGE("torch::jit::RegisterOperators is deprecated. Please use torch::RegisterOperators instead.")
   RegisterOperators(const std::string& name, Implementation&& implementation) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     op(name, std::forward<Implementation>(implementation));
+#pragma GCC diagnostic pop
   }
 
   template <typename Implementation>

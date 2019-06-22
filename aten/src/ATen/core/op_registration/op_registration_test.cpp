@@ -812,6 +812,9 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     },
     "(Tensor[] a) -> Tensor[]");
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
   // deprecated list types (with empty list)
   testArgTypes<std::vector<double>>::test<TestLegacyAPI>(
     std::vector<double>(), [] (const std::vector<double>& v) {EXPECT_EQ(0, v.size());},
@@ -862,6 +865,8 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
       EXPECT_EQ(TensorType1(), v.to<c10::List<at::Tensor>>().get(1).type_id());
     },
     "(Tensor[] a) -> Tensor[]");
+
+#pragma GCC diagnostic pop
 
   // Test optional of list (with nullopt)
   testArgTypes<c10::optional<c10::List<int64_t>>>::test(
