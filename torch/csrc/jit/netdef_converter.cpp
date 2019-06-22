@@ -130,7 +130,7 @@ void convertNetDefToIR(
       AT_ASSERT(namesMap.count(v));
       const std::string& name = namesMap.at(v);
       if (Value::isValidName(name)) {
-        v->setDebugName(name);
+        v->setUniqueName(name);
       }
     }
   }
@@ -138,14 +138,14 @@ void convertNetDefToIR(
     AT_ASSERT(namesMap.count(v));
     const std::string& name = namesMap.at(v);
     if (Value::isValidName(name)) {
-      v->setDebugName(name);
+      v->setUniqueName(name);
     }
   }
   for (Value* v : g->outputs()) {
     AT_ASSERT(namesMap.count(v));
     const std::string& name = namesMap.at(v);
     if (Value::isValidName(name)) {
-      v->setDebugName(name);
+      v->setUniqueName(name);
     }
   }
 }
@@ -210,10 +210,10 @@ static void convertNodeToCaffe2Op(const Node* node, caffe2::NetDef* net,
   caffe2::OperatorDef op;
   op.set_type(removePrefixIfNeeded(node->kind().toQualString(), prefix));
   for (const Value* input : node->inputs()) {
-    op.add_input(input->debugName());
+    op.add_input(input->uniqueName());
   }
   for (const Value* output : node->outputs()) {
-    op.add_output(output->debugName());
+    op.add_output(output->uniqueName());
   }
   std::vector<Symbol> names = node->attributeNames();
   for (const Symbol& name : names) {
@@ -228,7 +228,7 @@ void convertIRToNetDef(caffe2::NetDef* net, const Graph& g,
   net->mutable_op()->Clear();
 
   for (const Value* value : g.inputs()) {
-    net->add_external_input(value->debugName());
+    net->add_external_input(value->uniqueName());
   }
 
   for (const Node* node : g.nodes()) {
@@ -236,7 +236,7 @@ void convertIRToNetDef(caffe2::NetDef* net, const Graph& g,
   }
 
   for (const Value* value : g.outputs()) {
-    net->add_external_output(value->debugName());
+    net->add_external_output(value->uniqueName());
   }
 }
 

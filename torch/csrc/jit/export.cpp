@@ -214,7 +214,7 @@ void EncoderBase::EncodeValueInfo(
     onnx::ValueInfoProto* v,
     const Value* n,
     const std::unordered_map<std::string, std::unordered_map<int64_t, std::string>>& dynamic_axes) {
-  std::string name = n->debugName();
+  std::string name = n->uniqueName();
   v->set_name(name);
   if (CompleteTensorTypePtr node_type = n->type()->cast<CompleteTensorType>()) {
     onnx::TypeProto* t = v->mutable_type();
@@ -285,11 +285,11 @@ void EncoderBase::EncodeBlock(
       if (input->node()->mustBeNone() && !is_raw_export) {
         p_n->add_input("");
       } else {
-        p_n->add_input(input->debugName());
+        p_n->add_input(input->uniqueName());
       }
     }
     for (auto output : node->outputs()) {
-      p_n->add_output(output->debugName());
+      p_n->add_output(output->uniqueName());
       EncodeIntermediateValueInfo(graph_proto, output);
     }
     if (!node->kind().is_onnx()) {
