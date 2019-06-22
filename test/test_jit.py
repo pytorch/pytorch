@@ -6512,7 +6512,7 @@ a")
                 return len(node.findAllNodes("prim::If")) * 2 + len(node.findAllNodes("prim::Loop"))
             for node in ifs + loops:
                 outs = list(node.outputs())
-                out_name = list(map(lambda x: x.debugName(), outs))
+                out_name = list(map(lambda x: x.uniqueName(), outs))
                 if len(out_name) == 0:
                     continue
                 fc = FileCheck()
