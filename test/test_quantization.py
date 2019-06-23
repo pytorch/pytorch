@@ -60,8 +60,8 @@ class convertTest(TestCase):
         myModel = Model1()
         qConfigDict = {
             # Top level qconfig
-            '': QConfig(weight = observer(WeightObserver, QOptions(torch.qint8, torch.per_tensor_affine)),
-                        activation = observer(Observer, QOptions(torch.qint8, torch.per_tensor_affine)))
+            '': QConfig(weight=observer(WeightObserver, QOptions(torch.qint8, torch.per_tensor_affine)),
+                        activation=observer(Observer, QOptions(torch.qint8, torch.per_tensor_affine)))
         }
         eval_args = [calib_data]
         tq.quantize(myModel, qConfigDict, eval_fn, *eval_args)
@@ -85,8 +85,8 @@ class convertTest(TestCase):
         myModel = Model2()
         qConfigDict = {
             # Only quantize fc2
-            'fc2': QConfig(weight = observer(WeightObserver, QOptions(torch.qint8, torch.per_tensor_affine)),
-                           activation = observer(Observer, QOptions(torch.qint8, torch.per_tensor_affine)))
+            'fc2': QConfig(weight=observer(WeightObserver, QOptions(torch.qint8, torch.per_tensor_affine)),
+                           activation=observer(Observer, QOptions(torch.qint8, torch.per_tensor_affine)))
         }
         eval_args = [calib_data]
         tq.quantize(myModel, qConfigDict, eval_fn, *eval_args)
@@ -103,8 +103,8 @@ class convertTest(TestCase):
         calib_data = torch.rand(20, 5, dtype=torch.float)
         myModel = Model1()
         qConfigDict = {
-            '': QConfig(weight = observer(WeightObserver, QOptions(torch.qint8, torch.per_tensor_affine)),
-                        activation = observer(Observer, QOptions(torch.qint8, torch.per_tensor_affine)))
+            '': QConfig(weight=observer(WeightObserver, QOptions(torch.qint8, torch.per_tensor_affine)),
+                        activation=observer(Observer, QOptions(torch.qint8, torch.per_tensor_affine)))
         }
         eval_args = [calib_data]
         tq.prepare(myModel, qConfigDict)
@@ -126,8 +126,8 @@ class convertTest(TestCase):
         calib_data = torch.rand(20, 5, dtype=torch.float)
         myModel = Model2()
         qConfigDict = {
-            'fc2': QConfig(weight = observer(WeightObserver, QOptions(torch.qint8, torch.per_tensor_affine)),
-                           activation = observer(Observer, QOptions(torch.qint8, torch.per_tensor_affine)))
+            'fc2': QConfig(weight=observer(WeightObserver, QOptions(torch.qint8, torch.per_tensor_affine)),
+                           activation=observer(Observer, QOptions(torch.qint8, torch.per_tensor_affine)))
         }
         eval_args = [calib_data]
         tq.prepare(myModel, qConfigDict)
@@ -146,8 +146,8 @@ class convertTest(TestCase):
 
     def test_nested(self):
         myModel = NestedModel()
-        config = QConfig(weight = observer(WeightObserver, QOptions(torch.qint8, torch.per_tensor_affine)),
-                         activation = observer(Observer, QOptions(torch.qint8, torch.per_tensor_affine)))
+        config = QConfig(weight=observer(WeightObserver, QOptions(torch.qint8, torch.per_tensor_affine)),
+                         activation=observer(Observer, QOptions(torch.qint8, torch.per_tensor_affine)))
         qConfigDict = {
             'fc3': config,
             'sub2.fc2': config
