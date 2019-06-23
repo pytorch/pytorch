@@ -44,6 +44,7 @@
 #include <torch/csrc/jit/init.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/onnx/init.h>
+#include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 
 #ifdef USE_CUDNN
@@ -660,6 +661,7 @@ PyObject* initModule() {
   // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
+  torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);
