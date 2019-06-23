@@ -6,6 +6,8 @@
 #include <mutex>
 
 #include "tbb/tbb.h"
+#define TBB_PREVIEW_GLOBAL_CONTROL 1
+#include "tbb/global_control.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -18,9 +20,25 @@
 namespace at {
 
 namespace {
-  static thread_local tbb::task_scheduler_init tbb_init_(intraop_default_num_threads());
-  std::atomic<int> num_intraop_threads_{-1};
-  static thread_local tbb::task_group tg_;
+static thread_local tbb::task_scheduler_init tbb_init_(intraop_default_num_threads());
+std::atomic<int> num_intraop_threads_{-1};
+static thread_local tbb::task_group tg_;
+
+std::mutex global_thread_mutex_;
+std::shared_ptr<tbb::global_control> global_thread_limit_ = nullptr;
+
+void _internal_set_num_threads(int nthreads) {
+  TORCH_INTERNAL_ASSERT(nthreads > 0);
+  {
+    std::unique_lock<std::mutex> lk(global_thread_mutex_);
+    global_thread_limit_ = std::make_shared<tbb::global_control>(
+        tbb::global_control::max_allowed_parallelism, nthreads);
+  }
+  if (tbb_init_.is_active()) {
+    tbb_init_.terminate();
+  }
+  tbb_init_.initialize(nthreads);
+}
 }
 
 void init_num_threads() {
@@ -36,21 +54,14 @@ void init_num_threads() {
   if (nthreads < 0) {
     nthreads = intraop_default_num_threads();
   }
-  TORCH_INTERNAL_ASSERT(nthreads > 0);
-  if (tbb_init_.is_active()) {
-    tbb_init_.terminate();
-  }
-  tbb_init_.initialize(nthreads);
+  _internal_set_num_threads(nthreads);
 }
 
 void set_num_threads(int nthreads) {
   TORCH_CHECK(nthreads > 0);
   int no_value = -1;
   if (num_intraop_threads_.compare_exchange_strong(no_value, nthreads)) {
-    if (tbb_init_.is_active()) {
-      tbb_init_.terminate();
-    }
-    tbb_init_.initialize(nthreads);
+    _internal_set_num_threads(nthreads);
     return;
   }
   TORCH_CHECK(false,
