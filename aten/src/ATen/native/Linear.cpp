@@ -120,9 +120,11 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // finally squeeze summed dimensions if desired
   if (! keepdim) {
     auto sizes = result.sizes().vec();
-    for (int i = dim-1; i>=0; i--)
-      if (sum_dims[i])
+    for (int i = dim-1; i>=0; i--) {
+      if (sum_dims[i]) {
         sizes.erase(sizes.begin() + i);
+      }
+    }
     result = result.view(sizes);
   }
   return result;
@@ -357,8 +359,9 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   }
   // finally, we squeeze out all non-result dimensions
   auto sizes = result.sizes().vec();
-  for (int64_t dim = num_total_idxes-1; dim >= num_output_dims; dim--)
+  for (int64_t dim = num_total_idxes-1; dim >= num_output_dims; dim--) {
     sizes.erase(sizes.begin() + dim);
+  }
 
   result = result.view(sizes);
   return result;
