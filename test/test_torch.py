@@ -4417,7 +4417,7 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
 
     def test_randperm(self):
-        # Ensure both integer and floating-point numbers are tested.
+        # Test core functionality. Ensure both integer and floating-point numbers are tested.
         for dtype in (torch.long, torch.half):
             _RNGState = torch.get_rng_state()
             res1 = torch.randperm(100)

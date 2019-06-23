@@ -2759,11 +2759,14 @@ class TestCuda(TestCase):
     def test_randperm_cuda(self):
         cuda = torch.device('cuda:0')
 
-        # For small n, randperm is offloaded to CPU instead. For large n, randperm is executed on GPU.
+        # Test core functionality. For small n, randperm is offloaded to CPU instead. For large n, randperm is executed
+        # on GPU.
         for n in (100, 50000):
-            # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is different from
-            # others on cuda.
+            # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
+            # different from others on cuda.
             for dtype in (torch.long, torch.half, torch.float):
+                if n > 2049 and dtype == torch.half:  # Large n for torch.half will raise an exception, do not test here.
+                    continue
                 with torch.random.fork_rng(devices=[0]):
                     res1 = torch.randperm(n, dtype=dtype, device=cuda)
                 res2 = torch.empty(0, dtype=dtype, device=cuda)
