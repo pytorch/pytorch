@@ -119,11 +119,29 @@ struct TORCH_API CompilationUnit {
   /**
    * Register a class as being owned by this compilation unit.
    */
-  void register_class(ClassTypePtr classType) {
+  void register_class(c10::NamedTypePtr classType) {
     classes_.push_back(std::move(classType));
   };
 
-  ClassTypePtr get_class(const c10::QualifiedName& name) const {
+  c10::ClassTypePtr get_class(const c10::QualifiedName& name) const {
+    for (const auto& cls : classes_) {
+      if (cls->qualname() == name.qualifiedName()) {
+        return cls->expect<ClassType>();
+      }
+    }
+    return nullptr;
+  }
+
+  c10::TupleTypePtr get_named_tuple(const c10::QualifiedName& name) const {
+    for (const auto& cls : classes_) {
+      if (cls->qualname() == name.qualifiedName()) {
+        return cls->expect<TupleType>();
+      }
+    }
+    return nullptr;
+  }
+
+  c10::NamedTypePtr get_type(const c10::QualifiedName& name) const {
     for (const auto& cls : classes_) {
       if (cls->qualname() == name.qualifiedName()) {
         return cls;
@@ -179,7 +197,7 @@ struct TORCH_API CompilationUnit {
   // 1. Classes have compilation units internally that hold their methods.
   // 2. On load, the TypePtrs of any imported classes are owned by the main
   // module's compilation unit.
-  std::vector<ClassTypePtr> classes_;
+  std::vector<c10::NamedTypePtr> classes_;
 };
 
 } // namespace script

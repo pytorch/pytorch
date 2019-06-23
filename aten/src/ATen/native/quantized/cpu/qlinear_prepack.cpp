@@ -49,7 +49,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
     auto N = weight.size(0);
     auto K = weight.size(1);
 
-    int32_t weight_zero_point_int32 = weight.q_zero_point().toInt();
+    int32_t weight_zero_point_int32 = weight.q_zero_point();
 
     // TODO: contiguous is called for further JIT optimizations.
     auto weight_contig = weight.contiguous();
@@ -75,7 +75,7 @@ class QLinearPackWeightInt8 final : public c10::OperatorKernel {
             /*pmat=*/nullptr, // PackBMatrix manages ownership of pmat
             /*groups=*/1),
         col_offsets,
-        weight.q_scale().toFloat(),
+        weight.q_scale(),
         weight_zero_point_int32});
 
     // TODO: we will need to replace this with torchscript classes at a later
