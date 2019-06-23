@@ -26,6 +26,8 @@ class FunctionalAPITest(TestCase):
 class ModuleAPITest(TestCase):
     def test_linear_api(self):
         """test API functionality for nn.quantized.linear"""
+        # TODO: create from_float
+        # create __init__
         input_channels = 10
         output_channels = 20
         batch_size = 5
@@ -37,12 +39,7 @@ class ModuleAPITest(TestCase):
         B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32)
         out_scale = 0.5
         out_zero_point = 3
-        qLinear = nnq.Linear(output_channels, input_channels)
-        # Later diff replaces this with set_state/get_state
-        qLinear._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(W_q)
-        qLinear.bias = B_q
-        qLinear.output_scale = torch.Tensor([out_scale])
-        qLinear.output_zero_point = torch.Tensor([out_zero_point])
+        qLinear = nnq.Linear(W_q, B_q, out_scale, out_zero_point)
         Z_q = qLinear(X_q)
         # Check if the module implementation matches calling the
         # ops directly
@@ -59,7 +56,8 @@ class ModuleAPITest(TestCase):
             loaded_dict = torch.load(f)
         for key in model_dict:
             self.assertEqual(model_dict[key], loaded_dict[key])
-        qLinear2 = nnq.Linear(output_channels, input_channels)
+        # TODO: should we do this?
+        qLinear2 = nnq.Linear.from_float(torch.nn.Linear(output_channels, input_channels))
         qLinear2.load_state_dict(loaded_dict)
 
         def compareUnpackedWeight(w1, w2):
