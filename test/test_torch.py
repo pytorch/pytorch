@@ -8846,9 +8846,6 @@ class _TestTorchMixin(object):
             self.assertEqual((0, 5), fn(torch.pinverse, (5, 0)).shape)
             self.assertEqual((0, 0), fn(torch.pinverse, (0, 0)).shape)
 
-            # svd
-            self.assertRaises(RuntimeError, lambda: fn(torch.svd, (0, 0)))
-
             # det, logdet, slogdet
             self.assertEqual(torch.tensor(1., device=device), fn(torch.det, (0, 0)))
             self.assertEqual(torch.tensor(0., device=device), fn(torch.logdet, (0, 0)))
