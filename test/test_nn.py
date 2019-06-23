@@ -4581,6 +4581,8 @@ class TestNN(NNTestCase):
         incompatible_keys = net.load_state_dict(state_dict)
         self.assertEqual(len(incompatible_keys.missing_keys), 0)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
+        self.assertNotIn('Incompatible', str(incompatible_keys))
+        self.assertNotIn('Incompatible', repr(incompatible_keys))
         self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
         self.assertEqual(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
         self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
@@ -4592,6 +4594,8 @@ class TestNN(NNTestCase):
         self.assertEqual(len(incompatible_keys.missing_keys), 0)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
         self.assertIn('extra', incompatible_keys.unexpected_keys)
+        self.assertIn('Incompatible', str(incompatible_keys))
+        self.assertIn('Incompatible', repr(incompatible_keys))
 
         state_dict = net.state_dict()
         state_dict.update({'extra.param': torch.ones(5)})
