@@ -1808,8 +1808,8 @@ def _get_methods(cls):
 _compiled_methods_whitelist = {
     'forward', 'register_buffer', 'register_parameter', 'add_module',
     '_apply', 'apply', 'cuda', 'cpu', 'to', 'type', 'float', 'double', 'half',
-    'state_dict', 'load_state_dict', '_load_from_state_dict',
-    '_named_members', 'parameters', 'named_parameters',
+    'state_dict', '_save_to_state_dict', 'load_state_dict',
+    '_load_from_state_dict', '_named_members', 'parameters', 'named_parameters',
     'buffers', 'named_buffers', 'children', 'named_children', 'modules',
     'named_modules', 'zero_grad', 'share_memory', '_get_name', 'extra_repr',
     '_slow_forward', '_tracing_name', 'eval', 'train',
@@ -2086,8 +2086,8 @@ def _get_named_tuple_properties(obj):
             annotations.append(torch._C.TensorType.get())
     return type(obj).__name__, fields, annotations
 
-def _create_named_tuple(t, names, unqual_name):
-    TupleType = collections.namedtuple(unqual_name, names)
+def _create_named_tuple(t, unqual_name, field_names):
+    TupleType = collections.namedtuple(unqual_name, field_names)
     return TupleType(*t)
 
 class _disable_tracing(object):

@@ -26,3 +26,7 @@ class ReLU(Module):
     @weak_script_method
     def forward(self, input):
         return F.relu(input)
+
+    @staticmethod
+    def from_float(mod):
+        return ReLU(mod.inplace)

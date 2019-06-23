@@ -32,8 +32,7 @@ def addObserver(myMod, qConfigDict, qConfigParent=None, prefix=''):
             myMod.qConfig = qConfigParent
     # Insert observers only for leaf nodes
     if myMod.qConfig is not None and len(myMod._modules) == 0:
-        observerConfig = myMod.qConfig['activation']['config']
-        myMod.add_module('observer', myMod.qConfig['activation']['observer'](observerConfig))
+        myMod.add_module('observer', myMod.qConfig.activation())
         myMod.register_forward_hook(_forward_hook)
 
     for name, child in myMod.named_children():
@@ -127,8 +126,7 @@ class AbstractQuant(nn.Module):
     """
     def __init__(self, qconfig):
         super(AbstractQuant, self).__init__()
-        self.config = qconfig['activation']['config']
-        self.add_module('observer', qconfig['activation']['observer'](self.config))
+        self.add_module('observer', qconfig.activation())
 
     def forward(self, x):
         self.observer(x)
@@ -154,7 +152,7 @@ def calculateQParams(MyModule):
     if hasattr(MyModule, 'observer'):
         if isinstance(MyModule.observer, Observer):
             # Simple symmetric quantization over entire observed range
-            MyModule.qparams = MyModule.observer.calculate_q_params()
+            MyModule.qparams = MyModule.observer.calculate_qparams()
     for Module in MyModule.children():
         calculateQParams(Module)
 
@@ -184,7 +182,7 @@ def convertToQuantized(module):
     """
     module_swapped = swapModule(module)
     if len(list(module.named_children())) == 0:
-        return module
+        return module_swapped
 
     reassign = {}
     for name, mod in module.named_children():
@@ -197,44 +195,27 @@ def convertToQuantized(module):
 
     return module_swapped
 
-def swapModule(mod):
+DEFAULT_MODULE_MAPPING = {
+    torch.nn.Linear: nnq.Linear,
+    torch.nn.ReLU: nnq.ReLU,
+}
+
+ABSTRACT_MODULE_MAPPING = {
+    AbstractQuant: nnq.Quantize,
+    AbstractDeQuant: nnq.DeQuantize
+}
+
+def swapModule(mod, mapping=DEFAULT_MODULE_MAPPING):
     r""" Check if a module has a quantized counterpart and swap it.
     """
     new_mod = mod
     if hasattr(mod, 'observer'):
-        if type(mod) == torch.nn.Linear:
-            # Obtain quantized weights and biases
-            observerConfig = mod.qConfig['weight']['config']
-            weight_observer = mod.qConfig['weight']['observer'](observerConfig)
-            quantized_weight, quantized_bias = quantizeWeightAndBias(
-                mod, weight_observer)
-            new_mod = nnq.Linear(mod.out_features, mod.in_features)
-            state = {
-                'weight': quantized_weight,
-                'bias': quantized_bias,
-                'output_scale': mod.qparams[0],
-                'output_zero_point': mod.qparams[1]
-            }
-            new_mod.set_state(state)
-        if type(mod) == torch.nn.Identity:
-            new_mod = nnq.Quantize(mod.qparams[0].item(), mod.qparams[1].item(), torch.quint8)
+        if type(mod) in mapping:
+            new_mod = mapping[type(mod)].from_float(mod)
 
-        if type(mod) == torch.nn.ReLU:
-            new_mod = nnq.ReLU()
+    if type(mod) in ABSTRACT_MODULE_MAPPING:
+        new_mod = ABSTRACT_MODULE_MAPPING[type(mod)].from_float(mod)
 
-    if type(mod) == AbstractQuant:
-        new_mod = nnq.Quantize(mod.qparams[0].item(), mod.qparams[1].item(), torch.quint8)
-
-    if type(mod) == AbstractDeQuant:
-        new_mod = nnq.DeQuantize()
-
+    # keep the modification to forward
+    new_mod.forward = mod.forward
     return new_mod
-
-def quantizeWeightAndBias(mod, weight_observer):
-    weight_observer(mod.weight)
-    wt_qparams = weight_observer.calculate_q_params()
-    bias_qparams = torch.zeros(2)
-    bias_scale = (wt_qparams[0] * mod.qparams[0]).float()
-    quantized_weight = torch.quantize_linear(mod.weight.float(), wt_qparams[0], wt_qparams[1].int(), torch.qint8)
-    quantized_bias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
-    return quantized_weight, quantized_bias
