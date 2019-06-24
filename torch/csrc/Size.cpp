@@ -157,16 +157,21 @@ static PyObject *THPSize_reduce(THPSize *self)
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module) throw python_error();
 
-  THPObjectPtr obj(PyObject_GetAttrString(module, "Size"));
-  if (!obj) throw python_error();
-  PyTuple_SET_ITEM(ret.get(), 0, obj.release());
+  auto obj = (PyObject*)(&THPSizeType);
+  Py_INCREF(&THPSizeType);
+  PyTuple_SET_ITEM(ret.get(), 0, obj);
 
   THPObjectPtr t(PyTuple_New(PyTuple_Size((PyObject*)self)));
   if (!t) throw python_error();
   for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
-    PyTuple_SET_ITEM(t.get(), i, PyTuple_GET_ITEM(self, i));
+    auto d = PyTuple_GET_ITEM(self, i);
+    Py_INCREF(d);
+    PyTuple_SET_ITEM(t.get(), i, d);
   }
-  PyTuple_SET_ITEM(ret.get(), 1, Py_BuildValue("(O)", t.release()));
+
+  THPObjectPtr dims(Py_BuildValue("(O)", t.get()));
+  if (!dims) throw python_error();
+  PyTuple_SET_ITEM(ret.get(), 1, dims.release());
 
   return ret.release();
   END_HANDLE_TH_ERRORS
