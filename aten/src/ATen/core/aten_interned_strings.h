@@ -248,7 +248,6 @@ _(aten, conv3d) \
 _(aten, conv_tbc) \
 _(aten, conv_tbc_backward) \
 _(aten, conv_transpose1d) \
-_(aten, conv_transpose3d) \
 _(aten, convolution) \
 _(aten, copy_sparse_to_sparse) \
 _(aten, cos) \
