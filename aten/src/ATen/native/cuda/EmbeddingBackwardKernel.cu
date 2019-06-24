@@ -265,33 +265,33 @@ Tensor embedding_backward_cuda_kernel(
   // Compute the sum of each split-segment and handle bags
   if (offset2bag.defined()) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-        grad.scalar_type(), "embedding_bag_backward_cuda_compute_grad_weight", [&] {
-          compute_grad_weight_bags<scalar_t><<<grid, block, 0, stream>>>(
-              orig_indices.data<int64_t>(),
-                  grad.data<scalar_t>(),
-                  offset2bag.data<int64_t>(),
-                  count.defined() ? count.data<int64_t>() : nullptr, numel, stride,
-                  mode_mean, bag_size.data<int64_t>(),
-                  per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
-                  per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-                  thrust::raw_pointer_cast(split_segment_offsets.data()),
-                  num_of_split_segments, grad_weight_per_segment.data<scalar_t>(),
-                  stride_warped);
-        });
+      grad.scalar_type(), "embedding_bag_backward_cuda_compute_grad_weight", [&] {
+        compute_grad_weight_bags<scalar_t><<<grid, block, 0, stream>>>(
+          orig_indices.data<int64_t>(),
+          grad.data<scalar_t>(),
+          offset2bag.data<int64_t>(),
+          count.defined() ? count.data<int64_t>() : nullptr, numel, stride,
+          mode_mean, bag_size.data<int64_t>(),
+          per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
+          per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
+          thrust::raw_pointer_cast(split_segment_offsets.data()),
+          num_of_split_segments, grad_weight_per_segment.data<scalar_t>(),
+          stride_warped);
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-        grad.scalar_type(), "embedding_bag_backward_cuda_compute_grad_weight", [&] {
-          compute_grad_weight<scalar_t><<<grid, block, 0, stream>>>(
-              orig_indices.data<int64_t>(),
-                  grad.data<scalar_t>(),
-                  count.defined() ? count.data<int64_t>() : nullptr,
-                  numel, stride,
-                  thrust::raw_pointer_cast(split_segment_offsets.data()),
-                  num_of_split_segments,
-                  grad_weight_per_segment.data<scalar_t>(),
-                  padding_idx,
-                  stride_warped);
-        });
+      grad.scalar_type(), "embedding_bag_backward_cuda_compute_grad_weight", [&] {
+        compute_grad_weight<scalar_t><<<grid, block, 0, stream>>>(
+          orig_indices.data<int64_t>(),
+          grad.data<scalar_t>(),
+          count.defined() ? count.data<int64_t>() : nullptr,
+          numel, stride,
+          thrust::raw_pointer_cast(split_segment_offsets.data()),
+          num_of_split_segments,
+          grad_weight_per_segment.data<scalar_t>(),
+          padding_idx,
+          stride_warped);
+    });
   }
   THCudaCheck(cudaGetLastError());
 
@@ -299,16 +299,16 @@ Tensor embedding_backward_cuda_kernel(
   // into `grad_weight`.
   const int grid2 = ceil_div(num_of_segments*stride_warped, block);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-          grad.scalar_type(), "embedding_bag_backward_cuda_sum_and_scatter", [&] {
-            sum_and_scatter<scalar_t><<<grid2, block, 0, stream>>>(
-                  sorted_indices.data<int64_t>(),
-                  grad_weight.data<scalar_t>(),
-                  stride,
-                  thrust::raw_pointer_cast(segment_offsets.data()),
-                  num_of_segments, grad_weight_per_segment.data<scalar_t>(),
-                  thrust::raw_pointer_cast(split_segment_sizes_offsets.data()),
-                  num_of_split_segments, stride_warped);
-          });
+    grad.scalar_type(), "embedding_bag_backward_cuda_sum_and_scatter", [&] {
+      sum_and_scatter<scalar_t><<<grid2, block, 0, stream>>>(
+        sorted_indices.data<int64_t>(),
+        grad_weight.data<scalar_t>(),
+        stride,
+        thrust::raw_pointer_cast(segment_offsets.data()),
+        num_of_segments, grad_weight_per_segment.data<scalar_t>(),
+        thrust::raw_pointer_cast(split_segment_sizes_offsets.data()),
+        num_of_split_segments, stride_warped);
+  });
   THCudaCheck(cudaGetLastError());
   return grad_weight;
 }
