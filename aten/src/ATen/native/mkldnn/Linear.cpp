@@ -52,8 +52,8 @@ Tensor mkldnn_linear(
   TORCH_CHECK(self.dim() >= 2,
       "mkldnn_linear: input needs to has dim at least 2, input dim ", self.dim());
 
-  const ideep::tensor& x = get_mkldnn_tensor(self);
-  const ideep::tensor& w = itensor_from_mkldnn(weight);
+  const ideep::tensor x = get_mkldnn_tensor(self);
+  const ideep::tensor w = itensor_from_mkldnn(weight);
 
   ideep::tensor y;
   if (bias.defined()) {
