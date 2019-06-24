@@ -9364,14 +9364,22 @@ a")
             ''')
 
     def test_for_tuple_unpack(self):
-        with self.assertRaisesRegex(RuntimeError, 'Iteration variable unpacking is not supported'):
-            cu = torch.jit.CompilationUnit('''
-            def for_tuple_unpack(x, y):
-                for i, j in [[3, 4], [5, 6], [7, 8]]:
-                    x += i
-                    y += j
-                return x, y
-            ''')
+        def for_tuple_unpack(x, y):
+            for i, j in [[3, 4], [5, 6], [7, 8]]:
+                x += i
+                y += j
+            return x, y
+
+        self.checkScript(for_tuple_unpack, (torch.tensor(3), torch.tensor(5)))
+
+        def nested_tuple_unpack(x, y):
+            # type: (List[int], List[int]) -> int
+            sum = 0
+            for i, (j, k), v in zip(x, enumerate(x), y):
+                sum += i + j + k + v
+            return sum
+
+        self.checkScript(nested_tuple_unpack, ([1, 3, 5], [2, 4, 6]))
 
     def test_for_tuple_assign(self):
         def test_simple_assign(x):
