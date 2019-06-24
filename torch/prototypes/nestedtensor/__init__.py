@@ -11,7 +11,6 @@ torch.nn.modules.LSTM.forward = nested.nn_lstm_forward_monkey
 
 torch.nestedtensor = nested.make_nested_tensor
 torch.cat = nested.cat
-torch.stack = nested.stack
 
 print("2")
 

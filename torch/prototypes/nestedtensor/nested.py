@@ -70,7 +70,10 @@ def cross_entropy_monkey(input_, target_, weight=None, size_average=None,
         target_tensor = target_tensor.clone()
         target_tensor = target_tensor.view(-1)
         input_tensor = input_.tensor.view(-1, input_.tensor.size(-1))
-        max_last_dim = target_.nested_size().max(-1)[0].item()
+        target_nested_size = target_.nested_size()
+        max_last_dim = 0
+        for s in target_nested_size:
+            max_last_dim = max(max_last_dim, s[-1])
         target_tensor = target_.tensor.narrow(-1, 0, max_last_dim)
         target_tensor = target_tensor.contiguous().view(-1)
         # TODO: Off by a scaling factor to match non-batched version
@@ -271,11 +274,12 @@ def stack(nts_):
 
 def make_nested_tensor(obj):
     if is_nested_tensor(obj):
-        return NestedTensor(torch.tensor(obj.tensor), torch.tensor(obj.mask))
+        return NestedTensor(obj.tensor.clone().detach(), obj.mask.clone().detach())
     elif torch.is_tensor(obj):
-        return torch.tensor(obj)
+        return obj.clone().detach()
     elif isinstance(obj, list):
-        assert(len(obj) > 0)
+        if len(obj) == 0:
+            return NestedTensor(torch.tensor([]), torch.tensor([]))
         for obj_ in obj:
             assert(torch.is_tensor(obj_))
         dim = obj[0].dim()
@@ -287,7 +291,7 @@ def make_nested_tensor(obj):
             assert(device == obj_.device)
         tensors = []
         for obj_ in obj:
-            tensors.append(NestedTensor(torch.tensor(obj_),
+            tensors.append(NestedTensor(obj_.clone().detach(),
                 torch.ones_like(obj_)))
         return stack(tensors)
     else:
@@ -366,13 +370,6 @@ class NestedTensor():
             raise NotImplementedError()
         return super().__getattribute__(attr)
 
-    # Requires dim to reduce number of features
-    # and make it easier to guarantee correctness
-    def squeeze(self, dim):
-        tensor = self.tensor.squeeze(dim)
-        mask = self.mask.squeeze(dim)
-        return NestedTensor(tensor, mask)
-
     def fill_masked(self, value):
         masked_out = self.mask.view(-1) == 0
         if DEBUG_LEVEL > 0:
@@ -382,75 +379,27 @@ class NestedTensor():
         new_tensor = new_tensor.view(self.tensor.size())
         return NestedTensor(new_tensor, self.mask)
 
-    # XXX: This select differs from the regular Tensor
-    # narrow in that it doesn't throw an error if you're
-    # out of bounds. Entries which are
-    # shorter are simply represented by an empty list.
-    def narrow(self, dim, start, length):
-        assert isinstance(dim, numbers.Number)
-        assert isinstance(start, numbers.Number)
-        assert isinstance(length, numbers.Number)
-        assert length >= 0
-        assert start >= 0
-        if start + length >= self.tensor.size(dim):
-            length = max(0, self.tensor.size(dim) - start)
-        # If this is the case length doesn't matter, since
-        # we're entirely out of bounds
-        if start >= self.tensor.size(dim):
-            start = 0
-            length = 0
-        tensor = torch.narrow(self.tensor, dim, start, length)
-        mask = torch.narrow(self.mask, dim, start, length)
-        return NestedTensor(tensor, mask)
-
-    # A multi narrow is like applying narrow in the given dim
-    # with different lengths for each entry instead of a single length.
-    def multi_narrow(self, dim, start, lengths):
-        # A non-zero start creates masks that are much harder to deal with
-        assert start == 0
-        assert dim > 0  # There aren't variable length entries at dim 0
-        # A 1-dim Tensor can only be narrow with 1 length
-        # That's what narrow is for
-        assert self.dim() > 1
-        assert isinstance(dim, numbers.Number)
-        dim = int(dim)
-        assert isinstance(start, numbers.Number)
-        start = int(start)
-        assert isinstance(lengths, tuple)
-        int_lengths = []
-        for end in lengths:
-            assert isinstance(end, numbers.Number)
-            int_lengths.append(int(end))
-        lengths = tuple(int_lengths)
-
-        new_mask = self.mask.clone()
-        assert self.tensor.size(dim - 1) == len(lengths)
-        for i in range(self.tensor.size(dim - 1)):
-            new_mask.select(dim - 1, i).fill_(0)
-            new_mask.select(dim - 1, i).narrow(0, start, lengths[i]).fill_(1)
-        return NestedTensor(self.tensor, new_mask)
-
+    # We're constraining this to a list of Tensors
     def __len__(self):
-        # A 0-dim Tensors can't have a length
-        assert self.dim() > 0
-        if self.dim() == 1:
-            return int(self.mask.sum())
-        else:
-            # Note: Only vectors can hide entries.
-            # Higher dim tensors might still have varibly
-            # sized entries, but they can't be hidden.
-            # Even [[]] has length 1.
-            return len(self.mask)
+        return len(self.tensor)
 
     def __str__(self):
-        return self.tolist().__str__()
+        tensors = self.unbind()
+        result = "nestedtensor([\n"
+        for tensor in tensors:
+            result += "  " + tensor.__str__() + "\n"
+        result += "])"
+        return result
 
-    # TODO: Use a tolist that doesn't iterate over all entries
     def __repr__(self):
-        return self.tolist().__repr__()
+        tensors = self.unbind()
+        result = "nestedtensor([\n"
+        for tensor in tensors:
+            result += "  " + tensor.__repr__() + "\n"
+        result += "])"
+        return result
 
     # Ops specific to NestedTensor
-
     def pad_to_shape(self, goal_shape):
         def pad_tensor_to_shape(t, goal_shape):
             padd = ()
@@ -471,7 +420,6 @@ class NestedTensor():
         return self.mask.sum() == 0
 
     # Tensor ops
-
     def detach(self):
         tensor = self.tensor.detach()
         mask = self.mask.detach()
@@ -493,16 +441,6 @@ class NestedTensor():
         new_mask = self.mask.clone()
         return NestedTensor(new_tensor, new_mask)
 
-    def item(self):
-        # Nested lists don't have items
-        assert self.dim() == 1
-        if self.mask.sum() == 1:
-            return self.tensor.item()
-        else:
-            assert self.mask.sum() == 0
-            return torch.tensor([]).type(self.tensor.type())
-
-    # There is nothing special about a NestedTensor's dim
     def dim(self):
         return self.tensor.dim()
 
@@ -518,17 +456,11 @@ class NestedTensor():
 
     # Only lists of vectors will have a varying number of elements.
     def nested_size(self):
-        # This isn't defined for a 0-dim tensor, because
-        # you can't index into it.
-        assert self.dim() > 0
-        if self.dim() == 1:
-            return torch.tensor(int(self.mask.sum().item()))
-        else:
-            sizes = []
-            for i in range(len(self)):
-                data = self.narrow(0, i, 1).squeeze(0)
-                sizes.append(data.nested_size())
-            return torch.stack(sizes)
+        tensors = self.unbind()
+        sizes = []
+        for tensor in tensors:
+            sizes.append(tensor.size())
+        return tuple(sizes)
 
     def unbind(self):
         tensors_ = self.tensor.unbind()
@@ -543,19 +475,3 @@ class NestedTensor():
                 tensor = tensor.narrow(j, 0, band)
             tensors.append(tensor)
         return tensors
-
-    # def tolist(self):
-    #     if self.dim() == 0:
-    #         # There can be no such thing as a masked scalar
-    #         assert self.mask.item() == 1
-    #         return self.tensor.item()
-    #     if self.dim() == 1:
-    #         return self.tensor.narrow(0, 0, int(self.mask.sum())).tolist()
-    #     lst = []
-    #     for i in range(self.tensor.size(0)):
-    #         tmp = self.narrow(0, i, 1).squeeze(0).tolist()
-    #         # NOTE: Assumes mask is of form 1, 1, 1, ..., 1, 0, 0, 0, ..., 0
-    #         if tmp is None:
-    #             break
-    #         lst.append(tmp)
-    #     return lst

@@ -7,19 +7,6 @@ from torch import stack
 from torch.nn.functional import embedding
 import torch
 
-def _make_nested_list_examples():
-    nested_lists = []
-    nested_lists.append([3.0, 4.0, 5.0])
-    nested_lists.append([[3.0, 4.0, 5.0], 1.0])
-    nested_lists.append([[3.0, [4.0, 5.0]], 1.0])
-    nested_lists.append([[[3.0, 4.0, 5.0], 1.0], 2])
-    nested_lists.append([[3.0, 4.0, 5.0], [1.0, 2.0, 3.0, 5.0]])
-    nested_lists.append([[[10.0, 11.0, 12], 13.0], [14.0, 15.0]])
-    nested_lists.append([[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0, 7.0], [8.0, 9.0]],
-                        [[10.0, 11.0, 12], 13.0]])
-    return nested_lists
-
-
 def test_init():
     # This is a scalar. It aligns with Torch.
     # These cannot be concatenated with anything else.
@@ -156,17 +143,17 @@ def test_embedding_monkey():
     c = embedding(a, b)
     assert (c == d).all()
 
-    a = tensor([1, 2, 2])
+    a = torch.nestedtensor([torch.tensor([1, 2, 2])])
     b = torch.tensor([[4, 5, 6], [7, 8, 9], [10, 11, 12]])
-    d = tensor([[7, 8, 9], [10, 11, 12], [10, 11, 12]])
     c = embedding(a, b)
+    d = torch.nestedtensor([torch.tensor([[7, 8, 9], [10, 11, 12], [10, 11, 12]])])
     assert (c.tensor == d.tensor).all()
     assert (c.mask == d.mask).all()
 
-    a = tensor([[1, 2], [0, 0]])
+    a = torch.nestedtensor([torch.tensor([[1, 2], [0, 0]])])
     b = torch.tensor([[4, 5, 6], [7, 8, 9], [10, 11, 12]])
-    d = tensor([[[7, 8, 9], [10, 11, 12]], [[4, 5, 6], [4, 5, 6]]])
     c = embedding(a, b)
+    d = torch.nestedtensor([torch.tensor([[[7, 8, 9], [10, 11, 12]], [[4, 5, 6], [4, 5, 6]]])])
     assert (c.tensor == d.tensor).all()
     assert (c.mask == d.mask).all()
 
@@ -186,11 +173,11 @@ def test_embedding_monkey():
 def test_nested_linear():
     blinear = torch.nn.Linear(2, 3, bias=False)
     blinear.weight.data.mul_(0).add_(1)
-    a1 = tensor([[[2.0], [2.0, 2.0]]])
-    a1.tensor[0][0][1] = 3.0
-    a2 = tensor([[[2.0], [2.0, 2.0]]])
-    assert a1.tolist() == a2.tolist()
-    assert blinear(a1).tolist() == blinear(a2).tolist()
+    a1 = torch.nestedtensor([torch.tensor([2.0]), torch.tensor([2.0, 2.0])])
+    a1.tensor[0][0] = 3.0
+    a2 = torch.nestedtensor([torch.tensor([2.0]), torch.tensor([2.0, 2.0])])
+    b1 = blinear(a1)
+    b2 = blinear(a2)
 
 
 def test_nested_lstm():
@@ -199,8 +186,8 @@ def test_nested_lstm():
         dropout = 0.0  # Must be 0, otherwise you get random output
         hidden = (torch.randn(nlayers, bsz, nhid),
                   torch.randn(nlayers, bsz, nhid))
-        nested_hidden = (tensor(hidden[0]),
-                          tensor(hidden[1]))
+        nested_hidden = (torch.nestedtensor([hidden[0]]),
+                         torch.nestedtensor([hidden[1]]))
         # nested_rnn = nestedLSTM(ninp, nhid, nlayers,
         #                           dropout=dropout, batch_first=True)
         rnn = torch.nn.LSTM(ninp, nhid, nlayers, dropout=dropout,
@@ -217,7 +204,7 @@ def test_nested_lstm():
         #     i += 1
 
         input_tensor = torch.randn(bsz, seq_len, ninp)
-        nested_input_tensor = tensor(input_tensor)
+        nested_input_tensor = torch.nestedtensor([input_tensor])
 
         assert (nested_input_tensor.tensor == input_tensor).all()
         assert (nested_hidden[0].tensor == hidden[0]).all()
@@ -246,8 +233,8 @@ def test_nested_lstm():
         nested_hidden_0[:, 3:, :] = hidden[0][:, 2:, :]
         nested_hidden_1[:, :2, :] = hidden[1][:, :2, :]
         nested_hidden_1[:, 3:, :] = hidden[1][:, 2:, :]
-        nested_hidden = (tensor(nested_hidden_0),
-                          tensor(nested_hidden_1))
+        nested_hidden = (torch.nestedtensor([torch.tensor(nested_hidden_0)]),
+                         torch.nestedtensor([torch.tensor(nested_hidden_1)]))
 
         rnn = torch.nn.LSTM(ninp, nhid, nlayers, dropout=dropout,
                             batch_first=True)
@@ -259,10 +246,10 @@ def test_nested_lstm():
             p.data.copy_(x)
 
         input_tensor = torch.randn(bsz, seq_len, ninp)
-        nested_input_tensor_0 = tensor(input_tensor[:2, :, :])
-        nested_input_tensor_1 = tensor(torch.randn(
-            1, seq_len, ninp))
-        nested_input_tensor_2 = tensor(input_tensor[2:, :, :])
+        nested_input_tensor_0 = torch.nestedtensor([torch.tensor(input_tensor[:2, :, :])])
+        nested_input_tensor_1 = torch.nestedtensor([torch.tensor(torch.randn(
+            1, seq_len, ninp))])
+        nested_input_tensor_2 = torch.nestedtensor([torch.tensor(input_tensor[2:, :, :])])
 
         nested_input_tensor = cat([nested_input_tensor_0,
                                    nested_input_tensor_1,
@@ -308,48 +295,11 @@ def test_nested_lstm():
         _test_one_cat(4, 1,  1,  10, nlayers)
 
 
-def test_narrow():
-    a = tensor([[0], [1, 2, 3, 4, 1, 0]])
-    b1 = a.narrow(0, 0, 5)
-    b2 = a.narrow(0, 1, 5)
-    assert b1.tolist() == [[0], [1, 2, 3, 4, 1, 0]]
-    assert b2.tolist() == [[1, 2, 3, 4, 1, 0]]
-    b3 = a.narrow(1, 1, 4)
-    assert b3.tolist() == [[], [2, 3, 4, 1]]
-
-
-def test_multi_narrow():
-    a = tensor([[1, 2], [3, 4], [5, 6], [7, 8]])
-    assert a.tolist() == [[1, 2], [3, 4], [5, 6], [7, 8]]
-    b = a.multi_narrow(1, 0, (1, 2, 2, 1))
-    assert b.tolist() == [[1], [3, 4], [5, 6], [7]]
-    a = tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
-    assert a.tolist() == [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
-    a = tensor([[1, 2], [3, 4], [5, 6], [7, 8]])
-    b = a.multi_narrow(1, 0, (2, 2, 0, 2))
-    assert b.tolist() == [[1, 2], [3, 4], [], [7, 8]]
-
-
 def test_nested_size():
-    a = tensor(1.0)
-    try:
-        a.nested_size() == torch.tensor([])
-        raise Exception("Should have thrown an error")
-    except AssertionError:
-        pass
-    a = tensor([])
-    a.nested_size() == torch.tensor(0)
-    a = tensor([1, 2, 3])
-    a.nested_size() == torch.tensor(3)
-    a = tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
-    assert (a.nested_size() == torch.tensor([[2, 2], [2, 2]])).all()
-    a = tensor([[1, 2], [3, 4], [5, 6], [7, 8]])
-    assert (a.nested_size() == torch.tensor([2, 2, 2, 2])).all()
-    b = a.multi_narrow(1, 0, (1, 2, 2, 1))
-    assert (b.nested_size() == torch.tensor([1, 2, 2, 1])).all()
-    b = b.narrow(0, 0, 2)
-    assert (b.nested_size() == torch.tensor([1, 2])).all()
-    assert (b.mask == torch.tensor([[1, 0], [1, 1]])).all()
+    a = torch.nestedtensor([torch.rand(1, 2), torch.rand(2, 3), torch.rand(4, 5)])
+    print(a.nested_size())
+    na = (torch.Size([1, 2]), torch.Size([2, 3]), torch.Size([4, 5]))
+    assert a.nested_size() == na
 
 
 # TODO: Write a test
@@ -357,55 +307,46 @@ def test_nested_cross_entropy_loss():
     a = torch.tensor([[0., 4., 3.], [1., 2., 3.]])
     b = torch.tensor([1, 2])
     n = torch.nn.CrossEntropyLoss()
-    ba = tensor(a)
-    bb = tensor(b)
+    ba = torch.nestedtensor([torch.tensor(a)])
+    bb = torch.nestedtensor([torch.tensor(b)])
     print(n(a, b))
     print(n(ba, bb))
     print("--")
     a = torch.tensor([[0., 4., 3.], [1., 2., 3.]])
     b = torch.tensor([1, 2])
-    ba = tensor([[[0., 4., 3.], [1., 2., 3.]]])
-    bb = tensor([[1], [2]])
+    ba = torch.nestedtensor([torch.tensor([[[0., 4., 3.], [1., 2., 3.]]])])
+    bb = torch.nestedtensor([torch.tensor([[1], [2]])])
     print(n(a, b))
     print(n(ba, bb))
-    import pdb; pdb.set_trace()
 
 
 # TODO: Write a test
 def test_fill_masked():
-    a = tensor([[0., 4.], [1., 2., 3., 4., 1., 0.]])
+    a = torch.nestedtensor([torch.tensor([0., 4.]), torch.tensor([1., 2., 3., 4., 1., 0.])])
     a.fill_masked(3)
 
 
 def test_len():
-    a = tensor([[1, 2], [3, 4], [5, 6], [7, 8]])
+    a = torch.nestedtensor([torch.tensor([1, 2]), 
+                            torch.tensor([3, 4]), 
+                            torch.tensor([5, 6]), 
+                            torch.tensor([7, 8])])
     assert(len(a) == 4)
-    a = tensor([[1, 2], [3, 4]])
+    a = torch.nestedtensor([torch.tensor([1, 2]), 
+                            torch.tensor([7, 8])])
+
     assert(len(a) == 2)
-    a = tensor([[1, 2]])
+    a = torch.nestedtensor([torch.tensor([1, 2])])
     assert(len(a) == 1)
-    a = tensor([])
+    a = torch.nestedtensor([])
     assert(len(a) == 0)
 
 
+# TODO: Add view test. Very rigorous
 def test_unbind():
     a = torch.nestedtensor([torch.rand(1, 2), torch.rand(2, 3), torch.rand(4, 5)])
+    print(a)
     print(a.unbind())
-    import pdb; pdb.set_trace()
-
-
-def test_stack():
-    lst = [tensor([]), tensor([])]
-    res = stack(lst)
-    assert res.tolist() == [[], []]
-    res2 = cat(lst)
-    assert res2.tolist() == []
-
-    lst = [tensor([1, 2]), tensor([1, 2])]
-    res = stack(lst)
-    assert res.tolist() == [[1, 2], [1, 2]]
-    res2 = cat(lst)
-    assert res2.tolist() == [1, 2, 1, 2]
 
 
 # TODO: Carefully test reference passing vs. value passing for each function
@@ -418,10 +359,7 @@ if __name__ == "__main__":
     test_constructors()
     test_unbind()
     test_nested_size()
-    test_stack()
     test_embedding_monkey()
-    test_narrow()
-    test_multi_narrow()
     test_fill_masked()
     test_nested_cross_entropy_loss()
     test_nested_linear()
