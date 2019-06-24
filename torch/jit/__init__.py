@@ -1047,19 +1047,7 @@ def _qualified_name(obj):
 
 def _is_recursive_script_enabled(value):
     # TODO: when recursive script is made the default, remove this method
-
-    # torch.nn.functional/init functions
-    if hasattr(value, '__name__'):
-        name = value.__name__
-        if getattr(torch.nn.functional, name, None) == value:
-            return True
-        if getattr(torch.nn.init, name, None) == value:
-            return True
-
-    # torch.nn modules
-    if 'torch.nn.modules' in str(value.__class__):
-        # Special case to allow nn.Modules to be compiled even though @weak_script
-        # has been deleted
+    if 'torch.nn' in inspect.getmodule(value).__name__:
         return True
     return torch._C._jit_recursive_script()
 
@@ -1702,12 +1690,14 @@ def _convert_to_script_module(mod, methods=None):
     `('forward',)`. Methods accessed in forward are scripted on demand if
     `_enable_recursive_script()` is used.
     """
+    if isinstance(mod, ScriptModule):
+        return mod
+
     if isinstance(mod, (ModuleList, Sequential)):
         # Create constant versions for the iterable modules
         return _create_constant_iterable_module(mod)
 
-    # methods = ()
-    if methods is None:
+    if methods is None and hasattr(mod, 'forward'):
         if mod.forward.__func__ == torch.nn.Module.forward:
             # forward was not overrided
             raise RuntimeError("No forward (TODO: delete this error)")
