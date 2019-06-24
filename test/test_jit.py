@@ -9363,6 +9363,27 @@ a")
                 return x
             ''')
 
+    def test_for_in_string(self):
+        def test_strings(x):
+            # type: (str) -> str
+            reverse = ""
+            for c in x:
+                reverse = c + reverse
+            return reverse
+
+        self.checkScript(test_strings, ("hello",))
+        self.checkScript(test_strings, ("",))
+
+        def test_list_strings(x):
+            # type: (List[str]) -> str
+            result = ""
+            for sub_str in x:
+                result += sub_str
+            return result
+
+        self.checkScript(test_list_strings, (["hello", "world"],))
+        self.checkScript(test_list_strings, (["hello", " ", "world", ""],))
+
     def test_for_tuple_unpack(self):
         def for_tuple_unpack(x, y):
             for i, j in [[3, 4], [5, 6], [7, 8]]:
