@@ -62,7 +62,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   // have a release where this breaks (i.e. a = torch.randn(3, 4); x = Variable(a); a.resize_(4, 5); x.shape is not changed!)
   // and people are not complaining about it, so it's probably fine to just set this flag to true.
   std::cout << "THPVariable_pynew here1" << std::endl;
-  tensor.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(false);
+  tensor.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true); // yf225 TODO: change this to false, and then try test_nn again!
 
   Variable var = tensor;
   if (grad_fn) {
