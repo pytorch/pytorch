@@ -67,7 +67,11 @@ int get_num_interop_threads() {
 }
 
 void launch(std::function<void()> func) {
+#if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
+  intraop_launch(func);
+#else
   get_pool().run(func);
+#endif
 }
 
 } // namespace at

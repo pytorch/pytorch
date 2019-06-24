@@ -1076,7 +1076,7 @@ else:
                 test_suite.addTest(test)
         return test_suite
 
-# Quantizeation references
+# Quantization references
 def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
     """Quantizes a numpy array."""
     if qmin is None:
