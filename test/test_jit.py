@@ -9045,7 +9045,7 @@ a")
             for i in range(100):
                 c += i
             return c
-        self.checkScript(fn, (), outputs=4950, optimize=True)
+        self.checkScript(fn, ())
 
     def test_for_in_range_dynamic(self):
         def fn():
@@ -9059,7 +9059,6 @@ a")
         self.checkScript(fn, (), optimize=False)
 
     def test_for_in_range_ast(self):
-        @torch.jit.script
         def test_script_for_in_range_ast():
             c = 0
             for i in range(100):
@@ -9069,7 +9068,7 @@ a")
                 c += acc
             return c
 
-        self.assertEqual(test_script_for_in_range_ast(), 161700)
+        self.checkScript(test_script_for_in_range_ast, ())
 
     def test_for_in_range_if_ast(self):
         @torch.jit.script
@@ -9091,7 +9090,7 @@ a")
             for i in range(7, 100):
                 x += i
             return x
-        self.checkScript(fn, (), outputs=4929, optimize=True)
+        self.checkScript(fn, ())
 
     def test_for_in_range_start_end_step(self):
         def fn(start, end, step):
@@ -9101,14 +9100,12 @@ a")
                 x += i
             return x
 
-        def check(inp):
-            self.checkScript(fn, inp, outputs=fn(*inp), optimize=True)
-        check((7, 100, 7))
-        check((7, 100, -7))
-        check((2, -11, -3))
-        check((2, -11, 3))
-        check((2, 10, 3))
-        check((-2, -10, -10))
+        self.checkScript(fn, (7, 100, 7))
+        self.checkScript(fn, (7, 100, -7))
+        self.checkScript(fn, (2, -11, -3))
+        self.checkScript(fn, (2, -11, 3))
+        self.checkScript(fn, (2, 10, 3))
+        self.checkScript(fn, (-2, -10, -10))
 
     def test_for_in_range_zero_step(self):
         @torch.jit.script
@@ -9117,6 +9114,7 @@ a")
             for i in range(2, -11, 0):
                 x += i
             return x
+
         with self.assertRaisesRegex(RuntimeError, "must not be zero"):
             fn()
 
