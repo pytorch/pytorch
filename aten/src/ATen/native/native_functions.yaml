@@ -565,27 +565,15 @@
   dispatch:
     CUDA: cudnn_grid_sampler_backward
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: cumsum(Tensor self, int dim, *, ScalarType dtype) -> Tensor
+- func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: cumsum(Tensor self, int dim) -> Tensor
+- func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+
+- func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: cumsum(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-
-- func: cumsum(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
-
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: cumprod(Tensor self, int dim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: cumprod(Tensor self, int dim) -> Tensor
-  variants: function, method
-
-- func: cumprod(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-
-- func: cumprod(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
+- func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
 
@@ -1119,11 +1107,7 @@
     CPU: logspace_cpu_out
     CUDA: logspace_cuda_out
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: log_softmax(Tensor self, int dim, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: log_softmax(Tensor self, int dim) -> Tensor
+- func: log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
@@ -1177,27 +1161,13 @@
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: mean(Tensor self, *, ScalarType dtype) -> Tensor
+- func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self) -> Tensor
+- func: mean(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: mean(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: mean(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  variants: function, method
-
-- func: mean(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: mean(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-
-- func: mean(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: mean(Tensor self, int[1] dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+- func: mean(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: median(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -1759,11 +1729,7 @@
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: softmax(Tensor self, int dim, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: softmax(Tensor self, int dim) -> Tensor
+- func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
@@ -1861,27 +1827,13 @@
   variants: function, method
   device_guard: False
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: sum(Tensor self, *, ScalarType dtype) -> Tensor
+- func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: sum(Tensor self) -> Tensor
+- func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: sum(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: sum(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  variants: function, method
-
-- func: sum(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: sum(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-
-- func: sum(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: sum(Tensor self, int[1] dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+- func: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   variants: method
@@ -1915,27 +1867,13 @@
 
 - func: std(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
-# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
-- func: prod(Tensor self, *, ScalarType dtype) -> Tensor
+- func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: prod(Tensor self) -> Tensor
+- func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: prod(Tensor self, int dim, bool keepdim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: prod(Tensor self, int dim, bool keepdim=False) -> Tensor
-  variants: function, method
-
-- func: prod(Tensor self, int dim, *, ScalarType dtype) -> Tensor
-  variants: function, method
-
-- func: prod(Tensor self, int dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-
-- func: prod(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: prod(Tensor self, int dim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+- func: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: t(Tensor(a) self) -> Tensor(a)
   device_guard: False
