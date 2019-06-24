@@ -30,6 +30,7 @@ class ModuleAPITest(TestCase):
         # create __init__
         input_channels = 10
         output_channels = 20
+        nn_linear = torch.nn.Linear(output_channels, input_channels)
         batch_size = 5
         W = torch.rand(output_channels, input_channels).float()
         W_q = torch.quantize_linear(W, 0.1, 4, torch.qint8)
@@ -39,8 +40,10 @@ class ModuleAPITest(TestCase):
         B_q = torch.quantize_linear(B, W_q.q_scale() * X_q.q_scale(), 0, torch.qint32)
         out_scale = 0.5
         out_zero_point = 3
-        qLinear = nnq.Linear(W_q, B_q, out_scale, out_zero_point)
-        Z_q = qLinear(X_q)
+        q_linear = nnq.Linear(nn_linear, W_q, B_q, out_scale, out_zero_point)
+        self.assertEqual(W_q, q_linear.weight)
+        self.assertEqual(B_q, q_linear.bias)
+        Z_q = q_linear(X_q)
         # Check if the module implementation matches calling the
         # ops directly
         W_pack = torch.ops.quantized.fbgemm_linear_prepack(W_q)

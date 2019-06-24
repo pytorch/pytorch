@@ -1,12 +1,12 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
-from ...modules.module import Module
+from ...modules.linear import Linear as NNLinear
 from ...._jit_internal import weak_module
 
 
 
 @weak_module
-class Linear(Module):
+class Linear(NNLinear):
     r"""
     A module that wraps the quantized fbgemm linear operator function
     We adopt the same interface as `torch.nn.Linear`, please see https://pytorch.org/docs/stable/nn.html#torch.nn.Linear
@@ -19,15 +19,25 @@ class Linear(Module):
         _packed_weight: the weight that is first quantized and then packed using
             fbgemm_linear_pack function
         bias:   the quantized bias
-        output_scale: `scale` parameter of output Quantized Tensor
-        output_zero_point: `zero_point` parameter for output Quantized Tensor
+        output_scale: `scale` parameter of output Quantized Tensor, type: float
+        output_zero_point: `zero_point` parameter for output Quantized Tensor, type: long
     """
-    def __init__(self, qweight, qbias, output_scale, output_zero_point):
-        super(Linear, self).__init__()
+    def __init__(self, mod, qweight, qbias, output_scale, output_zero_point):
+        self.__dict__.update(mod.__dict__)
+        self._parameters.pop('weight')
+        self._parameters.pop('bias')
         self.register_buffer('_packed_weight', torch.ops.quantized.fbgemm_linear_prepack(qweight))
         self.register_buffer('output_scale', torch.Tensor([output_scale]))
         self.register_buffer('output_zero_point', torch.Tensor([output_zero_point]))
         self.register_buffer('bias', qbias)
+
+    @property
+    def weight(self):
+        return torch.ops.quantized.fbgemm_linear_unpack(self._packed_weight)
+
+    @weight.setter
+    def weight(self, w):
+        self._packed_weight = torch.ops.quantized.fbgemm_linear_prepack(w)
 
     def forward(self, x):
         Y_q = torch.ops.quantized.fbgemm_linear(
@@ -39,8 +49,8 @@ class Linear(Module):
 
     @staticmethod
     def from_float(mod):
-        if hasattr(mod, 'qConfig'):
-            weight_observer = mod.qConfig.weight()
+        if hasattr(mod, 'qconfig'):
+            weight_observer = mod.qconfig.weight()
             weight_observer(mod.weight)
             wt_qparams = weight_observer.calculate_qparams()
             bias_qparams = torch.zeros(2)
@@ -56,4 +66,4 @@ class Linear(Module):
             bias = torch.zeros(mod.out_features, dtype=torch.float)
             qbias = torch.quantize_linear(
                 bias, output_scale, output_zero_point, torch.qint32)
-        return Linear(qweight, qbias, output_scale, output_zero_point)
+        return Linear(mod, qweight, qbias, output_scale, output_zero_point)
