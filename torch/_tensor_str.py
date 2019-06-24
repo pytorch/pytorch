@@ -244,7 +244,8 @@ def _str(self):
     # Note [Print tensor device]:
     # A general logic here is we only print device when it doesn't match
     # the device specified in default tensor type.
-    # Currently torch.set_default_tensor_type() only supports CPU/CUDA.
+    # Currently torch.set_default_tensor_type() only supports CPU/CUDA, thus
+    # torch._C._get_default_device() only returns either cpu or cuda.
     # In other cases, we don't have a way to set them as default yet,
     # and we should always print out device for them.
     if self.device.type != torch._C._get_default_device()\
