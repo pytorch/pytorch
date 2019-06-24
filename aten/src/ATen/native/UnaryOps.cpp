@@ -141,9 +141,10 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
 }
 
 #ifdef NAMEDTENSOR_ENABLED
-#define USING_NAMED_TENSOR true
-#else
-#define USING_NAMED_TENSOR false
+#define PERFORM_NAME_INFERENCE                                  \
+    if (self.is_named()) {                                      \
+      at::internal_set_names_inplace(result, self.names());     \
+    }
 #endif
 
 // NB: If you use this macro, you may also need to add a CUDA forwarding
@@ -163,12 +164,9 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     assert_no_internal_overlap(result, #op);                    \
     auto iter = TensorIterator::unary_op(result, self);         \
     op##_stub(iter->device_type(), *iter);                      \
-    if (USING_NAMED_TENSOR && self.is_named()) {                \
-      at::internal_set_names_inplace(result, self.names());     \
-    }                                                           \
+    PERFORM_NAME_INFERENCE;                                     \
     return result;                                              \
   }
-
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple
 
@@ -200,7 +198,9 @@ IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
 
-#undef USING_NAMED_TENSOR
+#ifdef NAMEDTENSOR_ENABLED
+#undef PERFORM_NAME_INFERENCE
+#endif
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
