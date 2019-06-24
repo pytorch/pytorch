@@ -37,6 +37,7 @@ class FullyConnectedOp final : public Operator<Context> {
       typename T_Y,
       typename MATH>
   bool DoRunWithType() {
+    LOG(INFO) << "Running FC " << this->debug_def().input(1);
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
     std::chrono::time_point<std::chrono::system_clock> t_very_begin, t_begin,
         t_end;

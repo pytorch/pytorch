@@ -292,6 +292,17 @@ HistogramNetObserver::HistogramNetObserver(
       cnt_(0),
       mul_nets_(mul_nets),
       out_file_name_(out_file_name) {
+  is_valid_net = false;
+  for (auto* op : subject->GetOperators()) {
+    if (op->debug_def().type() == "FC") {
+      LOG(INFO) << "Attaching HistogramNetObserver to " << this;
+      is_valid_net = true;
+      break;
+    }
+  }
+  if (!is_valid_net) {
+    return;
+  }
   hist_infos_.resize(subject->GetOperators().size());
 
   int i = 0;
@@ -315,6 +326,9 @@ HistogramNetObserver::HistogramNetObserver(
 void HistogramNetObserver::DumpAndReset_(
     const string& out_file_name,
     bool print_total_min_max) {
+  if (!is_valid_net) {
+    return;
+  }
   stringstream file_name;
   file_name << out_file_name;
   if (mul_nets_) {

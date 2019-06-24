@@ -127,6 +127,7 @@ class HistogramNetObserver final : public NetObserver {
    * files for the nets will be appended with netbase addresses.
    */
   bool mul_nets_;
+  bool is_valid_net;
   const std::string out_file_name_;
   std::vector<std::shared_ptr<HistogramObserver::Info>> hist_infos_;
 };
