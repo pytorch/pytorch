@@ -128,6 +128,7 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
 
   float in_qparams_scale_old_{0};
   std::int32_t in_qparams_zero_point_old_{0};
+  int dump_tensor_counter_{0};
 }; // class ConvDNNLowPOp
 
 } // namespace caffe2

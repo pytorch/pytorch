@@ -25,11 +25,16 @@ C10_DEFINE_bool(
     false,
     "Share intermediate int32 buffer across DNNLOWP Conv ops");
 
-C10_DEFINE_bool(
+C10_DEFINE_int(
     caffe2_dnnlowp_dump_tensors,
     false,
     "Dump quantized input and weight tensors used in Conv and FC operators "
-    "during the first iteration");
+    "during the first N iterations");
+
+C10_DEFINE_string(
+    caffe2_dnnlowp_dump_tensor_path_prefix,
+    "",
+    "Prefix to the path where tensors are dumped");
 
 C10_DECLARE_bool(caffe2_dnnlowp_force_slow_path);
 
@@ -1114,20 +1119,34 @@ void ConvDNNLowPOp<T, ReluFused>::ConvNHWCCore_(
   const int kernel_dim = KernelDim_();
   const int Y_HxW = this->GetDimsSize(*Y);
 
-  if (FLAGS_caffe2_dnnlowp_dump_tensors) {
-    // Dump input activation
-    StoreMatrixInMatrixMarketFormat(
-        N * Y_HxW * group_,
-        kernel_dim,
-        col_buffer_data,
-        this->debug_def().input(INPUT));
+  if (dump_tensor_counter_ < FLAGS_caffe2_dnnlowp_dump_tensors) {
+    // Put the address of this operator to avoid overwriting because multiple
+    // copies of the same net can be running in parallel.
+    char buf[1024];
+    snprintf(buf, 1024, "%p", this);
 
-    // Dump weight
+    // Dump input activation
+    string blob_name(this->debug_def().input(INPUT));
+    replace(blob_name.begin(), blob_name.end(), '/', '_');
+    string file_name = FLAGS_caffe2_dnnlowp_dump_tensor_path_prefix +
+        blob_name + "_" + string(buf) + "_" + to_string(dump_tensor_counter_);
+
     StoreMatrixInMatrixMarketFormat(
-        group_ * M,
-        kernel_dim,
-        W_quantized_.data(),
-        this->debug_def().input(FILTER));
+        N * Y_HxW * group_, kernel_dim, col_buffer_data, file_name);
+
+    // Weight and bias is dumped only once because they are constant
+    if (dump_tensor_counter_ == 0) {
+      // Dump weight
+      blob_name = this->debug_def().input(FILTER);
+      replace(blob_name.begin(), blob_name.end(), '/', '_');
+      file_name = FLAGS_caffe2_dnnlowp_dump_tensor_path_prefix + blob_name +
+          "_" + string(buf) + "_" + to_string(dump_tensor_counter_);
+
+      StoreMatrixInMatrixMarketFormat(
+          group_ * M, kernel_dim, W_quantized_.data(), file_name);
+    }
+
+    ++dump_tensor_counter_;
   }
 
   using namespace fbgemm;

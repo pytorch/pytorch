@@ -19,8 +19,16 @@ C10_DEFINE_bool(
     "instead of using its own implementation that uses AVX2 instructions"
     "(currently only honored by FC)");
 
-C10_DECLARE_bool(caffe2_dnnlowp_dump_tensors);
+C10_DECLARE_int(caffe2_dnnlowp_dump_tensors);
+C10_DECLARE_string(caffe2_dnnlowp_dump_tensor_path_prefix);
+
 C10_DECLARE_bool(caffe2_dnnlowp_force_slow_path);
+
+C10_DEFINE_bool(
+    caffe2_dnnlowp_dump_fc_quantized_tensors,
+    true,
+    "When caffe2_dnnlowp_dump_tensors option is set, dump quantized tensors of "
+    "FC operators otherwise dump float tensors when they are available.");
 
 namespace caffe2 {
 
@@ -484,12 +492,52 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::RunOnDevice() {
 #endif
   }
 
-  if (FLAGS_caffe2_dnnlowp_dump_tensors) {
-    // Dump input activation
-    StoreMatrixInMatrixMarketFormat(M, K, Xdata, this->debug_def().input(0));
+  if (dump_tensor_counter_ < FLAGS_caffe2_dnnlowp_dump_tensors) {
+    // Put the address of this operator to avoid overwriting because multiple
+    // copies of the same net can be running in parallel.
+    char buf[1024];
+    snprintf(buf, 1024, "%p", this);
 
-    // Dump weight
-    StoreMatrixInMatrixMarketFormat(N, K, Wdata, this->debug_def().input(1));
+    // Dump input activation
+    string blob_name(this->debug_def().input(0));
+    replace(blob_name.begin(), blob_name.end(), '/', '_');
+    string file_name = FLAGS_caffe2_dnnlowp_dump_tensor_path_prefix +
+        blob_name + "_" + string(buf) + "_" + to_string(dump_tensor_counter_);
+
+    if (FLAGS_caffe2_dnnlowp_dump_fc_quantized_tensors && Xdata) {
+      StoreMatrixInMatrixMarketFormat(M, K, Xdata, file_name);
+    } else if (X.template IsType<float>()) {
+      StoreMatrixInMatrixMarketFormat(
+          M, K, X.template data<float>(), file_name);
+    }
+
+    // Weight and bias is dumped only once because they are constant
+    if (dump_tensor_counter_ == 0 || !is_weight_constant_) {
+      // Dump weight
+      blob_name = this->debug_def().input(1);
+      replace(blob_name.begin(), blob_name.end(), '/', '_');
+      file_name = FLAGS_caffe2_dnnlowp_dump_tensor_path_prefix + blob_name +
+          "_" + string(buf) + "_" + to_string(dump_tensor_counter_);
+      if (FLAGS_caffe2_dnnlowp_dump_fc_quantized_tensors && Wdata) {
+        StoreMatrixInMatrixMarketFormat(N, K, Wdata, file_name);
+      } else if (W.template IsType<float>()) {
+        StoreMatrixInMatrixMarketFormat(
+            N, K, W.template data<float>(), file_name);
+      }
+
+      // Dump input bias
+      blob_name = this->debug_def().input(2);
+      replace(blob_name.begin(), blob_name.end(), '/', '_');
+      file_name = FLAGS_caffe2_dnnlowp_dump_tensor_path_prefix + blob_name +
+          "_" + string(buf) + "_" + to_string(dump_tensor_counter_);
+      if (FLAGS_caffe2_dnnlowp_dump_fc_quantized_tensors && b_quantized_data_) {
+        StoreMatrixInMatrixMarketFormat(N, 1, b_quantized_data_, file_name);
+      } else if (b_dequantized_data_) {
+        StoreMatrixInMatrixMarketFormat(N, 1, b_dequantized_data_, file_name);
+      }
+    }
+
+    ++dump_tensor_counter_;
   }
 
 #ifdef DNNLOWP_MEASURE_TIME_BREAKDOWN
