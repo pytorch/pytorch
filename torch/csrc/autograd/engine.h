@@ -77,7 +77,7 @@ protected:
     // Data structures used by the threads for executing reentrant backwards
     // tasks. See Note [Reentrant backwards]
     // Number of available threads for processing new GraphTasks.
-    uint num_workers_;
+    unsigned int num_workers_;
     // The threads will wait on work_ to be notified of GraphTasks
     std::condition_variable work_;
     // To protect reads and writes to graphtask_queue_ and num_workers_
