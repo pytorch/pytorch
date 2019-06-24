@@ -241,8 +241,6 @@ class CMake:
         additional_options = {
             # Key: environment variable name. Value: Corresponding variable name to be passed to CMake.
             '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
-            'MKL_SEQ': 'INTEL_MKL_SEQUENTIAL',
-            'MKL_TBB': 'INTEL_MKL_TBB',
             'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA'
         }
         additional_options.update({
@@ -251,6 +249,7 @@ class CMake:
              'BUILDING_WITH_TORCH_LIBS',
              'CMAKE_PREFIX_PATH',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
+             'MKL_THREADING',
              'MKLDNN_THREADING',
              'ONNX_ML',
              'ONNX_NAMESPACE',
