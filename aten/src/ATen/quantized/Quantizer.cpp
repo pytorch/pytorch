@@ -191,37 +191,57 @@ template CAFFE2_API Tensor dequantize_tensor<qint8>(Tensor rtensor, Tensor qtens
 template CAFFE2_API Tensor dequantize_tensor<quint8>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 template CAFFE2_API Tensor dequantize_tensor<qint32>(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
 
-
-// TODO: add fbgemm for per channel
 template <typename T>
-Tensor quantize_tensor_per_channel_affine(Tensor rtensor,
-                                          Tensor qtensor,
-                                          const std::vector<double>& scales,
-                                          const std::vector<int64_t>& zero_points,
-                                          IntArrayRef axis) {
+Tensor quantize_tensor_per_channel_affine(
+    Tensor rtensor,
+    Tensor qtensor,
+    const std::vector<float>& scales,
+    const std::vector<int32_t>& zero_points,
+    IntArrayRef axis) {
   auto fn_name = "quantize_tensor_per_channel_affine";
   checkFloatCPUTensor(fn_name, rtensor);
   checkQuantizedCPUTensor<T>(fn_name, qtensor);
   checkZeroPoints<typename T::underlying>(fn_name, zero_points);
   int64_t channel_axis = axis[0];
-  TORCH_CHECK(channel_axis < rtensor.dim(), "Channel axis out of range in per channel affine quantization.");
+  TORCH_CHECK(
+      channel_axis < rtensor.dim(),
+      "Channel axis out of range in per channel affine quantization.");
   int64_t batches = size_to_dim_(channel_axis, rtensor.sizes());
-  int64_t elements_per_channel = size_from_dim_(channel_axis + 1, rtensor.sizes());
+  int64_t elements_per_channel =
+      size_from_dim_(channel_axis + 1, rtensor.sizes());
   int64_t channel = rtensor.size(channel_axis);
-  TORCH_CHECK(channel == scales.size(),
-              "length of scales must equal to channel");
-  TORCH_CHECK(channel == zero_points.size(),
-              "length of zero_points must equal to channel");
+  TORCH_CHECK(
+      channel == scales.size(), "length of scales must equal to channel");
+  TORCH_CHECK(
+      channel == zero_points.size(),
+      "length of zero_points must equal to channel");
   const float* rdata = rtensor.data<float>();
+
+#ifdef USE_FBGEMM
+  auto qdata = reinterpret_cast<typename T::underlying*>(qtensor.data<T>());
+  fbgemm::QuantizeGroupwise<typename T::underlying>(
+      rdata,
+      batches,
+      channel,
+      elements_per_channel,
+      channel, // Groups == channel for per channel quantization
+      scales.data(),
+      zero_points.data(),
+      qdata);
+#else
   auto qdata = qtensor.data<T>();
+
   for (auto b = 0; b < batches; ++b) {
     for (auto c = 0; c < channel; ++c) {
       for (auto e = 0; e < elements_per_channel; ++e) {
-        auto i = b * channel * elements_per_channel + c * elements_per_channel + e;
+        auto i =
+            b * channel * elements_per_channel + c * elements_per_channel + e;
         qdata[i] = quantize_val<T>(scales[c], zero_points[c], rdata[i]);
       }
     }
   }
+#endif
+
   return qtensor;
 }
 
