@@ -12,7 +12,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 
-#include "EmbeddingBackwardKernel.cuh"
+#include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 
 
 namespace at { namespace native {

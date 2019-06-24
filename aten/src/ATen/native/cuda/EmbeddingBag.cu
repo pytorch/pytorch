@@ -15,7 +15,7 @@
 #include <thrust/unique.h>
 #include <thrust/device_vector.h>
 
-#include "EmbeddingBackwardKernel.cuh"
+#include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 
 namespace at {
 namespace native {
