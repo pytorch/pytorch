@@ -251,7 +251,7 @@ Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& opt
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor fill_diagonal(const Tensor& self, Scalar fill_value, bool wrap) {
+Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {
   int64_t nDims = self.dim();
   TORCH_CHECK(nDims >= 2, "dimensions must large then 1 ");
 

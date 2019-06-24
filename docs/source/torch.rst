@@ -50,7 +50,7 @@ Creation Ops
 .. autofunction:: empty_like
 .. autofunction:: full
 .. autofunction:: full_like
-.. autofunction:: fill_diagonal
+.. autofunction:: fill_diagonal_
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

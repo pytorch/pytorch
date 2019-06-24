@@ -5816,9 +5816,9 @@ Args:
 """.format(**factory_like_common_args))
 
 
-add_docstr(torch.fill_diagonal,
+add_docstr(torch.fill_diagonal_,
            r"""
-fill_diagonal(input, fill_value, wrap=False) -> Tensor
+fill_diagonal_(input, fill_value, wrap=False) -> Tensor
 
 Fill the main diagonal of the given tensor of any dimensionality.
 This function modifies the input tensor in-place, and return the input tensor.
@@ -5827,16 +5827,16 @@ Arguments:
     input (Tensor): at least 2-dims. When dims>2, all dimensions of input must be of equal length
     fill_value (Scalar): the fill value
     wrap: the diagonal 'wrapped' after N columns for tall matrices.
-    
+
 Example::
 
     >>> a = torch.zeros(3, 3)
-    >>> torch.fill_diagonal(a, 5)
+    >>> torch.fill_diagonal_(a, 5)
     tensor([[5., 0., 0.],
             [0., 5., 0.],
             [0., 0., 5.]])
     >>> b = torch.zeros(7, 3)        
-    >>> b.fill_diagonal(5)
+    >>> b.fill_diagonal_(5)
     tensor([[5., 0., 0.],
             [0., 5., 0.],
             [0., 0., 5.],
@@ -5845,7 +5845,7 @@ Example::
             [0., 0., 0.],
             [0., 0., 0.]])
     >>> c = torch.zeros(7, 3)
-    >>> c.fill_diagonal(5, wrap=True)
+    >>> c.fill_diagonal_(5, wrap=True)
     tensor([[5., 0., 0.],
             [0., 5., 0.],
             [0., 0., 5.],
@@ -5853,7 +5853,7 @@ Example::
             [5., 0., 0.],
             [0., 5., 0.],
             [0., 0., 5.]])
-    
+
 """)
 
 add_docstr(torch.det,

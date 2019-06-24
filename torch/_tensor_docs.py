@@ -716,11 +716,11 @@ diagonal(offset=0, dim1=0, dim2=1) -> Tensor
 See :func:`torch.diagonal`
 """)
 
-add_docstr_all('fill_diagonal',
+add_docstr_all('fill_diagonal_',
                r"""
-fill_diagonal(fill_value, wrap=False) -> Tensor
+fill_diagonal_(fill_value, wrap=False) -> Tensor
 
-See :func:`torch.fill_diagonal`
+See :func:`torch.fill_diagonal_`
 """)
 
 add_docstr_all('digamma',

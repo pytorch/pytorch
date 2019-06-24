@@ -12185,7 +12185,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         v = 1
         for i in range(3):
             b[i][i] = v
-        a.fill_diagonal(v)
+        a.fill_diagonal_(v)
         self.assertEqual(a, b)
 
         c = torch.randn(7, 3)
@@ -12193,7 +12193,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         for i in range(3):
             d[i][i] = v
             d[i + 4][i] = v
-        c.fill_diagonal(v, wrap=True)
+        c.fill_diagonal_(v, wrap=True)
         self.assertEqual(c, d)
 
 # Functions to test negative dimension wrapping
