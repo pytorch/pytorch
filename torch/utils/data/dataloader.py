@@ -29,11 +29,13 @@ class _DatasetKind(object):
     Iterable = 1
 
     @staticmethod
-    def create_fetcher(kind, dataset, auto_collation, collate_fn, drop_last):
+    def create_fetcher(kind, dataset, auto_collation, collate_fn, drop_last, collate_fn_args=None):
         if kind == _DatasetKind.Map:
-            return _utils.fetch._MapDatasetFetcher(dataset, auto_collation, collate_fn, drop_last)
+            return _utils.fetch._MapDatasetFetcher(dataset, auto_collation, collate_fn, drop_last,
+                                                   collate_fn_args)
         else:
-            return _utils.fetch._IterableDatasetFetcher(dataset, auto_collation, collate_fn, drop_last)
+            return _utils.fetch._IterableDatasetFetcher(dataset, auto_collation, collate_fn, drop_last,
+                                                        collate_fn_args)
 
 
 class _InfiniteConstantSampler(Sampler):
@@ -83,6 +85,7 @@ class DataLoader(object):
         collate_fn (callable, optional): merges a list of samples to form a
             mini-batch of Tensor(s).  Used when using batched loading from a
             map-style dataset.
+        collate_fn_args (optional): parameters that can be used by collate_fn
         pin_memory (bool, optional): If ``True``, the data loader will copy Tensors
             into CUDA pinned memory before returning them.  If your data elements
             are a custom type, or your :attr:`collate_fn` returns a batch that is a custom type,
@@ -116,9 +119,8 @@ class DataLoader(object):
     __initialized = False
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None,
-                 batch_sampler=None, num_workers=0, collate_fn=None,
-                 pin_memory=False, drop_last=False, timeout=0,
-                 worker_init_fn=None):
+                 batch_sampler=None, num_workers=0, collate_fn=None, pin_memory=False,
+                 drop_last=False, timeout=0, worker_init_fn=None, collate_fn_args=None):
         torch._C._log_api_usage_once("python.data_loader")
         self.dataset = dataset
         self.num_workers = num_workers
@@ -226,6 +228,7 @@ class DataLoader(object):
                 collate_fn = _utils.collate.default_convert
 
         self.collate_fn = collate_fn
+        self.collate_fn_args = collate_fn_args
         self.__initialized = True
 
     def __setattr__(self, attr, val):
@@ -272,6 +275,7 @@ class _BaseDataLoaderIter(object):
         self.pin_memory = loader.pin_memory and torch.cuda.is_available()
         self.timeout = loader.timeout
         self.collate_fn = loader.collate_fn
+        self.collate_fn_args = loader.collate_fn_args
         self.sampler_iter = iter(self.index_sampler)
         self.base_seed = torch.empty((), dtype=torch.int64).random_().item()
 
@@ -303,7 +307,8 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         assert self.num_workers == 0
 
         self.dataset_fetcher = _DatasetKind.create_fetcher(
-            self.dataset_kind, self.dataset, self.auto_collation, self.collate_fn, self.drop_last)
+            self.dataset_kind, self.dataset, self.auto_collation, self.collate_fn,
+            self.drop_last, self.collate_fn_args)
 
     def __next__(self):
         index = self._next_index()  # may raise StopIteration
@@ -630,7 +635,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 args=(self.dataset_kind, self.dataset, index_queue,
                       self.worker_result_queue, self.workers_done_event,
                       self.auto_collation, self.collate_fn, self.drop_last,
-                      self.base_seed + i, self.worker_init_fn, i, self.num_workers))
+                      self.base_seed + i, self.worker_init_fn, i, self.num_workers,
+                      self.collate_fn_args))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to
             #     start a process and pass the arguments over via a pipe.
