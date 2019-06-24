@@ -389,33 +389,30 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
-  std::unique_lock<std::mutex> cudaFreeMutexLock(
-      *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-
   pre(ncclStreams_[key]);
 
-  C10D_NCCL_CHECK(ncclGroupStart());
+  {
+    AutoNcclGroup nccl_group_guard;
 
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    gpuGuard.set_index(devices[i].index());
-    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      gpuGuard.set_index(devices[i].index());
+      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
 
-    // Both `inputs' and `outputs' are created on a worker stream and used in
-    // different ncclStreams.  Hence, both must record the ncclStream to
-    // prevent being freed before the collective finishes.
-    //
-    // We only record `inputs' here, and leave recording `outputs' to `fn' for
-    // operations where `inputs' and `outputs' are not the same.
-    //
-    // See [Sync Streams].
-    c10::cuda::CUDACachingAllocator::recordStream(
-        inputs[i].storage().data(), ncclStream);
+      // Both `inputs' and `outputs' are created on a worker stream and used in
+      // different ncclStreams.  Hence, both must record the ncclStream to
+      // prevent being freed before the collective finishes.
+      //
+      // We only record `inputs' here, and leave recording `outputs' to `fn' for
+      // operations where `inputs' and `outputs' are not the same.
+      //
+      // See [Sync Streams].
+      c10::cuda::CUDACachingAllocator::recordStream(
+          inputs[i].storage().data(), ncclStream);
 
-    C10D_NCCL_CHECK(
-        fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
+      C10D_NCCL_CHECK(
+          fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
+    }
   }
-
-  C10D_NCCL_CHECK(ncclGroupEnd());
 
   post(ncclStreams_[key]);
 
