@@ -133,7 +133,7 @@ struct BailOutGraphBuilderForNode {
 };
 
 // `BailOutInserter` replaces prim::Guard nodes with
-// prim::BailOut nodes that allows interpreter to
+// prim::BailOut nodes that allow interpreter to
 // resume execution of the unoptimized(deoptimized)
 // version of an original graph from a particular point
 struct BailOutInserter {
@@ -148,7 +148,7 @@ struct BailOutInserter {
     addUnoptimizedFuncToBailouts();
   }
 
-  // Pack the original unoptimized graph into a Function constant
+  // Packs the original unoptimized graph into a Function constant
   // and add it as the first input to every prim::BailOut point
   // This graph will be used to compute a bailout graph for
   // any given bailout point
