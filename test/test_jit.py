@@ -9275,14 +9275,14 @@ a")
         self.checkScript(subscript_tuple_assign, ([12, 7, 9, 11], torch.tensor((3, 13, 17)), 0))
 
         # python 2 does not support star assignments so we use compilation unit to test instead
-        star_code = '''
+        star_code = dedent('''
         def star_tuple_assign():
             # type: () -> Tuple[int, int, Tuple[int, int], Tuple[int, int]]
             a, (b, *c), *d = 1, (2, 3, 4), 5, 6
             return a, b, c, d
-        '''
+        ''')
 
-        self.checkScript(star_code, (), name='star_tuple_assign', outputs=(1, 2, (3, 4), (5, 6)))
+        self.checkScript(star_code, (), name='star_tuple_assign')
 
 
     def test_multi_reduction(self):
@@ -16304,7 +16304,7 @@ class TestClassType(JitTestCase):
 
         ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor]
         if not PY2:
-            ops += truediv
+            ops.append(truediv)
         for func in ops:
             self.checkScript(func, ())
 
