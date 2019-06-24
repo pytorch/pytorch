@@ -93,19 +93,19 @@ Tensor dispatch_zeros(c10::TensorTypeId type_id, at::ScalarType scalar_type, opt
 Tensor dispatch_ones(c10::TensorTypeId type_id, at::ScalarType scalar_type, optional<Device> device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
-  return torch::zeros(sizes, options(type_id, scalar_type, std::move(device)));
+  return torch::ones(sizes, options(type_id, scalar_type, std::move(device)));
 }
 
 Tensor dispatch_full(c10::TensorTypeId type_id, at::ScalarType scalar_type, Scalar fill_value, optional<Device> device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
-  return torch::zeros(sizes, options(type_id, scalar_type, std::move(device)));
+  return torch::full(sizes, fill_value, options(type_id, scalar_type, std::move(device)));
 }
 
 Tensor new_with_sizes(c10::TensorTypeId type_id, at::ScalarType scalar_type, optional<Device> device, IntArrayRef sizes) {
   maybe_initialize_cuda(type_id);
   AutoNoGIL no_gil;
-  return torch::zeros(sizes, options(type_id, scalar_type, std::move(device)));
+  return torch::empty(sizes, options(type_id, scalar_type, std::move(device)));
 }
 
 Tensor new_with_storage(c10::TensorTypeId type_id, at::ScalarType scalar_type, Storage storage) {
