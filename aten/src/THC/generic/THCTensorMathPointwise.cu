@@ -181,6 +181,8 @@ void THCTensor_(cminValue)(THCState *state, THCTensor *self, THCTensor *src, sca
       const auto names = at::impl::internal_get_names(src);             \
       at::impl::internal_set_names_inplace(self_, names);               \
     }
+#else
+#define PERFORM_NAME_INFERENCE
 #endif
 
 #define IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_(NAME, CFUNC, REAL)             \
@@ -254,9 +256,7 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  abs, THCNumerics<scalar_t>::abs,   Real)
 
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC
-#ifdef NAMEDTENSOR_ENABLED
 #undef PERFORM_NAME_INFERENCE
-#endif
 
 void THCTensor_(clamp)(THCState *state, THCTensor *self_, THCTensor *src, scalar_t min_value,
   scalar_t max_value)
