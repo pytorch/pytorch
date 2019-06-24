@@ -172,10 +172,6 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   * Wait on the future until it completes.
   */
   void wait() {
-    if (completed_) {
-      return;
-    }
-
     std::unique_lock<std::mutex> lock(mutex_);
     while (!completed_) {
       finished_cv_.wait(lock);
@@ -186,14 +182,10 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    * Explicitly mark the future as completed with the output value.
    */
   void markCompleted(IValue value) {
-    {
-      // This is not to protect completed_ but to create a barrier
-      // from possible addCallback() calls
-      std::unique_lock<std::mutex> lock(mutex_);
-      AT_ASSERT(!completed());
-      completed_ = true;
-      value_ = std::move(value);
-    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(!completed());
+    completed_ = true;
+    value_ = std::move(value);
 
     fireCallbacks();
     finished_cv_.notify_all();
@@ -204,15 +196,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   void markCompleted(FutureError&& error_) {
-    {
-      // This is not to protect completed_ but to create a barrier
-      // from possible addCallback() calls
-      std::unique_lock<std::mutex> lock(mutex_);
-      AT_ASSERT(!completed());
-      completed_ = true;
-      has_error = true;
-      error = std::move(error_);
-    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    AT_ASSERT(!completed());
+    completed_ = true;
+    has_error = true;
+    error = std::move(error_);
 
     fireCallbacks();
     finished_cv_.notify_all();
@@ -335,7 +323,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   std::shared_ptr<ClassType> type() const {
     return type_;
   }
-  // temporarily defined in class_type.cpp to 
+  // temporarily defined in class_type.cpp to
   // ensure Modules do not leak memory
   ~Object();
  private:
