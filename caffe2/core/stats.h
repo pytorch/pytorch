@@ -12,18 +12,30 @@
 namespace caffe2 {
 
 class CAFFE2_API StatValue {
+ public:
+  virtual ~StatValue() = default;
+
+  virtual int64_t increment(int64_t inc) = 0;
+
+  virtual int64_t reset(int64_t value = 0) = 0;
+
+  virtual int64_t get() const = 0;
+};
+
+// AtomicStatValue is a stat value implementation backed by an atomic.
+class CAFFE2_API AtomicStatValue : public StatValue {
   std::atomic<int64_t> v_{0};
 
  public:
-  int64_t increment(int64_t inc) {
+  int64_t increment(int64_t inc) override {
     return v_ += inc;
   }
 
-  int64_t reset(int64_t value = 0) {
+  int64_t reset(int64_t value = 0) override {
     return v_.exchange(value);
   }
 
-  int64_t get() const {
+  int64_t get() const override {
     return v_.load();
   }
 };
@@ -115,9 +127,6 @@ CAFFE2_API ExportedStatMap toMap(const ExportedStatList& stats);
  *
  */
 class CAFFE2_API StatRegistry {
-  std::mutex mutex_;
-  std::unordered_map<std::string, std::unique_ptr<StatValue>> stats_;
-
  public:
   /**
    * Retrieve the singleton StatRegistry, which gets populated
@@ -150,7 +159,23 @@ class CAFFE2_API StatRegistry {
    */
   void update(const ExportedStatList& data);
 
+  StatRegistry();
+
   ~StatRegistry();
+
+  // StatValueCreator creates a new StatValue with the given name. This is used
+  // for integrating with external stats aggregation services.
+  using StatValueCreator =
+      std::function<std::unique_ptr<StatValue>(const std::string& name)>;
+
+  // setStatValueCreator sets the method used to create new StatValues for
+  // logging stats.
+  void setStatValueCreator(StatValueCreator creator);
+
+ private:
+  std::mutex mutex_;
+  std::unordered_map<std::string, std::unique_ptr<StatValue>> stats_;
+  StatValueCreator creator_;
 };
 
 struct CAFFE2_API Stat {

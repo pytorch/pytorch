@@ -20,7 +20,7 @@ StatValue* StatRegistry::add(const std::string& name) {
   if (it != stats_.end()) {
     return it->second.get();
   }
-  auto v = std::unique_ptr<StatValue>(new StatValue);
+  auto v = creator_(name);
   auto value = v.get();
   stats_.insert(std::make_pair(name, std::move(v)));
   return value;
@@ -44,10 +44,21 @@ void StatRegistry::update(const ExportedStatList& data) {
   }
 }
 
+StatRegistry::StatRegistry()
+    : creator_([](const std::string& /*name*/) {
+        return caffe2::make_unique<AtomicStatValue>();
+      }) {}
+
 StatRegistry::~StatRegistry() {}
 
 StatRegistry& StatRegistry::get() {
   static StatRegistry r;
   return r;
 }
+
+void StatRegistry::setStatValueCreator(StatValueCreator creator) {
+  std::lock_guard<std::mutex> lg(mutex_);
+
+  creator_ = std::move(creator);
 }
+} // namespace caffe2
