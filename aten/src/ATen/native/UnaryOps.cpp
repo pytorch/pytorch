@@ -145,6 +145,8 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     if (self.is_named()) {                                      \
       at::internal_set_names_inplace(result, self.names());     \
     }
+#else
+#define PERFORM_NAME_INFERENCE
 #endif
 
 // NB: If you use this macro, you may also need to add a CUDA forwarding
@@ -198,9 +200,7 @@ IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
 
-#ifdef NAMEDTENSOR_ENABLED
 #undef PERFORM_NAME_INFERENCE
-#endif
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);
