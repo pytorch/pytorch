@@ -104,6 +104,8 @@ class EventList(list):
             chrome_events = []
             next_id = 0
             for evt in self:
+                source_info_args = dict()
+                source_info_args["source_info"] = evt.source_debug_info
                 chrome_events.append(dict(
                     name=evt.name,
                     ph='X',
@@ -111,7 +113,7 @@ class EventList(list):
                     dur=evt.cpu_interval.elapsed_us(),
                     tid=evt.thread,
                     pid='CPU functions',
-                    args={},
+                    args=source_info_args,
                 ))
                 for k in evt.kernels:
                     # 's' and 'f' draw Flow arrows from
@@ -487,7 +489,7 @@ Kernel = namedtuple('Kernel', ['name', 'device', 'interval'])
 # TODO: record TID too
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
-    def __init__(self, id, name, thread, cpu_start, cpu_end, input_shapes=None):
+    def __init__(self, id, name, thread, cpu_start, cpu_end, input_shapes=None, source_debug_info=""):
         self.id = id
         self.name = name
         self.cpu_interval = Interval(cpu_start, cpu_end)
@@ -496,6 +498,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.count = 1
         self.cpu_children = []
         self.input_shapes = input_shapes
+        self.source_debug_info = source_debug_info
 
     def append_kernel(self, name, device, start, end):
         self.kernels.append(Kernel(name, device, Interval(start, end)))
@@ -638,7 +641,8 @@ def parse_cpu_trace(thread_records):
                 thread=start.thread_id(),
                 cpu_start=start_record.cpu_elapsed_us(start),
                 cpu_end=start_record.cpu_elapsed_us(record),
-                input_shapes=start.shapes())
+                input_shapes=start.shapes(),
+                source_debug_info=start.source_debug_info())
             if start.has_cuda():
                 cuda_start = adjusted_time(start)
                 cuda_end = adjusted_time(record)

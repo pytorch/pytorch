@@ -10,6 +10,12 @@
 
 namespace torch { namespace autograd { namespace profiler {
 
+namespace {
+void addStringArgToArgsString(std::string& args_string, const std::string& k, const std::string& v) {
+  args_string = "\"" + k + "\"" + ": " + "\"" + v + "\"";
+}
+}
+
 CUDAStubs default_stubs;
 constexpr CUDAStubs* default_stubs_addr = &default_stubs;
 // constant initialization, so it is guarenteed to be initialized before
@@ -235,7 +241,7 @@ static jit::CodeTemplate event_template(R"(
   "dur": ${dur},
   "tid": ${tid},
   "pid": "CPU Functions",
-  "args": {}
+  "args": {${args}}
 })");
 
 
@@ -280,6 +286,8 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
   std::vector<Event*> stack;
   out_ << "[\n";
   bool first = true;
+  // Aquire lock before calling unsafeGetSourceRangeInfo.
+  std::unique_lock<std::mutex> source_debug_info_lock(module_source_debug_info_lock);
   for(Event* e : events) {
     if(e->kind() == "push") {
       stack.push_back(e);
@@ -295,6 +303,10 @@ void RecordProfile::processEvents(const std::vector<Event*>& events) {
       env.d("ts", start->cpu_elapsed_us(*e_start));
       env.d("dur", e_start->cpu_elapsed_us(*e));
       env.d("tid", e_start->thread_id());
+      std::string source_debug_info_arg = unsafeGetInstructionDebugInfo(e->inst_info());
+      std::string args_string;
+      addStringArgToArgsString(args_string, "source_info", source_debug_info_arg);
+      env.s("args", args_string);
       out_ << event_template.format(env);
     }
   }

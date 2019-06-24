@@ -46,7 +46,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused) {
       .def("cpu_elapsed_us", &Event::cpu_elapsed_us)
       .def("cuda_elapsed_us", &Event::cuda_elapsed_us)
       .def("has_cuda", &Event::has_cuda)
-      .def("shapes", &Event::shapes);
+      .def("shapes", &Event::shapes)
+      .def("source_debug_info", &Event::source_debug_info);
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);

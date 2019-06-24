@@ -15,6 +15,8 @@
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/autograd/record_function.h>
+#include <torch/csrc/autograd/source_debug_info.h>
 
 #include <exception>
 #include <iostream>
@@ -398,6 +400,13 @@ struct BailoutBlock {
   std::vector<Instruction> instructions; // ends in a TAIL_CALL
 };
 
+void replaceAllChar(const char c, std::string& input) {
+  auto it = input.find(c);
+  while (it != std::string::npos) {
+    input.replace(it, it + 1, " ");
+    it = input.find(c);
+  }
+}
 struct CodeImpl {
   friend struct InterpreterState;
   std::vector<Instruction> instructions_;
@@ -414,6 +423,7 @@ struct CodeImpl {
   int register_size_ = 0;
   size_t n_outputs;
   size_t n_inputs;
+  int64_t code_id{-1};
 
   // We MUST hold onto graph here because some Operators stored in the
   // instruction lists have dependencies on meta-data stored in the graph
@@ -441,6 +451,7 @@ struct CodeImpl {
 
   CodeImpl(const std::shared_ptr<Graph>& graph)
       : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
+    code_id = torch::autograd::profiler::createNextCodeId();
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
     n_inputs = graph_->inputs().size();
@@ -455,6 +466,10 @@ struct CodeImpl {
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
     instructions_.emplace_back(op, X, N);
     instructions_source_.emplace_back(current_node_);
+    std::string debug_info_str = current_node_->sourceRange().text();
+    replaceAllChar('\n', debug_info_str);
+    size_t pc = instructions_source_.size() - 1;
+    torch::autograd::profiler::setInstructionDebugInfo({code_id, pc}, std::move(debug_info_str));
 
     // check that we didn't accidentally emit nodes out of topological order
     if (op == OP) {
@@ -805,6 +820,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // saved-by-value stuff that can exist on the stack inside runInterpreter
   struct ActiveFrame {
     size_t pc;
+    int64_t code_id;
     Instruction* instructions;
     IValue* constants;
     Operation* operators;
@@ -813,6 +829,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
     ActiveFrame(const Frame& frame)
         : pc(frame.pc),
+          code_id(frame.function->code_id),
           instructions(frame.function->instructions_.data()),
           constants(frame.function->constant_table_.data()),
           operators(frame.function->operator_table_.data()),
@@ -872,6 +889,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         // std::cout << "RUNNING ";
         // frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
+        if (torch::autograd::profiler::hasCallbacks()) {
+          // Set the thread local variables, code_id
+          // and pc. This is used in profiler to record
+          // where this instruction is coming from.
+          int64_t code_id = af.code_id;
+          torch::autograd::profiler::setInstructionInfo(
+              code_id, af.pc);
+        }
         switch (inst.op) {
           case OP:
             af.operators[inst.X](stack);

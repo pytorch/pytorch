@@ -16,6 +16,7 @@
 #endif
 
 #include <torch/csrc/autograd/record_function.h>
+#include <torch/csrc/autograd/source_debug_info.h>
 
 typedef struct CUevent_st* CUDAEventStub;
 
@@ -128,7 +129,8 @@ struct TORCH_API Event final {
       : name_(std::move(name)),
         kind_(kind),
         thread_id_(thread_id),
-        shapes_(shapes) {
+        shapes_(shapes),
+        inst_info_(getInstructionInfo()) {
     record(record_cuda);
   }
 
@@ -160,6 +162,14 @@ struct TORCH_API Event final {
   int device() const {
     return device_;
   }
+  const InstructionInfo& inst_info() const {
+    return inst_info_;
+  }
+  std::string source_debug_info() const {
+    std::unique_lock<std::mutex> source_debug_info_lock(module_source_debug_info_lock);
+    auto s = unsafeGetInstructionDebugInfo(inst_info());
+    return s;
+  }
 private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
@@ -169,6 +179,7 @@ private:
   std::vector<std::vector<int64_t>> shapes_;
   int device_ = -1;
   struct CUevent_st* event = nullptr;
+  InstructionInfo inst_info_;
 };
 
 // a linked-list of fixed sized vectors, to avoid
