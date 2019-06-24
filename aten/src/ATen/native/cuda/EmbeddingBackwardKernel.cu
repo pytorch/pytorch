@@ -22,7 +22,15 @@ namespace {
 
 // The maximum block size in CUDA
 constexpr int MAX_BLOCK_SIZE = 1024;
-// Number of rows each thread should sum initially
+/* This code computes the sum of the weights in two-steps:
+  1) Each GPU warp sums `NROWS_PER_THREAD` number of row given by `indeces`
+  2) Each partial-sum from 1) a than summed and scatter into `grad_weight`
+
+  Notice, `NROWS_PER_THREAD` impacts the Achieved Occupancy of the
+  kernel execution. If it is high, the size of the thread blocks will be
+  too small to achieve good occupancy. Similarly, a very low value will
+  make the size of the thread blocks in the final sum in step 2) too small.
+*/
 constexpr int NROWS_PER_THREAD = 10;
 
 #ifdef __HIP_PLATFORM_HCC__
@@ -39,13 +47,13 @@ int64_t ceil_div(int64_t x, int64_t y) {
 
 __global__
 void split_segment_sizes_kernel(int64_t *ret, const int64_t *segment_offsets,
-                                int64_t num_of_segments, int64_t blocksize, int64_t numel) {
+                                int64_t num_of_segments, int64_t numel) {
   const int id = blockIdx.x * blockDim.x + threadIdx.x;
   if(id < num_of_segments) {
     const int64_t idx_start = segment_offsets[id];
     const int64_t idx_end = (id == num_of_segments-1)?numel:segment_offsets[id+1];
     const int64_t size = idx_end - idx_start;
-    ret[id] = ceil_div(size, blocksize);
+    ret[id] = ceil_div(size, NROWS_PER_THREAD);
   }
 }
 
@@ -55,15 +63,14 @@ void split_segment_offsets_kernel(
         const int64_t *segment_sizes,
         const int64_t *segment_sizes_offsets,
         const int64_t *segment_offsets,
-        int64_t num_of_segments,
-        int64_t blocksize) {
+        int64_t num_of_segments) {
   const int id = blockIdx.x * blockDim.x + threadIdx.x;
   if(id < num_of_segments) {
     int64_t idx = segment_sizes_offsets[id];
     const int64_t segment_size = segment_sizes[id];
     const int64_t segment_offset = segment_offsets[id];
     for (int64_t i=0; i<segment_size; ++i) {
-      ret[idx++] = segment_offset + i * blocksize;
+      ret[idx++] = segment_offset + i * NROWS_PER_THREAD;
     }
   }
 }
@@ -226,7 +233,6 @@ Tensor embedding_backward_cuda_kernel(
             thrust::raw_pointer_cast(split_segment_sizes.data()),
             thrust::raw_pointer_cast(segment_offsets.data()),
             num_of_segments,
-            NROWS_PER_THREAD,
             numel);
   }
 
@@ -248,8 +254,7 @@ Tensor embedding_backward_cuda_kernel(
             thrust::raw_pointer_cast(split_segment_sizes.data()),
             thrust::raw_pointer_cast(split_segment_sizes_offsets.data()),
             thrust::raw_pointer_cast(segment_offsets.data()),
-            num_of_segments,
-            NROWS_PER_THREAD);
+            num_of_segments);
   }
 
   auto grad_weight_per_segment = at::empty({num_of_split_segments, stride}, grad.options());
