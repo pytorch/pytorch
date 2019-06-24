@@ -2761,7 +2761,7 @@ class TestCuda(TestCase):
 
         # Test core functionality. For small n, randperm is offloaded to CPU instead. For large n, randperm is executed
         # on GPU.
-        for n in (100, 50000):
+        for n in (100, 50000, 100000):
             # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
             # different from others on cuda.
             for dtype in (torch.long, torch.half, torch.float):
