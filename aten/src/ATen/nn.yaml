@@ -148,11 +148,3 @@
 - name: _thnn_conv3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0)
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]
-
-- name: _thnn_conv_dilated2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias={}, IntArrayRef[2] stride=1, IntArrayRef[2] padding=0, IntArrayRef[2] dilation=1)
-  cname: SpatialDilatedConvolution
-  buffers: [columns, ones]
-
-- name: _thnn_conv_dilated3d(Tensor self, Tensor weight, IntArrayRef[3] kernel_size, Tensor? bias={}, IntArrayRef[3] stride=1, IntArrayRef[3] padding=0, IntArrayRef[3] dilation=1)
-  cname: VolumetricDilatedConvolution
-  buffers: [columns, ones]

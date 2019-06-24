@@ -588,7 +588,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
   ASSERT_TRUE(op.has_value());
 
   captured_dict_size = 0;
-  c10::Dict<string, Tensor> dict();
+  c10::Dict<string, Tensor> dict;
   dict.insert("key1", dummyTensor(TensorType1()));
   dict.insert("key2", dummyTensor(TensorType2()));
   auto outputs = callOp(*op, dict);
@@ -607,7 +607,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  c10::Dict<string, string> dict();
+  c10::Dict<string, string> dict;
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -626,7 +626,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  c10::Dict<string, string> dict();
+  c10::Dict<string, string> dict;
   dict.insert("key1", "value1");
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
@@ -649,7 +649,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithMapOfLis
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  c10::Dict<string, c10::List<int64_t>> dict();
+  c10::Dict<string, c10::List<int64_t>> dict;
   dict.insert("key1", c10::List<int64_t>({10, 20}));
   dict.insert("key2", c10::List<int64_t>({30, 40}));
   auto outputs = callOp(*op, dict);
@@ -710,10 +710,10 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMa
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  c10::Dict<string, int64_t> dict1();
+  c10::Dict<string, int64_t> dict1;
   dict1.insert("1", 1);
   dict1.insert("2", 2);
-  c10::Dict<string, int64_t> dict2();
+  c10::Dict<string, int64_t> dict2;
   dict2.insert("3", 3);
   dict2.insert("4", 4);
   c10::List<c10::Dict<string, int64_t>> list({dict1, dict2});
@@ -741,10 +741,10 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithListOfMa
   auto op = c10::Dispatcher::singleton().findSchema({"_test::list_output", ""});
   ASSERT_TRUE(op.has_value());
 
-  c10::Dict<string, c10::List<int64_t>> dict1();
+  c10::Dict<string, c10::List<int64_t>> dict1;
   dict1.insert("1", c10::List<int64_t>({1, 2}));
   dict1.insert("3", c10::List<int64_t>({3, 4}));
-  c10::Dict<string, c10::List<int64_t>> dict2();
+  c10::Dict<string, c10::List<int64_t>> dict2;
   dict2.insert("5", c10::List<int64_t>({5, 6}));
   dict2.insert("7", c10::List<int64_t>({7, 8}));
   c10::List<c10::Dict<string, c10::List<int64_t>>> list({ dict1, dict2 });

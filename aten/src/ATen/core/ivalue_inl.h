@@ -425,7 +425,6 @@ struct _fake_type {};
 // The _fake_type<T> parameter allows us to overload
 // based on the return type.
 template <class Elem>
-C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow and deprecated. Please use c10::List<T> instead.")
 std::vector<Elem> generic_to(
     IValue ivalue,
     _fake_type<std::vector<Elem>>) {
@@ -456,7 +455,6 @@ c10::Dict<Key, Value> generic_to(
 }
 
 template <typename K, typename V>
-C10_DEPRECATED_MESSAGE("IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")
 std::unordered_map<K, V> generic_to(
     IValue ivalue,
     _fake_type<std::unordered_map<K, V>>) {

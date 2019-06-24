@@ -966,7 +966,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   auto makeDeeplyNestedObject = [] () -> DeeplyNestedType {
     c10::Dict<int64_t, std::string> inner3;
     inner3.insert(1, "1");
-    auto inner2 = c10::List<c10::optional<c10::Dict<int64_t, std::string>>>();
+    c10::List<c10::optional<c10::Dict<int64_t, std::string>>> inner2;
     inner2.push_back(std::move(inner3));
     c10::Dict<std::string, c10::List<c10::optional<c10::Dict<int64_t, std::string>>>> inner1;
     inner1.insert("key", std::move(inner2));
