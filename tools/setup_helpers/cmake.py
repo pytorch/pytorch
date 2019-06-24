@@ -244,7 +244,7 @@ class CMake:
             'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA'
         }
         additional_options.update({
-            env: env for env in
+            var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
              'CMAKE_PREFIX_PATH',
