@@ -53,18 +53,14 @@ at::DeprecatedTypeProperties* type_from_string(const std::string& str) {
     // torch.cuda. is prefix of str
     std::call_once(cuda_once, []() {
       for (auto type : autograd::VariableType::allCUDATypes()) {
-        for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-          cuda_map.emplace(type_to_string(*type), type);
-        }
+        cuda_map.emplace(type_to_string(*type), type);
       }
     });
     map = &cuda_map;
   } else {
     std::call_once(cpu_once, []() {
       for (auto type : autograd::VariableType::allCPUTypes()) {
-        for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-          cpu_map.emplace(type_to_string(*type), type);
-        }
+        cpu_map.emplace(type_to_string(*type), type);
       }
     });
     map = &cpu_map;
