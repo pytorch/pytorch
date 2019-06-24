@@ -46,8 +46,8 @@ int64_t ceil_div(int64_t x, int64_t y) {
 }
 
 __global__
-void split_segment_sizes_kernel(int64_t *ret, const int64_t *segment_offsets,
-                                int64_t num_of_segments, int64_t numel) {
+void krn_partials_per_segment(int64_t *ret, const int64_t *segment_offsets,
+                              int64_t num_of_segments, int64_t numel) {
   const int id = blockIdx.x * blockDim.x + threadIdx.x;
   if(id < num_of_segments) {
     const int64_t idx_start = segment_offsets[id];
@@ -58,18 +58,18 @@ void split_segment_sizes_kernel(int64_t *ret, const int64_t *segment_offsets,
 }
 
 __global__
-void split_segment_offsets_kernel(
+void krn_partial_segment_offset(
         int64_t *ret,
-        const int64_t *segment_sizes,
-        const int64_t *segment_sizes_offsets,
+        const int64_t *partials_per_segment,
+        const int64_t *partials_per_segment_offset,
         const int64_t *segment_offsets,
         int64_t num_of_segments) {
   const int id = blockIdx.x * blockDim.x + threadIdx.x;
   if(id < num_of_segments) {
-    int64_t idx = segment_sizes_offsets[id];
-    const int64_t segment_size = segment_sizes[id];
+    int64_t idx = partials_per_segment_offset[id];
+    const int64_t num_partials = partials_per_segment[id];
     const int64_t segment_offset = segment_offsets[id];
-    for (int64_t i=0; i<segment_size; ++i) {
+    for (int64_t i=0; i<num_partials; ++i) {
       ret[idx++] = segment_offset + i * NROWS_PER_THREAD;
     }
   }
@@ -161,7 +161,7 @@ template <typename scalar_t>
 __global__ void sum_and_scatter(
     int64_t *input, scalar_t *gradWeight, int64_t stride,
     int64_t* segment_offsets, int64_t num_of_segments, const scalar_t *grad_weight_per_segment,
-    const int64_t *segment_sizes_offsets, int64_t num_of_split_segments,
+    const int64_t *segment_sizes_offsets, int64_t num_of_partial_segments,
     const int64_t stride_warped) {
 
   const int gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -175,7 +175,7 @@ __global__ void sum_and_scatter(
   }
 
   const int idx_begin = segment_sizes_offsets[id];
-  const int idx_end = (id == num_of_segments-1)?num_of_split_segments:segment_sizes_offsets[id+1];
+  const int idx_end = (id == num_of_segments-1)?num_of_partial_segments:segment_sizes_offsets[id+1];
   acc_type<scalar_t, true> weight = 0;
   for (int idx=idx_begin; idx < idx_end; ++idx) {
     weight += grad_weight_per_segment[idx*stride + startFeature];
@@ -208,8 +208,9 @@ Tensor embedding_backward_cuda_kernel(
   const int64_t stride = grad_weight.stride(0);
 
   // Compute the number of segments and their start position so that we do not have to
-  // spawn a warp per index.
-  thrust::device_vector<int64_t> segment_offsets(numel);
+  // spawn a warp per index. In this context, a segment is a number of rows that should
+  // be summarized.
+  thrust::device_vector<int64_t> segment_offsets(numel); // Unit: index in `sorted_indices`
   int64_t num_of_segments;
   {
     auto sorted_indices_dev = thrust::device_ptr<int64_t>(sorted_indices.data<int64_t>());
@@ -226,43 +227,50 @@ Tensor embedding_backward_cuda_kernel(
   }
 
   // We split the segments up into sizes of `NROWS_PER_THREAD`
-  // Compute the size of each split_segment
-  thrust::device_vector<int64_t> split_segment_sizes(num_of_segments);
+  // Compute the number partial-segments per segment (some partial-segments 
+  // may not be the full `NROWS_PER_THREAD` number of rows)
+  thrust::device_vector<int64_t> partials_per_segment(num_of_segments);
   {
-    split_segment_sizes_kernel<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
-            thrust::raw_pointer_cast(split_segment_sizes.data()),
+    krn_partials_per_segment<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
+            thrust::raw_pointer_cast(partials_per_segment.data()),
             thrust::raw_pointer_cast(segment_offsets.data()),
             num_of_segments,
             numel);
   }
 
-  // Compute the number of split-segments and their sizes
-  thrust::device_vector<int64_t> split_segment_sizes_offsets(num_of_segments);
+  // In order to compute `partial_segment_offset`, which is the start index
+  // of each partial-segment in `sorted_indices`, we need to compute the
+  // start position of each _segment_ in `partial_segment_offset`.
+  // Unit: index in `partial_segment_offset`
+  thrust::device_vector<int64_t> partials_per_segment_offset(num_of_segments); 
   thrust::exclusive_scan(
           policy,
-          split_segment_sizes.begin(),
-          split_segment_sizes.end(),
-          split_segment_sizes_offsets.begin());
-  const int num_of_split_segments = split_segment_sizes[num_of_segments-1] +
-          split_segment_sizes_offsets[num_of_segments-1];
+          partials_per_segment.begin(),
+          partials_per_segment.end(),
+          partials_per_segment_offset.begin());
 
-  // Compute the start position of each split-segment
-  thrust::device_vector<int64_t> split_segment_offsets(num_of_split_segments);
+  // The total number of partial-segments is the sum of `partials_per_segment_offset`
+  const int num_of_partial_segments = partials_per_segment[num_of_segments-1] +
+          partials_per_segment_offset[num_of_segments-1];
+
+  // Now we can compute the start position of each partial-segment
+  // Unit: index in `sorted_indices`
+  thrust::device_vector<int64_t> partial_segment_offset(num_of_partial_segments);
   {
-    split_segment_offsets_kernel<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
-            thrust::raw_pointer_cast(split_segment_offsets.data()),
-            thrust::raw_pointer_cast(split_segment_sizes.data()),
-            thrust::raw_pointer_cast(split_segment_sizes_offsets.data()),
+    krn_partial_segment_offset<<<ceil_div(num_of_segments, 32), 32, 0, stream>>> (
+            thrust::raw_pointer_cast(partial_segment_offset.data()),
+            thrust::raw_pointer_cast(partials_per_segment.data()),
+            thrust::raw_pointer_cast(partials_per_segment_offset.data()),
             thrust::raw_pointer_cast(segment_offsets.data()),
             num_of_segments);
   }
 
-  auto grad_weight_per_segment = at::empty({num_of_split_segments, stride}, grad.options());
+  auto grad_weight_per_segment = at::empty({num_of_partial_segments, stride}, grad.options());
   const int stride_warped = ceil_div(stride, WARP_SIZE)*WARP_SIZE;
   const int block = std::min(stride_warped, MAX_BLOCK_SIZE);
-  const int grid = ceil_div(num_of_split_segments*stride_warped, block);
+  const int grid = ceil_div(num_of_partial_segments*stride_warped, block);
 
-  // Compute the sum of each split-segment and handle bags
+  // Compute the sum of each partial-segment and handle bags
   if (offset2bag.defined()) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad.scalar_type(), "embedding_bag_backward_cuda_compute_grad_weight", [&] {
@@ -274,8 +282,8 @@ Tensor embedding_backward_cuda_kernel(
           mode_mean, bag_size.data<int64_t>(),
           per_sample_weights.defined() ? per_sample_weights.data<scalar_t>() : NULL,
           per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-          thrust::raw_pointer_cast(split_segment_offsets.data()),
-          num_of_split_segments, grad_weight_per_segment.data<scalar_t>(),
+          thrust::raw_pointer_cast(partial_segment_offset.data()),
+          num_of_partial_segments, grad_weight_per_segment.data<scalar_t>(),
           stride_warped);
     });
   } else {
@@ -286,8 +294,8 @@ Tensor embedding_backward_cuda_kernel(
           grad.data<scalar_t>(),
           count.defined() ? count.data<int64_t>() : nullptr,
           numel, stride,
-          thrust::raw_pointer_cast(split_segment_offsets.data()),
-          num_of_split_segments,
+          thrust::raw_pointer_cast(partial_segment_offset.data()),
+          num_of_partial_segments,
           grad_weight_per_segment.data<scalar_t>(),
           padding_idx,
           stride_warped);
@@ -295,7 +303,7 @@ Tensor embedding_backward_cuda_kernel(
   }
   THCudaCheck(cudaGetLastError());
 
-  // Finally, we sum all the sub-sums of the split-segments and scatter them
+  // Finally, we sum all the partial-sums and scatter them
   // into `grad_weight`.
   const int grid2 = ceil_div(num_of_segments*stride_warped, block);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -306,8 +314,8 @@ Tensor embedding_backward_cuda_kernel(
         stride,
         thrust::raw_pointer_cast(segment_offsets.data()),
         num_of_segments, grad_weight_per_segment.data<scalar_t>(),
-        thrust::raw_pointer_cast(split_segment_sizes_offsets.data()),
-        num_of_split_segments, stride_warped);
+        thrust::raw_pointer_cast(partials_per_segment_offset.data()),
+        num_of_partial_segments, stride_warped);
   });
   THCudaCheck(cudaGetLastError());
   return grad_weight;
