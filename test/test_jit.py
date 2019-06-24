@@ -9384,6 +9384,28 @@ a")
         self.checkScript(test_list_strings, (["hello", "world"],))
         self.checkScript(test_list_strings, (["hello", " ", "world", ""],))
 
+    def test_for_in_dict(self):
+        def test_dicts(x):
+            # type: (Dict[str, int]) -> int
+            sum = 0
+            for key in x:
+                sum += x[key]
+            return sum
+
+        self.checkScript(test_dicts, ({"a": 1, "b": 2, "c": 3},))
+
+        def test_dict_keys_values(x):
+            # type: (Dict[str, int]) -> Tuple[str, int]
+            key_str = ""
+            sum = 0
+            for key in x.keys():
+                key_str += key
+            for val in x.values():
+                sum += val
+            return key_str, sum
+
+        self.checkScript(test_dicts, ({"a": 1, "b": 2, "c": 3},))
+
     def test_for_tuple_unpack(self):
         def for_tuple_unpack(x, y):
             for i, j in [[3, 4], [5, 6], [7, 8]]:
