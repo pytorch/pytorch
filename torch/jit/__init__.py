@@ -918,13 +918,11 @@ def _try_compile_weak_script(fn):
     if entry is None:
         return None
     if entry["status"] == _jit_internal.COMPILATION_PENDING:
-        compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
-        del entry["rcb"]
+        rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
+        compiled_fn = torch.jit.script(fn, True, 0, rcb)
         _jit_internal.compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
         entry["status"] = _jit_internal.COMPILED
         return compiled_fn
-        # TODO: use fn.__closure__
-        raise RuntimeError("Cannot make resolutionCallback in Python 2")
     else:
         return entry["compiled_fn"]
 
@@ -932,30 +930,6 @@ def _try_compile_weak_script(fn):
 class ScriptWarning(Warning):
     pass
 
-
-def createResolutionCallbackFromClosure(fn):
-    """
-    Create a resolutionCallback by introspecting the function instead of
-    looking up the stack for the enclosing scope
-    """
-    var_names = fn.__code__.co_freevars
-
-    # map of captured name -> value
-    free_vars = {}
-
-    for index, name in enumerate(var_names):
-        free_vars[name] = fn.__closure__[index].cell_contents
-    f_globals = fn.__globals__
-
-    def env(key):
-        if key in free_vars:
-            return free_vars[key]
-        elif hasattr(builtins, key):
-            return getattr(builtins, key)
-        else:
-            return f_globals.get(key)
-
-    return env
 
 def _create_constant_iterable_module(module):
     modules = OrderedDict()
@@ -1738,10 +1712,10 @@ def _get_weak_stubs(cls):
     """
     stubs = []
     for name in dir(cls):
-        func = get_function_from_type(cls, name)
-        if func in _jit_internal.weak_script_methods:
-            entry = _jit_internal.weak_script_methods[func]
-            stub = script_method(entry["original_method"], entry["rcb"])
+        fn = get_function_from_type(cls, name)
+        if fn in _jit_internal.weak_script_methods:
+            rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
+            stub = script_method(fn, rcb)
             stubs.append(stub)
     return stubs
 
