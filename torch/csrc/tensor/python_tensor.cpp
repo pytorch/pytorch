@@ -59,13 +59,15 @@ static PyTensorType* default_tensor_type;
 static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types);
 
 static TypeError unavailable_type(const PyTensorType& type) {
-  const char* cuda_msg = torch::utils::cuda_enabled() ? ". Torch not compiled with CUDA enabled." : "";
-  return TypeError("type %s not available%s", type.name, cuda_msg);
+  return TypeError("type %s not available. Torch not compiled with CUDA enabled.", type.name);
 }
 
 static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
   HANDLE_TH_ERRORS
   auto& tensor_type = *((PyTensorType*)type);
+  if (tensor_type.is_cuda && !torch::utils::cuda_enabled()) {
+    throw unavailable_type(tensor_type);
+  }
   return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(tensor_type.get_type_id(), tensor_type.get_scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -347,6 +349,9 @@ void py_set_default_tensor_type(PyObject* obj) {
     type = (PyTensorType*)obj;
   } else {
     throw TypeError("invalid type object");
+  }
+  if (type->is_cuda && !torch::utils::cuda_enabled()) {
+    throw unavailable_type(*type);
   }
   set_default_tensor_type(type);
 }

@@ -5386,65 +5386,29 @@
   dispatch:
     CPU: legacy::cpu::_thnn_conv3d_backward
 
-- func: thnn_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: nn
-
-- func: thnn_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
-  python_module: nn
-
-- func: thnn_conv_dilated2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv_dilated2d_forward_out
-    CUDA: legacy::cuda::_thnn_conv_dilated2d_forward_out
+    CPU: conv_dilated2d_cpu
+    CUDA: conv_dilated2d_cuda
 
-- func: thnn_conv_dilated2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> (Tensor output, Tensor columns, Tensor ones)
+- func: conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv_dilated2d_forward
-    CUDA: legacy::cuda::_thnn_conv_dilated2d_forward
+    CPU: conv_dilated2d_backward_cpu
+    CUDA: conv_dilated2d_backward_cuda
 
-- func: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv_dilated2d_backward_out
-    CUDA: legacy::cuda::_thnn_conv_dilated2d_backward_out
+    CPU: conv_dilated3d_cpu
+    CUDA: conv_dilated3d_cuda
 
-- func: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
+- func: conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv_dilated2d_backward
-    CUDA: legacy::cuda::_thnn_conv_dilated2d_backward
-
-- func: thnn_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: nn
-
-- func: thnn_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1) -> Tensor
-  python_module: nn
-
-- func: thnn_conv_dilated3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] dilation, *, Tensor(a!) output, Tensor(b!) columns, Tensor(c!) ones) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_conv_dilated3d_forward_out
-    CUDA: legacy::cuda::_thnn_conv_dilated3d_forward_out
-
-- func: thnn_conv_dilated3d_forward(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias, int[3] stride, int[3] padding, int[3] dilation) -> (Tensor output, Tensor columns, Tensor ones)
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_conv_dilated3d_forward
-    CUDA: legacy::cuda::_thnn_conv_dilated3d_forward
-
-- func: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_conv_dilated3d_backward_out
-    CUDA: legacy::cuda::_thnn_conv_dilated3d_backward_out
-
-- func: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_conv_dilated3d_backward
-    CUDA: legacy::cuda::_thnn_conv_dilated3d_backward
+    CPU: conv_dilated3d_backward_cpu
+    CUDA: conv_dilated3d_backward_cuda
 
 - func: col2im(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
