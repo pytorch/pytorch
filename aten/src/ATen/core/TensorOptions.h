@@ -615,3 +615,9 @@ inline DeviceType computeDeviceType(TensorTypeId tid) {
 }
 
 } // namespace at
+
+namespace c10 {
+
+using TensorOptions = at::TensorOptions;
+
+} // namespace c10
