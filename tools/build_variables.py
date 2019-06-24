@@ -427,7 +427,6 @@ def add_torch_libs():
             ":torch-cpp-cpu",
             ":thnn",
             "//caffe2/torch/fb/init:init",
-            "//caffe2/torch/lib/THD:THD_cpu",
             "//caffe2/torch/lib/c10d:c10d_cpu",
             "//caffe2/torch/lib/libshm:libshm",
         ],
