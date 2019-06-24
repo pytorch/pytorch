@@ -74,16 +74,17 @@ protected:
   std::mutex post_callbacks_lock_;
 
   struct ThreadPoolShared {
-    // Data structres used by the threads for executing reentrant backwards
+    // Data structures used by the threads for executing reentrant backwards
     // tasks. See Note [Reentrant backwards]
-    // Number of avaliable threads for processing new GraphTasks.
-    std::atomic_uint num_workers_;
+    // Number of available threads for processing new GraphTasks.
+    uint num_workers_;
     // The threads will wait on work_ to be notified of GraphTasks
     std::condition_variable work_;
     // To protect reads and writes to graphtask_queue_ and num_workers_
     // and for synchronizing creating new threads when needed
     std::mutex mutex_;
-    // Workers will process the GraphTasks added to this queue
+    // Workers will process the GraphTasks added to this queue. A GraphTask is
+    // allocated inside Engine::execute and lives for the duration of execute
     std::queue<GraphTask*> graphtasks_queue_;
 
     ThreadPoolShared() : num_workers_(0) {};

@@ -119,9 +119,10 @@ struct ReadyQueue {
 //
 // We maintain a pool of threads waiting for work to do
 // When a reentrant backwards call occurs, the current thread blocks
-// and a thread from the pool is woken up to complete the blocking tasks
-// If there are no threads avaliable, a new thread is spawned. The new thread
-// will continue processing tasks from the same ReadyQueue as the parent worker
+// and a thread from the pool is woken up to complete the blocking tasks and an
+// any other tasks that would have been assigned to that worker. If there are no
+// threads available, a new thread is spawned. The new thread will continue
+// processing tasks from the same ReadyQueue as the parent worker
 //
 // When the GraphTask is finished, the parent worker thread that is waiting on
 // the task is notified and the current thread returns to the pool.
@@ -351,6 +352,7 @@ void Engine::reentrant_thread_init() {
   auto tp_shared= thread_pool_shared_;
   while(true) {
     std::unique_lock<std::mutex> lk(tp_shared->mutex_);
+    ++thread_pool_shared_->num_workers_;
     tp_shared->work_.wait(lk, [&tp_shared]{ return !tp_shared->graphtasks_queue_.empty();});
     --thread_pool_shared_->num_workers_;
     auto graph_task = tp_shared->graphtasks_queue_.front();
@@ -358,7 +360,6 @@ void Engine::reentrant_thread_init() {
     lk.unlock();
     set_device(graph_task->owner_);
     thread_main(graph_task);
-    ++thread_pool_shared_->num_workers_;
   }
 }
 
@@ -757,16 +758,18 @@ auto Engine::start_threads() -> void {
 }
 
 void Engine::add_thread_pool_task(GraphTask *graph_task) {
-  std::lock_guard<std::mutex> lck(thread_pool_shared_->mutex_);
+  std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
   // There may already be some items on the graphtasks_queue_ added by other
   // threads but not enough workers to get to the the new task that will be
   // added
-  if (thread_pool_shared_->num_workers_ <= thread_pool_shared_->graphtasks_queue_.size()) {
+  bool create_thread = (thread_pool_shared_->num_workers_ <= thread_pool_shared_->graphtasks_queue_.size());
+  thread_pool_shared_->graphtasks_queue_.push(graph_task);
+  // Don't need to be holding the lock while actually creating the thread
+  lck.unlock();
+  if (create_thread) {
     std::thread t(&Engine::reentrant_thread_init, this);
-    ++thread_pool_shared_->num_workers_;
     t.detach();
   }
-  thread_pool_shared_->graphtasks_queue_.push(graph_task);
   // This works even if new thread is created because wait() will test the
   // predicate before waiting
   thread_pool_shared_->work_.notify_one();
