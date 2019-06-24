@@ -42,7 +42,6 @@ TESTS = [
     'optim',
     'quantized',
     'sparse',
-    'thd_distributed',
     'torch',
     'type_info',
     'type_hints',
@@ -55,7 +54,6 @@ TESTS = [
 
 WINDOWS_BLACKLIST = [
     'distributed',
-    'thd_distributed',
 ]
 
 ROCM_BLACKLIST = [
@@ -64,7 +62,6 @@ ROCM_BLACKLIST = [
     'distributed',
     'multiprocessing',
     'nccl',
-    'thd_distributed',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {
@@ -231,7 +228,6 @@ def test_distributed(executable, test_module, test_directory, options):
 CUSTOM_HANDLERS = {
     'cpp_extensions': test_cpp_extensions,
     'distributed': test_distributed,
-    'thd_distributed': test_distributed,
 }
 
 
