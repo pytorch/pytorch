@@ -238,11 +238,17 @@
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
-- name: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-  self: cumprod_backward(grad.to(self.scalar_type()), self, dim)
+- name: cumprod(Tensor self, int dim) -> Tensor
+  self: cumprod_backward(grad, self, dim)
 
-- name: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-  self: cumsum_backward(grad.to(self.scalar_type()), dim)
+- name: cumprod(Tensor self, int dim, *, ScalarType dtype) -> Tensor
+  self: cumprod_backward(grad, self, dim, dtype)
+
+- name: cumsum(Tensor self, int dim) -> Tensor
+  self: cumsum_backward(grad, dim)
+
+- name: cumsum(Tensor self, int dim, *, ScalarType dtype) -> Tensor
+  self: cumsum_backward(grad, dim, self.scalar_type())
 
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
@@ -339,7 +345,7 @@
   self: zeros_like(self)
   other: zeros_like(other)
 
-- name: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
+- name: gels(Tensor self, Tensor A) -> (Tensor solution, Tensor QR) 
   self: not_implemented("gels")
   A: not_implemented("gels")
 
@@ -505,10 +511,19 @@
   self: grad.clone().masked_fill_(self <= other, 0)
   other: grad.clone().masked_fill_(self > other, 0)
 
-- name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
+- name: mean(Tensor self) -> Tensor
+  self: mean_backward(grad, self.sizes(), self.numel())
+
+- name: mean(Tensor self, *, ScalarType dtype) -> Tensor
   self: grad.expand(self.sizes()).to(self.scalar_type()) / self.numel()
 
-- name: mean(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: mean(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
+  self: mean_backward(grad, self.sizes(), dim, keepdim)
+
+- name: mean(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
+  self: sum_backward(grad, self.sizes(), dim, false).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
+
+- name: mean(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
 
 - name: median(Tensor self) -> Tensor
@@ -655,10 +670,19 @@
 - name: pow(Scalar self, Tensor exponent) -> Tensor
   exponent: pow_backward_exponent(grad, self, exponent)
 
-- name: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
+- name: prod(Tensor self) -> Tensor
+  self: prod_backward(grad, self, result)
+
+- name: prod(Tensor self, *, ScalarType dtype) -> Tensor
   self: prod_backward(grad, self.to(grad.scalar_type()), result).to(self.scalar_type())
 
-- name: prod(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: prod(Tensor self, int dim, bool keepdim=False) -> Tensor
+  self: prod_backward(grad, self, result, dim, keepdim)
+
+- name: prod(Tensor self, int dim, *, ScalarType dtype) -> Tensor
+  self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, false).to(self.scalar_type())
+
+- name: prod(Tensor self, int dim, bool keepdim, *, ScalarType dtype) -> Tensor
   self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim).to(self.scalar_type())
 
 - name: pstrf(Tensor self, bool upper=True, Scalar tol=-1) -> (Tensor u, Tensor pivot)
@@ -794,10 +818,19 @@
 - name: rsub(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: -grad * alpha
 
-- name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
+- name: sum(Tensor self) -> Tensor
+  self: grad.expand(self.sizes())
+
+- name: sum(Tensor self, *, ScalarType dtype) -> Tensor
   self: grad.expand(self.sizes()).to(self.scalar_type())
 
-- name: sum(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: sum(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
+  self: sum_backward(grad, self.sizes(), dim, keepdim)
+
+- name: sum(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
+  self: sum_backward(grad, self.sizes(), dim, false).to(self.scalar_type())
+
+- name: sum(Tensor self, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type())
 
 - name: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
