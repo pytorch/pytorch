@@ -247,14 +247,9 @@ def _str(self):
     # Currently torch.set_default_tensor_type() only supports CPU/CUDA.
     # In other cases, we don't have a way to set them as default yet,
     # and we should always print out device for them.
-    if self.device.type == 'xla':
+    if self.device.type != torch._C._get_default_device()\
+            or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index):
         suffixes.append('device=\'' + str(self.device) + '\'')
-    elif not torch._C._is_default_type_cuda():
-        if self.device.type == 'cuda':
-            suffixes.append('device=\'' + str(self.device) + '\'')
-    else:
-        if self.device.type == 'cpu' or torch.cuda.current_device() != self.device.index:
-            suffixes.append('device=\'' + str(self.device) + '\'')
 
     has_default_dtype = self.dtype == torch.get_default_dtype() or self.dtype == torch.int64
 
