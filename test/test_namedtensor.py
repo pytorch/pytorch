@@ -1,6 +1,7 @@
 import unittest
 from common_utils import TestCase, run_tests
 from common_cuda import TEST_CUDA
+import itertools
 import torch
 import sys
 
@@ -68,6 +69,45 @@ class TestNamedTensor(TestCase):
     @unittest.skipIf(not TEST_CUDA, 'no CUDA')
     def test_empty_cuda(self):
         self._test_factory(torch.empty, 'cuda')
+
+    def test_unary_fns(self):
+        def _test(lambd, names=('N', 'D'), device='cpu'):
+            sizes = [2] * len(names)
+            tensor = torch.empty(sizes, names=names, device=device)
+            out = lambd(tensor)
+            self.assertEqual(out.names, tensor.names)
+
+        def method(name, *args, **kwargs):
+            return [lambda t: getattr(t, name)(*args, **kwargs)]
+
+        def out_function(name, *args, **kwargs):
+            out_fn = getattr(torch, name)
+
+            def fn(tensor):
+                result = tensor.new_empty([0])
+                out_fn(tensor, *args, out=result, **kwargs)
+                return result
+
+            return [fn]
+
+        def fn_method_and_inplace(name, *args, **kwargs):
+            return (
+                method(name, *args, **kwargs) +
+                method(name + '_', *args, **kwargs) +
+                out_function(name, *args, **kwargs)
+            )
+
+        def flatten(lst):
+            return [item for sublist in lst for item in sublist]
+
+        tests = [
+            fn_method_and_inplace('abs'),
+        ]
+        tests = flatten(tests)
+
+        for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
+            _test(testcase, device=device)
+
 
     def test_using_seen_interned_string_doesnt_bump_refcount(self):
         def see_name():

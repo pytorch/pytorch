@@ -16,6 +16,9 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
+#ifdef NAMEDTENSOR_ENABLED
+#include <ATen/NamedTensorUtils.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -137,6 +140,12 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
   return result;
 }
 
+#ifdef NAMEDTENSOR_ENABLED
+#define USING_NAMED_TENSOR true
+#else
+#define USING_NAMED_TENSOR false
+#endif
+
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
@@ -154,8 +163,12 @@ Tensor& _sigmoid_out_cpu(Tensor& result, const Tensor& self) {
     assert_no_internal_overlap(result, #op);                    \
     auto iter = TensorIterator::unary_op(result, self);         \
     op##_stub(iter->device_type(), *iter);                      \
+    if (USING_NAMED_TENSOR && self.is_named()) {                \
+      at::internal_set_names_inplace(result, self.names());     \
+    }                                                           \
     return result;                                              \
   }
+
 
 // NB: Temp. defaulting to TH implementation of abs due to issues with Apple
 
@@ -186,6 +199,8 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
+
+#undef USING_NAMED_TENSOR
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(acos_stub);

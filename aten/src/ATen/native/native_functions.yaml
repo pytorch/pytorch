@@ -92,14 +92,17 @@
 
 - func: abs(Tensor self) -> Tensor
   variants: function, method
+  named_guard: False
 
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+  named_guard: False
   dispatch:
     CPU: _abs__cpu
     CUDA: _abs__cuda
 
 - func: abs(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
   dispatch:
     CPU: _abs_out_cpu
     CUDA: _abs_out_cuda
