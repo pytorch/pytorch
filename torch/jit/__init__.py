@@ -712,8 +712,8 @@ def trace(func,
         if ``callable`` is ``nn.Module`` or ``forward()`` of ``nn.Module``, ``trace`` returns
         a ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
         The returned ``ScriptModule`` will have the same set of sub-modules and parameters as the
-        original ``nn.Module``
-        if ``callable`` is a standalone function, ``trace`` returns ``torch.jit._C.Function``
+        original ``nn.Module``.
+        If ``callable`` is a standalone function, ``trace`` returns ``torch.jit._C.Function``
 
     Example::
 
