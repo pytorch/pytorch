@@ -3,7 +3,7 @@ Weight Normalization from https://arxiv.org/abs/1602.07868
 """
 import math
 from torch.nn.parameter import Parameter
-from torch import _weight_norm, norm_except_dim, ones_like
+from torch import _weight_norm, norm_except_dim, full_like
 from torch.nn.init import _calculate_fan_in_and_fan_out
 
 
@@ -44,7 +44,7 @@ class WeightNorm(object):
             g_init = norm_except_dim(weight, 2, dim)
         elif init == 'norm_preserving':
             fan_in, fan_out = _calculate_fan_in_and_fan_out(weight)
-            g_init = ones_like(norm_except_dim(weight, 2, dim)) * math.sqrt(gamma * fan_in / fan_out)
+            g_init = full_like(norm_except_dim(weight, 2, dim), math.sqrt(gamma * fan_in / fan_out))
 
         # add g and v as new parameters and express w as g/||v|| * v
         module.register_parameter(name + '_g', Parameter(g_init.data))
