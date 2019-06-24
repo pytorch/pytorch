@@ -16,47 +16,10 @@ DEBUG_LEVEL = 0
 
 # Only entires at the end of lists can be hidden.
 
+# TODO: use torch.is_tensor
 
-def tensor_scalar(a):
-    assert isinstance(a, numbers.Number)
-    ret_tensor = torch.tensor(a)
-    return make_tensor(ret_tensor)
-
-
-def tensor_tensor(t):
-    assert isinstance(t, torch.Tensor)
-    return NestedTensor(t, torch.ones_like(t))
-
-
-def tensor_list(lst):
-    def _tensor_list(l):
-        if not isinstance(l, list):
-            return make_tensor(l)
-        impls = []
-        for entry in l:
-            impls.append(_tensor_list(entry))
-        return stack(impls)
-
-    assert isinstance(lst, list), "Is " + str(type(lst))
-    if len(lst) == 0:
-        return make_tensor(torch.tensor([]))
-    return _tensor_list(lst)
-
-
-# TODO: Clone value if NestedTensor?
-# Standardize on torch behavior here
-# Equivalent to torch.tensor?
-def make_tensor(value):
-    if isinstance(value, NestedTensor):
-        return value
-    elif isinstance(value, numbers.Number):
-        return tensor_scalar(value)
-    elif isinstance(value, torch.Tensor):
-        return tensor_tensor(value)
-    elif isinstance(value, list):
-        return tensor_list(value)
-    else:
-        assert "Given value is of unsupported type"
+def is_nested_tensor(obj):
+    return isinstance(obj, NestedTensor)
 
 
 orig_embedding = torch.nn.functional.embedding
@@ -67,6 +30,8 @@ orig_linear = torch.nn.functional.linear
 orig_vf_lstm = torch.nn._VF.lstm
 orig_nn_lstm_forward = torch.nn.LSTM.forward
 
+orig_cat = torch.cat
+orig_stack = torch.stack
 
 def embedding_monkey(input, weight, padding_idx=None, max_norm=None,
                      norm_type=2., scale_grad_by_freq=False, sparse=False):
@@ -218,17 +183,17 @@ def nn_lstm_forward_monkey(self, input, hx=None):
         empty_output_shape = (0,) * (input.dim() - 1)
         empty_output_tensor = empty_output_tensor.reshape(empty_output_shape)
         empty_output_tensor = empty_output_tensor.type(input.tensor.type())
-        bts = len(input.tensor) * [make_tensor(empty_output_tensor.clone())]
+        bts = len(input.tensor) * [make_nested_tensor_from_tensor(empty_output_tensor)]
         i = 0
         for x in nonzero_input_indicies:
             x = x.item()
-            bts[x] = make_tensor(tensors[i][:lengths[i]])
+            bts[x] = make_nested_tensor_from_tensor(tensors[i][:lengths[i]])
             i += 1
 
         output = stack(bts)
-        hidden = (make_tensor(hidden[0]).pad_to_shape(
+        hidden = (make_nested_tensor_from_tensor(hidden[0]).pad_to_shape(
             hx[0].tensor.size()),
-                  make_tensor(hidden[1]).pad_to_shape(
+                  make_nested_tensor_from_tensor(hidden[1]).pad_to_shape(
             hx[1].tensor.size()))
         return output, hidden
     else:
@@ -281,18 +246,18 @@ def _cat(nts, skip_empty):
     # An empty tensor here is defined as the result from
     # torch.tensor([])
     if all_zero_numel:
-        return make_tensor([])
+        return make_nested_tensor_from_tensor(torch.tensor([]))
 
-    tensor = torch.cat(tensors)
-    mask = torch.cat(masks)
+    tensor = orig_cat(tensors)
+    mask = orig_cat(masks)
     return NestedTensor(tensor, mask)
 
 
 # All shapes, but first dim must match
 # Empty or not, doesn't matter
 def stack(nts_):
-    if len(nts_) == 0:
-        raise RuntimeError("expected a non-empty list of NestedTensors")
+    if not (len(nts_) > 0 and is_nested_tensor(nts_[0])):
+        return orig_stack(nts_)
     nts = []
     # Raise dimensionality by 1
     for entry in nts_:
@@ -304,13 +269,43 @@ def stack(nts_):
         nts.append(NestedTensor(new_tensor, new_mask))
     return _cat(nts, False)
 
+def make_nested_tensor(obj):
+    if is_nested_tensor(obj):
+        return NestedTensor(torch.tensor(obj.tensor), torch.tensor(obj.mask))
+    elif torch.is_tensor(obj):
+        return torch.tensor(obj)
+    elif isinstance(obj, list):
+        assert(len(obj) > 0)
+        for obj_ in obj:
+            assert(torch.is_tensor(obj_))
+        dim = obj[0].dim()
+        layout = obj[0].layout
+        device = obj[0].device
+        for obj_ in obj:
+            assert(dim == obj_.dim())
+            assert(layout == obj_.layout)
+            assert(device == obj_.device)
+        tensors = []
+        for obj_ in obj:
+            tensors.append(NestedTensor(torch.tensor(obj_),
+                torch.ones_like(obj_)))
+        return stack(tensors)
+    else:
+        assert "Given value is of unsupported type"
+
+def make_nested_tensor_from_tensor(tensor):
+    assert isinstance(tensor, torch.Tensor)
+    return NestedTensor(tensor, torch.ones_like(tensor))
+
 
 # All shapes must match period.
 # Deprecated behavior supports insane catting of non-shape matching
 # empty tensors but we don't want that. Don't support this here and
 # throw an Error.
 def cat(nts):
-    return _cat(nts, True)
+    if len(nts) > 0 and is_nested_tensor(nts[0]):
+        return _cat(nts, True)
+    return orig_cat(nts)
 
 
 def _normalize_mask(mask):
@@ -322,6 +317,19 @@ def _normalize_mask(mask):
 def _check_mask(mask):
     assert (mask.numel() == ((mask == 0).sum() +
                              (mask == 1).sum()))
+
+# Given a mask get the sizes of the constituent Tensors
+# TODO: This is a very important function!
+# More tests!
+def _mask_to_size(mask):
+    def __mask_to_size(mask_):
+        if mask_.dim() == 0:
+            return tuple()
+        sum1 = mask_.sum(-1)
+        sum2 = int(sum1.view(-1)[0].item())
+        sum1 = _normalize_mask(sum1)
+        return __mask_to_size(sum1) + (sum2,)
+    return __mask_to_size(mask)
 
 
 # NOTE: MAJOR CONSTRAINT!
@@ -522,18 +530,32 @@ class NestedTensor():
                 sizes.append(data.nested_size())
             return torch.stack(sizes)
 
-    def tolist(self):
-        if self.dim() == 0:
-            # There can be no such thing as a masked scalar
-            assert self.mask.item() == 1
-            return self.tensor.item()
-        if self.dim() == 1:
-            return self.tensor.narrow(0, 0, int(self.mask.sum())).tolist()
-        lst = []
-        for i in range(self.tensor.size(0)):
-            tmp = self.narrow(0, i, 1).squeeze(0).tolist()
-            # NOTE: Assumes mask is of form 1, 1, 1, ..., 1, 0, 0, 0, ..., 0
-            if tmp is None:
-                break
-            lst.append(tmp)
-        return lst
+    def unbind(self):
+        tensors_ = self.tensor.unbind()
+        masks = self.mask.unbind()
+        tensors = []
+        for i in range(len(tensors_)):
+            tensor = tensors_[i]
+            mask = masks[i]
+            t = _mask_to_size(mask)
+            for j in range(len(t)):
+                band = t[j]
+                tensor = tensor.narrow(j, 0, band)
+            tensors.append(tensor)
+        return tensors
+
+    # def tolist(self):
+    #     if self.dim() == 0:
+    #         # There can be no such thing as a masked scalar
+    #         assert self.mask.item() == 1
+    #         return self.tensor.item()
+    #     if self.dim() == 1:
+    #         return self.tensor.narrow(0, 0, int(self.mask.sum())).tolist()
+    #     lst = []
+    #     for i in range(self.tensor.size(0)):
+    #         tmp = self.narrow(0, i, 1).squeeze(0).tolist()
+    #         # NOTE: Assumes mask is of form 1, 1, 1, ..., 1, 0, 0, 0, ..., 0
+    #         if tmp is None:
+    #             break
+    #         lst.append(tmp)
+    #     return lst

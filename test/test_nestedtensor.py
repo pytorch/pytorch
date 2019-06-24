@@ -1,11 +1,11 @@
-from prototypes.nested import NestedTensor
-from prototypes.nested import tensor
-from prototypes.nested import cat
-from prototypes.nested import stack
-# from prototypes.nested import nestedLSTM
-from prototypes.nested import embedding_monkey
-import torch
+import torch.prototypes.nestedtensor as nestedtensor
 
+NestedTensor = nestedtensor.NestedTensor
+
+from torch import cat
+from torch import stack
+from torch.nn.functional import embedding
+import torch
 
 def _make_nested_list_examples():
     nested_lists = []
@@ -146,56 +146,39 @@ def test_cat():
 
 
 def test_constructors():
-    a = tensor(2.0)
-    assert a.tolist() == 2.0
-    a = tensor([])
-    assert a.tolist() == []
-    a = tensor([2.0])
-    assert a.tolist() == [2.0]
-    a = tensor([[2.0], [3.0]])
-    assert a.tolist() == [[2.0], [3.0]]
-    a = tensor([[2.0]])
-    assert a.tolist() == [[2.0]]
-    a = tensor([3.0, 1.0])
-    assert a.tolist() == [3.0, 1.0]
-    try:
-        a = tensor([[2.0], [[3.0]]])
-        raise Exception("Cannot construct from lists"
-                        " with entries that don't match dimensionality")
-    except AssertionError:
-        pass
+    a = torch.nestedtensor([torch.tensor(2.0)])
 
 
 def test_embedding_monkey():
     a = torch.tensor([1, 2, 2])
     b = torch.tensor([[4, 5, 6], [7, 8, 9], [10, 11, 12]])
     d = torch.tensor([[7, 8, 9], [10, 11, 12], [10, 11, 12]])
-    c = embedding_monkey(a, b)
+    c = embedding(a, b)
     assert (c == d).all()
 
     a = tensor([1, 2, 2])
     b = torch.tensor([[4, 5, 6], [7, 8, 9], [10, 11, 12]])
     d = tensor([[7, 8, 9], [10, 11, 12], [10, 11, 12]])
-    c = embedding_monkey(a, b)
+    c = embedding(a, b)
     assert (c.tensor == d.tensor).all()
     assert (c.mask == d.mask).all()
 
     a = tensor([[1, 2], [0, 0]])
     b = torch.tensor([[4, 5, 6], [7, 8, 9], [10, 11, 12]])
     d = tensor([[[7, 8, 9], [10, 11, 12]], [[4, 5, 6], [4, 5, 6]]])
-    c = embedding_monkey(a, b)
+    c = embedding(a, b)
     assert (c.tensor == d.tensor).all()
     assert (c.mask == d.mask).all()
 
     return
     a = torch.tensor([[]])
     b = torch.tensor([[4, 5, 6], [7, 8, 9], [10, 11, 12]])
-    c = embedding_monkey(a, b)
+    c = embedding(a, b)
 
     a = tensor([[0]])
     b = torch.tensor([[4, 5, 6], [7, 8, 9], [10, 11, 12]])
     d = tensor([[[7, 8, 9], [10, 11, 12]], [[4, 5, 6], [4, 5, 6]]])
-    c = embedding_monkey(a, b)
+    c = embedding(a, b)
 
     # TODO: Deal with (1, 0, 3) shaped empty tensor
 
@@ -405,6 +388,12 @@ def test_len():
     assert(len(a) == 0)
 
 
+def test_unbind():
+    a = torch.nestedtensor([torch.rand(1, 2), torch.rand(2, 3), torch.rand(4, 5)])
+    print(a.unbind())
+    import pdb; pdb.set_trace()
+
+
 def test_stack():
     lst = [tensor([]), tensor([])]
     res = stack(lst)
@@ -427,6 +416,7 @@ if __name__ == "__main__":
     # TODO: Why does stack and cat behave the same for a list
     # of torch.tensor(scalar)s
     test_constructors()
+    test_unbind()
     test_nested_size()
     test_stack()
     test_embedding_monkey()
