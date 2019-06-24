@@ -324,7 +324,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   }
 
   dim3 grid(THCCeilDiv(num_indices, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
-  dim3 block(32, 4);
+  dim3 block(WARP_SIZE, 4);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.scalar_type(), "embedding_backward", [&] {
     embedding_backward_kernel<<<grid, block, 0, stream>>>(

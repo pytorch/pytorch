@@ -13,9 +13,6 @@ class Tensor;
 namespace c10 {
 struct IValue;
 template<class T> class List;
-struct Type;
-using TypePtr = std::shared_ptr<Type>;
-
 
 namespace detail {
 
