@@ -519,6 +519,7 @@ class LSTM(RNNBase):
 
         return output, hidden
 
+    @torch._jit_internal.export
     def forward_tensor(self, input, hx=None):
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
         batch_sizes = None
@@ -530,6 +531,7 @@ class LSTM(RNNBase):
 
         return output, self.permute_hidden(hidden, unsorted_indices)
 
+    @torch._jit_internal.export
     def forward_packed(self, input, hx=None):
         # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
         input, batch_sizes, sorted_indices, unsorted_indices = input
@@ -541,6 +543,7 @@ class LSTM(RNNBase):
         output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
+    @torch._jit_internal.ignore
     def forward(self, input, hx=None):
         if isinstance(input, PackedSequence):
             return self.forward_packed(input, hx)
