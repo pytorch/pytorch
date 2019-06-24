@@ -382,6 +382,10 @@ void TracingState::setValue(const IValue& v, Value* value) {
   }
 }
 
+void addInputs(Node* n, const Argument arg, IValue value) {
+  // TODO will fill in the logic
+}
+
 void addInputs(Node* n, const char* name, int64_t value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {

@@ -232,6 +232,10 @@ TORCH_API void exit(const Stack& outputs);
 
 TORCH_API void abandon();
 
+// NB: we would like to unify all the addInputs into the following function
+// which accepts IValue
+TORCH_API void addInputs(Node* n, const Argument arg, IValue value);
+
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
 TORCH_API void addInputs(Node* n, const char* name, int64_t value);
