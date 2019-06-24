@@ -656,6 +656,10 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_tensor_index_advanced_indexing_consecutive(self):
         self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([[1, 3], [4, 0]]), None])
 
+    def test_tensor_index_advanced_indexing_masked(self):
+        self._test_index_generic(
+            lambda input: input[:, torch.tensor([1, 0, 1, 0], dtype=torch.uint8), torch.tensor([[1, 3], [4, 0]]), None])
+
     def test_chunk(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
