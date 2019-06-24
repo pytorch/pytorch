@@ -309,7 +309,7 @@ We try to export the model and see the error message as below::
 The export fails because PyTorch does not support exporting ``elu`` operator.
 We find ``virtual Tensor elu(const Tensor & input, Scalar alpha, bool inplace) const override;``
 in ``VariableType.h``. This means ``elu`` is an ATen operator.
-We check the `ONNX operator list <http://https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_,
+We check the `ONNX operator list <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_,
 and confirm that ``Elu`` is standardized in ONNX.
 We add the following lines to ``symbolic_opset9.py``::
 

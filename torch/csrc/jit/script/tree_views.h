@@ -511,8 +511,8 @@ struct For : public Stmt {
   explicit For(const TreeRef& tree) : Stmt(tree) {
     tree->match(TK_FOR);
   }
-  List<Ident> targets() const {
-    return List<Ident>(subtree(0));
+  List<Expr> targets() const {
+    return List<Expr>(subtree(0));
   }
   List<Expr> itrs() const {
     return List<Expr>(subtree(1));
@@ -522,7 +522,7 @@ struct For : public Stmt {
   }
   static For create(
       const SourceRange& range,
-      const List<Ident>& targets,
+      const List<Expr>& targets,
       const List<Expr>& itrs,
       const List<Stmt>& body) {
     return For(Compound::create(TK_FOR, range, {targets, itrs, body}));
@@ -537,8 +537,8 @@ struct ListComp : public Expr {
   Expr elt() const {
     return Expr(subtree(0));
   }
-  Ident target() const {
-    return Ident(subtree(1));
+  Expr target() const {
+    return Expr(subtree(1));
   }
   Expr iter() const {
     return Expr(subtree(2));
@@ -547,7 +547,7 @@ struct ListComp : public Expr {
   static ListComp create(
       const SourceRange& range,
       const Expr& elt,
-      const Ident& target,
+      const Expr& target,
       const Expr& iter) {
     return ListComp(Compound::create(TK_LIST_COMP, range, {elt, target, iter}));
   }
