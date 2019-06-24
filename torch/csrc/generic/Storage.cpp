@@ -25,7 +25,7 @@ static void THPStorage_(dealloc)(THPStorage* self)
 
 static THWStorage* THPStorage_(newWithAllocator)(int64_t size, at::Allocator* allocator)
 {
-#if defined(THC_GENERIC_FILE) || defined(THD_GENERIC_FILE)
+#if defined(THC_GENERIC_FILE)
   THPUtils_setError(THPStorageStr " does not support custom allocators");
   return nullptr;
 #else
@@ -94,9 +94,6 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
   // torch.Storage(sequence)
   if (num_args == 1 && PySequence_Check(first_arg)) {
-#ifdef THD_GENERIC_FILE
-    THPUtils_setError("distributed storages don't support construction from a sequence");
-#else
     Py_ssize_t length = PySequence_Length(first_arg);
     THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
         THPUtils_typename(first_arg));
@@ -122,7 +119,6 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
       return nullptr;
     }
     return (PyObject*)self.release();
-#endif
   }
 
   THPUtils_invalidArguments(args, kwargs, THPStorageStr " constructor", 6,
@@ -310,7 +306,6 @@ THPCopyList THWStorage_(copy_functions);
 
 void THPStorage_(initCopyMethods)()
 {
-#ifndef THD_GENERIC_FILE
   auto& h = THWStorage_(copy_functions);
   // copy from CPU types
   THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPByteStorageType, h, &THWStorage_(copyByte));
@@ -350,21 +345,16 @@ void THPStorage_(initCopyMethods)()
   #undef THCpuStorage
   #undef THCpuStorage_
 #endif
-#endif // !defined(THD_GENERIC_FILE)
 }
 
 #include <torch/csrc/generic/StorageMethods.cpp>
-#ifndef THD_GENERIC_FILE
 #include <torch/csrc/generic/StorageSharing.cpp>
-#endif
 
 bool THPStorage_(init)(PyObject *module)
 {
   static std::vector<PyMethodDef> methods;
   THPUtils_addPyMethodDefs(methods, THPStorage_(methods));
-#ifndef THD_GENERIC_FILE
   THPUtils_addPyMethodDefs(methods, THPStorage_(sharingMethods));
-#endif
 
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_members = THPStorage_(members);
