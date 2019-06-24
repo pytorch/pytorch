@@ -461,7 +461,7 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 
 PyObject *THPModule_isDefaultTypeCuda(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  if (backendToDeviceType(tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id())) == at::kCUDA) {
+  if (computeDeviceType(torch::tensors::get_default_tensor_type_id()) == at::kCUDA) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;

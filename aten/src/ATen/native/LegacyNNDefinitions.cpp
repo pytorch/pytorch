@@ -78,24 +78,4 @@ Tensor thnn_conv3d(const Tensor & self, const Tensor & weight, IntArrayRef kerne
   return std::get<0>(at::thnn_conv3d_forward(self, weight, kernel_size, bias, stride, padding));
 }
 
-Tensor & thnn_conv_dilated2d_out(Tensor & output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
-  Tensor columns = at::empty({0}, self.options());
-  Tensor ones = at::empty({0}, self.options());
-  return std::get<0>(at::thnn_conv_dilated2d_forward_out(output, columns, ones, self, weight, kernel_size, bias, stride, padding, dilation));
-}
-
-Tensor thnn_conv_dilated2d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
-  return std::get<0>(at::thnn_conv_dilated2d_forward(self, weight, kernel_size, bias, stride, padding, dilation));
-}
-
-Tensor & thnn_conv_dilated3d_out(Tensor & output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
-  Tensor columns = at::empty({0}, self.options());
-  Tensor ones = at::empty({0}, self.options());
-  return std::get<0>(at::thnn_conv_dilated3d_forward_out(output, columns, ones, self, weight, kernel_size, bias, stride, padding, dilation));
-}
-
-Tensor thnn_conv_dilated3d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
-  return std::get<0>(at::thnn_conv_dilated3d_forward(self, weight, kernel_size, bias, stride, padding, dilation));
-}
-
 }} // namespace at::native
