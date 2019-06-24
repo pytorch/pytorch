@@ -1314,12 +1314,15 @@ struct to_ir {
         Value* cur_elem = iter_val->getelem(range, method, trip_count);
         SugaredValuePtr sv = std::make_shared<SimpleValue>(cur_elem);
         List<Expr> target_exprs = targets.value();
-        size_t n_binders = target_exprs.size();
+        validateAssignLhsExpr(target_exprs, range);
 
-        bool starred_unpack = calcNumStarredUnpack(target_exprs, range);
-        if (starred_unpack)
-          n_binders--;
-        emitExprsAssign(target_exprs, {sv}, range, n_binders);
+        // if target exprs are more than 1, it means iteration unpacking on LHS
+        // we create Tuple literal to wrap those target exprs for assignments
+        if (target_exprs.size() > 1) {
+          Expr tl = TupleLiteral::create(range, target_exprs);
+          target_exprs = List<Expr>::create(range, {tl});
+        }
+        emitExprsAssign(target_exprs, {sv}, range, /*n_binders=*/1);
       }
 
       emitStatements(body);
@@ -1336,11 +1339,6 @@ struct to_ir {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
     }
-    if (targets.size() != 1) {
-      throw ErrorReport(stmt)
-          << "Iteration variable unpacking is not supported";
-    }
-
     // Emit loop information for builtinFunction values like range(), zip(), 
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
     auto sv = emitSugaredExpr(itrs[0], 1);
@@ -1425,7 +1423,7 @@ struct to_ir {
   // 3) A Starred node can only appear when there is another non-Starred lhs
   //    Expr. Concretely this means that `*abc = func()` is illegal. Unpacking
   //    all outputs into a tuple is covered by `abc = func()`.
-  bool calcNumStarredUnpack(const List<Expr>& lhs, const SourceRange& r) {
+  bool validateAssignLhsExpr(const List<Expr>& lhs, const SourceRange& r) {
     size_t num_normal_assign = 0;
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
@@ -1715,7 +1713,7 @@ struct to_ir {
 
   void emitTupleAssign(const TupleLiteral& tl, const Expr& rhs) {
     size_t n_binders = tl.inputs().size();
-    bool starred_unpack = calcNumStarredUnpack(tl.inputs(), tl.range());
+    bool starred_unpack = validateAssignLhsExpr(tl.inputs(), tl.range());
     if (starred_unpack)
       n_binders--;
     auto output = emitSugaredExpr(rhs, n_binders);
@@ -1780,7 +1778,7 @@ struct to_ir {
           // recursively emit tuple assignments on tuple literal input
           TupleLiteral sub_tl = TupleLiteral(assignee);
           size_t sub_n_binders = sub_tl.inputs().size();
-          bool sub_starred_unpack = calcNumStarredUnpack(sub_tl.inputs(), sub_tl.range());
+          bool sub_starred_unpack = validateAssignLhsExpr(sub_tl.inputs(), sub_tl.range());
           if (sub_starred_unpack)
             sub_n_binders--;
           emitTupleAssign(sub_tl, outputs.at(i), rhs_loc, sub_n_binders, sub_starred_unpack);
