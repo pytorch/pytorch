@@ -87,7 +87,7 @@ protected:
     // allocated inside Engine::execute and lives for the duration of execute
     std::queue<GraphTask*> graphtasks_queue_;
 
-    ThreadPoolShared() : num_workers_(0) {};
+    ThreadPoolShared() : num_workers_(0) {}
  };
 
  // Temporary workaround until shutting down threads is done
