@@ -1972,11 +1972,10 @@ class TestNN(NNTestCase):
         self.assertEqual(m(input), expected_output)
 
         # norm_preserving init
-        input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
 
         # norm_preserving init: add weight normalization
-        m = torch.nn.utils.weight_norm(m, init='default')
+        m = torch.nn.utils.weight_norm(m, init='norm_preserving')
         self.assertEqual(m.weight_v.size(), m.weight.size())
         self.assertEqual(m.weight_g.size(), (7, 1))
 
@@ -1986,13 +1985,24 @@ class TestNN(NNTestCase):
         self.assertFalse(hasattr(m, 'weight_v'))
 
         # norm_preserving init: test with dim=1
-        m = torch.nn.utils.weight_norm(m, dim=1, init='default')
+        m = torch.nn.utils.weight_norm(m, dim=1, init='norm_preserving')
         self.assertEqual(m.weight_v.size(), m.weight.size())
         self.assertEqual(m.weight_g.size(), (1, 5))
 
         with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
             m = torch.nn.utils.weight_norm(m, init='default')
             m = torch.nn.utils.weight_norm(m, init='default')
+
+        # norm_preserving init: test norm preservation for Linear+ReLU layer
+        input = torch.randn(50, 5000)
+        m = nn.Linear(5000, 5000)
+        relu = nn.ReLU()
+        init.orthogonal_(m.weight)
+        init.zeros_(m.bias)
+        m = torch.nn.utils.weight_norm(m, init='norm_preserving')
+        output = relu(m(input))
+        norm_ratio = torch.mean(torch.norm(output, dim=-1) / torch.norm(input, dim=-1)).item()
+        self.assertEqual(norm_ratio, 1., prec=0.02)
 
     def test_weight_norm_pickle(self):
         for wn_init in ['default', 'norm_preserving']:
