@@ -120,6 +120,7 @@ void TensorIterator::compute_types() {
     auto common_type = compute_common_type();
     auto common_device = std::get<0>(common_type);
     auto common_dtype = std::get<1>(common_type);
+    bool has_cpu_scalar = false;
     for (auto& op : operands_) {
       if (!op.is_type_defined()) {
         op.device = common_device;
@@ -127,10 +128,12 @@ void TensorIterator::compute_types() {
       } else if (compute_common_dtype_ &&
                  (op.device != common_device || op.dtype != common_dtype)) {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
-            common_device.is_cuda() && op.tensor.device().is_cpu()) {
-          // don't cast CPU scalars in CUDA ops that directly support them
+            common_device.is_cuda() && op.tensor.device().is_cpu() &&
+            !has_cpu_scalar) {
+          // don't cast CPU scalars in CUDA ops that directly support them.
           op.device = op.tensor.device();
           op.dtype = op.tensor.scalar_type();
+          has_cpu_scalar = true;
         } else if (promote_gpu_output_dtypes_ && op.tensor.defined() &&
             !op.is_output &&
             op.tensor.scalar_type() == kHalf && common_dtype == kFloat &&
@@ -342,8 +345,9 @@ int TensorIterator::num_reduce_dims() const {
   }
   return count;
 }
-static loop2d_t loop_wrapper(const loop_t& loop) {
-  return [&loop](int ntensor, char** base, const int64_t* strides, int64_t size0, int64_t size1) {
+
+static inline loop2d_t loop_wrapper(int ntensor, const loop_t* loop) {
+  return [=](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
     auto data = PtrVector(base, base + ntensor);
     const int64_t* outer_strides = &strides[ntensor];
 
@@ -353,13 +357,13 @@ static loop2d_t loop_wrapper(const loop_t& loop) {
           data[arg] += outer_strides[arg];
         }
       }
-      loop(ntensor, data.data(), strides, size0);
+      (*loop)(data.data(), strides, size0);
     }
   };
 }
 
 void TensorIterator::for_each(const loop_t& loop) {
-  for_each(loop_wrapper(loop));
+  for_each(loop_wrapper(ntensors(), &loop));
 }
 
 void TensorIterator::for_each(const loop2d_t& loop) {
@@ -386,7 +390,7 @@ DimVector TensorIterator::get_strides() const {
 }
 
 void TensorIterator::serial_for_each(const loop_t& loop, Range range) const {
-  serial_for_each(loop_wrapper(loop), range);
+  serial_for_each(loop_wrapper(ntensors(), &loop), range);
 }
 
 void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
@@ -401,13 +405,13 @@ void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
   auto base_ptrs = get_base_ptrs();
   if (ndim() <= 1) {
     auto ptrs = get_data_ptrs(base_ptrs, { range.begin });
-    loop(ntensors(), ptrs.data(), strides.data(), range.size(), 1);
+    loop(ptrs.data(), strides.data(), range.size(), 1);
   } else {
     auto counter = DimCounter(shape_, range);
     while (!counter.is_done()) {
       auto ptrs = get_data_ptrs(base_ptrs, counter.values);
       auto step = counter.max_2d_step();
-      loop(ntensors(), ptrs.data(), strides.data(), step[0], step[1]);
+      loop(ptrs.data(), strides.data(), step[0], step[1]);
       counter.increment(step);
     }
   }

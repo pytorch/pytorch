@@ -33,6 +33,12 @@ inline std::string toString(at::IntArrayRef l) {
   return ss.str();
 }
 
+inline std::string toString(const c10::Layout& layout) {
+  std::stringstream ss;
+  ss << layout;
+  return ss.str();
+}
+
 inline void assertSameType(
     const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
@@ -105,6 +111,27 @@ inline void assertSizesMatch(
   if (tensors[index].sizes() != sizes) {
     fn("invalid tensor size at index " + std::to_string(index) + " (expected " +
        toString(sizes) + ", got " + toString(tensors[index].sizes()) + ")");
+  }
+}
+
+inline void assertLayoutMatch(
+    std::function<void(const std::string&)> fn,
+    const c10::Layout& expected,
+    const at::ArrayRef<at::Tensor>& tensors,
+    size_t index) {
+  const auto& actual = tensors[index].layout();
+  if (actual != expected) {
+    fn("invalid tensor layout at index " + std::to_string(index) +
+       " (expected " + toString(expected) + ", got " + toString(actual) + ")");
+  }
+}
+
+inline void assertLayoutMatch(
+    std::function<void(const std::string&)> fn,
+    const at::ArrayRef<at::Tensor>& tensors) {
+  const auto& layout = tensors[0].layout();
+  for (size_t i = 1; i < tensors.size(); i++) {
+    assertLayoutMatch(fn, layout, tensors, i);
   }
 }
 
@@ -272,8 +299,13 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
 
 template <typename T>
 inline T* getDataPointer(const at::Tensor& tensor) {
-  // NB: This does NOT respect storage_offset from the tensor
-  return static_cast<T*>(tensor.storage().data());
+  // This method is only used in ProcessGroupGloo for now. Call sites must make
+  // sure that the input tensor is contiguous. It is OK if the tensor does not
+  // start from the beginning of the storage. For example, it could come from
+  // chunk(..., dim=0)[1]. Hence, we need to use data_ptr() instead of
+  // tensor.storage().data()
+  // NB: not using tensor.data<T>() because tensor is not aware of gloo::TYPE
+  return static_cast<T*>(tensor.data_ptr());
 }
 
 template <typename T>

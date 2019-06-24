@@ -90,7 +90,13 @@ struct PythonResolver : public Resolver {
     return toSugaredValue(obj, m, loc);
   }
 
-  TypePtr resolveType(const std::string& name) const override {
+  static bool isNamedTupleClass(py::object obj) {
+    auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
+    return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
+        py::hasattr(obj, "_fields");
+  }
+
+  TypePtr resolveType(const std::string& name, const SourceRange& loc) const override {
     if (classType_ && name == classname_) {
       return classType_;
     }
@@ -104,11 +110,49 @@ struct PythonResolver : public Resolver {
       return nullptr;
     }
 
-    py::str qualifiedName =
-        py::module::import("torch.jit").attr("_qualified_name")(obj);
+    auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
+        py::module::import("torch.jit").attr("_qualified_name")(obj)));
 
-    return CompilationUnit::_get_python_cu().get_class(
-        c10::QualifiedName(qualifiedName));
+    if (isNamedTupleClass(obj)) {
+      // Currently don't support default values
+      if (py::hasattr(obj, "_field_defaults")) {
+        auto default_dict = py::cast<std::map<std::string, py::object>>(
+            py::getattr(obj, "_field_defaults"));
+        if (default_dict.size()) {
+          std::string error_msg =
+              "Default values are currently not supported"
+              " on NamedTuple fields in TorchScript. Fields "
+              "with default values: [";
+          bool first = true;
+          for (const auto& kv : default_dict) {
+            if (!first) {
+              error_msg += ", ";
+            }
+            error_msg += kv.first;
+          }
+          error_msg += "]";
+          throw ErrorReport(loc) << error_msg;
+        }
+      }
+
+      py::object props = py::module::import("torch.jit")
+                             .attr("_get_named_tuple_properties")(obj);
+      std::string unqualName;
+      std::vector<std::string> fields;
+      std::vector<TypePtr> annotations;
+      std::tie(unqualName, fields, annotations) = py::cast<
+          std::tuple<std::string, decltype(fields), decltype(annotations)>>(
+          props);
+
+      auto tt = TupleType::create(
+          annotations,
+          qualifiedName,
+          TupleType::namedTupleSchemaFromNamesAndTypes(qualifiedName, fields, annotations));
+      CompilationUnit::_get_python_cu().register_class(tt);
+      return tt;
+    }
+
+    return CompilationUnit::_get_python_cu().get_class(qualifiedName);
   }
 
  private:
@@ -178,11 +222,58 @@ static Self moduleSelf(
   };
 }
 
-static void setInputTensorTypes(Graph& g, const Stack& stack) {
-  AT_ASSERT(stack.size() == g.inputs().size());
-  for (size_t i = 0; i < stack.size(); ++i) {
-    g.inputs().at(i)->setType(
-        DimensionedTensorType::create(stack.at(i).toTensor()));
+static TypePtr getTensorType(
+    const at::Tensor& t,
+    const TypeKind type_kind) {
+  switch (type_kind) {
+    case TypeKind::DimensionedTensorType:
+      return DimensionedTensorType::create(t);
+    case TypeKind::CompleteTensorType: {
+      auto scalar_type = t.scalar_type();
+      auto sizes = t.sizes();
+      return CompleteTensorType::create(scalar_type, at::kCPU, sizes);
+    }
+    default:
+      throw std::runtime_error(
+          "Attempted to call getTensorType for type kind other than DimensionedTensorType or CompleteTensorType.");
+  }
+}
+
+static TupleTypePtr getTupleTensorType(
+    const Stack::const_iterator& s_iter,
+    const Stack::const_iterator& s_iter_end,
+    const TypePtr& tupleType,
+    const TypeKind type_kind) {
+  AT_ASSERT(tupleType->kind() == TupleType::Kind);
+  AT_ASSERT(s_iter != s_iter_end);
+
+  std::vector<TypePtr> types;
+  for (const auto& subType : tupleType->containedTypes()) {
+    if (subType->kind() == TupleType::Kind) {
+      types.push_back(getTupleTensorType(s_iter+1, s_iter_end, subType, type_kind));
+    } else {
+      types.push_back(getTensorType(s_iter->toTensor(), type_kind));
+    }
+  }
+  return TupleType::create(types);
+}
+
+static void setInputTensorTypes(
+    Graph& g,
+    const Stack& stack,
+    const TypeKind type_kind = TypeKind::DimensionedTensorType) {
+  at::ArrayRef<Value*> input_values = g.inputs();
+  auto s_iter = stack.begin();
+  for (auto v : input_values) {
+    AT_ASSERT(s_iter != stack.end());
+    if (v->type()->kind() == TupleType::Kind) {
+      AT_ASSERT(v->node()->kind() == prim::Param);
+      v->setType(
+          getTupleTensorType(s_iter, stack.end(), v->type(), type_kind));
+    } else {
+      v->setType(getTensorType(s_iter->toTensor(), type_kind));
+      s_iter++;
+    }
   }
 }
 
@@ -197,38 +288,32 @@ static std::shared_ptr<Graph> _propagate_shapes(
   return retval;
 }
 
-static std::shared_ptr<Graph> _propagate_and_assign_input_and_output_shapes(
+static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
     Graph& graph,
-    std::vector<at::Tensor> inputs,
-    std::vector<at::Tensor> outputs,
+    const std::vector<at::Tensor>& inputs,
     bool with_grad = false,
     bool propagate = true) {
   auto retval = graph.copy();
   if (propagate) {
-    setInputTensorTypes(*retval, fmap<IValue>(inputs));
+    setInputTensorTypes(*retval, fmap<IValue>(inputs), TypeKind::DimensionedTensorType);
     PropagateInputShapes(retval);
   }
-  AT_ASSERT(retval->inputs().size() == inputs.size());
-  for (size_t i = 0; i < retval->inputs().size(); ++i) {
-    auto scalar_type = inputs[i].scalar_type();
-    auto sizes = inputs[i].sizes();
-    auto type =
-        torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
-    retval->inputs()[i]->setType(type);
-  }
-  at::ArrayRef<Value*> output_values = retval->outputs();
-  // patch this to still work if we are returning a tuple of multiple values
-  if (output_values.at(0)->type()->kind() == TupleType::Kind) {
-    AT_ASSERT(output_values.at(0)->node()->kind() == prim::TupleConstruct);
-    output_values = output_values.at(0)->node()->inputs();
-  }
-  AT_ASSERT(output_values.size() == outputs.size());
+  setInputTensorTypes(*retval, fmap<IValue>(inputs), TypeKind::CompleteTensorType);
+
+  return retval;
+}
+
+static std::shared_ptr<Graph> _assign_output_shapes(
+    Graph& graph,
+    std::vector<at::Tensor> outputs) {
+  auto retval = graph.copy();
+  AT_ASSERT(retval->outputs().size() == outputs.size());
   for (size_t i = 0; i < outputs.size(); ++i) {
     auto scalar_type = outputs[i].scalar_type();
     auto sizes = outputs[i].sizes();
     auto type =
         torch::jit::CompleteTensorType::create(scalar_type, at::kCPU, sizes);
-    output_values[i]->setType(type);
+    retval->outputs()[i]->setType(type);
   }
   return retval;
 }
@@ -240,7 +325,7 @@ void addFunctionToModule(
   auto graph = func->graph()->copy();
   auto v = graph->insertInput(0, "self");
   v->setType(module.module_object()->type());
-  module.module_object()->type()->compilation_unit().create_function(
+  module.module_object()->type()->compilation_unit()->create_function(
       "forward", graph);
 }
 
@@ -255,7 +340,7 @@ void initJitScriptBindings(PyObject* module) {
   // Methods here are prefixed with _ since they should not be
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
-      .def(py::init<>())
+      .def(py::init<std::string>())
       .def(
           "save",
           [](std::shared_ptr<Module> m,
@@ -282,7 +367,7 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb) {
             c10::optional<Self> self;
-            m->class_compilation_unit().define(
+            m->class_compilation_unit()->define(
                 script, pythonResolver(rcb), moduleSelf(m, py_m));
             didFinishEmitModule(m);
           })
@@ -298,13 +383,13 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
-            m->class_compilation_unit().define(
+            m->class_compilation_unit()->define(
                 defs, resolvers, moduleSelf(m, py_m));
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
             auto defs_it = defs.begin();
             while (defs_it != defs.end()) {
-              auto& method = m->class_compilation_unit().get_function(
+              auto& method = m->class_compilation_unit()->get_function(
                   (*defs_it).name().name());
               method.setSchema(getSchemaWithNameAndDefaults(
                   defs_it->range(),
@@ -318,15 +403,15 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "_get_method",
-          [](Module& self, const std::string& name) -> const Method& {
+          [](Module& self, const std::string& name) -> Method {
             return self.get_method(name);
           },
-          py::return_value_policy::reference_internal)
+          py::keep_alive<0, 1>())
       .def("_register_parameter", &Module::register_parameter)
       .def(
           "_get_functions",
           [](Module& self) {
-            return self.class_compilation_unit().get_functions();
+            return self.class_compilation_unit()->get_functions();
           })
       .def(
           "_register_attribute",
@@ -339,7 +424,7 @@ void initJitScriptBindings(PyObject* module) {
           "_set_attribute",
           [](Module& self, const std::string& name, py::object value) {
             auto attr = self.find_attribute(name);
-            TORCH_CHECK(attr != nullptr, "Could not find attribute '", name, "'");
+            TORCH_CHECK(attr, "Could not find attribute '", name, "'");
             auto ivalue = toIValue(value, attr->type());
             attr->setValue(ivalue);
           })
@@ -350,24 +435,22 @@ void initJitScriptBindings(PyObject* module) {
       .def("_get_module", &Module::get_module)
       .def(
           "_get_modules",
-          [](Module& self) -> py::tuple {
-            auto modules = self.get_modules();
-            py::tuple result(modules.size());
-            for (size_t i = 0; i < modules.size(); ++i) {
-              auto& item = modules[i];
-              result[i] = std::make_pair(item->name(), item);
+          [](Module& self) {
+            std::vector<std::pair<std::string, Module>> modules;
+            for (Slot s : self.get_module_slots()) {
+              modules.emplace_back(s.name(), s.to_module());
             }
-            return result;
+            return modules;
           })
       .def(
           "_get_parameters",
           [](Module& self) -> py::tuple {
             auto parameters = self.get_parameters();
             py::tuple result(parameters.size());
-            for (size_t i = 0; i < parameters.size(); ++i) {
-              auto& p = parameters[i];
+            auto i = 0;
+            for (Slot p : parameters) {
               py::tuple r(2);
-              result[i] = std::make_tuple(
+              result[i++] = std::make_tuple(
                   p.name(), autograd::as_variable_ref(p.value().toTensor()));
             }
             return result;
@@ -377,11 +460,11 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) -> py::tuple {
             auto attributes = self.get_attributes();
             py::tuple result(attributes.size());
-            for (size_t i = 0; i < attributes.size(); ++i) {
-              auto& buffer = attributes[i];
+            size_t i = 0;
+            for (Slot buffer : attributes) {
               py::tuple r(3);
               IValue v = buffer.value();
-              result[i] = std::make_tuple(
+              result[i++] = std::make_tuple(
                   buffer.name(), buffer.type(), toPyObject(std::move(v)));
             }
             return result;
@@ -389,17 +472,17 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_has_attribute",
           [](Module& self, const std::string& name) -> bool {
-            return self.find_attribute(name);
+            return self.find_attribute(name).has_value();
           })
       .def(
           "_has_parameter",
           [](Module& self, const std::string& name) -> bool {
-            return self.find_parameter(name);
+            return self.find_parameter(name).has_value();
           })
       .def(
           "_has_buffer",
           [](Module& self, const std::string& name) -> bool {
-            return self.find_buffer(name);
+            return self.find_buffer(name).has_value();
           })
       .def(
           "_has_module",
@@ -414,10 +497,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_method_names",
           [](Module& self) {
-            return fmap(
-                self.get_methods(), [](const std::unique_ptr<Method>& method) {
-                  return method->name();
-                });
+            return fmap(self.get_methods(), [](const Method& method) {
+              return method.name();
+            });
           })
       .def(
           "_create_method_from_trace",
@@ -432,16 +514,15 @@ void initJitScriptBindings(PyObject* module) {
             auto typed_inputs = toTypedStack(input_tuple);
             auto graph = tracer::createGraphByTracing(
                 func, typed_inputs, var_lookup_fn, force_outplace, self);
-            self->module_object()->type()->compilation_unit().create_function(
+            self->module_object()->type()->compilation_unit()->create_function(
                 name, graph);
             didFinishEmitModule(self);
           })
       .def(
           "get_debug_state",
           [](Module& self) {
-            if (self.find_method("forward")) {
-              Method& m = self.get_method("forward");
-              return m.get_executor().getDebugState();
+            if (auto m = self.find_method("forward")) {
+              return m->get_executor().getDebugState();
             }
             throw std::runtime_error(
                 "Attempted to call get_debug_state on a Module without a compiled forward()");
@@ -451,10 +532,10 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<ClassTypePtr> classes;
+            std::vector<c10::NamedTypePtr> classes;
             PythonPrint(
                 ss,
-                self.class_compilation_unit(),
+                *self.class_compilation_unit(),
                 true,
                 tensors,
                 classes,
@@ -493,7 +574,7 @@ void initJitScriptBindings(PyObject* module) {
             if (tracing) {
               tracer::getTracingState()->graph->push_scope(callee.name());
             }
-            py::object result = invokeScriptMethodFromPython(
+            py::object result = invokeScriptFunctionFromPython(
                 callee, tuple_slice(std::move(args), 1), std::move(kwargs));
             if (tracing) {
               tracer::getTracingState()->graph->pop_scope();
@@ -528,7 +609,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Function& self) {
             std::ostringstream ss;
             std::vector<at::Tensor> tensors;
-            std::vector<ClassTypePtr> classes;
+            std::vector<c10::NamedTypePtr> classes;
             PythonPrint(ss, self, false, tensors, classes, false);
             return ss.str();
           })
@@ -547,21 +628,14 @@ void initJitScriptBindings(PyObject* module) {
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
           })
       .def_property_readonly("graph", &Method::graph)
-      .def(
-          "initial_ivalues",
-          [](Method& m) {
-            std::vector<at::Tensor> tensors;
-            for (auto& t : m.initial_ivalues()) {
-              tensors.push_back(t.value().toTensor());
-            }
-            return tensors;
-          })
-      .def_property_readonly("schema", &Method::getSchema)
+      .def("_lowered_graph", &Method::_lowered_graph)
+      .def_property_readonly(
+          "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)
       .def_property_readonly("code", [](Method& self) {
         std::ostringstream ss;
         std::vector<at::Tensor> tensors;
-        std::vector<ClassTypePtr> classes;
+        std::vector<c10::NamedTypePtr> classes;
         PythonPrint(ss, self.function(), true, tensors, classes, false);
         return ss.str();
       });
@@ -576,6 +650,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const Def& def, ResolutionCallback rcb, FunctionDefaults defaults) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         CompilationUnit cu;
+
         cu.define({def}, {pythonResolver(rcb)}, nullptr);
         std::shared_ptr<Function> defined = cu.get_functions().at(0);
         defined->setSchema(getSchemaWithNameAndDefaults(
@@ -672,21 +747,25 @@ void initJitScriptBindings(PyObject* module) {
       });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
+  m.def("_jit_get_emit_hooks", getEmitHooks);
   m.def("_jit_clear_class_registry", CompilationUnit::_clear_python_cu);
   m.def(
       "_debug_set_autodiff_subgraph_inlining",
       debugSetAutodiffSubgraphInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
-      "_propagate_and_assign_input_and_output_shapes",
-      _propagate_and_assign_input_and_output_shapes);
+      "_propagate_and_assign_input_shapes",
+      _propagate_and_assign_input_shapes);
+  m.def(
+      "_assign_output_shapes",
+      _assign_output_shapes);
   m.def("_jit_python_print", [](py::object obj) {
     std::ostringstream ss;
     std::vector<at::Tensor> constants;
-    std::vector<ClassTypePtr> classes;
+    std::vector<c10::NamedTypePtr> classes;
     if (auto self = as_module(obj)) {
       PythonPrint(
-          ss, self->class_compilation_unit(), true, constants, classes, true);
+          ss, *self->class_compilation_unit(), true, constants, classes, true);
     } else if (auto self = as_function(obj)) {
       PythonPrint(ss, *self, false, constants, classes, true);
     } else {

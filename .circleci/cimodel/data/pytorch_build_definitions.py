@@ -119,7 +119,9 @@ class Conf:
             parameters["requires"].append(dependency_build.gen_build_name("build"))
 
         if not self.is_important:
-            parameters["filters"] = {"branches": {"only": "master"}}
+            # If you update this, update
+            # caffe2_build_definitions.py too
+            parameters["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
 
         return {self.gen_build_name(phase): parameters}
 
@@ -165,7 +167,7 @@ def gen_dependent_configs(xenial_parent_config):
 
         configs.append(c)
 
-    for x in ["pytorch_short_perf_test_gpu", "pytorch_doc_push"]:
+    for x in ["pytorch_short_perf_test_gpu", "pytorch_python_doc_push", "pytorch_cpp_doc_push"]:
         configs.append(HiddenConf(x, parent_build=xenial_parent_config))
 
     return configs
