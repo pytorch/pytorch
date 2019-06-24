@@ -59,7 +59,7 @@ void mul_kernel_cuda(TensorIterator& iter) {
       return a && b;
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND2(kHalf, iter.dtype(), "mul_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "mul_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a * b;
       });
