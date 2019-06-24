@@ -394,7 +394,7 @@ class JitTestCase(TestCase):
             grads2 = torch.autograd.grad(l2, flattened_recording_inputs, allow_unused=allow_unused)
 
         if inputs_require_grads:
-            recording_inputs = do_input_map(lambda t: Variable(t, requires_grad=True), reference_tensors)
+            recording_inputs = do_input_map(lambda t: t.clone().requires_grad_(), reference_tensors)
             flattened_recording_inputs = flatten_inputs(recording_inputs)
 
         outputs_ge = ge(*recording_inputs)
